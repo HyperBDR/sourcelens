@@ -1,0 +1,49 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.py
+include tox.ini
+
+recursive-include backend *.py
+recursive-include backend *.html
+recursive-include backend *.txt
+recursive-include backend *.json
+recursive-include backend *.mo
+recursive-include backend *.po
+recursive-include backend *.pot
+recursive-include backend *.css
+recursive-include backend *.js
+recursive-include backend *.png
+recursive-include backend *.jpg
+recursive-include backend *.gif
+recursive-include backend *.ico
+recursive-include backend *.svg
+
+recursive-include backend/templates *
+recursive-include backend/static *
+recursive-include backend/locale *
+recursive-include backend/migrations *
+
+# Exclude unnecessary files
+recursive-exclude backend *.pyc
+recursive-exclude backend *.pyo
+recursive-exclude backend *.pyd
+recursive-exclude backend *.so
+recursive-exclude backend __pycache__
+recursive-exclude backend *.egg-info
+recursive-exclude backend *.dist-info
+recursive-exclude backend .DS_Store
+recursive-exclude backend .git
+recursive-exclude backend .gitignore
+recursive-exclude backend .env
+recursive-exclude backend .env.*
+recursive-exclude backend .vscode
+recursive-exclude backend .idea
+recursive-exclude backend .pytest_cache
+recursive-exclude backend .coverage
+recursive-exclude backend htmlcov
+recursive-exclude backend build
+recursive-exclude backend dist
+recursive-exclude backend node_modules
+recursive-exclude backend .tox
+recursive-exclude backend .eggs

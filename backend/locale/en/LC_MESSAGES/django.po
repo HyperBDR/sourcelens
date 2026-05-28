@@ -1,0 +1,751 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-01-29 09:33+0800\n"
+"PO-Revision-Date: 2025-01-01 12:00+0800\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: accounts/serializers.py:100
+msgid "JWT access token"
+msgstr ""
+
+#: accounts/serializers.py:101
+msgid "JWT refresh token"
+msgstr ""
+
+#: accounts/serializers.py:102
+msgid "User basic info"
+msgstr ""
+
+#: accounts/serializers.py:119
+msgid "Scene key (e.g., 'chat', 'product_issue')"
+msgstr ""
+
+#: accounts/serializers.py:122
+msgid "Scene display name in requested language"
+msgstr ""
+
+#: accounts/serializers.py:125
+msgid "Scene description in requested language"
+msgstr ""
+
+#: accounts/serializers.py:135
+msgid "User's email address"
+msgstr ""
+
+#: accounts/serializers.py:178
+#, python-format
+msgid ""
+"This email is already registered via %(providers)s. Please use %(providers)s "
+"to login instead."
+msgstr ""
+
+#: accounts/serializers.py:187
+msgid "This email address is already registered. Please login instead."
+msgstr ""
+
+#: accounts/serializers.py:209
+msgid "Virtual email username (will become username@domain)"
+msgstr ""
+
+#: accounts/serializers.py:223
+msgid ""
+"Username can only contain letters, numbers, dots, hyphens, and underscores"
+msgstr ""
+
+#: accounts/serializers.py:230
+msgid "Username cannot start or end with a dot"
+msgstr ""
+
+#: accounts/serializers.py:241
+msgid "This username is reserved and cannot be used"
+msgstr ""
+
+#: accounts/serializers.py:246
+msgid "This username is already taken"
+msgstr ""
+
+#: accounts/serializers.py:258 accounts/views/registration.py:200
+msgid "Registration verification token"
+msgstr ""
+
+#: accounts/serializers.py:267
+msgid "User password (8-32 characters, must contain letters and numbers)"
+msgstr ""
+
+#: accounts/serializers.py:276 accounts/serializers.py:365
+msgid "Virtual email username"
+msgstr ""
+
+#: accounts/serializers.py:282
+msgid "User's selected scene (e.g., 'chat', 'product_issue')"
+msgstr ""
+
+#: accounts/serializers.py:290 accounts/serializers.py:376
+msgid ""
+"Specifies the language used by AI when generating summaries, titles, and "
+"metadata."
+msgstr ""
+
+#: accounts/serializers.py:298
+msgid "User's timezone (e.g., 'UTC', 'Asia/Shanghai')"
+msgstr ""
+
+#: accounts/serializers.py:310 accounts/views/password.py:317
+msgid "Password must be at least 8 characters long"
+msgstr ""
+
+#: accounts/serializers.py:315 accounts/views/password.py:327
+msgid "Password cannot exceed 32 characters"
+msgstr ""
+
+#: accounts/serializers.py:323 accounts/views/password.py:340
+msgid "Password must contain both letters and numbers"
+msgstr ""
+
+#: accounts/serializers.py:370
+msgid "User's selected scene"
+msgstr ""
+
+#: accounts/serializers.py:383
+msgid "User's timezone"
+msgstr ""
+
+#: accounts/serializers.py:428
+msgid ""
+"User-friendly display name, prioritizing first_name + last_name from OAuth "
+"providers, falling back to username"
+msgstr ""
+
+#: accounts/serializers.py:436
+msgid "Primary virtual email address for receiving emails"
+msgstr ""
+
+#: accounts/serializers.py:442
+msgid "User profile information"
+msgstr ""
+
+#: accounts/serializers.py:447
+msgid "Authentication method and related information"
+msgstr ""
+
+#: accounts/serializers.py:608
+msgid "No user found with this email address"
+msgstr ""
+
+#: accounts/serializers.py:614 accounts/views/password.py:68
+msgid ""
+"OAuth users cannot reset password. Please login with your OAuth provider."
+msgstr ""
+
+#: accounts/serializers.py:623
+msgid "Please complete registration first"
+msgstr ""
+
+#: accounts/serializers.py:627
+msgid "User profile not found"
+msgstr ""
+
+#: accounts/services/email.py:77
+msgid "Complete Your Registration"
+msgstr ""
+
+#: accounts/services/email.py:79
+#, python-format
+msgid "Please complete your registration by visiting: %(url)s"
+msgstr ""
+
+#: accounts/services/email.py:205
+msgid "Reset Your Password"
+msgstr ""
+
+#: accounts/services/email.py:207
+#, python-format
+msgid "Please reset your password by visiting: %(url)s"
+msgstr ""
+
+#: accounts/views/oauth.py:49
+msgid "Complete OAuth user setup"
+msgstr ""
+
+#: accounts/views/oauth.py:71
+msgid "User has already completed registration"
+msgstr ""
+
+#: accounts/views/oauth.py:152
+#, fuzzy
+#| msgid "OSS configuration validated successfully"
+msgid "Setup completed successfully"
+msgstr "OSS configuration validated successfully"
+
+#: accounts/views/oauth.py:194
+msgid "Failed to complete setup"
+msgstr ""
+
+#: accounts/views/password.py:51
+msgid "Send password reset email"
+msgstr ""
+
+#: accounts/views/password.py:110
+msgid "Password reset email sent successfully"
+msgstr ""
+
+#: accounts/views/password.py:128
+msgid "Failed to send password reset email"
+msgstr ""
+
+#: accounts/views/password.py:151
+msgid "User with this email does not exist"
+msgstr ""
+
+#: accounts/views/password.py:184
+msgid "Failed to process password reset request"
+msgstr ""
+
+#: accounts/views/password.py:204
+msgid "Confirm password reset"
+msgstr ""
+
+#: accounts/views/password.py:253
+#, fuzzy
+#| msgid "{} is required"
+msgid "All fields are required"
+msgstr "{} is required"
+
+#: accounts/views/password.py:262
+msgid "Passwords do not match"
+msgstr ""
+
+#: accounts/views/password.py:294
+#, fuzzy
+#| msgid "Invalid Access Key ID"
+msgid "Invalid reset link"
+msgstr "Invalid Access Key ID"
+
+#: accounts/views/password.py:306
+msgid "Invalid or expired reset link"
+msgstr ""
+
+#: accounts/views/password.py:358
+msgid "Password has been reset successfully"
+msgstr ""
+
+#: accounts/views/password.py:395
+msgid "Failed to reset password"
+msgstr ""
+
+#: accounts/views/registration.py:51
+msgid "Send registration email"
+msgstr ""
+
+#: accounts/views/registration.py:123
+#, fuzzy
+#| msgid "OSS configuration validated successfully"
+msgid "Registration email sent successfully"
+msgstr "OSS configuration validated successfully"
+
+#: accounts/views/registration.py:144
+msgid "Failed to send registration email"
+msgstr ""
+
+#: accounts/views/registration.py:175
+msgid "Failed to process registration request"
+msgstr ""
+
+#: accounts/views/registration.py:194
+msgid "Verify registration token"
+msgstr ""
+
+#: accounts/views/registration.py:235 accounts/views/registration.py:421
+msgid "Registration has already been completed"
+msgstr ""
+
+#: accounts/views/registration.py:286
+#, fuzzy
+#| msgid "Code is required"
+msgid "Token has expired"
+msgstr "Code is required"
+
+#: accounts/views/registration.py:306
+msgid "Invalid token"
+msgstr ""
+
+#: accounts/views/registration.py:323
+msgid "Complete registration"
+msgstr ""
+
+#: accounts/views/registration.py:399
+msgid "Invalid registration token"
+msgstr ""
+
+#: accounts/views/registration.py:448
+msgid "Registration token has expired"
+msgstr ""
+
+#: accounts/views/registration.py:561
+msgid "Failed to complete registration"
+msgstr ""
+
+#: accounts/views/registration.py:580
+msgid "Check username availability"
+msgstr ""
+
+#: accounts/views/registration.py:586
+msgid "Username to check"
+msgstr ""
+
+#: accounts/views/registration.py:604
+msgid "Username is available"
+msgstr ""
+
+#: accounts/views/registration.py:611
+msgid "Invalid username"
+msgstr ""
+
+#: accounts/views/scenes.py:46
+msgid "Get available scenes"
+msgstr ""
+
+#: accounts/views/scenes.py:52
+msgid "Language code (e.g., 'zh-CN', 'en-US', 'es')"
+msgstr ""
+
+#: accounts/views/scenes.py:130
+msgid "Failed to retrieve available scenes"
+msgstr ""
+
+#: cloud_billing/services/notification_service.py:70
+msgid "[Important] Cloud Billing Alert"
+msgstr ""
+
+#: cloud_billing/services/notification_service.py:83
+#, python-brace-format
+msgid ""
+"{provider_name} current total cost {current_cost:.2f} {currency} exceeds "
+"threshold {threshold:.2f} {currency}\n"
+"Previous hour cost: {previous_cost:.2f} {currency}"
+msgstr ""
+
+#: cloud_billing/services/notification_service.py:97
+#, python-brace-format
+msgid ""
+"{provider_name} account billing increased by {increase_cost:.2f} "
+"{currency} in the last hour, growth rate: {increase_percent:.2f}%\n"
+"Current cost: {current_cost:.2f} {currency}\n"
+"Previous hour cost: {previous_cost:.2f} {currency}"
+msgstr ""
+
+#: cloud_billing/services/notification_service.py:157
+msgid ""
+"## Cloud Billing Alert\n"
+"\n"
+msgstr ""
+
+#: cloud_billing/services/notification_service.py:170
+#, python-brace-format
+msgid ""
+"{title}**{provider_name}** current total cost **{current_cost:.2f} {currency}"
+"** exceeds threshold **{threshold:.2f} {currency}**\n"
+"\n"
+"- Previous hour cost: {previous_cost:.2f} {currency}\n"
+"\n"
+"<@all>"
+msgstr ""
+
+#: cloud_billing/services/notification_service.py:185
+#, python-brace-format
+msgid ""
+"{title}**{provider_name}** account billing increased by "
+"**{increase_cost:.2f} {currency}** in the last hour, growth rate: "
+"**{increase_percent:.2f}%**\n"
+"\n"
+"- Current cost: {current_cost:.2f} {currency}\n"
+"- Previous hour cost: {previous_cost:.2f} {currency}\n"
+"\n"
+"<@all>"
+msgstr ""
+
+#: cloud_billing/tasks.py:579
+#, python-brace-format
+msgid " (Account: {account_id})"
+msgstr ""
+
+#: cloud_billing/tasks.py:588
+#, python-brace-format
+msgid ""
+"{provider_name}{account_display} current total cost {current_cost:.2f} "
+"{currency} exceeds threshold {threshold:.2f} {currency}"
+msgstr ""
+
+#: cloud_billing/tasks.py:601
+#, python-brace-format
+msgid ""
+"{provider_name}{account_display} billing increased by {increase_cost:.2f} "
+"{currency} in the last hour, growth rate: {increase_percent:.2f}%"
+msgstr ""
+
+#: cloud_billing/tasks.py
+msgid "Alert type"
+msgstr "Alert type"
+
+#: cloud_billing/tasks.py
+msgid "Cloud provider"
+msgstr "Cloud provider"
+
+#: cloud_billing/tasks.py
+msgid "Account"
+msgstr "Account"
+
+#: cloud_billing/tasks.py
+msgid "Notes"
+msgstr "Notes"
+
+#: cloud_billing/tasks.py
+msgid "Tags"
+msgstr "Tags"
+
+#: cloud_billing/tasks.py
+msgid "Current balance"
+msgstr "Current balance"
+
+#: cloud_billing/tasks.py
+msgid "Alert threshold"
+msgstr "Alert threshold"
+
+#: cloud_billing/tasks.py
+msgid "Alert description"
+msgstr "Alert description"
+
+#: cloud_billing/tasks.py
+msgid "Balance threshold alert"
+msgstr "Balance threshold alert"
+
+#: cloud_billing/tasks.py
+msgid "Estimated days remaining alert"
+msgstr "Estimated days remaining alert"
+
+#: cloud_billing/tasks.py
+msgid "Cost threshold alert"
+msgstr "Cost threshold alert"
+
+#: cloud_billing/tasks.py
+msgid "Cost growth alert"
+msgstr "Cost growth alert"
+
+#: cloud_billing/tasks.py
+msgid "Current total cost"
+msgstr "Current total cost"
+
+#: cloud_billing/tasks.py
+msgid "Estimated days remaining"
+msgstr "Estimated days remaining"
+
+#: cloud_billing/tasks.py
+msgid "Previous hour cost"
+msgstr "Previous hour cost"
+
+#: cloud_billing/tasks.py
+msgid "Increase amount"
+msgstr "Increase amount"
+
+#: cloud_billing/tasks.py
+msgid "Growth rate"
+msgstr "Growth rate"
+
+#: cloud_billing/tasks.py
+msgid "Percentage threshold"
+msgstr "Percentage threshold"
+
+#: cloud_billing/tasks.py
+msgid "Amount threshold"
+msgstr "Amount threshold"
+
+#: cloud_billing/tasks.py
+msgid "Remaining balance is below the configured threshold. Please recharge promptly."
+msgstr "Remaining balance is below the configured threshold. Please recharge promptly."
+
+#: cloud_billing/tasks.py
+msgid "Projected remaining days are below the configured threshold. Please recharge promptly."
+msgstr "Projected remaining days are below the configured threshold. Please recharge promptly."
+
+#: cloud_billing/tasks.py
+msgid "Current total cost exceeds the configured threshold"
+msgstr "Current total cost exceeds the configured threshold"
+
+#: cloud_billing/tasks.py
+msgid "Billing growth exceeds the configured threshold"
+msgstr "Billing growth exceeds the configured threshold"
+
+#: cloud_billing/dashboard.py
+msgid "US Dollar"
+msgstr "US Dollar"
+
+#: cloud_billing/dashboard.py
+msgid "Chinese Yuan"
+msgstr "Chinese Yuan"
+
+#: cloud_billing/services/notification_service.py
+msgid "Cloud Billing Alert"
+msgstr "Cloud Billing Alert"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+#, python-format
+msgid ""
+"Server cannot reach SMTP host (no route). Check deployment: "
+"firewall/security group outbound rules, or container network. "
+"Original: %(error)s"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+#, python-format
+msgid ""
+"SMTP connection timed out. Check server network and "
+"firewall/proxy. Original: %(error)s"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Webhook URL not configured"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Channel validation test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Send failed"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "SMTP host not configured"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "From address required to send test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Email validation test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "(connection only)"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Email channel validation test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Validation failed"
+msgstr ""
+
+#: data_collector/tasks.py
+msgid "Start collection"
+msgstr "Start collection"
+
+#: data_collector/tasks.py
+msgid "Fetching raw data"
+msgstr "Fetching raw data"
+
+#: data_collector/tasks.py
+msgid "Collection done"
+msgstr "Collection done"
+
+#: data_collector/tasks.py
+msgid "Start cleanup"
+msgstr "Start cleanup"
+
+#: data_collector/tasks.py
+msgid "Cleanup done"
+msgstr "Cleanup done"
+
+#~ msgid "OSS storage is disabled, validation skipped"
+#~ msgstr "OSS storage is disabled, validation skipped"
+
+#~ msgid "Missing required fields: {}"
+#~ msgstr "Missing required fields: {}"
+
+#~ msgid "Failed to initialize storage: {}"
+#~ msgstr "Failed to initialize storage: {}"
+
+#~ msgid "Access Key ID may be incorrect"
+#~ msgstr "Access Key ID may be incorrect"
+
+#~ msgid "Please check if Access Key ID is correct"
+#~ msgstr "Please check if Access Key ID is correct"
+
+#~ msgid "Invalid Access Key Secret"
+#~ msgstr "Invalid Access Key Secret"
+
+#~ msgid "Access Key Secret may be incorrect"
+#~ msgstr "Access Key Secret may be incorrect"
+
+#~ msgid "Please check if Access Key Secret is correct"
+#~ msgstr "Please check if Access Key Secret is correct"
+
+#~ msgid "Cannot access Bucket \"{}\""
+#~ msgstr "Cannot access Bucket \"{}\""
+
+#~ msgid "Bucket \"{}\" may not exist"
+#~ msgstr "Bucket \"{}\" may not exist"
+
+#~ msgid "Bucket name may be incorrect"
+#~ msgstr "Bucket name may be incorrect"
+
+#~ msgid "Please check if you have permission to access this Bucket"
+#~ msgstr "Please check if you have permission to access this Bucket"
+
+#~ msgid ""
+#~ "The \"Use Virtual Host Style\" configuration may be incorrect, please try "
+#~ "toggling this option"
+#~ msgstr ""
+#~ "The \"Use Virtual Host Style\" configuration may be incorrect, please try "
+#~ "toggling this option"
+
+#~ msgid "Access denied"
+#~ msgstr "Access denied"
+
+#~ msgid "Access Key may not have permission to access this Bucket"
+#~ msgstr "Access Key may not have permission to access this Bucket"
+
+#~ msgid "Please check the Access Key permission configuration"
+#~ msgstr "Please check the Access Key permission configuration"
+
+#~ msgid "Please confirm the Bucket access policy settings"
+#~ msgstr "Please confirm the Bucket access policy settings"
+
+#~ msgid "Cannot connect to endpoint \"{}\""
+#~ msgstr "Cannot connect to endpoint \"{}\""
+
+#~ msgid "Endpoint \"{}\" may be incorrect"
+#~ msgstr "Endpoint \"{}\" may be incorrect"
+
+#~ msgid "Please check if network connection is normal"
+#~ msgstr "Please check if network connection is normal"
+
+#~ msgid "Please confirm the endpoint address format is correct"
+#~ msgstr "Please confirm the endpoint address format is correct"
+
+#~ msgid "Connection timeout"
+#~ msgstr "Connection timeout"
+
+#~ msgid "Timeout when connecting to \"{}\""
+#~ msgstr "Timeout when connecting to \"{}\""
+
+#~ msgid "Please check network connection"
+#~ msgstr "Please check network connection"
+
+#~ msgid "Please confirm the endpoint address is correct"
+#~ msgstr "Please confirm the endpoint address is correct"
+
+#~ msgid "Cannot retrieve Bucket information"
+#~ msgstr "Cannot retrieve Bucket information"
+
+#~ msgid "Access Key ID or Secret may be wrong"
+#~ msgstr "Access Key ID or Secret may be wrong"
+
+#~ msgid "Endpoint address may be incorrect"
+#~ msgstr "Endpoint address may be incorrect"
+
+#~ msgid "Network connection may have issues"
+#~ msgstr "Network connection may have issues"
+
+#~ msgid "Possible causes:"
+#~ msgstr "Possible causes:"
+
+#~ msgid "Validation error: {}"
+#~ msgstr "Validation error: {}"
+
+#~ msgid "Failed to initialize storage"
+#~ msgstr "Failed to initialize storage"
+
+#~ msgid "Configuration parameters may be incorrect"
+#~ msgstr "Configuration parameters may be incorrect"
+
+#~ msgid "Please check if all required fields are filled correctly"
+#~ msgstr "Please check if all required fields are filled correctly"
+
+#: cloud_billing/alert_messages.py
+msgid "Balance Alert"
+msgstr "Balance Alert"
+
+msgid "Days Remaining Alert"
+msgstr "Days Remaining Alert"
+
+msgid "Cost Threshold Alert"
+msgstr "Cost Threshold Alert"
+
+msgid "Cost Growth Alert"
+msgstr "Cost Growth Alert"
+
+msgid "Balance %(bal).2f %(cur)s below threshold %(thr).2f %(cur)s"
+msgstr "Balance %(bal).2f %(cur)s below threshold %(thr).2f %(cur)s"
+
+msgid "%(days)s days remaining below threshold %(thr)s"
+msgstr "%(days)s days remaining below threshold %(thr)s"
+
+msgid "Total cost %(cost).2f %(cur)s exceeds threshold %(thr).2f %(cur)s"
+msgstr "Total cost %(cost).2f %(cur)s exceeds threshold %(thr).2f %(cur)s"
+
+msgid "Growth %(pct).1f%%"
+msgstr "Growth %(pct).1f%%"
+
+msgid "threshold %(thr).1f%%"
+msgstr "threshold %(thr).1f%%"
+
+msgid "Provider"
+msgstr "Provider"
+
+msgid "Balance"
+msgstr "Balance"
+
+msgid "Cost Breakdown"
+msgstr "Cost Breakdown"
+
+msgid "Resource"
+msgstr "Resource"
+
+msgid "Cost"
+msgstr "Cost"
+
+msgid "Owner"
+msgstr "Owner"
+
+msgid "DevMind Cloud Billing · @all"
+msgstr "DevMind Cloud Billing · @all"
+
+msgid ": "
+msgstr ": "
+
+msgid ", "
+msgstr ", "
+
+msgid "Current Total"
+msgstr "Current Total"
+
+msgid "Previous Hour"
+msgstr "Previous Hour"
+
+msgid "Increase"
+msgstr "Increase"
+
+msgid "Growth Rate"
+msgstr "Growth Rate"
+
+msgid "Growth %"
+msgstr "Growth %"
+
+msgid "Amount"
+msgstr "Amount"

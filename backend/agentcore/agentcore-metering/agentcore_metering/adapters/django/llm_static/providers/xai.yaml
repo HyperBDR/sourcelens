@@ -1,0 +1,25 @@
+id: xai
+label: xAI (Grok)
+default_api_base: "https://api.x.ai/v1"
+default_model: grok-3-mini-beta
+settings_key: XAI_CONFIG
+requires_api_base: false
+models:
+  - id: grok-3-mini-beta
+    label: Grok 3 Mini Beta
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: grok-2-vision-1212
+    label: Grok 2 Vision
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: grok-2
+    label: Grok 2
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

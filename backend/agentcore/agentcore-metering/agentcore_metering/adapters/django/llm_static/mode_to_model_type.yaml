@@ -1,0 +1,7 @@
+# Resolver model_type derived from primary mode
+chat: llm
+completion: llm
+embedding: embedding
+image_generation: image_generation
+audio_transcription: llm
+audio_speech: llm

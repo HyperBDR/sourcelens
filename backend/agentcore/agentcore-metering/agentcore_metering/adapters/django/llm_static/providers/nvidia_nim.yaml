@@ -1,0 +1,13 @@
+id: nvidia_nim
+label: NVIDIA NIM
+default_api_base: null
+default_model: meta/llama3-8b
+settings_key: NVIDIA_NIM_CONFIG
+requires_api_base: false
+models:
+  - id: meta/llama3-8b
+    label: Llama 3 8B (NIM)
+    capabilities: [text-to-text, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

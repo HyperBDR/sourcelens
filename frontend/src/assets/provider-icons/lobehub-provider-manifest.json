@@ -1,0 +1,546 @@
+{
+  "ai21": {
+    "found": true,
+    "source": "ai21"
+  },
+  "ai302": {
+    "found": true,
+    "source": "ai302-color"
+  },
+  "ai360": {
+    "found": true,
+    "source": "ai360-color"
+  },
+  "aihubmix": {
+    "found": true,
+    "source": "aihubmix-color"
+  },
+  "aimass": {
+    "found": true,
+    "source": "aimass-color"
+  },
+  "aistudio": {
+    "found": true,
+    "source": "aistudio"
+  },
+  "akashchat": {
+    "found": true,
+    "source": "akashchat-color"
+  },
+  "alephalpha": {
+    "found": true,
+    "source": "alephalpha"
+  },
+  "alibaba": {
+    "found": true,
+    "source": "alibaba-color"
+  },
+  "alibabacloud": {
+    "found": true,
+    "source": "alibabacloud-color"
+  },
+  "antgroup": {
+    "found": true,
+    "source": "antgroup-color"
+  },
+  "anthropic": {
+    "found": true,
+    "source": "anthropic"
+  },
+  "anyscale": {
+    "found": true,
+    "source": "anyscale-color"
+  },
+  "apple": {
+    "found": true,
+    "source": "apple"
+  },
+  "atlascloud": {
+    "found": true,
+    "source": "atlascloud"
+  },
+  "aws": {
+    "found": true,
+    "source": "aws-color"
+  },
+  "azure": {
+    "found": true,
+    "source": "azure-color"
+  },
+  "azureai": {
+    "found": true,
+    "source": "azureai-color"
+  },
+  "baichuan": {
+    "found": true,
+    "source": "baichuan-color"
+  },
+  "baidu": {
+    "found": true,
+    "source": "baidu-color"
+  },
+  "baiducloud": {
+    "found": true,
+    "source": "baiducloud-color"
+  },
+  "bailian": {
+    "found": true,
+    "source": "bailian-color"
+  },
+  "baseten": {
+    "found": true,
+    "source": "baseten"
+  },
+  "bedrock": {
+    "found": true,
+    "source": "bedrock-color"
+  },
+  "bfl": {
+    "found": true,
+    "source": "bfl"
+  },
+  "bilibili": {
+    "found": true,
+    "source": "bilibili-color"
+  },
+  "burncloud": {
+    "found": true,
+    "source": "burncloud-color"
+  },
+  "bytedance": {
+    "found": true,
+    "source": "bytedance-color"
+  },
+  "centml": {
+    "found": true,
+    "source": "centml-color"
+  },
+  "cerebras": {
+    "found": true,
+    "source": "cerebras-color"
+  },
+  "civitai": {
+    "found": true,
+    "source": "civitai-color"
+  },
+  "claude": {
+    "found": true,
+    "source": "claude-color"
+  },
+  "cloudflare": {
+    "found": true,
+    "source": "cloudflare-color"
+  },
+  "cohere": {
+    "found": true,
+    "source": "cohere-color"
+  },
+  "cometapi": {
+    "found": true,
+    "source": "cometapi-color"
+  },
+  "comfyui": {
+    "found": true,
+    "source": "comfyui-color"
+  },
+  "copilot": {
+    "found": true,
+    "source": "copilot-color"
+  },
+  "crusoe": {
+    "found": true,
+    "source": "crusoe-color"
+  },
+  "deepinfra": {
+    "found": true,
+    "source": "deepinfra-color"
+  },
+  "deepmind": {
+    "found": true,
+    "source": "deepmind-color"
+  },
+  "deepseek": {
+    "found": true,
+    "source": "deepseek-color"
+  },
+  "doubao": {
+    "found": true,
+    "source": "doubao-color"
+  },
+  "exa": {
+    "found": true,
+    "source": "exa-color"
+  },
+  "fal": {
+    "found": true,
+    "source": "fal-color"
+  },
+  "featherless": {
+    "found": true,
+    "source": "featherless-color"
+  },
+  "fireworks": {
+    "found": true,
+    "source": "fireworks-color"
+  },
+  "fireworksai": {
+    "found": true,
+    "source": "fireworks-color"
+  },
+  "friendli": {
+    "found": true,
+    "source": "friendli"
+  },
+  "gemini": {
+    "found": true,
+    "source": "gemini-color"
+  },
+  "giteeai": {
+    "found": true,
+    "source": "giteeai"
+  },
+  "github": {
+    "found": true,
+    "source": "github"
+  },
+  "githubcopilot": {
+    "found": true,
+    "source": "githubcopilot"
+  },
+  "google": {
+    "found": true,
+    "source": "google-color"
+  },
+  "googlecloud": {
+    "found": true,
+    "source": "googlecloud-color"
+  },
+  "groq": {
+    "found": true,
+    "source": "groq"
+  },
+  "higress": {
+    "found": true,
+    "source": "higress-color"
+  },
+  "huawei": {
+    "found": true,
+    "source": "huawei-color"
+  },
+  "huaweicloud": {
+    "found": true,
+    "source": "huaweicloud-color"
+  },
+  "huggingface": {
+    "found": true,
+    "source": "huggingface-color"
+  },
+  "hunyuan": {
+    "found": true,
+    "source": "hunyuan-color"
+  },
+  "hyperbolic": {
+    "found": true,
+    "source": "hyperbolic-color"
+  },
+  "ibm": {
+    "found": true,
+    "source": "ibm"
+  },
+  "iflytekcloud": {
+    "found": true,
+    "source": "iflytekcloud-color"
+  },
+  "inference": {
+    "found": true,
+    "source": "inference"
+  },
+  "infermatic": {
+    "found": true,
+    "source": "infermatic-color"
+  },
+  "infiniai": {
+    "found": true,
+    "source": "infinigence-color"
+  },
+  "infinigence": {
+    "found": true,
+    "source": "infinigence-color"
+  },
+  "internlm": {
+    "found": true,
+    "source": "internlm-color"
+  },
+  "jina": {
+    "found": true,
+    "source": "jina"
+  },
+  "kluster": {
+    "found": true,
+    "source": "kluster-color"
+  },
+  "lambda": {
+    "found": true,
+    "source": "lambda"
+  },
+  "leptonai": {
+    "found": true,
+    "source": "leptonai-color"
+  },
+  "lg": {
+    "found": true,
+    "source": "lg-color"
+  },
+  "lmstudio": {
+    "found": true,
+    "source": "lmstudio"
+  },
+  "lobehub": {
+    "found": true,
+    "source": "lobehub-color"
+  },
+  "longcat": {
+    "found": true,
+    "source": "longcat-color"
+  },
+  "menlo": {
+    "found": true,
+    "source": "menlo"
+  },
+  "meta": {
+    "found": true,
+    "source": "meta-color"
+  },
+  "microsoft": {
+    "found": true,
+    "source": "microsoft-color"
+  },
+  "minimax": {
+    "found": true,
+    "source": "minimax-color"
+  },
+  "mistral": {
+    "found": true,
+    "source": "mistral-color"
+  },
+  "modelscope": {
+    "found": true,
+    "source": "modelscope-color"
+  },
+  "moonshot": {
+    "found": true,
+    "source": "moonshot"
+  },
+  "nebius": {
+    "found": true,
+    "source": "nebius"
+  },
+  "newapi": {
+    "found": true,
+    "source": "newapi-color"
+  },
+  "nousresearch": {
+    "found": true,
+    "source": "nousresearch"
+  },
+  "novita": {
+    "found": true,
+    "source": "novita-color"
+  },
+  "nplcloud": {
+    "found": true,
+    "source": "nplcloud-color"
+  },
+  "nvidia": {
+    "found": true,
+    "source": "nvidia-color"
+  },
+  "ollama": {
+    "found": true,
+    "source": "ollama"
+  },
+  "ollamacloud": {
+    "found": true,
+    "source": "ollama"
+  },
+  "openai": {
+    "found": true,
+    "source": "openai"
+  },
+  "openrouter": {
+    "found": true,
+    "source": "openrouter"
+  },
+  "parasail": {
+    "found": true,
+    "source": "parasail"
+  },
+  "perplexity": {
+    "found": true,
+    "source": "perplexity-color"
+  },
+  "player2": {
+    "found": true,
+    "source": "player2-color"
+  },
+  "ppio": {
+    "found": true,
+    "source": "ppio-color"
+  },
+  "qiniu": {
+    "found": true,
+    "source": "qiniu-color"
+  },
+  "qwen": {
+    "found": true,
+    "source": "qwen-color"
+  },
+  "replicate": {
+    "found": true,
+    "source": "replicate"
+  },
+  "sambanova": {
+    "found": true,
+    "source": "sambanova-color"
+  },
+  "search1api": {
+    "found": true,
+    "source": "search1api-color"
+  },
+  "searchapi": {
+    "found": true,
+    "source": "searchapi"
+  },
+  "sensenova": {
+    "found": true,
+    "source": "sensenova-color"
+  },
+  "siliconcloud": {
+    "found": true,
+    "source": "siliconcloud-color"
+  },
+  "snowflake": {
+    "found": true,
+    "source": "snowflake-color"
+  },
+  "sophnet": {
+    "found": true,
+    "source": "sophnet-color"
+  },
+  "spark": {
+    "found": true,
+    "source": "spark-color"
+  },
+  "stability": {
+    "found": true,
+    "source": "stability-color"
+  },
+  "statecloud": {
+    "found": true,
+    "source": "statecloud-color"
+  },
+  "stepfun": {
+    "found": true,
+    "source": "stepfun-color"
+  },
+  "straico": {
+    "found": true,
+    "source": "straico-color"
+  },
+  "streamlake": {
+    "found": true,
+    "source": "streamlake-color"
+  },
+  "submodel": {
+    "found": true,
+    "source": "submodel-color"
+  },
+  "taichu": {
+    "found": true,
+    "source": "aimass-color"
+  },
+  "targon": {
+    "found": true,
+    "source": "targon-color"
+  },
+  "tencent": {
+    "found": true,
+    "source": "tencent-color"
+  },
+  "tencentcloud": {
+    "found": true,
+    "source": "tencentcloud-color"
+  },
+  "tii": {
+    "found": true,
+    "source": "tii-color"
+  },
+  "togetherai": {
+    "found": true,
+    "source": "together-color"
+  },
+  "upstage": {
+    "found": true,
+    "source": "upstage-color"
+  },
+  "v0": {
+    "found": true,
+    "source": "vercel"
+  },
+  "vercel": {
+    "found": true,
+    "source": "vercel"
+  },
+  "vercelaigateway": {
+    "found": true,
+    "source": "vercel"
+  },
+  "vertexai": {
+    "found": true,
+    "source": "vertexai-color"
+  },
+  "vllm": {
+    "found": true,
+    "source": "vllm-color"
+  },
+  "volcengine": {
+    "found": true,
+    "source": "volcengine-color"
+  },
+  "wenxin": {
+    "found": true,
+    "source": "wenxin-color"
+  },
+  "workersai": {
+    "found": true,
+    "source": "workersai-color"
+  },
+  "xai": {
+    "found": true,
+    "source": "xai"
+  },
+  "xiaomimimo": {
+    "found": true,
+    "source": "xiaomimimo"
+  },
+  "xinference": {
+    "found": true,
+    "source": "xinference-color"
+  },
+  "yandex": {
+    "found": true,
+    "source": "yandex"
+  },
+  "zenmux": {
+    "found": true,
+    "source": "zenmux"
+  },
+  "zeroone": {
+    "found": true,
+    "source": "zeroone"
+  },
+  "zhipu": {
+    "found": true,
+    "source": "zhipu-color"
+  }
+}

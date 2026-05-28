@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentcore-notifier"
+version = "0.1.0"
+description = "Notification management module (webhook, email) for Django"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "django>=4.2",
+    "requests>=2.28.0",
+    "celery>=5.0",
+    "djangorestframework>=3.14",
+    "agentcore-task",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-django",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentcore_notifier*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+django_find_project = false
+pythonpath = ["."]
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "-v"

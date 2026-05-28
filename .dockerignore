@@ -1,0 +1,86 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Django
+*.log
+local_settings.py
+**/*.sqlite3
+**/*.sqlite3-journal
+**/*.db
+**/*.db-journal
+media/
+static/
+staticfiles/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+
+# Other
+.env
+*.bak
+*.tmp
+*.temp
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Project specific
+data/
+cache/
+
+# Frontend workspace
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.auth/
+frontend/.auth/
+frontend/storage-state*.json
+frontend/.git
+frontend/.gitignore
+frontend/.dockerignore
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/.vscode/
+frontend/.idea/
+frontend/.cursor/
+frontend/*.md

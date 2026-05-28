@@ -1,0 +1,31 @@
+id: openrouter
+label: OpenRouter
+default_api_base: "https://openrouter.ai/api/v1"
+default_model: google/gemma-2-9b-it:free
+settings_key: OPENROUTER_CONFIG
+requires_api_base: false
+models:
+  - id: google/gemma-2-9b-it:free
+    label: Gemma 2 9B (free)
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: openai/gpt-4o-mini
+    label: OpenAI GPT-4o Mini
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: anthropic/claude-3.5-sonnet
+    label: Claude 3.5 Sonnet
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: meta-llama/llama-3.3-70b-instruct
+    label: Llama 3.3 70B
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

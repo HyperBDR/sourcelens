@@ -1,0 +1,62 @@
+id: gemini
+label: Google Gemini
+default_api_base: "https://generativelanguage.googleapis.com"
+default_model: gemini-2.0-flash
+settings_key: GEMINI_CONFIG
+requires_api_base: false
+models:
+  - id: gemini-3-pro-preview
+    label: Gemini 3 Pro
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 2.0
+      output_usd_per_1m: 12.0
+      source: "https://ai.google.dev/gemini-api/docs/pricing"
+      updated: "2026-02"
+  - id: gemini-3-flash-preview
+    label: Gemini 3 Flash
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.5
+      output_usd_per_1m: 3.0
+      source: "https://ai.google.dev/gemini-api/docs/pricing"
+      updated: "2026-02"
+  - id: gemini-2.0-flash
+    label: Gemini 2.0 Flash
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 1048576
+    max_output_tokens: 8192
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.3
+      output_usd_per_1m: 2.5
+      source: "https://ai.google.dev/gemini-api/docs/pricing"
+      updated: "2026-02"
+  - id: gemini-1.5-flash
+    label: Gemini 1.5 Flash
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 1048576
+    max_output_tokens: 8192
+    mode: chat
+  - id: gemini-1.5-pro
+    label: Gemini 1.5 Pro
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 2097152
+    max_output_tokens: 8192
+    mode: chat
+  - id: gemini-nano
+    label: Gemini Nano
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 32000
+    max_output_tokens: 8192
+    mode: chat
+  - id: imagen-3.0-generate-002
+    label: Imagen 3
+    capabilities: [text-to-image]
+    mode: image_generation

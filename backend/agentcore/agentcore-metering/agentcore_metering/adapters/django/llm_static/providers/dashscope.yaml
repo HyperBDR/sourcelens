@@ -1,0 +1,48 @@
+id: dashscope
+label: Dashscope (Qwen)
+default_api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+default_model: qwen-turbo
+settings_key: DASHSCOPE_CONFIG
+requires_api_base: false
+models:
+  - id: qwen3-max
+    label: Qwen3 Max
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: qwen3-max-preview
+    label: Qwen3 Max Preview
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: qwen-max-latest
+    label: Qwen Max Latest
+    capabilities: [text-to-text, vision, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: qwen-plus
+    label: Qwen Plus
+    capabilities: [text-to-text, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: qwen-turbo
+    label: Qwen Turbo
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: qwen-long
+    label: Qwen Long
+    capabilities: [text-to-text, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: text-embedding-v3
+    label: Text Embedding V3
+    capabilities: [embedding]
+    max_input_tokens: 8191
+    mode: embedding

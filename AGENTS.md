@@ -1,0 +1,199 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Behavioral Guidelines
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with
+project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial
+tasks, use judgment.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes,
+simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" -> "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" -> "Write a test that reproduces it, then make it pass"
+- "Refactor X" -> "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```text
+1. [Step] -> verify: [check]
+2. [Step] -> verify: [check]
+3. [Step] -> verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it
+work") require constant clarification.
+
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer
+rewrites due to overcomplication, and clarifying questions come before
+implementation rather than after mistakes.
+
+## 项目概述
+
+SourceLens 是一个保留基础架构的新项目，包含 Django REST API 后端和 Vue 3 前端。当前核心能力集中在用户认证、权限/角色管理、agentcore 管理台集成、任务调度基础设施和通知/LLM 管理能力。
+
+核心开发目录：
+- `backend/` — Django REST API、accounts、core 配置和 agentcore 子模块
+- `frontend/` — Vue 3 + Vite 前端和管理台页面
+
+## 常用命令
+
+### 初始化（克隆后必执行）
+```bash
+git submodule update --init --recursive   # 拉取 agentcore 子模块
+```
+
+### Docker 本地开发
+```bash
+cp env.sample .env.dev
+docker-compose -f docker-compose.dev.yml up -d
+# Web: http://localhost:8000
+# API docs: http://localhost:8000/swagger/
+# Celery monitor (Flower): http://localhost:5555
+```
+
+### Docker 生产构建
+```bash
+cp env.sample .env
+docker-compose up -d
+# 默认端口: HTTP 10080, HTTPS 10443
+```
+
+### Python 开发（非 Docker）
+```bash
+pip install -e .[dev]
+# 本地 agentcore editable 模式:
+for d in backend/agentcore/*/; do [ -f "${d}pyproject.toml" ] && pip install -e "$d"; done
+```
+
+### 测试与代码质量
+```bash
+pytest                              # 运行所有测试
+pytest path/to/test.py              # 单个测试文件
+python backend/manage.py test        # Django test runner（部分测试）
+black --check backend/              # 检查格式
+isort --check backend/              # 检查 import 顺序
+```
+
+### Django 管理命令
+```bash
+python backend/manage.py migrate
+python backend/manage.py register_periodic_tasks   # 注册所有定时任务
+python backend/manage.py createsuperuser
+```
+
+### 前端
+```bash
+cd frontend
+npm install
+npm run dev          # 开发服务器
+npm run build        # 生产构建
+npm run lint         # ESLint
+npm run test:e2e     # Playwright E2E
+```
+
+## 架构概览
+
+### Django 应用结构（backend/）
+
+每个 Django app 都应尽量自包含：拥有自己的 models、views、serializers、services、migrations、periodic_tasks 和 tests。跨 app 的回归测试放在 `backend/tests/`。
+
+主要 App：
+- **`accounts/`** — 用户认证、JWT、OAuth（Google）、Profile、Role、Permission
+- **`core/`** — 项目配置、URL、Celery、分页、中间件和定时任务注册器
+
+共享基础设施（`backend/core/`）：
+- **`settings/`** — Django 配置分片（base.py、database.py、celery.py、rest.py、swagger.py、accounts.py、cache.py 等）
+- **`urls.py`** — 根路由，mount accounts 和 agentcore API
+- **`celery.py`** — Celery app 配置，含 autodiscover_tasks() 自动发现各 app 的 tasks.py
+- **`periodic_registry.py`** — 定时任务注册器，所有 app 的 periodic_tasks 通过 `register_periodic_tasks()` 写入 django_celery_beat
+
+### agentcore 子模块（git submodules under `backend/agentcore/`）
+
+agentcore 是独立维护的包，通过 git submodule 引入。子模块被当作 Django app 使用：
+
+| 子模块 | INSTALLED_APPS | 路由前缀 | 功能 |
+|---|---|---|---|
+| `agentcore-metering` | `agentcore_metering.adapters.django` | `/api/v1/admin/` | LLM 用量追踪 |
+| `agentcore-task` | `agentcore_task.adapters.django` | `/api/v1/tasks/` | 统一任务管理 |
+| `agentcore-notifier` | `agentcore_notifier.adapters.django` | `/api/v1/admin/notifications/` | 飞书通知 |
+
+### 定时任务机制（Celery Beat）
+
+- **Task 发现**：`core/celery.py` 调用 `app.autodiscover_tasks()`，自动加载所有 INSTALLED_APPS 中各 app 的 `tasks.py`
+- **Periodic Task 注册**：不通过代码声明，而是在启动时由 `register_periodic_tasks` management command 发现各 app 的 `periodic_tasks.register_periodic_tasks()` 函数，写入 django_celery_beat 数据库。**现有记录不会被覆盖**，以保留运维人员在数据库中的自定义修改
+- **容器入口**：`docker/entrypoint.sh` 在 gunicorn 容器中运行 `register_periodic_tasks` 一次；celery-beat 容器使用 DatabaseScheduler 从数据库读取调度
+
+### API 层
+
+- **REST Framework**：DRF + drf-spectacular（OpenAPI schema、Swagger UI、ReDoc）
+- **认证**：dj-rest-auth (JWT) + django-allauth (OAuth Google) + allauth headless API（前后端分离场景）
+- **国际化**：Django i18n，中文（zh-hans）和英文（en），通过 `LanguageCodeMappingMiddleware` 映射浏览器 Accept-Language
+- **时区**：所有数据存储为 UTC，前端负责用户本地时区转换
+
+### 前端（frontend/）
+
+- Vue 3 + Vite + Composition API + `<script setup>`
+- Pinia（状态管理）、Vue Router、vue-i18n、Tailwind CSS
+- E2E：Playwright（`playwright.config.cjs`）
+- 前端构建集成在根 `Dockerfile` 的 `frontend` target 中
+
+## 编码规范（来自 Cursor rules）
+
+- **响应语言**：所有解释用中文，代码注释用英文
+- **注释规则**：无行内注释，注释写在代码块上方；类和函数使用 docstring（triple quotes）
+- **行宽**：每行最多 79 字符
+- **Import 结构**：三段式（stdlib → third-party → local app），段内按字母排序，不混用
+- **业务逻辑位置**：放在 models、serializers、services 中，views 只处理请求
+- **Django/DRF**：优先使用 CBV（复杂逻辑）和 DRF 内置功能，不手写原始 SQL
+- **调试用 print**：避免使用，用 logging 代替
+
+## 安全与配置
+
+- 不提交 `.env`、secrets、证书；从 `env.sample` 复制创建
+- 生产使用 PostgreSQL（推荐）、开发可用 SQLite
+- `docker/nginx/certs/` 和云厂商配置发布前需审查

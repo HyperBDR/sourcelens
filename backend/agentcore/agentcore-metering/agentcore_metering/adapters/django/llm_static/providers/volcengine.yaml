@@ -1,0 +1,18 @@
+id: volcengine
+label: Volcengine (Doubao)
+settings_key: VOLCENGINE_CONFIG
+requires_api_base: false
+default_model: doubao-pro-32k
+models:
+  - id: doubao-pro-32k
+    label: Doubao Pro 32K
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: doubao-pro-4k
+    label: Doubao Pro 4K
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

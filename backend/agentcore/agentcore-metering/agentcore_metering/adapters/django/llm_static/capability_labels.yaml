@@ -1,0 +1,12 @@
+# Capability tag id -> short label for UI (aligned with product tier docs)
+text-to-text: Text-to-Text
+code: Code
+vision: Vision Input
+multimodal: MultiModal
+text-to-image: Text-to-Image
+long-context: Long Context
+low-cost: Low Cost
+embedding: Embedding
+reasoning: Reasoning
+speech-to-text: Speech-to-Text
+text-to-speech: Text-to-Speech

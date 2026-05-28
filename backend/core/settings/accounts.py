@@ -1,0 +1,130 @@
+"""
+Accounts and Authentication Configuration
+
+This module contains all settings related to:
+- User registration and authentication
+- Email configuration for registration emails
+- Google OAuth configuration
+- Social account authentication
+"""
+import os
+
+
+# ============================
+# Email Configuration
+# ============================
+
+EMAIL_BACKEND = os.getenv(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.smtp.EmailBackend'
+)
+
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'false').lower() == "true"
+
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'false').lower() == "true"
+
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+
+DEFAULT_FROM_EMAIL = os.getenv(
+    'DEFAULT_FROM_EMAIL',
+    'noreply@backend.local'
+)
+
+
+# ============================
+# Social Account Providers Configuration
+# ============================
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': [
+            'profile',
+            'email',
+        ],
+        'AUTH_PARAMS': {
+            'access_type': 'online',
+        },
+    },
+}
+
+# Custom adapter for business logic (user creation, profile setup)
+SOCIALACCOUNT_ADAPTER = 'accounts.adapters.CustomSocialAccountAdapter'
+
+# Basic account settings
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_REQUIRED = False
+SOCIALACCOUNT_STORE_TOKENS = True
+SOCIALACCOUNT_LOGIN_ON_GET = True
+
+# Account configuration
+# Unique email addresses (prevent duplicate registrations)
+ACCOUNT_UNIQUE_EMAIL = True
+
+# Login methods (replaces deprecated AUTHENTICATION_METHOD)
+# Allow both email and username login
+ACCOUNT_LOGIN_METHODS = ['email', 'username']
+
+# Force HTTPS for OAuth callback URLs in production
+# This ensures django-allauth generates https:// URLs for OAuth providers
+# Environment variable allows flexibility for local development (http)
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = os.getenv(
+    'ACCOUNT_DEFAULT_HTTP_PROTOCOL',
+    'http'
+)
+
+# Email-based authentication for social accounts
+# If OAuth email matches existing user, auto-connect instead of creating
+# new user
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+
+# ============================
+# OAuth Redirect Configuration
+# ============================
+
+# Frontend URL
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+# OAuth flows require traditional /accounts/ endpoints for provider callbacks
+HEADLESS_ONLY = False
+
+# OAuth callback redirect URL
+# Points to custom view that generates JWT tokens before redirecting to frontend
+LOGIN_REDIRECT_URL = "/accounts/oauth/callback/"
+
+# Frontend URLs for email verification and password reset (optional)
+# Note: socialaccount_signup is NOT used as we have custom redirect logic
+HEADLESS_FRONTEND_URLS = {
+    "socialaccount_login_error": f"{FRONTEND_URL}/auth/oauth/error",
+    "account_confirm_email": f"{FRONTEND_URL}/account/verify-email/{{key}}",
+    "account_reset_password": f"{FRONTEND_URL}/account/password/reset",
+    "account_reset_password_from_key": (
+        f"{FRONTEND_URL}/account/password/reset/key/{{key}}"
+    ),
+}
+
+
+# ============================
+# Registration Configuration
+# ============================
+
+REGISTRATION_TOKEN_EXPIRY_HOURS = int(
+    os.getenv('REGISTRATION_TOKEN_EXPIRY_HOURS', '24')
+)
+
+# ============================
+# Password Reset Configuration
+# ============================
+
+# Password reset token validity (in seconds)
+# Django default is 3 days (259200 seconds)
+# We set it to 1 day (86400 seconds) for better security
+PASSWORD_RESET_TIMEOUT = int(
+    os.getenv('PASSWORD_RESET_TIMEOUT', '86400')
+)

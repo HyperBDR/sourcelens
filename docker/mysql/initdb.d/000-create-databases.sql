@@ -1,0 +1,4 @@
+CREATE DATABASE IF NOT EXISTS devmind;
+CREATE USER 'devmind'@'%' IDENTIFIED BY 'devmind';
+GRANT ALL PRIVILEGES ON devmind.* TO 'devmind'@'%';
+FLUSH PRIVILEGES;

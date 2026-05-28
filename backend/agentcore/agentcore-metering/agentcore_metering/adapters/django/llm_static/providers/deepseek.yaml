@@ -1,0 +1,35 @@
+id: deepseek
+label: DeepSeek
+default_api_base: "https://api.deepseek.com"
+default_model: deepseek-chat
+settings_key: DEEPSEEK_CONFIG
+requires_api_base: false
+models:
+  - id: deepseek-chat
+    label: DeepSeek V3.2 Chat
+    capabilities: [text-to-text, long-context, low-cost]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.28
+      output_usd_per_1m: 0.42
+      source: "https://api-docs.deepseek.com/quick_start/pricing"
+      updated: "2026-02"
+  - id: deepseek-reasoner
+    label: DeepSeek V3.2 Reasoner
+    capabilities: [text-to-text, long-context, low-cost, reasoning]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.55
+      output_usd_per_1m: 2.19
+      source: "https://api-docs.deepseek.com/quick_start/pricing"
+      updated: "2026-02"
+  - id: deepseek-coder
+    label: DeepSeek Coder
+    capabilities: [text-to-text, code]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

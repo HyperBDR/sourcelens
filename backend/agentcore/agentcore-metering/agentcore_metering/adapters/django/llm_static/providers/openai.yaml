@@ -1,0 +1,114 @@
+id: openai
+label: OpenAI
+default_api_base: "https://api.openai.com/v1"
+default_model: gpt-4o-mini
+settings_key: OPENAI_CONFIG
+requires_api_base: false
+models:
+  - id: gpt-5.2
+    label: GPT-5.2
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.75
+      output_usd_per_1m: 14.0
+      source: "https://openai.com/api/pricing"
+      updated: "2026-02"
+  - id: gpt-5.2-pro
+    label: GPT-5.2 Pro
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 21.0
+      output_usd_per_1m: 168.0
+      source: "https://openai.com/api/pricing"
+      updated: "2026-02"
+  - id: gpt-5.2-chat-latest
+    label: GPT-5.2 Chat
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-4-mini
+    label: GPT-4 Mini
+    capabilities: [text-to-text, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-5-mini
+    label: GPT-5 Mini
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-5-nano
+    label: GPT-5 Nano
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: gpt-4o
+    label: GPT-4o
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-4o-mini
+    label: GPT-4o Mini
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 0.15
+      output_usd_per_1m: 0.6
+      source: "https://openai.com/api/pricing"
+      updated: "2026-02"
+  - id: o1
+    label: O1
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 200000
+    max_output_tokens: 100000
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 15.0
+      output_usd_per_1m: 60.0
+      source: "https://openai.com/api/pricing"
+      updated: "2026-02"
+  - id: o1-mini
+    label: O1 Mini
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 128000
+    max_output_tokens: 65536
+    mode: chat
+    reference_pricing:
+      input_usd_per_1m: 1.1
+      output_usd_per_1m: 4.4
+      source: "https://openai.com/api/pricing"
+      updated: "2026-02"
+  - id: dall-e-3
+    label: DALL-E 3
+    capabilities: [text-to-image]
+    mode: image_generation
+  - id: dall-e-2
+    label: DALL-E 2
+    capabilities: [text-to-image]
+    mode: image_generation
+  - id: gpt-image-1
+    label: GPT Image 1
+    capabilities: [text-to-image]
+    mode: image_generation
+  - id: text-embedding-3-small
+    label: Text Embedding 3 Small
+    capabilities: [embedding]
+    max_input_tokens: 8191
+    mode: embedding
+  - id: text-embedding-3-large
+    label: Text Embedding 3 Large
+    capabilities: [embedding]
+    max_input_tokens: 8191
+    mode: embedding

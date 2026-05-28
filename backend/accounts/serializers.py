@@ -1,0 +1,726 @@
+import logging
+import re
+
+from django.conf import settings
+from django.contrib.auth.models import User
+from django.utils.translation import gettext_lazy as _
+
+from rest_framework import serializers
+
+from allauth.socialaccount import providers
+from allauth.socialaccount.models import SocialAccount
+
+from accounts.access import (
+    get_access_profile,
+    get_effective_roles,
+    normalize_feature_keys,
+    normalize_platform_key,
+    serialize_feature_options,
+    serialize_platform_options,
+)
+from accounts.models import Profile
+
+
+def normalize_language_code(value):
+    """
+    Normalize requested language using configured mappings.
+
+    This function:
+    1. Uses settings.LANGUAGES to get supported languages (no hardcoding)
+    2. Uses settings.LANGUAGE_CODE_MAPPING for variant mappings
+    3. Falls back to settings.LANGUAGE_CODE if not found
+    4. Ensures returned code is always in LANGUAGES list
+
+    This approach is fully extensible - adding new languages only requires
+    updating settings.LANGUAGES and optionally LANGUAGE_CODE_MAPPING.
+    """
+    languages = settings.LANGUAGES
+    if not languages:
+        return settings.LANGUAGE_CODE
+
+    configured_codes = {
+        code.lower(): code
+        for code, _ in languages
+    }
+
+    default_language = settings.LANGUAGE_CODE
+    if default_language.lower() not in configured_codes:
+        default_language = languages[0][0]
+
+    if not value:
+        return default_language
+
+    raw_value = value.strip().lower()
+    if not raw_value:
+        return default_language
+
+    normalized_value = raw_value.replace('_', '-')
+    mapping = settings.LANGUAGE_CODE_MAPPING
+    mapped_value = mapping.get(normalized_value)
+    if mapped_value and mapped_value.lower() in configured_codes:
+        return configured_codes[mapped_value.lower()]
+
+    direct_match = configured_codes.get(normalized_value)
+    if direct_match:
+        return direct_match
+
+    return default_language
+
+
+def check_username_uniqueness(username):
+    """
+    Check if username is unique.
+
+    Currently checks User.username uniqueness.
+    Can be extended to check EmailAlias if needed.
+    """
+    return not User.objects.filter(username=username).exists()
+
+
+class SuccessResponseSerializer(serializers.Serializer):
+    """
+    Standard success response for Swagger documentation.
+    """
+    success = serializers.BooleanField(default=True)
+    message = serializers.CharField()
+
+
+class TokenVerificationResponseSerializer(serializers.Serializer):
+    """
+    Token verification response with email.
+    """
+    success = serializers.BooleanField(default=True)
+    email = serializers.EmailField()
+
+
+class AuthTokenResponseSerializer(serializers.Serializer):
+    """
+    Authentication token response (JWT).
+    """
+    access = serializers.CharField(help_text=_("JWT access token"))
+    refresh = serializers.CharField(help_text=_("JWT refresh token"))
+    user = serializers.DictField(help_text=_("User basic info"))
+
+
+class UsernameAvailabilityResponseSerializer(serializers.Serializer):
+    """
+    Username availability check response.
+    """
+    available = serializers.BooleanField()
+    username = serializers.CharField()
+    message = serializers.CharField()
+
+
+class SceneSerializer(serializers.Serializer):
+    """
+    Scene information serializer.
+    """
+    key = serializers.CharField(
+        help_text=_("Scene key (e.g., 'chat', 'product_issue')")
+    )
+    name = serializers.CharField(
+        help_text=_("Scene display name in requested language")
+    )
+    description = serializers.CharField(
+        help_text=_("Scene description in requested language")
+    )
+
+
+class SendRegistrationEmailSerializer(serializers.Serializer):
+    """
+    Serializer for sending registration email.
+    """
+    email = serializers.EmailField(
+        required=True,
+        help_text=_("User's email address")
+    )
+
+    def validate_email(self, value):
+        """
+        Validate email is not already registered and completed.
+
+        Check if user registered via OAuth and provide friendly hint.
+        Allow re-sending email if user exists but registration not completed.
+        """
+        value = value.lower().strip()
+
+        try:
+            user = User.objects.get(email=value)
+
+            try:
+                profile = user.profile
+                if profile.registration_completed:
+                    social_accounts = SocialAccount.objects.filter(
+                        user=user
+                    )
+
+                    if social_accounts.exists():
+                        provider_names = []
+                        for acc in social_accounts:
+                            try:
+                                provider_class = (
+                                    providers.registry.by_id(
+                                        acc.provider
+                                    )
+                                )
+                                provider_names.append(
+                                    provider_class.name
+                                )
+                            except Exception:
+                                provider_names.append(
+                                    acc.provider.title()
+                                )
+
+                        providers_str = ' or '.join(provider_names)
+
+                        raise serializers.ValidationError(
+                            _(
+                                "This email is already registered "
+                                "via %(providers)s. "
+                                "Please use %(providers)s to "
+                                "login instead."
+                            ) % {'providers': providers_str}
+                        )
+                    else:
+                        raise serializers.ValidationError(
+                            _(
+                                "This email address is already "
+                                "registered. Please login instead."
+                            )
+                        )
+            except Profile.DoesNotExist:
+                pass
+
+        except User.DoesNotExist:
+            pass
+
+        return value
+
+
+class VirtualEmailUsernameSerializer(serializers.Serializer):
+    """
+    Serializer for validating virtual email username.
+    """
+    username = serializers.CharField(
+        min_length=3,
+        max_length=64,
+        required=True,
+        help_text=_(
+            "Virtual email username "
+            "(will become username@domain)"
+        )
+    )
+
+    def validate_username(self, value):
+        """
+        Validate virtual email username format and uniqueness.
+        """
+        value = value.lower().strip()
+
+        if not re.match(r'^[a-zA-Z0-9._-]+$', value):
+            raise serializers.ValidationError(
+                _(
+                    "Username can only contain letters, numbers, "
+                    "dots, hyphens, and underscores"
+                )
+            )
+
+        if value.startswith('.') or value.endswith('.'):
+            raise serializers.ValidationError(
+                _("Username cannot start or end with a dot")
+            )
+
+        reserved_words = [
+            'admin', 'administrator', 'root', 'postmaster',
+            'webmaster', 'hostmaster', 'noreply', 'no-reply',
+            'support', 'help', 'info', 'contact'
+        ]
+
+        if value in reserved_words:
+            raise serializers.ValidationError(
+                _("This username is reserved and cannot be used")
+            )
+
+        if not check_username_uniqueness(value):
+            raise serializers.ValidationError(
+                _("This username is already taken")
+            )
+
+        return value
+
+
+class CompleteRegistrationSerializer(serializers.Serializer):
+    """
+    Serializer for completing user registration.
+    """
+    token = serializers.CharField(
+        required=True,
+        help_text=_("Registration verification token")
+    )
+
+    password = serializers.CharField(
+        min_length=8,
+        max_length=32,
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text=_(
+            "User password (8-32 characters, "
+            "must contain letters and numbers)"
+        )
+    )
+
+    virtual_email_username = serializers.CharField(
+        min_length=3,
+        max_length=64,
+        required=True,
+        help_text=_("Virtual email username")
+    )
+
+    scene = serializers.CharField(
+        required=False,
+        help_text=_(
+            "User's selected scene "
+            "(e.g., 'chat', 'product_issue')"
+        )
+    )
+
+    language = serializers.CharField(
+        required=True,
+        help_text=_(
+            "Specifies the language used by AI when generating "
+            "summaries, titles, and metadata."
+        )
+    )
+
+    timezone = serializers.CharField(
+        required=True,
+        help_text=_(
+            "User's timezone "
+            "(e.g., 'UTC', 'Asia/Shanghai')"
+        )
+    )
+
+    def validate_password(self, value):
+        """
+        Validate password strength: 8-32 characters,
+        must contain letters and numbers.
+        """
+        if len(value) < 8:
+            raise serializers.ValidationError(
+                _("Password must be at least 8 characters long")
+            )
+
+        if len(value) > 32:
+            raise serializers.ValidationError(
+                _("Password cannot exceed 32 characters")
+            )
+
+        has_letter = re.search(r'[a-zA-Z]', value)
+        has_number = re.search(r'[0-9]', value)
+
+        if not (has_letter and has_number):
+            raise serializers.ValidationError(
+                _("Password must contain both letters and numbers")
+            )
+
+        return value
+
+    def validate_virtual_email_username(self, value):
+        """
+        Validate virtual email username.
+
+        Reuse validation logic from VirtualEmailUsernameSerializer.
+        """
+        username_serializer = VirtualEmailUsernameSerializer(
+            data={'username': value}
+        )
+
+        if not username_serializer.is_valid():
+            raise serializers.ValidationError(
+                username_serializer.errors['username']
+            )
+
+        return username_serializer.validated_data['username']
+
+    def validate_language(self, value):
+        """
+        Normalize language to supported value.
+        """
+        return normalize_language_code(value)
+
+
+class CompleteGoogleSetupSerializer(serializers.Serializer):
+    """
+    Serializer for completing Google user setup.
+
+    Google users are already authenticated via OAuth,
+    so they don't need to provide a password.
+    They only need to complete virtual email and preferences setup.
+    """
+
+    virtual_email_username = serializers.CharField(
+        min_length=3,
+        max_length=64,
+        required=True,
+        help_text=_("Virtual email username")
+    )
+
+    scene = serializers.CharField(
+        required=False,
+        help_text=_("User's selected scene")
+    )
+
+    language = serializers.CharField(
+        required=True,
+        help_text=_(
+            "Specifies the language used by AI when generating "
+            "summaries, titles, and metadata."
+        )
+    )
+
+    timezone = serializers.CharField(
+        required=True,
+        help_text=_("User's timezone")
+    )
+
+    def validate_scene(self, value):
+        """
+        Validate scene is valid.
+        """
+        if not value:
+            return None
+        return value
+
+    def validate_virtual_email_username(self, value):
+        """
+        Validate virtual email username.
+
+        Reuse validation logic from VirtualEmailUsernameSerializer.
+        """
+        username_serializer = VirtualEmailUsernameSerializer(
+            data={'username': value}
+        )
+
+        if not username_serializer.is_valid():
+            raise serializers.ValidationError(
+                username_serializer.errors['username']
+            )
+
+        return username_serializer.validated_data['username']
+
+    def validate_language(self, value):
+        """
+        Normalize language to supported value.
+        """
+        return normalize_language_code(value)
+
+
+class UserDetailsSerializer(serializers.ModelSerializer):
+    """
+    Custom user details serializer for dj-rest-auth.
+    Includes virtual email address from EmailAlias and profile information.
+    Also includes authentication method information and password change
+    capability.
+    """
+    display_name = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_(
+            "User-friendly display name, prioritizing "
+            "first_name + last_name from OAuth providers, "
+            "falling back to username"
+        )
+    )
+
+    virtual_email = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_(
+            "Primary virtual email address for receiving emails"
+        )
+    )
+
+    profile = serializers.SerializerMethodField(
+        help_text=_("User profile information")
+    )
+    profile_language = serializers.CharField(
+        write_only=True,
+        required=False,
+        help_text=_(
+            "User's preferred language for AI generation "
+            "and backend logic (not UI display)"
+        )
+    )
+    profile_timezone = serializers.CharField(
+        write_only=True,
+        required=False,
+        help_text=_(
+            "User's timezone for backend logic "
+            "and date/time display"
+        )
+    )
+
+    auth_info = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_("Authentication method and related information")
+    )
+    access_profile = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_("Resolved platform visibility and landing route"),
+    )
+    roles = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_("Effective roles resolved from direct and group bindings."),
+    )
+    permissions = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_("Effective Django permission codenames."),
+    )
+
+    class Meta:
+        model = User
+        fields = [
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'display_name',
+            'virtual_email',
+            'profile',
+            'profile_language',
+            'profile_timezone',
+            'auth_info',
+            'is_staff',
+            'roles',
+            'permissions',
+            'access_profile',
+        ]
+        read_only_fields = [
+            'id',
+            'username',
+            'email',
+            'virtual_email',
+            'profile',
+            'auth_info',
+            'display_name',
+            'is_staff',
+            'roles',
+            'permissions',
+            'access_profile',
+        ]
+
+    def get_display_name(self, obj):
+        """
+        Get user-friendly display name.
+
+        Priority order:
+        1. first_name + last_name (from OAuth providers like Google)
+        2. first_name only (if last_name is empty)
+        3. username (fallback)
+
+        This provides a more friendly name display for OAuth users
+        who typically have proper first_name and last_name from their provider.
+        """
+        if obj.first_name and obj.last_name:
+            return f"{obj.first_name} {obj.last_name}".strip()
+        elif obj.first_name:
+            return obj.first_name.strip()
+        else:
+            return obj.username
+
+    def get_virtual_email(self, obj):
+        """
+        Get the primary virtual email address for the user.
+
+        Returns None as EmailAlias is not implemented in this project.
+        Can be extended to return email alias if needed.
+        """
+        return None
+
+    def get_profile(self, obj):
+        """
+        Get user profile information.
+
+        Returns registration status and preferences.
+        """
+        try:
+            profile = obj.profile
+            return {
+                'registration_completed': (
+                    profile.registration_completed
+                ),
+                'language': profile.language,
+                'timezone': profile.timezone,
+                'nickname': profile.nickname,
+                'avatar_url': profile.avatar_url
+            }
+        except Profile.DoesNotExist:
+            return None
+
+    def get_auth_info(self, obj):
+        """
+        Get authentication method information.
+
+        Returns authentication type, provider info, and capabilities.
+        """
+        auth_info = {
+            'method': 'email',
+            'provider': None,
+            'provider_account_id': None,
+            'provider_email': None,
+            'can_change_password': obj.has_usable_password(),
+            'login_identifier': None
+        }
+
+        try:
+            social_accounts = SocialAccount.objects.filter(user=obj)
+
+            if social_accounts.exists():
+                social_account = social_accounts.first()
+                provider_id = social_account.provider
+
+                provider_name_map = {
+                    'google': 'Google',
+                    'github': 'GitHub',
+                    'facebook': 'Facebook',
+                    'twitter': 'Twitter',
+                }
+
+                auth_info['method'] = 'oauth'
+                auth_info['provider'] = provider_name_map.get(
+                    provider_id,
+                    provider_id.title()
+                )
+                auth_info['provider_account_id'] = social_account.uid
+                auth_info['provider_email'] = (
+                    social_account.extra_data.get('email')
+                )
+                auth_info['login_identifier'] = (
+                    f"{auth_info['provider']} "
+                    f"({auth_info['provider_email'] or social_account.uid})"
+                )
+            else:
+                auth_info['login_identifier'] = obj.email
+
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(
+                "Error getting auth info for user %s: %s",
+                obj.id,
+                e,
+                exc_info=True
+            )
+
+        return auth_info
+
+    def get_roles(self, obj):
+        """Serialize effective roles for the current user."""
+        effective_roles = get_effective_roles(obj)
+        return [
+            {
+                'id': role.pk,
+                'name': role.name,
+                'visible_features': normalize_feature_keys(
+                    role.visible_features
+                ),
+                'preferred_platform': normalize_platform_key(
+                    role.preferred_platform
+                ),
+                'is_active': role.is_active,
+            }
+            for role in effective_roles
+        ]
+
+    def get_permissions(self, obj):
+        """Serialize effective Django permissions for client-side routing."""
+        return sorted(obj.get_all_permissions())
+
+    def get_access_profile(self, obj):
+        """Serialize resolved access information for the current user."""
+        return get_access_profile(obj)
+
+    def update(self, instance, validated_data):
+        """
+        Update user instance and profile language/timezone if provided.
+        """
+        profile_language = validated_data.pop('profile_language', None)
+        profile_timezone = validated_data.pop('profile_timezone', None)
+
+        # Update user fields
+        instance = super().update(instance, validated_data)
+
+        # Update profile language and/or timezone if provided
+        if profile_language is not None or profile_timezone is not None:
+            try:
+                profile = instance.profile
+                update_fields = []
+                if profile_language is not None:
+                    normalized_lang = normalize_language_code(
+                        profile_language
+                    )
+                    profile.language = normalized_lang
+                    update_fields.append('language')
+                if profile_timezone is not None:
+                    tz_value = (
+                        profile_timezone.strip() or 'Asia/Shanghai'
+                    )
+                    profile.timezone = tz_value
+                    update_fields.append('timezone')
+                if update_fields:
+                    profile.save(update_fields=update_fields)
+            except Profile.DoesNotExist:
+                default_lang = (
+                    normalize_language_code(profile_language)
+                    if profile_language
+                    else 'zh-CN'
+                )
+                default_tz = (
+                    profile_timezone.strip()
+                    if profile_timezone
+                    else 'Asia/Shanghai'
+                )
+                Profile.objects.create(
+                    user=instance,
+                    language=default_lang,
+                    timezone=default_tz
+                )
+        return instance
+
+
+class CustomPasswordResetSerializer(serializers.Serializer):
+    """
+    Custom password reset serializer that only allows email-registered users.
+    OAuth users are rejected with appropriate error message.
+    """
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        """
+        Validate that the email belongs to an email-registered user.
+        """
+        try:
+            user = User.objects.get(email=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(
+                _("No user found with this email address")
+            )
+
+        if not user.has_usable_password():
+            raise serializers.ValidationError(
+                _(
+                    "OAuth users cannot reset password. "
+                    "Please login with your OAuth provider."
+                )
+            )
+
+        try:
+            profile = user.profile
+            if not profile.registration_completed:
+                raise serializers.ValidationError(
+                    _("Please complete registration first")
+                )
+        except Profile.DoesNotExist:
+            raise serializers.ValidationError(
+                _("User profile not found")
+            )
+
+        return value

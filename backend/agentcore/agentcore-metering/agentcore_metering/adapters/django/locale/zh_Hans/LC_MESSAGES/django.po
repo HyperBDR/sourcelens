@@ -1,0 +1,41 @@
+# LLM connection-test validation messages (agentcore_metering).
+# Copyright (C) 2025
+# This file is distributed under the same license as the project.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: agentcore_metering\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-01-01 00:00+0000\n"
+"PO-Revision-Date: 2025-01-01 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: zh_Hans\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Invalid or expired API key. Please check and try again."
+msgstr "API Key 无效或已过期，请检查后重试。"
+
+msgid "Authentication failed. Check API key or account permissions."
+msgstr "认证失败，请检查 API Key 或账号权限。"
+
+msgid "Rate limit or quota exceeded. Please try again later."
+msgstr "请求过于频繁或超出配额，请稍后再试。"
+
+msgid "Model or endpoint not found. Check model name and API base URL."
+msgstr "模型或接口地址不存在，请检查模型名称与 API 地址。"
+
+msgid "Connection timed out. Check network and API base URL."
+msgstr "连接超时，请检查网络与 API 地址。"
+
+msgid "Cannot reach the service. Check API base URL and network."
+msgstr "无法连接服务，请检查 API 地址与网络。"
+
+msgid "Access denied. Check API key or account permissions."
+msgstr "无访问权限，请检查 API Key 与账号权限。"
+
+msgid "Connection test failed. Check your configuration and try again."
+msgstr "连接测试失败，请检查配置后重试。"

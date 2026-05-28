@@ -1,0 +1,44 @@
+{
+  "name": "frontend",
+  "version": "1.0.0",
+  "description": "Frontend application for SourceLens",
+  "type": "module",
+  "license": "SEE LICENSE",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-path .gitignore",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:container": "BASE_URL=http://localhost:10080 playwright test --config=playwright.config.cjs"
+  },
+  "dependencies": {
+    "@vueuse/core": "^10.5.0",
+    "axios": "^1.6.2",
+    "chart.js": "^4.5.1",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
+    "dompurify": "^3.0.9",
+    "highlight.js": "^11.11.1",
+    "marked": "^16.3.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.0",
+    "vue-chartjs": "^5.3.3",
+    "vue-i18n": "^9.1.10",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^20.10.0",
+    "@vitejs/plugin-vue": "^4.6.2",
+    "@vue/eslint-config-prettier": "^8.0.0",
+    "autoprefixer": "^10.4.16",
+    "eslint": "^8.57.1",
+    "eslint-plugin-vue": "^9.19.2",
+    "postcss": "^8.4.32",
+    "prettier": "^3.1.1",
+    "tailwindcss": "^3.3.6",
+    "vite": "^5.0.8"
+  }
+}

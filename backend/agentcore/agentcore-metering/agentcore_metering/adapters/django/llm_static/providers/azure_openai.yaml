@@ -1,0 +1,60 @@
+id: azure_openai
+label: Azure OpenAI
+default_model: gpt-4o-mini
+settings_key: AZURE_OPENAI_CONFIG
+requires_api_base: true
+models:
+  - id: gpt-5.2
+    label: GPT-5.2
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-5.2-pro
+    label: GPT-5.2 Pro
+    capabilities: [text-to-text, vision, code, multimodal, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-4-mini
+    label: GPT-4 Mini
+    capabilities: [text-to-text, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-5-mini
+    label: GPT-5 Mini
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-5-nano
+    label: GPT-5 Nano
+    capabilities: [text-to-text, low-cost]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: gpt-4o
+    label: GPT-4o
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: gpt-4o-mini
+    label: GPT-4o Mini
+    capabilities: [text-to-text, vision, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 16384
+    mode: chat
+  - id: o1
+    label: O1
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 200000
+    max_output_tokens: 100000
+    mode: chat
+  - id: o1-mini
+    label: O1 Mini
+    capabilities: [text-to-text, long-context, reasoning]
+    max_input_tokens: 128000
+    max_output_tokens: 65536
+    mode: chat

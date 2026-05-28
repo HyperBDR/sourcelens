@@ -1,0 +1,31 @@
+id: mistral
+label: Mistral
+default_api_base: "https://api.mistral.ai/v1"
+default_model: mistral-tiny
+settings_key: MISTRAL_CONFIG
+requires_api_base: false
+models:
+  - id: mistral-large-latest
+    label: Mistral Large
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: mistral-small-latest
+    label: Mistral Small
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: mistral-tiny
+    label: Mistral Tiny
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: codestral-latest
+    label: Codestral
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

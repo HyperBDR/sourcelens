@@ -1,0 +1,13 @@
+id: meta_llama
+label: Meta Llama
+default_api_base: null
+default_model: Llama-3.3-8B-Instruct
+settings_key: META_LLAMA_CONFIG
+requires_api_base: false
+models:
+  - id: Llama-3.3-8B-Instruct
+    label: Llama 3.3 8B Instruct
+    capabilities: [text-to-text, long-context]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

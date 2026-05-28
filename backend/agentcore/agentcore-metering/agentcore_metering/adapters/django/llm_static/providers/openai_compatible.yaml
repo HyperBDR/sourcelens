@@ -1,0 +1,6 @@
+id: openai_compatible
+label: OpenAI Compatible
+default_api_base: ""
+default_model: ""
+requires_api_base: true
+models: []

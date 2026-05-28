@@ -1,0 +1,25 @@
+id: minimax
+label: MiniMax
+default_api_base: "https://api.minimaxi.com/v1"
+default_model: MiniMax-M2.1
+settings_key: MINIMAX_CONFIG
+requires_api_base: false
+models:
+  - id: MiniMax-M2.5
+    label: MiniMax M2.5
+    capabilities: [text-to-text, vision, multimodal, low-cost]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: MiniMax-M2.1
+    label: MiniMax M2.1
+    capabilities: [text-to-text, vision, multimodal, low-cost]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: abab6.5s-chat
+    label: ABAB 6.5s Chat
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat

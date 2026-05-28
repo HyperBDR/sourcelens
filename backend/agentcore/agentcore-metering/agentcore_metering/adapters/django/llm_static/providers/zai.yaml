@@ -1,0 +1,24 @@
+id: zai
+label: Z.AI (GLM)
+settings_key: ZAI_CONFIG
+requires_api_base: false
+default_model: glm-4.5-flash
+models:
+  - id: glm-4-plus
+    label: GLM-4 Plus
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: glm-4-flash
+    label: GLM-4 Flash
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
+  - id: glm-4.5-flash
+    label: GLM-4.5 Flash
+    capabilities: [text-to-text]
+    max_input_tokens: 128000
+    max_output_tokens: 8192
+    mode: chat
