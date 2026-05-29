@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-hans">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SourceLens 设计文档</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
+        background: #f7f8fa;
+        color: #1f2329;
+      }
+      header {
+        padding: 32px 40px;
+        background: #fff;
+        border-bottom: 1px solid #e5e6eb;
+      }
+      header h1 {
+        margin: 0 0 4px;
+        font-size: 22px;
+      }
+      header p {
+        margin: 0;
+        color: #86909c;
+        font-size: 14px;
+      }
+      main {
+        max-width: 960px;
+        margin: 32px auto;
+        padding: 0 24px;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 16px;
+      }
+      li a {
+        display: block;
+        padding: 20px;
+        background: #fff;
+        border: 1px solid #e5e6eb;
+        border-radius: 8px;
+        text-decoration: none;
+        color: #1f2329;
+        transition: box-shadow 0.15s, border-color 0.15s;
+      }
+      li a:hover {
+        border-color: #4080ff;
+        box-shadow: 0 2px 8px rgba(64, 128, 255, 0.12);
+      }
+      .empty {
+        color: #86909c;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>SourceLens 设计文档</h1>
+      <p>开发模式下的静态设计稿评审入口（仅 dev，不进入生产构建）</p>
+    </header>
+    <main>
+      <p class="empty">
+        把设计稿 HTML 放到 <code>frontend/design/</code> 目录，然后在下方添加链接。
+      </p>
+      <ul>
+        <!-- 示例：
+        <li><a href="/design/login.html">登录页设计</a></li>
+        -->
+      </ul>
+    </main>
+  </body>
+</html>
