@@ -142,6 +142,7 @@ services:
     volumes:
       - ./frontend/src:/app/src:ro
       - ./frontend/public:/app/public:ro
+      - ./frontend/design:/app/design:ro
       - ./frontend/index.html:/app/index.html:ro
       - ./frontend/vite.config.js:/app/vite.config.js:ro
       - ./frontend/tailwind.config.js:/app/tailwind.config.js:ro
