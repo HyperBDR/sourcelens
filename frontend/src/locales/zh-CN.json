@@ -75,6 +75,45 @@
   "virtualEmail": {
     "yourAddress": "您的AI智能邮箱"
   },
+  "lens": {
+    "chat": {
+      "liveOutput": "实时输出",
+      "executionTimeline": "执行时间线",
+      "showTimeline": "查看 {count} 条事件",
+      "hideTimeline": "收起事件",
+      "questionPlaceholder": "输入问题",
+      "runInline": "同步执行",
+      "cancelRun": "中止",
+      "runSubmitted": "Run 已提交。",
+      "submitFailed": "提交查询失败。",
+      "waitingForResult": "仍在等待执行结果。",
+      "thinking": "正在分析项目内容",
+      "waiting": "等待中",
+      "running": "正在分析",
+      "generating": "正在生成",
+      "agentActivity": "Agent 活动",
+      "events": {
+        "submitted": "已提交",
+        "sync": "同步状态",
+        "status": "状态更新",
+        "step": "{step}",
+        "ping": "等待中",
+        "error": "执行失败",
+        "agentActivity": "Agent 活动"
+      },
+      "activity": {
+        "planning": "正在规划检索路径",
+        "analyzing_question": "正在分析问题意图",
+        "searching_code": "正在检索代码和文档",
+        "searched_code": "已完成候选文件检索",
+        "reading_evidence": "正在读取证据片段",
+        "read_evidence": "已完成证据读取",
+        "calling_model": "正在调用模型生成回答",
+        "completed": "执行逻辑已完成",
+        "running": "正在执行"
+      }
+    }
+  },
   "auth": {
     "login": "登录",
     "register": "注册",

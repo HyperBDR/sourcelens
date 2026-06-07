@@ -38,7 +38,9 @@ test.describe('Login page', () => {
     await expect(page.locator('button[type="submit"]')).toBeVisible()
   })
 
-  test('shows validation error when submitting empty form', async ({ page }) => {
+  test('shows validation error when submitting empty form', async ({
+    page
+  }) => {
     await page.goto('/login')
     await page.waitForLoadState('networkidle')
 
@@ -66,9 +68,7 @@ test.describe('Login page', () => {
     expect(page.url()).toContain('/login')
 
     // Should show error message
-    const errorMsg = page
-      .locator('text=/error|登录失败|invalid|错误/i')
-      .first()
+    const errorMsg = page.locator('text=/error|登录失败|invalid|错误/i').first()
     await expect(errorMsg).toBeVisible({ timeout: 5000 })
   })
 
@@ -120,7 +120,9 @@ test.describe('Auth guards', () => {
     }
   })
 
-  test('authenticated user is redirected away from /login', async ({ page }) => {
+  test('authenticated user is redirected away from /login', async ({
+    page
+  }) => {
     const loggedIn = await tryLogin(page)
     if (!loggedIn) {
       test.skip()

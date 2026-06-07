@@ -61,7 +61,9 @@ test.describe('LLM pages', () => {
     await expect(title).toBeVisible({ timeout: 10000 })
 
     // Should show stats content: either cards or empty state
-    const content = page.locator('.text-2xl, .text-xl, .font-semibold, text=/暂无|no data/i').first()
+    const content = page
+      .locator('.text-2xl, .text-xl, .font-semibold, text=/暂无|no data/i')
+      .first()
     await expect(content).toBeVisible({ timeout: 10000 })
   })
 
@@ -76,7 +78,9 @@ test.describe('LLM pages', () => {
     await expect(tableOrEmpty).toBeVisible({ timeout: 15000 })
   })
 
-  test('LLM Usage pagination controls exist when data present', async ({ page }) => {
+  test('LLM Usage pagination controls exist when data present', async ({
+    page
+  }) => {
     await page.goto('/management/llm/usage')
     await page.waitForLoadState('networkidle')
     await page.waitForTimeout(2000)
@@ -101,7 +105,9 @@ test.describe('LLM pages', () => {
     await page.goto('/management/llm/config')
     await page.waitForLoadState('networkidle')
 
-    const saveBtn = page.locator('button', { hasText: /save|保存|update|更新|submit|提交/i }).first()
+    const saveBtn = page
+      .locator('button', { hasText: /save|保存|update|更新|submit|提交/i })
+      .first()
     await expect(saveBtn).toBeVisible({ timeout: 5000 })
   })
 
@@ -109,10 +115,14 @@ test.describe('LLM pages', () => {
     await page.goto('/management/llm/data-settings')
     await page.waitForLoadState('networkidle')
     await expect(page).toHaveURL(/\/management\/llm\/data-settings/)
-    await expect(page.locator('h1, h2, form').first()).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('h1, h2, form').first()).toBeVisible({
+      timeout: 10000
+    })
   })
 
-  test('legacy /llm/* routes redirect to /management/llm/*', async ({ page }) => {
+  test('legacy /llm/* routes redirect to /management/llm/*', async ({
+    page
+  }) => {
     const legacyRoutes = ['/llm/stats', '/llm/usage', '/llm/config']
     for (const route of legacyRoutes) {
       await page.goto(route)

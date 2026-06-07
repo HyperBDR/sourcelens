@@ -1,0 +1,1860 @@
+<template>
+  <AdminLayout>
+    <div class="w-full max-w-full p-6">
+      <div class="mb-4">
+        <h1 class="text-lg font-semibold text-gray-900">
+          {{ activeMeta.title }}
+        </h1>
+        <p class="mt-1 text-sm text-gray-500">
+          {{ activeMeta.description }}
+        </p>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div class="p-6">
+          <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <span class="text-sm text-gray-600">
+              {{
+                t('lensAdmin.total', {
+                  label: activeMeta.label,
+                  count: activeCount
+                })
+              }}
+            </span>
+            <div class="flex items-center gap-2">
+              <BaseButton
+                variant="outline"
+                size="sm"
+                :loading="loading"
+                @click="load"
+              >
+                {{ t('common.refresh') }}
+              </BaseButton>
+              <BaseButton
+                v-if="canCreate"
+                variant="primary"
+                size="sm"
+                @click="startCreate"
+              >
+                {{ activeMeta.action }}
+              </BaseButton>
+            </div>
+          </div>
+
+          <div class="mb-6 flex flex-wrap gap-2 border-b border-gray-200 pb-4">
+            <button
+              v-for="tab in tabs"
+              :key="tab.key"
+              type="button"
+              class="rounded-md px-3 py-1.5 text-sm font-medium transition"
+              :class="
+                activeTab === tab.key
+                  ? 'bg-primary-50 text-primary-700'
+                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+              "
+              @click="selectTab(tab.key)"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+
+          <BaseLoading v-if="loading && activeCount === 0" />
+
+          <template v-else-if="activeTab === 'settings'">
+            <h2 class="mb-6 text-base font-semibold text-gray-900">
+              {{ t('lensAdmin.settings.sectionTitle') }}
+            </h2>
+
+            <section
+              v-for="setting in settingDefinitions"
+              :key="setting.key"
+              class="grid grid-cols-1 items-start gap-4 border-t border-gray-200 py-6 first:border-t-0 first:pt-0 md:grid-cols-3"
+            >
+              <div class="md:col-span-2">
+                <h3 class="mb-1 text-sm font-semibold text-gray-900">
+                  {{ setting.label }}
+                </h3>
+                <p class="text-sm text-gray-600">
+                  {{ setting.description }}
+                </p>
+                <p class="mt-1 font-mono text-xs text-gray-400">
+                  {{ setting.key }}
+                </p>
+              </div>
+              <div class="flex justify-end md:col-span-1">
+                <div class="flex w-full items-center justify-end gap-2 md:w-64">
+                  <input
+                    v-if="setting.type === 'number'"
+                    v-model.number="settingsForm[setting.key]"
+                    type="number"
+                    min="1"
+                    class="w-24 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  />
+                  <select
+                    v-else-if="setting.type === 'model_ref'"
+                    v-model="settingsForm[setting.key]"
+                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  >
+                    <option value="">
+                      {{ t('lensAdmin.placeholders.noModel') }}
+                    </option>
+                    <option
+                      v-for="config in llmConfigOptions"
+                      :key="config.uuid"
+                      :value="config.uuid"
+                    >
+                      {{ formatLLMConfigLabel(config) }}
+                    </option>
+                  </select>
+                  <span class="w-16 text-sm text-gray-500">
+                    {{ setting.unit }}
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            <div
+              class="flex items-center justify-end gap-3 border-t border-gray-200 pt-6"
+            >
+              <BaseButton
+                variant="secondary"
+                size="sm"
+                :disabled="saving"
+                @click="resetSettingsForm"
+              >
+                {{ t('lensAdmin.settings.reset') }}
+              </BaseButton>
+              <BaseButton
+                variant="primary"
+                size="sm"
+                :loading="saving"
+                @click="saveSettings"
+              >
+                {{ t('lensAdmin.settings.saveChanges') }}
+              </BaseButton>
+            </div>
+            <p v-if="formError" class="mt-2 text-sm text-red-600">
+              {{ formError }}
+            </p>
+          </template>
+
+          <div
+            v-else-if="activeCount === 0"
+            class="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center"
+          >
+            <p class="text-sm font-medium text-gray-600">
+              {{ t('common.noData') }}
+            </p>
+          </div>
+
+          <div
+            v-else
+            class="relative overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm"
+          >
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
+                <tr>
+                  <th
+                    v-for="column in activeColumns"
+                    :key="column"
+                    class="table-head"
+                  >
+                    {{ column }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 bg-white">
+                <tr
+                  v-for="row in activeRows"
+                  :key="row.uuid || row.key || row.task_type"
+                  class="transition-colors duration-150 hover:bg-gray-50"
+                >
+                  <template v-if="activeTab === 'assistants'">
+                    <td class="table-cell">
+                      <div class="font-medium text-gray-900">
+                        {{ row.name }}
+                      </div>
+                      <div class="text-xs text-gray-500">{{ row.slug }}</div>
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ lensNodeName(row.lensnode) }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.selected_task || emptyValue }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.selected_dirs?.length || 0 }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{
+                        t('lensAdmin.table.toolSummary', {
+                          skills: row.skill_summary?.enabled || 0,
+                          mcps: row.mcp_summary?.enabled || 0
+                        })
+                      }}
+                    </td>
+                    <td class="table-cell">
+                      <StatusBadge :status="row.status" />
+                    </td>
+                    <td class="table-cell">
+                      <RowActions :row="row" />
+                    </td>
+                  </template>
+
+                  <template v-else-if="activeTab === 'lensnodes'">
+                    <td class="table-cell">
+                      <div class="font-medium text-gray-900">
+                        {{ row.name }}
+                      </div>
+                      <div class="text-xs text-gray-500">
+                        {{ compactUuid(row.uuid) }}
+                      </div>
+                    </td>
+                    <td class="table-cell">
+                      <div class="flex flex-wrap gap-1">
+                        <StatusBadge :status="row.status" />
+                        <StatusBadge :status="row.enrollment_status" />
+                      </div>
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.workspace_path || emptyValue }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{
+                        t('lensAdmin.table.dirTaskSummary', {
+                          dirs: row.available_dirs?.length || 0,
+                          tasks: row.tasks?.length || 0
+                        })
+                      }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ formatDateTime(row.last_heartbeat_at) }}
+                    </td>
+                    <td class="table-cell">
+                      <div class="flex flex-wrap gap-2">
+                        <BaseButton
+                          size="sm"
+                          variant="outline"
+                          @click="startEdit(row)"
+                        >
+                          {{ t('common.edit') }}
+                        </BaseButton>
+                        <BaseButton
+                          v-if="row.enrollment_status !== 'approved'"
+                          size="sm"
+                          variant="outline"
+                          @click="approve(row)"
+                        >
+                          {{ t('lensAdmin.actions.approve') }}
+                        </BaseButton>
+                        <BaseButton
+                          size="sm"
+                          variant="outline"
+                          @click="issueToken(row)"
+                        >
+                          {{ t('lensAdmin.actions.issueToken') }}
+                        </BaseButton>
+                        <BaseButton
+                          size="sm"
+                          variant="outline"
+                          @click="revokeToken(row)"
+                        >
+                          {{ t('lensAdmin.actions.revokeToken') }}
+                        </BaseButton>
+                        <BaseButton
+                          size="sm"
+                          variant="danger"
+                          @click="remove(row)"
+                        >
+                          {{ t('common.delete') }}
+                        </BaseButton>
+                      </div>
+                    </td>
+                  </template>
+
+                  <template v-else-if="activeTab === 'datasources'">
+                    <td class="table-cell">
+                      <div class="font-medium text-gray-900">
+                        {{ row.name }}
+                      </div>
+                      <div class="text-xs text-gray-500">
+                        {{ compactUuid(row.uuid) }}
+                      </div>
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.source_type }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.target_path || emptyValue }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{
+                        formatSyncPolicy(row.sync_policy, row.last_synced_at)
+                      }}
+                    </td>
+                    <td class="table-cell">
+                      <StatusBadge :status="row.status" />
+                    </td>
+                    <td class="table-cell">
+                      <div class="flex flex-wrap gap-2">
+                        <BaseButton
+                          size="sm"
+                          variant="outline"
+                          @click="sync(row)"
+                        >
+                          {{ t('lensAdmin.actions.sync') }}
+                        </BaseButton>
+                        <RowActions :row="row" />
+                      </div>
+                    </td>
+                  </template>
+
+                  <template v-else-if="activeTab === 'skills'">
+                    <td class="table-cell font-medium text-gray-900">
+                      {{ row.name }}
+                    </td>
+                    <td class="table-cell text-gray-500">{{ row.slug }}</td>
+                    <td class="table-cell">
+                      <StatusBadge
+                        :status="row.enabled ? 'enabled' : 'disabled'"
+                      />
+                    </td>
+                    <td class="table-cell">
+                      <RowActions :row="row" />
+                    </td>
+                  </template>
+
+                  <template v-else-if="activeTab === 'mcp'">
+                    <td class="table-cell font-medium text-gray-900">
+                      {{ row.name }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.transport }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.endpoint || emptyValue }}
+                    </td>
+                    <td class="table-cell">
+                      <StatusBadge
+                        :status="row.enabled ? 'enabled' : 'disabled'"
+                      />
+                    </td>
+                    <td class="table-cell">
+                      <RowActions :row="row" />
+                    </td>
+                  </template>
+
+                  <template v-else>
+                    <td class="table-cell font-medium text-gray-900">
+                      {{ formatTaskName(row) }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ row.task_type || emptyValue }}
+                    </td>
+                    <td class="table-cell">
+                      <StatusBadge :status="row.last_status || 'pending'" />
+                    </td>
+                    <td
+                      class="table-cell"
+                      :class="row.last_error ? 'text-red-600' : 'text-gray-400'"
+                    >
+                      {{ row.last_error || emptyValue }}
+                    </td>
+                    <td class="table-cell text-gray-500">
+                      {{ formatDateTime(row.last_run_at) }}
+                    </td>
+                    <td class="table-cell">
+                      <BaseButton
+                        size="sm"
+                        variant="outline"
+                        :loading="loading"
+                        @click="load"
+                      >
+                        {{ t('common.refresh') }}
+                      </BaseButton>
+                    </td>
+                  </template>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
+        <form class="space-y-4" @submit.prevent="save">
+          <template v-if="activeTab === 'assistants'">
+            <FormRow :label="t('lensAdmin.fields.name')">
+              <input v-model="form.name" class="form-input" required />
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.slug')">
+              <input v-model="form.slug" class="form-input" required />
+            </FormRow>
+            <div class="grid gap-4 md:grid-cols-2">
+              <FormRow :label="t('lensAdmin.fields.lensnode')">
+                <select
+                  v-model="form.lensnode_uuid"
+                  class="form-input"
+                  required
+                >
+                  <option value="">
+                    {{ t('lensAdmin.placeholders.selectLensNode') }}
+                  </option>
+                  <option
+                    v-for="lensnode in lensnodes"
+                    :key="lensnode.uuid"
+                    :value="lensnode.uuid"
+                  >
+                    {{ lensnode.name }}
+                  </option>
+                </select>
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.task')">
+                <select
+                  v-model="form.selected_task"
+                  class="form-input"
+                  required
+                >
+                  <option value="">
+                    {{ t('lensAdmin.placeholders.selectTask') }}
+                  </option>
+                  <option
+                    v-for="task in selectedLensNodeTasks"
+                    :key="task.name"
+                    :value="task.name"
+                  >
+                    {{ task.title || task.name }} · {{ task.description }}
+                  </option>
+                </select>
+              </FormRow>
+            </div>
+            <FormRow :label="t('lensAdmin.fields.selectedDirs')">
+              <div
+                v-if="selectedLensNodeDirs.length"
+                class="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3"
+              >
+                <div
+                  v-for="dir in selectedLensNodeDirs"
+                  :key="dir.path"
+                  class="rounded-md border border-gray-200 bg-white p-3"
+                >
+                  <label class="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      :checked="isDirSelected(dir.path)"
+                      @change="
+                        toggleDirSelection(dir.path, $event.target.checked)
+                      "
+                    />
+                    <span class="font-mono">{{ dir.path }}</span>
+                  </label>
+                  <div v-if="isDirSelected(dir.path)" class="mt-3">
+                    <label class="mb-1 block text-xs font-medium text-gray-500">
+                      {{ t('lensAdmin.fields.includePaths') }}
+                    </label>
+                    <textarea
+                      class="form-input min-h-20 font-mono"
+                      :placeholder="t('lensAdmin.placeholders.includePaths')"
+                      :value="selectedDirScopeText(dir.path)"
+                      @input="updateDirScope(dir.path, $event.target.value)"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div
+                v-else
+                class="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500"
+              >
+                {{ t('lensAdmin.placeholders.noDirs') }}
+              </div>
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.retrievalPolicy')">
+              <div
+                class="grid gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 md:grid-cols-3"
+              >
+                <label class="block text-xs font-medium text-gray-600">
+                  {{ t('lensAdmin.fields.maxEvidenceFiles') }}
+                  <input
+                    v-model.number="form.max_evidence_files"
+                    class="form-input mt-1"
+                    min="1"
+                    type="number"
+                  />
+                </label>
+                <label class="block text-xs font-medium text-gray-600">
+                  {{ t('lensAdmin.fields.excludeExtensions') }}
+                  <input
+                    v-model="form.exclude_extensions_text"
+                    class="form-input mt-1 font-mono"
+                    :placeholder="t('lensAdmin.placeholders.extensions')"
+                  />
+                </label>
+                <label class="block text-xs font-medium text-gray-600">
+                  {{ t('lensAdmin.fields.excludeDirs') }}
+                  <input
+                    v-model="form.exclude_dirs_text"
+                    class="form-input mt-1 font-mono"
+                    :placeholder="t('lensAdmin.placeholders.excludeDirs')"
+                  />
+                </label>
+              </div>
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.workspaceGuide')">
+              <div class="rounded-md border border-gray-200 bg-gray-50 p-3">
+                <label class="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    v-model="form.workspace_guide_enabled"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span>{{ t('lensAdmin.fields.workspaceGuideEnabled') }}</span>
+                </label>
+                <p class="mt-2 text-xs text-gray-500">
+                  {{ t('lensAdmin.fields.workspaceGuideHelp') }}
+                </p>
+                <textarea
+                  v-model="form.workspace_guide_content"
+                  class="form-input mt-3 min-h-36 font-mono"
+                  :placeholder="t('lensAdmin.placeholders.workspaceGuide')"
+                />
+              </div>
+            </FormRow>
+            <div class="grid gap-4 md:grid-cols-4">
+              <FormRow :label="t('lensAdmin.fields.preprocessModel')">
+                <select v-model="form.preprocess_model_ref" class="form-input">
+                  <option value="">
+                    {{ t('lensAdmin.placeholders.noModel') }}
+                  </option>
+                  <option
+                    v-for="config in llmConfigOptions"
+                    :key="config.uuid"
+                    :value="config.uuid"
+                  >
+                    {{ formatLLMConfigLabel(config) }}
+                  </option>
+                </select>
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.postprocessModel')">
+                <select v-model="form.postprocess_model_ref" class="form-input">
+                  <option value="">
+                    {{ t('lensAdmin.placeholders.noModel') }}
+                  </option>
+                  <option
+                    v-for="config in llmConfigOptions"
+                    :key="config.uuid"
+                    :value="config.uuid"
+                  >
+                    {{ formatLLMConfigLabel(config) }}
+                  </option>
+                </select>
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.agentModel')">
+                <select v-model="form.agent_model_ref" class="form-input">
+                  <option value="">
+                    {{ t('lensAdmin.placeholders.noModel') }}
+                  </option>
+                  <option
+                    v-for="config in llmConfigOptions"
+                    :key="config.uuid"
+                    :value="config.uuid"
+                  >
+                    {{ formatLLMConfigLabel(config) }}
+                  </option>
+                </select>
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.multimodalModel')">
+                <select v-model="form.multimodal_model_ref" class="form-input">
+                  <option value="">
+                    {{ t('lensAdmin.placeholders.noModel') }}
+                  </option>
+                  <option
+                    v-for="config in llmConfigOptions"
+                    :key="config.uuid"
+                    :value="config.uuid"
+                  >
+                    {{ formatLLMConfigLabel(config) }}
+                  </option>
+                </select>
+              </FormRow>
+            </div>
+          </template>
+
+          <template v-else-if="activeTab === 'lensnodes'">
+            <FormRow :label="t('lensAdmin.fields.name')">
+              <input v-model="form.name" class="form-input" required />
+            </FormRow>
+            <div class="grid gap-4 md:grid-cols-3">
+              <FormRow :label="t('lensAdmin.fields.workspacePath')">
+                <input v-model="form.workspace_path" class="form-input" />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.protocolVersion')">
+                <input v-model="form.protocol_version" class="form-input" />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.agentVersion')">
+                <input v-model="form.agent_version" class="form-input" />
+              </FormRow>
+            </div>
+            <FormRow :label="t('lensAdmin.fields.labels')">
+              <KeyValueEditor
+                v-model="form.labels_rows"
+                :key-label="t('lensAdmin.fields.labelKey')"
+                :value-label="t('lensAdmin.fields.labelValue')"
+              />
+            </FormRow>
+          </template>
+
+          <template v-else-if="activeTab === 'datasources'">
+            <FormRow :label="t('lensAdmin.fields.name')">
+              <input v-model="form.name" class="form-input" required />
+            </FormRow>
+            <div class="grid gap-4 md:grid-cols-3">
+              <FormRow :label="t('lensAdmin.fields.type')">
+                <select
+                  v-model="form.source_type"
+                  class="form-input"
+                  @change="handleDatasourceTypeChange"
+                >
+                  <option value="git">git</option>
+                  <option value="jira">jira</option>
+                  <option value="feishu">feishu</option>
+                </select>
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.targetPath')">
+                <input v-model="form.target_path" class="form-input" />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.syncInterval')">
+                <input
+                  v-model.number="syncIntervalSeconds"
+                  class="form-input"
+                  min="1"
+                  type="number"
+                />
+              </FormRow>
+            </div>
+            <template v-if="form.source_type === 'git'">
+              <FormRow :label="t('lensAdmin.fields.repoUrl')">
+                <input v-model="datasourceConfig.repo_url" class="form-input" />
+              </FormRow>
+              <div class="grid gap-4 md:grid-cols-2">
+                <FormRow :label="t('lensAdmin.fields.branch')">
+                  <input v-model="datasourceConfig.branch" class="form-input" />
+                </FormRow>
+                <FormRow :label="t('lensAdmin.fields.credentialsRef')">
+                  <input
+                    v-model="datasourceConfig.credentials_ref"
+                    class="form-input"
+                  />
+                </FormRow>
+              </div>
+            </template>
+            <template v-else-if="form.source_type === 'jira'">
+              <div class="grid gap-4 md:grid-cols-2">
+                <FormRow :label="t('lensAdmin.fields.jiraBaseUrl')">
+                  <input
+                    v-model="datasourceConfig.base_url"
+                    class="form-input"
+                  />
+                </FormRow>
+                <FormRow :label="t('lensAdmin.fields.authScheme')">
+                  <select
+                    v-model="datasourceConfig.auth_scheme"
+                    class="form-input"
+                  >
+                    <option value="bearer">Bearer</option>
+                    <option value="basic">Basic</option>
+                  </select>
+                </FormRow>
+              </div>
+              <div class="grid gap-4 md:grid-cols-2">
+                <FormRow :label="t('lensAdmin.fields.queryRules')">
+                  <KeyValueEditor
+                    v-model="datasourceConfig.query_rules_rows"
+                    :key-label="t('lensAdmin.fields.ruleKey')"
+                    :value-label="t('lensAdmin.fields.ruleValue')"
+                  />
+                </FormRow>
+                <FormRow :label="t('lensAdmin.fields.fieldMapping')">
+                  <KeyValueEditor
+                    v-model="datasourceConfig.field_mapping_rows"
+                    :key-label="t('lensAdmin.fields.sourceField')"
+                    :value-label="t('lensAdmin.fields.targetField')"
+                  />
+                </FormRow>
+              </div>
+            </template>
+            <template v-else-if="form.source_type === 'feishu'">
+              <div class="grid gap-4 md:grid-cols-2">
+                <FormRow :label="t('lensAdmin.fields.appToken')">
+                  <input
+                    v-model="datasourceConfig.app_token"
+                    class="form-input"
+                  />
+                </FormRow>
+                <FormRow :label="t('lensAdmin.fields.docIds')">
+                  <input
+                    v-model="datasourceConfig.doc_ids_text"
+                    class="form-input"
+                    :placeholder="t('lensAdmin.placeholders.docIds')"
+                  />
+                </FormRow>
+              </div>
+            </template>
+          </template>
+
+          <template v-else-if="activeTab === 'skills'">
+            <FormRow :label="t('lensAdmin.fields.name')">
+              <input v-model="form.name" class="form-input" required />
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.slug')">
+              <input v-model="form.slug" class="form-input" required />
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.definition')">
+              <textarea
+                v-model="form.definition_text"
+                class="json-input"
+                rows="6"
+              />
+            </FormRow>
+            <BooleanRow v-model="form.enabled" />
+          </template>
+
+          <template v-else-if="activeTab === 'mcp'">
+            <FormRow :label="t('lensAdmin.fields.name')">
+              <input v-model="form.name" class="form-input" required />
+            </FormRow>
+            <div class="grid gap-4 md:grid-cols-2">
+              <FormRow :label="t('lensAdmin.fields.transport')">
+                <select v-model="form.transport" class="form-input">
+                  <option value="url">url</option>
+                  <option value="stdio">stdio</option>
+                </select>
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.endpoint')">
+                <input v-model="form.endpoint" class="form-input" />
+              </FormRow>
+            </div>
+            <FormRow :label="t('lensAdmin.fields.config')">
+              <KeyValueEditor
+                v-model="form.config_rows"
+                :key-label="t('lensAdmin.fields.configKey')"
+                :value-label="t('lensAdmin.fields.configValue')"
+              />
+            </FormRow>
+            <BooleanRow v-model="form.enabled" />
+          </template>
+
+          <p v-if="formError" class="text-sm text-red-600">
+            {{ formError }}
+          </p>
+        </form>
+        <template #footer>
+          <div class="flex flex-row-reverse gap-2">
+            <BaseButton :loading="saving" variant="primary" @click="save">
+              {{ t('common.save') }}
+            </BaseButton>
+            <BaseButton variant="outline" @click="closeModal">
+              {{ t('common.cancel') }}
+            </BaseButton>
+          </div>
+        </template>
+      </BaseModal>
+    </div>
+  </AdminLayout>
+</template>
+
+<script setup>
+import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
+
+import { llmAdminApi } from '@/admin/api/llmAdmin'
+import AdminLayout from '@/admin/layout/AdminLayout.vue'
+import {
+  approveLensNode,
+  createAssistant,
+  createDataSource,
+  createGlobalSetting,
+  createLensNode,
+  createMcpServer,
+  createSkill,
+  deleteAssistant,
+  deleteDataSource,
+  deleteLensNode,
+  deleteMcpServer,
+  deleteSkill,
+  getSystemHealth,
+  issueLensNodeToken,
+  listAssistants,
+  listDataSources,
+  listGlobalSettings,
+  listLensNodes,
+  listMcpServers,
+  listSkills,
+  revokeLensNodeToken,
+  syncDataSource,
+  updateAssistant,
+  updateDataSource,
+  updateGlobalSetting,
+  updateLensNode,
+  updateMcpServer,
+  updateSkill
+} from '@/api/lens'
+import { useToast } from '@/composables/useToast'
+import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseModal from '@/components/ui/BaseModal.vue'
+import StatusBadge from '@/components/ui/StatusBadge.vue'
+
+const { t, locale } = useI18n()
+const route = useRoute()
+const router = useRouter()
+const { showSuccess, showError } = useToast()
+
+const tabs = computed(() => [
+  { key: 'assistants', label: t('lensAdmin.tabs.assistants') },
+  { key: 'lensnodes', label: t('lensAdmin.tabs.lensnodes') },
+  { key: 'datasources', label: t('lensAdmin.tabs.datasources') },
+  { key: 'skills', label: t('lensAdmin.tabs.skills') },
+  { key: 'mcp', label: t('lensAdmin.tabs.mcp') },
+  { key: 'settings', label: t('lensAdmin.tabs.settings') },
+  { key: 'health', label: t('lensAdmin.tabs.health') }
+])
+
+const routeToTab = {
+  assistants: 'assistants',
+  lensnodes: 'lensnodes',
+  datasources: 'datasources',
+  'resources/skills': 'skills',
+  'resources/mcp': 'mcp',
+  settings: 'settings',
+  health: 'health'
+}
+
+const tabToRoute = {
+  assistants: '/management/lens/assistants',
+  lensnodes: '/management/lens/lensnodes',
+  datasources: '/management/lens/datasources',
+  skills: '/management/lens/resources/skills',
+  mcp: '/management/lens/resources/mcp',
+  settings: '/management/lens/settings',
+  health: '/management/lens/health'
+}
+
+const activeTab = ref('assistants')
+const loading = ref(false)
+const saving = ref(false)
+const showModal = ref(false)
+const mode = ref('create')
+const form = ref({})
+const formError = ref('')
+const datasourceConfig = ref({})
+const syncIntervalSeconds = ref(3600)
+const llmConfigOptions = ref([])
+
+const assistants = ref([])
+const lensnodes = ref([])
+const dataSources = ref([])
+const skills = ref([])
+const mcps = ref([])
+const globalSettings = ref([])
+const systemHealth = ref([])
+
+const defaultSettings = {
+  'lensnode.defaults.timeout': 600,
+  'retention.run_days': 90,
+  'lensnode.health.offline_threshold_s': 120,
+  'lens.skills.generator_model_ref': ''
+}
+
+const settingsForm = ref({ ...defaultSettings })
+const initialSettings = ref({ ...defaultSettings })
+const emptyValue = '—'
+
+const FormRow = defineComponent({
+  props: {
+    label: {
+      type: String,
+      required: true
+    }
+  },
+  setup(props, { slots }) {
+    return () =>
+      h('div', [
+        h(
+          'label',
+          { class: 'mb-1 block text-sm font-medium text-gray-700' },
+          props.label
+        ),
+        slots.default?.()
+      ])
+  }
+})
+
+const BooleanRow = defineComponent({
+  props: {
+    modelValue: {
+      type: Boolean,
+      default: true
+    }
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    return () =>
+      h('label', { class: 'flex items-center gap-2 text-sm text-gray-600' }, [
+        h('input', {
+          checked: props.modelValue,
+          class:
+            'h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500',
+          type: 'checkbox',
+          onChange: (event) => emit('update:modelValue', event.target.checked)
+        }),
+        h('span', t('lensAdmin.fields.enabled'))
+      ])
+  }
+})
+
+const KeyValueEditor = defineComponent({
+  props: {
+    keyLabel: {
+      type: String,
+      required: true
+    },
+    modelValue: {
+      type: Array,
+      default: () => []
+    },
+    valueLabel: {
+      type: String,
+      required: true
+    }
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    const updateRow = (index, field, value) => {
+      const rows = props.modelValue.map((row) => ({ ...row }))
+      rows[index] = { ...rows[index], [field]: value }
+      emit('update:modelValue', rows)
+    }
+
+    const removeRow = (index) => {
+      emit(
+        'update:modelValue',
+        props.modelValue.filter((_, rowIndex) => rowIndex !== index)
+      )
+    }
+
+    const addRow = () => {
+      emit('update:modelValue', [...props.modelValue, { key: '', value: '' }])
+    }
+
+    return () =>
+      h('div', { class: 'space-y-2' }, [
+        ...props.modelValue.map((row, index) =>
+          h(
+            'div',
+            {
+              class:
+                'grid grid-cols-1 gap-2 rounded-md border border-gray-200 bg-gray-50 p-2 md:grid-cols-[1fr_1fr_auto]'
+            },
+            [
+              h('input', {
+                class:
+                  'rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500',
+                placeholder: props.keyLabel,
+                value: row.key,
+                onInput: (event) => updateRow(index, 'key', event.target.value)
+              }),
+              h('input', {
+                class:
+                  'rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500',
+                placeholder: props.valueLabel,
+                value: row.value,
+                onInput: (event) =>
+                  updateRow(index, 'value', event.target.value)
+              }),
+              h(
+                BaseButton,
+                {
+                  size: 'sm',
+                  variant: 'outline',
+                  onClick: () => removeRow(index)
+                },
+                () => t('lensAdmin.actions.removeRow')
+              )
+            ]
+          )
+        ),
+        h(
+          BaseButton,
+          {
+            size: 'sm',
+            variant: 'outline',
+            onClick: addRow
+          },
+          () => t('lensAdmin.actions.addRow')
+        )
+      ])
+  }
+})
+
+const RowActions = defineComponent({
+  props: {
+    row: {
+      type: Object,
+      required: true
+    }
+  },
+  setup(props) {
+    return () =>
+      h('div', { class: 'flex flex-wrap gap-2' }, [
+        h(
+          BaseButton,
+          {
+            size: 'sm',
+            variant: 'outline',
+            onClick: () => startEdit(props.row)
+          },
+          () => t('common.edit')
+        ),
+        h(
+          BaseButton,
+          {
+            size: 'sm',
+            variant: 'danger',
+            onClick: () => remove(props.row)
+          },
+          () => t('common.delete')
+        )
+      ])
+  }
+})
+
+const activeRows = computed(() => {
+  const rowsByTab = {
+    assistants: assistants.value,
+    lensnodes: lensnodes.value,
+    datasources: dataSources.value,
+    skills: skills.value,
+    mcp: mcps.value,
+    health: systemHealth.value
+  }
+  return rowsByTab[activeTab.value] || []
+})
+
+const activeCount = computed(() => {
+  if (activeTab.value === 'settings') {
+    return settingDefinitions.value.length
+  }
+  return activeRows.value.length
+})
+
+const canCreate = computed(
+  () => !['settings', 'health'].includes(activeTab.value)
+)
+
+const activeMeta = computed(() => {
+  const key = activeTab.value
+  return {
+    title: t(`lensAdmin.pages.${key}.title`),
+    description: t(`lensAdmin.pages.${key}.description`),
+    label: t(`lensAdmin.pages.${key}.label`),
+    action: t(`lensAdmin.pages.${key}.action`)
+  }
+})
+
+const activeColumns = computed(() => {
+  const columnsByTab = {
+    assistants: [
+      'assistant',
+      'lensnode',
+      'task',
+      'dirs',
+      'tools',
+      'status',
+      'actions'
+    ],
+    lensnodes: [
+      'lensnode',
+      'status',
+      'workspace',
+      'dirsAndTasks',
+      'heartbeat',
+      'actions'
+    ],
+    datasources: [
+      'datasource',
+      'type',
+      'targetPath',
+      'sync',
+      'status',
+      'actions'
+    ],
+    skills: ['skill', 'slug', 'status', 'actions'],
+    mcp: ['mcpServer', 'transport', 'endpoint', 'status', 'actions'],
+    health: ['task', 'type', 'status', 'error', 'lastRun', 'actions']
+  }
+  return (columnsByTab[activeTab.value] || []).map((column) =>
+    t(`lensAdmin.columns.${column}`)
+  )
+})
+
+const settingDefinitions = computed(() => [
+  {
+    key: 'lensnode.defaults.timeout',
+    label: t('lensAdmin.settings.timeoutTitle'),
+    description: t('lensAdmin.settings.timeoutDesc'),
+    type: 'number',
+    unit: t('lensAdmin.settings.secondsUnit')
+  },
+  {
+    key: 'retention.run_days',
+    label: t('lensAdmin.settings.retentionTitle'),
+    description: t('lensAdmin.settings.retentionDesc'),
+    type: 'number',
+    unit: t('lensAdmin.settings.daysUnit')
+  },
+  {
+    key: 'lensnode.health.offline_threshold_s',
+    label: t('lensAdmin.settings.offlineTitle'),
+    description: t('lensAdmin.settings.offlineDesc'),
+    type: 'number',
+    unit: t('lensAdmin.settings.secondsUnit')
+  },
+  {
+    key: 'lens.skills.generator_model_ref',
+    label: t('lensAdmin.settings.skillGeneratorModelTitle'),
+    description: t('lensAdmin.settings.skillGeneratorModelDesc'),
+    type: 'model_ref',
+    unit: ''
+  }
+])
+
+const modalTitle = computed(() => {
+  const action =
+    mode.value === 'create'
+      ? t('lensAdmin.modal.create')
+      : t('lensAdmin.modal.edit')
+  return `${action} ${activeMeta.value.label}`
+})
+
+const selectedLensNodeTasks = computed(() => {
+  const selected = lensnodes.value.find(
+    (lensnode) => lensnode.uuid === form.value.lensnode_uuid
+  )
+  return Array.isArray(selected?.tasks) ? selected.tasks : []
+})
+
+const selectedLensNodeDirs = computed(() => {
+  const selected = lensnodes.value.find(
+    (lensnode) => lensnode.uuid === form.value.lensnode_uuid
+  )
+  const dirs = Array.isArray(selected?.available_dirs)
+    ? selected.available_dirs
+    : []
+  return dirs
+    .map((dir) => {
+      if (typeof dir === 'string') {
+        return { path: dir }
+      }
+      return { ...dir, path: dir.path || dir.name || '' }
+    })
+    .filter((dir) => dir.path)
+})
+
+function compactUuid(value) {
+  if (!value) {
+    return emptyValue
+  }
+  return `${String(value).slice(0, 8)}...${String(value).slice(-6)}`
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return t('lensAdmin.table.notRecorded')
+  }
+  return new Intl.DateTimeFormat(locale.value, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(value))
+}
+
+function formatSyncPolicy(syncPolicy, lastSyncedAt) {
+  const interval = syncPolicy?.interval_seconds
+  const intervalText = interval
+    ? t('lensAdmin.table.intervalSeconds', { seconds: interval })
+    : emptyValue
+  return `${intervalText} · ${formatDateTime(lastSyncedAt)}`
+}
+
+function formatTaskName(row) {
+  return row.name || row.task_name || row.task_type || emptyValue
+}
+
+function formatLLMConfigLabel(config) {
+  const model = config.config?.model || config.model || emptyValue
+  return `${config.provider || config.name || config.uuid} · ${model}`
+}
+
+function lensNodeName(value) {
+  const uuid = typeof value === 'object' ? value?.uuid : value
+  const found = lensnodes.value.find((lensnode) => lensnode.uuid === uuid)
+  return found?.name || uuid || emptyValue
+}
+
+function isDirSelected(path) {
+  return selectedDirs().some((dir) => dir.path === path)
+}
+
+function toggleDirSelection(path, checked) {
+  const dirs = selectedDirs()
+  if (checked && !dirs.some((dir) => dir.path === path)) {
+    form.value.selected_dirs = [...dirs, { path, include_paths_text: '' }]
+    return
+  }
+  if (!checked) {
+    form.value.selected_dirs = dirs.filter((dir) => dir.path !== path)
+  }
+}
+
+function selectedDirScopeText(path) {
+  const dir = selectedDirs().find((item) => item.path === path)
+  return dir?.include_paths_text || ''
+}
+
+function updateDirScope(path, value) {
+  form.value.selected_dirs = selectedDirs().map((dir) =>
+    dir.path === path ? { ...dir, include_paths_text: value } : dir
+  )
+}
+
+function selectedDirs() {
+  return Array.isArray(form.value.selected_dirs) ? form.value.selected_dirs : []
+}
+
+function parseRouteTab() {
+  const raw = route.params.pathMatch
+  const path = Array.isArray(raw) ? raw.join('/') : raw || 'assistants'
+  activeTab.value = routeToTab[path] || 'assistants'
+}
+
+function selectTab(tab) {
+  activeTab.value = tab
+  router.push(tabToRoute[tab])
+}
+
+function normalizeList(payload) {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+  if (Array.isArray(payload?.results)) {
+    return payload.results
+  }
+  return []
+}
+
+async function load() {
+  loading.value = true
+  formError.value = ''
+  try {
+    const [
+      assistantRows,
+      lensnodeRows,
+      dataSourceRows,
+      skillRows,
+      mcpRows,
+      settingRows,
+      healthRows,
+      llmRows
+    ] = await Promise.all([
+      listAssistants(),
+      listLensNodes(),
+      listDataSources(),
+      listSkills(),
+      listMcpServers(),
+      listGlobalSettings(),
+      getSystemHealth(),
+      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
+    ])
+
+    assistants.value = normalizeList(assistantRows)
+    lensnodes.value = normalizeList(lensnodeRows)
+    dataSources.value = normalizeList(dataSourceRows)
+    skills.value = normalizeList(skillRows)
+    mcps.value = normalizeList(mcpRows)
+    globalSettings.value = normalizeList(settingRows)
+    systemHealth.value = normalizeList(healthRows)
+    llmConfigOptions.value = normalizeList(llmRows)
+    hydrateSettingsForm()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.loadFailed')))
+  } finally {
+    loading.value = false
+  }
+}
+
+function hydrateSettingsForm() {
+  const next = { ...defaultSettings }
+  globalSettings.value.forEach((setting) => {
+    if (setting.key in next) {
+      const definition = settingDefinitions.value.find(
+        (item) => item.key === setting.key
+      )
+      next[setting.key] =
+        definition?.type === 'number'
+          ? Number(setting.value ?? next[setting.key])
+          : setting.value ?? next[setting.key]
+    }
+  })
+  settingsForm.value = { ...next }
+  initialSettings.value = { ...next }
+}
+
+function resetSettingsForm() {
+  settingsForm.value = { ...initialSettings.value }
+  formError.value = ''
+}
+
+async function saveSettings() {
+  saving.value = true
+  formError.value = ''
+  try {
+    for (const setting of settingDefinitions.value) {
+      const value =
+        setting.type === 'number'
+          ? Math.max(1, Number(settingsForm.value[setting.key]) || 1)
+          : settingsForm.value[setting.key] || ''
+      const payload = {
+        key: setting.key,
+        value,
+        description: setting.description
+      }
+      const exists = globalSettings.value.some((row) => row.key === setting.key)
+      if (exists) {
+        await updateGlobalSetting(setting.key, payload)
+      } else {
+        await createGlobalSetting(payload)
+      }
+    }
+    showSuccess(t('lensAdmin.messages.saveSuccess'))
+    await load()
+  } catch (error) {
+    formError.value = resolveError(error, t('lensAdmin.messages.saveFailed'))
+    showError(formError.value)
+  } finally {
+    saving.value = false
+  }
+}
+
+function startCreate() {
+  mode.value = 'create'
+  formError.value = ''
+  datasourceConfig.value = {}
+  syncIntervalSeconds.value = 3600
+  form.value = defaultForm(activeTab.value)
+  showModal.value = true
+}
+
+function startEdit(row) {
+  mode.value = 'edit'
+  formError.value = ''
+  datasourceConfig.value = { ...(row.config || {}) }
+  syncIntervalSeconds.value = row.sync_policy?.interval_seconds || 3600
+  form.value = formFromRow(activeTab.value, row)
+  showModal.value = true
+}
+
+function closeModal() {
+  showModal.value = false
+  form.value = {}
+  formError.value = ''
+}
+
+function defaultForm(tab) {
+  const forms = {
+    assistants: {
+      name: '',
+      slug: '',
+      lensnode_uuid: '',
+      selected_task: '',
+      selected_dirs: [],
+      preprocess_model_ref: '',
+      postprocess_model_ref: '',
+      agent_model_ref: '',
+      multimodal_model_ref: '',
+      max_evidence_files: 12,
+      exclude_extensions_text: '.lock,.pyc,.sqlite3',
+      exclude_dirs_text: '.git,.venv,__pycache__,node_modules,dist,build',
+      workspace_guide_enabled: false,
+      workspace_guide_content: '',
+      settings: {},
+      status: 'active'
+    },
+    lensnodes: {
+      name: '',
+      workspace_path: '/workspace',
+      protocol_version: 'v1',
+      agent_version: '',
+      labels_rows: []
+    },
+    datasources: {
+      name: '',
+      source_type: 'git',
+      target_path: '',
+      status: 'active'
+    },
+    skills: {
+      name: '',
+      slug: '',
+      definition_text: '',
+      enabled: true
+    },
+    mcp: {
+      name: '',
+      transport: 'url',
+      endpoint: '',
+      config_rows: [],
+      enabled: true
+    }
+  }
+  handleDatasourceTypeChange(forms[tab])
+  return forms[tab] || {}
+}
+
+function formFromRow(tab, row) {
+  if (tab === 'assistants') {
+    return {
+      uuid: row.uuid,
+      name: row.name || '',
+      slug: row.slug || '',
+      lensnode_uuid: row.lensnode?.uuid || row.lensnode || '',
+      selected_task: row.selected_task || '',
+      selected_dirs: selectedDirsFromValue(row.selected_dirs || []),
+      preprocess_model_ref: row.preprocess_model_ref || '',
+      postprocess_model_ref: row.postprocess_model_ref || '',
+      agent_model_ref: row.agent_model_ref || '',
+      multimodal_model_ref: row.multimodal_model_ref || '',
+      max_evidence_files: row.settings?.max_evidence_files || 12,
+      exclude_extensions_text: listToText(
+        row.settings?.retrieval_policy?.exclude_extensions || [
+          '.lock',
+          '.pyc',
+          '.sqlite3'
+        ]
+      ),
+      exclude_dirs_text: listToText(
+        row.settings?.retrieval_policy?.exclude_dirs || [
+          '.git',
+          '.venv',
+          '__pycache__',
+          'node_modules',
+          'dist',
+          'build'
+        ]
+      ),
+      workspace_guide_enabled: row.workspace_guide?.enabled || false,
+      workspace_guide_content: row.workspace_guide?.content || '',
+      settings: { ...(row.settings || {}) },
+      status: row.status || 'active'
+    }
+  }
+  if (tab === 'lensnodes') {
+    return {
+      uuid: row.uuid,
+      name: row.name || '',
+      workspace_path: row.workspace_path || '/workspace',
+      protocol_version: row.protocol_version || 'v1',
+      agent_version: row.agent_version || '',
+      labels_rows: objectToRows(row.labels || {})
+    }
+  }
+  if (tab === 'datasources') {
+    datasourceConfig.value = datasourceConfigFromRow(row)
+    return {
+      uuid: row.uuid,
+      name: row.name || '',
+      source_type: row.source_type || 'git',
+      target_path: row.target_path || '',
+      status: row.status || 'active'
+    }
+  }
+  if (tab === 'skills') {
+    return {
+      uuid: row.uuid,
+      name: row.name || '',
+      slug: row.slug || '',
+      definition_text:
+        typeof row.definition === 'string'
+          ? row.definition
+          : stringifyJson(row.definition || {}),
+      enabled: row.enabled !== false
+    }
+  }
+  if (tab === 'mcp') {
+    return {
+      uuid: row.uuid,
+      name: row.name || '',
+      transport: row.transport || 'url',
+      endpoint: row.endpoint || '',
+      config_rows: objectToRows(row.config || {}),
+      enabled: row.enabled !== false
+    }
+  }
+  return {}
+}
+
+function datasourceConfigFromRow(row) {
+  if (row.source_type === 'jira') {
+    return {
+      ...(row.config || {}),
+      field_mapping_rows: objectToRows(row.config?.field_mapping || {}),
+      query_rules_rows: objectToRows(row.config?.query_rules || {})
+    }
+  }
+  if (row.source_type === 'feishu') {
+    return {
+      ...(row.config || {}),
+      doc_ids_text: (row.config?.doc_ids || []).join(',')
+    }
+  }
+  return { ...(row.config || {}) }
+}
+
+function handleDatasourceTypeChange(seed = null) {
+  const sourceType = seed?.source_type || form.value.source_type
+  if (sourceType === 'git') {
+    datasourceConfig.value = {
+      repo_url: '',
+      branch: 'main',
+      credentials_ref: ''
+    }
+  } else if (sourceType === 'jira') {
+    datasourceConfig.value = {
+      base_url: '',
+      auth_scheme: 'bearer',
+      field_mapping_rows: [],
+      query_rules_rows: []
+    }
+  } else if (sourceType === 'feishu') {
+    datasourceConfig.value = {
+      app_token: '',
+      doc_ids_text: '',
+      credentials_ref: ''
+    }
+  }
+}
+
+async function save() {
+  saving.value = true
+  formError.value = ''
+  try {
+    const payload = buildPayload(activeTab.value)
+    const uuid = form.value.uuid
+    if (activeTab.value === 'assistants') {
+      await saveByMode(uuid, payload, createAssistant, updateAssistant)
+    } else if (activeTab.value === 'lensnodes') {
+      await saveByMode(uuid, payload, createLensNode, updateLensNode)
+    } else if (activeTab.value === 'datasources') {
+      await saveByMode(uuid, payload, createDataSource, updateDataSource)
+    } else if (activeTab.value === 'skills') {
+      await saveByMode(uuid, payload, createSkill, updateSkill)
+    } else if (activeTab.value === 'mcp') {
+      await saveByMode(uuid, payload, createMcpServer, updateMcpServer)
+    }
+    showSuccess(t('lensAdmin.messages.saveSuccess'))
+    closeModal()
+    await load()
+  } catch (error) {
+    formError.value = resolveError(error, t('lensAdmin.messages.saveFailed'))
+    showError(formError.value)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveByMode(uuid, payload, createFn, updateFn) {
+  if (mode.value === 'create') {
+    await createFn(payload)
+  } else {
+    await updateFn(uuid, payload)
+  }
+}
+
+function buildPayload(tab) {
+  if (tab === 'assistants') {
+    return {
+      name: form.value.name,
+      slug: form.value.slug,
+      lensnode_uuid: form.value.lensnode_uuid,
+      selected_task: form.value.selected_task,
+      selected_dirs: buildSelectedDirs(),
+      preprocess_model_ref: form.value.preprocess_model_ref || null,
+      postprocess_model_ref: form.value.postprocess_model_ref || null,
+      agent_model_ref: form.value.agent_model_ref || null,
+      multimodal_model_ref: form.value.multimodal_model_ref || null,
+      settings: buildAssistantSettings(),
+      workspace_guide: {
+        enabled: Boolean(form.value.workspace_guide_enabled),
+        content: form.value.workspace_guide_content || ''
+      },
+      status: form.value.status || 'active'
+    }
+  }
+  if (tab === 'lensnodes') {
+    return {
+      name: form.value.name,
+      workspace_path: form.value.workspace_path,
+      protocol_version: form.value.protocol_version,
+      agent_version: form.value.agent_version,
+      labels: rowsToObject(form.value.labels_rows)
+    }
+  }
+  if (tab === 'datasources') {
+    return {
+      name: form.value.name,
+      source_type: form.value.source_type,
+      target_path: form.value.target_path,
+      config: buildDatasourceConfig(),
+      sync_policy: {
+        interval_seconds: Math.max(1, Number(syncIntervalSeconds.value) || 3600)
+      },
+      status: form.value.status || 'active'
+    }
+  }
+  if (tab === 'skills') {
+    return {
+      name: form.value.name,
+      slug: form.value.slug,
+      definition: form.value.definition_text,
+      enabled: !!form.value.enabled
+    }
+  }
+  if (tab === 'mcp') {
+    return {
+      name: form.value.name,
+      transport: form.value.transport,
+      endpoint: form.value.endpoint,
+      config: rowsToObject(form.value.config_rows),
+      enabled: !!form.value.enabled
+    }
+  }
+  return {}
+}
+
+function buildAssistantSettings() {
+  const settings = { ...(form.value.settings || {}) }
+  const retrievalPolicy = {}
+  const excludeExtensions = splitList(form.value.exclude_extensions_text)
+  const excludeDirs = splitList(form.value.exclude_dirs_text)
+  if (excludeExtensions.length) {
+    retrievalPolicy.exclude_extensions = excludeExtensions
+  }
+  if (excludeDirs.length) {
+    retrievalPolicy.exclude_dirs = excludeDirs
+  }
+  settings.max_evidence_files = Math.max(
+    1,
+    Number(form.value.max_evidence_files) || 12
+  )
+  settings.retrieval_policy = retrievalPolicy
+  return settings
+}
+
+function buildDatasourceConfig() {
+  const config = { ...datasourceConfig.value }
+  if (form.value.source_type === 'jira') {
+    config.query_rules = rowsToObject(config.query_rules_rows)
+    config.field_mapping = rowsToObject(config.field_mapping_rows)
+    delete config.query_rules_rows
+    delete config.field_mapping_rows
+  }
+  if (form.value.source_type === 'feishu') {
+    config.doc_ids = String(config.doc_ids_text || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    delete config.doc_ids_text
+  }
+  return config
+}
+
+function buildSelectedDirs() {
+  return selectedDirs().map((dir) => {
+    const includePaths = String(dir.include_paths_text || '')
+      .split('\n')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    if (!includePaths.length) {
+      return { path: dir.path }
+    }
+    return {
+      path: dir.path,
+      retrieval_scope: { include_paths: includePaths }
+    }
+  })
+}
+
+function selectedDirsFromValue(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map((dir) => ({
+      path: dir.path || '',
+      include_paths_text: (
+        dir.retrieval_scope?.include_paths ||
+        dir.include_paths ||
+        []
+      ).join('\n')
+    }))
+    .filter((dir) => dir.path)
+}
+
+function splitList(value) {
+  return String(value || '')
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function listToText(value) {
+  return Array.isArray(value) ? value.join(',') : ''
+}
+
+function objectToRows(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return []
+  }
+  return Object.entries(value).map(([key, rowValue]) => ({
+    key,
+    value: typeof rowValue === 'string' ? rowValue : String(rowValue)
+  }))
+}
+
+function stringifyJson(value) {
+  return JSON.stringify(value, null, 2)
+}
+
+function rowsToObject(rows) {
+  return (rows || []).reduce((output, row) => {
+    const key = String(row.key || '').trim()
+    if (key) {
+      output[key] = String(row.value || '').trim()
+    }
+    return output
+  }, {})
+}
+
+async function remove(row) {
+  if (!window.confirm(t('lensAdmin.messages.confirmDelete'))) {
+    return
+  }
+  try {
+    if (activeTab.value === 'assistants') {
+      await deleteAssistant(row.uuid)
+    } else if (activeTab.value === 'lensnodes') {
+      await deleteLensNode(row.uuid)
+    } else if (activeTab.value === 'datasources') {
+      await deleteDataSource(row.uuid)
+    } else if (activeTab.value === 'skills') {
+      await deleteSkill(row.uuid)
+    } else if (activeTab.value === 'mcp') {
+      await deleteMcpServer(row.uuid)
+    }
+    showSuccess(t('lensAdmin.messages.deleteSuccess'))
+    await load()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.deleteFailed')))
+  }
+}
+
+async function approve(row) {
+  try {
+    await approveLensNode(row.uuid)
+    showSuccess(t('lensAdmin.messages.approveSuccess'))
+    await load()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.approveFailed')))
+  }
+}
+
+async function issueToken(row) {
+  try {
+    const result = await issueLensNodeToken(row.uuid)
+    const token = result?.token || result?.auth_token
+    showSuccess(
+      token
+        ? t('lensAdmin.messages.tokenIssuedWithValue', { token })
+        : t('lensAdmin.messages.tokenIssued')
+    )
+    await load()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.tokenIssueFailed')))
+  }
+}
+
+async function revokeToken(row) {
+  try {
+    await revokeLensNodeToken(row.uuid)
+    showSuccess(t('lensAdmin.messages.tokenRevoked'))
+    await load()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.tokenRevokeFailed')))
+  }
+}
+
+async function sync(row) {
+  try {
+    await syncDataSource(row.uuid)
+    showSuccess(t('lensAdmin.messages.syncStarted'))
+    await load()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.syncFailed')))
+  }
+}
+
+function resolveError(error, fallback) {
+  return (
+    error?.response?.data?.data?.detail ||
+    error?.response?.data?.detail ||
+    error?.message ||
+    fallback
+  )
+}
+
+watch(
+  () => route.params.pathMatch,
+  () => {
+    parseRouteTab()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => form.value.lensnode_uuid,
+  () => {
+    if (
+      activeTab.value === 'assistants' &&
+      !selectedLensNodeTasks.value.some(
+        (task) => task.name === form.value.selected_task
+      )
+    ) {
+      form.value.selected_task = ''
+    }
+  }
+)
+
+onMounted(load)
+</script>
+
+<style scoped>
+.form-input {
+  @apply w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500;
+}
+
+.json-input {
+  @apply w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500;
+}
+</style>

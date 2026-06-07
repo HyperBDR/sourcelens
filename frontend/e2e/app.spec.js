@@ -36,7 +36,9 @@ test.describe('Dashboard', () => {
     if (!loggedIn) test.skip()
   })
 
-  test('Dashboard page renders with hero and pillar sections', async ({ page }) => {
+  test('Dashboard page renders with hero and pillar sections', async ({
+    page
+  }) => {
     await page.goto('/dashboard')
     await page.waitForLoadState('networkidle')
 

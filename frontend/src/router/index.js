@@ -85,6 +85,47 @@ const routes = [
     redirect: '/management/task-management/list'
   },
   {
+    path: '/ai-query',
+    name: 'AIQueryPrototype',
+    component: () => import('@/pages/AIQuery.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/lens',
+    redirect: '/lens/assistants'
+  },
+  {
+    path: '/lens/assistants',
+    name: 'LensAssistants',
+    component: () => import('@/pages/lens/Assistants.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/lens/assistants/:slug/chat',
+    name: 'LensAssistantChat',
+    component: () => import('@/pages/lens/Chat.vue'),
+    props: (route) => ({
+      assistantSlug: route.params.slug
+    }),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/lens/assistants/:slug/history',
+    name: 'LensAssistantHistory',
+    component: () => import('@/pages/lens/History.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/lens/admin/:pathMatch(.*)*',
+    redirect: (to) => {
+      const pathMatch = to.params.pathMatch
+      const suffix = Array.isArray(pathMatch)
+        ? pathMatch.join('/')
+        : pathMatch || 'assistants'
+      return `/management/lens/${suffix}`
+    }
+  },
+  {
     path: '/notifier',
     redirect: '/management/notifier/stats'
   },

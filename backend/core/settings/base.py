@@ -80,6 +80,7 @@ AI_QUERY_ALLOWED_BASE_DIRS = [
 
 # Django & thrid party apps
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -143,6 +144,9 @@ INSTALLED_APPS = [
     # domains to access the API.
     'corsheaders',
 
+    # ASGI WebSocket support for Lens execution Nodes.
+    'channels',
+
     # A Django app that provides support for periodic task scheduling
     # using Celery. It allows you to manage and schedule tasks in a
     # database-backed way, making it easier to handle recurring tasks.
@@ -158,6 +162,7 @@ INSTALLED_APPS = [
 INSTALLED_APPS += [
     'core',
     'accounts',
+    'lens',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
@@ -167,6 +172,24 @@ INSTALLED_APPS += [
 # This is required for django.contrib.sites and django-allauth
 # to work correctly.
 SITE_ID = 1
+
+ASGI_APPLICATION = 'core.asgi.application'
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'core.channel_layers.RedisChannelLayer',
+        'CONFIG': {
+            'brpop_timeout': float(
+                os.getenv('CHANNEL_LAYER_BRPOP_TIMEOUT', '1')
+            ),
+            'hosts': [
+                os.getenv(
+                    'CHANNEL_LAYER_REDIS_URL',
+                    os.getenv('REDIS_URL', 'redis://redis:6379/2'),
+                )
+            ],
+        },
+    },
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

@@ -61,7 +61,6 @@
                   <th class="table-head">
                     {{ t('management.groupUserCount') }}
                   </th>
-                  <th class="table-head">{{ t('management.roles') }}</th>
                   <th class="table-head">
                     {{ t('management.permissionCount') }}
                   </th>
@@ -80,9 +79,6 @@
                   </td>
                   <td class="table-cell text-gray-500">
                     {{ group.user_count ?? 0 }}
-                  </td>
-                  <td class="table-cell text-gray-500">
-                    {{ joinNames(group.roles) }}
                   </td>
                   <td class="table-cell text-gray-500">
                     {{ group.permission_count ?? 0 }}
@@ -154,28 +150,6 @@
             }}</label>
             <input v-model="form.name" type="text" class="form-input" />
           </div>
-          <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">{{
-              t('management.selectRoles')
-            }}</label>
-            <div
-              class="max-h-40 space-y-2 overflow-y-auto rounded-md border border-gray-300 bg-white p-2"
-            >
-              <label
-                v-for="role in roleOptions"
-                :key="role.id"
-                class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-gray-50"
-              >
-                <input
-                  v-model="form.role_ids"
-                  type="checkbox"
-                  :value="role.id"
-                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                />
-                <span class="text-sm text-gray-700">{{ role.name }}</span>
-              </label>
-            </div>
-          </div>
         </form>
         <template #footer>
           <div class="flex flex-row-reverse gap-2">
@@ -214,14 +188,12 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const totalCount = ref(0)
 
-const roleOptions = ref([])
-
 const showModal = ref(false)
 const mode = ref('create')
 const editingGroupId = ref(null)
 const submitLoading = ref(false)
 const submitError = ref(null)
-const form = ref({ name: '', role_ids: [] })
+const form = ref({ name: '' })
 
 const totalPages = computed(() =>
   totalCount.value > 0 ? Math.ceil(totalCount.value / pageSize.value) : 1
@@ -240,23 +212,17 @@ const modalTitle = computed(() =>
     : t('management.editGroup')
 )
 
-function joinNames(items) {
-  return Array.isArray(items) && items.length
-    ? items.map((item) => item.name).join(', ')
-    : '—'
-}
-
 function closeModal() {
   showModal.value = false
   editingGroupId.value = null
   submitError.value = null
   submitLoading.value = false
-  form.value = { name: '', role_ids: [] }
+  form.value = { name: '' }
 }
 
 function openCreateModal() {
   mode.value = 'create'
-  form.value = { name: '', role_ids: [] }
+  form.value = { name: '' }
   showModal.value = true
 }
 
@@ -264,21 +230,9 @@ function openEditModal(group) {
   mode.value = 'edit'
   editingGroupId.value = group.id
   form.value = {
-    name: group.name || '',
-    role_ids: Array.isArray(group.roles)
-      ? group.roles.map((item) => item.id)
-      : []
+    name: group.name || ''
   }
   showModal.value = true
-}
-
-async function loadRoleOptions() {
-  try {
-    const data = await managementApi.getRoles({ page: 1, page_size: 1000 })
-    roleOptions.value = Array.isArray(data) ? data : (data?.results ?? [])
-  } catch {
-    roleOptions.value = []
-  }
 }
 
 async function submitGroup() {
@@ -291,10 +245,7 @@ async function submitGroup() {
 
   submitLoading.value = true
   try {
-    const payload = {
-      name,
-      role_ids: Array.isArray(form.value.role_ids) ? form.value.role_ids : []
-    }
+    const payload = { name }
     if (mode.value === 'create') {
       await managementApi.createGroup(payload)
     } else {
@@ -353,7 +304,7 @@ function goNextPage() {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchGroups(), loadRoleOptions()])
+  await fetchGroups()
 })
 </script>
 

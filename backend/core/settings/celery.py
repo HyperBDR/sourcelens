@@ -38,10 +38,17 @@ CELERY_ACCEPT_CONTENT = ['json']
 # compression), and yaml (more readable but less efficient).
 CELERY_TASK_SERIALIZER = 'json'
 
-# Dedicated queue for this project to avoid consuming tasks from other apps
+# Dedicated queues for this project to avoid consuming tasks from other apps
 # that share the same broker.
 CELERY_TASK_DEFAULT_QUEUE = os.getenv("CELERY_TASK_DEFAULT_QUEUE", "backend")
-CELERY_TASK_QUEUES = (Queue(CELERY_TASK_DEFAULT_QUEUE),)
+CELERY_TASK_QUEUE_NAMES = [
+    name.strip()
+    for name in os.getenv("CELERY_TASK_QUEUES", "backend,lens").split(",")
+    if name.strip()
+]
+if CELERY_TASK_DEFAULT_QUEUE not in CELERY_TASK_QUEUE_NAMES:
+    CELERY_TASK_QUEUE_NAMES.insert(0, CELERY_TASK_DEFAULT_QUEUE)
+CELERY_TASK_QUEUES = tuple(Queue(name) for name in CELERY_TASK_QUEUE_NAMES)
 
 # Prevent task loss in Redis
 CELERY_BROKER_TRANSPORT_OPTIONS = {

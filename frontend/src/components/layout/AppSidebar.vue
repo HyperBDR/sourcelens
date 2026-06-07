@@ -89,6 +89,29 @@
           <span>{{ t('dashboard.title') }}</span>
         </router-link>
 
+        <router-link
+          v-if="userStore.userHasFeature('workspace')"
+          to="/lens/assistants"
+          class="nav-item"
+          :class="isActive('/lens') ? 'nav-item-active' : ''"
+          @click="isMobile && $emit('close')"
+          @mouseenter="preloadRoute('/lens/assistants')"
+        >
+          <svg
+            class="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.79 9.79 0 01-4-.82L3 20l1.82-4.91A7.8 7.8 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+            />
+          </svg>
+          <span>Lens</span>
+        </router-link>
       </div>
 
       <!-- Settings Menu -->
@@ -193,7 +216,6 @@ const preloadRoute = (path) => {
     // Ignore preload errors silently
   }
 }
-
 </script>
 
 <style scoped>

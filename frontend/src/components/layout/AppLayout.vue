@@ -32,6 +32,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import AppHeader from './AppHeader.vue'
 import AppSidebar from './AppSidebar.vue'
 
@@ -42,6 +43,7 @@ const props = defineProps({
   }
 })
 
+const route = useRoute()
 const showMobileMenu = ref(false)
 const resolvedShowSidebar = computed(() => props.showSidebar)
 </script>

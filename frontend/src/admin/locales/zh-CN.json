@@ -532,5 +532,195 @@
       "valueLabel": "配置内容 (JSON)",
       "invalidJson": "请输入有效的 JSON"
     }
+  },
+  "lensAdmin": {
+    "menuTitle": "Lens 管理",
+    "total": "{label} · {count}",
+    "tabs": {
+      "assistants": "Assistants",
+      "lensnodes": "LensNodes",
+      "datasources": "数据源",
+      "skills": "Skills",
+      "mcp": "MCP Servers",
+      "settings": "全局配置",
+      "health": "系统健康"
+    },
+    "pages": {
+      "assistants": {
+        "title": "Assistant 管理",
+        "description": "配置对外能力、执行节点、任务和工作区目录。",
+        "label": "Assistant",
+        "action": "新建 Assistant"
+      },
+      "lensnodes": {
+        "title": "LensNode 管理",
+        "description": "查看和审批分布式执行节点，管理接入凭证。",
+        "label": "LensNode",
+        "action": "新建 LensNode"
+      },
+      "datasources": {
+        "title": "数据源管理",
+        "description": "配置独立同步器，将外部数据同步到本地目标目录。",
+        "label": "数据源",
+        "action": "新建数据源"
+      },
+      "skills": {
+        "title": "Skill 资源库",
+        "description": "维护可被 Assistant 加载的全局 Skill 资源。",
+        "label": "Skill",
+        "action": "新建 Skill"
+      },
+      "mcp": {
+        "title": "MCP Server 资源库",
+        "description": "维护可被 Assistant 加载的全局 MCP Server。",
+        "label": "MCP Server",
+        "action": "新建 MCP Server"
+      },
+      "settings": {
+        "title": "Lens 全局配置",
+        "description": "配置节点默认超时、Run 保留天数和健康检查阈值。",
+        "label": "配置项",
+        "action": "新建配置"
+      },
+      "health": {
+        "title": "Lens 系统健康",
+        "description": "查看 Lens 定时任务和最近执行状态。",
+        "label": "任务",
+        "action": "新建任务"
+      }
+    },
+    "columns": {
+      "assistant": "Assistant",
+      "lensnode": "LensNode",
+      "task": "任务",
+      "dirs": "目录",
+      "tools": "工具",
+      "status": "状态",
+      "actions": "操作",
+      "workspace": "工作区",
+      "dirsAndTasks": "目录 / 任务",
+      "heartbeat": "心跳",
+      "datasource": "数据源",
+      "type": "类型",
+      "targetPath": "目标路径",
+      "sync": "同步",
+      "skill": "Skill",
+      "slug": "Slug",
+      "mcpServer": "MCP Server",
+      "transport": "Transport",
+      "endpoint": "Endpoint",
+      "error": "错误",
+      "lastRun": "上次运行"
+    },
+    "table": {
+      "toolSummary": "Skills {skills} / MCP {mcps}",
+      "dirTaskSummary": "Dirs {dirs} / Tasks {tasks}",
+      "notRecorded": "未记录",
+      "intervalSeconds": "{seconds}s"
+    },
+    "actions": {
+      "approve": "通过",
+      "issueToken": "签发",
+      "revokeToken": "吊销",
+      "sync": "同步",
+      "addRow": "添加一行",
+      "removeRow": "移除"
+    },
+    "fields": {
+      "name": "名称",
+      "slug": "Slug",
+      "lensnode": "LensNode",
+      "task": "任务",
+      "selectedDirs": "选择目录",
+      "includePaths": "检索范围",
+      "retrievalPolicy": "检索策略",
+      "maxEvidenceFiles": "证据文件上限",
+      "excludeExtensions": "排除扩展名",
+      "excludeDirs": "排除目录",
+      "workspaceGuide": "工作区指引",
+      "workspaceGuideEnabled": "为该 Assistant 注入此指引",
+      "workspaceGuideHelp": "描述仓库结构、检索优先级和停止规则。SourceLens 会将其保存为绑定 Skill，并在 LensNode 执行时注入。",
+      "preprocessModel": "预处理模型",
+      "postprocessModel": "后处理模型",
+      "agentModel": "Agent 模型",
+      "multimodalModel": "多模态模型",
+      "workspacePath": "工作区路径",
+      "protocolVersion": "协议版本",
+      "agentVersion": "Agent 版本",
+      "labels": "标签",
+      "labelKey": "标签名",
+      "labelValue": "标签值",
+      "type": "类型",
+      "targetPath": "目标路径",
+      "syncInterval": "同步间隔（秒）",
+      "repoUrl": "仓库 URL",
+      "branch": "分支",
+      "credentialsRef": "凭证引用",
+      "jiraBaseUrl": "Jira 地址",
+      "authScheme": "认证方式",
+      "queryRules": "查询规则",
+      "ruleKey": "规则名",
+      "ruleValue": "规则值",
+      "fieldMapping": "字段映射",
+      "sourceField": "源字段",
+      "targetField": "目标字段",
+      "appToken": "App Token",
+      "docIds": "文档 ID",
+      "definition": "定义",
+      "enabled": "启用",
+      "transport": "Transport",
+      "endpoint": "Endpoint",
+      "config": "配置项",
+      "configKey": "配置名",
+      "configValue": "配置值"
+    },
+    "placeholders": {
+      "selectLensNode": "请选择 LensNode",
+      "selectTask": "请选择任务",
+      "noModel": "不配置",
+      "docIds": "多个 ID 用逗号分隔",
+      "includePaths": "每行一个路径规则，如 src/**",
+      "extensions": "如 .lock,.pyc,.sqlite3",
+      "excludeDirs": "如 .git,node_modules,dist",
+      "workspaceGuide": "示例：\n- /workspace/product 是产品级工作区，不是 Git 仓库。\n- service-api 是主要后端仓库。\n- deploy 包含部署和打包变更。\n- 查询最近变更时，先检查 service-api，证据不足再检查 deploy。",
+      "noDirs": "请先选择 LensNode，或等待节点上报可用目录。"
+    },
+    "settings": {
+      "sectionTitle": "运行与保留策略",
+      "timeoutTitle": "节点默认超时",
+      "timeoutDesc": "LensNode 执行任务的默认超时时间。",
+      "retentionTitle": "Run 保留天数",
+      "retentionDesc": "Run 与执行记录保留天数，超过后由清理任务处理。",
+      "offlineTitle": "节点离线阈值",
+      "offlineDesc": "超过该秒数未收到心跳时，健康检查将节点标记为离线。",
+      "skillGeneratorModelTitle": "Skill 生成模型",
+      "skillGeneratorModelDesc": "SourceLens 生成 Workspace Guide Skill 时默认使用的 LLM 配置。留空则使用模板生成。",
+      "secondsUnit": "秒",
+      "daysUnit": "天",
+      "reset": "重置",
+      "saveChanges": "保存修改"
+    },
+    "modal": {
+      "create": "新建",
+      "edit": "编辑"
+    },
+    "messages": {
+      "loadFailed": "加载 Lens 管理数据失败",
+      "saveSuccess": "保存成功",
+      "saveFailed": "保存失败",
+      "deleteSuccess": "删除成功",
+      "deleteFailed": "删除失败",
+      "confirmDelete": "确定删除这条记录？",
+      "invalidJson": "请输入有效的 JSON",
+      "approveSuccess": "审批通过",
+      "approveFailed": "审批失败",
+      "tokenIssued": "Token 已签发",
+      "tokenIssuedWithValue": "Token 已签发：{token}",
+      "tokenIssueFailed": "Token 签发失败",
+      "tokenRevoked": "Token 已吊销",
+      "tokenRevokeFailed": "Token 吊销失败",
+      "syncStarted": "同步任务已触发",
+      "syncFailed": "同步任务触发失败"
+    }
   }
 }

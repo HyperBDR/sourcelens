@@ -133,6 +133,52 @@ def _repair_json_obj(content: str) -> str:
     return repaired
 
 
+def _read_field(value: Any, key: str) -> Any:
+    """Read a field from dict-like or object-like values."""
+
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _extract_tool_calls(message: Any) -> list:
+    """Return OpenAI-compatible tool call dictionaries from a message."""
+
+    raw_calls = _read_field(message, "tool_calls") or []
+    output = []
+    for raw_call in raw_calls:
+        call_id = _read_field(raw_call, "id")
+        call_type = _read_field(raw_call, "type") or "function"
+        function = _read_field(raw_call, "function") or {}
+        name = _read_field(function, "name")
+        arguments = _read_field(function, "arguments")
+        if not name:
+            continue
+        output.append(
+            {
+                "id": call_id,
+                "type": call_type,
+                "function": {
+                    "name": name,
+                    "arguments": arguments or "{}",
+                },
+            }
+        )
+    return output
+
+
+def _assistant_message_payload(message: Any) -> Dict[str, Any]:
+    """Return a serializable assistant message including tool calls."""
+
+    return {
+        "role": "assistant",
+        "content": _read_field(message, "content") or "",
+        "tool_calls": _extract_tool_calls(message),
+    }
+
+
 class LLMTracker:
     """
     LLM call tracker via LiteLLM with usage and cost (reference pricing).
@@ -152,6 +198,9 @@ class LLMTracker:
         stream: bool = False,
         json_repair: Optional[bool] = None,
         json_attempts: int = 3,
+        tools: Optional[list] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        return_message: bool = False,
     ) -> Union[
         Tuple[str, Dict[str, Any]],
         Generator[str, None, Dict[str, Any]],
@@ -182,6 +231,10 @@ class LLMTracker:
             params["temperature"] = temperature
         if top_p is not None:
             params["top_p"] = top_p
+        if tools is not None:
+            params["tools"] = tools
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
 
         if json_mode:
             if response_format is None:
@@ -230,6 +283,7 @@ class LLMTracker:
                 node_name=node_name,
                 state=state,
                 model=model,
+                return_message=return_message,
             )
 
         total_attempts = max_json_attempts
@@ -241,6 +295,7 @@ class LLMTracker:
                 node_name=node_name,
                 state=state,
                 model=model,
+                return_message=False,
             )
             try:
                 repaired_content = _repair_json_obj(content)
@@ -270,6 +325,7 @@ class LLMTracker:
         node_name: str,
         state: Optional[Dict],
         model: str,
+        return_message: bool = False,
     ) -> Tuple[str, Dict[str, Any]]:
         """Single non-stream LLM call + metering persistence."""
         request_started_at = timezone.now()
@@ -287,7 +343,8 @@ class LLMTracker:
                 raise ValueError("LLM returned empty response")
             msg = choice.message
             content = getattr(msg, "content", None) or ""
-            if not (content and str(content).strip()):
+            tool_calls = _extract_tool_calls(msg)
+            if not (content and str(content).strip()) and not tool_calls:
                 raise ValueError("LLM returned empty response")
 
             usage = usage_from_response(response, model)
@@ -342,6 +399,8 @@ class LLMTracker:
                 f"model={usage['model']} total_tokens={usage['total_tokens']} "
                 f"cost={cost} {cost_currency}"
             )
+            if return_message:
+                return _assistant_message_payload(msg), usage
             return str(content), usage
 
         except AuthenticationError as e:

@@ -20,8 +20,16 @@ export const adminRoutes = [
   },
   {
     path: '/management/roles',
-    name: 'ManagementRoles',
-    component: () => import('@/admin/pages/Management/Roles.vue'),
+    redirect: '/management/users'
+  },
+  {
+    path: '/management/lens',
+    redirect: '/management/lens/assistants'
+  },
+  {
+    path: '/management/lens/:pathMatch(.*)*',
+    name: 'LensAdmin',
+    component: () => import('@/pages/lens/Admin.vue'),
     meta: { requiresAuth: true, requiredFeature: 'admin_console' }
   },
   {

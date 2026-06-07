@@ -56,6 +56,17 @@
         color: #86909c;
         font-size: 14px;
       }
+      .note {
+        margin: 0 0 16px;
+        color: #4e5969;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .meta {
+        margin-top: 8px;
+        color: #86909c;
+        font-size: 12px;
+      }
     </style>
   </head>
   <body>
@@ -64,13 +75,27 @@
       <p>开发模式下的静态设计稿评审入口（仅 dev，不进入生产构建）</p>
     </header>
     <main>
-      <p class="empty">
-        把设计稿 HTML 放到 <code>frontend/design/</code> 目录，然后在下方添加链接。
+      <p class="note">
+        当前已发布的原型位于 <code>frontend/design/ai-query-v1/</code>。
+        入口与原型都只在 dev 模式下可访问，生产构建不会包含这些页面。
       </p>
       <ul>
-        <!-- 示例：
-        <li><a href="/design/login.html">登录页设计</a></li>
-        -->
+        <li>
+          <a href="/design/ai-query-v1/">
+            <strong>AI Query Vue 原型</strong>
+            <div class="meta">
+              Vue + Tailwind 原型，包含项目配置、查询流式与系统状态
+            </div>
+          </a>
+        </li>
+        <li>
+          <a href="/design/lens-v1.1/">
+            <strong>Lens v1.1 旧版静态原型</strong>
+            <div class="meta">
+              仅作历史保留，不作为本次 AI Query 评审入口
+            </div>
+          </a>
+        </li>
       </ul>
     </main>
   </body>

@@ -532,5 +532,195 @@
       "valueLabel": "Config (JSON)",
       "invalidJson": "Please enter valid JSON"
     }
+  },
+  "lensAdmin": {
+    "menuTitle": "Lens Admin",
+    "total": "{label} · {count}",
+    "tabs": {
+      "assistants": "Assistants",
+      "lensnodes": "LensNodes",
+      "datasources": "Data Sources",
+      "skills": "Skills",
+      "mcp": "MCP Servers",
+      "settings": "Global Settings",
+      "health": "System Health"
+    },
+    "pages": {
+      "assistants": {
+        "title": "Assistant Management",
+        "description": "Configure public capabilities, execution nodes, tasks, and workspace directories.",
+        "label": "Assistant",
+        "action": "Create Assistant"
+      },
+      "lensnodes": {
+        "title": "LensNode Management",
+        "description": "Review distributed execution nodes and manage access credentials.",
+        "label": "LensNode",
+        "action": "Create LensNode"
+      },
+      "datasources": {
+        "title": "Data Source Management",
+        "description": "Configure standalone synchronizers that write external data into local target directories.",
+        "label": "Data Source",
+        "action": "Create Data Source"
+      },
+      "skills": {
+        "title": "Skill Library",
+        "description": "Manage reusable Skill resources that Assistants can load.",
+        "label": "Skill",
+        "action": "Create Skill"
+      },
+      "mcp": {
+        "title": "MCP Server Library",
+        "description": "Manage reusable MCP Servers that Assistants can load.",
+        "label": "MCP Server",
+        "action": "Create MCP Server"
+      },
+      "settings": {
+        "title": "Lens Global Settings",
+        "description": "Configure node defaults, Run retention, and health-check thresholds.",
+        "label": "Setting",
+        "action": "Create Setting"
+      },
+      "health": {
+        "title": "Lens System Health",
+        "description": "View Lens scheduled tasks and their latest execution state.",
+        "label": "Task",
+        "action": "Create Task"
+      }
+    },
+    "columns": {
+      "assistant": "Assistant",
+      "lensnode": "LensNode",
+      "task": "Task",
+      "dirs": "Dirs",
+      "tools": "Tools",
+      "status": "Status",
+      "actions": "Actions",
+      "workspace": "Workspace",
+      "dirsAndTasks": "Dirs / Tasks",
+      "heartbeat": "Heartbeat",
+      "datasource": "Data Source",
+      "type": "Type",
+      "targetPath": "Target Path",
+      "sync": "Sync",
+      "skill": "Skill",
+      "slug": "Slug",
+      "mcpServer": "MCP Server",
+      "transport": "Transport",
+      "endpoint": "Endpoint",
+      "error": "Error",
+      "lastRun": "Last Run"
+    },
+    "table": {
+      "toolSummary": "Skills {skills} / MCP {mcps}",
+      "dirTaskSummary": "Dirs {dirs} / Tasks {tasks}",
+      "notRecorded": "Not recorded",
+      "intervalSeconds": "{seconds}s"
+    },
+    "actions": {
+      "approve": "Approve",
+      "issueToken": "Issue",
+      "revokeToken": "Revoke",
+      "sync": "Sync",
+      "addRow": "Add row",
+      "removeRow": "Remove"
+    },
+    "fields": {
+      "name": "Name",
+      "slug": "Slug",
+      "lensnode": "LensNode",
+      "task": "Task",
+      "selectedDirs": "Select Directories",
+      "includePaths": "Retrieval Scope",
+      "retrievalPolicy": "Retrieval Policy",
+      "maxEvidenceFiles": "Evidence file limit",
+      "excludeExtensions": "Exclude extensions",
+      "excludeDirs": "Exclude directories",
+      "workspaceGuide": "Workspace Guide",
+      "workspaceGuideEnabled": "Inject this guide for the Assistant",
+      "workspaceGuideHelp": "Describe repository layout, search priority, and stopping rules. SourceLens will save it as a bound Skill and inject it into LensNode runs.",
+      "preprocessModel": "Preprocess Model",
+      "postprocessModel": "Postprocess Model",
+      "agentModel": "Agent Model",
+      "multimodalModel": "Multimodal Model",
+      "workspacePath": "Workspace Path",
+      "protocolVersion": "Protocol Version",
+      "agentVersion": "Agent Version",
+      "labels": "Labels",
+      "labelKey": "Label key",
+      "labelValue": "Label value",
+      "type": "Type",
+      "targetPath": "Target Path",
+      "syncInterval": "Sync Interval (seconds)",
+      "repoUrl": "Repository URL",
+      "branch": "Branch",
+      "credentialsRef": "Credentials Ref",
+      "jiraBaseUrl": "Jira Base URL",
+      "authScheme": "Auth Scheme",
+      "queryRules": "Query Rules",
+      "ruleKey": "Rule key",
+      "ruleValue": "Rule value",
+      "fieldMapping": "Field Mapping",
+      "sourceField": "Source field",
+      "targetField": "Target field",
+      "appToken": "App Token",
+      "docIds": "Document IDs",
+      "definition": "Definition",
+      "enabled": "Enabled",
+      "transport": "Transport",
+      "endpoint": "Endpoint",
+      "config": "Config Items",
+      "configKey": "Config key",
+      "configValue": "Config value"
+    },
+    "placeholders": {
+      "selectLensNode": "Select a LensNode",
+      "selectTask": "Select a task",
+      "noModel": "Not configured",
+      "docIds": "Separate multiple IDs with commas",
+      "includePaths": "One path rule per line, e.g. src/**",
+      "extensions": "e.g. .lock,.pyc,.sqlite3",
+      "excludeDirs": "e.g. .git,node_modules,dist",
+      "workspaceGuide": "Example:\n- /workspace/product is a product-level workspace, not a Git repo.\n- service-api is the main backend repo.\n- deploy contains deployment and packaging changes.\n- For recent-change questions, inspect service-api first, then deploy only if needed.",
+      "noDirs": "Select a LensNode first, or wait for the node to report available directories."
+    },
+    "settings": {
+      "sectionTitle": "Runtime and Retention",
+      "timeoutTitle": "Node Default Timeout",
+      "timeoutDesc": "Default timeout for LensNode task execution.",
+      "retentionTitle": "Run Retention Days",
+      "retentionDesc": "How many days to keep Runs and execution records before cleanup.",
+      "offlineTitle": "Node Offline Threshold",
+      "offlineDesc": "If no heartbeat is received within this many seconds, health checks mark the node offline.",
+      "skillGeneratorModelTitle": "Skill Generator Model",
+      "skillGeneratorModelDesc": "Default LLM configuration used when SourceLens generates Workspace Guide Skills. Leave empty to use template-only generation.",
+      "secondsUnit": "sec",
+      "daysUnit": "days",
+      "reset": "Reset",
+      "saveChanges": "Save Changes"
+    },
+    "modal": {
+      "create": "Create",
+      "edit": "Edit"
+    },
+    "messages": {
+      "loadFailed": "Failed to load Lens admin data",
+      "saveSuccess": "Saved successfully",
+      "saveFailed": "Save failed",
+      "deleteSuccess": "Deleted successfully",
+      "deleteFailed": "Delete failed",
+      "confirmDelete": "Delete this record?",
+      "invalidJson": "Please enter valid JSON",
+      "approveSuccess": "Approved",
+      "approveFailed": "Approval failed",
+      "tokenIssued": "Token issued",
+      "tokenIssuedWithValue": "Token issued: {token}",
+      "tokenIssueFailed": "Token issue failed",
+      "tokenRevoked": "Token revoked",
+      "tokenRevokeFailed": "Token revoke failed",
+      "syncStarted": "Sync task triggered",
+      "syncFailed": "Failed to trigger sync task"
+    }
   }
 }

@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lens — Chat v1.1</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        primary: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' }
+      },
+      fontFamily: { sans: ['Inter','system-ui','sans-serif'] }
+    }
+  }
+}
+</script>
+<style>
+body { font-family: Inter, system-ui, sans-serif; }
+.sidebar-link { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:8px; font-size:14px; font-weight:500; color:#cbd5e1; transition:all .2s; text-decoration:none; }
+.sidebar-link:hover { background:#334155; color:#f1f5f9; }
+.sidebar-link.active { background:rgba(99,102,241,.8); color:#fff; }
+.step-bar { display:flex; gap:4px; overflow:hidden; }
+.step-item { flex:1; height:3px; border-radius:2px; background:#e5e7eb; transition:background .3s; }
+.step-item.done { background:#2563eb; }
+.step-item.running { background:#93c5fd; animation:pulse 1s infinite; }
+.step-item.failed { background:#ef4444; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:.5} }
+.msg-user { display:flex; justify-content:flex-end; margin-bottom:16px; }
+.msg-user .bubble { background:#2563eb; color:#fff; border-radius:16px 16px 4px 16px; padding:12px 16px; max-width:70%; font-size:14px; line-height:1.6; }
+.msg-assistant { display:flex; gap:10px; margin-bottom:16px; align-items:flex-start; }
+.msg-assistant .avatar { width:32px; height:32px; border-radius:50%; background:#eff6ff; border:1px solid #dbeafe; display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:4px; }
+.msg-assistant .bubble { background:#fff; border:1px solid #e5e7eb; border-radius:4px 16px 16px 16px; padding:12px 16px; max-width:75%; font-size:14px; line-height:1.7; }
+.msg-assistant.msg-failed .bubble { border-color:#fca5a5; background:#fff7f7; }
+.msg-assistant.msg-cancelled .bubble { border-color:#fdba74; background:#fff8f0; }
+.typing-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#94a3b8; animation:blink .8s infinite; }
+.typing-dot:nth-child(2){animation-delay:.2s;}.typing-dot:nth-child(3){animation-delay:.4s;}
+@keyframes blink{0%,100%{opacity:.2}50%{opacity:1}}
+#chat-input { outline:none; }
+#chat-input:focus { box-shadow:0 0 0 2px #bfdbfe; }
+</style>
+</head>
+<body class="bg-gray-50 flex h-screen overflow-hidden">
+
+<!-- Sidebar -->
+<aside class="w-64 flex-shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col h-full">
+  <div class="flex items-center gap-3 px-4 h-16 border-b border-slate-700">
+    <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+    </div>
+    <span class="text-white font-semibold text-lg">Lens</span>
+  </div>
+  <div class="px-3 py-3 border-b border-slate-700">
+    <button onclick="newSession()" class="w-full flex items-center gap-2 px-3 py-2 text-sm text-primary-300 border border-primary-700/50 rounded-lg hover:bg-primary-900/30 transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      新建会话
+    </button>
+  </div>
+  <div class="flex-1 px-3 py-2 overflow-y-auto">
+    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-2 py-2">历史会话</p>
+    <div id="session-list"></div>
+  </div>
+  <div class="px-3 py-3 border-t border-slate-700 space-y-1">
+    <a href="history.html" class="sidebar-link text-xs">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      所有历史
+    </a>
+    <a href="index.html" class="sidebar-link text-xs">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+      返回 Assistants
+    </a>
+  </div>
+</aside>
+
+<!-- Main chat area -->
+<div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+  <!-- Chat header -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4 flex-shrink-0">
+    <div class="flex-1">
+      <h2 id="assistant-name" class="text-base font-semibold text-gray-900">—</h2>
+      <p class="text-xs text-gray-500 mt-0.5" id="session-title">新会话</p>
+    </div>
+    <div id="progress-bar" class="hidden flex-1 max-w-xs">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs text-gray-500" id="current-step-label">处理中...</span>
+      </div>
+      <div class="step-bar">
+        <div class="step-item" id="step-rewrite"></div>
+        <div class="step-item" id="step-retrieval"></div>
+        <div class="step-item" id="step-answer"></div>
+        <div class="step-item" id="step-stream"></div>
+      </div>
+    </div>
+    <!-- M6: Cancel button with intermediate state -->
+    <button id="cancel-btn" class="hidden px-3 py-1.5 text-xs text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-1.5" onclick="cancelRun()">
+      <span id="cancel-btn-text">取消</span>
+      <svg id="cancel-spinner" class="hidden w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+    </button>
+  </header>
+
+  <!-- Messages -->
+  <div class="flex-1 overflow-y-auto px-6 py-4" id="messages-container">
+    <div id="welcome" class="flex flex-col items-center justify-center h-full text-center py-16">
+      <div class="w-16 h-16 bg-primary-100 rounded-2xl flex items-center justify-center mb-4">
+        <svg class="w-9 h-9 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+      </div>
+      <h3 class="text-lg font-semibold text-gray-800 mb-2">开始提问吧</h3>
+      <p class="text-sm text-gray-500 max-w-sm mb-6">这个 Assistant 已连接代码库和知识源，可以回答关于代码结构、架构、API 的问题。</p>
+      <div class="flex flex-wrap gap-2 justify-center max-w-lg">
+        <button onclick="setQuestion('这个项目的 Celery 任务是如何注册的？')" class="px-3 py-2 text-xs bg-white border border-gray-200 rounded-lg text-gray-600 hover:border-primary-300 hover:text-primary-700 transition-colors">这个项目的 Celery 任务是如何注册的？</button>
+        <button onclick="setQuestion('SSE 流式接口的实现原理是什么？')" class="px-3 py-2 text-xs bg-white border border-gray-200 rounded-lg text-gray-600 hover:border-primary-300 hover:text-primary-700 transition-colors">SSE 流式接口的实现原理是什么？</button>
+        <button onclick="setQuestion('[模拟失败] 沙箱超时如何处理？')" class="px-3 py-2 text-xs bg-white border border-orange-200 rounded-lg text-orange-600 hover:border-red-300 hover:text-red-700 transition-colors" title="点击模拟 SSE error / Run failed 场景">⚠ 模拟沙箱超时（Run 失败态演示）</button>
+      </div>
+    </div>
+    <div id="messages"></div>
+  </div>
+
+  <!-- Input area -->
+  <div class="flex-shrink-0 bg-white border-t border-gray-200 px-6 py-4">
+    <div id="step-detail" class="hidden mb-3 bg-gray-50 rounded-lg border border-gray-200 p-3">
+      <p class="text-xs font-medium text-gray-500 mb-2">🔍 检索命中</p>
+      <div class="space-y-1 text-xs text-gray-600" id="evidence-list"></div>
+    </div>
+    <div class="flex items-end gap-3">
+      <textarea
+        id="chat-input"
+        rows="1"
+        placeholder="输入问题，按 Enter 发送，Shift+Enter 换行..."
+        class="flex-1 resize-none border border-gray-300 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+        style="min-height:48px;max-height:200px;overflow-y:auto"
+        onkeydown="handleKeydown(event)"
+        oninput="autoResize(this)"
+      ></textarea>
+      <button
+        id="send-btn"
+        onclick="sendMessage()"
+        class="flex-shrink-0 w-12 h-12 bg-primary-600 hover:bg-primary-700 text-white rounded-xl flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+      </button>
+    </div>
+    <p class="text-xs text-gray-400 mt-2 text-center">AI 回答仅供参考，请结合实际代码验证</p>
+  </div>
+</div>
+
+<script src="../shared.js"></script>
+<script>
+// M2: Read slug and session from URL params; look up assistant name from MOCK data
+const params = new URLSearchParams(location.search);
+const slug = params.get('slug') || 'code-advisor';
+const sessionParam = params.get('session');
+
+// Resolve assistant name from slug (fixes cross-assistant title bug)
+const assistantObj = MOCK.assistants.find(a => a.slug === slug);
+const assistantName = params.get('name') || (assistantObj ? assistantObj.name : slug);
+document.getElementById('assistant-name').textContent = assistantName;
+
+let messages = [];
+let isRunning = false;
+let isCancelling = false;
+let runTimeout = null;
+let currentSessionStatus = 'active'; // tracks run state for persistence
+
+function setSessionTitle(text) {
+  if (!text) {
+    document.getElementById('session-title').textContent = '新会话';
+    return;
+  }
+  document.getElementById('session-title').textContent =
+    text.length > 30 ? `${text.slice(0, 30)}...` : text;
+}
+
+function renderSessions() {
+  const sessions = MOCK.sessions.filter(s => s.assistant_slug === slug);
+  const container = document.getElementById('session-list');
+  if (sessions.length === 0) {
+    container.innerHTML = '<p class="text-xs text-slate-500 px-2">无历史会话</p>';
+    return;
+  }
+  container.innerHTML = sessions.map(s => `
+    <div class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-slate-700 cursor-pointer group" onclick="loadSession('${s.uuid}')">
+      ${s.status==='failed'
+        ?'<svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M6 18L18 6"/></svg>'
+        :s.status==='cancelled'
+        ?'<svg class="w-4 h-4 text-orange-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>'
+        :'<svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>'}
+      <span class="text-xs text-slate-300 flex-1 truncate">${s.title}</span>
+    </div>
+  `).join('');
+}
+
+function newSession() {
+  messages = [];
+  currentSessionStatus = 'active';
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('welcome').classList.remove('hidden');
+  setSessionTitle('');
+}
+
+// M2: Load session from UUID (supports ?session= deep link)
+function loadSession(uuid) {
+  const session = MOCK.sessions.find(s => s.uuid === uuid);
+  if (!session) return;
+  currentSessionStatus = session.status || 'active';
+
+  // Fix: use assistant_name from session, not hardcoded
+  setSessionTitle(session.title);
+  document.getElementById('welcome').classList.add('hidden');
+
+  // M1+M6: show failed/cancelled state from session
+  if (session.status === 'failed') {
+    const errorCode = session.run_error || 'LENS_SANDBOX_TIMEOUT';
+    messages = [
+      { role: 'user', content: session.title },
+      { role: 'assistant_failed', content: '', error: errorCode, partial: false },
+    ];
+  } else if (session.status === 'cancelled') {
+    messages = [
+      { role: 'user', content: session.title },
+      { role: 'assistant_cancelled', content: session.partialContent || '' },
+    ];
+  } else {
+    messages = [
+      { role: 'user', content: session.title },
+      { role: 'assistant', content: `关于「${session.title}」，我来分析一下...\n\n根据代码库中的相关文件，该功能的实现主要涉及以下几个关键部分：\n\n1. **核心模块** — 位于 \`backend/core/\` 下\n2. **配置管理** — 通过 \`settings.py\` 统一管理\n3. **异步处理** — 使用 Celery + Redis 队列\n\n如需更多详情，请进一步提问。` },
+    ];
+  }
+  renderMessages();
+}
+
+function renderMessages() {
+  const container = document.getElementById('messages');
+  container.innerHTML = messages.map(m => {
+    if (m.role === 'user') {
+      return `<div class="msg-user"><div class="bubble">${escHtml(m.content)}</div></div>`;
+    }
+    if (m.role === 'assistant') {
+      return `<div class="msg-assistant">
+        <div class="avatar"><svg class="w-4 h-4 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg></div>
+        <div class="bubble" style="white-space:pre-wrap">${m.content||typingDots()}</div>
+      </div>`;
+    }
+    // M1: failed state — SSE error / Run failed
+    if (m.role === 'assistant_failed') {
+      return `<div class="msg-assistant msg-failed">
+        <div class="avatar bg-red-50 border-red-200"><svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M6 18L18 6"/></svg></div>
+        <div class="bubble">
+          ${m.partial && m.content ? `<div class="mb-3 text-gray-700" style="white-space:pre-wrap">${escHtml(m.content)}<br><span class="text-xs text-orange-500 italic">（部分答案已保留）</span></div>` : ''}
+          <div class="flex items-center gap-2 mt-1">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>Run 失败
+            </span>
+            <span class="text-xs text-red-600 font-mono">${escHtml(m.error||'UNKNOWN_ERROR')}</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-2">沙箱执行失败，${m.error==='LENS_SANDBOX_TIMEOUT'?'超时时间已达上限，请联系管理员调整 sandbox.defaults.timeout 配置。':m.error==='LENS_ENGINE_NOT_IMPLEMENTED'?'当前引擎尚未实现，请切换 Assistant。':'请重试或联系管理员。'}</p>
+        </div>
+      </div>`;
+    }
+    // M6: cancelled state with partial content + badge
+    if (m.role === 'assistant_cancelled') {
+      return `<div class="msg-assistant msg-cancelled">
+        <div class="avatar bg-orange-50 border-orange-200"><svg class="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg></div>
+        <div class="bubble">
+          ${m.content ? `<div class="mb-3 text-gray-700" style="white-space:pre-wrap">${escHtml(m.content)}</div>` : ''}
+          <div class="flex items-center gap-2 mt-1">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636"/></svg>Run 已取消
+            </span>
+            ${m.content ? '<span class="text-xs text-gray-400">（部分答案已保留）</span>' : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+    return '';
+  }).join('');
+  scrollToBottom();
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function typingDots() {
+  return '<span class="inline-flex gap-1 items-center"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span>';
+}
+
+function scrollToBottom() {
+  const c = document.getElementById('messages-container');
+  c.scrollTop = c.scrollHeight;
+}
+
+function setQuestion(q) {
+  document.getElementById('chat-input').value = q;
+  document.getElementById('chat-input').focus();
+}
+
+function handleKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+function sendMessage() {
+  if (isCancelling) {
+    showToast('上一条问答仍在取消中，请稍候', 'warn');
+    return;
+  }
+  if (isRunning) {
+    showToast('当前已有问答在执行，请等待完成或先取消', 'warn');
+    return;
+  }
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  document.getElementById('welcome').classList.add('hidden');
+  input.value = '';
+  input.style.height = 'auto';
+  messages.push({ role: 'user', content: text });
+  messages.push({ role: 'assistant', content: '' });
+  renderMessages();
+  // M1: trigger failure scenario for specific input
+  const shouldFail = text.includes('模拟失败') || text.includes('沙箱超时');
+  startRun(text, shouldFail);
+}
+
+function startRun(question, shouldFail) {
+  isRunning = true;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('progress-bar').classList.remove('hidden');
+  document.getElementById('cancel-btn').classList.remove('hidden');
+  document.getElementById('cancel-btn-text').textContent = '取消';
+  document.getElementById('cancel-spinner').classList.add('hidden');
+
+  const steps = ['step-rewrite','step-retrieval','step-answer','step-stream'];
+  const labels = ['改写问题...','检索代码库...','生成答案...','流式输出...'];
+  let currentStep = 0;
+
+  function advanceStep() {
+    if (!isRunning) return;
+    if (currentStep > 0) document.getElementById(steps[currentStep-1]).className = 'step-item done';
+    if (currentStep < steps.length) {
+      document.getElementById(steps[currentStep]).className = 'step-item running';
+      document.getElementById('current-step-label').textContent = labels[currentStep];
+      if (currentStep === 1) showEvidence();
+      // M1: fail at retrieval step if shouldFail
+      if (shouldFail && currentStep === 1) {
+        currentStep++;
+        runTimeout = setTimeout(() => {
+          if (!isRunning) return;
+          finishRunFailed('LENS_SANDBOX_TIMEOUT', true);
+        }, 1800);
+        return;
+      }
+      if (currentStep === 3) startStreaming();
+      currentStep++;
+      runTimeout = setTimeout(advanceStep, currentStep === 4 ? 3000 : 1200);
+    } else {
+      finishRun();
+    }
+  }
+  advanceStep();
+}
+
+function showEvidence() {
+  const evidences = [
+    'backend/lens/services/execution.py (line 45-89)',
+    'backend/lens/models.py (Run, RunStep)',
+    'backend/core/periodic_registry.py (task registration)',
+  ];
+  document.getElementById('step-detail').classList.remove('hidden');
+  document.getElementById('evidence-list').innerHTML = evidences.map(e =>
+    `<div class="flex items-center gap-2"><svg class="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>${e}</div>`
+  ).join('');
+}
+
+const fullAnswer = `根据代码库分析，以下是详细解答：
+
+**1. 核心流程**
+
+问答系统的执行分为四个阶段（RunStep），由 LangGraph StateGraph 编排：
+- \`query_rewrite\` — 用 LLM 对问题进行语义改写，提升检索质量
+- \`retrieval\` — 在沙箱容器中执行代码搜索，挂载数据源
+- \`answer\` — 根据检索结果用 LLM 合成最终答案
+- \`stream\` — 通过 SSE 实时推送给前端
+
+**2. 关键代码路径**
+
+\`\`\`python
+# backend/lens/services/execution.py
+def execute_answer_run(run: Run) -> None:
+    with run_step(run, 'query_rewrite') as step:
+        rewritten = LLMTracker(assistant.preprocess_model_ref).complete(...)
+    with run_step(run, 'retrieval') as step, sandbox_context(run) as sb:
+        result = execute_agent_in_sandbox(sb, rewritten, assistant)
+\`\`\`
+
+**3. 注意事项**
+
+- 所有 LLM 调用通过 \`agentcore_metering.LLMTracker\` 计量
+- 沙箱只读挂载数据源，安全加固（no-new-privileges, cap_drop=ALL）
+- SSE 流节流：≤200ms 或 100 token 写一次 Message`;
+
+let streamIndex = 0;
+let streamInterval = null;
+
+function startStreaming() {
+  const lastMsgIndex = messages.length - 1;
+  streamIndex = 0;
+  streamInterval = setInterval(() => {
+    if (!isRunning) { clearInterval(streamInterval); return; }
+    const chunkSize = Math.floor(Math.random() * 8) + 3;
+    streamIndex = Math.min(streamIndex + chunkSize, fullAnswer.length);
+    messages[lastMsgIndex].content = fullAnswer.slice(0, streamIndex);
+    renderMessages();
+    if (streamIndex >= fullAnswer.length) clearInterval(streamInterval);
+  }, 50);
+}
+
+function finishRun() {
+  isRunning = false;
+  currentSessionStatus = 'done';
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('progress-bar').classList.add('hidden');
+  document.getElementById('cancel-btn').classList.add('hidden');
+  document.getElementById('step-detail').classList.add('hidden');
+  steps().forEach(id => document.getElementById(id).className = 'step-item');
+  if (messages[0]) setSessionTitle(messages[0].content);
+}
+
+// M1: Run failed state with partial answer
+function finishRunFailed(errorCode, hasPartial) {
+  isRunning = false;
+  currentSessionStatus = 'failed';
+  clearTimeout(runTimeout);
+  clearInterval(streamInterval);
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('progress-bar').classList.add('hidden');
+  document.getElementById('cancel-btn').classList.add('hidden');
+  document.getElementById('step-detail').classList.add('hidden');
+  steps().forEach(id => {
+    const el = document.getElementById(id);
+    if (el.classList.contains('running')) el.className = 'step-item failed';
+    else if (!el.classList.contains('done')) el.className = 'step-item';
+  });
+  const lastMsg = messages[messages.length - 1];
+  const partialContent = hasPartial ? lastMsg.content || '' : '';
+  messages[messages.length - 1] = {
+    role: 'assistant_failed',
+    content: partialContent,
+    partial: hasPartial && partialContent.length > 0,
+    error: errorCode,
+  };
+  renderMessages();
+  if (messages[0]) setSessionTitle(messages[0].content);
+  showToast(`Run 失败：${errorCode}`, 'error');
+}
+
+function steps() {
+  return ['step-rewrite','step-retrieval','step-answer','step-stream'];
+}
+
+// M6: Cancel with intermediate state
+let cancellingTimeout = null;
+function cancelRun() {
+  if (!isRunning) {
+    showToast('当前没有可取消的运行', 'warn');
+    return;
+  }
+  if (isCancelling) {
+    showToast('取消请求已发送，请稍候', 'warn');
+    return;
+  }
+  isCancelling = true;
+
+  // Show intermediate "取消中..." state
+  const btn = document.getElementById('cancel-btn');
+  document.getElementById('cancel-btn-text').textContent = '取消中...';
+  document.getElementById('cancel-spinner').classList.remove('hidden');
+  btn.disabled = true;
+  btn.classList.add('opacity-70');
+
+  cancellingTimeout = setTimeout(() => {
+    clearTimeout(runTimeout);
+    clearInterval(streamInterval);
+    isRunning = false;
+    isCancelling = false;
+    currentSessionStatus = 'cancelled';
+
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('progress-bar').classList.add('hidden');
+    document.getElementById('cancel-btn').classList.add('hidden');
+    document.getElementById('step-detail').classList.add('hidden');
+    btn.disabled = false;
+    btn.classList.remove('opacity-70');
+    steps().forEach(id => document.getElementById(id).className = 'step-item');
+
+    // M6: Show cancelled badge + preserve partial content
+    const lastMsg = messages[messages.length - 1];
+    const partialContent = lastMsg && lastMsg.role === 'assistant' ? lastMsg.content || '' : '';
+    if (lastMsg && (lastMsg.role === 'assistant' || lastMsg.role === 'assistant_cancelled')) {
+      messages[messages.length - 1] = { role: 'assistant_cancelled', content: partialContent };
+    }
+    renderMessages();
+    if (messages[0]) setSessionTitle(messages[0].content);
+    showToast('已取消本次问答', 'error');
+  }, 700);
+}
+
+// M2: Auto-load session from URL param on page load
+function initPage() {
+  renderSessions();
+  if (sessionParam) {
+    loadSession(sessionParam);
+  }
+}
+
+initPage();
+</script>
+</body>
+</html>

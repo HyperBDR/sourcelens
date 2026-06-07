@@ -36,6 +36,9 @@ urlpatterns = [
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),
 
+    # Lens MVP API
+    path('api/lens/', include('lens.urls')),
+
     # Notifier admin API (agentcore-notifier: must be before admin/ to match)
     path(
         'api/v1/admin/notifications/',

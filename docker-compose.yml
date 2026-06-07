@@ -14,15 +14,23 @@ services:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
     env_file:
       - ./.env
+    environment:
+      LENSNODE_NAME: ${LENSNODE_NAME:-local-lensnode}
+      LENSNODE_TOKEN: ${LENSNODE_TOKEN:-change-me-lensnode-token}
+      LENSNODE_WORKSPACE_PATH: /workspace
     volumes:
       - ./data/django/staticfiles:/opt/backend/core/staticfiles
       - ./data/logs/api:/var/log/gunicorn
       - ./data/storage:/opt/storage
+      - ./data/workspace:/workspace
       - ./docker/nginx/certs:/opt/certs
     networks:
       - backend_network
     depends_on:
-      - postgresql
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: gunicorn
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
@@ -41,15 +49,16 @@ services:
     volumes:
       - ./data/logs/worker:/var/log/celery
       - ./data/storage:/opt/storage
+      - ./data/workspace:/workspace
     networks:
       - backend_network
     depends_on:
       backend-api:
-        condition: service_started
+        condition: service_healthy
       postgresql:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: celery
 
   backend-scheduler:
@@ -65,11 +74,11 @@ services:
       - backend_network
     depends_on:
       backend-api:
-        condition: service_started
+        condition: service_healthy
       postgresql:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: celery-beat
 
   frontend:
@@ -89,6 +98,33 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  lensnode:
+    build:
+      context: ./lensnode
+      dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
+    image: sourcelens-lensnode:latest
+    container_name: sourcelens-lensnode
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      LENSNODE_NAME: ${LENSNODE_NAME:-local-lensnode}
+      LENSNODE_TOKEN: ${LENSNODE_TOKEN:-change-me-lensnode-token}
+      LENSNODE_CONTROL_WS_URL: ws://backend-api:8000/ws/lens/lensnodes/
+      LENSNODE_AI_GATEWAY_URL: http://backend-api:8000/api/lens/lensnode/ai-gateway/
+      LENSNODE_WORKSPACE_PATH: /workspace
+      LENSNODE_HEARTBEAT_INTERVAL_S: 15
+    volumes:
+      - ./data/workspace:/workspace
+    networks:
+      - backend_network
+    depends_on:
+      backend-api:
+        condition: service_healthy
 
   # Recommend to use nginx proxy manager to manage the outside access
   nginx:
@@ -144,7 +180,7 @@ services:
     networks:
       - backend_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-backend}"]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -c 'SELECT 1' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -160,6 +196,12 @@ services:
       - ./data/logs/redis:/var/log/redis
     networks:
       - backend_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 networks:
   backend_network:

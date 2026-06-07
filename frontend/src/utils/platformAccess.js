@@ -9,7 +9,13 @@ export const FEATURE_DEFINITIONS = [
     key: 'admin_console',
     labelKey: 'platforms.adminConsole',
     defaultPath: '/management/users',
-    matchers: ['/management', '/llm', '/task-management', '/notifier']
+    matchers: [
+      '/management',
+      '/lens/admin',
+      '/llm',
+      '/task-management',
+      '/notifier'
+    ]
   }
 ]
 
@@ -20,9 +26,14 @@ export const FEATURE_KEY_SET = new Set(
 const FEATURE_MAP = new Map(FEATURE_DEFINITIONS.map((item) => [item.key, item]))
 
 const FEATURE_ALIASES = {
+  management: 'admin_console',
   llm_console: 'admin_console',
   task_management_console: 'admin_console',
   notification_console: 'admin_console'
+}
+
+export function isAdminUser(user) {
+  return !!(user?.is_staff || user?.is_superuser)
 }
 
 export function normalizeFeatureKeys(values) {
@@ -56,6 +67,15 @@ export function getAccessProfile(user) {
 
 export function hasFeature(user, featureKey) {
   const normalizedFeatureKey = FEATURE_ALIASES[featureKey] || featureKey
+
+  if (normalizedFeatureKey === 'workspace') {
+    return !!user
+  }
+
+  if (normalizedFeatureKey === 'admin_console') {
+    return isAdminUser(user)
+  }
+
   const visibleFeatures = normalizeFeatureKeys(
     getAccessProfile(user).visible_features
   )
@@ -74,25 +94,29 @@ export function hasAnyPermission(user, permissions) {
 }
 
 export function getAvailablePlatforms(user, t) {
-  const accessProfile = getAccessProfile(user)
-  const platformMap = new Map(
-    (accessProfile.available_platforms || []).map((item) => [item.key, item])
-  )
+  if (!user) return []
 
-  return FEATURE_DEFINITIONS.filter((item) => platformMap.has(item.key)).map(
-    (item) => {
-      const resolved = platformMap.get(item.key)
-      return {
-        key: item.key,
-        label: t ? t(item.labelKey) : item.key,
-        defaultPath: resolved?.default_path || item.defaultPath
-      }
-    }
+  return FEATURE_DEFINITIONS.filter((item) => hasFeature(user, item.key)).map(
+    (item) => ({
+      key: item.key,
+      label: t ? t(item.labelKey) : item.key,
+      defaultPath: item.defaultPath
+    })
   )
 }
 
 export function getLandingPath(user) {
-  return getAccessProfile(user).landing_path || '/dashboard'
+  if (!user) return '/dashboard'
+  const landingPath = getAccessProfile(user).landing_path
+
+  if (landingPath && hasFeature(user, getCurrentPlatformKey(landingPath))) {
+    return landingPath
+  }
+
+  const fallback = FEATURE_DEFINITIONS.find((item) =>
+    hasFeature(user, item.key)
+  )
+  return fallback?.defaultPath || '/dashboard'
 }
 
 export function getCurrentPlatformKey(path) {

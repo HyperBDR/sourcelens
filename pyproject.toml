@@ -30,6 +30,11 @@ dependencies = [
     "django-allauth>=0.57.0",
     "cryptography>=42.0.0",
     "django-cors-headers>=4.3.0",
+    "channels==4.2.0",
+    "channels-redis==4.2.1",
+    "daphne==4.1.2",
+    "langchain-core==1.4.0",
+    "langgraph==1.2.1",
     # Agentcore submodules. Docker local builds rewrite these to local
     # file paths from backend/agentcore to avoid GitHub during image builds.
     "agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git",

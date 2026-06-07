@@ -1,0 +1,24 @@
+services:
+  lensnode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
+    image: sourcelens-lensnode:dev
+    container_name: sourcelens-lensnode-standalone
+    restart: unless-stopped
+    environment:
+      LENSNODE_NAME: ${LENSNODE_NAME:-local-dev-lensnode}
+      LENSNODE_TOKEN: ${LENSNODE_TOKEN:-dev-lensnode-token}
+      LENSNODE_CONTROL_WS_URL: ${LENSNODE_CONTROL_WS_URL:-ws://host.docker.internal:8000/ws/lens/lensnodes/}
+      LENSNODE_AI_GATEWAY_URL: ${LENSNODE_AI_GATEWAY_URL:-http://host.docker.internal:8000/api/lens/lensnode/ai-gateway/}
+      LENSNODE_WORKSPACE_PATH: /workspace
+      LENSNODE_HEARTBEAT_INTERVAL_S: ${LENSNODE_HEARTBEAT_INTERVAL_S:-15}
+      PYTHONPATH: /opt/lensnode
+    volumes:
+      - ./workspace:/workspace
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

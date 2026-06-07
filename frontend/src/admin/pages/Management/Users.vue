@@ -60,10 +60,6 @@
                   <th class="table-head">{{ t('dashboard.username') }}</th>
                   <th class="table-head">{{ t('dashboard.email') }}</th>
                   <th class="table-head">{{ t('management.groups') }}</th>
-                  <th class="table-head">{{ t('management.roles') }}</th>
-                  <th class="table-head">
-                    {{ t('management.defaultPlatform') }}
-                  </th>
                   <th class="table-head">{{ t('dashboard.isStaff') }}</th>
                   <th class="table-head">{{ t('management.isActive') }}</th>
                   <th class="table-head">{{ t('management.dateJoined') }}</th>
@@ -90,17 +86,6 @@
                   </td>
                   <td class="table-cell text-gray-500">
                     {{ joinNames(user.groups) }}
-                  </td>
-                  <td class="table-cell text-gray-500">
-                    {{ joinNames(user.effective_roles || user.roles) }}
-                  </td>
-                  <td class="table-cell text-gray-500">
-                    {{
-                      formatPlatform(
-                        user.preferred_platform ||
-                          user.access_profile?.preferred_platform
-                      )
-                    }}
                   </td>
                   <td class="table-cell">
                     <span
@@ -230,48 +215,6 @@
               </label>
             </div>
           </div>
-          <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">{{
-              t('management.selectRoles')
-            }}</label>
-            <div
-              class="max-h-40 space-y-2 overflow-y-auto rounded-md border border-gray-300 bg-white p-2"
-            >
-              <label
-                v-for="role in roleOptions"
-                :key="role.id"
-                class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-gray-50"
-              >
-                <input
-                  v-model="form.role_ids"
-                  type="checkbox"
-                  :value="role.id"
-                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                />
-                <span class="text-sm text-gray-700">{{ role.name }}</span>
-              </label>
-            </div>
-          </div>
-          <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">{{
-              t('management.defaultPlatform')
-            }}</label>
-            <select
-              v-model="form.preferred_platform"
-              class="form-input bg-white"
-            >
-              <option value="">
-                {{ t('management.followRolePreference') }}
-              </option>
-              <option
-                v-for="platform in platformOptions"
-                :key="platform.key"
-                :value="platform.key"
-              >
-                {{ platform.label }}
-              </option>
-            </select>
-          </div>
           <div class="grid gap-4 md:grid-cols-2">
             <div class="flex items-center gap-3">
               <input
@@ -330,7 +273,6 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import { managementApi } from '@/admin/api'
-import { FEATURE_DEFINITIONS } from '@/utils/platformAccess'
 
 const { t } = useI18n()
 
@@ -348,7 +290,6 @@ const submitLoading = ref(false)
 const submitError = ref(null)
 
 const groupOptions = ref([])
-const roleOptions = ref([])
 
 const createEmptyForm = () => ({
   username: '',
@@ -356,9 +297,7 @@ const createEmptyForm = () => ({
   password: '',
   is_staff: false,
   is_active: true,
-  group_ids: [],
-  role_ids: [],
-  preferred_platform: ''
+  group_ids: []
 })
 
 const form = ref(createEmptyForm())
@@ -380,13 +319,6 @@ const modalTitle = computed(() =>
     : t('management.editUser')
 )
 
-const platformOptions = computed(() =>
-  FEATURE_DEFINITIONS.map((item) => ({
-    key: item.key,
-    label: t(item.labelKey)
-  }))
-)
-
 function joinNames(items) {
   return Array.isArray(items) && items.length
     ? items.map((item) => item.name).join(', ')
@@ -397,11 +329,6 @@ function formatDate(value) {
   if (!value) return '—'
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-}
-
-function formatPlatform(value) {
-  const match = platformOptions.value.find((item) => item.key === value)
-  return match?.label || '—'
 }
 
 function closeModal() {
@@ -429,30 +356,22 @@ function openEditModal(user) {
     is_active: user.is_active !== false,
     group_ids: Array.isArray(user.groups)
       ? user.groups.map((item) => item.id)
-      : [],
-    role_ids: Array.isArray(user.roles)
-      ? user.roles.map((item) => item.id)
-      : [],
-    preferred_platform: user.preferred_platform || ''
+      : []
   }
   showModal.value = true
 }
 
 async function loadOptions() {
   try {
-    const [groupsData, rolesData] = await Promise.all([
-      managementApi.getGroups({ page: 1, page_size: 1000 }),
-      managementApi.getRoles({ page: 1, page_size: 1000 })
-    ])
+    const groupsData = await managementApi.getGroups({
+      page: 1,
+      page_size: 1000
+    })
     groupOptions.value = Array.isArray(groupsData)
       ? groupsData
       : (groupsData?.results ?? [])
-    roleOptions.value = Array.isArray(rolesData)
-      ? rolesData
-      : (rolesData?.results ?? [])
   } catch {
     groupOptions.value = []
-    roleOptions.value = []
   }
 }
 
@@ -463,9 +382,7 @@ async function submitUser() {
     email: (form.value.email || '').trim(),
     is_staff: !!form.value.is_staff,
     is_active: !!form.value.is_active,
-    group_ids: Array.isArray(form.value.group_ids) ? form.value.group_ids : [],
-    role_ids: Array.isArray(form.value.role_ids) ? form.value.role_ids : [],
-    preferred_platform: form.value.preferred_platform || ''
+    group_ids: Array.isArray(form.value.group_ids) ? form.value.group_ids : []
   }
 
   if (!payload.username) {

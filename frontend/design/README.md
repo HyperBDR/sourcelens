@@ -22,3 +22,8 @@ cd frontend && npm run dev
    <li><a href="/design/login.html">登录页设计</a></li>
    ```
 3. 浏览器访问 `http://localhost:3000/design/login.html`。
+
+## 当前原型
+
+- `ai-query-v1/`：DEV-3 当前 Vue + Tailwind 原型入口，开发期评审使用。
+- `lens-v1.1/`：历史静态原型保留，不作为本次 AI Query 评审入口。

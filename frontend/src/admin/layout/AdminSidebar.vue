@@ -190,6 +190,238 @@
           class="menu-group"
         >
           <button
+            @click="toggleLensMenu"
+            class="admin-nav-item admin-nav-item-parent w-full"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+              />
+            </svg>
+            <span class="flex-1 text-left">{{ t('lensAdmin.menuTitle') }}</span>
+            <svg
+              class="w-4 h-4 transition-transform"
+              :class="lensMenuOpen ? 'rotate-90' : ''"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+          <Transition
+            enter-active-class="transition-all duration-200 ease-out"
+            enter-from-class="opacity-0 max-h-0"
+            enter-to-class="opacity-100 max-h-96"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 max-h-96"
+            leave-to-class="opacity-0 max-h-0"
+          >
+            <div v-if="lensMenuOpen" class="submenu">
+              <router-link
+                to="/management/lens/assistants"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/assistants')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/lens/assistants')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.79 9.79 0 01-4-.82L3 20l1.82-4.91A7.8 7.8 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.pages.assistants.title') }}</span>
+              </router-link>
+              <router-link
+                to="/management/lens/lensnodes"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/lensnodes')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/lens/lensnodes')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2M7 8h.01M7 16h.01"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.pages.lensnodes.title') }}</span>
+              </router-link>
+              <router-link
+                to="/management/lens/datasources"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/datasources')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/lens/datasources')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.pages.datasources.title') }}</span>
+              </router-link>
+              <router-link
+                to="/management/lens/resources/skills"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/resources/skills')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/lens/resources/skills')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.tabs.skills') }}</span>
+              </router-link>
+              <router-link
+                to="/management/lens/resources/mcp"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/resources/mcp')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/lens/resources/mcp')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.tabs.mcp') }}</span>
+              </router-link>
+              <router-link
+                to="/management/lens/settings"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/settings')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/lens/settings')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.tabs.settings') }}</span>
+              </router-link>
+              <router-link
+                to="/management/lens/health"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/health')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/lens/health')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.tabs.health') }}</span>
+              </router-link>
+            </div>
+          </Transition>
+        </div>
+
+        <div
+          v-if="userStore.userHasFeature('admin_console')"
+          class="menu-group"
+        >
+          <button
             @click="toggleLLMMenu"
             class="admin-nav-item admin-nav-item-parent w-full"
           >
@@ -686,6 +918,7 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const userManagementMenuOpen = ref(true)
+const lensMenuOpen = ref(true)
 const llmMenuOpen = ref(true)
 const taskManagementMenuOpen = ref(true)
 const notificationManagementMenuOpen = ref(true)
@@ -702,6 +935,10 @@ const isActive = (path) => {
 
 const toggleUserManagementMenu = () => {
   userManagementMenuOpen.value = !userManagementMenuOpen.value
+}
+
+const toggleLensMenu = () => {
+  lensMenuOpen.value = !lensMenuOpen.value
 }
 
 const toggleLLMMenu = () => {
@@ -725,6 +962,7 @@ watch(
       newPath.startsWith('/management/roles')
     )
       userManagementMenuOpen.value = true
+    if (newPath.startsWith('/management/lens')) lensMenuOpen.value = true
     if (newPath.startsWith('/management/llm')) llmMenuOpen.value = true
     if (newPath.startsWith('/management/task-management'))
       taskManagementMenuOpen.value = true

@@ -63,6 +63,11 @@ def configure_logging(log_level="INFO"):
                 'handlers': ['console'],
                 'propagate': False,
             },
+            'lens': {
+                'level': log_level,
+                'handlers': ['console'],
+                'propagate': False,
+            },
             'django.server': DEFAULT_LOGGING['loggers']['django.server'],
             'django.utils.autoreload': {
                 'level': 'INFO',

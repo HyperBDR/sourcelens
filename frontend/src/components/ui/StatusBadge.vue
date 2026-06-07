@@ -35,7 +35,7 @@
     </svg>
     <!-- Processing icon (spinning) -->
     <svg
-      v-else-if="status === 'processing'"
+      v-else-if="status === 'processing' || status === 'running'"
       class="animate-spin w-3.5 h-3.5 flex-shrink-0"
       fill="none"
       viewBox="0 0 24 24"
@@ -116,7 +116,7 @@
     </svg>
     <!-- Disabled icon -->
     <svg
-      v-else-if="status === 'disabled'"
+      v-else-if="status === 'disabled' || status === 'cancelled'"
       class="w-3.5 h-3.5 flex-shrink-0"
       fill="none"
       stroke="currentColor"
@@ -165,11 +165,13 @@ const getStatusClass = (status) => {
     success: 'bg-green-100 text-green-800 border-green-200',
     failed: 'bg-red-100 text-red-800 border-red-200',
     processing: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    running: 'bg-yellow-100 text-yellow-800 border-yellow-200',
     fetched: 'bg-blue-100 text-blue-800 border-blue-200',
     pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
     completed: 'bg-green-100 text-green-800 border-green-200',
     enabled: 'bg-green-100 text-green-800 border-green-200',
-    disabled: 'bg-gray-100 text-gray-700 border-gray-200'
+    disabled: 'bg-gray-100 text-gray-700 border-gray-200',
+    cancelled: 'bg-gray-100 text-gray-700 border-gray-200'
   }
   return classes[status] || 'bg-gray-100 text-gray-700 border-gray-200'
 }
@@ -179,11 +181,13 @@ const getStatusText = (status) => {
     success: t('common.status.success'),
     failed: t('common.status.failed'),
     processing: t('common.status.processing'),
+    running: t('common.status.processing'),
     fetched: t('common.status.fetched'),
     pending: t('common.status.pending'),
     completed: t('common.status.completed'),
     enabled: t('common.status.enabled'),
-    disabled: t('common.status.disabled')
+    disabled: t('common.status.disabled'),
+    cancelled: t('common.status.disabled')
   }
   return statusTexts[status] || status || t('common.status.unknown')
 }

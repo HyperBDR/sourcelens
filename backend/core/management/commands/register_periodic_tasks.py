@@ -26,12 +26,14 @@ def discover_and_register():
     """
     TASK_REGISTRY.clear()
 
+    discovered_modules = []
     for app in settings.INSTALLED_APPS:
         try:
             module = importlib.import_module(f"{app}.periodic_tasks")
         except ModuleNotFoundError:
             continue
 
+        discovered_modules.append(module)
         if hasattr(module, "register_periodic_tasks"):
             try:
                 module.register_periodic_tasks()
@@ -41,6 +43,15 @@ def discover_and_register():
                 )
 
     apply_registry()
+    for module in discovered_modules:
+        if hasattr(module, "sync_registered_periodic_tasks"):
+            try:
+                module.sync_registered_periodic_tasks()
+            except Exception as e:
+                logger.exception(
+                    "sync_registered_periodic_tasks failed for "
+                    f"module {module.__name__}: {e}"
+                )
 
 
 class Command(BaseCommand):

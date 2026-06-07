@@ -75,6 +75,45 @@
   "virtualEmail": {
     "yourAddress": "Your AI Email"
   },
+  "lens": {
+    "chat": {
+      "liveOutput": "Live output",
+      "executionTimeline": "Execution timeline",
+      "showTimeline": "Show {count} events",
+      "hideTimeline": "Hide events",
+      "questionPlaceholder": "Enter a question",
+      "runInline": "Run inline",
+      "cancelRun": "Cancel",
+      "runSubmitted": "Run submitted.",
+      "submitFailed": "Failed to submit query.",
+      "waitingForResult": "Still waiting for execution result.",
+      "thinking": "Analyzing project context",
+      "waiting": "Waiting",
+      "running": "Analyzing",
+      "generating": "Generating",
+      "agentActivity": "Agent activity",
+      "events": {
+        "submitted": "Submitted",
+        "sync": "Sync status",
+        "status": "Status update",
+        "step": "{step}",
+        "ping": "Waiting",
+        "error": "Execution failed",
+        "agentActivity": "Agent activity"
+      },
+      "activity": {
+        "planning": "Planning retrieval",
+        "analyzing_question": "Analyzing the question",
+        "searching_code": "Searching code and docs",
+        "searched_code": "Finished searching candidate files",
+        "reading_evidence": "Reading evidence snippets",
+        "read_evidence": "Finished reading evidence",
+        "calling_model": "Calling the model for an answer",
+        "completed": "Execution logic completed",
+        "running": "Running"
+      }
+    }
+  },
   "auth": {
     "login": "Login",
     "register": "Register",

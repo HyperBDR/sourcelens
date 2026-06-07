@@ -144,7 +144,7 @@ const pageTitle = computed(() => {
   const routeNames = {
     ManagementUsers: t('management.userManagement'),
     ManagementGroups: t('management.groupManagement'),
-    ManagementRoles: t('management.roleManagement'),
+    LensAdmin: 'Lens Admin',
     LLMStats: t('llm.stats.title'),
     LLMUsage: t('llm.usage.title'),
     LLMConfig: t('llm.config.title'),

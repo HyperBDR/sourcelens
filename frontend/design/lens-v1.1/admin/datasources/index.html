@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lens Admin — 数据源 v1.1</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{primary:{50:'#eff6ff',100:'#dbeafe',600:'#2563eb',700:'#1d4ed8'}},fontFamily:{sans:['Inter','system-ui','sans-serif']}}}}</script>
+<style>
+body{font-family:Inter,system-ui,sans-serif;}
+.admin-link{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;font-size:14px;font-weight:500;color:#cbd5e1;transition:all .2s;text-decoration:none;}
+.admin-link:hover{background:#334155;color:#f1f5f9;}
+.admin-link.active{background:rgba(99,102,241,.8);color:#fff;}
+.sub-link{display:flex;align-items:center;gap:10px;padding:6px 12px 6px 32px;border-radius:8px;font-size:13px;color:#94a3b8;transition:all .2s;text-decoration:none;}
+.sub-link:hover{background:#334155;color:#f1f5f9;}
+.drawer{position:fixed;left:50%;top:50%;width:720px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(15,23,42,.24);z-index:50;display:flex;flex-direction:column;opacity:0;pointer-events:none;transform:translate(-50%,-48%) scale(.98);transition:transform .24s cubic-bezier(.4,0,.2,1),opacity .24s cubic-bezier(.4,0,.2,1);}
+.drawer.open{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1);}
+.drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:40;opacity:0;transition:opacity .3s;pointer-events:none;}
+.drawer-overlay.open{opacity:1;pointer-events:auto;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:60;display:flex;align-items:center;justify-content:center;}
+.input{display:block;width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;}
+.input:focus{box-shadow:0 0 0 2px #bfdbfe;border-color:#93c5fd;}
+.label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:4px;}
+</style>
+</head>
+<body class="bg-gray-50 flex h-screen overflow-hidden">
+
+<aside class="w-64 flex-shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col h-full">
+  <div class="flex items-center gap-3 px-4 h-16 border-b border-slate-700">
+    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+    </div>
+    <span class="text-white font-semibold">Lens Admin</span>
+  </div>
+  <nav class="flex-1 px-3 py-4 space-y-1">
+    <a href="../assistants/" class="admin-link"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>助手管理</a>
+    <a href="index.html" class="admin-link active"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4"/></svg>数据源管理</a>
+    <div class="mt-1">
+      <a href="../resources/" class="admin-link" style="opacity:.8">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        资源库
+      </a>
+      <div class="ml-1 mt-0.5 space-y-0.5">
+        <a href="../resources/#skills" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>Skills
+        </a>
+        <a href="../resources/#mcps" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>MCP Servers
+        </a>
+        <a href="../resources/#settings" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>全局配置
+        </a>
+        <a href="../resources/#health" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>系统健康
+        </a>
+        <a href="../resources/#sync-tasks" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>同步任务
+        </a>
+      </div>
+    </div>
+  </nav>
+  <div class="px-3 py-4 border-t border-slate-700">
+    <a href="../../assistants/" class="admin-link text-sm"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>用户视图</a>
+  </div>
+</aside>
+
+<div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+  <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold text-gray-900">全局数据源</h1>
+      <p class="text-sm text-gray-500 mt-0.5">管理代码库、Jira、飞书等知识源，供 Assistant 按需绑定</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button onclick="openCreateDrawer()" class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>新建数据源
+      </button>
+    </div>
+  </header>
+  <main class="flex-1 overflow-y-auto p-6">
+    <div class="mb-4 flex items-start justify-between gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-3">
+      <div>
+        <p class="text-sm font-medium text-gray-700">同步状态说明</p>
+        <p class="text-xs text-gray-500 mt-1">列表展示数据源当前同步状态；完整执行记录请在资源库的“同步任务”子页查看。</p>
+      </div>
+      <label class="flex items-center gap-2 cursor-pointer select-none text-xs text-gray-400" title="开发期演示 503 fail-closed 路径">
+        <input type="checkbox" id="redis-down-toggle" onchange="renderTable()" class="rounded">
+        <span>演示 503</span>
+      </label>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">名称</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">类型</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">状态</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">已绑定</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">同步状态</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">操作</th>
+          </tr>
+        </thead>
+        <tbody id="ds-table" class="divide-y divide-gray-100"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<!-- Drawer overlay -->
+<div id="drawer-overlay" class="drawer-overlay" onclick="closeDrawer()"></div>
+
+<!-- Centered Create/Edit Modal -->
+<div id="ds-drawer" class="drawer">
+  <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+    <h3 id="ds-drawer-title" class="text-lg font-semibold text-gray-900">新建数据源</h3>
+    <button onclick="closeDrawer()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+    <div><label class="label">名称 *</label><input id="ds-name" type="text" class="input" placeholder="My Repository"></div>
+    <div>
+      <label class="label">类型 *</label>
+      <select id="ds-type" class="input" onchange="updateConfigFields()">
+        <option value="git">git（代码库）</option>
+        <option value="jira">jira</option>
+        <option value="feishu">feishu（飞书）</option>
+        <option value="confluence">confluence</option>
+        <option value="local_dir">local_dir（本地目录，无同步任务）</option>
+      </select>
+    </div>
+    <div id="config-git">
+      <label class="label">仓库 URL *</label>
+      <input id="ds-repo-url" type="text" class="input" placeholder="https://github.com/example/repo">
+      <div class="grid grid-cols-2 gap-3 mt-3">
+        <div><label class="label">分支</label><input id="ds-branch" type="text" class="input" placeholder="main" value="main"></div>
+        <div><label class="label">凭证引用</label><input id="ds-cred-ref" type="text" class="input font-mono" placeholder="cred-xxx"></div>
+      </div>
+    </div>
+    <div id="config-jira" class="hidden">
+      <label class="label">Jira 基础 URL *</label>
+      <input id="ds-jira-url" type="text" class="input" placeholder="https://jira.example.com">
+      <div class="mt-3"><label class="label">认证方式</label>
+        <select id="ds-jira-auth" class="input"><option value="token">API Token</option><option value="basic">Basic Auth</option></select>
+      </div>
+    </div>
+    <div id="config-feishu" class="hidden">
+      <label class="label">App Token *</label>
+      <input id="ds-feishu-token" type="text" class="input font-mono" placeholder="mock_token_xxx">
+      <p class="text-xs text-red-500 mt-1">⚠ 禁止明文写入实际 Token，存凭证引用</p>
+    </div>
+    <div id="config-confluence" class="hidden">
+      <label class="label">基础 URL *</label>
+      <input id="ds-conf-url" type="text" class="input" placeholder="https://confluence.example.com">
+      <div class="mt-3"><label class="label">凭证引用</label><input id="ds-conf-cred" type="text" class="input font-mono" placeholder="cred-xxx"></div>
+    </div>
+    <div id="config-local" class="hidden">
+      <label class="label">本地目录路径 *</label>
+      <input id="ds-local-path" type="text" class="input font-mono" placeholder="/var/docs/internal">
+      <p class="text-xs text-gray-400 mt-1">local_dir 不创建同步任务，直接只读挂载</p>
+    </div>
+    <div id="sync-policy-section">
+      <label class="label">同步间隔（秒）</label>
+      <input id="ds-interval" type="number" class="input" placeholder="3600" value="3600">
+    </div>
+  </div>
+  <div class="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex gap-3 justify-end bg-gray-50">
+    <button onclick="closeDrawer()" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">取消</button>
+    <button onclick="saveDataSource()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg">保存</button>
+  </div>
+</div>
+
+<!-- [H1] Delete blocked modal -->
+<div id="ds-delete-blocked-modal" class="hidden modal-overlay">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-96">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
+        <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+      </div>
+      <h3 class="text-base font-semibold text-gray-900">无法删除</h3>
+    </div>
+    <p id="ds-blocked-msg" class="text-sm text-gray-700 mb-3"></p>
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+      <p class="text-xs text-blue-800">请先在<strong>助手管理</strong>页面解绑该数据源的所有 Assistant 绑定，再回来删除。</p>
+    </div>
+    <div class="flex justify-end">
+      <button onclick="closeModal('ds-delete-blocked-modal')" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete confirm -->
+<div id="ds-delete-modal" class="hidden modal-overlay">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+        <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+      </div>
+      <h3 class="text-base font-semibold text-gray-900">确认删除数据源</h3>
+    </div>
+    <p id="ds-confirm-msg" class="text-sm text-gray-600 mb-4"></p>
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeModal('ds-delete-modal')" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">取消</button>
+      <button onclick="confirmDsDelete()" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg">删除</button>
+    </div>
+  </div>
+</div>
+
+<script src="../../shared.js"></script>
+<script>
+let editingDsId=null, deleteDsTarget=null;
+const sourceTypeBadge={git:'bg-orange-100 text-orange-800',jira:'bg-blue-100 text-blue-800',feishu:'bg-indigo-100 text-indigo-800',confluence:'bg-purple-100 text-purple-800',local_dir:'bg-gray-100 text-gray-700'};
+
+function isRedisDown(){return document.getElementById('redis-down-toggle')?.checked;}
+
+function openDrawer(){document.getElementById('ds-drawer').classList.add('open');document.getElementById('drawer-overlay').classList.add('open');}
+function closeDrawer(){document.getElementById('ds-drawer').classList.remove('open');document.getElementById('drawer-overlay').classList.remove('open');}
+function openModal(id){document.getElementById(id)?.classList.remove('hidden');}
+function closeModal(id){document.getElementById(id)?.classList.add('hidden');}
+
+// D4: 同步状态徽标列
+function syncStatusCell(ds) {
+  if (ds.source_type === 'local_dir') {
+    return '<span class="text-xs text-gray-400">无同步（直接挂载）</span>';
+  }
+  const s = MOCK.datasourceSyncState[ds.uuid];
+  if (!s) {
+    return `<span class="text-xs text-gray-400">${formatDate(ds.last_synced_at) || '从未同步'}</span>`;
+  }
+  switch (s.status) {
+    case 'SUCCESS':
+      return `<span class="text-xs text-green-700 font-medium">已同步 · ${formatDate(s.last_synced_at)}</span>`;
+    case 'FAILURE':
+      return `<span class="inline-flex items-center gap-1 text-xs text-red-600 cursor-help" title="${s.error_message||s.error_code||''}">
+        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        上次失败
+        ${s.error_code ? `<span class="font-mono bg-red-50 px-1 rounded text-red-700">${s.error_code}</span>` : ''}
+      </span>`;
+    case 'REVOKED':
+      return `<span class="inline-flex items-center gap-1 text-xs text-amber-600 font-medium cursor-help" title="任务被中断(worker 重启/清理)，请重试">
+        已撤销
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      </span>`;
+    case 'PENDING':
+      return `<span class="inline-flex items-center gap-1 text-xs text-blue-600">
+        <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        排队中
+      </span>`;
+    case 'STARTED':
+      return `<div>
+        <span class="inline-flex items-center gap-1 text-xs text-indigo-700">
+          <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          同步中… ${s.progress}%
+        </span>
+        <div class="mt-1 w-20 bg-gray-200 rounded-full h-1"><div class="bg-indigo-500 h-1 rounded-full transition-all" style="width:${s.progress}%"></div></div>
+      </div>`;
+    case 'RETRY':
+      return `<span class="inline-flex items-center gap-1 text-xs text-yellow-600">
+        <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        重试中…
+      </span>`;
+    default:
+      return `<span class="text-xs text-gray-400">${formatDate(ds.last_synced_at)}</span>`;
+  }
+}
+
+// D4: 同步按钮 6 态状态机
+function syncButtonCell(ds) {
+  if (ds.source_type === 'local_dir') return '';
+  const s = MOCK.datasourceSyncState[ds.uuid];
+  const status = s ? s.status : null;
+
+  if (status === 'PENDING' || status === 'STARTED' || status === 'RETRY') {
+    const label = status === 'STARTED' ? `同步中 ${s.progress}%` : status === 'RETRY' ? '重试中…' : '排队中';
+    return `<button onclick="onAlreadySyncing(event)" aria-disabled="true" class="inline-flex items-center gap-1 text-xs text-gray-400 cursor-not-allowed">
+      <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      ${label}
+    </button>`;
+  }
+  if (status === 'FAILURE') {
+    return `<button onclick="triggerSync('${ds.uuid}')" class="inline-flex items-center gap-1 text-xs text-white bg-red-600 hover:bg-red-700 px-2 py-1 rounded font-medium">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      重试同步
+    </button>`;
+  }
+  if (status === 'REVOKED') {
+    return `<button onclick="triggerSync('${ds.uuid}')" class="inline-flex items-center gap-1 text-xs text-amber-700 border border-amber-300 hover:bg-amber-50 px-2 py-1 rounded font-medium" title="任务被中断，请重新同步">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      重试同步
+    </button>`;
+  }
+  // SUCCESS or null: normal sync button
+  return `<button onclick="triggerSync('${ds.uuid}')" class="text-xs text-green-600 hover:underline font-medium">同步</button>`;
+}
+
+function renderTable() {
+  document.getElementById('ds-table').innerHTML=MOCK.datasources.map(ds=>`
+    <tr class="hover:bg-gray-50 transition-colors ${ds.status==='disabled'?'opacity-60':''}">
+      <td class="px-4 py-3">
+        <div class="font-medium text-gray-900">${ds.name}</div>
+        ${ds.source_type==='git'?`<div class="text-xs text-gray-400 font-mono truncate max-w-xs">${ds.config.repo_url||''}</div>`:''}
+        ${ds.source_type==='local_dir'?`<div class="text-xs text-gray-400 font-mono">${ds.config.path||''}</div>`:''}
+      </td>
+      <td class="px-4 py-3"><span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${sourceTypeBadge[ds.source_type]||'bg-gray-100 text-gray-600'}">${ds.source_type}</span></td>
+      <td class="px-4 py-3">${statusBadge(ds.status)}</td>
+      <td class="px-4 py-3">${ds.assistants_bound>0?`<span class="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">${ds.assistants_bound} 个 Assistant</span>`:'<span class="text-xs text-gray-400">无绑定</span>'}</td>
+      <td class="px-4 py-3">${syncStatusCell(ds)}</td>
+      <td class="px-4 py-3">
+        <div class="flex flex-wrap gap-2 items-center">
+          <button onclick="openEditDrawer('${ds.uuid}')" class="text-xs text-blue-600 hover:underline">编辑</button>
+          ${syncButtonCell(ds)}
+          <button onclick="openDsDeleteModal('${ds.uuid}')" class="text-xs text-red-600 hover:underline">删除</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function onAlreadySyncing(event) {
+  event.preventDefault();
+  showToast('已在同步中（409）', 'warn');
+}
+
+function updateConfigFields(){
+  const type=document.getElementById('ds-type').value;
+  ['git','jira','feishu','confluence','local'].forEach(t=>document.getElementById(`config-${t}`).classList.add('hidden'));
+  document.getElementById(`config-${type==='local_dir'?'local':type}`)?.classList.remove('hidden');
+  document.getElementById('sync-policy-section').style.display=type==='local_dir'?'none':'block';
+}
+
+function openCreateDrawer(){
+  editingDsId=null;
+  document.getElementById('ds-drawer-title').textContent='新建数据源';
+  document.getElementById('ds-name').value='';
+  document.getElementById('ds-type').value='git';
+  document.getElementById('ds-repo-url').value='';
+  document.getElementById('ds-branch').value='main';
+  document.getElementById('ds-cred-ref').value='';
+  document.getElementById('ds-interval').value='3600';
+  updateConfigFields();
+  openDrawer();
+}
+
+function openEditDrawer(uuid){
+  const ds=MOCK.datasources.find(d=>d.uuid===uuid); if(!ds)return;
+  editingDsId=uuid;
+  document.getElementById('ds-drawer-title').textContent='编辑数据源';
+  document.getElementById('ds-name').value=ds.name;
+  document.getElementById('ds-type').value=ds.source_type;
+  if(ds.source_type==='git'){
+    document.getElementById('ds-repo-url').value=ds.config.repo_url||'';
+    document.getElementById('ds-branch').value=ds.config.branch||'main';
+    document.getElementById('ds-cred-ref').value=ds.config.credentials_ref||'';
+  }
+  updateConfigFields();
+  openDrawer();
+}
+
+function saveDataSource(){
+  const name=document.getElementById('ds-name').value.trim();
+  const type=document.getElementById('ds-type').value;
+  if(!name){showToast('名称为必填项','error');return;}
+  if(editingDsId){
+    const ds=MOCK.datasources.find(d=>d.uuid===editingDsId);
+    if(ds){ds.name=name;ds.source_type=type;}
+  }else{
+    const uuid='new-ds-'+Date.now();
+    MOCK.datasources.push({uuid,name,source_type:type,status:'active',last_synced_at:type==='local_dir'?null:null,assistants_bound:0,config:{}});
+    if(type!=='local_dir') MOCK.datasourceSyncState[uuid]=null;
+  }
+  closeDrawer(); renderTable(); showToast(editingDsId?'数据源已更新':'数据源已创建，同步任务已注册');
+}
+
+function triggerSync(uuid){
+  const ds=MOCK.datasources.find(d=>d.uuid===uuid); if(!ds)return;
+  // D4: Redis fail-closed (503)
+  if(isRedisDown()){showToast('同步服务暂不可用，请稍后重试（503）','error');return;}
+  if(ds.status==='error'){showToast('数据源状态异常，请先修复配置','error');return;}
+  if(ds.status==='disabled'){showToast('数据源已禁用，无法同步','error');return;}
+  // D4: set to PENDING state
+  MOCK.datasourceSyncState[uuid]={status:'PENDING',progress:0,last_synced_at:ds.last_synced_at,error_code:null,error_message:null};
+  renderTable();
+  showToast(`${ds.name} 同步任务已排队`);
+  // Simulate PENDING → STARTED → SUCCESS
+  setTimeout(()=>{
+    const s=MOCK.datasourceSyncState[uuid]; if(!s)return;
+    s.status='STARTED'; s.progress=5; renderTable();
+    let prog=5;
+    const poll=setInterval(()=>{
+      const s=MOCK.datasourceSyncState[uuid]; if(!s||s.status!=='STARTED'){clearInterval(poll);return;}
+      prog=Math.min(100,prog+15); s.progress=prog;
+      if(prog>=100){
+        s.status='SUCCESS'; s.last_synced_at=new Date().toISOString();
+        const d=MOCK.datasources.find(x=>x.uuid===uuid); if(d)d.last_synced_at=s.last_synced_at;
+        clearInterval(poll);
+      }
+      renderTable();
+    },2000);
+  },1500);
+}
+
+function openDsDeleteModal(uuid){
+  const ds=MOCK.datasources.find(d=>d.uuid===uuid); if(!ds)return;
+  if(ds.assistants_bound>0){
+    document.getElementById('ds-blocked-msg').innerHTML=`无法删除 <strong>${ds.name}</strong>：存在 <strong>${ds.assistants_bound} 个 Assistant</strong> 已绑定，请先解绑。`;
+    openModal('ds-delete-blocked-modal');
+  }else{
+    deleteDsTarget=uuid;
+    document.getElementById('ds-confirm-msg').textContent=`确认删除「${ds.name}」？将同时移除关联的同步任务，此操作不可撤销。`;
+    openModal('ds-delete-modal');
+  }
+}
+function confirmDsDelete(){
+  const idx=MOCK.datasources.findIndex(d=>d.uuid===deleteDsTarget);
+  if(idx>=0)MOCK.datasources.splice(idx,1);
+  closeModal('ds-delete-modal'); renderTable(); showToast('数据源已删除','error');
+}
+
+renderTable();
+</script>
+</body>
+</html>

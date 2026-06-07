@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lens Admin — Assistants v1.1</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{primary:{50:'#eff6ff',100:'#dbeafe',600:'#2563eb',700:'#1d4ed8'}},fontFamily:{sans:['Inter','system-ui','sans-serif']}}}}</script>
+<style>
+body{font-family:Inter,system-ui,sans-serif;}
+.admin-link{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;font-size:14px;font-weight:500;color:#cbd5e1;transition:all .2s;text-decoration:none;}
+.admin-link:hover{background:#334155;color:#f1f5f9;}
+.admin-link.active{background:rgba(99,102,241,.8);color:#fff;}
+.sub-link{display:flex;align-items:center;gap:10px;padding:6px 12px 6px 32px;border-radius:8px;font-size:13px;color:#94a3b8;transition:all .2s;text-decoration:none;}
+.sub-link:hover{background:#334155;color:#f1f5f9;}
+.drawer{position:fixed;left:50%;top:50%;width:860px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(15,23,42,.24);z-index:50;display:flex;flex-direction:column;opacity:0;pointer-events:none;transform:translate(-50%,-48%) scale(.98);transition:transform .24s cubic-bezier(.4,0,.2,1),opacity .24s cubic-bezier(.4,0,.2,1);}
+.drawer.open{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1);}
+.detail-drawer{position:fixed;inset-y:0;right:0;width:420px;max-width:100vw;background:#fff;box-shadow:-8px 0 32px rgba(15,23,42,.18);z-index:55;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);}
+.detail-drawer.open{transform:translateX(0);}
+.drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:40;opacity:0;transition:opacity .3s;pointer-events:none;}
+.drawer-overlay.open{opacity:1;pointer-events:auto;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:60;display:flex;align-items:center;justify-content:center;}
+.input{display:block;width:100%;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;outline:none;}
+.input:focus{box-shadow:0 0 0 2px #bfdbfe;border-color:#93c5fd;}
+.label{display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:4px;}
+/* Wizard step indicator */
+.step-dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;transition:all .3s;}
+.step-dot.done{background:#2563eb;color:#fff;}
+.step-dot.current{background:#dbeafe;color:#2563eb;border:2px solid #2563eb;}
+.step-dot.pending{background:#f3f4f6;color:#9ca3af;}
+.step-line{flex:1;height:2px;background:#e5e7eb;margin:0 4px;transition:background .3s;}
+.step-line.done{background:#2563eb;}
+</style>
+</head>
+<body class="bg-gray-50 flex h-screen overflow-hidden">
+
+<aside class="w-64 flex-shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col h-full">
+  <div class="flex items-center gap-3 px-4 h-16 border-b border-slate-700">
+    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+    </div>
+    <span class="text-white font-semibold">Lens Admin</span>
+  </div>
+  <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <a href="index.html" class="admin-link active">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      助手管理
+    </a>
+    <a href="../datasources/" class="admin-link">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4"/></svg>
+      数据源管理
+    </a>
+    <div class="mt-1">
+      <a href="../resources/" class="admin-link" style="opacity:.8">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        资源库
+      </a>
+      <div class="ml-1 mt-0.5 space-y-0.5">
+        <a href="../resources/#skills" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>Skills
+        </a>
+        <a href="../resources/#mcps" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>MCP Servers
+        </a>
+        <a href="../resources/#settings" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>全局配置
+        </a>
+        <a href="../resources/#health" class="sub-link">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>系统健康
+        </a>
+      </div>
+    </div>
+  </nav>
+  <div class="px-3 py-4 border-t border-slate-700">
+    <a href="../../assistants/" class="admin-link text-sm">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+      用户视图
+    </a>
+  </div>
+</aside>
+
+<div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+  <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold text-gray-900">Assistant 管理</h1>
+      <p class="text-sm text-gray-500 mt-0.5">创建和配置 AI 问答助手，绑定数据源和工具</p>
+    </div>
+    <button onclick="startWizard()" class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      新建 Assistant
+    </button>
+  </header>
+  <main class="flex-1 overflow-y-auto p-6">
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">名称</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">引擎</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">数据源</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">状态</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">模型校验</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
+          </tr>
+        </thead>
+        <tbody id="assistant-table" class="divide-y divide-gray-100"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<!-- Drawer overlay -->
+<div id="drawer-overlay" class="drawer-overlay" onclick="closeDrawer()"></div>
+
+<!-- Create Wizard Drawer (3-step guided flow) -->
+<div id="wizard-drawer" class="drawer">
+  <!-- Wizard header with step indicator -->
+  <div class="flex-shrink-0 px-6 py-4 border-b border-gray-200 bg-gray-50">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-base font-semibold text-gray-900">新建 Assistant</h3>
+      <button onclick="closeDrawer()" class="p-1.5 rounded-lg hover:bg-gray-200 text-gray-400">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <!-- Step indicator -->
+    <div class="flex items-center">
+      <div class="step-dot" id="dot-1">1</div>
+      <div class="step-line" id="line-1"></div>
+      <div class="step-dot" id="dot-2">2</div>
+      <div class="step-line" id="line-2"></div>
+      <div class="step-dot" id="dot-3">3</div>
+    </div>
+    <div class="flex justify-between mt-1.5 text-xs text-gray-500">
+      <span>基本信息</span>
+      <span class="ml-2">数据源</span>
+      <span>工具配置</span>
+    </div>
+  </div>
+
+  <!-- Step 1: Basic Info -->
+  <div id="wizard-step-1" class="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-2">
+      <p class="text-xs text-blue-800">💡 填写 Assistant 的基本信息。引擎类型决定了代码分析能力，可保存后再修改。</p>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label">名称 *</label>
+        <input id="f-name" type="text" class="input" placeholder="My Code Assistant" oninput="autoSlug()">
+      </div>
+      <div>
+        <label class="label">Slug *</label>
+        <input id="f-slug" type="text" class="input font-mono" placeholder="my-code-assistant">
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label">引擎类型 *</label>
+        <select id="f-engine" class="input">
+          <option value="claude_code">claude_code — 代码分析（推荐）</option>
+          <option value="codex">codex — 通用编程</option>
+          <option value="http_direct" disabled>http_direct（留位，未实现）</option>
+          <option value="deepagent" disabled>deepagent（留位，未实现）</option>
+        </select>
+      </div>
+      <div>
+        <label class="label">初始状态</label>
+        <select id="f-status" class="input">
+          <option value="active">运行中</option>
+          <option value="disabled">已禁用</option>
+        </select>
+      </div>
+    </div>
+    <div>
+      <label class="label">预处理模型 <span class="text-gray-400 font-normal">（可选）</span></label>
+      <input id="f-preprocess-model" type="text" class="input font-mono" placeholder="LLMConfig UUID">
+      <p class="text-xs text-gray-400 mt-1">用于 query 改写和 answer 整理，保存时进行连通性校验，失败不阻断保存。</p>
+    </div>
+    <div>
+      <label class="label">引擎模型 <span class="text-gray-400 font-normal">（可选）</span></label>
+      <input id="f-engine-model" type="text" class="input font-mono" placeholder="LLMConfig UUID">
+    </div>
+  </div>
+
+  <!-- Step 2: DataSources -->
+  <div id="wizard-step-2" class="hidden flex-1 overflow-y-auto px-6 py-5">
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+      <p class="text-xs text-blue-800">💡 选择此 Assistant 可访问的代码库或知识源。可绑定多个，也可稍后在编辑页添加。</p>
+    </div>
+    <div id="datasource-bindings" class="space-y-2 mb-3"></div>
+    <button onclick="addDatasourceRow()" class="text-xs text-blue-600 hover:underline flex items-center gap-1">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>添加数据源
+    </button>
+    <div class="mt-6 pt-4 border-t border-gray-100">
+      <p class="text-xs text-gray-400">如果暂时不绑定数据源，可以跳过此步骤，后续在编辑页面添加。</p>
+    </div>
+  </div>
+
+  <!-- Step 3: Skills & MCP -->
+  <div id="wizard-step-3" class="hidden flex-1 overflow-y-auto px-6 py-5 space-y-5">
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+      <p class="text-xs text-blue-800">💡 配置此 Assistant 可用的工具能力。Skills 为预置工具脚本，MCP 为外部工具服务。</p>
+    </div>
+    <div>
+      <h4 class="text-sm font-semibold text-gray-700 mb-2">Skills</h4>
+      <div id="skill-bindings" class="flex flex-wrap gap-2"></div>
+    </div>
+    <div>
+      <h4 class="text-sm font-semibold text-gray-700 mb-1">MCP Servers</h4>
+      <p class="text-xs text-gray-400 mb-3">每个绑定可独立配置 enabled / load_config / scope</p>
+      <div id="mcp-bindings" class="space-y-2"></div>
+      <button onclick="addMcpBindingRow()" class="mt-2 text-xs text-blue-600 hover:underline flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>添加 MCP 绑定
+      </button>
+    </div>
+  </div>
+
+  <!-- Wizard footer -->
+  <div class="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+    <button id="wizard-back-btn" onclick="wizardBack()" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 hidden">← 上一步</button>
+    <div class="flex-1"></div>
+    <button id="wizard-skip-btn" onclick="wizardNext(true)" class="px-3 py-2 text-xs text-gray-400 hover:text-gray-600 mr-2">跳过</button>
+    <button id="wizard-next-btn" onclick="wizardNext()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2">
+      下一步 →
+    </button>
+    <button id="wizard-save-btn" onclick="saveAssistant()" class="hidden px-4 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2">
+      <span id="save-spinner" class="hidden"><svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></span>
+      完成并创建
+    </button>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="edit-drawer" class="drawer">
+  <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+    <h3 class="text-lg font-semibold text-gray-900">编辑 Assistant</h3>
+    <button onclick="closeDrawer()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+    <div class="grid grid-cols-2 gap-4">
+      <div><label class="label">名称 *</label><input id="e-name" type="text" class="input"></div>
+      <div><label class="label">Slug *</label><input id="e-slug" type="text" class="input font-mono"></div>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div><label class="label">引擎类型</label>
+        <select id="e-engine" class="input">
+          <option value="claude_code">claude_code</option>
+          <option value="codex">codex</option>
+        </select>
+      </div>
+      <div><label class="label">状态</label>
+        <select id="e-status" class="input">
+          <option value="active">运行中</option>
+          <option value="disabled">已禁用</option>
+        </select>
+      </div>
+    </div>
+    <div><label class="label">预处理模型</label><input id="e-preprocess-model" type="text" class="input font-mono"></div>
+    <div><label class="label">引擎模型</label><input id="e-engine-model" type="text" class="input font-mono"></div>
+    <div class="border-t border-gray-100 pt-4">
+      <h4 class="text-sm font-semibold text-gray-700 mb-3">绑定数据源</h4>
+      <div id="e-datasource-bindings" class="space-y-2"></div>
+      <button onclick="addEditDsRow()" class="mt-2 text-xs text-blue-600 hover:underline flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>添加数据源
+      </button>
+    </div>
+    <div class="border-t border-gray-100 pt-4">
+      <h4 class="text-sm font-semibold text-gray-700 mb-2">绑定 Skills</h4>
+      <div id="e-skill-bindings" class="flex flex-wrap gap-2"></div>
+    </div>
+    <div class="border-t border-gray-100 pt-4">
+      <h4 class="text-sm font-semibold text-gray-700 mb-1">绑定 MCP Servers</h4>
+      <div id="e-mcp-bindings" class="space-y-2"></div>
+      <button onclick="addEditMcpRow()" class="mt-2 text-xs text-blue-600 hover:underline flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>添加 MCP 绑定
+      </button>
+    </div>
+  </div>
+  <div class="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex gap-3 justify-end bg-gray-50">
+    <button onclick="closeDrawer()" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">取消</button>
+    <button onclick="saveEdit()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2">
+      <span id="edit-spinner" class="hidden"><svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></span>
+      保存并校验
+    </button>
+  </div>
+</div>
+
+<!-- Detail Drawer -->
+<div id="detail-drawer" class="detail-drawer">
+  <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+    <div>
+      <h3 id="detail-title" class="text-lg font-semibold text-gray-900">Assistant 详情</h3>
+      <p id="detail-subtitle" class="text-xs text-gray-500 mt-1">查看配置、状态和绑定情况</p>
+    </div>
+    <button onclick="closeDrawer()" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+    <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-xs text-gray-500">基础信息</p>
+          <p id="detail-name" class="mt-1 text-base font-semibold text-gray-900">—</p>
+          <p id="detail-slug" class="text-xs font-mono text-gray-500 mt-1">—</p>
+        </div>
+        <div id="detail-status"></div>
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div class="rounded-xl border border-gray-200 p-4">
+        <p class="text-xs text-gray-500">数据源</p>
+        <p id="detail-datasources" class="mt-1 text-sm font-medium text-gray-900">—</p>
+      </div>
+      <div class="rounded-xl border border-gray-200 p-4">
+        <p class="text-xs text-gray-500">会话数</p>
+        <p id="detail-sessions" class="mt-1 text-sm font-medium text-gray-900">—</p>
+      </div>
+    </div>
+    <div class="rounded-xl border border-gray-200 p-4">
+      <p class="text-xs text-gray-500">模型校验</p>
+      <div id="detail-validation" class="mt-2"></div>
+    </div>
+    <div class="rounded-xl border border-gray-200 p-4 space-y-3">
+      <div>
+        <p class="text-xs text-gray-500">绑定数据源</p>
+        <div id="detail-datasource-list" class="mt-2 space-y-2"></div>
+      </div>
+      <div>
+        <p class="text-xs text-gray-500">绑定 MCP</p>
+        <div id="detail-mcp-list" class="mt-2 space-y-2"></div>
+      </div>
+    </div>
+  </div>
+  <div class="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex gap-3 justify-end bg-gray-50">
+    <button onclick="closeDrawer()" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100">关闭</button>
+    <button onclick="openDetailEdit()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg">编辑</button>
+  </div>
+</div>
+
+<!-- [H1] Delete blocked modal -->
+<div id="delete-blocked-modal" class="hidden modal-overlay">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-96">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
+        <svg class="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+      </div>
+      <h3 class="text-base font-semibold text-gray-900">无法删除</h3>
+    </div>
+    <p id="delete-blocked-msg" class="text-sm text-gray-700 mb-3"></p>
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+      <p class="text-xs text-blue-800"><strong>提示：</strong>Assistant 退役请使用「禁用」软态，而非删除。如需彻底移除，请先在历史记录页归档所有关联会话。</p>
+    </div>
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeModal('delete-blocked-modal')" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">关闭</button>
+      <button onclick="closeModal('delete-blocked-modal');doToggleStatus(pendingDeleteId)" class="px-4 py-2 text-sm bg-gray-600 hover:bg-gray-700 text-white rounded-lg">改为禁用</button>
+    </div>
+  </div>
+</div>
+
+<div id="delete-modal" class="hidden modal-overlay">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <div class="flex items-center gap-3 mb-4">
+      <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+        <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+      </div>
+      <h3 class="text-base font-semibold text-gray-900">确认删除</h3>
+    </div>
+    <p id="delete-confirm-msg" class="text-sm text-gray-600 mb-4"></p>
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeModal('delete-modal')" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">取消</button>
+      <button onclick="confirmDelete()" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg">删除</button>
+    </div>
+  </div>
+</div>
+
+<script src="../../shared.js"></script>
+<script>
+let editingId=null, deleteTarget=null, pendingDeleteId=null, detailEditingId=null;
+let wizardStep=1, dsBindings=[], mcpBindings=[], editDsBindings=[], editMcpBindings=[];
+
+// Drawer helpers
+function openDrawer(id){document.getElementById(id).classList.add('open');document.getElementById('drawer-overlay').classList.add('open');}
+function closeDrawer(){['wizard-drawer','edit-drawer','detail-drawer'].forEach(id=>document.getElementById(id).classList.remove('open'));document.getElementById('drawer-overlay').classList.remove('open');}
+function openModal(id){document.getElementById(id)?.classList.remove('hidden');}
+function closeModal(id){document.getElementById(id)?.classList.add('hidden');}
+
+// Auto-generate slug from name
+function autoSlug(){
+  const name=document.getElementById('f-name').value;
+  document.getElementById('f-slug').value=name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+}
+
+// ===================== Wizard (Create flow) =====================
+const WIZARD_STEPS=3;
+
+function startWizard(){
+  wizardStep=1; dsBindings=[]; mcpBindings=[];
+  document.getElementById('f-name').value='';
+  document.getElementById('f-slug').value='';
+  document.getElementById('f-engine').value='claude_code';
+  document.getElementById('f-status').value='active';
+  document.getElementById('f-preprocess-model').value='';
+  document.getElementById('f-engine-model').value='';
+  renderDsBindings(); renderSkillBindings(); renderMcpBindings();
+  updateWizardUI();
+  openDrawer('wizard-drawer');
+}
+
+function updateWizardUI(){
+  for(let i=1;i<=WIZARD_STEPS;i++){
+    document.getElementById(`wizard-step-${i}`).classList.toggle('hidden', i!==wizardStep);
+    const dot=document.getElementById(`dot-${i}`);
+    dot.className='step-dot '+(i<wizardStep?'done':i===wizardStep?'current':'pending');
+  }
+  for(let i=1;i<WIZARD_STEPS;i++){
+    document.getElementById(`line-${i}`).className='step-line '+(i<wizardStep?'done':'');
+  }
+  const backBtn=document.getElementById('wizard-back-btn');
+  const nextBtn=document.getElementById('wizard-next-btn');
+  const skipBtn=document.getElementById('wizard-skip-btn');
+  const saveBtn=document.getElementById('wizard-save-btn');
+  backBtn.classList.toggle('hidden', wizardStep===1);
+  nextBtn.classList.toggle('hidden', wizardStep===WIZARD_STEPS);
+  skipBtn.classList.toggle('hidden', wizardStep===1||wizardStep===WIZARD_STEPS);
+  saveBtn.classList.toggle('hidden', wizardStep!==WIZARD_STEPS);
+}
+
+function wizardNext(skip=false){
+  if(wizardStep===1){
+    const name=document.getElementById('f-name').value.trim();
+    const slug=document.getElementById('f-slug').value.trim();
+    if(!name||!slug){showToast('名称和 Slug 为必填项','error');return;}
+  }
+  if(wizardStep<WIZARD_STEPS){wizardStep++;updateWizardUI();}
+}
+function wizardBack(){if(wizardStep>1){wizardStep--;updateWizardUI();}}
+
+function saveAssistant(){
+  const name=document.getElementById('f-name').value.trim();
+  const slug=document.getElementById('f-slug').value.trim();
+  if(!name||!slug){showToast('名称和 Slug 为必填项','error');return;}
+  const spinner=document.getElementById('save-spinner');
+  spinner.classList.remove('hidden');
+  setTimeout(()=>{
+    spinner.classList.add('hidden');
+    MOCK.assistants.push({
+      uuid:'new-'+Date.now(), slug, name, capability_type:'query',
+      engine_type:document.getElementById('f-engine').value,
+      status:document.getElementById('f-status').value,
+      datasource_uuids: dsBindings.filter(b=>b.ds).map(b=>b.ds),
+      datasources:dsBindings.filter(b=>b.ds).length, sessions:0,
+      created_at:new Date().toISOString(),
+      model_validation:{status:'ok',checked_at:new Date().toISOString()},
+    });
+    closeDrawer(); renderTable(); showToast('Assistant 已创建！模型校验通过。');
+  },1200);
+}
+
+// DataSource bindings (wizard)
+function renderDsBindings(){
+  const c=document.getElementById('datasource-bindings');
+  if(dsBindings.length===0){c.innerHTML='<p class="text-xs text-gray-400 italic">暂未绑定数据源</p>';return;}
+  c.innerHTML=dsBindings.map((b,i)=>`
+    <div class="flex gap-2 items-center">
+      <select class="input flex-1 text-xs" onchange="dsBindings[${i}].ds=this.value">
+        <option value="">选择数据源...</option>
+        ${MOCK.datasources.map(ds=>`<option value="${ds.uuid}" ${b.ds===ds.uuid?'selected':''}>${ds.name}</option>`).join('')}
+      </select>
+      <button onclick="dsBindings.splice(${i},1);renderDsBindings()" class="text-gray-400 hover:text-red-500">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+function addDatasourceRow(){dsBindings.push({ds:''});renderDsBindings();}
+
+function renderSkillBindings(){
+  document.getElementById('skill-bindings').innerHTML=MOCK.skills.map(sk=>`
+    <label class="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg cursor-pointer hover:border-blue-300 text-xs">
+      <input type="checkbox" ${sk.enabled?'checked':''} class="rounded text-blue-600">${sk.name}
+    </label>
+  `).join('');
+}
+
+function renderMcpBindings(){
+  const c=document.getElementById('mcp-bindings');
+  if(mcpBindings.length===0){c.innerHTML='<p class="text-xs text-gray-400 italic">暂无绑定</p>';return;}
+  c.innerHTML=mcpBindings.map((b,i)=>`
+    <div class="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+      <div class="flex gap-2">
+        <select class="input flex-1 text-xs" onchange="mcpBindings[${i}].mcp_uuid=this.value">
+          <option value="">选择 MCP Server...</option>
+          ${MOCK.mcpServers.map(m=>`<option value="${m.uuid}" ${b.mcp_uuid===m.uuid?'selected':''}>${m.name}</option>`).join('')}
+        </select>
+        <button onclick="mcpBindings.splice(${i},1);renderMcpBindings()" class="text-gray-400 hover:text-red-500">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="flex gap-4 items-center pl-1">
+        <label class="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" ${b.enabled?'checked':''} onchange="mcpBindings[${i}].enabled=this.checked" class="rounded">启用</label>
+        <label class="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" ${b.load_config?'checked':''} onchange="mcpBindings[${i}].load_config=this.checked" class="rounded">加载配置</label>
+        <select class="text-xs border border-gray-300 rounded px-2 py-0.5 bg-white" onchange="mcpBindings[${i}].scope=this.value">
+          <option value="session" ${b.scope==='session'?'selected':''}>session</option>
+          <option value="assistant" ${b.scope==='assistant'?'selected':''}>assistant</option>
+        </select>
+      </div>
+    </div>
+  `).join('');
+}
+function addMcpBindingRow(){mcpBindings.push({mcp_uuid:'',enabled:true,load_config:false,scope:'session'});renderMcpBindings();}
+
+// ===================== Edit flow =====================
+function renderEditDsBindings(){
+  const c=document.getElementById('e-datasource-bindings');
+  c.innerHTML=editDsBindings.map((b,i)=>`
+    <div class="flex gap-2 items-center">
+      <select class="input flex-1 text-xs" onchange="editDsBindings[${i}].ds=this.value">
+        <option value="">选择数据源...</option>
+        ${MOCK.datasources.map(ds=>`<option value="${ds.uuid}" ${b.ds===ds.uuid?'selected':''}>${ds.name}</option>`).join('')}
+      </select>
+      <button onclick="editDsBindings.splice(${i},1);renderEditDsBindings()" class="text-gray-400 hover:text-red-500">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+function addEditDsRow(){editDsBindings.push({ds:''});renderEditDsBindings();}
+
+function renderEditMcpBindings(){
+  const c=document.getElementById('e-mcp-bindings');
+  if(editMcpBindings.length===0){c.innerHTML='<p class="text-xs text-gray-400 italic">暂无绑定</p>';return;}
+  c.innerHTML=editMcpBindings.map((b,i)=>`
+    <div class="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
+      <div class="flex gap-2">
+        <select class="input flex-1 text-xs" onchange="editMcpBindings[${i}].mcp_uuid=this.value">
+          <option value="">选择 MCP Server...</option>
+          ${MOCK.mcpServers.map(m=>`<option value="${m.uuid}" ${b.mcp_uuid===m.uuid?'selected':''}>${m.name}</option>`).join('')}
+        </select>
+        <button onclick="editMcpBindings.splice(${i},1);renderEditMcpBindings()" class="text-gray-400 hover:text-red-500">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="flex gap-4 items-center pl-1">
+        <label class="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" ${b.enabled?'checked':''} onchange="editMcpBindings[${i}].enabled=this.checked" class="rounded">启用</label>
+        <label class="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" ${b.load_config?'checked':''} onchange="editMcpBindings[${i}].load_config=this.checked" class="rounded">加载配置</label>
+        <select class="text-xs border border-gray-300 rounded px-2 py-0.5 bg-white" onchange="editMcpBindings[${i}].scope=this.value">
+          <option value="session" ${b.scope==='session'?'selected':''}>session</option>
+          <option value="assistant" ${b.scope==='assistant'?'selected':''}>assistant</option>
+        </select>
+      </div>
+    </div>
+  `).join('');
+}
+function addEditMcpRow(){editMcpBindings.push({mcp_uuid:'',enabled:true,load_config:false,scope:'session'});renderEditMcpBindings();}
+
+function openEditDrawer(uuid){
+  const a=MOCK.assistants.find(x=>x.uuid===uuid); if(!a)return;
+  editingId=uuid;
+  editDsBindings=(a.datasource_uuids||[]).map((ds)=>({ds}));
+  if(editDsBindings.length===0){
+    editDsBindings=Array.from({length:a.datasources},(_,i)=>({ds:MOCK.datasources[i]?.uuid||''}));
+  }
+  editMcpBindings=(MOCK_ASSISTANT_MCP_BINDINGS[uuid]||[]).map(b=>({...b}));
+  document.getElementById('e-name').value=a.name;
+  document.getElementById('e-slug').value=a.slug;
+  document.getElementById('e-engine').value=a.engine_type;
+  document.getElementById('e-status').value=a.status;
+  document.getElementById('e-preprocess-model').value='mock-llm-config-uuid-preprocess';
+  document.getElementById('e-engine-model').value='mock-llm-config-uuid-engine';
+  document.getElementById('e-skill-bindings').innerHTML=MOCK.skills.map(sk=>`
+    <label class="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg cursor-pointer hover:border-blue-300 text-xs">
+      <input type="checkbox" ${sk.enabled?'checked':''} class="rounded">${sk.name}
+    </label>
+  `).join('');
+  renderEditDsBindings();
+  renderEditMcpBindings();
+  openDrawer('edit-drawer');
+}
+
+function openDetailDrawer(uuid){
+  const a=MOCK.assistants.find(x=>x.uuid===uuid); if(!a)return;
+  detailEditingId=uuid;
+  const dsList = (a.datasource_uuids || []).map(id => MOCK.datasources.find(ds => ds.uuid === id)?.name).filter(Boolean);
+  const mcpList = (MOCK_ASSISTANT_MCP_BINDINGS[uuid] || [])
+    .map(b => {
+      const m = MOCK.mcpServers.find(x => x.uuid === b.mcp_uuid);
+      if (!m) return null;
+      return `${m.name} · ${b.enabled ? '启用' : '禁用'} · ${b.load_config ? '加载配置' : '不加载配置'} · ${b.scope}`;
+    })
+    .filter(Boolean);
+  document.getElementById('detail-title').textContent = 'Assistant 详情';
+  document.getElementById('detail-name').textContent = a.name;
+  document.getElementById('detail-slug').textContent = `@${a.slug}`;
+  document.getElementById('detail-status').innerHTML = statusBadge(a.status);
+  document.getElementById('detail-datasources').textContent = `${a.datasources} 个`;
+  document.getElementById('detail-sessions').textContent = `${a.sessions} 个`;
+  document.getElementById('detail-validation').innerHTML = modelValidationBadge(a.model_validation);
+  document.getElementById('detail-datasource-list').innerHTML = dsList.length
+    ? dsList.map(name => `<div class="text-sm text-gray-700">${name}</div>`).join('')
+    : '<p class="text-sm text-gray-400">暂无绑定</p>';
+  document.getElementById('detail-mcp-list').innerHTML = mcpList.length
+    ? mcpList.map(text => `<div class="text-sm text-gray-700">${text}</div>`).join('')
+    : '<p class="text-sm text-gray-400">暂无绑定</p>';
+  openDrawer('detail-drawer');
+}
+
+function openDetailEdit(){
+  if(!detailEditingId) return;
+  const uuid = detailEditingId;
+  closeDrawer();
+  openEditDrawer(uuid);
+}
+
+function saveEdit(){
+  const name=document.getElementById('e-name').value.trim();
+  const slug=document.getElementById('e-slug').value.trim();
+  if(!name||!slug){showToast('名称和 Slug 为必填项','error');return;}
+  const spinner=document.getElementById('edit-spinner');
+  spinner.classList.remove('hidden');
+  const failValidation=editingId==='a1b2c3d4-0002-0000-0000-000000000002';
+  setTimeout(()=>{
+    spinner.classList.add('hidden');
+    const a=MOCK.assistants.find(x=>x.uuid===editingId);
+    if(a){
+      a.name=name; a.slug=slug;
+      a.engine_type=document.getElementById('e-engine').value;
+      a.status=document.getElementById('e-status').value;
+      a.datasource_uuids=editDsBindings.filter(b=>b.ds).map(b=>b.ds);
+      a.datasources=a.datasource_uuids.length;
+      a.model_validation=failValidation
+        ?{status:'saved_with_error',error:'LENS_ENGINE_NOT_IMPLEMENTED',checked_at:new Date().toISOString()}
+        :{status:'ok',checked_at:new Date().toISOString()};
+      MOCK_ASSISTANT_MCP_BINDINGS[editingId]=editMcpBindings.filter(b=>b.mcp_uuid);
+      showToast(failValidation?'已保存，但模型校验失败（不阻断保存）':'Assistant 已更新，模型校验通过', failValidation?'error':'success');
+    }
+    closeDrawer(); renderTable();
+  },1200);
+}
+
+// ===================== Table & actions =====================
+function renderTable(){
+  document.getElementById('assistant-table').innerHTML=MOCK.assistants.map(a=>`
+    ${(() => {
+      const dsSummary = getAssistantDatasourceSummary(a);
+      const dsText = dsSummary.disabled > 0
+        ? `${dsSummary.active} 正常 / ${dsSummary.total} 绑定`
+        : `${dsSummary.active} 个数据源`;
+      const dsClass = dsSummary.disabled > 0
+        ? 'text-orange-600'
+        : 'text-blue-600';
+      return `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="px-4 py-3">
+        <div class="font-medium text-gray-900">${a.name}</div>
+        <div class="text-xs text-gray-400 font-mono">@${a.slug}</div>
+      </td>
+      <td class="px-4 py-3">${engineBadge(a.engine_type)}</td>
+      <td class="px-4 py-3">
+        <button onclick="openEditDrawer('${a.uuid}')" class="text-xs ${dsClass} hover:underline">${dsText} →</button>
+      </td>
+      <td class="px-4 py-3">${statusBadge(a.status)}</td>
+      <td class="px-4 py-3">${modelValidationBadge(a.model_validation)}</td>
+      <td class="px-4 py-3">
+        <div class="flex gap-2">
+          <button onclick="openDetailDrawer('${a.uuid}')" class="text-xs text-slate-600 hover:underline">详情</button>
+          <button onclick="openEditDrawer('${a.uuid}')" class="text-xs text-blue-600 hover:underline">编辑</button>
+          <button onclick="doToggleStatus('${a.uuid}')" class="text-xs text-yellow-600 hover:underline">${a.status==='active'?'禁用':'启用'}</button>
+          <button onclick="openDeleteModal('${a.uuid}')" class="text-xs text-red-600 hover:underline">删除</button>
+        </div>
+      </td>
+    </tr>
+  `;})()}
+  `).join('');
+}
+
+function doToggleStatus(uuid){
+  const a=MOCK.assistants.find(x=>x.uuid===uuid);
+  if(a){a.status=a.status==='active'?'disabled':'active';renderTable();showToast(`状态已更新为：${a.status==='active'?'运行中':'已禁用'}`);}
+}
+
+function openDeleteModal(uuid){
+  const a=MOCK.assistants.find(x=>x.uuid===uuid);if(!a)return;
+  pendingDeleteId=uuid;
+  if(a.sessions>0){
+    document.getElementById('delete-blocked-msg').innerHTML=`无法删除 <strong>${a.name}</strong>：存在 <strong>${a.sessions} 个关联会话</strong>，请先将所有会话归档后再操作。`;
+    openModal('delete-blocked-modal');
+  }else{
+    deleteTarget=uuid;
+    document.getElementById('delete-confirm-msg').textContent=`确认删除「${a.name}」？该 Assistant 当前无关联会话，此操作不可撤销。`;
+    openModal('delete-modal');
+  }
+}
+function confirmDelete(){
+  const idx=MOCK.assistants.findIndex(x=>x.uuid===deleteTarget);
+  if(idx>=0)MOCK.assistants.splice(idx,1);
+  closeModal('delete-modal'); renderTable(); showToast('已删除','error');
+}
+
+renderTable();
+</script>
+</body>
+</html>

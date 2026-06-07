@@ -28,7 +28,7 @@ class GetAvailableScenesView(APIView):
         parameters=[
             OpenApiParameter(
                 name="language",
-                type=OpenApiTypes.STRING,
+                type=OpenApiTypes.STR,
                 location=OpenApiParameter.QUERY,
                 description=_("Language code (e.g., 'zh-CN', 'en-US')"),
                 required=False,

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lens — Assistants v1.1</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        primary: { 50:'#eff6ff',100:'#dbeafe',200:'#bfdbfe',300:'#93c5fd',400:'#60a5fa',500:'#3b82f6',600:'#2563eb',700:'#1d4ed8',800:'#1e40af',900:'#1e3a8a' }
+      },
+      fontFamily: { sans: ['Inter','system-ui','sans-serif'] }
+    }
+  }
+}
+</script>
+<style>
+body { font-family: Inter, system-ui, sans-serif; }
+.sidebar-link { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:8px; font-size:14px; font-weight:500; color:#cbd5e1; transition:all .2s; text-decoration:none; }
+.sidebar-link:hover { background:#334155; color:#f1f5f9; }
+.sidebar-link.active { background:rgba(99,102,241,.8); color:#fff; }
+.sidebar-link svg { flex-shrink:0; }
+/* L1: admin links visual distinction */
+.admin-section-link { opacity: 0.75; }
+.admin-section-link:hover { opacity: 1; }
+</style>
+</head>
+<body class="bg-gray-50 flex h-screen overflow-hidden">
+
+<!-- Sidebar -->
+<aside class="w-64 flex-shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col h-full">
+  <div class="flex items-center gap-3 px-4 h-16 border-b border-slate-700">
+    <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+    </div>
+    <span class="text-white font-semibold text-lg">Lens</span>
+    <span class="ml-auto text-xs bg-primary-900 text-primary-300 px-2 py-0.5 rounded-full">原型</span>
+  </div>
+  <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-2">用户</p>
+    <a href="index.html" class="sidebar-link active">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+      Assistants
+    </a>
+    <a href="history.html" class="sidebar-link">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      历史记录
+    </a>
+
+    <!-- L1: Admin section clearly labelled and visually distinguished -->
+    <div class="mt-4 pt-3 border-t border-slate-700">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-1">管理员</p>
+      <div class="bg-slate-700/40 rounded-lg px-2 py-1 mt-1 mb-1">
+        <p class="text-xs text-slate-400 px-1 py-0.5">⚠ 以下功能需管理员权限。<br>本期原型未实现鉴权，点击可进入演示。</p>
+      </div>
+      <a href="../admin/assistants/" class="sidebar-link admin-section-link">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        助手管理
+      </a>
+      <a href="../admin/datasources/" class="sidebar-link admin-section-link">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+        数据源管理
+      </a>
+      <a href="../admin/resources/" class="sidebar-link admin-section-link">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        资源库
+      </a>
+    </div>
+  </nav>
+  <div class="px-3 py-4 border-t border-slate-700">
+    <div class="flex items-center gap-3 px-3 py-2">
+      <div class="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-semibold">U</div>
+      <div>
+        <p class="text-sm font-medium text-slate-200">普通用户</p>
+        <p class="text-xs text-slate-400">user@example.com</p>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- Main content -->
+<div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+  <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
+    <div>
+      <h1 class="text-xl font-semibold text-gray-900">Assistants</h1>
+      <p class="text-sm text-gray-500 mt-0.5">选择一个 Assistant 开始问答</p>
+    </div>
+  </header>
+  <main class="flex-1 overflow-y-auto p-6">
+    <div id="assistant-list" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </main>
+</div>
+
+<script src="../shared.js"></script>
+<script>
+function renderAssistants() {
+  const active = MOCK.assistants.filter(a => a.status === 'active');
+  const container = document.getElementById('assistant-list');
+  if (active.length === 0) {
+    container.innerHTML = `<div class="col-span-3 text-center py-16 text-gray-400">
+      <p class="text-lg font-medium text-gray-500">暂无可用 Assistant</p>
+      <p class="text-sm text-gray-400 mt-1">请联系管理员创建 Assistant</p>
+    </div>`;
+    return;
+  }
+  container.innerHTML = active.map(a => `
+    ${(() => {
+      const dsSummary = getAssistantDatasourceSummary(a);
+      const dsLabel = dsSummary.disabled > 0
+        ? `${dsSummary.active} 正常 / ${dsSummary.total} 绑定`
+        : `${dsSummary.active} 数据源`;
+      const dsHint = dsSummary.disabled > 0
+        ? `<p class="text-xs text-orange-600 mt-2">有 ${dsSummary.disabled} 个已禁用数据源未计入可用范围</p>`
+        : '';
+      return `
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-primary-300 focus-within:ring-2 focus-within:ring-primary-200 transition-all cursor-pointer group"
+         tabindex="0"
+         role="link"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.location='chat.html?slug=${a.slug}&name=${encodeURIComponent(a.name)}';}"
+         onclick="window.location='chat.html?slug=${a.slug}&name=${encodeURIComponent(a.name)}'">
+      <div class="p-5">
+        <div class="flex items-start justify-between mb-3">
+          <div class="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center">
+            <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          </div>
+          ${engineBadge(a.engine_type)}
+        </div>
+        <h3 class="text-base font-semibold text-gray-900 group-hover:text-primary-700 transition-colors">${a.name}</h3>
+        <p class="text-sm text-gray-500 mt-1">@${a.slug}</p>
+        <div class="flex items-center gap-4 mt-4 pt-4 border-t border-gray-100">
+          <div class="flex items-center gap-1 text-xs text-gray-500">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4"/></svg>
+            ${dsLabel}
+          </div>
+          <div class="flex items-center gap-1 text-xs text-gray-500">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+            ${a.sessions} 会话
+          </div>
+        </div>
+        ${dsHint}
+      </div>
+      <div class="px-5 pb-4">
+        <button class="w-full py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors pointer-events-none">
+          开始问答
+        </button>
+      </div>
+    </div>
+  `;})()}
+  `).join('');
+}
+
+renderAssistants();
+</script>
+</body>
+</html>

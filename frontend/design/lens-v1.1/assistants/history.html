@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lens — 历史记录 v1.1</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{primary:{50:'#eff6ff',600:'#2563eb',700:'#1d4ed8'}},fontFamily:{sans:['Inter','system-ui','sans-serif']}}}}</script>
+<style>
+body{font-family:Inter,system-ui,sans-serif;}
+.sidebar-link{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;font-size:14px;font-weight:500;color:#cbd5e1;transition:all .2s;text-decoration:none;}
+.sidebar-link:hover{background:#334155;color:#f1f5f9;}
+.sidebar-link.active{background:rgba(99,102,241,.8);color:#fff;}
+</style>
+</head>
+<body class="bg-gray-50 flex h-screen overflow-hidden">
+
+<aside class="w-64 flex-shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col h-full">
+  <div class="flex items-center gap-3 px-4 h-16 border-b border-slate-700">
+    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+    </div>
+    <span class="text-white font-semibold text-lg">Lens</span>
+  </div>
+  <nav class="flex-1 px-3 py-4 space-y-1">
+    <a href="index.html" class="sidebar-link">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+      Assistants
+    </a>
+    <a href="history.html" class="sidebar-link active">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      历史记录
+    </a>
+  </nav>
+</aside>
+
+<div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+  <header class="bg-white border-b border-gray-200 px-6 py-4">
+    <h1 class="text-xl font-semibold text-gray-900">我的历史记录</h1>
+    <p class="text-sm text-gray-500 mt-0.5">所有 Assistant 的问答会话历史</p>
+  </header>
+
+  <main class="flex-1 overflow-y-auto p-6">
+    <div class="flex items-center gap-3 mb-4">
+      <select id="filter-assistant" class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="">全部 Assistant</option>
+      </select>
+      <select id="filter-status" class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="">全部状态</option>
+        <option value="active">进行中</option>
+        <option value="archived">已归档</option>
+        <option value="failed">失败</option>
+        <option value="cancelled">已取消</option>
+      </select>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">会话标题</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Assistant</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">消息数</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">状态</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">创建时间</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
+          </tr>
+        </thead>
+        <tbody id="session-table" class="divide-y divide-gray-100"></tbody>
+      </table>
+      <div id="empty-state" class="hidden text-center py-12 text-gray-400">
+        <svg class="w-12 h-12 mx-auto mb-3 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+        <p>暂无会话记录</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Archive confirm modal -->
+<div id="archive-modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-80">
+    <h3 class="text-base font-semibold text-gray-900 mb-2">确认归档</h3>
+    <p class="text-sm text-gray-600 mb-4">此会话将被标记为已归档，历史记录不会删除。</p>
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeModal('archive-modal')" class="px-4 py-2 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">取消</button>
+      <button onclick="confirmArchive()" class="px-4 py-2 text-sm bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg">归档</button>
+    </div>
+  </div>
+</div>
+
+<script src="../shared.js"></script>
+<script>
+let archiveTarget = null;
+
+// Populate assistant filter from actual data
+function initFilters() {
+  const select = document.getElementById('filter-assistant');
+  const slugs = [...new Set(MOCK.sessions.map(s => s.assistant_slug))];
+  slugs.forEach(slug => {
+    const a = MOCK.assistants.find(x => x.slug === slug);
+    const opt = document.createElement('option');
+    opt.value = slug;
+    // M2: show assistant name, not raw slug
+    opt.textContent = a ? a.name : slug;
+    select.appendChild(opt);
+  });
+}
+
+function renderTable(sessions) {
+  const tbody = document.getElementById('session-table');
+  const empty = document.getElementById('empty-state');
+  if (sessions.length === 0) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  tbody.innerHTML = sessions.map(s => {
+    // M2: show assistant_name (resolved), not raw slug
+    const aName = s.assistant_name || MOCK.assistants.find(a=>a.slug===s.assistant_slug)?.name || s.assistant_slug;
+    // M2: deep link carries both slug and session UUID
+    const link = `chat.html?slug=${s.assistant_slug}&name=${encodeURIComponent(aName)}&session=${s.uuid}`;
+    return `
+    <tr class="hover:bg-gray-50 transition-colors">
+      <td class="px-4 py-3">
+        <a href="${link}" class="text-blue-600 hover:text-blue-800 font-medium">${s.title}</a>
+        ${s.run_error ? `<div class="text-xs text-red-500 mt-0.5 font-mono">${s.run_error}</div>` : ''}
+      </td>
+      <td class="px-4 py-3 text-gray-600">${aName}</td>
+      <td class="px-4 py-3 text-gray-600">${s.messages}</td>
+      <td class="px-4 py-3">${statusBadge(s.status)}</td>
+      <td class="px-4 py-3 text-gray-500">${formatDate(s.created_at)}</td>
+      <td class="px-4 py-3">
+        <div class="flex gap-2">
+          <a href="${link}" class="text-xs text-blue-600 hover:underline">查看</a>
+          ${s.status==='active'?`<button onclick="archiveSession('${s.uuid}')" class="text-xs text-yellow-600 hover:underline">归档</button>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function archiveSession(uuid) {
+  archiveTarget = uuid;
+  openModal('archive-modal');
+}
+
+function confirmArchive() {
+  const sess = MOCK.sessions.find(s => s.uuid === archiveTarget);
+  if (sess) sess.status = 'archived';
+  closeModal('archive-modal');
+  applyFilters();
+  showToast('会话已归档');
+}
+
+function applyFilters() {
+  const assistantFilter = document.getElementById('filter-assistant').value;
+  const statusFilter = document.getElementById('filter-status').value;
+  let sessions = [...MOCK.sessions];
+  if (assistantFilter) sessions = sessions.filter(s => s.assistant_slug === assistantFilter);
+  if (statusFilter) sessions = sessions.filter(s => s.status === statusFilter);
+  renderTable(sessions);
+}
+
+document.getElementById('filter-assistant').addEventListener('change', applyFilters);
+document.getElementById('filter-status').addEventListener('change', applyFilters);
+
+initFilters();
+applyFilters();
+</script>
+</body>
+</html>

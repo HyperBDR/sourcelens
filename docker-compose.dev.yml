@@ -5,6 +5,10 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.dev
+    environment:
+      LENSNODE_NAME: ${LENSNODE_NAME:-local-dev-lensnode}
+      LENSNODE_TOKEN: ${LENSNODE_TOKEN:-dev-lensnode-token}
+      LENSNODE_WORKSPACE_PATH: /workspace
     build:
       context: .
       dockerfile: Dockerfile
@@ -20,10 +24,14 @@ services:
       - ./backend:/opt/backend
       - ./docker/nginx/certs:/opt/certs
       - ./data.dev/storage:/opt/storage
+      - ./data.dev/workspace:/workspace
     networks:
       - backend_network
     depends_on:
-      - postgresql
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: development
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
@@ -43,13 +51,18 @@ services:
     volumes:
       - ./data.dev/logs/worker:/var/log/celery
       - ./data.dev/storage:/opt/storage
+      - ./data.dev/workspace:/workspace
       - ./backend:/opt/backend
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     networks:
       - backend_network
     depends_on:
-      - backend-api
-      - postgresql
-      - redis
+      backend-api:
+        condition: service_healthy
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: celery
 
   backend-scheduler:
@@ -65,11 +78,11 @@ services:
       - backend_network
     depends_on:
       backend-api:
-        condition: service_started
+        condition: service_healthy
       postgresql:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: celery-beat
 
   postgresql:
@@ -97,7 +110,7 @@ services:
     networks:
       - backend_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -c 'SELECT 1' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -113,6 +126,12 @@ services:
       - ./data.dev/logs/redis:/var/log/redis
     networks:
       - backend_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   flower:
     image: sourcelens-api:latest
@@ -124,12 +143,42 @@ services:
       - "${FLOWER_HOST_PORT:-5555}:5555"
     depends_on:
       backend-api:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: flower
     networks:
       - backend_network
+
+  lensnode:
+    build:
+      context: ./lensnode
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
+    image: sourcelens-lensnode:dev
+    container_name: sourcelens-lensnode-dev
+    restart: unless-stopped
+    env_file:
+      - ./.env.dev
+    environment:
+      LENSNODE_NAME: ${LENSNODE_NAME:-local-dev-lensnode}
+      LENSNODE_TOKEN: ${LENSNODE_TOKEN:-dev-lensnode-token}
+      LENSNODE_CONTROL_WS_URL: ws://backend-api:8000/ws/lens/lensnodes/
+      LENSNODE_AI_GATEWAY_URL: http://backend-api:8000/api/lens/lensnode/ai-gateway/
+      LENSNODE_WORKSPACE_PATH: /workspace
+      LENSNODE_HEARTBEAT_INTERVAL_S: 15
+      PYTHONPATH: /opt/lensnode
+    volumes:
+      - ./data.dev/workspace:/workspace
+      - ./lensnode/lensnode:/opt/lensnode/lensnode:ro
+    networks:
+      - backend_network
+    depends_on:
+      backend-api:
+        condition: service_healthy
 
   frontend:
     build:
@@ -154,7 +203,7 @@ services:
       - backend_network
     depends_on:
       backend-api:
-        condition: service_started
+        condition: service_healthy
 
   nginx:
     image: nginx:latest

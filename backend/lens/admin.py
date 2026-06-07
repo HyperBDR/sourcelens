@@ -1,0 +1,71 @@
+from django.contrib import admin
+
+from .models import (
+    Assistant,
+    AssistantMCP,
+    AssistantSkill,
+    DataSource,
+    GlobalSetting,
+    MCPServer,
+    Message,
+    LensNode,
+    Run,
+    RunExecution,
+    RunStep,
+    ScheduledTask,
+    Session,
+    Skill,
+)
+
+
+@admin.register(LensNode)
+class LensNodeAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "status",
+        "enrollment_status",
+        "protocol_version",
+        "agent_version",
+        "last_heartbeat_at",
+    )
+    search_fields = ("name",)
+
+
+@admin.register(Assistant)
+class AssistantAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "lensnode", "selected_task", "status")
+    search_fields = ("name", "slug")
+
+
+@admin.register(DataSource)
+class DataSourceAdmin(admin.ModelAdmin):
+    list_display = ("name", "source_type", "status", "last_synced_at")
+    search_fields = ("name",)
+
+
+@admin.register(Skill)
+class SkillAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "enabled")
+    search_fields = ("name", "slug")
+
+
+@admin.register(MCPServer)
+class MCPServerAdmin(admin.ModelAdmin):
+    list_display = ("name", "transport", "enabled")
+    search_fields = ("name",)
+
+
+@admin.register(Session)
+class SessionAdmin(admin.ModelAdmin):
+    list_display = ("uuid", "assistant", "user", "status", "created_at")
+    search_fields = ("title",)
+
+
+admin.site.register(AssistantSkill)
+admin.site.register(AssistantMCP)
+admin.site.register(Message)
+admin.site.register(Run)
+admin.site.register(RunStep)
+admin.site.register(RunExecution)
+admin.site.register(ScheduledTask)
+admin.site.register(GlobalSetting)
