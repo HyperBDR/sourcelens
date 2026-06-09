@@ -5,11 +5,8 @@
     <div class="w-full max-w-md space-y-8">
       <!-- Header -->
       <div>
-        <div class="mb-4 flex items-center justify-between gap-4">
+        <div class="mb-4 flex items-center justify-between">
           <BrandLogo variant="responsive" />
-          <h2 class="text-2xl font-semibold text-ink-900">
-            {{ t('auth.loginTitle') }}
-          </h2>
           <LanguageSwitcher />
         </div>
       </div>
