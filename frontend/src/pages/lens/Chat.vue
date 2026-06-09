@@ -126,24 +126,45 @@
               :key="session.uuid"
               class="session-item"
               :class="selectedSessionUuid === session.uuid ? 'session-item-active' : ''"
-              :title="session.title || t('lens.chat.untitledSession')"
-              @click="selectSession(session)"
             >
-              <div class="min-w-0 flex-1">
-                <div class="session-title">
-                  {{ session.title || t('lens.chat.untitledSession') }}
+              <template v-if="deletingSessionUuid === session.uuid">
+                <div class="min-w-0 flex-1 truncate text-xs text-gray-500">
+                  {{ t('lens.chat.confirmDelete') }}？
                 </div>
-              </div>
-              <button
-                type="button"
-                class="session-delete-btn"
-                :aria-label="t('common.delete')"
-                @click.stop="confirmDeleteSession(session)"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </button>
+                <div class="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    class="session-confirm-btn session-confirm-yes"
+                    @click.stop="doDeleteSession(session)"
+                  >{{ t('common.confirm') }}</button>
+                  <button
+                    type="button"
+                    class="session-confirm-btn session-confirm-no"
+                    @click.stop="deletingSessionUuid = ''"
+                  >{{ t('common.cancel') }}</button>
+                </div>
+              </template>
+              <template v-else>
+                <div
+                  class="min-w-0 flex-1 cursor-pointer"
+                  :title="session.title || t('lens.chat.untitledSession')"
+                  @click="selectSession(session)"
+                >
+                  <div class="session-title">
+                    {{ session.title || t('lens.chat.untitledSession') }}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="session-delete-btn"
+                  :aria-label="t('lens.chat.deleteSession')"
+                  @click.stop="deletingSessionUuid = session.uuid"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+              </template>
             </div>
           </div>
         </section>
@@ -452,6 +473,7 @@ const revealQueue = ref('')
 const revealTimer = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
+const deletingSessionUuid = ref('')
 const dockMenuOpen = ref(false)
 const composerRef = ref(null)
 const scrollRef = ref(null)
@@ -918,8 +940,8 @@ function formatTime(isoString) {
   })
 }
 
-async function confirmDeleteSession(session) {
-  if (!confirm(t('lens.chat.confirmDeleteSession') || '确认删除该会话？')) return
+async function doDeleteSession(session) {
+  deletingSessionUuid.value = ''
   try {
     await deleteSession(session.uuid)
     sessions.value = sessions.value.filter((s) => s.uuid !== session.uuid)
@@ -932,9 +954,9 @@ async function confirmDeleteSession(session) {
         messages.value = []
       }
     }
-    showSuccess(t('lens.chat.sessionDeleted') || '会话已删除')
+    showSuccess(t('lens.chat.sessionDeleted'))
   } catch {
-    showError(t('lens.chat.deleteFailed') || '删除失败')
+    showError(t('lens.chat.deleteFailed'))
   }
 }
 
@@ -1096,6 +1118,18 @@ onBeforeUnmount(() => {
 
 .session-delete-btn svg {
   @apply h-3.5 w-3.5;
+}
+
+.session-confirm-btn {
+  @apply rounded px-1.5 py-0.5 text-xs font-medium transition-colors;
+}
+
+.session-confirm-yes {
+  @apply bg-red-500 text-white hover:bg-red-600;
+}
+
+.session-confirm-no {
+  @apply bg-gray-100 text-gray-600 hover:bg-gray-200;
 }
 
 .main-shell {
