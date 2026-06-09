@@ -341,22 +341,6 @@
         <div class="composer-inner">
           <div class="composer-shell">
             <div class="composer">
-              <button
-                class="composer-icon-btn"
-                type="button"
-                :aria-label="t('lens.chat.newSession')"
-                @click="createNewSession"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                  aria-hidden="true"
-                >
-                  <path d="M12 5v14M5 12h14" stroke-linecap="round" />
-                </svg>
-              </button>
               <input
                 ref="composerRef"
                 v-model="question"
@@ -958,13 +942,13 @@ onBeforeUnmount(() => {
 <style scoped>
 .lens-chat-page {
   @apply flex h-screen w-full overflow-hidden;
-  background: #f9fafb;
+  background: #ffffff;
   color: #111827;
 }
 
 .sidebar {
   @apply flex h-full flex-shrink-0 flex-col border-r transition-all duration-300 ease-in-out;
-  background: #f9fafb;
+  background: #ffffff;
   border-color: #e5e7eb;
 }
 
@@ -1130,7 +1114,7 @@ onBeforeUnmount(() => {
 
 .message-card.assistant {
   border-color: #e5e7eb;
-  background: #ffffff;
+  background: #f9fafb;
 }
 
 .message-time {
@@ -1353,20 +1337,6 @@ onBeforeUnmount(() => {
 
 .composer-input::placeholder {
   color: #9ca3af;
-}
-
-.composer-icon-btn {
-  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors;
-  color: #374151;
-  background: #f3f4f6;
-}
-
-.composer-icon-btn:hover {
-  background: #e5e7eb;
-}
-
-.composer-icon-btn svg {
-  @apply h-5 w-5;
 }
 
 .composer-action-btn {
