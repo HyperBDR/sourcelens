@@ -27,24 +27,24 @@ export default {
           900: '#0e1b4f'
         },
         ink: {
-          50: '#f7f5f1',
-          100: '#efebe4',
-          200: '#e0d9cd',
-          300: '#c6bca9',
-          400: '#9d9483',
-          500: '#736b5d',
-          600: '#554f45',
-          700: '#3d3932',
-          800: '#2b2823',
-          900: '#171512'
+          50: '#f9fafb',
+          100: '#f3f4f6',
+          200: '#e5e7eb',
+          300: '#d1d5db',
+          400: '#9ca3af',
+          500: '#6b7280',
+          600: '#4b5563',
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827'
         },
         line: {
-          DEFAULT: '#ded7ca',
-          soft: '#efebe3'
+          DEFAULT: '#e5e7eb',
+          soft: '#f3f4f6'
         },
         surface: {
-          DEFAULT: '#fbfaf7',
-          sunken: '#f5f2eb'
+          DEFAULT: '#ffffff',
+          sunken: '#f9fafb'
         },
         success: {
           DEFAULT: '#1f9d6b',
@@ -92,9 +92,9 @@ export default {
         '2xl': '20px'
       },
       boxShadow: {
-        soft: '0 1px 3px rgba(23, 21, 18, 0.06)',
-        'soft-md': '0 4px 12px rgba(23, 21, 18, 0.10)',
-        'soft-lg': '0 10px 24px rgba(23, 21, 18, 0.12)'
+        soft: '0 1px 3px rgba(0, 0, 0, 0.05)',
+        'soft-md': '0 4px 12px rgba(0, 0, 0, 0.08)',
+        'soft-lg': '0 10px 24px rgba(0, 0, 0, 0.10)'
       },
       container: {
         center: true,

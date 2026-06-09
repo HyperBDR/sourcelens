@@ -3,54 +3,61 @@
     <button
       @click="toggleDropdown"
       :class="[
-        'flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors',
+        'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors',
         variant === 'dark'
-          ? 'text-white hover:bg-white/10'
-          : 'text-ink-600 hover:bg-line-soft hover:text-ink-900'
+          ? 'text-white/80 hover:bg-white/10 hover:text-white'
+          : 'text-ink-500 hover:bg-line-soft hover:text-ink-800'
       ]"
       :title="t('common.language')"
     >
-      <!-- Language icon -->
+      <span class="text-base leading-none">{{ currentLanguageDisplay }}</span>
       <svg
-        class="w-4 h-4"
+        class="h-3 w-3 transition-transform"
+        :class="showDropdown ? 'rotate-180' : ''"
+        viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
+        stroke-width="2.5"
       >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"
-        />
+        <path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
-      <!-- Current language flag/name -->
-      <span class="text-xs font-medium">{{ currentLanguageDisplay }}</span>
     </button>
 
-    <!-- Dropdown menu -->
     <Transition
       enter-active-class="transition ease-out duration-100"
-      enter-from-class="transform opacity-0 scale-95"
-      enter-to-class="transform opacity-100 scale-100"
+      enter-from-class="transform opacity-0 translate-y-1 scale-95"
+      enter-to-class="transform opacity-100 translate-y-0 scale-100"
       leave-active-class="transition ease-in duration-75"
-      leave-from-class="transform opacity-100 scale-100"
-      leave-to-class="transform opacity-0 scale-95"
+      leave-from-class="transform opacity-100 translate-y-0 scale-100"
+      leave-to-class="transform opacity-0 translate-y-1 scale-95"
     >
       <div
         v-if="showDropdown"
-        class="absolute right-0 z-50 mt-2 w-32 overflow-hidden rounded-lg border border-line bg-surface shadow-lg"
+        class="absolute right-0 z-50 mt-1.5 w-36 overflow-hidden rounded-xl border border-line bg-surface p-1 shadow-soft-md"
       >
         <button
           v-for="lang in languages"
           :key="lang.value"
           @click="selectLanguage(lang.value)"
-          class="flex w-full items-center px-3 py-2 text-sm text-ink-700 transition-colors hover:bg-line-soft"
-          :class="{ 'bg-line-soft font-medium text-ink-900': locale === lang.value }"
+          class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors"
+          :class="
+            locale === lang.value
+              ? 'bg-line-soft font-medium text-ink-900'
+              : 'text-ink-600 hover:bg-line-soft hover:text-ink-900'
+          "
         >
-          <span class="mr-2 text-sm">{{ lang.flag }}</span>
-          {{ lang.label }}
+          <span class="text-base leading-none">{{ lang.flag }}</span>
+          <span class="flex-1 text-left">{{ lang.label }}</span>
+          <svg
+            v-if="locale === lang.value"
+            class="h-3.5 w-3.5 shrink-0 text-primary-600"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+          >
+            <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
       </div>
     </Transition>

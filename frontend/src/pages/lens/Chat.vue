@@ -958,14 +958,14 @@ onBeforeUnmount(() => {
 <style scoped>
 .lens-chat-page {
   @apply flex h-screen w-full overflow-hidden;
-  background: #f5f3ee;
-  color: #2a2722;
+  background: #f9fafb;
+  color: #111827;
 }
 
 .sidebar {
   @apply flex h-full flex-shrink-0 flex-col border-r transition-all duration-300 ease-in-out;
-  background: #f5f3ee;
-  border-color: #e6e1d6;
+  background: #f9fafb;
+  border-color: #e5e7eb;
 }
 
 .sidebar-expanded {
@@ -1006,11 +1006,11 @@ onBeforeUnmount(() => {
 
 .sidebar-collapse-btn {
   @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors;
-  color: #46423a;
+  color: #374151;
 }
 
 .sidebar-collapse-btn:hover {
-  background: #efebe2;
+  background: #f3f4f6;
 }
 
 .sidebar-collapse-btn svg {
@@ -1019,11 +1019,11 @@ onBeforeUnmount(() => {
 
 .new-chat-btn {
   @apply flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors;
-  color: #46423a;
+  color: #374151;
 }
 
 .new-chat-btn:hover {
-  background: #efebe2;
+  background: #f3f4f6;
 }
 
 .new-chat-btn svg {
@@ -1044,7 +1044,7 @@ onBeforeUnmount(() => {
 
 .sessions-head h2 {
   @apply text-[11px] font-semibold tracking-wide;
-  color: #928b7d;
+  color: #6b7280;
 }
 
 .sessions-list {
@@ -1056,21 +1056,21 @@ onBeforeUnmount(() => {
 }
 
 .session-item:hover {
-  background: #efebe2;
+  background: #f3f4f6;
 }
 
 .session-item-active {
-  background: #ebe4d8;
+  background: #e5e7eb;
 }
 
 .session-title {
   @apply truncate text-sm font-medium;
-  color: #2a2722;
+  color: #111827;
 }
 
 .main-shell {
   @apply relative flex min-w-0 flex-1 flex-col overflow-hidden;
-  background: #fbfaf7;
+  background: #ffffff;
 }
 
 .thread-scroll {
@@ -1108,7 +1108,7 @@ onBeforeUnmount(() => {
 
 .message-avatar.assistant {
   background: #ffffff;
-  border: 1px solid #e6e1d6;
+  border: 1px solid #e5e7eb;
 }
 
 .message-body {
@@ -1129,13 +1129,13 @@ onBeforeUnmount(() => {
 }
 
 .message-card.assistant {
-  border-color: #e6e1d6;
+  border-color: #e5e7eb;
   background: #ffffff;
 }
 
 .message-time {
   @apply mt-1 text-xs;
-  color: #c2bbb0;
+  color: #9ca3af;
 }
 
 .message-time.user {
@@ -1148,19 +1148,19 @@ onBeforeUnmount(() => {
 
 .message-markdown :deep(.markdown-content) {
   @apply max-w-none;
-  color: #46423a;
+  color: #374151;
 }
 
 .message-markdown :deep(.markdown-content h1),
 .message-markdown :deep(.markdown-content h2),
 .message-markdown :deep(.markdown-content h3),
 .message-markdown :deep(.markdown-content h4) {
-  color: #2a2722;
+  color: #111827;
 }
 
 .message-markdown :deep(.markdown-content p) {
   @apply mb-3 text-[16px] leading-7;
-  color: #46423a;
+  color: #374151;
 }
 
 .message-markdown :deep(.markdown-content ul),
@@ -1170,7 +1170,7 @@ onBeforeUnmount(() => {
 
 .message-markdown :deep(.markdown-content li) {
   @apply mb-2 text-[16px] leading-7;
-  color: #46423a;
+  color: #374151;
 }
 
 .message-markdown :deep(.markdown-content code) {
@@ -1180,7 +1180,7 @@ onBeforeUnmount(() => {
 
 .message-text {
   @apply mt-2 whitespace-pre-wrap text-[16px] leading-7;
-  color: #2a2722;
+  color: #111827;
 }
 
 .message-actions {
@@ -1189,12 +1189,12 @@ onBeforeUnmount(() => {
 
 .icon-btn {
   @apply flex h-[30px] w-[30px] items-center justify-center rounded-md transition-colors;
-  color: #928b7d;
+  color: #9ca3af;
 }
 
 .icon-btn:hover {
-  background: #efebe2;
-  color: #46423a;
+  background: #f3f4f6;
+  color: #374151;
 }
 
 .icon-btn svg {
@@ -1205,7 +1205,7 @@ onBeforeUnmount(() => {
 .activity-card,
 .timeline-card {
   @apply mb-9 max-w-[900px] rounded-lg border bg-white px-4 py-3;
-  border-color: #e6e1d6;
+  border-color: #e5e7eb;
 }
 
 .card-head {
@@ -1215,23 +1215,23 @@ onBeforeUnmount(() => {
 .card-title,
 .card-heading {
   @apply text-xs font-semibold uppercase tracking-wide;
-  color: #928b7d;
+  color: #6b7280;
 }
 
 .card-state,
 .card-caption {
   @apply text-xs;
-  color: #928b7d;
+  color: #6b7280;
 }
 
 .live-text {
   @apply mt-2 whitespace-pre-wrap text-[16px] leading-7;
-  color: #2a2722;
+  color: #111827;
 }
 
 .live-thinking {
   @apply mt-2 flex items-center gap-2 text-sm;
-  color: #6b6559;
+  color: #4b5563;
 }
 
 .typing-dots {
@@ -1240,7 +1240,7 @@ onBeforeUnmount(() => {
 
 .typing-dots span {
   @apply h-1.5 w-1.5 rounded-full;
-  background: #928b7d;
+  background: #9ca3af;
   animation: typing-dot 1.2s ease-in-out infinite;
 }
 
@@ -1264,23 +1264,23 @@ onBeforeUnmount(() => {
 
 .activity-item {
   @apply flex items-start justify-between gap-3 rounded-md px-3 py-2;
-  background: #fbfaf7;
+  background: #f9fafb;
 }
 
 .activity-title {
   @apply text-sm font-medium;
-  color: #2a2722;
+  color: #111827;
 }
 
 .activity-detail {
   @apply mt-1 truncate text-xs;
-  color: #928b7d;
+  color: #6b7280;
 }
 
 .activity-time,
 .timeline-time {
   @apply shrink-0 text-xs;
-  color: #928b7d;
+  color: #6b7280;
 }
 
 .timeline-toggle {
@@ -1292,7 +1292,7 @@ onBeforeUnmount(() => {
 }
 
 .timeline-list > * + * {
-  border-top: 1px solid #efebe2;
+  border-top: 1px solid #f3f4f6;
 }
 
 .timeline-item {
@@ -1311,21 +1311,21 @@ onBeforeUnmount(() => {
 
 .timeline-label {
   @apply text-xs;
-  color: #6b6559;
+  color: #4b5563;
 }
 
 .timeline-message {
   @apply mt-2 whitespace-pre-wrap text-xs leading-5;
-  color: #46423a;
+  color: #374151;
 }
 
 .composer-wrap {
   @apply pointer-events-none absolute inset-x-0 bottom-0 z-20 px-6 pb-5;
   background: linear-gradient(
     to top,
-    rgba(251, 250, 247, 0.98) 36%,
-    rgba(251, 250, 247, 0.78) 72%,
-    rgba(251, 250, 247, 0) 100%
+    rgba(255, 255, 255, 0.98) 36%,
+    rgba(255, 255, 255, 0.78) 72%,
+    rgba(255, 255, 255, 0) 100%
   );
 }
 
@@ -1334,7 +1334,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-shell {
-  @apply pointer-events-auto rounded-[28px] border border-line bg-surface/95 px-4 py-3 shadow-[0_20px_50px_rgba(42,39,34,0.08)];
+  @apply pointer-events-auto rounded-[28px] border border-line bg-surface/95 px-4 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.06)];
   backdrop-filter: blur(18px);
 }
 
@@ -1348,21 +1348,21 @@ onBeforeUnmount(() => {
 
 .composer-input {
   @apply h-10 flex-1 border-0 bg-transparent p-0 text-[16px] leading-6 outline-none;
-  color: #2a2722;
+  color: #111827;
 }
 
 .composer-input::placeholder {
-  color: #928b7d;
+  color: #9ca3af;
 }
 
 .composer-icon-btn {
   @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors;
-  color: #46423a;
-  background: #f6f3ed;
+  color: #374151;
+  background: #f3f4f6;
 }
 
 .composer-icon-btn:hover {
-  background: #ede7de;
+  background: #e5e7eb;
 }
 
 .composer-icon-btn svg {
@@ -1376,7 +1376,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-action-btn:hover:not(:disabled) {
-  background: #2a2722;
+  background: #1f2937;
 }
 
 .composer-action-btn-stop {
@@ -1384,7 +1384,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-action-btn:disabled {
-  background: #e6e1d6;
+  background: #e5e7eb;
   cursor: not-allowed;
 }
 
@@ -1394,7 +1394,7 @@ onBeforeUnmount(() => {
 
 .disclaimer {
   @apply mt-3 text-center text-xs;
-  color: #928b7d;
+  color: #9ca3af;
 }
 
 .sidebar-footer {
@@ -1465,7 +1465,7 @@ onBeforeUnmount(() => {
 @media (max-width: 1023px) {
   .sidebar {
     @apply fixed inset-y-0 left-0 z-30 -translate-x-full transition-transform duration-300;
-    box-shadow: 0 0 40px rgba(42, 39, 34, 0.15);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.1);
   }
 
   .sidebar-open {
@@ -1492,7 +1492,7 @@ onBeforeUnmount(() => {
 
 @media (min-width: 1024px) {
   .main-shell {
-    box-shadow: inset 1px 0 0 #ddd6c6;
+    box-shadow: inset 1px 0 0 #e5e7eb;
   }
 }
 </style>
