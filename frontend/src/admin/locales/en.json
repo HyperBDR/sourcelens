@@ -50,6 +50,9 @@
     "workspace": "Workspace",
     "adminConsole": "Admin Console"
   },
+  "dataManagement": {
+    "menuTitle": "Data Management"
+  },
   "llm": {
     "menuTitle": "Models",
     "stats": {
@@ -542,8 +545,7 @@
       "datasources": "Data Sources",
       "skills": "Skills",
       "mcp": "MCP Servers",
-      "settings": "Global Settings",
-      "health": "System Health"
+      "settings": "Global Settings"
     },
     "pages": {
       "assistants": {
@@ -553,7 +555,7 @@
         "action": "Create Assistant"
       },
       "lensnodes": {
-        "title": "LensNode Management",
+        "title": "Node Management",
         "description": "Review distributed execution nodes and manage access credentials.",
         "label": "LensNode",
         "action": "Create LensNode"
@@ -578,15 +580,9 @@
       },
       "settings": {
         "title": "Lens Global Settings",
-        "description": "Configure node defaults, Run retention, and health-check thresholds.",
+        "description": "Configure node defaults, Run retention, health-check thresholds, and default task enablement.",
         "label": "Setting",
         "action": "Create Setting"
-      },
-      "health": {
-        "title": "Lens System Health",
-        "description": "View Lens scheduled tasks and their latest execution state.",
-        "label": "Task",
-        "action": "Create Task"
       }
     },
     "columns": {
@@ -600,6 +596,7 @@
       "workspace": "Workspace",
       "dirsAndTasks": "Dirs / Tasks",
       "heartbeat": "Heartbeat",
+      "value": "Value",
       "datasource": "Data Source",
       "type": "Type",
       "targetPath": "Target Path",
@@ -611,6 +608,20 @@
       "endpoint": "Endpoint",
       "error": "Error",
       "lastRun": "Last Run"
+    },
+    "tasks": {
+      "title": "Default Scheduled Tasks",
+      "description": "Control the enabled state of Lens default scheduled tasks here.",
+      "task": "Task",
+      "enabled": "Enabled",
+      "lastRun": "Last run",
+      "lastStatus": "Run status",
+      "cleanup": "LensNode Cleanup",
+      "cleanupDesc": "Clean up runs that have been stuck for too long.",
+      "health": "LensNode Health Check",
+      "healthDesc": "Mark online nodes offline when their heartbeat times out.",
+      "retention": "Run Retention Cleanup",
+      "retentionDesc": "Delete historical runs older than the retention window."
     },
     "table": {
       "toolSummary": "Skills {skills} / MCP {mcps}",
@@ -677,7 +688,7 @@
     "placeholders": {
       "selectLensNode": "Select a LensNode",
       "selectTask": "Select a task",
-      "noModel": "Not configured",
+      "noModel": "Default",
       "docIds": "Separate multiple IDs with commas",
       "includePaths": "One path rule per line, e.g. src/**",
       "extensions": "e.g. .lock,.pyc,.sqlite3",
@@ -693,6 +704,12 @@
       "retentionDesc": "How many days to keep Runs and execution records before cleanup.",
       "offlineTitle": "Node Offline Threshold",
       "offlineDesc": "If no heartbeat is received within this many seconds, health checks mark the node offline.",
+      "cleanupIntervalTitle": "Cleanup interval",
+      "cleanupIntervalDesc": "Execution interval for the LensNode cleanup task, in seconds.",
+      "healthIntervalTitle": "Health check interval",
+      "healthIntervalDesc": "Execution interval for the LensNode health check task, in seconds.",
+      "retentionIntervalTitle": "Retention cleanup interval",
+      "retentionIntervalDesc": "Execution interval for the run retention cleanup task, in seconds.",
       "skillGeneratorModelTitle": "Skill Generator Model",
       "skillGeneratorModelDesc": "Default LLM configuration used when SourceLens generates Workspace Guide Skills. Leave empty to use template-only generation.",
       "secondsUnit": "sec",

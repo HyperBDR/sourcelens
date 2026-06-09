@@ -90,7 +90,7 @@
                   :class="
                     activeRole === roleOption.key
                       ? 'bg-cyan-400 text-slate-950'
-                      : 'bg-white/8 text-slate-300 hover:bg-white/12'
+                      : 'bg-white/10 text-slate-300 hover:bg-white/12'
                   "
                   @click="activeRole = roleOption.key"
                 >
@@ -106,7 +106,7 @@
                   :class="
                     activeTab === tab.key
                       ? 'border-cyan-400/50 bg-cyan-400/10'
-                      : 'border-white/10 bg-white/5 hover:bg-white/8'
+                      : 'border-white/10 bg-white/5 hover:bg-white/10'
                   "
                   @click="activeTab = tab.key"
                 >
@@ -212,7 +212,7 @@
                   :class="
                     activeProjectId === project.id
                       ? 'border-cyan-400/50 bg-cyan-400/10'
-                      : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/8'
+                      : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
                   "
                   @click="activeProjectId = project.id"
                 >
@@ -764,7 +764,7 @@
                           :class="
                             query.outcome === outcome.key
                               ? 'border-cyan-400/50 bg-cyan-400/10'
-                              : 'border-white/10 bg-white/5 hover:bg-white/8'
+                              : 'border-white/10 bg-white/5 hover:bg-white/10'
                           "
                           @click="query.outcome = outcome.key"
                         >

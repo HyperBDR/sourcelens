@@ -1,6 +1,6 @@
 <template>
   <header
-    class="layout-admin-header bg-slate-800/95 shadow-sm border-b border-slate-700 flex-shrink-0 z-30"
+    class="layout-admin-header z-30 flex-shrink-0 border-b border-ink-800 bg-ink-900/95 shadow-sm backdrop-blur"
   >
     <div class="px-4 sm:px-6 lg:px-8">
       <div class="flex justify-between items-center h-16">
@@ -23,7 +23,7 @@
               />
             </svg>
           </button>
-          <h1 class="text-lg font-semibold text-slate-100 lg:hidden">
+          <h1 class="text-lg font-semibold text-white lg:hidden">
             {{ pageTitle }}
           </h1>
         </div>
@@ -34,7 +34,7 @@
           <div class="relative" ref="userMenuRef">
             <button
               @click="toggleUserMenu"
-              class="flex items-center space-x-2 text-sm text-slate-300 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-lg px-2 py-1"
+              class="flex items-center gap-2 rounded-lg px-2 py-1 text-sm text-ink-300 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             >
               <div
                 :class="avatarBgColor"
@@ -71,21 +71,21 @@
             >
               <div
                 v-if="showUserMenu"
-                class="absolute right-0 mt-2 w-80 bg-white rounded-md shadow-lg py-2 z-50 border border-gray-200"
+                class="absolute right-0 z-50 mt-2 w-80 rounded-lg border border-line bg-surface py-2 shadow-lg"
               >
-                <div class="px-4 py-2 border-b border-gray-100">
-                  <div class="font-semibold text-gray-900 truncate">
+                <div class="border-b border-line px-4 py-2">
+                  <div class="truncate font-semibold text-ink-900">
                     {{ displayName }}
                   </div>
                 </div>
                 <div class="px-4 py-2">
-                  <router-link
-                    to="/settings"
-                    class="flex items-center gap-2 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-50 rounded-md px-2 py-1.5 transition-colors"
-                    @click="showUserMenu = false"
+                  <button
+                    type="button"
+                    class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink-700 transition-colors hover:bg-line-soft hover:text-ink-900"
+                    @click="openSettings"
                   >
                     <svg
-                      class="w-4 h-4 text-gray-400"
+                      class="h-4 w-4 text-ink-400"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -104,12 +104,12 @@
                       />
                     </svg>
                     <span>{{ t('common.settings') }}</span>
-                  </router-link>
+                  </button>
                 </div>
-                <div class="border-t border-gray-100 my-1"></div>
+                <div class="my-1 border-t border-line"></div>
                 <button
                   @click="handleLogout"
-                  class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  class="block w-full px-4 py-2 text-left text-sm text-ink-700 hover:bg-line-soft"
                 >
                   {{ t('common.logout') }}
                 </button>
@@ -127,6 +127,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
+import { useUiStore } from '@/store/ui'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
 import PlatformSwitcher from '@/components/layout/PlatformSwitcher.vue'
 
@@ -136,6 +137,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const uiStore = useUiStore()
 
 const showUserMenu = ref(false)
 const userMenuRef = ref(null)
@@ -187,6 +189,11 @@ const avatarBgColor = computed(() => {
 
 const toggleUserMenu = () => {
   showUserMenu.value = !showUserMenu.value
+}
+
+const openSettings = () => {
+  uiStore.openSettings()
+  showUserMenu.value = false
 }
 
 const handleLogout = async () => {

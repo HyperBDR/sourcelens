@@ -3,6 +3,12 @@
     <ErrorBoundary>
       <router-view />
     </ErrorBoundary>
+    <Teleport to="body">
+      <UserSettingsModal
+        :show="uiStore.settingsOpen"
+        @close="uiStore.closeSettings()"
+      />
+    </Teleport>
     <Toast />
   </div>
 </template>
@@ -10,10 +16,13 @@
 <script setup>
 import { onMounted } from 'vue'
 import { useUserStore } from '@/store/user'
+import { useUiStore } from '@/store/ui'
 import ErrorBoundary from '@/components/ui/ErrorBoundary.vue'
 import Toast from '@/components/ui/Toast.vue'
+import UserSettingsModal from '@/components/settings/UserSettingsModal.vue'
 
 const userStore = useUserStore()
+const uiStore = useUiStore()
 
 // Initialize app
 onMounted(() => {

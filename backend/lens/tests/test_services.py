@@ -10,6 +10,8 @@ from django.core.management import call_command
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
+from django_celery_beat.models import PeriodicTask
+
 from core.asgi import application
 from core.management.commands.register_periodic_tasks import (
     discover_and_register,
@@ -22,6 +24,7 @@ from lens.llm import _parse_preflight_result
 from lens.models import (
     Assistant,
     DataSource,
+    GlobalSetting,
     LensNode,
     Message,
     Run,
@@ -574,6 +577,31 @@ class LensServiceTests(TransactionTestCase):
             1,
         )
         self.assertGreaterEqual(len(TASK_REGISTRY), 4)
+
+    def test_register_periodic_tasks_uses_global_interval_settings(self):
+        GlobalSetting.objects.create(
+            key="lensnode_cleanup.interval_seconds",
+            value=1800,
+        )
+        GlobalSetting.objects.create(
+            key="lensnode_health.interval_seconds",
+            value=120,
+        )
+        GlobalSetting.objects.create(
+            key="run_retention.interval_seconds",
+            value=7200,
+        )
+
+        TASK_REGISTRY.clear()
+        register_periodic_tasks()
+
+        cleanup = PeriodicTask.objects.get(name="lens-lensnode-cleanup")
+        health = PeriodicTask.objects.get(name="lens-lensnode-health")
+        retention = PeriodicTask.objects.get(name="lens-run-retention")
+
+        self.assertEqual(cleanup.interval.every, 1800)
+        self.assertEqual(health.interval.every, 120)
+        self.assertEqual(retention.interval.every, 7200)
 
     def test_discover_and_register_backfills_periodic_task_refs(self):
         discover_and_register()

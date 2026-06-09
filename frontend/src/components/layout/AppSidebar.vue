@@ -11,40 +11,33 @@
     <div
       v-if="showMobileMenu && isMobile"
       @click="$emit('close')"
-      class="fixed inset-0 bg-gray-900 bg-opacity-50 z-40 lg:hidden"
+      class="fixed inset-0 z-40 bg-ink-950/50 lg:hidden"
     />
   </Transition>
 
   <!-- Sidebar -->
   <aside
     :class="[
-      'bg-white border-r border-gray-200 flex flex-col transition-transform duration-300 ease-in-out w-64 flex-shrink-0 h-full',
+      'flex h-full w-64 flex-shrink-0 flex-col border-r border-line bg-surface-sunken transition-transform duration-300 ease-in-out',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
   >
     <!-- Logo and close button -->
     <div
-      class="flex items-center justify-between h-16 px-4 border-b border-gray-200"
+      class="flex h-16 items-center justify-between border-b border-line px-4"
     >
       <router-link
         :to="homePath"
-        class="flex items-center space-x-2 flex-1"
+        class="flex flex-1 items-center justify-start"
         @click="isMobile && $emit('close')"
       >
-        <img
-          src="/android-chrome-192x192.png"
-          alt="SourceLens Logo"
-          class="w-8 h-8"
-        />
-        <span class="text-xl font-semibold text-gray-900">{{
-          t('common.appName')
-        }}</span>
+        <BrandLogo variant="responsive" wrapperClass="origin-left scale-[0.62]" />
       </router-link>
       <button
         v-if="isMobile"
         @click="$emit('close')"
-        class="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+        class="rounded-md p-2 text-ink-500 hover:bg-line-soft hover:text-ink-900"
       >
         <svg
           class="w-5 h-5"
@@ -63,7 +56,7 @@
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto flex flex-col">
+    <nav class="flex flex-1 flex-col space-y-1 overflow-y-auto px-3 py-4">
       <div class="flex-1 space-y-1">
         <router-link
           v-if="userStore.userHasFeature('workspace')"
@@ -113,38 +106,11 @@
           <span>Lens</span>
         </router-link>
       </div>
-
-      <!-- Settings Menu -->
-      <div class="mt-auto pt-4 border-t border-gray-200">
-        <router-link
-          :to="{ name: 'SettingsProfile' }"
-          class="nav-item"
-          :class="isActive('/settings/profile') ? 'nav-item-active' : ''"
-          @mouseenter="preloadRoute('/settings/profile')"
-        >
-          <svg
-            class="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-          <span>{{ t('common.settings') }}</span>
-        </router-link>
-      </div>
     </nav>
+
+    <div class="border-t border-line p-3">
+      <SidebarQuickMenu />
+    </div>
   </aside>
 </template>
 
@@ -153,6 +119,8 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
+import BrandLogo from '@/components/layout/BrandLogo.vue'
+import SidebarQuickMenu from '@/components/layout/SidebarQuickMenu.vue'
 
 const props = defineProps({
   showMobileMenu: {
@@ -220,33 +188,33 @@ const preloadRoute = (path) => {
 
 <style scoped>
 .nav-item {
-  @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all duration-200;
+  @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-700 transition-colors hover:bg-line-soft hover:text-ink-900;
 }
 
 .nav-item-active {
-  @apply bg-primary-50 text-primary-600;
+  @apply bg-brand-50 text-brand-700;
 }
 
 .nav-item-parent {
-  @apply w-full cursor-pointer font-semibold text-gray-800;
+  @apply w-full cursor-pointer font-semibold text-ink-900;
 }
 
 .nav-item-parent:hover {
-  @apply bg-gray-50;
+  @apply bg-line-soft;
 }
 
 .nav-item-child {
-  @apply relative pl-10 py-2 text-sm font-normal text-gray-600;
+  @apply relative pl-10 py-2 text-sm font-normal text-ink-600;
   margin-left: 0.75rem;
   border-radius: 0.375rem;
 }
 
 .nav-item-child:hover {
-  @apply bg-gray-50;
+  @apply bg-line-soft;
 }
 
 .nav-item-child.nav-item-active {
-  @apply bg-primary-50 text-primary-600 font-medium;
+  @apply bg-brand-50 text-brand-700 font-medium;
 }
 
 .menu-group {
@@ -265,12 +233,12 @@ const preloadRoute = (path) => {
 /* Add a subtle left border indicator for child items */
 .nav-item-child::before {
   content: '';
-  @apply absolute left-6 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-gray-300 rounded;
+  @apply absolute left-6 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded bg-line;
   transition: all 0.2s;
 }
 
 .nav-item-child.nav-item-active::before {
-  @apply bg-primary-500 w-1;
+  @apply w-1 bg-brand-500;
 }
 
 /* Improve icon spacing in parent items */

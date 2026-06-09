@@ -14,6 +14,7 @@
     "test:e2e:container": "BASE_URL=http://localhost:10080 playwright test --config=playwright.config.cjs"
   },
   "dependencies": {
+    "@lucide/vue": "^1.17.0",
     "@vueuse/core": "^10.5.0",
     "axios": "^1.6.2",
     "chart.js": "^4.5.1",

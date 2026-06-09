@@ -1,124 +1,137 @@
 <template>
   <AppLayout>
-    <div class="mx-auto flex max-w-7xl flex-col gap-5">
-      <header class="rounded-lg border border-gray-200 bg-white px-5 py-4">
+    <div class="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-4 lg:px-6">
+      <section class="rounded-lg border border-line bg-surface shadow-sm">
         <div
-          class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"
+          class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-end lg:justify-between"
         >
-          <div>
-            <p class="text-xs font-semibold uppercase text-gray-500">Lens</p>
-            <h1 class="mt-1 text-2xl font-semibold text-gray-900">
-              Assistants
-            </h1>
-            <p class="mt-2 max-w-3xl text-sm leading-6 text-gray-600">
-              面向 LensNode 工作区目录的助手入口，展示任务、目录和模型引用检查。
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="text-lg font-semibold text-ink-900">Assistants</h1>
+              <span
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs font-medium text-ink-500"
+              >
+                Lens
+              </span>
+            </div>
+            <p class="mt-1 max-w-3xl text-sm leading-6 text-ink-500">
+              面向 LensNode 工作区目录的助手入口，统一展示状态、目录和工具配置。
             </p>
           </div>
-          <BaseButton :loading="loading" variant="secondary" @click="load">
-            刷新
+          <BaseButton :loading="loading" variant="outline" @click="load">
+            {{ t('common.refresh') }}
           </BaseButton>
         </div>
-      </header>
 
-      <section class="grid gap-4 md:grid-cols-4">
-        <div
-          v-for="metric in metrics"
-          :key="metric.label"
-          class="rounded-lg border border-gray-200 bg-white p-4"
-        >
-          <div class="text-xs font-medium text-gray-500">
-            {{ metric.label }}
-          </div>
-          <div class="mt-2 text-2xl font-semibold text-gray-900">
-            {{ metric.value }}
-          </div>
-        </div>
-      </section>
-
-      <section class="rounded-lg border border-gray-200 bg-white">
-        <div class="border-b border-gray-200 px-5 py-4">
-          <h2 class="text-base font-semibold text-gray-900">助手目录</h2>
-        </div>
-
-        <div v-if="assistants.length" class="divide-y divide-gray-100">
-          <article
-            v-for="assistant in assistants"
-            :key="assistant.uuid"
-            class="grid gap-4 px-5 py-4 lg:grid-cols-[1fr_220px_220px]"
+        <div class="grid gap-3 border-b border-line bg-surface-sunken px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div
+            v-for="metric in metrics"
+            :key="metric.label"
+            class="rounded-lg border border-line bg-surface px-4 py-3"
           >
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="truncate text-base font-semibold text-gray-900">
-                  {{ assistant.name }}
-                </h3>
-                <StatusBadge :status="assistant.status" />
-                <StatusBadge :status="modelCheckStatus(assistant)" />
-              </div>
-              <p class="mt-1 text-sm text-gray-500">
-                {{ assistant.slug }} · {{ assistant.selected_task || '-' }}
-              </p>
-              <div class="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
-                <span class="rounded-md bg-gray-100 px-2 py-1">
-                  LensNode {{ compactUuid(assistant.lensnode) }}
-                </span>
-                <span class="rounded-md bg-gray-100 px-2 py-1">
-                  Dirs {{ assistant.selected_dirs?.length || 0 }}
-                </span>
-                <span class="rounded-md bg-gray-100 px-2 py-1">
-                  Skills {{ assistant.skill_summary?.enabled || 0 }}/{{
-                    assistant.skill_summary?.total || 0
-                  }}
-                </span>
-                <span class="rounded-md bg-gray-100 px-2 py-1">
-                  MCP {{ assistant.mcp_summary?.enabled || 0 }}/{{
-                    assistant.mcp_summary?.total || 0
-                  }}
-                </span>
-              </div>
+            <div class="text-xs font-medium text-ink-500">
+              {{ metric.label }}
             </div>
-
-            <div class="text-sm text-gray-600">
-              <div class="font-medium text-gray-900">模型检查</div>
-              <div class="mt-2 space-y-1">
-                <div
-                  v-for="field in modelFields"
-                  :key="field"
-                  class="flex justify-between gap-3"
-                >
-                  <span>{{ fieldLabels[field] }}</span>
-                  <span>
-                    {{
-                      assistant.settings?._model_check?.[field]?.status || '-'
-                    }}
-                  </span>
-                </div>
-              </div>
+            <div class="mt-2 text-2xl font-semibold text-ink-900">
+              {{ metric.value }}
             </div>
-
-            <div class="flex items-start justify-end gap-2">
-              <BaseButton
-                variant="primary"
-                size="sm"
-                @click="goChat(assistant)"
-              >
-                进入查询
-              </BaseButton>
-              <BaseButton
-                variant="secondary"
-                size="sm"
-                @click="goHistory(assistant)"
-              >
-                历史
-              </BaseButton>
-            </div>
-          </article>
+          </div>
         </div>
 
-        <div v-else class="px-5 py-16 text-center">
-          <div class="text-sm font-medium text-gray-900">暂无助手</div>
-          <p class="mt-2 text-sm text-gray-500">
-            后端创建 Assistant 后会显示在这里。
-          </p>
+        <div class="px-5 py-4">
+          <BaseLoading v-if="loading && !assistants.length" />
+
+          <div
+            v-else-if="!assistants.length"
+            class="rounded-lg border border-line bg-surface-sunken py-16 text-center"
+          >
+            <div class="text-sm font-medium text-ink-900">暂无助手</div>
+            <p class="mt-2 text-sm text-ink-500">
+              后端创建 Assistant 后会显示在这里。
+            </p>
+          </div>
+
+          <div
+            v-else
+            class="overflow-x-auto rounded-lg border border-line bg-surface"
+          >
+            <table class="min-w-full divide-y divide-line">
+              <thead class="bg-surface-sunken">
+                <tr>
+                  <th class="table-head">Assistant</th>
+                  <th class="table-head">LensNode</th>
+                  <th class="table-head">Task</th>
+                  <th class="table-head">Dirs</th>
+                  <th class="table-head">Tools</th>
+                  <th class="table-head">Status</th>
+                  <th class="table-head text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-line bg-surface">
+                <tr
+                  v-for="assistant in assistants"
+                  :key="assistant.uuid"
+                  class="transition-colors hover:bg-surface-sunken"
+                >
+                  <td class="table-cell">
+                    <div class="font-medium text-ink-900">
+                      {{ assistant.name }}
+                    </div>
+                    <div class="mt-1 text-xs text-ink-500">
+                      {{ assistant.slug }}
+                    </div>
+                  </td>
+                  <td class="table-cell text-ink-600">
+                    {{ lensNodeName(assistant.lensnode) }}
+                  </td>
+                  <td class="table-cell text-ink-600">
+                    {{ assistant.selected_task || '-' }}
+                  </td>
+                  <td class="table-cell text-ink-600">
+                    {{ assistant.selected_dirs?.length || 0 }}
+                  </td>
+                  <td class="table-cell text-ink-600">
+                    <div class="space-y-1">
+                      <div>
+                        Skills {{ assistant.skill_summary?.enabled || 0 }}/{{
+                          assistant.skill_summary?.total || 0
+                        }}
+                      </div>
+                      <div>
+                        MCP {{ assistant.mcp_summary?.enabled || 0 }}/{{
+                          assistant.mcp_summary?.total || 0
+                        }}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="table-cell">
+                    <div class="flex flex-wrap gap-2">
+                      <StatusBadge :status="assistant.status" />
+                      <StatusBadge :status="modelCheckStatus(assistant)" />
+                    </div>
+                  </td>
+                  <td class="table-cell">
+                    <div class="flex justify-end gap-2">
+                      <BaseButton
+                        variant="primary"
+                        size="sm"
+                        @click="goChat(assistant)"
+                      >
+                        进入查询
+                      </BaseButton>
+                      <BaseButton
+                        variant="outline"
+                        size="sm"
+                        @click="goHistory(assistant)"
+                      >
+                        历史
+                      </BaseButton>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </div>
@@ -129,9 +142,11 @@
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseLoading from '@/components/ui/BaseLoading.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useToast } from '@/composables/useToast'
 import { useLensStore } from '@/store/lens'
@@ -139,21 +154,10 @@ import { useLensStore } from '@/store/lens'
 import { compactUuid, modelCheckStatus } from './format'
 
 const router = useRouter()
+const { t } = useI18n()
 const { showError } = useToast()
 const lensStore = useLensStore()
 const { assistants, loading } = storeToRefs(lensStore)
-const modelFields = [
-  'preprocess_model_ref',
-  'postprocess_model_ref',
-  'agent_model_ref',
-  'multimodal_model_ref'
-]
-const fieldLabels = {
-  preprocess_model_ref: 'Pre',
-  postprocess_model_ref: 'Post',
-  agent_model_ref: 'Agent',
-  multimodal_model_ref: 'Multi'
-}
 
 const metrics = computed(() => {
   const active = assistants.value.filter((item) => item.status === 'active')
@@ -174,6 +178,14 @@ const metrics = computed(() => {
   ]
 })
 
+function lensNodeName(value) {
+  if (!value) return '-'
+  if (typeof value === 'object') {
+    return value.name || value.uuid || '-'
+  }
+  return compactUuid(value)
+}
+
 async function load() {
   try {
     await lensStore.loadAssistants()
@@ -192,3 +204,13 @@ function goHistory(assistant) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.table-head {
+  @apply border-b border-line px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
+}
+
+.table-cell {
+  @apply px-4 py-4 text-sm text-ink-700;
+}
+</style>

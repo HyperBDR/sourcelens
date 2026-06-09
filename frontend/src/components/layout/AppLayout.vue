@@ -1,5 +1,5 @@
 <template>
-  <div class="h-screen bg-gray-50 flex w-full overflow-hidden">
+  <div class="flex h-screen w-full overflow-hidden bg-surface-sunken">
     <!-- Sidebar -->
     <AppSidebar
       v-if="resolvedShowSidebar"
@@ -8,7 +8,7 @@
     />
 
     <!-- Main content area -->
-    <div class="flex-1 flex flex-col min-w-0 w-0 h-full overflow-hidden">
+    <div class="flex-1 flex min-w-0 flex-col overflow-hidden bg-surface">
       <!-- Header -->
       <AppHeader
         :show-menu-button="resolvedShowSidebar"
@@ -17,7 +17,7 @@
 
       <!-- Main content - scrollable -->
       <main
-        class="flex-1 min-w-0 overflow-y-auto bg-gray-50"
+        class="flex-1 min-w-0 overflow-y-auto bg-surface-sunken"
         :class="
           resolvedShowSidebar ? 'py-3 px-4' : 'px-6 py-6 sm:px-8 lg:px-10'
         "

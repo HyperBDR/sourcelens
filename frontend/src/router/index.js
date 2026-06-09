@@ -33,16 +33,11 @@ const routes = [
   },
   {
     path: '/settings',
-    redirect: (to) => ({
-      path: '/settings/profile',
-      query: to.query
-    })
+    redirect: '/dashboard'
   },
   {
     path: '/settings/profile',
-    name: 'SettingsProfile',
-    component: () => import('@/pages/settings/Profile.vue'),
-    meta: { requiresAuth: true }
+    redirect: '/dashboard'
   },
   {
     path: '/llm',

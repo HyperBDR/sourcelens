@@ -109,7 +109,7 @@
                   :class="
                     activeScope === scope.key
                       ? 'border-cyan-400/50 bg-cyan-400/10'
-                      : 'border-white/10 bg-white/5 hover:bg-white/8'
+                      : 'border-white/10 bg-white/5 hover:bg-white/10'
                   "
                   @click="activeScope = scope.key"
                 >
@@ -173,7 +173,7 @@
                   :class="
                     selectedAssistant?.uuid === assistant.uuid
                       ? 'border-cyan-400/50 bg-cyan-400/10'
-                      : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/8'
+                      : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
                   "
                   @click="selectAssistant(assistant)"
                 >
@@ -259,7 +259,7 @@
                   :class="
                     selectedSession?.uuid === session.uuid
                       ? 'border-cyan-400/50 bg-cyan-400/10'
-                      : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/8'
+                      : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/10'
                   "
                   @click="selectSession(session)"
                 >

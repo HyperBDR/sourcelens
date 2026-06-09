@@ -3,10 +3,10 @@
     <button
       @click="toggleDropdown"
       :class="[
-        'flex items-center space-x-1 px-2 py-1 text-sm rounded-md transition-colors',
+        'flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors',
         variant === 'dark'
-          ? 'text-white hover:text-white hover:bg-slate-700'
-          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+          ? 'text-white hover:bg-white/10'
+          : 'text-ink-600 hover:bg-line-soft hover:text-ink-900'
       ]"
       :title="t('common.language')"
     >
@@ -40,14 +40,14 @@
     >
       <div
         v-if="showDropdown"
-        class="absolute right-0 mt-2 w-32 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200"
+        class="absolute right-0 z-50 mt-2 w-32 overflow-hidden rounded-lg border border-line bg-surface shadow-lg"
       >
         <button
           v-for="lang in languages"
           :key="lang.value"
           @click="selectLanguage(lang.value)"
-          class="flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-          :class="{ 'bg-gray-50 font-medium': locale === lang.value }"
+          class="flex w-full items-center px-3 py-2 text-sm text-ink-700 transition-colors hover:bg-line-soft"
+          :class="{ 'bg-line-soft font-medium text-ink-900': locale === lang.value }"
         >
           <span class="mr-2 text-sm">{{ lang.flag }}</span>
           {{ lang.label }}
@@ -61,6 +61,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePreferencesStore } from '@/store/preferences'
+import { getUiLanguageOptions } from '@/utils/languages'
 
 defineProps({
   variant: {
@@ -76,13 +77,10 @@ const preferencesStore = usePreferencesStore()
 const showDropdown = ref(false)
 const dropdownRef = ref(null)
 
-const languages = [
-  { value: 'en', label: 'English', flag: '🇺🇸' },
-  { value: 'zh-CN', label: '简体中文', flag: '🇨🇳' }
-]
+const languages = computed(() => getUiLanguageOptions(t))
 
 const currentLanguageDisplay = computed(() => {
-  const lang = languages.find((l) => l.value === locale.value)
+  const lang = languages.value.find((l) => l.value === locale.value)
   return lang ? lang.flag : '🌐'
 })
 

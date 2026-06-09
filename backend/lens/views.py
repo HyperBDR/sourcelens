@@ -22,7 +22,11 @@ from .models import (
     Skill,
 )
 from .lensnode_auth import issue_lensnode_token, token_matches
-from .periodic_tasks import ensure_datasource_periodic_task
+from .periodic_tasks import (
+    GLOBAL_PERIODIC_TASKS,
+    ensure_datasource_periodic_task,
+    sync_global_periodic_task,
+)
 from .serializers import (
     AssistantSerializer,
     DataSourceSerializer,
@@ -403,19 +407,110 @@ class GlobalSettingViewSet(BaseAdminViewSet):
     queryset = GlobalSetting.objects.all()
     serializer_class = GlobalSettingSerializer
     lookup_field = "key"
+    lookup_value_regex = "[^/]+"
 
-    @action(detail=False, methods=["get"], url_path="system-health")
+    def perform_create(self, serializer):
+        """Create a global setting and sync derived runtime config."""
+
+        setting = serializer.save()
+        self._sync_runtime_schedule(setting)
+
+    def perform_update(self, serializer):
+        """Update a global setting and sync derived runtime config."""
+
+        setting = serializer.save()
+        self._sync_runtime_schedule(setting)
+
+    def _sync_runtime_schedule(self, setting):
+        """Propagate interval settings to celery beat rows."""
+
+        if setting.key not in {
+            meta["setting_key"] for meta in GLOBAL_PERIODIC_TASKS.values()
+        }:
+            return
+
+        for task_type, meta in GLOBAL_PERIODIC_TASKS.items():
+            if meta["setting_key"] == setting.key:
+                sync_global_periodic_task(task_type)
+                break
+
+    @action(detail=False, methods=["get", "patch"], url_path="system-health")
     def system_health(self, request):
-        """Expose scheduled task health for MVP admin panel."""
+        """Expose and update the enabled state for global scheduled tasks."""
 
-        tasks = ScheduledTask.objects.filter(
-            task_type__in=[
-                ScheduledTask.TaskType.LENSNODE_CLEANUP,
-                ScheduledTask.TaskType.LENSNODE_HEALTH,
-                ScheduledTask.TaskType.RUN_RETENTION,
+        if request.method == "GET":
+            tasks = ScheduledTask.objects.filter(
+                task_type__in=[
+                    ScheduledTask.TaskType.LENSNODE_CLEANUP,
+                    ScheduledTask.TaskType.LENSNODE_HEALTH,
+                    ScheduledTask.TaskType.RUN_RETENTION,
+                ]
+            ).order_by("task_type")
+            data = [
+                {
+                    "name": task.name,
+                    "task_type": task.task_type,
+                    "enabled": task.enabled,
+                    "last_status": task.last_status,
+                    "last_run_at": task.last_run_at,
+                    "last_error": task.last_error,
+                    "last_metrics": task.last_metrics,
+                }
+                for task in tasks
             ]
-        ).order_by("task_type")
-        data = [
+            return Response(data)
+
+        task_type = request.data.get("task_type")
+        enabled = request.data.get("enabled")
+
+        valid_task_types = {
+            ScheduledTask.TaskType.LENSNODE_CLEANUP,
+            ScheduledTask.TaskType.LENSNODE_HEALTH,
+            ScheduledTask.TaskType.RUN_RETENTION,
+        }
+        if task_type not in valid_task_types:
+            return Response(
+                {"detail": "Invalid task_type."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not isinstance(enabled, bool):
+            return Response(
+                {"detail": "enabled must be a boolean."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        task_name_map = {
+            ScheduledTask.TaskType.LENSNODE_CLEANUP: "lens-lensnode-cleanup",
+            ScheduledTask.TaskType.LENSNODE_HEALTH: "lens-lensnode-health",
+            ScheduledTask.TaskType.RUN_RETENTION: "lens-run-retention",
+        }
+        task, _ = ScheduledTask.objects.get_or_create(
+            task_type=task_type,
+            target_type=None,
+            target_id=None,
+            defaults={
+                "name": task_name_map[task_type],
+                "enabled": enabled,
+            },
+        )
+        if task.enabled != enabled:
+            task.enabled = enabled
+            task.save(update_fields=["enabled", "updated_at"])
+
+        from django_celery_beat.models import PeriodicTask
+
+        periodic_task_name = task_name_map[task_type]
+        periodic_task = PeriodicTask.objects.filter(
+            name=periodic_task_name
+        ).first()
+        if periodic_task is not None and periodic_task.enabled != enabled:
+            periodic_task.enabled = enabled
+            periodic_task.save(update_fields=["enabled"])
+            from django_celery_beat.models import PeriodicTasks
+
+            PeriodicTasks.update_changed()
+
+        return Response(
             {
                 "name": task.name,
                 "task_type": task.task_type,
@@ -425,9 +520,7 @@ class GlobalSettingViewSet(BaseAdminViewSet):
                 "last_error": task.last_error,
                 "last_metrics": task.last_metrics,
             }
-            for task in tasks
-        ]
-        return Response(data)
+        )
 
 
 class LensNodeAIGatewayView(APIView):

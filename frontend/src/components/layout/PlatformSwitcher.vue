@@ -2,7 +2,7 @@
   <div v-if="platforms.length > 1" class="relative" ref="switcherRef">
     <button
       @click="open = !open"
-      class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium shadow-sm transition-colors"
+      class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium shadow-sm transition-colors"
       :class="[buttonClasses, buttonClass]"
     >
       <span class="max-w-[20rem] truncate whitespace-nowrap">{{
@@ -34,7 +34,7 @@
     >
       <div
         v-if="open"
-        class="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl shadow-lg"
+        class="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-xl border shadow-lg"
         :class="panelClasses"
       >
         <div
@@ -107,26 +107,26 @@ const isDark = computed(() => props.variant === 'dark')
 
 const buttonClasses = computed(() =>
   isDark.value
-    ? 'border border-slate-600 bg-slate-800 text-slate-100 hover:border-slate-500 hover:bg-slate-700'
-    : 'border border-gray-200 bg-white text-gray-700 hover:border-primary-300 hover:text-primary-700'
+    ? 'border-slate-600 bg-slate-800 text-slate-100 hover:border-slate-500 hover:bg-slate-700'
+    : 'border-line bg-surface text-ink-700 hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700'
 )
 
 const panelClasses = computed(() =>
   isDark.value
-    ? 'border border-gray-200 bg-white'
-    : 'border border-gray-200 bg-white'
+    ? 'border-line bg-surface'
+    : 'border-line bg-surface'
 )
 
 const headerClasses = computed(() =>
   isDark.value
-    ? 'border-gray-100 text-gray-500'
-    : 'border-gray-100 text-gray-500'
+    ? 'border-line text-ink-500'
+    : 'border-line text-ink-500'
 )
 
 const itemClasses = computed(() =>
   isDark.value
-    ? 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
-    : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+    ? 'text-ink-700 hover:bg-line-soft hover:text-ink-900'
+    : 'text-ink-700 hover:bg-line-soft hover:text-ink-900'
 )
 
 const handleClickOutside = (event) => {

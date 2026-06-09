@@ -2,7 +2,7 @@
   <div :class="cardClasses">
     <div v-if="$slots.header || title" :class="headerClasses">
       <slot name="header">
-        <h3 v-if="title" class="text-lg font-semibold text-gray-900">
+        <h3 v-if="title" class="text-base font-semibold text-ink-900">
           {{ title }}
         </h3>
       </slot>
@@ -21,7 +21,7 @@
 <script setup>
 import { computed } from 'vue'
 
-const props = defineProps({
+  const props = defineProps({
   title: {
     type: String,
     default: ''
@@ -47,7 +47,8 @@ const props = defineProps({
 })
 
 const cardClasses = computed(() => {
-  const baseClasses = 'card'
+  const baseClasses =
+    'rounded-lg border border-line bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
   const paddingClasses = {
     none: '',
     sm: 'p-4',
@@ -56,7 +57,7 @@ const cardClasses = computed(() => {
   }
   const shadowClasses = {
     none: 'shadow-none',
-    sm: 'shadow-sm',
+    sm: '',
     md: 'shadow-md',
     lg: 'shadow-lg'
   }
@@ -71,9 +72,9 @@ const cardClasses = computed(() => {
 })
 
 const headerClasses = computed(() => {
-  const base = 'card-header'
+  const base = 'border-b border-line px-5 py-4'
   const muted = props.headerMuted
-    ? 'bg-gray-50 border-b border-gray-100 px-4 py-3'
+    ? 'bg-line-soft'
     : ''
   return [base, muted, props.headerClass].filter(Boolean).join(' ')
 })

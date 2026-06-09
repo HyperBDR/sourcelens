@@ -88,18 +88,24 @@ const handleKeydown = (event) => {
 }
 
 const buttonClasses = computed(() => {
-  const baseClasses = 'btn'
+  const baseClasses =
+    'inline-flex items-center justify-center gap-2 rounded-lg border text-sm font-medium transition-colors focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed'
   const variantClasses = {
-    primary: 'btn-primary',
-    secondary: 'btn-secondary',
-    danger: 'btn-danger',
-    outline: 'btn-outline',
-    ghost: 'btn-ghost'
+    primary:
+      'border-primary-600 bg-primary-600 text-white hover:border-primary-700 hover:bg-primary-700 focus:ring-primary-500/30',
+    secondary:
+      'border-line bg-surface text-ink-700 hover:border-line/80 hover:bg-line-soft focus:ring-primary-500/20',
+    danger:
+      'border-danger-600 bg-danger-600 text-white hover:border-danger-700 hover:bg-danger-700 focus:ring-danger-500/30',
+    outline:
+      'border-line bg-transparent text-ink-700 hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 focus:ring-primary-500/20',
+    ghost:
+      'border-transparent bg-transparent text-ink-600 hover:bg-line-soft hover:text-ink-900 focus:ring-primary-500/20'
   }
   const sizeClasses = {
-    sm: 'px-3 py-1.5 text-xs',
-    md: 'px-4 py-2 text-sm',
-    lg: 'px-6 py-3 text-base'
+    sm: 'px-3 py-1.5 text-xs h-8',
+    md: 'px-4 py-2 text-sm h-9',
+    lg: 'px-5 py-3 text-base h-11'
   }
   const blockClass = props.block ? 'w-full' : ''
 

@@ -10,38 +10,33 @@
     <div
       v-if="showMobileMenu && isMobile"
       @click="$emit('close')"
-      class="layout-admin-overlay fixed inset-0 bg-gray-900 bg-opacity-50 z-40 lg:hidden"
+      class="layout-admin-overlay fixed inset-0 z-40 bg-ink-950/55 lg:hidden"
     />
   </Transition>
 
   <aside
     :class="[
-      'layout-admin-sidebar bg-slate-800/95 border-r border-slate-700 flex flex-col transition-transform duration-300 ease-in-out w-64 flex-shrink-0 h-full',
+      'layout-admin-sidebar flex h-full w-64 flex-shrink-0 flex-col border-r border-ink-800 bg-ink-900 transition-transform duration-300 ease-in-out',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
   >
     <div
-      class="flex items-center justify-between h-16 px-4 border-b border-slate-700"
+      class="flex h-16 items-center justify-between border-b border-ink-800 px-4"
     >
       <router-link
         to="/management"
-        class="flex items-center space-x-2 flex-1"
+        class="flex flex-1 items-center"
         @click="isMobile && $emit('close')"
       >
-        <img
-          src="/android-chrome-192x192.png"
-          alt="SourceLens Admin"
-          class="w-8 h-8"
-        />
-        <span class="text-xl font-semibold text-slate-100">{{
-          t('management.logoTitle')
-        }}</span>
+        <span class="text-lg font-semibold tracking-tight text-white">
+          {{ t('management.logoTitle') }}
+        </span>
       </router-link>
       <button
         v-if="isMobile"
         @click="$emit('close')"
-        class="p-2 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-700"
+        class="rounded-md p-2 text-ink-400 hover:bg-white/10 hover:text-white"
       >
         <svg
           class="w-5 h-5"
@@ -59,132 +54,8 @@
       </button>
     </div>
 
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto flex flex-col">
+    <nav class="flex flex-1 flex-col space-y-1 overflow-y-auto px-3 py-4">
       <div class="flex-1 space-y-1">
-        <div
-          v-if="userStore.userHasFeature('admin_console')"
-          class="menu-group"
-        >
-          <button
-            @click="toggleUserManagementMenu"
-            class="admin-nav-item admin-nav-item-parent w-full"
-          >
-            <svg
-              class="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-              />
-            </svg>
-            <span class="flex-1 text-left">{{
-              t('management.userManagement')
-            }}</span>
-            <svg
-              class="w-4 h-4 transition-transform"
-              :class="userManagementMenuOpen ? 'rotate-90' : ''"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-          </button>
-          <Transition
-            enter-active-class="transition-all duration-200 ease-out"
-            enter-from-class="opacity-0 max-h-0"
-            enter-to-class="opacity-100 max-h-96"
-            leave-active-class="transition-all duration-200 ease-in"
-            leave-from-class="opacity-100 max-h-96"
-            leave-to-class="opacity-0 max-h-0"
-          >
-            <div v-if="userManagementMenuOpen" class="submenu">
-              <router-link
-                to="/management/users"
-                class="admin-nav-item admin-nav-item-child"
-                :class="
-                  isActive('/management/users') ? 'admin-nav-item-active' : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/management/users')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-                  />
-                </svg>
-                <span>{{ t('management.userManagement') }}</span>
-              </router-link>
-              <router-link
-                to="/management/groups"
-                class="admin-nav-item admin-nav-item-child"
-                :class="
-                  isActive('/management/groups') ? 'admin-nav-item-active' : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/management/groups')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                  />
-                </svg>
-                <span>{{ t('management.groupManagement') }}</span>
-              </router-link>
-              <router-link
-                to="/management/roles"
-                class="admin-nav-item admin-nav-item-child"
-                :class="
-                  isActive('/management/roles') ? 'admin-nav-item-active' : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/management/roles')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 6l2.09 4.26L19 11l-3.5 3.41L16.18 19 12 16.77 7.82 19l.68-4.59L5 11l4.91-.74L12 6z"
-                  />
-                </svg>
-                <span>{{ t('management.roleManagement') }}</span>
-              </router-link>
-            </div>
-          </Transition>
-        </div>
-
         <div
           v-if="userStore.userHasFeature('admin_console')"
           class="menu-group"
@@ -284,32 +155,6 @@
                 <span>{{ t('lensAdmin.pages.lensnodes.title') }}</span>
               </router-link>
               <router-link
-                to="/management/lens/datasources"
-                class="admin-nav-item admin-nav-item-child"
-                :class="
-                  isActive('/management/lens/datasources')
-                    ? 'admin-nav-item-active'
-                    : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/management/lens/datasources')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4"
-                  />
-                </svg>
-                <span>{{ t('lensAdmin.pages.datasources.title') }}</span>
-              </router-link>
-              <router-link
                 to="/management/lens/resources/skills"
                 class="admin-nav-item admin-nav-item-child"
                 :class="
@@ -387,16 +232,68 @@
                 </svg>
                 <span>{{ t('lensAdmin.tabs.settings') }}</span>
               </router-link>
+            </div>
+          </Transition>
+        </div>
+
+        <div
+          v-if="userStore.userHasFeature('admin_console')"
+          class="menu-group"
+        >
+          <button
+            @click="toggleDataManagementMenu"
+            class="admin-nav-item admin-nav-item-parent w-full"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4"
+              />
+            </svg>
+            <span class="flex-1 text-left">{{
+              t('dataManagement.menuTitle')
+            }}</span>
+            <svg
+              class="w-4 h-4 transition-transform"
+              :class="dataManagementMenuOpen ? 'rotate-90' : ''"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+          <Transition
+            enter-active-class="transition-all duration-200 ease-out"
+            enter-from-class="opacity-0 max-h-0"
+            enter-to-class="opacity-100 max-h-96"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 max-h-96"
+            leave-to-class="opacity-0 max-h-0"
+          >
+            <div v-if="dataManagementMenuOpen" class="submenu">
               <router-link
-                to="/management/lens/health"
+                to="/management/lens/datasources"
                 class="admin-nav-item admin-nav-item-child"
                 :class="
-                  isActive('/management/lens/health')
+                  isActive('/management/lens/datasources')
                     ? 'admin-nav-item-active'
                     : ''
                 "
                 @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/management/lens/health')"
+                @mouseenter="preloadRoute('/management/lens/datasources')"
               >
                 <svg
                   class="w-4 h-4"
@@ -408,10 +305,110 @@
                     stroke-linecap="round"
                     stroke-linejoin="round"
                     stroke-width="2"
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                    d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4"
                   />
                 </svg>
-                <span>{{ t('lensAdmin.tabs.health') }}</span>
+                <span>{{ t('lensAdmin.pages.datasources.title') }}</span>
+              </router-link>
+            </div>
+          </Transition>
+        </div>
+
+        <div
+          v-if="userStore.userHasFeature('admin_console')"
+          class="menu-group"
+        >
+          <button
+            @click="toggleUserManagementMenu"
+            class="admin-nav-item admin-nav-item-parent w-full"
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+              />
+            </svg>
+            <span class="flex-1 text-left">{{
+              t('management.userManagement')
+            }}</span>
+            <svg
+              class="w-4 h-4 transition-transform"
+              :class="userManagementMenuOpen ? 'rotate-90' : ''"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+          <Transition
+            enter-active-class="transition-all duration-200 ease-out"
+            enter-from-class="opacity-0 max-h-0"
+            enter-to-class="opacity-100 max-h-96"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 max-h-96"
+            leave-to-class="opacity-0 max-h-0"
+          >
+            <div v-if="userManagementMenuOpen" class="submenu">
+              <router-link
+                to="/management/users"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/users') ? 'admin-nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/users')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                  />
+                </svg>
+                <span>{{ t('management.userManagement') }}</span>
+              </router-link>
+              <router-link
+                to="/management/groups"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/groups') ? 'admin-nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/groups')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                  />
+                </svg>
+                <span>{{ t('management.groupManagement') }}</span>
               </router-link>
             </div>
           </Transition>
@@ -870,7 +867,7 @@
         </div>
       </div>
 
-      <div class="mt-auto pt-4 border-t border-slate-700">
+      <div class="mt-auto border-t border-ink-800 pt-4">
         <router-link
           to="/dashboard"
           class="admin-nav-item"
@@ -919,6 +916,7 @@ const userStore = useUserStore()
 
 const userManagementMenuOpen = ref(true)
 const lensMenuOpen = ref(true)
+const dataManagementMenuOpen = ref(true)
 const llmMenuOpen = ref(true)
 const taskManagementMenuOpen = ref(true)
 const notificationManagementMenuOpen = ref(true)
@@ -941,6 +939,10 @@ const toggleLensMenu = () => {
   lensMenuOpen.value = !lensMenuOpen.value
 }
 
+const toggleDataManagementMenu = () => {
+  dataManagementMenuOpen.value = !dataManagementMenuOpen.value
+}
+
 const toggleLLMMenu = () => {
   llmMenuOpen.value = !llmMenuOpen.value
 }
@@ -958,11 +960,12 @@ watch(
   (newPath) => {
     if (
       newPath.startsWith('/management/users') ||
-      newPath.startsWith('/management/groups') ||
-      newPath.startsWith('/management/roles')
+      newPath.startsWith('/management/groups')
     )
       userManagementMenuOpen.value = true
     if (newPath.startsWith('/management/lens')) lensMenuOpen.value = true
+    if (newPath.startsWith('/management/lens/datasources'))
+      dataManagementMenuOpen.value = true
     if (newPath.startsWith('/management/llm')) llmMenuOpen.value = true
     if (newPath.startsWith('/management/task-management'))
       taskManagementMenuOpen.value = true
@@ -993,33 +996,33 @@ const preloadRoute = (path) => {
 
 <style scoped>
 .admin-nav-item {
-  @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-all duration-200;
+  @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
 }
 
 .admin-nav-item-active {
-  @apply bg-indigo-500/90 text-white hover:bg-indigo-500/90 hover:text-white;
+  @apply bg-brand-500/90 text-white hover:bg-brand-500/90 hover:text-white;
 }
 
 .admin-nav-item-parent {
-  @apply w-full cursor-pointer font-semibold text-slate-200;
+  @apply w-full cursor-pointer font-semibold text-ink-200;
 }
 
 .admin-nav-item-parent:hover {
-  @apply bg-slate-700 text-slate-100;
+  @apply bg-white/10 text-white;
 }
 
 .admin-nav-item-child {
-  @apply relative pl-10 py-2 text-sm font-normal text-slate-400;
+  @apply relative pl-10 py-2 text-sm font-normal text-ink-400;
   margin-left: 0.75rem;
   border-radius: 0.375rem;
 }
 
 .admin-nav-item-child:hover {
-  @apply bg-slate-700 text-slate-200;
+  @apply bg-white/10 text-ink-100;
 }
 
 .admin-nav-item-child.admin-nav-item-active {
-  @apply bg-indigo-500/80 text-white font-medium;
+  @apply bg-brand-500/80 text-white font-medium;
 }
 
 .menu-group {
@@ -1037,11 +1040,11 @@ const preloadRoute = (path) => {
 
 .admin-nav-item-child::before {
   content: '';
-  @apply absolute left-6 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-slate-600 rounded;
+  @apply absolute left-6 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded bg-ink-700;
 }
 
 .admin-nav-item-child.admin-nav-item-active::before {
-  @apply bg-indigo-400 w-1;
+  @apply w-1 bg-brand-200;
 }
 
 .admin-nav-item-parent svg:first-child,

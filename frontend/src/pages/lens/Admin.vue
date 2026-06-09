@@ -1,121 +1,201 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
-      <div class="mb-4">
-        <h1 class="text-lg font-semibold text-gray-900">
-          {{ activeMeta.title }}
-        </h1>
-        <p class="mt-1 text-sm text-gray-500">
-          {{ activeMeta.description }}
-        </p>
-      </div>
-
-      <div class="rounded-lg border border-gray-200 bg-white shadow-sm">
-        <div class="p-6">
-          <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <span class="text-sm text-gray-600">
-              {{
-                t('lensAdmin.total', {
+    <div class="mx-auto flex max-w-full flex-col gap-4 px-4 py-4 lg:px-6">
+      <section class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm">
+        <div class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="min-w-0 space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <h1 class="text-xl font-semibold text-ink-900">
+                {{ activeMeta.title }}
+              </h1>
+              <span class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs font-medium text-ink-500">
+                {{ activeMeta.label }}
+              </span>
+            </div>
+            <p class="max-w-3xl text-sm leading-6 text-ink-500">
+              {{ activeMeta.description }}
+            </p>
+            <div class="flex flex-wrap items-center gap-2 text-xs text-ink-500">
+              <span class="rounded-md border border-line bg-surface-sunken px-2 py-1">
+                {{ t('lensAdmin.total', {
                   label: activeMeta.label,
                   count: activeCount
-                })
-              }}
-            </span>
-            <div class="flex items-center gap-2">
-              <BaseButton
-                variant="outline"
-                size="sm"
-                :loading="loading"
-                @click="load"
-              >
-                {{ t('common.refresh') }}
-              </BaseButton>
-              <BaseButton
-                v-if="canCreate"
-                variant="primary"
-                size="sm"
-                @click="startCreate"
+                }) }}
+              </span>
+              <span
+                v-if="activeTab !== 'settings'"
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
               >
                 {{ activeMeta.action }}
-              </BaseButton>
+              </span>
             </div>
           </div>
-
-          <div class="mb-6 flex flex-wrap gap-2 border-b border-gray-200 pb-4">
-            <button
-              v-for="tab in tabs"
-              :key="tab.key"
-              type="button"
-              class="rounded-md px-3 py-1.5 text-sm font-medium transition"
-              :class="
-                activeTab === tab.key
-                  ? 'bg-primary-50 text-primary-700'
-                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
-              "
-              @click="selectTab(tab.key)"
+          <div class="flex flex-wrap items-center gap-2">
+            <BaseButton
+              variant="outline"
+              size="sm"
+              :loading="loading"
+              @click="load"
             >
-              {{ tab.label }}
-            </button>
+              {{ t('common.refresh') }}
+            </BaseButton>
+            <BaseButton
+              v-if="canCreate"
+              variant="primary"
+              size="sm"
+              @click="startCreate"
+            >
+              {{ activeMeta.action }}
+            </BaseButton>
           </div>
+        </div>
 
+        <div class="px-5 py-4">
           <BaseLoading v-if="loading && activeCount === 0" />
 
           <template v-else-if="activeTab === 'settings'">
-            <h2 class="mb-6 text-base font-semibold text-gray-900">
-              {{ t('lensAdmin.settings.sectionTitle') }}
-            </h2>
-
-            <section
-              v-for="setting in settingDefinitions"
-              :key="setting.key"
-              class="grid grid-cols-1 items-start gap-4 border-t border-gray-200 py-6 first:border-t-0 first:pt-0 md:grid-cols-3"
-            >
-              <div class="md:col-span-2">
-                <h3 class="mb-1 text-sm font-semibold text-gray-900">
-                  {{ setting.label }}
-                </h3>
-                <p class="text-sm text-gray-600">
-                  {{ setting.description }}
-                </p>
-                <p class="mt-1 font-mono text-xs text-gray-400">
-                  {{ setting.key }}
-                </p>
-              </div>
-              <div class="flex justify-end md:col-span-1">
-                <div class="flex w-full items-center justify-end gap-2 md:w-64">
-                  <input
-                    v-if="setting.type === 'number'"
-                    v-model.number="settingsForm[setting.key]"
-                    type="number"
-                    min="1"
-                    class="w-24 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                  />
-                  <select
-                    v-else-if="setting.type === 'model_ref'"
-                    v-model="settingsForm[setting.key]"
-                    class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+            <div class="overflow-hidden rounded-lg border border-line">
+              <table class="min-w-full table-fixed divide-y divide-line">
+                <colgroup>
+                  <col class="w-[48%]" />
+                  <col class="w-[52%]" />
+                </colgroup>
+                <thead class="bg-surface-sunken">
+                  <tr>
+                    <th class="table-head">
+                      {{ t('lensAdmin.settings.sectionTitle') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.value') }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-line bg-surface">
+                  <tr
+                    v-for="setting in settingDefinitions"
+                    :key="setting.key"
+                    class="align-top transition-colors hover:bg-line-soft"
                   >
-                    <option value="">
-                      {{ t('lensAdmin.placeholders.noModel') }}
-                    </option>
-                    <option
-                      v-for="config in llmConfigOptions"
-                      :key="config.uuid"
-                      :value="config.uuid"
-                    >
-                      {{ formatLLMConfigLabel(config) }}
-                    </option>
-                  </select>
-                  <span class="w-16 text-sm text-gray-500">
-                    {{ setting.unit }}
-                  </span>
-                </div>
-              </div>
-            </section>
+                    <td class="table-cell">
+                      <div class="text-sm font-semibold text-ink-900">
+                        {{ setting.label }}
+                      </div>
+                      <p class="mt-1 text-sm leading-6 text-ink-500">
+                        {{ setting.description }}
+                      </p>
+                      <p class="mt-1 font-mono text-xs text-ink-400">
+                        {{ setting.key }}
+                      </p>
+                    </td>
+                    <td class="table-cell">
+                      <div class="flex w-full items-center justify-end gap-3">
+                        <input
+                          v-if="setting.type === 'number'"
+                          v-model.number="settingsForm[setting.key]"
+                          type="number"
+                          min="1"
+                          class="w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                        />
+                        <select
+                          v-else-if="setting.type === 'model_ref'"
+                          v-model="settingsForm[setting.key]"
+                          class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                        >
+                          <option value="">
+                            {{ t('lensAdmin.placeholders.noModel') }}
+                          </option>
+                          <option
+                            v-for="config in llmConfigOptions"
+                            :key="config.uuid"
+                            :value="config.uuid"
+                          >
+                            {{ formatLLMConfigLabel(config) }}
+                          </option>
+                        </select>
+                        <span class="w-16 text-sm text-ink-500">
+                          {{ setting.unit }}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
 
-            <div
-              class="flex items-center justify-end gap-3 border-t border-gray-200 pt-6"
-            >
+            <div class="mt-6 overflow-hidden rounded-lg border border-line">
+              <div class="border-b border-line px-4 py-3">
+                <h3 class="text-sm font-semibold text-ink-900">
+                  {{ t('lensAdmin.tasks.title') }}
+                </h3>
+                <p class="mt-1 text-sm text-ink-500">
+                  {{ t('lensAdmin.tasks.description') }}
+                </p>
+              </div>
+              <table class="min-w-full divide-y divide-line">
+                <thead class="bg-surface-sunken">
+                  <tr>
+                    <th class="table-head">
+                      {{ t('lensAdmin.tasks.task') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.tasks.enabled') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.tasks.lastRun') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.tasks.lastStatus') }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-line bg-surface">
+                  <tr
+                    v-for="task in defaultScheduledTasks"
+                    :key="task.task_type"
+                    class="align-top transition-colors hover:bg-line-soft"
+                  >
+                    <td class="table-cell">
+                      <div class="text-sm font-semibold text-ink-900">
+                        {{ task.label }}
+                      </div>
+                      <p class="mt-1 text-sm leading-6 text-ink-500">
+                        {{ task.description }}
+                      </p>
+                      <p class="mt-1 font-mono text-xs text-ink-400">
+                        {{ task.task_type }}
+                      </p>
+                    </td>
+                    <td class="table-cell">
+                      <label class="inline-flex items-center gap-2">
+                        <input
+                          :checked="task.enabled"
+                          :disabled="taskSaving[task.task_type]"
+                          type="checkbox"
+                          class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                          @change="
+                            updateScheduledTaskEnabled(
+                              task.task_type,
+                              $event.target.checked
+                            )
+                          "
+                        />
+                        <span class="text-sm text-ink-600">
+                          {{ task.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
+                        </span>
+                      </label>
+                    </td>
+                    <td class="table-cell text-sm text-ink-600">
+                      {{ formatDateTime(task.last_run_at) }}
+                    </td>
+                    <td class="table-cell">
+                      <StatusBadge :status="task.last_status || 'unknown'" />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="mt-4 flex items-center justify-end gap-3 border-t border-line pt-4">
               <BaseButton
                 variant="secondary"
                 size="sm"
@@ -133,26 +213,26 @@
                 {{ t('lensAdmin.settings.saveChanges') }}
               </BaseButton>
             </div>
-            <p v-if="formError" class="mt-2 text-sm text-red-600">
+            <p v-if="formError" class="mt-2 text-sm text-danger-700">
               {{ formError }}
             </p>
           </template>
 
           <div
             v-else-if="activeCount === 0"
-            class="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center"
+            class="rounded-lg border border-line bg-surface-sunken py-16 text-center"
           >
-            <p class="text-sm font-medium text-gray-600">
+            <p class="text-sm font-medium text-ink-500">
               {{ t('common.noData') }}
             </p>
           </div>
 
           <div
             v-else
-            class="relative overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm"
+            class="relative overflow-x-auto rounded-lg border border-line bg-surface"
           >
-            <table class="min-w-full divide-y divide-gray-200">
-              <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
+            <table class="min-w-full divide-y divide-line">
+              <thead class="bg-surface-sunken">
                 <tr>
                   <th
                     v-for="column in activeColumns"
@@ -163,29 +243,31 @@
                   </th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-gray-100 bg-white">
+              <tbody class="divide-y divide-line bg-surface">
                 <tr
                   v-for="row in activeRows"
                   :key="row.uuid || row.key || row.task_type"
-                  class="transition-colors duration-150 hover:bg-gray-50"
+                  class="transition-colors hover:bg-line-soft"
                 >
                   <template v-if="activeTab === 'assistants'">
                     <td class="table-cell">
-                      <div class="font-medium text-gray-900">
+                      <div class="font-medium text-ink-900">
                         {{ row.name }}
                       </div>
-                      <div class="text-xs text-gray-500">{{ row.slug }}</div>
+                      <div class="mt-1 font-mono text-xs text-ink-400">
+                        {{ row.slug }}
+                      </div>
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{ lensNodeName(row.lensnode) }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{ row.selected_task || emptyValue }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{ row.selected_dirs?.length || 0 }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{
                         t('lensAdmin.table.toolSummary', {
                           skills: row.skill_summary?.enabled || 0,
@@ -203,10 +285,10 @@
 
                   <template v-else-if="activeTab === 'lensnodes'">
                     <td class="table-cell">
-                      <div class="font-medium text-gray-900">
+                      <div class="font-medium text-ink-900">
                         {{ row.name }}
                       </div>
-                      <div class="text-xs text-gray-500">
+                      <div class="mt-1 font-mono text-xs text-ink-400">
                         {{ compactUuid(row.uuid) }}
                       </div>
                     </td>
@@ -216,10 +298,10 @@
                         <StatusBadge :status="row.enrollment_status" />
                       </div>
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{ row.workspace_path || emptyValue }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{
                         t('lensAdmin.table.dirTaskSummary', {
                           dirs: row.available_dirs?.length || 0,
@@ -227,7 +309,7 @@
                         })
                       }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{ formatDateTime(row.last_heartbeat_at) }}
                     </td>
                     <td class="table-cell">
@@ -274,20 +356,20 @@
 
                   <template v-else-if="activeTab === 'datasources'">
                     <td class="table-cell">
-                      <div class="font-medium text-gray-900">
+                      <div class="font-medium text-ink-900">
                         {{ row.name }}
                       </div>
-                      <div class="text-xs text-gray-500">
+                      <div class="mt-1 font-mono text-xs text-ink-400">
                         {{ compactUuid(row.uuid) }}
                       </div>
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{ row.source_type }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{ row.target_path || emptyValue }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-600">
                       {{
                         formatSyncPolicy(row.sync_policy, row.last_synced_at)
                       }}
@@ -310,10 +392,12 @@
                   </template>
 
                   <template v-else-if="activeTab === 'skills'">
-                    <td class="table-cell font-medium text-gray-900">
+                    <td class="table-cell font-medium text-ink-900">
                       {{ row.name }}
                     </td>
-                    <td class="table-cell text-gray-500">{{ row.slug }}</td>
+                    <td class="table-cell font-mono text-ink-500">
+                      {{ row.slug }}
+                    </td>
                     <td class="table-cell">
                       <StatusBadge
                         :status="row.enabled ? 'enabled' : 'disabled'"
@@ -325,13 +409,13 @@
                   </template>
 
                   <template v-else-if="activeTab === 'mcp'">
-                    <td class="table-cell font-medium text-gray-900">
+                    <td class="table-cell font-medium text-ink-900">
                       {{ row.name }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell font-mono text-ink-500">
                       {{ row.transport }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell font-mono text-ink-500">
                       {{ row.endpoint || emptyValue }}
                     </td>
                     <td class="table-cell">
@@ -345,10 +429,10 @@
                   </template>
 
                   <template v-else>
-                    <td class="table-cell font-medium text-gray-900">
+                    <td class="table-cell font-medium text-ink-900">
                       {{ formatTaskName(row) }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell font-mono text-ink-500">
                       {{ row.task_type || emptyValue }}
                     </td>
                     <td class="table-cell">
@@ -356,11 +440,11 @@
                     </td>
                     <td
                       class="table-cell"
-                      :class="row.last_error ? 'text-red-600' : 'text-gray-400'"
+                      :class="row.last_error ? 'text-danger-700' : 'text-ink-400'"
                     >
                       {{ row.last_error || emptyValue }}
                     </td>
-                    <td class="table-cell text-gray-500">
+                    <td class="table-cell text-ink-500">
                       {{ formatDateTime(row.last_run_at) }}
                     </td>
                     <td class="table-cell">
@@ -379,7 +463,7 @@
             </table>
           </div>
         </div>
-      </div>
+    </section>
 
       <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
         <form class="space-y-4" @submit.prevent="save">
@@ -431,17 +515,17 @@
             <FormRow :label="t('lensAdmin.fields.selectedDirs')">
               <div
                 v-if="selectedLensNodeDirs.length"
-                class="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3"
+                class="space-y-2 rounded-md border border-line bg-surface-sunken p-3"
               >
                 <div
                   v-for="dir in selectedLensNodeDirs"
                   :key="dir.path"
-                  class="rounded-md border border-gray-200 bg-white p-3"
+                  class="rounded-md border border-line bg-surface p-3"
                 >
-                  <label class="flex items-center gap-2 text-sm text-gray-700">
+                  <label class="flex items-center gap-2 text-sm text-ink-700">
                     <input
                       type="checkbox"
-                      class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
                       :checked="isDirSelected(dir.path)"
                       @change="
                         toggleDirSelection(dir.path, $event.target.checked)
@@ -450,7 +534,7 @@
                     <span class="font-mono">{{ dir.path }}</span>
                   </label>
                   <div v-if="isDirSelected(dir.path)" class="mt-3">
-                    <label class="mb-1 block text-xs font-medium text-gray-500">
+                    <label class="mb-1 block text-xs font-medium text-ink-500">
                       {{ t('lensAdmin.fields.includePaths') }}
                     </label>
                     <textarea
@@ -464,16 +548,16 @@
               </div>
               <div
                 v-else
-                class="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500"
+                class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500"
               >
                 {{ t('lensAdmin.placeholders.noDirs') }}
               </div>
             </FormRow>
             <FormRow :label="t('lensAdmin.fields.retrievalPolicy')">
               <div
-                class="grid gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 md:grid-cols-3"
+                class="grid gap-3 rounded-md border border-line bg-surface-sunken p-3 md:grid-cols-3"
               >
-                <label class="block text-xs font-medium text-gray-600">
+                <label class="block text-xs font-medium text-ink-600">
                   {{ t('lensAdmin.fields.maxEvidenceFiles') }}
                   <input
                     v-model.number="form.max_evidence_files"
@@ -482,7 +566,7 @@
                     type="number"
                   />
                 </label>
-                <label class="block text-xs font-medium text-gray-600">
+                <label class="block text-xs font-medium text-ink-600">
                   {{ t('lensAdmin.fields.excludeExtensions') }}
                   <input
                     v-model="form.exclude_extensions_text"
@@ -490,7 +574,7 @@
                     :placeholder="t('lensAdmin.placeholders.extensions')"
                   />
                 </label>
-                <label class="block text-xs font-medium text-gray-600">
+                <label class="block text-xs font-medium text-ink-600">
                   {{ t('lensAdmin.fields.excludeDirs') }}
                   <input
                     v-model="form.exclude_dirs_text"
@@ -501,16 +585,16 @@
               </div>
             </FormRow>
             <FormRow :label="t('lensAdmin.fields.workspaceGuide')">
-              <div class="rounded-md border border-gray-200 bg-gray-50 p-3">
-                <label class="flex items-center gap-2 text-sm text-gray-700">
+              <div class="rounded-md border border-line bg-surface-sunken p-3">
+                <label class="flex items-center gap-2 text-sm text-ink-700">
                   <input
                     v-model="form.workspace_guide_enabled"
                     type="checkbox"
-                    class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
                   />
                   <span>{{ t('lensAdmin.fields.workspaceGuideEnabled') }}</span>
                 </label>
-                <p class="mt-2 text-xs text-gray-500">
+                <p class="mt-2 text-xs text-ink-500">
                   {{ t('lensAdmin.fields.workspaceGuideHelp') }}
                 </p>
                 <textarea
@@ -744,7 +828,7 @@
             <BooleanRow v-model="form.enabled" />
           </template>
 
-          <p v-if="formError" class="text-sm text-red-600">
+          <p v-if="formError" class="text-sm text-danger-700">
             {{ formError }}
           </p>
         </form>
@@ -766,7 +850,7 @@
 <script setup>
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
@@ -798,7 +882,8 @@ import {
   updateGlobalSetting,
   updateLensNode,
   updateMcpServer,
-  updateSkill
+  updateSkill,
+  updateSystemTaskEnabled
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -808,18 +893,7 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
-const router = useRouter()
 const { showSuccess, showError } = useToast()
-
-const tabs = computed(() => [
-  { key: 'assistants', label: t('lensAdmin.tabs.assistants') },
-  { key: 'lensnodes', label: t('lensAdmin.tabs.lensnodes') },
-  { key: 'datasources', label: t('lensAdmin.tabs.datasources') },
-  { key: 'skills', label: t('lensAdmin.tabs.skills') },
-  { key: 'mcp', label: t('lensAdmin.tabs.mcp') },
-  { key: 'settings', label: t('lensAdmin.tabs.settings') },
-  { key: 'health', label: t('lensAdmin.tabs.health') }
-])
 
 const routeToTab = {
   assistants: 'assistants',
@@ -827,18 +901,7 @@ const routeToTab = {
   datasources: 'datasources',
   'resources/skills': 'skills',
   'resources/mcp': 'mcp',
-  settings: 'settings',
-  health: 'health'
-}
-
-const tabToRoute = {
-  assistants: '/management/lens/assistants',
-  lensnodes: '/management/lens/lensnodes',
-  datasources: '/management/lens/datasources',
-  skills: '/management/lens/resources/skills',
-  mcp: '/management/lens/resources/mcp',
-  settings: '/management/lens/settings',
-  health: '/management/lens/health'
+  settings: 'settings'
 }
 
 const activeTab = ref('assistants')
@@ -859,17 +922,36 @@ const skills = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
 const systemHealth = ref([])
+const taskSaving = ref({})
 
 const defaultSettings = {
   'lensnode.defaults.timeout': 600,
   'retention.run_days': 90,
   'lensnode.health.offline_threshold_s': 120,
+  'lensnode_cleanup.interval_seconds': 3600,
+  'lensnode_health.interval_seconds': 60,
+  'run_retention.interval_seconds': 86400,
   'lens.skills.generator_model_ref': ''
 }
 
 const settingsForm = ref({ ...defaultSettings })
 const initialSettings = ref({ ...defaultSettings })
 const emptyValue = '—'
+
+const defaultScheduledTaskMeta = {
+  lensnode_cleanup: {
+    label: () => t('lensAdmin.tasks.cleanup'),
+    description: () => t('lensAdmin.tasks.cleanupDesc')
+  },
+  lensnode_health: {
+    label: () => t('lensAdmin.tasks.health'),
+    description: () => t('lensAdmin.tasks.healthDesc')
+  },
+  run_retention: {
+    label: () => t('lensAdmin.tasks.retention'),
+    description: () => t('lensAdmin.tasks.retentionDesc')
+  }
+}
 
 const FormRow = defineComponent({
   props: {
@@ -883,7 +965,7 @@ const FormRow = defineComponent({
       h('div', [
         h(
           'label',
-          { class: 'mb-1 block text-sm font-medium text-gray-700' },
+          { class: 'mb-1 block text-sm font-medium text-ink-700' },
           props.label
         ),
         slots.default?.()
@@ -901,11 +983,11 @@ const BooleanRow = defineComponent({
   emits: ['update:modelValue'],
   setup(props, { emit }) {
     return () =>
-      h('label', { class: 'flex items-center gap-2 text-sm text-gray-600' }, [
+      h('label', { class: 'flex items-center gap-2 text-sm text-ink-600' }, [
         h('input', {
           checked: props.modelValue,
           class:
-            'h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500',
+            'h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500',
           type: 'checkbox',
           onChange: (event) => emit('update:modelValue', event.target.checked)
         }),
@@ -955,19 +1037,19 @@ const KeyValueEditor = defineComponent({
             'div',
             {
               class:
-                'grid grid-cols-1 gap-2 rounded-md border border-gray-200 bg-gray-50 p-2 md:grid-cols-[1fr_1fr_auto]'
+                'grid grid-cols-1 gap-2 rounded-md border border-line bg-surface-sunken p-2 md:grid-cols-[1fr_1fr_auto]'
             },
             [
               h('input', {
                 class:
-                  'rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500',
+                  'rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
                 placeholder: props.keyLabel,
                 value: row.key,
                 onInput: (event) => updateRow(index, 'key', event.target.value)
               }),
               h('input', {
                 class:
-                  'rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500',
+                  'rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20',
                 placeholder: props.valueLabel,
                 value: row.value,
                 onInput: (event) =>
@@ -1036,8 +1118,7 @@ const activeRows = computed(() => {
     lensnodes: lensnodes.value,
     datasources: dataSources.value,
     skills: skills.value,
-    mcp: mcps.value,
-    health: systemHealth.value
+    mcp: mcps.value
   }
   return rowsByTab[activeTab.value] || []
 })
@@ -1050,7 +1131,7 @@ const activeCount = computed(() => {
 })
 
 const canCreate = computed(
-  () => !['settings', 'health'].includes(activeTab.value)
+  () => activeTab.value !== 'settings'
 )
 
 const activeMeta = computed(() => {
@@ -1091,12 +1172,32 @@ const activeColumns = computed(() => {
       'actions'
     ],
     skills: ['skill', 'slug', 'status', 'actions'],
-    mcp: ['mcpServer', 'transport', 'endpoint', 'status', 'actions'],
-    health: ['task', 'type', 'status', 'error', 'lastRun', 'actions']
+    mcp: ['mcpServer', 'transport', 'endpoint', 'status', 'actions']
   }
   return (columnsByTab[activeTab.value] || []).map((column) =>
     t(`lensAdmin.columns.${column}`)
   )
+})
+
+const defaultScheduledTasks = computed(() => {
+  const taskTypes = [
+    'lensnode_cleanup',
+    'lensnode_health',
+    'run_retention'
+  ]
+  return taskTypes.map((taskType) => {
+    const existing =
+      systemHealth.value.find((row) => row.task_type === taskType) || {}
+    const meta = defaultScheduledTaskMeta[taskType]
+    return {
+      task_type: taskType,
+      label: meta.label(),
+      description: meta.description(),
+      enabled: existing.enabled !== false,
+      last_run_at: existing.last_run_at || null,
+      last_status: existing.last_status || null
+    }
+  })
 })
 
 const settingDefinitions = computed(() => [
@@ -1118,6 +1219,27 @@ const settingDefinitions = computed(() => [
     key: 'lensnode.health.offline_threshold_s',
     label: t('lensAdmin.settings.offlineTitle'),
     description: t('lensAdmin.settings.offlineDesc'),
+    type: 'number',
+    unit: t('lensAdmin.settings.secondsUnit')
+  },
+  {
+    key: 'lensnode_cleanup.interval_seconds',
+    label: t('lensAdmin.settings.cleanupIntervalTitle'),
+    description: t('lensAdmin.settings.cleanupIntervalDesc'),
+    type: 'number',
+    unit: t('lensAdmin.settings.secondsUnit')
+  },
+  {
+    key: 'lensnode_health.interval_seconds',
+    label: t('lensAdmin.settings.healthIntervalTitle'),
+    description: t('lensAdmin.settings.healthIntervalDesc'),
+    type: 'number',
+    unit: t('lensAdmin.settings.secondsUnit')
+  },
+  {
+    key: 'run_retention.interval_seconds',
+    label: t('lensAdmin.settings.retentionIntervalTitle'),
+    description: t('lensAdmin.settings.retentionIntervalDesc'),
     type: 'number',
     unit: t('lensAdmin.settings.secondsUnit')
   },
@@ -1240,11 +1362,6 @@ function parseRouteTab() {
   activeTab.value = routeToTab[path] || 'assistants'
 }
 
-function selectTab(tab) {
-  activeTab.value = tab
-  router.push(tabToRoute[tab])
-}
-
 function normalizeList(payload) {
   if (Array.isArray(payload)) {
     return payload
@@ -1345,6 +1462,19 @@ async function saveSettings() {
     showError(formError.value)
   } finally {
     saving.value = false
+  }
+}
+
+async function updateScheduledTaskEnabled(taskType, enabled) {
+  taskSaving.value = { ...taskSaving.value, [taskType]: true }
+  try {
+    await updateSystemTaskEnabled(taskType, enabled)
+    await load()
+    showSuccess(t('lensAdmin.messages.saveSuccess'))
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.saveFailed')))
+  } finally {
+    taskSaving.value = { ...taskSaving.value, [taskType]: false }
   }
 }
 
@@ -1851,10 +1981,18 @@ onMounted(load)
 
 <style scoped>
 .form-input {
-  @apply w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500;
+  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
 }
 
 .json-input {
-  @apply w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500;
+  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
+.table-head {
+  @apply border-b border-line px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
+}
+
+.table-cell {
+  @apply px-4 py-4 text-sm text-ink-700;
 }
 </style>

@@ -65,6 +65,19 @@ def _get_or_create_global_record(task_type):
     return record
 
 
+def _is_global_task_enabled(task_type, default=True):
+    """Return whether a global periodic task is enabled."""
+
+    record = ScheduledTask.objects.filter(
+        task_type=task_type,
+        target_type=None,
+        target_id=None,
+    ).only("enabled").first()
+    if record is None:
+        return default
+    return bool(record.enabled)
+
+
 @shared_task(name="lens.source_sync", queue="lens")
 def source_sync_task(datasource_uuid):
     """Celery entrypoint for synchronizing a datasource."""
@@ -144,6 +157,9 @@ def datasource_lock(datasource_uuid, ttl_s=600):
 def lensnode_health_task():
     """Mark stale online LensNodes offline based on heartbeat age."""
 
+    if not _is_global_task_enabled(ScheduledTask.TaskType.LENSNODE_HEALTH):
+        return 0
+
     record = _get_or_create_global_record(ScheduledTask.TaskType.LENSNODE_HEALTH)
     record.last_status = ScheduledTask.Status.RUNNING
     record.last_error = ""
@@ -177,6 +193,9 @@ def lensnode_health_task():
 @shared_task(name="lens.lensnode_cleanup", queue="lens")
 def lensnode_cleanup_task():
     """Fail stale non-terminal runs that no LensNode has completed."""
+
+    if not _is_global_task_enabled(ScheduledTask.TaskType.LENSNODE_CLEANUP):
+        return 0
 
     record = _get_or_create_global_record(ScheduledTask.TaskType.LENSNODE_CLEANUP)
     record.last_status = ScheduledTask.Status.RUNNING
@@ -222,6 +241,9 @@ def lensnode_cleanup_task():
 @shared_task(name="lens.run_retention", queue="lens")
 def run_retention_task():
     """Celery entrypoint for deleting old terminal runs."""
+
+    if not _is_global_task_enabled(ScheduledTask.TaskType.RUN_RETENTION):
+        return 0
 
     record = _get_or_create_global_record(ScheduledTask.TaskType.RUN_RETENTION)
     record.last_status = ScheduledTask.Status.RUNNING

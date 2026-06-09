@@ -1,12 +1,12 @@
 <template>
-  <div class="layout-admin h-screen flex w-full overflow-hidden bg-gray-50">
+  <div class="layout-admin flex h-screen w-full overflow-hidden bg-ink-50">
     <AdminSidebar
       :show-mobile-menu="showMobileMenu"
       @close="showMobileMenu = false"
     />
-    <div class="flex-1 flex flex-col min-w-0 w-0 h-full overflow-hidden">
+    <div class="flex-1 flex min-w-0 flex-col overflow-hidden bg-ink-50">
       <AdminHeader @toggle-menu="showMobileMenu = !showMobileMenu" />
-      <main class="flex-1 py-3 px-4 min-w-0 overflow-y-auto bg-gray-50">
+      <main class="flex-1 min-w-0 overflow-y-auto bg-ink-50 px-4 py-3">
         <div :key="route.path">
           <slot />
         </div>

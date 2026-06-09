@@ -623,3 +623,43 @@ class LensApiTests(TestCase):
         task_types = {item["task_type"] for item in response.data}
         self.assertIn("lensnode_cleanup", task_types)
         self.assertIn("lensnode_health", task_types)
+
+    def test_system_health_patch_updates_enabled_state(self):
+        task = ScheduledTask.objects.create(
+            name="lensnode_cleanup",
+            task_type="lensnode_cleanup",
+            enabled=True,
+        )
+
+        response = self.client.patch(
+            "/api/lens/admin/global-settings/system-health/",
+            {
+                "task_type": "lensnode_cleanup",
+                "enabled": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        task.refresh_from_db()
+        self.assertFalse(task.enabled)
+        self.assertFalse(response.data["enabled"])
+
+    def test_global_setting_interval_syncs_periodic_task(self):
+        from django_celery_beat.models import PeriodicTask
+
+        response = self.client.patch(
+            "/api/lens/admin/global-settings/"
+            "lensnode_cleanup.interval_seconds/",
+            {
+                "key": "lensnode_cleanup.interval_seconds",
+                "value": 7200,
+                "description": "Cleanup interval",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        task = PeriodicTask.objects.get(name="lens-lensnode-cleanup")
+        self.assertEqual(task.interval.every, 7200)
+        self.assertEqual(task.interval.period, "seconds")

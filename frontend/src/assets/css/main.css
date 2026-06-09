@@ -7,71 +7,59 @@
 
 @layer base {
   html {
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
   }
 
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-surface-sunken text-ink-900 antialiased;
   }
 
-  /* Force light background for select, option, and input elements to prevent dark mode issues */
   select,
   select option,
-  input[type="text"],
-  input[type="email"],
-  input[type="password"],
-  input[type="number"],
-  input[type="date"],
-  input[type="datetime-local"],
-  input[type="time"],
-  input[type="search"],
-  input[type="tel"],
-  input[type="url"],
-  input[type="color"],
-  input[type="file"],
-  input[type="range"],
+  input[type='text'],
+  input[type='email'],
+  input[type='password'],
+  input[type='number'],
+  input[type='date'],
+  input[type='datetime-local'],
+  input[type='time'],
+  input[type='search'],
+  input[type='tel'],
+  input[type='url'],
+  input[type='color'],
+  input[type='file'],
+  input[type='range'],
   textarea {
     background-color: #ffffff !important;
-    color: #1f2937 !important;
+    color: #171512 !important;
   }
 
-  /* Checkbox and radio buttons - ensure they have proper background */
-  /* Reset all checkbox styles first */
-  input[type="checkbox"] {
+  input[type='checkbox'],
+  input[type='radio'] {
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
     background-color: #ffffff !important;
-    border: 1px solid #d1d5db !important;
-    border-color: #d1d5db !important;
+    border: 1px solid #ded7ca !important;
+    position: relative;
+    accent-color: #2b4ee6 !important;
+  }
+
+  input[type='checkbox'] {
     border-radius: 0.25rem !important;
-    accent-color: #2563eb !important;
-    position: relative;
   }
 
-  input[type="radio"] {
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
-    appearance: none !important;
-    background-color: #ffffff !important;
-    border: 1px solid #d1d5db !important;
-    border-color: #d1d5db !important;
+  input[type='radio'] {
     border-radius: 50% !important;
-    accent-color: #2563eb !important;
-    position: relative;
   }
 
-  /* Checked state - use background color and white checkmark */
-  input[type="checkbox"]:checked,
-  input[type="radio"]:checked {
-    background-color: #2563eb !important;
-    background-image: none !important;
-    border-color: #2563eb !important;
-    accent-color: #2563eb !important;
+  input[type='checkbox']:checked,
+  input[type='radio']:checked {
+    background-color: #2b4ee6 !important;
+    border-color: #2b4ee6 !important;
   }
 
-  /* Custom checkmark for checked checkbox */
-  input[type="checkbox"]:checked::before {
+  input[type='checkbox']:checked::before {
     content: '' !important;
     position: absolute !important;
     left: 50% !important;
@@ -84,8 +72,7 @@
     display: block !important;
   }
 
-  /* Radio button checked indicator */
-  input[type="radio"]:checked::before {
+  input[type='radio']:checked::before {
     content: '' !important;
     position: absolute !important;
     left: 50% !important;
@@ -98,25 +85,18 @@
     display: block !important;
   }
 
-  input[type="checkbox"]:disabled,
-  input[type="radio"]:disabled {
-    background-color: #f9fafb !important;
-    border-color: #e5e7eb !important;
+  input[type='checkbox']:disabled,
+  input[type='radio']:disabled {
+    background-color: #f5f2eb !important;
+    border-color: #ded7ca !important;
     opacity: 0.6 !important;
     cursor: not-allowed !important;
   }
 
-  /* Disabled and checked checkbox - ensure it's visible */
-  input[type="checkbox"]:disabled:checked {
-    background-color: #2563eb !important;
-    border-color: #2563eb !important;
-    opacity: 0.7 !important;
-  }
-
-  /* Disabled and checked radio - ensure it's visible */
-  input[type="radio"]:disabled:checked {
-    background-color: #2563eb !important;
-    border-color: #2563eb !important;
+  input[type='checkbox']:disabled:checked,
+  input[type='radio']:disabled:checked {
+    background-color: #2b4ee6 !important;
+    border-color: #2b4ee6 !important;
     opacity: 0.7 !important;
   }
 
@@ -125,64 +105,22 @@
   input:disabled,
   input[readonly],
   textarea:disabled {
-    background-color: #f9fafb !important;
-    color: #6b7280 !important;
-  }
-
-  input[type="date"]:readonly,
-  input[type="datetime-local"]:readonly {
-    background-color: #f9fafb !important;
-    color: #1f2937 !important;
+    background-color: #f5f2eb !important;
+    color: #736b5d !important;
   }
 }
 
 @layer components {
-  .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-
-  .btn-primary {
-    @apply btn bg-primary-600 text-white border-primary-600 hover:bg-primary-700 hover:border-primary-700 focus:ring-primary-500 disabled:bg-primary-600 disabled:text-white disabled:border-primary-600;
-  }
-
-  .btn-secondary {
-    @apply btn bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400 focus:ring-primary-500 disabled:bg-white disabled:text-gray-700 disabled:border-gray-300;
-  }
-
-  .btn-danger {
-    @apply btn bg-red-600 text-white border-red-600 hover:bg-red-700 hover:border-red-700 focus:ring-red-500 disabled:bg-red-600 disabled:text-white disabled:border-red-600;
-  }
-
-  .btn-outline {
-    @apply btn bg-transparent text-primary-600 border-primary-600 hover:bg-primary-50 hover:text-primary-700 focus:ring-primary-500 disabled:bg-transparent disabled:text-primary-600 disabled:border-primary-600;
-  }
-
-  .btn-ghost {
-    @apply btn bg-transparent text-gray-700 border-transparent hover:bg-gray-100 hover:text-gray-900 focus:ring-primary-500 disabled:bg-transparent disabled:text-gray-500 disabled:border-transparent;
-  }
-
-  .input {
-    @apply block w-full px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-
-  .input-error {
-    @apply input border-red-300 focus:ring-red-500 focus:border-red-500;
-  }
-
-  .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200;
-  }
-
-  .card-header {
-    @apply px-6 py-4 border-b border-gray-200;
-  }
-
   .card-body {
-    @apply px-6 py-4;
+    @apply px-5 py-5;
   }
 
   .card-footer {
-    @apply px-6 py-4 border-t border-gray-200 bg-gray-50;
+    @apply border-t border-line px-5 py-4 bg-surface;
+  }
+
+  .card-header {
+    @apply border-b border-line px-5 py-4;
   }
 
   .line-clamp-2 {
@@ -199,37 +137,36 @@
   }
 }
 
-/* Vue DatePicker custom theme */
 .dp__theme_light {
-  --dp-font-family: 'Inter', system-ui, sans-serif;
+  --dp-font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
   --dp-font-size: 0.85rem;
   --dp-border-radius: 0.625rem;
-  --dp-border-color: #e5e7eb;
-  --dp-text-color: #1f2937;
-  --dp-primary-color: #2563eb;
+  --dp-border-color: #ded7ca;
+  --dp-text-color: #171512;
+  --dp-primary-color: #2b4ee6;
   --dp-primary-text-color: #ffffff;
-  --dp-hover-color: #eff6ff;
-  --dp-hover-text-color: #1d4ed8;
-  --dp-primary-disabled-color: #bfdbfe;
-  --dp-secondary-color: #f3f4f6;
-  --dp-menu-border-color: #e5e7eb;
-  --dp-success-color: #16a34a;
-  --dp-icon-color: #6b7280;
+  --dp-hover-color: #eef4fe;
+  --dp-hover-text-color: #2440c5;
+  --dp-primary-disabled-color: #d9e7ff;
+  --dp-secondary-color: #f5f2eb;
+  --dp-menu-border-color: #ded7ca;
+  --dp-success-color: #1f9d6b;
+  --dp-icon-color: #736b5d;
 }
 
 .dp__menu {
-  @apply shadow-xl border border-gray-200 rounded-xl;
+  @apply rounded-xl border border-line shadow-lg;
 }
 
 .dp__input {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
   font-size: 0.875rem;
   border-radius: 0.5rem;
   padding: 0.45rem 0.75rem;
 }
 
 .bdtp-compact {
-  @apply flex items-center rounded-md border border-gray-300 bg-white pr-0;
+  @apply flex items-center rounded-md border border-line bg-surface pr-0;
   min-height: 1.25rem;
 }
 
@@ -238,11 +175,11 @@
 }
 
 .bdtp-compact .dp__input_wrap {
-  @apply flex items-center w-full min-h-[1.25rem] px-1.5;
+  @apply flex min-h-[1.25rem] w-full items-center px-1.5;
 }
 
 .bdtp-compact .dp__input {
-  @apply font-medium text-xs leading-4 p-0 bg-transparent border-none shadow-none focus:ring-0 focus:outline-none;
+  @apply bg-transparent p-0 text-xs font-medium leading-4 shadow-none focus:outline-none focus:ring-0;
   height: 1.25rem;
   line-height: 1.25rem;
 }
@@ -256,9 +193,5 @@
 }
 
 .dp__range_between {
-  background: rgba(37, 99, 235, 0.1);
-}
-
-.dp__today {
-  border-color: rgba(37, 99, 235, 0.7);
+  background: rgba(43, 78, 230, 0.1);
 }

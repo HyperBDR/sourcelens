@@ -50,6 +50,9 @@
     "workspace": "用户工作台",
     "adminConsole": "管理员控制台"
   },
+  "dataManagement": {
+    "menuTitle": "数据管理"
+  },
   "llm": {
     "menuTitle": "大模型管理",
     "stats": {
@@ -542,8 +545,7 @@
       "datasources": "数据源",
       "skills": "Skills",
       "mcp": "MCP Servers",
-      "settings": "全局配置",
-      "health": "系统健康"
+      "settings": "全局配置"
     },
     "pages": {
       "assistants": {
@@ -553,7 +555,7 @@
         "action": "新建 Assistant"
       },
       "lensnodes": {
-        "title": "LensNode 管理",
+        "title": "节点管理",
         "description": "查看和审批分布式执行节点，管理接入凭证。",
         "label": "LensNode",
         "action": "新建 LensNode"
@@ -578,15 +580,9 @@
       },
       "settings": {
         "title": "Lens 全局配置",
-        "description": "配置节点默认超时、Run 保留天数和健康检查阈值。",
+        "description": "配置节点默认超时、Run 保留天数、健康检查阈值，以及默认定时任务启用状态。",
         "label": "配置项",
         "action": "新建配置"
-      },
-      "health": {
-        "title": "Lens 系统健康",
-        "description": "查看 Lens 定时任务和最近执行状态。",
-        "label": "任务",
-        "action": "新建任务"
       }
     },
     "columns": {
@@ -600,6 +596,7 @@
       "workspace": "工作区",
       "dirsAndTasks": "目录 / 任务",
       "heartbeat": "心跳",
+      "value": "值",
       "datasource": "数据源",
       "type": "类型",
       "targetPath": "目标路径",
@@ -611,6 +608,20 @@
       "endpoint": "Endpoint",
       "error": "错误",
       "lastRun": "上次运行"
+    },
+    "tasks": {
+      "title": "默认定时任务",
+      "description": "在这里统一控制 Lens 默认定时任务的启用状态。",
+      "task": "任务",
+      "enabled": "启用",
+      "lastRun": "最近运行",
+      "lastStatus": "运行状态",
+      "cleanup": "LensNode 清理",
+      "cleanupDesc": "清理长时间未结束的运行记录。",
+      "health": "LensNode 健康检查",
+      "healthDesc": "将超时未心跳的在线节点标记为离线。",
+      "retention": "Run 保留清理",
+      "retentionDesc": "删除超过保留天数的历史运行记录。"
     },
     "table": {
       "toolSummary": "Skills {skills} / MCP {mcps}",
@@ -677,7 +688,7 @@
     "placeholders": {
       "selectLensNode": "请选择 LensNode",
       "selectTask": "请选择任务",
-      "noModel": "不配置",
+      "noModel": "默认",
       "docIds": "多个 ID 用逗号分隔",
       "includePaths": "每行一个路径规则，如 src/**",
       "extensions": "如 .lock,.pyc,.sqlite3",
@@ -693,8 +704,14 @@
       "retentionDesc": "Run 与执行记录保留天数，超过后由清理任务处理。",
       "offlineTitle": "节点离线阈值",
       "offlineDesc": "超过该秒数未收到心跳时，健康检查将节点标记为离线。",
-      "skillGeneratorModelTitle": "Skill 生成模型",
-      "skillGeneratorModelDesc": "SourceLens 生成 Workspace Guide Skill 时默认使用的 LLM 配置。留空则使用模板生成。",
+      "cleanupIntervalTitle": "清理任务间隔",
+      "cleanupIntervalDesc": "LensNode 清理任务的执行间隔，单位为秒。",
+      "healthIntervalTitle": "健康检查间隔",
+      "healthIntervalDesc": "LensNode 健康检查任务的执行间隔，单位为秒。",
+      "retentionIntervalTitle": "保留清理间隔",
+      "retentionIntervalDesc": "Run 保留清理任务的执行间隔，单位为秒。",
+      "skillGeneratorModelTitle": "提示词生成辅助模型",
+      "skillGeneratorModelDesc": "用于用户前端生成提示词、Skills 等内容的辅助 LLM 配置。留空则使用模板生成。",
       "secondsUnit": "秒",
       "daysUnit": "天",
       "reset": "重置",

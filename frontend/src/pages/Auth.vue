@@ -1,21 +1,15 @@
 <template>
   <div
-    class="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8"
+    class="flex min-h-screen items-center justify-center bg-surface-sunken px-4 py-12 sm:px-6 lg:px-8"
   >
-    <div class="max-w-md w-full space-y-8">
+    <div class="w-full max-w-md space-y-8">
       <!-- Header -->
       <div>
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center space-x-3">
-            <img
-              src="/android-chrome-192x192.png"
-              alt="SourceLens Logo"
-              class="w-10 h-10"
-            />
-            <h2 class="text-2xl font-bold text-gray-900">
-              {{ t('auth.loginTitle') }}
-            </h2>
-          </div>
+        <div class="mb-4 flex items-center justify-between gap-4">
+          <BrandLogo variant="responsive" />
+          <h2 class="text-2xl font-semibold text-ink-900">
+            {{ t('auth.loginTitle') }}
+          </h2>
           <LanguageSwitcher />
         </div>
       </div>
@@ -23,7 +17,7 @@
       <!-- Login Form -->
       <form class="mt-6 space-y-4" @submit.prevent="handleLogin">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
+          <label class="mb-1 block text-sm font-medium text-ink-700">
             {{ t('auth.username') }}
           </label>
           <BaseInput
@@ -56,18 +50,18 @@
             v-model="rememberMe"
             name="remember-me"
             type="checkbox"
-            class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+            class="h-4 w-4 rounded border-line text-primary-600 focus:ring-primary-500"
           />
-          <label for="remember-me" class="ml-2 block text-sm text-gray-900">
+          <label for="remember-me" class="ml-2 block text-sm text-ink-900">
             {{ t('auth.rememberMe') }}
           </label>
         </div>
 
         <div
           v-if="errorMessage"
-          class="rounded-md bg-red-50 border border-red-200 p-4"
+          class="rounded-lg border border-danger-100 bg-danger-50 p-4"
         >
-          <p class="text-sm text-red-700">
+          <p class="text-sm text-danger-700">
             {{ errorMessage }}
           </p>
         </div>
@@ -94,6 +88,7 @@ import { useUserStore } from '@/store/user'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
+import BrandLogo from '@/components/layout/BrandLogo.vue'
 
 const { t } = useI18n()
 const router = useRouter()

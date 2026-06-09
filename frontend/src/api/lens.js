@@ -208,3 +208,11 @@ export async function getSystemHealth() {
   const response = await api.get('/lens/admin/global-settings/system-health/')
   return unwrapList(unwrapResponse(response))
 }
+
+export async function updateSystemTaskEnabled(taskType, enabled) {
+  const response = await api.patch('/lens/admin/global-settings/system-health/', {
+    task_type: taskType,
+    enabled
+  })
+  return unwrapResponse(response)
+}

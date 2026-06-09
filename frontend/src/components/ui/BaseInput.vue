@@ -3,10 +3,10 @@
     <label
       v-if="label"
       :for="inputId"
-      class="block text-sm font-medium text-gray-700"
+      class="block text-sm font-medium text-ink-800"
     >
       {{ label }}
-      <span v-if="required" class="text-red-500">*</span>
+      <span v-if="required" class="text-danger-600">*</span>
     </label>
 
     <div class="relative">
@@ -26,17 +26,17 @@
 
       <div
         v-if="$slots.icon"
-        class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+        class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none"
       >
         <slot name="icon" />
       </div>
 
       <div
         v-if="error && showValidationIcon"
-        class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+        class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none"
       >
         <svg
-          class="w-5 h-5 text-red-500"
+          class="w-5 h-5 text-danger-600"
           fill="currentColor"
           viewBox="0 0 20 20"
         >
@@ -50,10 +50,10 @@
 
       <div
         v-else-if="valid && !error"
-        class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+        class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none"
       >
         <svg
-          class="w-5 h-5 text-green-500"
+          class="w-5 h-5 text-success"
           fill="currentColor"
           viewBox="0 0 20 20"
         >
@@ -67,17 +67,17 @@
 
       <div
         v-else-if="$slots.rightIcon"
-        class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+        class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none"
       >
         <slot name="rightIcon" />
       </div>
     </div>
 
-    <p v-if="error" class="text-sm text-red-600">
+    <p v-if="error" class="text-sm text-danger-700">
       {{ error }}
     </p>
 
-    <p v-else-if="help" class="text-sm text-gray-500">
+    <p v-else-if="help" class="text-sm text-ink-500">
       {{ help }}
     </p>
   </div>
@@ -144,8 +144,11 @@ const slots = useSlots()
 const inputId = ref(`input-${Math.random().toString(36).substr(2, 9)}`)
 
 const inputClasses = computed(() => {
-  const baseClasses = 'input'
-  const errorClass = props.error ? 'input-error' : ''
+  const baseClasses =
+    'block w-full rounded-lg border bg-surface px-3 py-2 text-sm text-ink-900 shadow-sm placeholder:text-ink-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:opacity-50'
+  const errorClass = props.error
+    ? 'border-danger-300 focus:border-danger-500 focus:ring-danger-500/20'
+    : 'border-line'
   const sizeClasses = {
     sm: 'px-2 py-1 text-xs',
     md: 'px-3 py-2 text-sm',

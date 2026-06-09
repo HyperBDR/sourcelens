@@ -542,6 +542,9 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
             "retention.run_days": "run_days",
             "lensnode.defaults.timeout": "timeout",
             "lensnode.health.offline_threshold_s": "offline_threshold_s",
+            "lensnode_cleanup.interval_seconds": "interval_seconds",
+            "lensnode_health.interval_seconds": "interval_seconds",
+            "run_retention.interval_seconds": "interval_seconds",
         }
         if key in positive_integer_keys:
             if not isinstance(value, int) or value <= 0:
