@@ -1120,7 +1120,7 @@ onBeforeUnmount(() => {
 }
 
 .message-card {
-  @apply rounded-lg border px-4 py-3 shadow-none;
+  @apply min-w-0 rounded-lg border px-4 py-3 shadow-none;
 }
 
 .message-card.user {
@@ -1147,7 +1147,7 @@ onBeforeUnmount(() => {
 }
 
 .message-markdown :deep(.markdown-content) {
-  @apply max-w-none;
+  @apply max-w-none break-words;
   color: #374151;
 }
 
@@ -1179,7 +1179,7 @@ onBeforeUnmount(() => {
 }
 
 .message-text {
-  @apply mt-2 whitespace-pre-wrap text-[16px] leading-7;
+  @apply mt-2 whitespace-pre-wrap break-words text-[16px] leading-7;
   color: #111827;
 }
 
