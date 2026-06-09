@@ -135,13 +135,23 @@
                   <button
                     type="button"
                     class="session-confirm-btn session-confirm-yes"
+                    :aria-label="t('common.confirm')"
                     @click.stop="doDeleteSession(session)"
-                  >{{ t('common.confirm') }}</button>
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                      <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
                   <button
                     type="button"
                     class="session-confirm-btn session-confirm-no"
+                    :aria-label="t('common.cancel')"
                     @click.stop="deletingSessionUuid = ''"
-                  >{{ t('common.cancel') }}</button>
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                      <path d="M18 6 6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
                 </div>
               </template>
               <template v-else>
@@ -1121,7 +1131,11 @@ onBeforeUnmount(() => {
 }
 
 .session-confirm-btn {
-  @apply rounded px-1.5 py-0.5 text-xs font-medium transition-colors;
+  @apply flex h-6 w-6 items-center justify-center rounded-md transition-colors;
+}
+
+.session-confirm-btn svg {
+  @apply h-3.5 w-3.5;
 }
 
 .session-confirm-yes {
@@ -1129,7 +1143,7 @@ onBeforeUnmount(() => {
 }
 
 .session-confirm-no {
-  @apply bg-gray-100 text-gray-600 hover:bg-gray-200;
+  @apply bg-gray-100 text-gray-500 hover:bg-gray-200;
 }
 
 .main-shell {
