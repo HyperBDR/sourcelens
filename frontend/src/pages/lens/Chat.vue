@@ -125,16 +125,25 @@
               v-for="session in sessions"
               :key="session.uuid"
               class="session-item"
-              :class="selectedSessionUuid === session.uuid ? 'session-item-active' : ''"
+              :class="[
+                deletingSessionUuid === session.uuid ? 'session-item-deleting' : selectedSessionUuid === session.uuid ? 'session-item-active' : ''
+              ]"
             >
-              <template v-if="deletingSessionUuid === session.uuid">
-                <div class="min-w-0 flex-1 truncate text-xs text-gray-500">
-                  {{ t('lens.chat.confirmDelete') }}？
+              <div
+                class="min-w-0 flex-1 cursor-pointer"
+                :title="session.title || t('lens.chat.untitledSession')"
+                @click="deletingSessionUuid !== session.uuid && selectSession(session)"
+              >
+                <div class="session-title" :class="deletingSessionUuid === session.uuid ? 'opacity-40' : ''">
+                  {{ session.title || t('lens.chat.untitledSession') }}
                 </div>
-                <div class="flex shrink-0 gap-1">
+              </div>
+
+              <div class="flex shrink-0 items-center gap-1">
+                <template v-if="deletingSessionUuid === session.uuid">
                   <button
                     type="button"
-                    class="session-confirm-btn session-confirm-yes"
+                    class="session-action-btn session-action-confirm"
                     :aria-label="t('common.confirm')"
                     @click.stop="doDeleteSession(session)"
                   >
@@ -144,7 +153,7 @@
                   </button>
                   <button
                     type="button"
-                    class="session-confirm-btn session-confirm-no"
+                    class="session-action-btn session-action-cancel"
                     :aria-label="t('common.cancel')"
                     @click.stop="deletingSessionUuid = ''"
                   >
@@ -152,29 +161,19 @@
                       <path d="M18 6 6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                   </button>
-                </div>
-              </template>
-              <template v-else>
-                <div
-                  class="min-w-0 flex-1 cursor-pointer"
-                  :title="session.title || t('lens.chat.untitledSession')"
-                  @click="selectSession(session)"
-                >
-                  <div class="session-title">
-                    {{ session.title || t('lens.chat.untitledSession') }}
-                  </div>
-                </div>
+                </template>
                 <button
+                  v-else
                   type="button"
                   class="session-delete-btn"
                   :aria-label="t('lens.chat.deleteSession')"
                   @click.stop="deletingSessionUuid = session.uuid"
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                     <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
                 </button>
-              </template>
+              </div>
             </div>
           </div>
         </section>
@@ -1096,7 +1095,7 @@ onBeforeUnmount(() => {
 }
 
 .session-item {
-  @apply flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors;
+  @apply flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-all duration-150;
 }
 
 .session-item:hover {
@@ -1107,13 +1106,27 @@ onBeforeUnmount(() => {
   background: #e5e7eb;
 }
 
+.session-item-deleting {
+  background: #fff1f2;
+}
+
 .session-title {
   @apply truncate text-sm font-medium;
   color: #111827;
 }
 
+.session-delete-btn,
+.session-action-btn {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors;
+}
+
+.session-delete-btn svg,
+.session-action-btn svg {
+  @apply h-3.5 w-3.5;
+}
+
 .session-delete-btn {
-  @apply ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md opacity-0 transition-all;
+  @apply opacity-0;
   color: #9ca3af;
 }
 
@@ -1126,24 +1139,22 @@ onBeforeUnmount(() => {
   color: #ef4444;
 }
 
-.session-delete-btn svg {
-  @apply h-3.5 w-3.5;
+.session-action-confirm {
+  background: #ef4444;
+  color: #ffffff;
 }
 
-.session-confirm-btn {
-  @apply flex h-6 w-6 items-center justify-center rounded-md transition-colors;
+.session-action-confirm:hover {
+  background: #dc2626;
 }
 
-.session-confirm-btn svg {
-  @apply h-3.5 w-3.5;
+.session-action-cancel {
+  background: #f3f4f6;
+  color: #6b7280;
 }
 
-.session-confirm-yes {
-  @apply bg-red-500 text-white hover:bg-red-600;
-}
-
-.session-confirm-no {
-  @apply bg-gray-100 text-gray-500 hover:bg-gray-200;
+.session-action-cancel:hover {
+  background: #e5e7eb;
 }
 
 .main-shell {
