@@ -24,7 +24,7 @@
       >
         <section
           v-if="show"
-          class="relative flex max-h-[82vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-white shadow-soft-lg"
+          class="relative flex h-[480px] max-h-[82vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-white shadow-soft-lg"
         >
           <!-- Left nav -->
           <nav class="flex w-44 shrink-0 flex-col border-r border-line bg-gray-50 py-3">
