@@ -122,12 +122,9 @@
                   </div>
 
                   <div class="mt-3 relative">
-                    <div class="pointer-events-none absolute inset-y-0 left-3 flex items-center">
-                      <span class="text-base">{{ languages.find(l => l.value === locale)?.flag }}</span>
-                    </div>
                     <select
                       :value="locale"
-                      class="w-full appearance-none rounded-xl border border-line bg-surface py-2.5 pl-9 pr-9 text-sm text-ink-800 transition-colors focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                      class="w-full appearance-none rounded-xl border border-line bg-surface py-2.5 pl-3 pr-9 text-sm text-ink-800 transition-colors focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
                       @change="selectLanguage($event.target.value)"
                     >
                       <option
