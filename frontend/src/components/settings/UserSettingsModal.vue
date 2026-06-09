@@ -121,22 +121,28 @@
                     </div>
                   </div>
 
-                  <div class="mt-4 grid grid-cols-2 gap-2">
-                    <button
-                      v-for="lang in languages"
-                      :key="lang.value"
-                      type="button"
-                      class="flex items-center gap-2 rounded-xl border px-3 py-3 text-left text-sm transition-colors"
-                      :class="
-                        locale === lang.value
-                          ? 'border-primary-200 bg-primary-50 text-primary-700'
-                          : 'border-line bg-surface text-ink-700 hover:bg-line-soft hover:text-ink-900'
-                      "
-                      @click="selectLanguage(lang.value)"
+                  <div class="mt-3 relative">
+                    <div class="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+                      <span class="text-base">{{ languages.find(l => l.value === locale)?.flag }}</span>
+                    </div>
+                    <select
+                      :value="locale"
+                      class="w-full appearance-none rounded-xl border border-line bg-surface py-2.5 pl-9 pr-9 text-sm text-ink-800 transition-colors focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                      @change="selectLanguage($event.target.value)"
                     >
-                      <span class="text-base">{{ lang.flag }}</span>
-                      <span class="font-medium">{{ lang.label }}</span>
-                    </button>
+                      <option
+                        v-for="lang in languages"
+                        :key="lang.value"
+                        :value="lang.value"
+                      >
+                        {{ lang.flag }} {{ lang.label }}
+                      </option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+                      <svg class="h-4 w-4 text-ink-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </div>
                   </div>
                 </div>
 
