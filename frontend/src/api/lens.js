@@ -100,6 +100,10 @@ export async function createSession(payload) {
   return unwrapResponse(response)
 }
 
+export async function deleteSession(uuid) {
+  await api.delete(`/lens/sessions/${uuid}/`)
+}
+
 export async function createRun(sessionUuid, payload) {
   const response = await api.post(
     `/lens/sessions/${sessionUuid}/runs/`,

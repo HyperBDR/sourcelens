@@ -121,23 +121,30 @@
             <h2>{{ t('lens.chat.sessions') }}</h2>
           </div>
           <div class="sessions-list">
-            <button
+            <div
               v-for="session in sessions"
               :key="session.uuid"
-              type="button"
               class="session-item"
-              :class="[
-                selectedSessionUuid === session.uuid ? 'session-item-active' : '',
-              ]"
+              :class="selectedSessionUuid === session.uuid ? 'session-item-active' : ''"
               :title="session.title || t('lens.chat.untitledSession')"
               @click="selectSession(session)"
             >
-              <div class="min-w-0">
+              <div class="min-w-0 flex-1">
                 <div class="session-title">
                   {{ session.title || t('lens.chat.untitledSession') }}
                 </div>
               </div>
-            </button>
+              <button
+                type="button"
+                class="session-delete-btn"
+                :aria-label="t('common.delete')"
+                @click.stop="confirmDeleteSession(session)"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
           </div>
         </section>
       </div>
@@ -415,6 +422,7 @@ import {
   cancelRun,
   createRun,
   createSession,
+  deleteSession,
   getRun,
   listAssistants,
   listMessages,
@@ -910,6 +918,26 @@ function formatTime(isoString) {
   })
 }
 
+async function confirmDeleteSession(session) {
+  if (!confirm(t('lens.chat.confirmDeleteSession') || '确认删除该会话？')) return
+  try {
+    await deleteSession(session.uuid)
+    sessions.value = sessions.value.filter((s) => s.uuid !== session.uuid)
+    if (selectedSessionUuid.value === session.uuid) {
+      const next = sessions.value[0]
+      if (next) {
+        await selectSession(next)
+      } else {
+        selectedSessionUuid.value = ''
+        messages.value = []
+      }
+    }
+    showSuccess(t('lens.chat.sessionDeleted') || '会话已删除')
+  } catch {
+    showError(t('lens.chat.deleteFailed') || '删除失败')
+  }
+}
+
 function handleOutsideClick(event) {
   const target = event.target
   if (dockMenuRef.value && !dockMenuRef.value.contains(target)) {
@@ -1050,6 +1078,24 @@ onBeforeUnmount(() => {
 .session-title {
   @apply truncate text-sm font-medium;
   color: #111827;
+}
+
+.session-delete-btn {
+  @apply ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md opacity-0 transition-all;
+  color: #9ca3af;
+}
+
+.session-item:hover .session-delete-btn {
+  @apply opacity-100;
+}
+
+.session-delete-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.session-delete-btn svg {
+  @apply h-3.5 w-3.5;
 }
 
 .main-shell {
