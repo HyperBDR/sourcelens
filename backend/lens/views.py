@@ -193,6 +193,61 @@ class LensNodeViewSet(BaseAdminViewSet):
         )
         return Response(LensNodeSerializer(lensnode).data)
 
+    @action(detail=True, methods=["post"], url_path="list-dirs")
+    def list_dirs(self, request, uuid=None):
+        """Ask a connected LensNode to list immediate subdirectories."""
+
+        import time
+        import uuid as uuid_mod
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        from django.core.cache import cache
+        from .services import lensnode_group_name
+
+        lensnode = self.get_object()
+        if lensnode.status != LensNode.Status.ONLINE:
+            return Response(
+                {"error": "LensNode is offline"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        paths = request.data.get("paths") or []
+        if not paths:
+            return Response({"dirs": {}})
+
+        request_id = uuid_mod.uuid4().hex
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return Response(
+                {"error": "Channel layer not configured"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        async_to_sync(channel_layer.group_send)(
+            lensnode_group_name(lensnode.uuid),
+            {
+                "type": "lensnode_command",
+                "payload": {
+                    "type": "list_dirs",
+                    "request_id": request_id,
+                    "paths": paths,
+                },
+            },
+        )
+
+        cache_key = f"lens:list_dirs:{request_id}"
+        for _ in range(30):
+            result = cache.get(cache_key)
+            if result is not None:
+                cache.delete(cache_key)
+                return Response({"dirs": result})
+            time.sleep(0.2)
+
+        return Response(
+            {"error": "timeout"},
+            status=status.HTTP_408_REQUEST_TIMEOUT,
+        )
+
 
 class AssistantViewSet(BaseAuthenticatedViewSet):
     """CRUD for assistants."""

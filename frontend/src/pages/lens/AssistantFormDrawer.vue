@@ -1,0 +1,472 @@
+<template>
+  <BaseDrawer
+    :show="show"
+    :title="drawerTitle"
+    :subtitle="drawerSubtitle"
+    @close="$emit('close')"
+  >
+    <!-- Wizard step indicator -->
+    <div class="mb-6 flex items-center">
+      <template v-for="(step, i) in wizardStepsMeta" :key="step.key">
+        <div class="flex flex-col items-center">
+          <div
+            class="flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors"
+            :class="
+              i + 1 < wizardStep
+                ? 'border-brand-600 bg-brand-600 text-white'
+                : i + 1 === wizardStep
+                  ? 'border-brand-600 text-brand-600'
+                  : 'border-line text-ink-400'
+            "
+          >
+            <svg
+              v-if="i + 1 < wizardStep"
+              class="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2.5"
+                d="M5 13l4 4L19 7"
+              />
+            </svg>
+            <span v-else>{{ i + 1 }}</span>
+          </div>
+          <span
+            class="mt-1 text-xs"
+            :class="
+              i + 1 === wizardStep
+                ? 'font-medium text-brand-600'
+                : 'text-ink-400'
+            "
+          >
+            {{ step.title }}
+          </span>
+        </div>
+        <div
+          v-if="i < wizardStepsMeta.length - 1"
+          class="mb-4 mx-1 h-px flex-1 bg-line"
+        />
+      </template>
+    </div>
+
+    <!-- Wizard Step 1 — Basics & Models -->
+    <div v-if="wizardStep === 1" class="space-y-5">
+      <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step1Desc') }}</p>
+      <FormRow :label="t('lensAdmin.fields.name')">
+        <input v-model="form.name" class="form-input" required />
+      </FormRow>
+      <FormRow :label="t('lensAdmin.fields.slug')">
+        <input v-model="form.slug" class="form-input" required />
+      </FormRow>
+      <div>
+        <div class="mb-3 border-b border-line pb-2 text-sm font-medium text-ink-600">
+          {{ t('lensAdmin.wizard.modelsOptionalLabel') }}
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <FormRow :label="t('lensAdmin.fields.preprocessModel')">
+            <select v-model="form.preprocess_model_ref" class="form-input">
+              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
+              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+            </select>
+          </FormRow>
+          <FormRow :label="t('lensAdmin.fields.postprocessModel')">
+            <select v-model="form.postprocess_model_ref" class="form-input">
+              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
+              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+            </select>
+          </FormRow>
+          <FormRow :label="t('lensAdmin.fields.agentModel')">
+            <select v-model="form.agent_model_ref" class="form-input">
+              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
+              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+            </select>
+          </FormRow>
+          <FormRow :label="t('lensAdmin.fields.multimodalModel')">
+            <select v-model="form.multimodal_model_ref" class="form-input">
+              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
+              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+            </select>
+          </FormRow>
+        </div>
+      </div>
+    </div>
+
+    <!-- Wizard Step 2 — Execution -->
+    <div v-else-if="wizardStep === 2" class="space-y-4">
+      <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step2Desc') }}</p>
+      <div class="grid gap-4 md:grid-cols-2">
+        <FormRow :label="t('lensAdmin.fields.lensnode')">
+          <select v-model="form.lensnode_uuid" class="form-input" required>
+            <option value="">{{ t('lensAdmin.placeholders.selectLensNode') }}</option>
+            <option v-for="ln in lensnodes" :key="ln.uuid" :value="ln.uuid">{{ ln.name }}</option>
+          </select>
+        </FormRow>
+        <FormRow :label="t('lensAdmin.fields.task')">
+          <select v-model="form.selected_task" class="form-input" required>
+            <option value="">{{ t('lensAdmin.placeholders.selectTask') }}</option>
+            <option
+              v-for="task in selectedLensNodeTasks"
+              :key="task.name"
+              :value="task.name"
+              :title="task.description"
+            >
+              {{ task.title || task.name }}
+            </option>
+          </select>
+        </FormRow>
+      </div>
+      <div>
+        <div class="mb-1 flex items-center justify-between">
+          <span class="text-sm font-medium text-ink-700">{{ t('lensAdmin.fields.selectedDirs') }}</span>
+          <button
+            v-if="form.lensnode_uuid"
+            type="button"
+            class="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-ink-500 transition-colors hover:bg-surface-sunken hover:text-ink-700 disabled:opacity-40"
+            :disabled="refreshingDirs"
+            @click="$emit('refresh-dirs')"
+          >
+            <svg class="h-3.5 w-3.5" :class="{ 'animate-spin': refreshingDirs }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {{ t('common.refresh') }}
+          </button>
+        </div>
+        <select
+          v-if="selectedLensNodeDirs.length"
+          v-model="selectedDirPath"
+          class="form-input font-mono"
+        >
+          <option value="">{{ t('lensAdmin.placeholders.selectDir') }}</option>
+          <option v-for="dir in selectedLensNodeDirs" :key="dir.path" :value="dir.path">
+            {{ dir.path }}
+          </option>
+        </select>
+        <div
+          v-else
+          class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500"
+        >
+          {{ t('lensAdmin.placeholders.noDirs') }}
+        </div>
+        <div v-if="selectedDirPath" class="mt-2">
+          <label class="mb-1 block text-xs font-medium text-ink-500">
+            {{ t('lensAdmin.fields.includePaths') }}
+          </label>
+          <textarea
+            class="form-input min-h-20 font-mono"
+            :placeholder="t('lensAdmin.placeholders.includePaths')"
+            :value="selectedDirScopeText(selectedDirPath)"
+            @input="updateDirScope(selectedDirPath, $event.target.value)"
+          />
+        </div>
+      </div>
+      <FormRow :label="t('lensAdmin.fields.retrievalPolicy')">
+        <div class="grid gap-3 rounded-md border border-line bg-surface-sunken p-3">
+          <label class="block text-xs font-medium text-ink-600">
+            {{ t('lensAdmin.fields.excludeExtensions') }}
+            <textarea v-model="form.exclude_extensions_text" class="form-input mt-1 min-h-28 font-mono" :placeholder="t('lensAdmin.placeholders.extensions')" />
+          </label>
+          <label class="block text-xs font-medium text-ink-600">
+            {{ t('lensAdmin.fields.excludeDirs') }}
+            <textarea v-model="form.exclude_dirs_text" class="form-input mt-1 min-h-28 font-mono" :placeholder="t('lensAdmin.placeholders.excludeDirs')" />
+          </label>
+        </div>
+      </FormRow>
+    </div>
+
+    <!-- Wizard Step 3 — Prompts -->
+    <div v-else-if="wizardStep === 3" class="space-y-5">
+      <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step3Desc') }}</p>
+
+      <!-- Workspace context (optional, free text injected before query) -->
+      <div>
+        <span class="text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.contextLabel') }}</span>
+        <p class="mb-2 text-xs text-ink-500">{{ t('lensAdmin.wizard.contextHint') }}</p>
+        <textarea
+          v-model="form.workspace_guide_overview"
+          class="form-input min-h-32"
+          :placeholder="t('lensAdmin.wizard.contextPlaceholder')"
+        />
+      </div>
+
+      <!-- Pre-prompt -->
+      <div>
+        <div class="mb-1 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.prePromptLabel') }}</div>
+        <p class="mb-2 text-xs text-ink-500">{{ t('lensAdmin.wizard.prePromptHint') }}</p>
+        <textarea v-model="form.pre_prompt" class="form-input min-h-24" :placeholder="t('lensAdmin.wizard.prePromptPlaceholder')" />
+      </div>
+
+      <!-- Post-prompt -->
+      <div>
+        <div class="mb-1 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.postPromptLabel') }}</div>
+        <p class="mb-2 text-xs text-ink-500">{{ t('lensAdmin.wizard.postPromptHint') }}</p>
+        <textarea v-model="form.post_prompt" class="form-input min-h-24" :placeholder="t('lensAdmin.wizard.postPromptPlaceholder')" />
+      </div>
+    </div>
+
+    <!-- Wizard Step 4 — Skills & MCP -->
+    <div v-else-if="wizardStep === 4" class="space-y-5">
+      <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step4Desc') }}</p>
+      <div>
+        <div class="mb-2 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.skillsSection') }}</div>
+        <div v-if="skills.length" class="space-y-1 rounded-md border border-line bg-surface-sunken p-2">
+          <label
+            v-for="skill in skills"
+            :key="skill.uuid"
+            class="flex cursor-pointer items-center gap-3 rounded px-2 py-2 transition-colors hover:bg-surface"
+          >
+            <input
+              type="checkbox"
+              :value="skill.uuid"
+              v-model="form.skill_uuids"
+              class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+            />
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-medium text-ink-900">{{ skill.name }}</div>
+              <div class="font-mono text-xs text-ink-400">{{ skill.slug }}</div>
+            </div>
+            <StatusBadge :status="skill.enabled ? 'enabled' : 'disabled'" />
+          </label>
+        </div>
+        <div v-else class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500">
+          {{ t('lensAdmin.wizard.noSkills') }}
+        </div>
+      </div>
+      <div>
+        <div class="mb-2 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.mcpSection') }}</div>
+        <div v-if="mcps.length" class="space-y-1 rounded-md border border-line bg-surface-sunken p-2">
+          <label
+            v-for="mcp in mcps"
+            :key="mcp.uuid"
+            class="flex cursor-pointer items-center gap-3 rounded px-2 py-2 transition-colors hover:bg-surface"
+          >
+            <input
+              type="checkbox"
+              :value="mcp.uuid"
+              v-model="form.mcp_uuids"
+              class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+            />
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-medium text-ink-900">{{ mcp.name }}</div>
+              <div class="text-xs text-ink-400">{{ mcp.transport }} · {{ mcp.endpoint || emptyValue }}</div>
+            </div>
+            <StatusBadge :status="mcp.enabled ? 'enabled' : 'disabled'" />
+          </label>
+        </div>
+        <div v-else class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500">
+          {{ t('lensAdmin.wizard.noMcp') }}
+        </div>
+      </div>
+    </div>
+
+    <p v-if="formError" class="mt-4 text-sm text-danger-700">{{ formError }}</p>
+
+    <template #footer>
+      <div class="flex items-center justify-between">
+        <BaseButton
+          variant="outline"
+          @click="wizardStep > 1 ? prevWizardStep() : $emit('close')"
+        >
+          {{ wizardStep > 1 ? t('lensAdmin.wizard.back') : t('common.cancel') }}
+        </BaseButton>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-ink-400">{{ wizardStep }} / {{ WIZARD_STEP_COUNT }}</span>
+          <BaseButton
+            v-if="wizardStep < WIZARD_STEP_COUNT"
+            variant="primary"
+            :disabled="!canProceedWizard"
+            @click="nextWizardStep"
+          >
+            {{ t('lensAdmin.wizard.next') }}
+          </BaseButton>
+          <BaseButton
+            v-else
+            variant="primary"
+            :loading="saving"
+            @click="$emit('save')"
+          >
+            {{ mode === 'create' ? t('lensAdmin.wizard.finish') : t('common.save') }}
+          </BaseButton>
+        </div>
+      </div>
+    </template>
+  </BaseDrawer>
+</template>
+
+<script setup>
+import { computed, defineComponent, h, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDrawer from '@/components/ui/BaseDrawer.vue'
+import StatusBadge from '@/components/ui/StatusBadge.vue'
+
+import { EMPTY_VALUE, formatLLMConfigLabel } from './adminHelpers'
+
+const props = defineProps({
+  show: Boolean,
+  mode: { type: String, default: 'create' },
+  // Shared reactive form object owned by the parent; this drawer writes into
+  // it directly so the parent's save() can read the result unchanged.
+  form: { type: Object, required: true },
+  lensnodes: { type: Array, default: () => [] },
+  skills: { type: Array, default: () => [] },
+  mcps: { type: Array, default: () => [] },
+  llmConfigOptions: { type: Array, default: () => [] },
+  saving: Boolean,
+  formError: { type: String, default: '' },
+  refreshingDirs: Boolean
+})
+
+defineEmits(['close', 'save', 'refresh-dirs'])
+
+const { t } = useI18n()
+
+const emptyValue = EMPTY_VALUE
+const WIZARD_STEP_COUNT = 4
+const wizardStep = ref(1)
+
+watch(
+  () => props.show,
+  (show) => {
+    if (show) {
+      wizardStep.value = 1
+    }
+  }
+)
+
+const FormRow = defineComponent({
+  props: {
+    label: {
+      type: String,
+      required: true
+    }
+  },
+  setup(rowProps, { slots }) {
+    return () =>
+      h('div', [
+        h(
+          'label',
+          { class: 'mb-1 block text-sm font-medium text-ink-700' },
+          rowProps.label
+        ),
+        slots.default?.()
+      ])
+  }
+})
+
+const drawerTitle = computed(() =>
+  props.mode === 'create'
+    ? t('lensAdmin.drawer.createTitle')
+    : t('lensAdmin.drawer.editTitle')
+)
+
+const drawerSubtitle = computed(() =>
+  props.mode === 'edit' ? props.form.name || '' : ''
+)
+
+const wizardStepsMeta = computed(() => [
+  { key: 'basic', title: t('lensAdmin.wizard.step1Title') },
+  { key: 'execution', title: t('lensAdmin.wizard.step2Title') },
+  { key: 'prompts', title: t('lensAdmin.wizard.step3Title') },
+  { key: 'tools', title: t('lensAdmin.wizard.step4Title') }
+])
+
+const canProceedWizard = computed(() => {
+  if (wizardStep.value === 1) {
+    return !!props.form.name?.trim() && !!props.form.slug?.trim()
+  }
+  if (wizardStep.value === 2) {
+    return (
+      !!props.form.lensnode_uuid &&
+      !!props.form.selected_task &&
+      selectedDirs().length > 0
+    )
+  }
+  return true
+})
+
+const selectedLensNodeTasks = computed(() => {
+  const selected = props.lensnodes.find(
+    (lensnode) => lensnode.uuid === props.form.lensnode_uuid
+  )
+  return Array.isArray(selected?.tasks) ? selected.tasks : []
+})
+
+const selectedLensNodeDirs = computed(() => {
+  const selected = props.lensnodes.find(
+    (lensnode) => lensnode.uuid === props.form.lensnode_uuid
+  )
+  const dirs = Array.isArray(selected?.available_dirs)
+    ? selected.available_dirs
+    : []
+  return dirs
+    .map((dir) => {
+      if (typeof dir === 'string') {
+        return { path: dir }
+      }
+      return { ...dir, path: dir.path || dir.name || '' }
+    })
+    .filter((dir) => dir.path)
+})
+
+function nextWizardStep() {
+  if (wizardStep.value < WIZARD_STEP_COUNT) wizardStep.value++
+}
+
+function prevWizardStep() {
+  if (wizardStep.value > 1) wizardStep.value--
+}
+
+function selectedDirs() {
+  return Array.isArray(props.form.selected_dirs) ? props.form.selected_dirs : []
+}
+
+const selectedDirPath = computed({
+  get() {
+    return selectedDirs()[0]?.path || ''
+  },
+  set(path) {
+    if (!path) {
+      props.form.selected_dirs = []
+      return
+    }
+    const existing = selectedDirs().find((dir) => dir.path === path)
+    props.form.selected_dirs = [existing || { path, include_paths_text: '' }]
+  }
+})
+
+function selectedDirScopeText(path) {
+  const dir = selectedDirs().find((item) => item.path === path)
+  return dir?.include_paths_text || ''
+}
+
+function updateDirScope(path, value) {
+  props.form.selected_dirs = selectedDirs().map((dir) =>
+    dir.path === path ? { ...dir, include_paths_text: value } : dir
+  )
+}
+
+watch(
+  () => props.form.lensnode_uuid,
+  () => {
+    if (
+      props.show &&
+      !selectedLensNodeTasks.value.some(
+        (task) => task.name === props.form.selected_task
+      )
+    ) {
+      props.form.selected_task = ''
+    }
+  }
+)
+</script>
+
+<style scoped>
+.form-input {
+  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+</style>

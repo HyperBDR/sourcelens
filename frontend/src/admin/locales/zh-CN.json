@@ -541,7 +541,7 @@
     "total": "{label} · {count}",
     "tabs": {
       "assistants": "Assistants",
-      "lensnodes": "LensNodes",
+      "lensnodes": "节点管理",
       "datasources": "数据源",
       "skills": "Skills",
       "mcp": "MCP Servers",
@@ -557,8 +557,8 @@
       "lensnodes": {
         "title": "节点管理",
         "description": "查看和审批分布式执行节点，管理接入凭证。",
-        "label": "LensNode",
-        "action": "新建 LensNode"
+        "label": "节点管理",
+        "action": "新建节点"
       },
       "datasources": {
         "title": "数据源管理",
@@ -587,7 +587,7 @@
     },
     "columns": {
       "assistant": "Assistant",
-      "lensnode": "LensNode",
+      "lensnode": "节点",
       "task": "任务",
       "dirs": "目录",
       "tools": "工具",
@@ -616,16 +616,16 @@
       "enabled": "启用",
       "lastRun": "最近运行",
       "lastStatus": "运行状态",
-      "cleanup": "LensNode 清理",
+      "cleanup": "节点清理",
       "cleanupDesc": "清理长时间未结束的运行记录。",
-      "health": "LensNode 健康检查",
+      "health": "节点健康检查",
       "healthDesc": "将超时未心跳的在线节点标记为离线。",
       "retention": "Run 保留清理",
       "retentionDesc": "删除超过保留天数的历史运行记录。"
     },
     "table": {
-      "toolSummary": "Skills {skills} / MCP {mcps}",
-      "dirTaskSummary": "Dirs {dirs} / Tasks {tasks}",
+      "toolSummary": "技能 {skills} / MCP {mcps}",
+      "dirTaskSummary": "{dirs} 目录 / {tasks} 任务",
       "notRecorded": "未记录",
       "intervalSeconds": "{seconds}s"
     },
@@ -640,17 +640,15 @@
     "fields": {
       "name": "名称",
       "slug": "Slug",
-      "lensnode": "LensNode",
+      "lensnode": "节点",
       "task": "任务",
       "selectedDirs": "选择目录",
       "includePaths": "检索范围",
       "retrievalPolicy": "检索策略",
-      "maxEvidenceFiles": "证据文件上限",
       "excludeExtensions": "排除扩展名",
       "excludeDirs": "排除目录",
-      "workspaceGuide": "工作区指引",
       "workspaceGuideEnabled": "为该 Assistant 注入此指引",
-      "workspaceGuideHelp": "描述仓库结构、检索优先级和停止规则。SourceLens 会将其保存为绑定 Skill，并在 LensNode 执行时注入。",
+      "workspaceGuideHelp": "描述仓库结构、检索优先级和停止规则。SourceLens 会将其保存为绑定 Skill，并在节点执行时注入。",
       "preprocessModel": "预处理模型",
       "postprocessModel": "后处理模型",
       "agentModel": "Agent 模型",
@@ -686,28 +684,28 @@
       "configValue": "配置值"
     },
     "placeholders": {
-      "selectLensNode": "请选择 LensNode",
+      "selectLensNode": "请选择节点",
       "selectTask": "请选择任务",
+      "selectDir": "请选择目录",
       "noModel": "默认",
       "docIds": "多个 ID 用逗号分隔",
       "includePaths": "每行一个路径规则，如 src/**",
       "extensions": "如 .lock,.pyc,.sqlite3",
       "excludeDirs": "如 .git,node_modules,dist",
-      "workspaceGuide": "示例：\n- /workspace/product 是产品级工作区，不是 Git 仓库。\n- service-api 是主要后端仓库。\n- deploy 包含部署和打包变更。\n- 查询最近变更时，先检查 service-api，证据不足再检查 deploy。",
-      "noDirs": "请先选择 LensNode，或等待节点上报可用目录。"
+      "noDirs": "请先选择节点，或等待节点上报可用目录。"
     },
     "settings": {
       "sectionTitle": "运行与保留策略",
       "timeoutTitle": "节点默认超时",
-      "timeoutDesc": "LensNode 执行任务的默认超时时间。",
+      "timeoutDesc": "节点执行任务的默认超时时间。",
       "retentionTitle": "Run 保留天数",
       "retentionDesc": "Run 与执行记录保留天数，超过后由清理任务处理。",
       "offlineTitle": "节点离线阈值",
       "offlineDesc": "超过该秒数未收到心跳时，健康检查将节点标记为离线。",
       "cleanupIntervalTitle": "清理任务间隔",
-      "cleanupIntervalDesc": "LensNode 清理任务的执行间隔，单位为秒。",
+      "cleanupIntervalDesc": "节点清理任务的执行间隔，单位为秒。",
       "healthIntervalTitle": "健康检查间隔",
-      "healthIntervalDesc": "LensNode 健康检查任务的执行间隔，单位为秒。",
+      "healthIntervalDesc": "节点健康检查任务的执行间隔，单位为秒。",
       "retentionIntervalTitle": "保留清理间隔",
       "retentionIntervalDesc": "Run 保留清理任务的执行间隔，单位为秒。",
       "skillGeneratorModelTitle": "提示词生成辅助模型",
@@ -720,6 +718,37 @@
     "modal": {
       "create": "新建",
       "edit": "编辑"
+    },
+    "drawer": {
+      "createTitle": "新建 Assistant",
+      "editTitle": "编辑 Assistant"
+    },
+    "wizard": {
+      "step1Title": "基础与模型",
+      "step1Desc": "设置名称、Slug 与各阶段模型配置（模型可选）",
+      "step2Title": "执行配置",
+      "step2Desc": "选择执行节点、任务、目录与检索策略",
+      "step3Title": "提示词",
+      "step3Desc": "补充查询前的背景与检索指令，均为可选",
+      "step4Title": "Skills 与 MCP",
+      "step4Desc": "为该助手绑定 Skills 与 MCP Server，均为可选",
+      "contextLabel": "工作区背景（可选）",
+      "contextHint": "告诉助手查询前需要知道的事：这是什么项目、有什么禁区、优先看哪里。",
+      "contextPlaceholder": "例如：\n- 这是 HyperBDR 灾备软件主仓库，service-api 是核心后端。\n- 不要参考 deploy/ 下的旧配置，以最新代码为准。\n- 部署问题优先看 docs/。",
+      "back": "上一步",
+      "next": "下一步",
+      "finish": "完成创建",
+      "modelsOptionalLabel": "模型配置（可选，留空使用系统默认）",
+      "prePromptLabel": "问题预处理提示词（可选）",
+      "prePromptHint": "用于处理收到的用户问题，例如屏蔽或拦截某些不应回答的问题，留空使用系统默认",
+      "prePromptPlaceholder": "留空使用系统默认…",
+      "postPromptLabel": "回答后处理提示词（可选）",
+      "postPromptHint": "用于对回答内容进行处理与审核，例如回答涉及代码时提示不展示代码等，留空使用系统默认",
+      "postPromptPlaceholder": "留空使用系统默认…",
+      "skillsSection": "Skills",
+      "mcpSection": "MCP Servers",
+      "noSkills": "暂无可用 Skill，请先在 Skill 资源库中创建",
+      "noMcp": "暂无可用 MCP Server，请先在 MCP Server 资源库中创建"
     },
     "messages": {
       "loadFailed": "加载 Lens 管理数据失败",

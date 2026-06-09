@@ -58,8 +58,10 @@
       "fetched": "Fetched",
       "pending": "Pending",
       "completed": "Completed",
+      "active": "Active",
       "enabled": "Enabled",
       "disabled": "Disabled",
+      "inactive": "Disabled",
       "unknown": "Unknown"
     },
     "pagination": {

@@ -1,7 +1,5 @@
 from pathlib import Path
 
-from django.utils.text import slugify
-
 from .models import AssistantSkill, Skill
 
 BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
@@ -39,10 +37,7 @@ def sync_workspace_guide_skill(assistant, workspace_guide):
         _disable_workspace_guide_binding(assistant, slug)
         return None
 
-    skill_md = build_workspace_guide_skill_md(
-        assistant=assistant,
-        content=content,
-    )
+    skill_md = build_workspace_guide_skill_md(content=content)
     skill, _ = Skill.objects.update_or_create(
         slug=slug,
         defaults={
@@ -69,49 +64,10 @@ def sync_workspace_guide_skill(assistant, workspace_guide):
     return skill
 
 
-def build_workspace_guide_skill_md(*, assistant, content):
-    """Build a complete Workspace Guide SKILL.md from user guidance."""
+def build_workspace_guide_skill_md(*, content):
+    """Return the user-provided workspace context as-is (no template)."""
 
-    skill_name = slugify(workspace_guide_slug(assistant))
-    description = (
-        "Use this skill when answering questions about the "
-        f"{assistant.name} workspace structure, repository layout, search "
-        "priority, or recent code changes."
-    )
-    selected_dirs = "\n".join(
-        f"- {item.get('path')}"
-        for item in assistant.selected_dirs or []
-        if item.get("path")
-    )
-    return (
-        "---\n"
-        f"name: {skill_name}\n"
-        f"description: {description}\n"
-        "---\n\n"
-        f"# {assistant.name} Workspace Guide\n\n"
-        "## Selected Workspace Directories\n\n"
-        f"{selected_dirs or '- No selected directories were configured.'}\n\n"
-        "## Workspace Structure\n\n"
-        f"{content}\n\n"
-        "## Required Usage Rules\n\n"
-        "- Treat this guide as authoritative for repository layout and "
-        "search priority.\n"
-        "- Prefer exact repository, product, or module matches before broad "
-        "workspace searches.\n"
-        "- If the selected workspace is a product-level directory, inspect "
-        "direct child repositories before assuming the root is a Git repo.\n"
-        "- For recent-change questions, inspect the most relevant repository "
-        "first with git_log, then use git_diff only for commit ranges needed "
-        "to explain the changes.\n"
-        "- Do not repeatedly query the same repository with larger ranges "
-        "unless previous evidence was insufficient.\n"
-        "- After collecting evidence from the primary repository and one "
-        "related repository, summarize before expanding further.\n"
-        "- Classify recent changes as new features, bug fixes, "
-        "build/deployment/config changes, or unclear from evidence.\n"
-        "- If a path is a directory, search within it or choose a specific "
-        "file instead of trying to read the directory as a file.\n"
-    )
+    return content.strip()
 
 
 def get_workspace_guide_payload(assistant):

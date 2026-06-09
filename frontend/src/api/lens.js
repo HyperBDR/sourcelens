@@ -59,6 +59,11 @@ export async function deleteLensNode(uuid) {
   return unwrapResponse(response)
 }
 
+export async function scanLensNodeDirs(uuid, paths) {
+  const response = await api.post(`/lens/admin/lensnodes/${uuid}/list-dirs/`, { paths })
+  return unwrapResponse(response)
+}
+
 export async function approveLensNode(uuid) {
   const response = await api.post(`/lens/admin/lensnodes/${uuid}/approve/`)
   return unwrapResponse(response)

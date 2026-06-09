@@ -30,8 +30,10 @@ const dotClass = computed(() => {
     fetched: 'bg-primary-600',
     pending: 'bg-warning-600',
     completed: 'bg-success-600',
+    active: 'bg-success-600',
     enabled: 'bg-success-600',
     disabled: 'bg-ink-400',
+    inactive: 'bg-ink-400',
     cancelled: 'bg-ink-400'
   }
   return classes[props.status] || 'bg-ink-400'
@@ -46,8 +48,10 @@ const getStatusClass = (status) => {
     fetched: 'text-primary-700',
     pending: 'text-warning-700',
     completed: 'text-success-700',
+    active: 'text-success-700',
     enabled: 'text-success-700',
     disabled: 'text-ink-500',
+    inactive: 'text-ink-500',
     cancelled: 'text-ink-500'
   }
   return classes[status] || 'text-ink-500'
@@ -62,8 +66,10 @@ const getStatusText = (status) => {
     fetched: t('common.status.fetched'),
     pending: t('common.status.pending'),
     completed: t('common.status.completed'),
+    active: t('common.status.active'),
     enabled: t('common.status.enabled'),
     disabled: t('common.status.disabled'),
+    inactive: t('common.status.disabled'),
     cancelled: t('common.status.disabled')
   }
   return statusTexts[status] || status || t('common.status.unknown')

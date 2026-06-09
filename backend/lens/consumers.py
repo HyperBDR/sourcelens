@@ -66,6 +66,8 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_run_output(content)
         elif frame_type == "run_done":
             await self._handle_run_done(content)
+        elif frame_type == "list_dirs_result":
+            await self._handle_list_dirs_result(content)
         else:
             await self.send_json(
                 {
@@ -248,6 +250,21 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             return uuid.UUID(str(value))
         except (TypeError, ValueError):
             return None
+
+    async def _handle_list_dirs_result(self, content):
+        """Store list_dirs response in cache for the waiting HTTP handler."""
+
+        request_id = content.get("request_id") or ""
+        dirs = content.get("dirs") or {}
+        if request_id:
+            await database_sync_to_async(self._cache_list_dirs_result)(
+                request_id, dirs
+            )
+
+    @staticmethod
+    def _cache_list_dirs_result(request_id, dirs):
+        from django.core.cache import cache
+        cache.set(f"lens:list_dirs:{request_id}", dirs, timeout=30)
 
     async def _send_bad_frame(self, message):
         await self.send_json(

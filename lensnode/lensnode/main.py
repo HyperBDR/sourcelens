@@ -190,6 +190,8 @@ class LensNodeClient:
         message_type = message.get("type")
         if message_type == "run_start":
             await self._start_command(message, send_queue)
+        elif message_type == "list_dirs":
+            await self._handle_list_dirs(message, send_queue)
         elif message_type == "run_cancel":
             run_uuid = str(message.get("run_uuid") or "")
             task = self.running_tasks.get(run_uuid)
@@ -274,6 +276,33 @@ class LensNodeClient:
         )
         self.running_tasks[run_uuid] = task
         task.add_done_callback(lambda item: self._consume_task_exception(item))
+
+    async def _handle_list_dirs(self, message, send_queue):
+        """List immediate subdirectories for requested paths and reply."""
+
+        from pathlib import Path
+
+        request_id = str(message.get("request_id") or "")
+        paths = message.get("paths") or []
+        result = {}
+        for path in paths:
+            p = Path(path)
+            subdirs = []
+            if p.is_dir():
+                try:
+                    for sub in sorted(p.iterdir(), key=lambda x: x.name):
+                        if sub.is_dir() and not sub.name.startswith("."):
+                            subdirs.append({"path": str(sub), "name": sub.name})
+                            if len(subdirs) >= 30:
+                                break
+                except PermissionError:
+                    pass
+            result[path] = subdirs
+        await send_queue.put({
+            "type": "list_dirs_result",
+            "request_id": request_id,
+            "dirs": result,
+        })
 
     async def _send_busy(self, run_uuid, send_queue, reason):
         """Report a run that cannot start because local capacity is full."""

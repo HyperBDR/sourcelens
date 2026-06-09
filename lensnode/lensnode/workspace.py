@@ -20,7 +20,7 @@ DEFAULT_EXCLUDED_EXTENSIONS = {
 
 
 def available_dirs(workspace_path):
-    """Return first-level directories available under the workspace root."""
+    """Return first-level directories with their immediate subdirectories."""
 
     root = Path(workspace_path)
     if not root.exists():
@@ -28,13 +28,18 @@ def available_dirs(workspace_path):
 
     dirs = []
     for child in sorted(root.iterdir(), key=lambda item: item.name):
-        if child.is_dir():
-            dirs.append(
-                {
-                    "path": str(child),
-                    "name": child.name,
-                }
-            )
+        if not child.is_dir():
+            continue
+        children = []
+        try:
+            for sub in sorted(child.iterdir(), key=lambda x: x.name):
+                if sub.is_dir() and not sub.name.startswith("."):
+                    children.append({"path": str(sub), "name": sub.name})
+                    if len(children) >= 30:
+                        break
+        except PermissionError:
+            pass
+        dirs.append({"path": str(child), "name": child.name, "children": children})
     return dirs
 
 

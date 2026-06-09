@@ -264,8 +264,8 @@
                     <td class="table-cell text-ink-600">
                       {{ row.selected_task || emptyValue }}
                     </td>
-                    <td class="table-cell text-ink-600">
-                      {{ row.selected_dirs?.length || 0 }}
+                    <td class="table-cell font-mono text-xs text-ink-500">
+                      {{ row.selected_dirs?.[0]?.path || emptyValue }}
                     </td>
                     <td class="table-cell text-ink-600">
                       {{
@@ -465,206 +465,26 @@
         </div>
     </section>
 
+      <!-- Assistant Drawer (create wizard + edit) -->
+      <AssistantFormDrawer
+        :show="showDrawer"
+        :mode="mode"
+        :form="form"
+        :lensnodes="lensnodes"
+        :skills="skills"
+        :mcps="mcps"
+        :llm-config-options="llmConfigOptions"
+        :saving="saving"
+        :form-error="formError"
+        :refreshing-dirs="refreshingDirs"
+        @close="closeDrawer"
+        @save="save"
+        @refresh-dirs="refreshDirs"
+      />
+
       <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
         <form class="space-y-4" @submit.prevent="save">
-          <template v-if="activeTab === 'assistants'">
-            <FormRow :label="t('lensAdmin.fields.name')">
-              <input v-model="form.name" class="form-input" required />
-            </FormRow>
-            <FormRow :label="t('lensAdmin.fields.slug')">
-              <input v-model="form.slug" class="form-input" required />
-            </FormRow>
-            <div class="grid gap-4 md:grid-cols-2">
-              <FormRow :label="t('lensAdmin.fields.lensnode')">
-                <select
-                  v-model="form.lensnode_uuid"
-                  class="form-input"
-                  required
-                >
-                  <option value="">
-                    {{ t('lensAdmin.placeholders.selectLensNode') }}
-                  </option>
-                  <option
-                    v-for="lensnode in lensnodes"
-                    :key="lensnode.uuid"
-                    :value="lensnode.uuid"
-                  >
-                    {{ lensnode.name }}
-                  </option>
-                </select>
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.task')">
-                <select
-                  v-model="form.selected_task"
-                  class="form-input"
-                  required
-                >
-                  <option value="">
-                    {{ t('lensAdmin.placeholders.selectTask') }}
-                  </option>
-                  <option
-                    v-for="task in selectedLensNodeTasks"
-                    :key="task.name"
-                    :value="task.name"
-                  >
-                    {{ task.title || task.name }} · {{ task.description }}
-                  </option>
-                </select>
-              </FormRow>
-            </div>
-            <FormRow :label="t('lensAdmin.fields.selectedDirs')">
-              <div
-                v-if="selectedLensNodeDirs.length"
-                class="space-y-2 rounded-md border border-line bg-surface-sunken p-3"
-              >
-                <div
-                  v-for="dir in selectedLensNodeDirs"
-                  :key="dir.path"
-                  class="rounded-md border border-line bg-surface p-3"
-                >
-                  <label class="flex items-center gap-2 text-sm text-ink-700">
-                    <input
-                      type="checkbox"
-                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-                      :checked="isDirSelected(dir.path)"
-                      @change="
-                        toggleDirSelection(dir.path, $event.target.checked)
-                      "
-                    />
-                    <span class="font-mono">{{ dir.path }}</span>
-                  </label>
-                  <div v-if="isDirSelected(dir.path)" class="mt-3">
-                    <label class="mb-1 block text-xs font-medium text-ink-500">
-                      {{ t('lensAdmin.fields.includePaths') }}
-                    </label>
-                    <textarea
-                      class="form-input min-h-20 font-mono"
-                      :placeholder="t('lensAdmin.placeholders.includePaths')"
-                      :value="selectedDirScopeText(dir.path)"
-                      @input="updateDirScope(dir.path, $event.target.value)"
-                    />
-                  </div>
-                </div>
-              </div>
-              <div
-                v-else
-                class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500"
-              >
-                {{ t('lensAdmin.placeholders.noDirs') }}
-              </div>
-            </FormRow>
-            <FormRow :label="t('lensAdmin.fields.retrievalPolicy')">
-              <div
-                class="grid gap-3 rounded-md border border-line bg-surface-sunken p-3 md:grid-cols-3"
-              >
-                <label class="block text-xs font-medium text-ink-600">
-                  {{ t('lensAdmin.fields.maxEvidenceFiles') }}
-                  <input
-                    v-model.number="form.max_evidence_files"
-                    class="form-input mt-1"
-                    min="1"
-                    type="number"
-                  />
-                </label>
-                <label class="block text-xs font-medium text-ink-600">
-                  {{ t('lensAdmin.fields.excludeExtensions') }}
-                  <input
-                    v-model="form.exclude_extensions_text"
-                    class="form-input mt-1 font-mono"
-                    :placeholder="t('lensAdmin.placeholders.extensions')"
-                  />
-                </label>
-                <label class="block text-xs font-medium text-ink-600">
-                  {{ t('lensAdmin.fields.excludeDirs') }}
-                  <input
-                    v-model="form.exclude_dirs_text"
-                    class="form-input mt-1 font-mono"
-                    :placeholder="t('lensAdmin.placeholders.excludeDirs')"
-                  />
-                </label>
-              </div>
-            </FormRow>
-            <FormRow :label="t('lensAdmin.fields.workspaceGuide')">
-              <div class="rounded-md border border-line bg-surface-sunken p-3">
-                <label class="flex items-center gap-2 text-sm text-ink-700">
-                  <input
-                    v-model="form.workspace_guide_enabled"
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-                  />
-                  <span>{{ t('lensAdmin.fields.workspaceGuideEnabled') }}</span>
-                </label>
-                <p class="mt-2 text-xs text-ink-500">
-                  {{ t('lensAdmin.fields.workspaceGuideHelp') }}
-                </p>
-                <textarea
-                  v-model="form.workspace_guide_content"
-                  class="form-input mt-3 min-h-36 font-mono"
-                  :placeholder="t('lensAdmin.placeholders.workspaceGuide')"
-                />
-              </div>
-            </FormRow>
-            <div class="grid gap-4 md:grid-cols-4">
-              <FormRow :label="t('lensAdmin.fields.preprocessModel')">
-                <select v-model="form.preprocess_model_ref" class="form-input">
-                  <option value="">
-                    {{ t('lensAdmin.placeholders.noModel') }}
-                  </option>
-                  <option
-                    v-for="config in llmConfigOptions"
-                    :key="config.uuid"
-                    :value="config.uuid"
-                  >
-                    {{ formatLLMConfigLabel(config) }}
-                  </option>
-                </select>
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.postprocessModel')">
-                <select v-model="form.postprocess_model_ref" class="form-input">
-                  <option value="">
-                    {{ t('lensAdmin.placeholders.noModel') }}
-                  </option>
-                  <option
-                    v-for="config in llmConfigOptions"
-                    :key="config.uuid"
-                    :value="config.uuid"
-                  >
-                    {{ formatLLMConfigLabel(config) }}
-                  </option>
-                </select>
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.agentModel')">
-                <select v-model="form.agent_model_ref" class="form-input">
-                  <option value="">
-                    {{ t('lensAdmin.placeholders.noModel') }}
-                  </option>
-                  <option
-                    v-for="config in llmConfigOptions"
-                    :key="config.uuid"
-                    :value="config.uuid"
-                  >
-                    {{ formatLLMConfigLabel(config) }}
-                  </option>
-                </select>
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.multimodalModel')">
-                <select v-model="form.multimodal_model_ref" class="form-input">
-                  <option value="">
-                    {{ t('lensAdmin.placeholders.noModel') }}
-                  </option>
-                  <option
-                    v-for="config in llmConfigOptions"
-                    :key="config.uuid"
-                    :value="config.uuid"
-                  >
-                    {{ formatLLMConfigLabel(config) }}
-                  </option>
-                </select>
-              </FormRow>
-            </div>
-          </template>
-
-          <template v-else-if="activeTab === 'lensnodes'">
+          <template v-if="activeTab === 'lensnodes'">
             <FormRow :label="t('lensAdmin.fields.name')">
               <input v-model="form.name" class="form-input" required />
             </FormRow>
@@ -891,6 +711,21 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
+import AssistantFormDrawer from './AssistantFormDrawer.vue'
+import {
+  EMPTY_VALUE as emptyValue,
+  compactUuid,
+  formatLLMConfigLabel,
+  formatTaskName,
+  listToText,
+  normalizeList,
+  objectToRows,
+  rowsToObject,
+  selectedDirsFromValue,
+  splitList,
+  stringifyJson
+} from './adminHelpers'
+
 const { t, locale } = useI18n()
 const route = useRoute()
 const { showSuccess, showError } = useToast()
@@ -907,7 +742,10 @@ const routeToTab = {
 const activeTab = ref('assistants')
 const loading = ref(false)
 const saving = ref(false)
+const pendingDeleteId = ref(null)
+const refreshingDirs = ref(false)
 const showModal = ref(false)
+const showDrawer = ref(false)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
@@ -936,7 +774,6 @@ const defaultSettings = {
 
 const settingsForm = ref({ ...defaultSettings })
 const initialSettings = ref({ ...defaultSettings })
-const emptyValue = '—'
 
 const defaultScheduledTaskMeta = {
   lensnode_cleanup: {
@@ -1088,8 +925,36 @@ const RowActions = defineComponent({
     }
   },
   setup(props) {
-    return () =>
-      h('div', { class: 'flex flex-wrap gap-2' }, [
+    return () => {
+      const id = props.row.uuid || props.row.key
+      if (pendingDeleteId.value === id) {
+        return h('div', { class: 'flex flex-wrap items-center gap-2' }, [
+          h(
+            BaseButton,
+            {
+              size: 'sm',
+              variant: 'danger',
+              onClick: () => {
+                pendingDeleteId.value = null
+                remove(props.row)
+              }
+            },
+            () => t('common.confirm')
+          ),
+          h(
+            BaseButton,
+            {
+              size: 'sm',
+              variant: 'outline',
+              onClick: () => {
+                pendingDeleteId.value = null
+              }
+            },
+            () => t('common.cancel')
+          )
+        ])
+      }
+      return h('div', { class: 'flex flex-wrap gap-2' }, [
         h(
           BaseButton,
           {
@@ -1104,11 +969,14 @@ const RowActions = defineComponent({
           {
             size: 'sm',
             variant: 'danger',
-            onClick: () => remove(props.row)
+            onClick: () => {
+              pendingDeleteId.value = id
+            }
           },
           () => t('common.delete')
         )
       ])
+    }
   }
 })
 
@@ -1260,37 +1128,6 @@ const modalTitle = computed(() => {
   return `${action} ${activeMeta.value.label}`
 })
 
-const selectedLensNodeTasks = computed(() => {
-  const selected = lensnodes.value.find(
-    (lensnode) => lensnode.uuid === form.value.lensnode_uuid
-  )
-  return Array.isArray(selected?.tasks) ? selected.tasks : []
-})
-
-const selectedLensNodeDirs = computed(() => {
-  const selected = lensnodes.value.find(
-    (lensnode) => lensnode.uuid === form.value.lensnode_uuid
-  )
-  const dirs = Array.isArray(selected?.available_dirs)
-    ? selected.available_dirs
-    : []
-  return dirs
-    .map((dir) => {
-      if (typeof dir === 'string') {
-        return { path: dir }
-      }
-      return { ...dir, path: dir.path || dir.name || '' }
-    })
-    .filter((dir) => dir.path)
-})
-
-function compactUuid(value) {
-  if (!value) {
-    return emptyValue
-  }
-  return `${String(value).slice(0, 8)}...${String(value).slice(-6)}`
-}
-
 function formatDateTime(value) {
   if (!value) {
     return t('lensAdmin.table.notRecorded')
@@ -1311,45 +1148,10 @@ function formatSyncPolicy(syncPolicy, lastSyncedAt) {
   return `${intervalText} · ${formatDateTime(lastSyncedAt)}`
 }
 
-function formatTaskName(row) {
-  return row.name || row.task_name || row.task_type || emptyValue
-}
-
-function formatLLMConfigLabel(config) {
-  const model = config.config?.model || config.model || emptyValue
-  return `${config.provider || config.name || config.uuid} · ${model}`
-}
-
 function lensNodeName(value) {
   const uuid = typeof value === 'object' ? value?.uuid : value
   const found = lensnodes.value.find((lensnode) => lensnode.uuid === uuid)
   return found?.name || uuid || emptyValue
-}
-
-function isDirSelected(path) {
-  return selectedDirs().some((dir) => dir.path === path)
-}
-
-function toggleDirSelection(path, checked) {
-  const dirs = selectedDirs()
-  if (checked && !dirs.some((dir) => dir.path === path)) {
-    form.value.selected_dirs = [...dirs, { path, include_paths_text: '' }]
-    return
-  }
-  if (!checked) {
-    form.value.selected_dirs = dirs.filter((dir) => dir.path !== path)
-  }
-}
-
-function selectedDirScopeText(path) {
-  const dir = selectedDirs().find((item) => item.path === path)
-  return dir?.include_paths_text || ''
-}
-
-function updateDirScope(path, value) {
-  form.value.selected_dirs = selectedDirs().map((dir) =>
-    dir.path === path ? { ...dir, include_paths_text: value } : dir
-  )
 }
 
 function selectedDirs() {
@@ -1362,15 +1164,6 @@ function parseRouteTab() {
   activeTab.value = routeToTab[path] || 'assistants'
 }
 
-function normalizeList(payload) {
-  if (Array.isArray(payload)) {
-    return payload
-  }
-  if (Array.isArray(payload?.results)) {
-    return payload.results
-  }
-  return []
-}
 
 async function load() {
   loading.value = true
@@ -1484,7 +1277,11 @@ function startCreate() {
   datasourceConfig.value = {}
   syncIntervalSeconds.value = 3600
   form.value = defaultForm(activeTab.value)
-  showModal.value = true
+  if (activeTab.value === 'assistants') {
+    showDrawer.value = true
+  } else {
+    showModal.value = true
+  }
 }
 
 function startEdit(row) {
@@ -1493,13 +1290,35 @@ function startEdit(row) {
   datasourceConfig.value = { ...(row.config || {}) }
   syncIntervalSeconds.value = row.sync_policy?.interval_seconds || 3600
   form.value = formFromRow(activeTab.value, row)
-  showModal.value = true
+  if (activeTab.value === 'assistants') {
+    showDrawer.value = true
+  } else {
+    showModal.value = true
+  }
 }
 
 function closeModal() {
   showModal.value = false
   form.value = {}
   formError.value = ''
+}
+
+function closeDrawer() {
+  showDrawer.value = false
+  form.value = {}
+  formError.value = ''
+}
+
+async function refreshDirs() {
+  if (!form.value.lensnode_uuid) return
+  refreshingDirs.value = true
+  try {
+    lensnodes.value = normalizeList(await listLensNodes())
+  } catch {
+    showError(t('lensAdmin.messages.loadFailed'))
+  } finally {
+    refreshingDirs.value = false
+  }
 }
 
 function defaultForm(tab) {
@@ -1514,11 +1333,13 @@ function defaultForm(tab) {
       postprocess_model_ref: '',
       agent_model_ref: '',
       multimodal_model_ref: '',
-      max_evidence_files: 12,
       exclude_extensions_text: '.lock,.pyc,.sqlite3',
       exclude_dirs_text: '.git,.venv,__pycache__,node_modules,dist,build',
-      workspace_guide_enabled: false,
-      workspace_guide_content: '',
+      workspace_guide_overview: '',
+      pre_prompt: '',
+      post_prompt: '',
+      skill_uuids: [],
+      mcp_uuids: [],
       settings: {},
       status: 'active'
     },
@@ -1566,7 +1387,6 @@ function formFromRow(tab, row) {
       postprocess_model_ref: row.postprocess_model_ref || '',
       agent_model_ref: row.agent_model_ref || '',
       multimodal_model_ref: row.multimodal_model_ref || '',
-      max_evidence_files: row.settings?.max_evidence_files || 12,
       exclude_extensions_text: listToText(
         row.settings?.retrieval_policy?.exclude_extensions || [
           '.lock',
@@ -1584,8 +1404,11 @@ function formFromRow(tab, row) {
           'build'
         ]
       ),
-      workspace_guide_enabled: row.workspace_guide?.enabled || false,
-      workspace_guide_content: row.workspace_guide?.content || '',
+      workspace_guide_overview: row.workspace_guide?.content || '',
+      pre_prompt: row.settings?.pre_prompt || '',
+      post_prompt: row.settings?.post_prompt || '',
+      skill_uuids: (row.skill_bindings || []).map((b) => b.skill?.uuid || b.skill_uuid).filter(Boolean),
+      mcp_uuids: (row.mcp_bindings || []).map((b) => b.mcp_server?.uuid || b.mcp_uuid).filter(Boolean),
       settings: { ...(row.settings || {}) },
       status: row.status || 'active'
     }
@@ -1694,7 +1517,11 @@ async function save() {
       await saveByMode(uuid, payload, createMcpServer, updateMcpServer)
     }
     showSuccess(t('lensAdmin.messages.saveSuccess'))
-    closeModal()
+    if (showDrawer.value) {
+      closeDrawer()
+    } else {
+      closeModal()
+    }
     await load()
   } catch (error) {
     formError.value = resolveError(error, t('lensAdmin.messages.saveFailed'))
@@ -1714,6 +1541,7 @@ async function saveByMode(uuid, payload, createFn, updateFn) {
 
 function buildPayload(tab) {
   if (tab === 'assistants') {
+    const guideContent = (form.value.workspace_guide_overview || '').trim()
     return {
       name: form.value.name,
       slug: form.value.slug,
@@ -1726,9 +1554,15 @@ function buildPayload(tab) {
       multimodal_model_ref: form.value.multimodal_model_ref || null,
       settings: buildAssistantSettings(),
       workspace_guide: {
-        enabled: Boolean(form.value.workspace_guide_enabled),
-        content: form.value.workspace_guide_content || ''
+        enabled: !!guideContent,
+        content: guideContent
       },
+      skill_bindings: (form.value.skill_uuids || []).map((uuid) => ({
+        skill_uuid: uuid
+      })),
+      mcp_bindings: (form.value.mcp_uuids || []).map((uuid) => ({
+        mcp_uuid: uuid
+      })),
       status: form.value.status || 'active'
     }
   }
@@ -1784,11 +1618,17 @@ function buildAssistantSettings() {
   if (excludeDirs.length) {
     retrievalPolicy.exclude_dirs = excludeDirs
   }
-  settings.max_evidence_files = Math.max(
-    1,
-    Number(form.value.max_evidence_files) || 12
-  )
   settings.retrieval_policy = retrievalPolicy
+  if (form.value.pre_prompt?.trim()) {
+    settings.pre_prompt = form.value.pre_prompt.trim()
+  } else {
+    delete settings.pre_prompt
+  }
+  if (form.value.post_prompt?.trim()) {
+    settings.post_prompt = form.value.post_prompt.trim()
+  } else {
+    delete settings.post_prompt
+  }
   return settings
 }
 
@@ -1826,61 +1666,7 @@ function buildSelectedDirs() {
   })
 }
 
-function selectedDirsFromValue(value) {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  return value
-    .map((dir) => ({
-      path: dir.path || '',
-      include_paths_text: (
-        dir.retrieval_scope?.include_paths ||
-        dir.include_paths ||
-        []
-      ).join('\n')
-    }))
-    .filter((dir) => dir.path)
-}
-
-function splitList(value) {
-  return String(value || '')
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function listToText(value) {
-  return Array.isArray(value) ? value.join(',') : ''
-}
-
-function objectToRows(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return []
-  }
-  return Object.entries(value).map(([key, rowValue]) => ({
-    key,
-    value: typeof rowValue === 'string' ? rowValue : String(rowValue)
-  }))
-}
-
-function stringifyJson(value) {
-  return JSON.stringify(value, null, 2)
-}
-
-function rowsToObject(rows) {
-  return (rows || []).reduce((output, row) => {
-    const key = String(row.key || '').trim()
-    if (key) {
-      output[key] = String(row.value || '').trim()
-    }
-    return output
-  }, {})
-}
-
 async function remove(row) {
-  if (!window.confirm(t('lensAdmin.messages.confirmDelete'))) {
-    return
-  }
   try {
     if (activeTab.value === 'assistants') {
       await deleteAssistant(row.uuid)
@@ -1960,20 +1746,6 @@ watch(
     parseRouteTab()
   },
   { immediate: true }
-)
-
-watch(
-  () => form.value.lensnode_uuid,
-  () => {
-    if (
-      activeTab.value === 'assistants' &&
-      !selectedLensNodeTasks.value.some(
-        (task) => task.name === form.value.selected_task
-      )
-    ) {
-      form.value.selected_task = ''
-    }
-  }
 )
 
 onMounted(load)

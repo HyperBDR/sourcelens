@@ -373,11 +373,34 @@
                             />
                           </svg>
                         </button>
+                        <template v-if="pendingDeleteId === (row.uuid || row.id)">
+                          <button
+                            type="button"
+                            :title="t('common.confirm')"
+                            class="inline-flex items-center justify-center rounded p-1.5 text-red-600 hover:bg-red-50"
+                            @click="pendingDeleteId = null; deleteConfig(row)"
+                          >
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            :title="t('common.cancel')"
+                            class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-gray-100"
+                            @click="pendingDeleteId = null"
+                          >
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </template>
                         <button
+                          v-else
                           type="button"
                           :title="t('common.delete')"
                           class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600"
-                          @click="deleteConfig(row)"
+                          @click="pendingDeleteId = row.uuid || row.id"
                         >
                           <svg
                             class="h-4 w-4"
@@ -998,6 +1021,7 @@ const { t } = useI18n()
 
 const loading = ref(true)
 const configList = ref([])
+const pendingDeleteId = ref(null)
 const userList = ref([])
 const modelsData = ref({ providers: [], capability_labels: {} })
 
@@ -1583,8 +1607,7 @@ async function setAsDefault(row) {
 }
 
 async function deleteConfig(row) {
-  if (!(row?.uuid || row?.id) || !confirm(t('llm.config.confirmDeleteConfig')))
-    return
+  if (!(row?.uuid || row?.id)) return
   try {
     await llmAdminApi.deleteLLMConfigDetail(row.uuid || row.id)
     await loadAll()

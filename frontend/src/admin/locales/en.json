@@ -642,13 +642,11 @@
       "slug": "Slug",
       "lensnode": "LensNode",
       "task": "Task",
-      "selectedDirs": "Select Directories",
+      "selectedDirs": "Select Directory",
       "includePaths": "Retrieval Scope",
       "retrievalPolicy": "Retrieval Policy",
-      "maxEvidenceFiles": "Evidence file limit",
       "excludeExtensions": "Exclude extensions",
       "excludeDirs": "Exclude directories",
-      "workspaceGuide": "Workspace Guide",
       "workspaceGuideEnabled": "Inject this guide for the Assistant",
       "workspaceGuideHelp": "Describe repository layout, search priority, and stopping rules. SourceLens will save it as a bound Skill and inject it into LensNode runs.",
       "preprocessModel": "Preprocess Model",
@@ -688,12 +686,12 @@
     "placeholders": {
       "selectLensNode": "Select a LensNode",
       "selectTask": "Select a task",
+      "selectDir": "Select a directory",
       "noModel": "Default",
       "docIds": "Separate multiple IDs with commas",
       "includePaths": "One path rule per line, e.g. src/**",
       "extensions": "e.g. .lock,.pyc,.sqlite3",
       "excludeDirs": "e.g. .git,node_modules,dist",
-      "workspaceGuide": "Example:\n- /workspace/product is a product-level workspace, not a Git repo.\n- service-api is the main backend repo.\n- deploy contains deployment and packaging changes.\n- For recent-change questions, inspect service-api first, then deploy only if needed.",
       "noDirs": "Select a LensNode first, or wait for the node to report available directories."
     },
     "settings": {
@@ -720,6 +718,37 @@
     "modal": {
       "create": "Create",
       "edit": "Edit"
+    },
+    "drawer": {
+      "createTitle": "Create Assistant",
+      "editTitle": "Edit Assistant"
+    },
+    "wizard": {
+      "step1Title": "Basics & Models",
+      "step1Desc": "Set name, slug, and per-stage model overrides (models are optional)",
+      "step2Title": "Execution",
+      "step2Desc": "Select node, task, directories, and retrieval policy",
+      "step3Title": "Prompts",
+      "step3Desc": "Add pre-query context and retrieval instructions — all optional",
+      "step4Title": "Skills & MCP",
+      "step4Desc": "Bind Skills and MCP Servers to this assistant — all optional",
+      "contextLabel": "Workspace Context (optional)",
+      "contextHint": "Tell the assistant what it should know before searching: what this project is, what's off-limits, where to look first.",
+      "contextPlaceholder": "e.g.\n- This is the HyperBDR DR software main repo; service-api is the core backend.\n- Ignore old configs under deploy/; trust the latest code.\n- For deployment questions, check docs/ first.",
+      "back": "Back",
+      "next": "Next",
+      "finish": "Create Assistant",
+      "modelsOptionalLabel": "Model Overrides (optional — leave blank to use system defaults)",
+      "prePromptLabel": "Question Pre-processing Prompt (optional)",
+      "prePromptHint": "Processes the incoming user question — for example, blocking or filtering questions that should not be answered. Leave blank to use system default.",
+      "prePromptPlaceholder": "Leave blank to use system default…",
+      "postPromptLabel": "Answer Post-processing Prompt (optional)",
+      "postPromptHint": "Processes and reviews the answer content — for example, instructing the model not to show code when the answer involves code. Leave blank to use system default.",
+      "postPromptPlaceholder": "Leave blank to use system default…",
+      "skillsSection": "Skills",
+      "mcpSection": "MCP Servers",
+      "noSkills": "No Skills available — create one in the Skill Library first",
+      "noMcp": "No MCP Servers available — create one in the MCP Server Library first"
     },
     "messages": {
       "loadFailed": "Failed to load Lens admin data",
