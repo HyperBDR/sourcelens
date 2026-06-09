@@ -249,6 +249,18 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         serializer = MessageSerializer(session.message_set.all(), many=True)
         return Response(serializer.data)
 
+    def perform_destroy(self, instance):
+        """Delete runs first to avoid PROTECT conflict on Run.input_message.
+
+        Django 5.1's deletion collector checks PROTECT constraints during
+        the collection phase. It processes Message.session (CASCADE) before
+        Run.session (CASCADE), so Run.input_message (PROTECT) blocks Message
+        deletion before Run is added to the deletion set. Deleting Runs
+        explicitly first removes the PROTECT reference.
+        """
+        instance.run_set.all().delete()
+        instance.delete()
+
     @action(detail=True, methods=["post"])
     def runs(self, request, uuid=None):
         """Create an execution run for a session."""
