@@ -238,32 +238,31 @@
             class="message-row"
             :class="message.role === 'user' ? 'message-row-user' : 'message-row-assistant'"
           >
-            <div class="message-avatar" :class="message.role">
-              <span v-if="message.role === 'user'">你</span>
-              <svg
+            <div
+              class="message-avatar"
+              :class="[message.role, message.role === 'user' ? avatarBgColor : '']"
+            >
+              <Smile v-if="message.role === 'user'" :size="17" :stroke-width="2" />
+              <img
                 v-else
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path
-                  d="M12 2l1.6 5.2L19 9l-5.4 1.8L12 16l-1.6-5.2L5 9l5.4-1.8L12 2z"
-                />
-              </svg>
+                src="/brand/logo_transparent.png"
+                alt="SourceLens"
+                class="h-[20px] w-[20px] object-contain"
+              />
             </div>
 
             <div class="message-body">
               <div class="message-card" :class="message.role">
-                <div class="message-role">
-                  {{ message.role === 'user' ? 'USER' : 'ASSISTANT' }}
-                </div>
-
                 <div v-if="message.role === 'assistant'" class="message-markdown">
                   <MarkdownRenderer :content="message.content || '（空）'" />
                 </div>
                 <div v-else class="message-text">
                   {{ message.content || '（空）' }}
                 </div>
+              </div>
+
+              <div class="message-time" :class="message.role">
+                {{ formatTime(message.created_at) }}
               </div>
 
               <div
@@ -416,7 +415,7 @@ import {
   watch,
   nextTick
 } from 'vue'
-import { PanelLeftClose, PanelLeftOpen, Plus } from '@lucide/vue'
+import { PanelLeftClose, PanelLeftOpen, Plus, Smile } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -918,6 +917,15 @@ function retryLastQuestion() {
   })
 }
 
+function formatTime(isoString) {
+  if (!isoString) return ''
+  return new Date(isoString).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+}
+
 function handleOutsideClick(event) {
   const target = event.target
   if (dockMenuRef.value && !dockMenuRef.value.contains(target)) {
@@ -1074,16 +1082,20 @@ onBeforeUnmount(() => {
 }
 
 .thread {
-  @apply mx-auto w-full max-w-[720px] px-6 py-8;
+  @apply mx-auto w-full max-w-[900px] px-6 py-8;
   padding-bottom: 240px;
 }
 
 .message-row {
-  @apply mb-9 flex gap-4;
+  @apply mb-9 flex items-start gap-4;
 }
 
 .message-row-user {
   @apply justify-end;
+}
+
+.message-row-user .message-avatar {
+  order: 2;
 }
 
 .message-avatar {
@@ -1091,21 +1103,16 @@ onBeforeUnmount(() => {
 }
 
 .message-avatar.user {
-  background: #e6e1d6;
-  color: #46423a;
-}
-
-.message-avatar.assistant {
-  background: linear-gradient(100deg, #2b4ee6 0%, #0abcc0 100%);
   color: #fff;
 }
 
-.message-avatar.assistant svg {
-  @apply h-[17px] w-[17px];
+.message-avatar.assistant {
+  background: #ffffff;
+  border: 1px solid #e6e1d6;
 }
 
 .message-body {
-  @apply min-w-0 flex-1 pt-[3px];
+  @apply min-w-0 flex-1;
 }
 
 .message-row-user .message-body {
@@ -1126,9 +1133,13 @@ onBeforeUnmount(() => {
   background: #ffffff;
 }
 
-.message-role {
-  @apply text-xs font-semibold uppercase tracking-wide;
-  color: #928b7d;
+.message-time {
+  @apply mt-1 text-xs;
+  color: #c2bbb0;
+}
+
+.message-time.user {
+  @apply text-right;
 }
 
 .message-markdown {
@@ -1193,7 +1204,7 @@ onBeforeUnmount(() => {
 .live-card,
 .activity-card,
 .timeline-card {
-  @apply mb-9 max-w-[720px] rounded-lg border bg-white px-4 py-3;
+  @apply mb-9 max-w-[900px] rounded-lg border bg-white px-4 py-3;
   border-color: #e6e1d6;
 }
 
@@ -1319,7 +1330,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-inner {
-  @apply mx-auto w-full max-w-[720px];
+  @apply mx-auto w-full max-w-[900px];
 }
 
 .composer-shell {
