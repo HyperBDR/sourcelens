@@ -1318,16 +1318,16 @@ onBeforeUnmount(() => {
 }
 
 .composer-shell {
-  @apply pointer-events-auto rounded-[28px] border border-line bg-surface/95 px-4 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.06)];
-  backdrop-filter: blur(18px);
+  @apply pointer-events-auto;
 }
 
 .composer {
-  @apply flex items-center gap-3 rounded-[24px] bg-white px-3 py-2.5;
+  @apply flex items-center gap-3 rounded-2xl border border-line bg-white px-4 py-3 shadow-soft;
 }
 
 .composer:focus-within {
-  box-shadow: 0 0 0 3px rgba(43, 78, 230, 0.12);
+  @apply border-primary-300;
+  box-shadow: 0 0 0 3px rgba(43, 78, 230, 0.08);
 }
 
 .composer-input {
