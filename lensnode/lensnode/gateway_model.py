@@ -12,6 +12,24 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 LOGGER = logging.getLogger("lensnode")
 
 
+def _in_subagent_context():
+    """Return True if the current LLM call originates from a subagent.
+
+    deepagents wraps each subagent run in a langsmith tracing context
+    that sets metadata ls_agent_type="subagent". Reading it lets the
+    gateway model keep subagent output out of the user-facing stream so
+    parallel subagents do not interleave into the answer bubble.
+    """
+
+    try:
+        from langsmith.run_helpers import get_tracing_context
+
+        metadata = get_tracing_context().get("metadata") or {}
+        return metadata.get("ls_agent_type") == "subagent"
+    except Exception:
+        return False
+
+
 class LensGatewayChatModel(BaseChatModel):
     """LangChain chat model that delegates calls to the control plane."""
 
@@ -101,6 +119,12 @@ class LensGatewayChatModel(BaseChatModel):
         content_parts = []
         tool_calls = []
         usage = {}
+        # Subagent output must not reach the user-facing answer/thinking
+        # stream. deepagents tags subagent runs via the langsmith tracing
+        # context; when set, collect content/tool_calls normally but stay
+        # silent (no emit_output) so parallel subagents don't interleave
+        # into the main bubble.
+        silent = _in_subagent_context()
 
         with httpx.Client(timeout=self.request_timeout_s) as client:
             with client.stream(
@@ -127,7 +151,8 @@ class LensGatewayChatModel(BaseChatModel):
                                 text = data.get("content") or ""
                                 if text and kind == "content":
                                     content_parts.append(text)
-                                    self.emit_output(text)
+                                    if not silent:
+                                        self.emit_output(text)
                             elif data.get("type") == "done":
                                 usage = data.get("usage") or {}
                                 tool_calls = data.get("tool_calls") or []
@@ -139,7 +164,7 @@ class LensGatewayChatModel(BaseChatModel):
         # moves into the thinking panel before the tools run and never
         # lingers in the answer bubble. The final turn issues no tool
         # calls, so its content stays as the answer.
-        if self.emit_output is not None and tool_calls and content:
+        if self.emit_output is not None and not silent and tool_calls and content:
             self.emit_output("", reset=True)
 
         gateway_message = {

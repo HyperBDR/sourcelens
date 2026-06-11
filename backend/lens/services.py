@@ -265,6 +265,7 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                 "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(
                     run.session.assistant.agent_rounds, 26
                 ),
+                "agent_rounds": run.session.assistant.agent_rounds,
                 "settings": run.session.assistant.settings,
             },
         },

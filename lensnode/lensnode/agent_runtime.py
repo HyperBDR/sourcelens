@@ -3,6 +3,7 @@ import logging
 
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
 from .agent_tools import build_agent_tools
 from .gateway_model import LensGatewayChatModel
@@ -106,6 +107,7 @@ class LensDeepAgentRuntime:
                     root_dir=str(resources.root),
                     virtual_mode=True,
                 ),
+                "subagents": [_fast_subagent()],
                 "name": f"lensnode-{command.get('task') or 'agent'}",
             }
             if resources.skill_paths:
@@ -174,6 +176,7 @@ def _system_prompt(scenario, command, context_skill_contents=None):
         "multiple files at once, or run multiple searches at once, by "
         "issuing several tool calls in one message. Only go step by step "
         "when a later action genuinely depends on an earlier result.\n\n"
+        f"{_subagent_guidance(command.get('agent_rounds'))}"
         "Required workflow:\n"
         "1. Call search_workspace before answering any project or code "
         "analysis question.\n"
@@ -193,6 +196,58 @@ def _system_prompt(scenario, command, context_skill_contents=None):
         "evidence.\n\n"
         f"Selected directories:\n{dirs or '- none'}"
         f"{context_guidance}"
+    )
+
+
+def _fast_subagent():
+    """General-purpose subagent that parallelizes its own tool calls.
+
+    By default a delegated subagent runs deepagents' stock prompt and
+    tends to do serial ReAct (one file at a time) — the main reason a
+    subtask is slow. Overriding the same-named general-purpose subagent
+    and prepending the parallel guidance makes it batch its reads and
+    searches like the main agent. Tools and model are inherited from the
+    parent (tools default to the parent's set).
+    """
+
+    parallel = (
+        "Work in parallel whenever steps are independent — this is the "
+        "biggest lever on speed. When several files or searches are "
+        "needed, issue those tool calls together in one message so they "
+        "run concurrently; do not read and validate hits one at a time. "
+        "Keep the number of parallel calls reasonable.\n\n"
+    )
+    return {
+        **GENERAL_PURPOSE_SUBAGENT,
+        "system_prompt": parallel + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+    }
+
+
+def _subagent_guidance(agent_rounds):
+    """Return depth-tiered guidance on when to use the task subagent.
+
+    Subagents are a completed agent loop each (multi-round, minute-scale),
+    so they only pay off for heavy, independent subtasks and are a net
+    loss on light multi-file work. Only the deep/max tiers encourage
+    parallel delegation; lighter tiers steer the model to stay in the
+    main loop and parallelize with batched tool calls instead.
+    """
+
+    if agent_rounds in ("deep", "max"):
+        return (
+            "Delegating subtasks (task tool): when the question splits "
+            "into genuinely independent, heavy subtasks — each needing "
+            "its own multi-round search/read exploration — delegate them "
+            "to `task` subagents in parallel (issue multiple task calls "
+            "in one message), then synthesize their results. Do NOT "
+            "delegate light work (reading a few files): handle that "
+            "directly with batched tool calls, which is faster.\n\n"
+        )
+    return (
+        "Stay in the main loop: handle the work directly with batched "
+        "tool calls (parallel reads/searches). Do NOT delegate to `task` "
+        "subagents for this — at this depth, direct batched work is "
+        "faster than spinning up subagents.\n\n"
     )
 
 
