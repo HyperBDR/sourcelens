@@ -265,3 +265,5 @@ requirements-dev.txt
 # uv lock file (project uses pip)
 uv.lock
 /.stoneforge/.worktrees/
+
+references
