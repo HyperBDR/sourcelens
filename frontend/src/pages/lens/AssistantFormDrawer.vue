@@ -62,37 +62,46 @@
       <FormRow :label="t('lensAdmin.fields.slug')">
         <input v-model="form.slug" class="form-input" required />
       </FormRow>
-      <div>
-        <div class="mb-3 border-b border-line pb-2 text-sm font-medium text-ink-600">
-          {{ t('lensAdmin.wizard.modelsOptionalLabel') }}
+      <FormRow :label="t('lensAdmin.fields.agentModel') + ' *'">
+        <select v-model="form.agent_model_ref" class="form-input" required>
+          <option value="">{{ t('lensAdmin.placeholders.selectModel') }}</option>
+          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+        </select>
+        <p class="mt-1 text-xs text-ink-500">{{ t('lensAdmin.wizard.agentModelHint') }}</p>
+      </FormRow>
+      <FormRow :label="t('lensAdmin.fields.multimodalModel')">
+        <select v-model="form.multimodal_model_ref" class="form-input">
+          <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
+          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+        </select>
+        <p class="mt-1 text-xs text-ink-500">{{ t('lensAdmin.wizard.multimodalModelHint') }}</p>
+      </FormRow>
+      <FormRow :label="t('lensAdmin.fields.maxConcurrency')">
+        <input
+          v-model.number="form.max_concurrency"
+          type="number"
+          min="1"
+          max="50"
+          class="form-input w-32"
+        />
+        <p class="mt-1 text-xs text-ink-500">{{ t('lensAdmin.wizard.maxConcurrencyHint') }}</p>
+      </FormRow>
+      <FormRow :label="t('lensAdmin.fields.agentRounds')">
+        <div class="grid grid-cols-5 gap-2">
+          <label
+            v-for="tier in agentRoundsTiers"
+            :key="tier.value"
+            class="flex cursor-pointer flex-col items-center rounded-lg border-2 p-2 text-center transition-colors"
+            :class="form.agent_rounds === tier.value
+              ? 'border-brand-600 bg-brand-50 text-brand-700'
+              : 'border-line bg-surface text-ink-600 hover:border-brand-300'"
+          >
+            <input type="radio" :value="tier.value" v-model="form.agent_rounds" class="sr-only" />
+            <span class="text-sm font-medium">{{ tier.label }}</span>
+            <span class="mt-0.5 text-xs opacity-60">{{ tier.hint }}</span>
+          </label>
         </div>
-        <div class="grid gap-4 md:grid-cols-2">
-          <FormRow :label="t('lensAdmin.fields.preprocessModel')">
-            <select v-model="form.preprocess_model_ref" class="form-input">
-              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
-              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
-            </select>
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.postprocessModel')">
-            <select v-model="form.postprocess_model_ref" class="form-input">
-              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
-              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
-            </select>
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.agentModel')">
-            <select v-model="form.agent_model_ref" class="form-input">
-              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
-              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
-            </select>
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.multimodalModel')">
-            <select v-model="form.multimodal_model_ref" class="form-input">
-              <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
-              <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
-            </select>
-          </FormRow>
-        </div>
-      </div>
+      </FormRow>
     </div>
 
     <!-- Wizard Step 2 — Execution -->
@@ -187,23 +196,9 @@
         <p class="mb-2 text-xs text-ink-500">{{ t('lensAdmin.wizard.contextHint') }}</p>
         <textarea
           v-model="form.workspace_guide_overview"
-          class="form-input min-h-32"
+          class="form-input min-h-96"
           :placeholder="t('lensAdmin.wizard.contextPlaceholder')"
         />
-      </div>
-
-      <!-- Pre-prompt -->
-      <div>
-        <div class="mb-1 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.prePromptLabel') }}</div>
-        <p class="mb-2 text-xs text-ink-500">{{ t('lensAdmin.wizard.prePromptHint') }}</p>
-        <textarea v-model="form.pre_prompt" class="form-input min-h-24" :placeholder="t('lensAdmin.wizard.prePromptPlaceholder')" />
-      </div>
-
-      <!-- Post-prompt -->
-      <div>
-        <div class="mb-1 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.postPromptLabel') }}</div>
-        <p class="mb-2 text-xs text-ink-500">{{ t('lensAdmin.wizard.postPromptHint') }}</p>
-        <textarea v-model="form.post_prompt" class="form-input min-h-24" :placeholder="t('lensAdmin.wizard.postPromptPlaceholder')" />
       </div>
     </div>
 
@@ -368,6 +363,14 @@ const drawerSubtitle = computed(() =>
   props.mode === 'edit' ? props.form.name || '' : ''
 )
 
+const agentRoundsTiers = computed(() => [
+  { value: 'flash',    label: t('lensAdmin.agentRounds.flash'),    hint: t('lensAdmin.agentRounds.flashHint') },
+  { value: 'fast',     label: t('lensAdmin.agentRounds.fast'),     hint: t('lensAdmin.agentRounds.fastHint') },
+  { value: 'balanced', label: t('lensAdmin.agentRounds.balanced'), hint: t('lensAdmin.agentRounds.balancedHint') },
+  { value: 'deep',     label: t('lensAdmin.agentRounds.deep'),     hint: t('lensAdmin.agentRounds.deepHint') },
+  { value: 'max',      label: t('lensAdmin.agentRounds.max'),      hint: t('lensAdmin.agentRounds.maxHint') },
+])
+
 const wizardStepsMeta = computed(() => [
   { key: 'basic', title: t('lensAdmin.wizard.step1Title') },
   { key: 'execution', title: t('lensAdmin.wizard.step2Title') },
@@ -377,7 +380,11 @@ const wizardStepsMeta = computed(() => [
 
 const canProceedWizard = computed(() => {
   if (wizardStep.value === 1) {
-    return !!props.form.name?.trim() && !!props.form.slug?.trim()
+    return (
+      !!props.form.name?.trim() &&
+      !!props.form.slug?.trim() &&
+      !!props.form.agent_model_ref
+    )
   }
   if (wizardStep.value === 2) {
     return (

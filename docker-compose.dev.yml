@@ -170,6 +170,9 @@ services:
       LENSNODE_AI_GATEWAY_URL: http://backend-api:8000/api/lens/lensnode/ai-gateway/
       LENSNODE_WORKSPACE_PATH: /workspace
       LENSNODE_HEARTBEAT_INTERVAL_S: 15
+      LENSNODE_REQUEST_TIMEOUT_S: 600
+      # Max concurrent runs per node. Increase in production based on node resources.
+      LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-5}
       PYTHONPATH: /opt/lensnode
     volumes:
       - ./data.dev/workspace:/workspace

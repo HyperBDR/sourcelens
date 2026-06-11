@@ -728,6 +728,7 @@ class LLMTracker:
                 "stream_options": {"include_usage": True},
             }
             stream_response = litellm.completion(**stream_params)
+            accumulated_tool_calls: dict = {}
             for chunk in stream_response:
                 last_chunk = chunk
                 choices = getattr(chunk, "choices", None) or []
@@ -754,7 +755,6 @@ class LLMTracker:
                 )
                 if reasoning_raw is not None:
                     text = _extract_text(reasoning_raw)
-                    text = str(text).strip() if text else ""
                     if text:
                         streamed_content_len += len(text)
                         streamed_content += text
@@ -764,10 +764,30 @@ class LLMTracker:
                             yield ("reasoning", text)
                         except GeneratorExit:
                             _handle_stream_stop()
+                raw_tool_calls = _read_chunk_field(delta, "tool_calls")
+                if raw_tool_calls:
+                    for tc in raw_tool_calls:
+                        idx = _read_chunk_field(tc, "index") or 0
+                        if idx not in accumulated_tool_calls:
+                            accumulated_tool_calls[idx] = {
+                                "id": "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        tc_id = _read_chunk_field(tc, "id")
+                        if tc_id:
+                            accumulated_tool_calls[idx]["id"] = tc_id
+                        tc_func = _read_chunk_field(tc, "function")
+                        if tc_func:
+                            tc_name = _read_chunk_field(tc_func, "name") or ""
+                            tc_args = _read_chunk_field(tc_func, "arguments") or ""
+                            if tc_name:
+                                accumulated_tool_calls[idx]["function"]["name"] += tc_name
+                            if tc_args:
+                                accumulated_tool_calls[idx]["function"]["arguments"] += tc_args
                 content = _read_chunk_field(delta, "content")
                 if content is not None:
                     text = _extract_text(content)
-                    text = str(text).strip() if text else ""
                     if text:
                         streamed_content_len += len(text)
                         streamed_content += text
@@ -814,6 +834,11 @@ class LLMTracker:
                 f"model={usage['model']} "
                 f"total_tokens={usage.get('total_tokens')}"
             )
+            if accumulated_tool_calls:
+                return {
+                    **usage,
+                    "_tool_calls": list(accumulated_tool_calls.values()),
+                }
             return usage
         except GeneratorExit:
             raise

@@ -16,8 +16,11 @@ TERMINAL_RUN_STATUSES = {
     Run.Status.FAILED,
     Run.Status.CANCELLED,
 }
-STREAM_POLL_INTERVAL_SECONDS = 1
+STREAM_POLL_INTERVAL_SECONDS = 0.3
 STREAM_PING_INTERVAL_SECONDS = 15
+
+BUSY_RETRY_INTERVAL_S = 5
+BUSY_RETRY_WINDOW_S = 120
 
 
 class LensNodeDispatchError(RuntimeError):
@@ -28,6 +31,21 @@ def lensnode_group_name(lensnode_uuid):
     """Return the Channels group name for a LensNode."""
 
     return f"lens.lensnode.{lensnode_uuid}"
+
+
+def fail_active_runs_for_lensnode(lensnode_uuid):
+    """Mark all non-terminal runs for a lensnode as failed on disconnect."""
+
+    now = timezone.now()
+    Run.objects.filter(
+        lensnode__uuid=lensnode_uuid,
+        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+    ).update(
+        status=Run.Status.FAILED,
+        error="LENSNODE_DISCONNECTED",
+        finished_at=now,
+        updated_at=now,
+    )
 
 
 def _next_sequence(session):
@@ -210,6 +228,15 @@ def create_run_execution_snapshot(run):
     return execution
 
 
+AGENT_TURNS_BY_ROUNDS = {
+    "flash":    5,
+    "fast":     13,
+    "balanced": 26,
+    "deep":     50,
+    "max":      100,
+}
+
+
 def dispatch_run_to_lensnode(run, rewritten_question):
     """Send a run_start command to the connected LensNode."""
 
@@ -234,6 +261,9 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                     str(run.session.assistant.agent_model_ref)
                     if run.session.assistant.agent_model_ref
                     else ""
+                ),
+                "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(
+                    run.session.assistant.agent_rounds, 26
                 ),
                 "settings": run.session.assistant.settings,
             },
@@ -262,8 +292,17 @@ def cancel_run_on_lensnode(run):
     return None
 
 
-def append_lensnode_output(run_uuid, content_delta="", final_content=None):
-    """Persist output content streamed back from a LensNode."""
+def append_lensnode_output(
+    run_uuid, content_delta="", final_content=None, reset=False
+):
+    """Persist output content streamed back from a LensNode.
+
+    When reset is True the accumulated content is replaced by the delta
+    rather than appended. The agent uses this at the start of each model
+    turn so intermediate reasoning is superseded by the next turn,
+    letting the SSE layer emit a token_reset and move prior text into
+    the frontend thinking panel.
+    """
 
     run = Run.objects.select_related("output_message").get(uuid=run_uuid)
     if run.status in TERMINAL_RUN_STATUSES:
@@ -272,6 +311,8 @@ def append_lensnode_output(run_uuid, content_delta="", final_content=None):
         return run
     if final_content is not None:
         run.output_message.content = final_content
+    elif reset:
+        run.output_message.content = content_delta
     else:
         run.output_message.content = f"{run.output_message.content}{content_delta}"
     run.output_message.run = run
@@ -317,17 +358,24 @@ def finish_lensnode_run(run_uuid, status, error=""):
     if run.status in TERMINAL_RUN_STATUSES:
         return run
     now = timezone.now()
-    if status == Run.Status.DONE:
-        try:
-            _postprocess_lensnode_answer(run)
-            run.status = Run.Status.DONE
+
+    if status == Run.Status.FAILED and error == "LENSNODE_BUSY":
+        elapsed = (now - run.created_at).total_seconds()
+        if elapsed < BUSY_RETRY_WINDOW_S:
+            run.status = Run.Status.QUEUED
             run.error = ""
-        except Exception as exc:
-            run.status = Run.Status.FAILED
-            run.error = str(exc)
-            execution_status = RunExecution.Status.FAILED
-        else:
-            execution_status = RunExecution.Status.COMPLETED
+            run.save(update_fields=["status", "error", "updated_at"])
+            from .tasks import execute_answer_run
+            execute_answer_run.apply_async(
+                args=[str(run_uuid)],
+                countdown=BUSY_RETRY_INTERVAL_S,
+            )
+            return run
+
+    if status == Run.Status.DONE:
+        run.status = Run.Status.DONE
+        run.error = ""
+        execution_status = RunExecution.Status.COMPLETED
     else:
         run.status = Run.Status.FAILED
         run.error = error or "LENS_RUN_FAILED"
@@ -343,75 +391,35 @@ def finish_lensnode_run(run_uuid, status, error=""):
     if not run.session.title:
         run.session.title = run.input_message.content[:160]
         run.session.save(update_fields=["title", "updated_at"])
+
+    _promote_next_queued_run(run.session.assistant)
     return run
 
 
-def _postprocess_lensnode_answer(run):
-    """Run optional control-plane answer post-processing."""
+def _promote_next_queued_run(assistant):
+    """Enqueue the oldest queued run for this assistant, if any."""
 
-    assistant = run.session.assistant
-    if not assistant.postprocess_model_ref:
-        return None
-    if run.output_message is None:
-        return None
-
-    from .llm import postprocess_answer
-
-    step, _ = RunStep.objects.get_or_create(
-        run=run,
-        sequence=_step_sequence(RunStep.StepType.ANSWER),
-        defaults={
-            "step_type": RunStep.StepType.ANSWER,
-            "status": RunStep.Status.RUNNING,
-            "detail": {},
-        },
-    )
-    step.step_type = RunStep.StepType.ANSWER
-    step.status = RunStep.Status.RUNNING
-    step.detail = {
-        **(step.detail or {}),
-        "raw_answer_length": len(run.output_message.content),
-    }
-    step.save(update_fields=["step_type", "status", "detail", "updated_at"])
-
-    try:
-        result = postprocess_answer(
-            assistant,
-            run.session.user,
-            run.input_message.content,
-            run.output_message.content,
+    next_run = (
+        Run.objects.filter(
+            session__assistant=assistant,
+            status=Run.Status.QUEUED,
         )
-    except Exception as exc:
-        step.status = RunStep.Status.FAILED
-        step.detail = {
-            **(step.detail or {}),
-            "error": str(exc),
-        }
-        step.save(update_fields=["status", "detail", "updated_at"])
-        raise
+        .order_by("created_at")
+        .first()
+    )
+    if next_run:
+        from .tasks import execute_answer_run
+        execute_answer_run.delay(str(next_run.uuid))
 
-    run.output_message.content = result.content
-    run.output_message.run = run
-    run.output_message.save(update_fields=["content", "run"])
-    step.status = RunStep.Status.DONE
-    step.detail = {
-        **(step.detail or {}),
-        "postprocessed_answer_length": len(result.content),
-        "metered": result.metered,
-        "usage": result.usage,
-    }
-    step.save(update_fields=["status", "detail", "updated_at"])
-    return result
 
 
 def _step_sequence(step_type):
     """Return the canonical sequence for a step type."""
 
     mapping = {
-        RunStep.StepType.QUERY_REWRITE: 1,
-        RunStep.StepType.RETRIEVAL: 2,
-        RunStep.StepType.ANSWER: 3,
-        RunStep.StepType.STREAM: 4,
+        RunStep.StepType.RETRIEVAL: 1,
+        RunStep.StepType.ANSWER: 2,
+        RunStep.StepType.STREAM: 3,
     }
     return mapping.get(step_type, 2)
 
@@ -422,6 +430,7 @@ def stream_run_events(run):
     emitted_steps = set()
     emitted_content = ""
     last_status = None
+    last_queue_position = None
     last_ping_at = timezone.now()
 
     run = _load_run_stream_state(run.pk)
@@ -439,6 +448,18 @@ def stream_run_events(run):
                 "ts": timezone.now().isoformat(),
             }
 
+        if run.status == Run.Status.QUEUED:
+            position = _queue_position(run)
+            if position != last_queue_position:
+                last_queue_position = position
+                yield {
+                    "type": "queue_position",
+                    "position": position,
+                    "ts": timezone.now().isoformat(),
+                }
+        else:
+            last_queue_position = None
+
         for step in run.steps.all():
             step_key = (step.sequence, step.status, step.updated_at)
             if step_key not in emitted_steps:
@@ -453,7 +474,13 @@ def stream_run_events(run):
                 }
 
         if content != emitted_content:
-            delta = content[len(emitted_content) :]
+            if not content.startswith(emitted_content):
+                emitted_content = ""
+                yield {
+                    "type": "token_reset",
+                    "ts": timezone.now().isoformat(),
+                }
+            delta = content[len(emitted_content):]
             emitted_content = content
             if delta:
                 yield {
@@ -483,6 +510,7 @@ async def stream_run_events_async(run):
     emitted_steps = set()
     emitted_content = ""
     last_status = None
+    last_queue_position = None
     last_ping_at = timezone.now()
     run_pk = run.pk
 
@@ -501,6 +529,18 @@ async def stream_run_events_async(run):
                 "ts": timezone.now().isoformat(),
             }
 
+        if run.status == Run.Status.QUEUED:
+            position = await sync_to_async(_queue_position)(run)
+            if position != last_queue_position:
+                last_queue_position = position
+                yield {
+                    "type": "queue_position",
+                    "position": position,
+                    "ts": timezone.now().isoformat(),
+                }
+        else:
+            last_queue_position = None
+
         for step in run.steps.all():
             step_key = (step.sequence, step.status, step.updated_at)
             if step_key not in emitted_steps:
@@ -515,7 +555,13 @@ async def stream_run_events_async(run):
                 }
 
         if content != emitted_content:
-            delta = content[len(emitted_content) :]
+            if not content.startswith(emitted_content):
+                emitted_content = ""
+                yield {
+                    "type": "token_reset",
+                    "ts": timezone.now().isoformat(),
+                }
+            delta = content[len(emitted_content):]
             emitted_content = content
             if delta:
                 yield {
@@ -543,10 +589,20 @@ def _load_run_stream_state(run_pk):
     """Load the latest run state needed for SSE snapshots."""
 
     return (
-        Run.objects.select_related("output_message")
+        Run.objects.select_related("output_message", "session__assistant")
         .prefetch_related("steps")
         .get(pk=run_pk)
     )
+
+
+def _queue_position(run):
+    """Return the number of QUEUED runs ahead of this run for the assistant."""
+
+    return Run.objects.filter(
+        session__assistant=run.session.assistant,
+        status=Run.Status.QUEUED,
+        created_at__lt=run.created_at,
+    ).count()
 
 
 def _run_content(run):

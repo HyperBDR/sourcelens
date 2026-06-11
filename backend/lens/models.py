@@ -82,12 +82,25 @@ class Assistant(TimestampedUUIDModel):
         on_delete=models.PROTECT,
         related_name="assistants",
     )
+    class AgentRounds(models.TextChoices):
+        FLASH    = "flash",    "极速"
+        FAST     = "fast",     "快速"
+        BALANCED = "balanced", "均衡"
+        DEEP     = "deep",     "深度"
+        MAX      = "max",      "极限"
+
     selected_task = models.CharField(max_length=160)
     selected_dirs = models.JSONField(default=list, blank=True)
     preprocess_model_ref = models.UUIDField(null=True, blank=True)
     postprocess_model_ref = models.UUIDField(null=True, blank=True)
     multimodal_model_ref = models.UUIDField(null=True, blank=True)
     agent_model_ref = models.UUIDField(null=True, blank=True)
+    agent_rounds = models.CharField(
+        max_length=16,
+        choices=AgentRounds.choices,
+        default=AgentRounds.BALANCED,
+    )
+    max_concurrency = models.PositiveSmallIntegerField(default=5)
     settings = models.JSONField(default=dict, blank=True)
     status = models.CharField(
         max_length=16,

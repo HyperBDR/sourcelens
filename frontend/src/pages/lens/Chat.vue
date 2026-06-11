@@ -270,7 +270,7 @@
         </div>
         <div v-else class="thread">
           <div
-            v-for="message in messages"
+            v-for="message in decoratedMessages"
             :key="message.uuid"
             class="message-row"
             :class="message.role === 'user' ? 'message-row-user' : 'message-row-assistant'"
@@ -289,6 +289,55 @@
             </div>
 
             <div class="message-body">
+              <div
+                v-if="message._thinkingSteps"
+                class="thinking-panel thinking-panel-done"
+              >
+                <button
+                  type="button"
+                  class="thinking-panel-header"
+                  @click="toggleThinking(message.uuid)"
+                >
+                  <Sparkles :size="13" class="thinking-done-icon" />
+                  <span class="thinking-panel-status">
+                    {{
+                      message.thinking.duration_seconds != null
+                        ? t('lens.chat.thinkingDone', {
+                            duration: formatDuration(
+                              message.thinking.duration_seconds
+                            ),
+                            count: message._thinkingSteps.length
+                          })
+                        : t('lens.chat.thinkingDoneSteps', {
+                            count: message._thinkingSteps.length
+                          })
+                    }}
+                  </span>
+                  <ChevronUp
+                    v-if="expandedThinking.has(message.uuid)"
+                    :size="13"
+                    class="thinking-panel-chevron"
+                  />
+                  <ChevronDown v-else :size="13" class="thinking-panel-chevron" />
+                </button>
+                <div
+                  v-if="expandedThinking.has(message.uuid)"
+                  class="thinking-panel-body"
+                >
+                  <div
+                    v-for="step in message._thinkingSteps"
+                    :key="step.id"
+                    class="thinking-step-item"
+                  >
+                    <span class="thinking-step-bullet">▸</span>
+                    <span>{{ step.message }}</span>
+                    <span v-if="step.count > 1" class="thinking-step-repeat">
+                      ×{{ step.count }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div class="message-card" :class="message.role">
                 <div v-if="message.role === 'assistant'" class="message-markdown">
                   <MarkdownRenderer :content="message.content || '（空）'" />
@@ -350,27 +399,69 @@
             </div>
           </div>
 
-          <article v-if="showLiveAnswer" class="live-card">
-            <div class="card-head">
-              <div class="card-title">ASSISTANT</div>
-              <div v-if="isRunActive" class="card-state">
-                {{ liveStatusText }}
+          <!-- Live answer: one row / one avatar — thinking panel + streaming markdown -->
+          <div
+            v-if="showLiveAnswer"
+            class="message-row message-row-assistant live-progress-row"
+          >
+            <div class="message-avatar assistant">
+              <img
+                src="/brand/logo_transparent.png"
+                alt="SourceLens"
+                class="h-[20px] w-[20px] object-contain"
+              />
+            </div>
+            <div class="message-body">
+              <div v-if="isRunActive" class="thinking-panel thinking-panel-live">
+                <button
+                  type="button"
+                  class="thinking-panel-header"
+                  @click="thinkingPanelOpen = !thinkingPanelOpen"
+                >
+                  <span class="live-progress-dot" />
+                  <span class="thinking-panel-status">
+                    {{ latestActivityMessage || liveStatusText }}
+                    <span v-if="!latestActivityMessage" class="typing-dots" aria-hidden="true">
+                      <span /><span /><span />
+                    </span>
+                  </span>
+                  <span v-if="elapsedText" class="thinking-elapsed">{{ elapsedText }}</span>
+                  <span v-if="thinkingSteps.length > 0" class="thinking-step-count">
+                    {{ thinkingSteps.length }}
+                  </span>
+                  <ChevronUp v-if="thinkingPanelOpen && (thinkingSteps.length > 0 || thinkingText)" :size="13" class="thinking-panel-chevron" />
+                  <ChevronDown v-else-if="thinkingSteps.length > 0 || thinkingText" :size="13" class="thinking-panel-chevron" />
+                </button>
+                <div
+                  v-if="thinkingPanelOpen && (thinkingSteps.length > 0 || thinkingText)"
+                  ref="thinkingPanelRef"
+                  class="thinking-panel-body"
+                >
+                  <div v-for="step in thinkingSteps" :key="step.id" class="thinking-step-item">
+                    <span class="thinking-step-bullet">▸</span>
+                    <span>{{ step.message }}</span>
+                    <span v-if="step.count > 1" class="thinking-step-repeat">×{{ step.count }}</span>
+                  </div>
+                  <div v-if="thinkingText" class="thinking-reasoning">
+                    {{ thinkingText }}
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="partialAnswer || streamError" class="message-card assistant">
+                <div v-if="streamError" class="live-text">
+                  {{ streamError }}
+                </div>
+                <div
+                  v-else
+                  class="message-markdown live-markdown"
+                  :class="{ 'is-streaming': showCursor }"
+                >
+                  <MarkdownRenderer :content="partialAnswer" />
+                </div>
               </div>
             </div>
-
-            <div v-if="partialAnswer || streamError" class="live-text">
-              {{ partialAnswer || streamError }}
-              <span v-if="showCursor" class="stream-cursor" />
-            </div>
-            <div v-else class="live-thinking">
-              <span>{{ t('lens.chat.thinking') }}</span>
-              <span class="typing-dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </div>
-          </article>
+          </div>
         </div>
       </div>
 
@@ -378,11 +469,15 @@
         <div class="composer-inner">
           <div class="composer-shell">
             <div class="composer">
-              <input
+              <textarea
                 ref="composerRef"
                 v-model="question"
                 class="composer-input"
+                rows="1"
                 :placeholder="t('lens.chat.questionPlaceholder')"
+                @keydown.enter.exact.prevent="insertNewline"
+                @keydown.ctrl.enter.exact.prevent="handlePrimaryAction"
+                @input="autoResizeTextarea"
               />
               <button
                 class="composer-action-btn"
@@ -412,7 +507,7 @@
                   fill="currentColor"
                   aria-hidden="true"
                 >
-                  <rect x="7" y="7" width="10" height="10" rx="2.2" />
+                  <rect x="5" y="5" width="14" height="14" rx="2.5" />
                 </svg>
               </button>
             </div>
@@ -436,7 +531,7 @@ import {
   watch,
   nextTick
 } from 'vue'
-import { PanelLeftClose, PanelLeftOpen, Plus, Smile } from '@lucide/vue'
+import { PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -475,11 +570,10 @@ const question = ref('')
 const partialAnswer = ref('')
 const streamError = ref('')
 const streamEvents = ref([])
+const queuePosition = ref(null)
 const currentRun = ref(null)
 const loading = ref({ run: false })
 const streamController = ref(null)
-const revealQueue = ref('')
-const revealTimer = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const deletingSessionUuid = ref('')
@@ -489,6 +583,11 @@ const scrollRef = ref(null)
 const dockMenuRef = ref(null)
 const seenActivityKeys = new Set()
 const seenStepEventCounts = new Map()
+const thinkingPanelOpen = ref(false)
+const thinkingPanelRef = ref(null)
+const thinkingText = ref('')
+const elapsedSeconds = ref(0)
+let elapsedTimer = null
 
 const selectedAssistant = computed(
   () =>
@@ -559,6 +658,11 @@ const liveStatusText = computed(() => {
   if (currentRun.value?.status === 'running') {
     return t('lens.chat.running')
   }
+  if (currentRun.value?.status === 'queued') {
+    if (queuePosition.value === null) return t('lens.chat.queued')
+    if (queuePosition.value === 0) return t('lens.chat.queuedNext')
+    return t('lens.chat.queuedPosition', { position: queuePosition.value })
+  }
   return t('lens.chat.waiting')
 })
 
@@ -568,6 +672,140 @@ const activityEvents = computed(() =>
     .slice(-5)
     .reverse()
 )
+
+function _friendlyActivityMessage(event) {
+  const agentEvent = event.agentEvent || ''
+  const activity = event.activity || ''
+  if (agentEvent.startsWith('tool.')) {
+    const parts = agentEvent.split('.')
+    const toolName = parts[1]
+    const action = parts[2]
+    if (action === 'done' || action === 'denied') return null
+    const toolLabelMap = {
+      search_workspace: t('lens.chat.activity.searchWorkspace'),
+      read_workspace_file: t('lens.chat.activity.readFile'),
+      git_log: t('lens.chat.activity.gitLog'),
+      git_diff: t('lens.chat.activity.gitDiff'),
+      summarize_recent_changes: t('lens.chat.activity.summarizeChanges'),
+      write_file: t('lens.chat.activity.writingFile'),
+      read_file: t('lens.chat.activity.readFile'),
+      edit_file: t('lens.chat.activity.editingFile'),
+      ls: t('lens.chat.activity.listFiles'),
+      write_todos: t('lens.chat.activity.planningTasks'),
+      task: t('lens.chat.activity.delegatingTask'),
+    }
+    return toolLabelMap[toolName] || t('lens.chat.activity.callingTool', { name: toolName })
+  }
+  if (activity === 'thinking') return t('lens.chat.activity.thinking')
+  if (activity === 'loading_resources') return t('lens.chat.activity.loadingResources')
+  if (activity === 'completed') return null
+  return null
+}
+
+const latestActivityMessage = computed(() => {
+  for (const event of activityEvents.value) {
+    const msg = _friendlyActivityMessage(event)
+    if (msg) return msg
+  }
+  return null
+})
+
+const thinkingSteps = computed(() => {
+  const grouped = []
+  for (const e of streamEvents.value) {
+    if (!e.activity) continue
+    const msg = _friendlyActivityMessage(e)
+    if (!msg) continue
+    const last = grouped[grouped.length - 1]
+    if (last && last.message === msg) {
+      last.count++
+    } else {
+      grouped.push({ id: e.id, message: msg, count: 1 })
+    }
+  }
+  return grouped
+})
+
+watch(
+  () => thinkingSteps.value.length,
+  async () => {
+    await nextTick()
+    if (thinkingPanelRef.value) {
+      thinkingPanelRef.value.scrollTop = thinkingPanelRef.value.scrollHeight
+    }
+  }
+)
+
+watch(thinkingText, async () => {
+  await nextTick()
+  if (thinkingPanelRef.value) {
+    thinkingPanelRef.value.scrollTop = thinkingPanelRef.value.scrollHeight
+  }
+})
+
+function formatDuration(seconds) {
+  if (seconds == null) return ''
+  const s = Math.round(seconds)
+  if (s < 60) return `${s}s`
+  return `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+const elapsedText = computed(() => {
+  if (elapsedSeconds.value === 0) return null
+  return formatDuration(elapsedSeconds.value)
+})
+
+function thinkingStepsFor(events) {
+  const grouped = []
+  for (const e of events || []) {
+    const msg = _friendlyActivityMessage({
+      agentEvent: e.agent_event,
+      activity: e.activity
+    })
+    if (!msg) continue
+    const last = grouped[grouped.length - 1]
+    if (last && last.message === msg) {
+      last.count++
+    } else {
+      grouped.push({ id: `${grouped.length}`, message: msg, count: 1 })
+    }
+  }
+  return grouped
+}
+
+const expandedThinking = ref(new Set())
+
+function toggleThinking(uuid) {
+  const next = new Set(expandedThinking.value)
+  if (next.has(uuid)) {
+    next.delete(uuid)
+  } else {
+    next.add(uuid)
+  }
+  expandedThinking.value = next
+}
+
+const decoratedMessages = computed(() =>
+  messages.value.map((message) => {
+    if (message.role === 'assistant' && message.thinking?.steps?.length) {
+      const steps = thinkingStepsFor(message.thinking.steps)
+      if (steps.length) {
+        return { ...message, _thinkingSteps: steps }
+      }
+    }
+    return message
+  })
+)
+
+watch(isRunActive, (active) => {
+  if (active) {
+    elapsedSeconds.value = 0
+    elapsedTimer = setInterval(() => { elapsedSeconds.value++ }, 1000)
+  } else {
+    clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
+})
 
 const isMobile = computed(() => {
   if (typeof window === 'undefined') return false
@@ -588,10 +826,12 @@ function pushStreamEvent(event) {
 
 function resetStreamState() {
   partialAnswer.value = ''
-  revealQueue.value = ''
-  stopRevealTimer()
   streamError.value = ''
   streamEvents.value = []
+  queuePosition.value = null
+  thinkingPanelOpen.value = false
+  thinkingText.value = ''
+  elapsedSeconds.value = 0
   seenActivityKeys.clear()
   seenStepEventCounts.clear()
 }
@@ -615,40 +855,9 @@ function pushAgentActivity(item, fallbackTs, fallbackStatus) {
   })
 }
 
-function stopRevealTimer() {
-  if (revealTimer.value) {
-    window.clearInterval(revealTimer.value)
-    revealTimer.value = null
-  }
-}
-
-function flushRevealQueue() {
-  if (revealQueue.value) {
-    partialAnswer.value += revealQueue.value
-    revealQueue.value = ''
-  }
-  stopRevealTimer()
-}
-
-function startRevealTimer() {
-  if (revealTimer.value) {
-    return
-  }
-  revealTimer.value = window.setInterval(() => {
-    if (!revealQueue.value) {
-      stopRevealTimer()
-      return
-    }
-    const nextChunk = revealQueue.value.slice(0, 4)
-    revealQueue.value = revealQueue.value.slice(nextChunk.length)
-    partialAnswer.value += nextChunk
-    nextTick(scrollToBottom)
-  }, 18)
-}
-
 function appendAnswerDelta(content) {
-  revealQueue.value += content
-  startRevealTimer()
+  partialAnswer.value += content
+  nextTick(scrollToBottom)
 }
 
 function scrollToBottom() {
@@ -710,8 +919,9 @@ async function loadSessions(selectUuid = '') {
     targetUuid = created?.uuid
   }
   if (targetUuid) {
-    await selectSession({ uuid: targetUuid }, false)
+    await selectSession({ uuid: targetUuid })
   }
+  await nextTick(() => composerRef.value?.focus())
 }
 
 async function createNewSession(notify = true) {
@@ -738,6 +948,25 @@ async function createNewSession(notify = true) {
   }
 
   return session
+}
+
+function insertNewline() {
+  const el = composerRef.value
+  if (!el) return
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  question.value = question.value.slice(0, start) + '\n' + question.value.slice(end)
+  nextTick(() => {
+    el.selectionStart = el.selectionEnd = start + 1
+    autoResizeTextarea(el)
+  })
+}
+
+function autoResizeTextarea(el) {
+  const target = el?.target ?? el
+  if (!target) return
+  target.style.height = 'auto'
+  target.style.height = Math.min(target.scrollHeight, 200) + 'px'
 }
 
 async function handlePrimaryAction() {
@@ -807,6 +1036,7 @@ async function readSse(runUuid) {
 function handleEvent(event) {
   if (event.type === 'sync' || event.type === 'status') {
     currentRun.value = { ...currentRun.value, status: event.status }
+    if (event.status !== 'queued') queuePosition.value = null
     if (event.type === 'sync') {
       event.steps?.forEach((step) => handleStepEvent(step, event.ts))
     }
@@ -817,12 +1047,20 @@ function handleEvent(event) {
       ts: event.ts
     })
   }
+  if (event.type === 'queue_position') {
+    queuePosition.value = event.position
+  }
   if (event.type === 'sync' && event.content) {
-    flushRevealQueue()
     partialAnswer.value = event.content
   }
   if (event.type === 'step') {
     handleStepEvent(event, event.ts)
+  }
+  if (event.type === 'token_reset') {
+    if (partialAnswer.value) {
+      thinkingText.value += partialAnswer.value + '\n'
+    }
+    partialAnswer.value = ''
   }
   if (event.type === 'token') {
     appendAnswerDelta(event.content)
@@ -882,9 +1120,14 @@ function handleStepEvent(event, ts) {
 async function submit() {
   loading.value.run = true
   resetStreamState()
+  const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
+  question.value = ''
+  if (composerRef.value) composerRef.value.style.height = 'auto'
+  messages.value = [...messages.value, { role: 'user', content: optimisticText, uuid: '__optimistic__', created_at: new Date().toISOString() }]
+  await nextTick(scrollToBottom)
   try {
     const run = await createRun(selectedSessionUuid.value, {
-      question: question.value,
+      question: optimisticText,
       run_inline: false,
       enqueue: true
     })
@@ -896,13 +1139,26 @@ async function submit() {
       ts: new Date().toISOString()
     })
     await readSse(run.uuid)
-    flushRevealQueue()
     currentRun.value = await getRun(run.uuid)
-    await selectSession({ uuid: selectedSessionUuid.value }, false)
-    question.value = ''
-    showInfo(t('lens.chat.runSubmitted'))
+    messages.value = await listMessages(selectedSessionUuid.value)
+
+    if (currentRun.value?.status === 'failed') {
+      // Remove the empty pre-created assistant placeholder from the failed run
+      const last = messages.value[messages.value.length - 1]
+      if (last?.role === 'assistant' && !last.content) {
+        messages.value = messages.value.slice(0, -1)
+      }
+      const errMsg = currentRun.value.error || t('lens.chat.events.error')
+      streamError.value = errMsg
+      showError(errMsg)
+    } else {
+      await nextTick()
+      resetStreamState()
+    }
     await nextTick(scrollToBottom)
   } catch {
+    messages.value = messages.value.filter(m => m.uuid !== '__optimistic__')
+    question.value = optimisticText
     showError(t('lens.chat.submitFailed'))
   } finally {
     loading.value.run = false
@@ -979,6 +1235,7 @@ function handleOutsideClick(event) {
 watch(
   () => route.params.slug,
   () => {
+    dockMenuOpen.value = false
     bootstrap()
   },
   { immediate: true }
@@ -994,7 +1251,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleOutsideClick)
   streamController.value?.abort()
-  stopRevealTimer()
+  clearInterval(elapsedTimer)
 })
 </script>
 
@@ -1180,11 +1437,7 @@ onBeforeUnmount(() => {
 }
 
 .message-row-user {
-  @apply justify-end;
-}
-
-.message-row-user .message-avatar {
-  order: 2;
+  @apply flex-row-reverse;
 }
 
 .message-avatar {
@@ -1205,21 +1458,11 @@ onBeforeUnmount(() => {
 }
 
 .message-row-user .message-body {
-  @apply max-w-[640px];
+  @apply w-fit max-w-[640px] flex-none text-right;
 }
 
 .message-card {
-  @apply min-w-0 rounded-lg border px-4 py-3 shadow-none;
-}
-
-.message-card.user {
-  border-color: #b9cdfa;
-  background: #eef4fe;
-}
-
-.message-card.assistant {
-  border-color: #e5e7eb;
-  background: #f9fafb;
+  @apply min-w-0;
 }
 
 .message-time {
@@ -1231,9 +1474,6 @@ onBeforeUnmount(() => {
   @apply text-right;
 }
 
-.message-markdown {
-  @apply mt-2;
-}
 
 .message-markdown :deep(.markdown-content) {
   @apply max-w-none break-words;
@@ -1262,13 +1502,13 @@ onBeforeUnmount(() => {
   color: #374151;
 }
 
-.message-markdown :deep(.markdown-content code) {
+.message-markdown :deep(.markdown-content :not(pre) > code) {
   background: #eef4fe;
   color: #0e278c;
 }
 
 .message-text {
-  @apply mt-2 whitespace-pre-wrap break-words text-[16px] leading-7;
+  @apply whitespace-pre-wrap break-words text-[16px] leading-7;
   color: #111827;
 }
 
@@ -1313,13 +1553,102 @@ onBeforeUnmount(() => {
   color: #6b7280;
 }
 
+.live-progress-row {
+  @apply mb-2;
+}
+
+.thinking-panel {
+  @apply w-full rounded-lg overflow-hidden;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.thinking-panel-done {
+  @apply mb-2;
+  background: #fafafa;
+}
+
+.thinking-panel-live {
+  @apply mb-2;
+}
+
+.thinking-done-icon {
+  @apply shrink-0;
+  color: #9ca3af;
+}
+
+.thinking-panel-header {
+  @apply flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left;
+  background: transparent;
+  border: none;
+}
+
+.thinking-panel-header:hover {
+  background: #f3f4f6;
+}
+
+.thinking-panel-status {
+  @apply flex flex-1 items-center gap-1 text-sm;
+  color: #374151;
+}
+
+.thinking-step-count {
+  @apply rounded-full px-1.5 py-0.5 text-xs;
+  background: #e5e7eb;
+  color: #6b7280;
+}
+
+.thinking-elapsed {
+  @apply shrink-0 text-xs tabular-nums;
+  color: #9ca3af;
+}
+
+.thinking-panel-chevron {
+  @apply shrink-0;
+  color: #9ca3af;
+}
+
+.thinking-panel-body {
+  @apply max-h-36 overflow-y-auto px-3 pb-2 pt-1;
+  border-top: 1px solid #e5e7eb;
+  scroll-behavior: smooth;
+}
+
+.thinking-step-item {
+  @apply flex items-baseline gap-1.5 py-0.5 text-xs;
+  color: #6b7280;
+}
+
+.thinking-step-bullet {
+  @apply shrink-0;
+  color: #d1d5db;
+}
+
+.thinking-step-repeat {
+  @apply ml-1 shrink-0 text-xs;
+  color: #9ca3af;
+}
+
+.thinking-reasoning {
+  @apply whitespace-pre-wrap break-words text-xs leading-5 mt-1 pt-1;
+  border-top: 1px dashed #e5e7eb;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.live-progress-dot {
+  @apply h-1.5 w-1.5 shrink-0 rounded-full;
+  background: #2b4ee6;
+  animation: cursor-blink 1s steps(2, start) infinite;
+}
+
 .live-text {
-  @apply mt-2 whitespace-pre-wrap text-[16px] leading-7;
+  @apply whitespace-pre-wrap text-[16px] leading-7;
   color: #111827;
 }
 
 .live-thinking {
-  @apply mt-2 flex items-center gap-2 text-sm;
+  @apply flex items-center gap-2 text-sm;
   color: #4b5563;
 }
 
@@ -1341,8 +1670,9 @@ onBeforeUnmount(() => {
   animation-delay: 0.3s;
 }
 
-.stream-cursor {
-  @apply ml-0.5 inline-block h-4 w-1 translate-y-0.5;
+.live-markdown.is-streaming :deep(.markdown-content > *:last-child)::after {
+  content: '';
+  @apply ml-1 inline-block h-4 w-1 align-middle;
   background: #2b4ee6;
   animation: cursor-blink 1s steps(2, start) infinite;
 }
@@ -1436,8 +1766,13 @@ onBeforeUnmount(() => {
 }
 
 .composer-input {
-  @apply h-10 flex-1 border-0 bg-transparent p-0 text-[16px] leading-6 outline-none;
+  @apply flex-1 border-0 bg-transparent py-2 px-0 text-[16px] leading-6 outline-none;
   color: #111827;
+  min-height: 2.5rem;
+  max-height: 200px;
+  resize: none;
+  overflow-y: auto;
+  align-self: flex-end;
 }
 
 .composer-input::placeholder {

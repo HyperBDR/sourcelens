@@ -33,18 +33,27 @@ const props = defineProps({
   }
 })
 
-// Configure marked options
+// Configure marked. marked v16 removed the `highlight` option, so syntax
+// highlighting runs in a custom code renderer instead. Emitting the
+// `hljs` class lets the global highlight.js theme style the block (dark
+// background + token colors) even when the language is unknown.
+const renderer = new marked.Renderer()
+renderer.code = ({ text, lang }) => {
+  const language =
+    props.enableHighlight && lang && hljs.getLanguage(lang) ? lang : ''
+  let body
+  try {
+    body = language
+      ? hljs.highlight(text, { language }).value
+      : escapeHtml(text)
+  } catch (err) {
+    body = escapeHtml(text)
+  }
+  return `<pre><code class="hljs language-${language}">${body}</code></pre>`
+}
+
 marked.setOptions({
-  highlight: function (code, lang) {
-    if (props.enableHighlight && lang && hljs.getLanguage(lang)) {
-      try {
-        return hljs.highlight(code, { language: lang }).value
-      } catch (err) {
-        // Silently fall back to plain text if highlighting fails
-      }
-    }
-    return code
-  },
+  renderer,
   breaks: true,
   gfm: true
 })

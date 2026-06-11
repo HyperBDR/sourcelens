@@ -1,5 +1,6 @@
 import json
-from typing import Any, Sequence
+import logging
+from typing import Any, Optional, Sequence
 
 import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -7,6 +8,8 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
+
+LOGGER = logging.getLogger("lensnode")
 
 
 class LensGatewayChatModel(BaseChatModel):
@@ -16,6 +19,7 @@ class LensGatewayChatModel(BaseChatModel):
     ai_gateway_url: str
     token: str
     request_timeout_s: int = 120
+    emit_output: Optional[Any] = None
 
     @property
     def _llm_type(self):
@@ -61,7 +65,6 @@ class LensGatewayChatModel(BaseChatModel):
         payload = {
             "model_ref": self.model_ref,
             "messages": [_message_to_gateway(message) for message in messages],
-            "return_message": True,
         }
         if kwargs.get("tools") is not None:
             payload["tools"] = kwargs["tools"]
@@ -72,12 +75,14 @@ class LensGatewayChatModel(BaseChatModel):
         if kwargs.get("max_tokens") is not None:
             payload["max_tokens"] = kwargs["max_tokens"]
 
+        if self.emit_output is not None:
+            return self._generate_streaming(payload)
+
+        payload["return_message"] = True
         with httpx.Client(timeout=self.request_timeout_s) as client:
             response = client.post(
                 self.ai_gateway_url,
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                },
+                headers={"Authorization": f"Bearer {self.token}"},
                 json=payload,
             )
             response.raise_for_status()
@@ -88,6 +93,71 @@ class LensGatewayChatModel(BaseChatModel):
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": data.get("usage") or {}},
+        )
+
+    def _generate_streaming(self, payload):
+        """Stream tokens from the gateway, emitting each via emit_output."""
+
+        content_parts = []
+        tool_calls = []
+        usage = {}
+
+        with httpx.Client(timeout=self.request_timeout_s) as client:
+            with client.stream(
+                "POST",
+                self.ai_gateway_url,
+                headers={"Authorization": f"Bearer {self.token}"},
+                json={**payload, "stream": True},
+            ) as response:
+                response.raise_for_status()
+                buffer = ""
+                for chunk in response.iter_text():
+                    buffer += chunk
+                    while "\n\n" in buffer:
+                        event_str, buffer = buffer.split("\n\n", 1)
+                        for line in event_str.splitlines():
+                            if not line.startswith("data: "):
+                                continue
+                            try:
+                                data = json.loads(line[6:])
+                            except ValueError:
+                                continue
+                            if data.get("type") == "token":
+                                kind = data.get("kind") or "content"
+                                text = data.get("content") or ""
+                                if text and kind == "content":
+                                    content_parts.append(text)
+                                    self.emit_output(text)
+                            elif data.get("type") == "done":
+                                usage = data.get("usage") or {}
+                                tool_calls = data.get("tool_calls") or []
+
+        content = "".join(content_parts)
+
+        # If this turn issued tool calls, its streamed text was
+        # intermediate reasoning, not the final answer. Reset now so it
+        # moves into the thinking panel before the tools run and never
+        # lingers in the answer bubble. The final turn issues no tool
+        # calls, so its content stays as the answer.
+        if self.emit_output is not None and tool_calls and content:
+            self.emit_output("", reset=True)
+
+        gateway_message = {
+            "content": content,
+            "tool_calls": [
+                {
+                    "id": tc.get("id"),
+                    "type": "function",
+                    "function": tc.get("function") or {},
+                }
+                for tc in tool_calls
+            ],
+        }
+        message = _message_from_gateway(gateway_message)
+        message.response_metadata["usage"] = usage
+        return ChatResult(
+            generations=[ChatGeneration(message=message)],
+            llm_output={"usage": usage},
         )
 
 

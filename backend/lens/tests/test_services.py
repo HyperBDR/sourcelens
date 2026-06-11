@@ -19,8 +19,6 @@ from core.management.commands.register_periodic_tasks import (
 from core.periodic_registry import TASK_REGISTRY
 from lens.execution import execute_answer_run
 from lens.lensnode_auth import issue_lensnode_token
-from lens.llm import LensLLMResult, QuestionPreflightResult
-from lens.llm import _parse_preflight_result
 from lens.models import (
     Assistant,
     DataSource,
@@ -143,99 +141,10 @@ class LensServiceTests(TransactionTestCase):
         run.refresh_from_db()
 
         self.assertEqual(run.status, "done")
-        self.assertEqual(run.steps.count(), 4)
+        self.assertEqual(run.steps.count(), 3)
         self.assertTrue(run.output_message.content)
         self.assertEqual(run.execution.task, "knowledge_qa")
         self.assertEqual(run.execution.target_dirs, [{"path": "/workspace/repo"}])
-
-    def test_execute_answer_run_allows_preflight_and_dispatches(self):
-        run = create_execution_run(
-            session=self.session,
-            question="How does SSE work?",
-            enqueue=False,
-        )
-        preflight = QuestionPreflightResult(
-            decision="allow",
-            message="",
-            rewritten_question="Explain SSE in this repo.",
-            reason="single_workspace_question",
-            usage={"total_tokens": 9},
-            metered=True,
-        )
-
-        with patch("lens.llm.preflight_question", return_value=preflight):
-            execute_answer_run(run, dispatch=False)
-
-        run.refresh_from_db()
-        step = run.steps.get(sequence=1)
-        self.assertEqual(step.detail["decision"], "allow")
-        self.assertEqual(
-            step.detail["rewritten_question"],
-            "Explain SSE in this repo.",
-        )
-        self.assertTrue(hasattr(run, "execution"))
-        self.assertEqual(run.execution.task, "knowledge_qa")
-
-    def test_execute_answer_run_clarify_preflight_does_not_dispatch(self):
-        run = create_execution_run(
-            session=self.session,
-            question="A lot of unrelated questions",
-            enqueue=False,
-        )
-        preflight = QuestionPreflightResult(
-            decision="clarify",
-            message="Please split this into one question at a time.",
-            rewritten_question="",
-            reason="too_many_unrelated_questions",
-            usage={"total_tokens": 11},
-            metered=True,
-        )
-
-        with patch("lens.llm.preflight_question", return_value=preflight):
-            execute_answer_run(run, dispatch=True)
-
-        run.refresh_from_db()
-        self.assertEqual(run.status, Run.Status.DONE)
-        self.assertEqual(
-            run.output_message.content,
-            "Please split this into one question at a time.",
-        )
-        self.assertFalse(hasattr(run, "execution"))
-        self.assertEqual(run.steps.count(), 2)
-        self.assertEqual(
-            run.steps.get(sequence=1).detail["decision"],
-            "clarify",
-        )
-
-    def test_execute_answer_run_reject_preflight_does_not_dispatch(self):
-        run = create_execution_run(
-            session=self.session,
-            question="What is the weather today?",
-            enqueue=False,
-        )
-        preflight = QuestionPreflightResult(
-            decision="reject",
-            message="This assistant only answers workspace questions.",
-            rewritten_question="",
-            reason="outside_workspace_scope",
-            usage={"total_tokens": 12},
-            metered=True,
-        )
-
-        with patch("lens.llm.preflight_question", return_value=preflight):
-            execute_answer_run(run, dispatch=True)
-
-        run.refresh_from_db()
-        self.assertEqual(run.status, Run.Status.DONE)
-        self.assertEqual(
-            run.output_message.content,
-            "This assistant only answers workspace questions.",
-        )
-        self.assertFalse(hasattr(run, "execution"))
-        self.assertEqual(
-            run.steps.get(sequence=1).detail["reason"],
-            "outside_workspace_scope",
-        )
 
     def test_execute_answer_run_fails_when_lensnode_offline(self):
         self.lensnode.status = LensNode.Status.OFFLINE
@@ -252,45 +161,6 @@ class LensServiceTests(TransactionTestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, Run.Status.FAILED)
         self.assertEqual(run.error, "LENSNODE_OFFLINE")
-
-    def test_finish_lensnode_run_applies_optional_postprocess_model(self):
-        self.assistant.postprocess_model_ref = (
-            "016d5cf7-2245-4015-b242-d6323e795b58"
-        )
-        self.assistant.save(update_fields=["postprocess_model_ref"])
-        run = create_execution_run(
-            session=self.session,
-            question="What does this project do?",
-            enqueue=False,
-        )
-        run.output_message.content = "raw answer"
-        run.output_message.save(update_fields=["content"])
-        postprocess_result = type(
-            "PostprocessResult",
-            (),
-            {
-                "content": "polished answer",
-                "usage": {"total_tokens": 8},
-                "metered": True,
-            },
-        )()
-
-        with patch(
-            "lens.llm.postprocess_answer",
-            return_value=postprocess_result,
-        ):
-            finish_lensnode_run(run.uuid, Run.Status.DONE)
-
-        run.refresh_from_db()
-        self.assertEqual(run.status, Run.Status.DONE)
-        self.assertEqual(run.output_message.content, "polished answer")
-        answer_step = run.steps.get(sequence=3)
-        self.assertEqual(answer_step.step_type, RunStep.StepType.ANSWER)
-        self.assertEqual(answer_step.status, RunStep.Status.DONE)
-        self.assertEqual(
-            answer_step.detail["postprocessed_answer_length"],
-            len("polished answer"),
-        )
 
     def test_finish_lensnode_run_does_not_overwrite_cancelled_run(self):
         run = create_execution_run(
@@ -322,19 +192,6 @@ class LensServiceTests(TransactionTestCase):
 
         run.refresh_from_db()
         self.assertEqual(run.output_message.content, "")
-
-    def test_preflight_invalid_json_clarifies_instead_of_allowing(self):
-        result = LensLLMResult(
-            content="not json",
-            usage={"total_tokens": 3},
-            metered=True,
-        )
-
-        parsed = _parse_preflight_result(result, "Question?")
-
-        self.assertEqual(parsed.decision, "clarify")
-        self.assertEqual(parsed.reason, "invalid_preflight_response")
-        self.assertTrue(parsed.message)
 
     def test_lensnode_websocket_hello_output_and_done(self):
         token = issue_lensnode_token(self.lensnode)

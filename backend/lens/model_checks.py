@@ -1,8 +1,6 @@
 from django.utils import timezone
 
 MODEL_REF_FIELDS = (
-    "preprocess_model_ref",
-    "postprocess_model_ref",
     "multimodal_model_ref",
     "agent_model_ref",
 )

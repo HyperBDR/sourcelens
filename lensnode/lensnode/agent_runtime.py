@@ -91,6 +91,7 @@ class LensDeepAgentRuntime:
                 ai_gateway_url=self.config.ai_gateway_url,
                 token=self.config.token,
                 request_timeout_s=self.config.request_timeout_s,
+                emit_output=emit_output,
             )
             tools = build_agent_tools(command, emit_event=emit_agent_event)
             kwargs = {
@@ -119,21 +120,19 @@ class LensDeepAgentRuntime:
                 },
             )
             agent = create_deep_agent(**kwargs)
-            emit_agent_event("deepagents.agent.invoke")
-            response = agent.invoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": question,
-                        }
-                    ]
-                },
-                config={"recursion_limit": 30},
+            max_turns = command.get("max_agent_turns", 26)
+            emit_agent_event(
+                "deepagents.agent.invoke",
+                {"max_agent_turns": max_turns},
             )
-            answer = _extract_final_message(response)
-            if emit_output is not None and answer:
-                emit_output(answer)
+            answer, truncated = _run_agent_with_turn_limit(
+                agent, question, max_turns, emit_event=emit_agent_event
+            )
+            if truncated:
+                emit_agent_event(
+                    "deepagents.agent.truncated",
+                    {"max_agent_turns": max_turns},
+                )
             emit_agent_event(
                 "deepagents.runtime.done",
                 {
@@ -252,3 +251,79 @@ def _activity_from_event(event):
     if event.endswith(".done"):
         return "completed"
     return "running"
+
+
+def _run_agent_with_turn_limit(agent, question, max_turns, emit_event=None):
+    """Stream agent events and stop after max_turns AI turns.
+
+    Returns (answer, truncated) where truncated=True means the agent
+    was stopped before it finished naturally.
+    """
+
+    last_state = None
+    truncated = False
+    seen_tool_calls = set()
+
+    for state in agent.stream(
+        {"messages": [{"role": "user", "content": question}]},
+        stream_mode="values",
+        config={"recursion_limit": 500},
+    ):
+        last_state = state
+        messages = state.get("messages", [])
+        if emit_event is not None:
+            _emit_new_tool_calls(messages, seen_tool_calls, emit_event)
+        ai_turns = sum(
+            1
+            for m in messages
+            if getattr(m, "type", "") == "ai"
+        )
+        if ai_turns >= max_turns:
+            truncated = True
+            break
+
+    answer = _extract_final_message(last_state or {})
+    if truncated:
+        answer += (
+            "\n\n---\n*已达到当前分析深度上限，"
+            "如需更完整的结果，请调高分析档位后重试。*"
+        )
+    return answer, truncated
+
+
+def _emit_new_tool_calls(messages, seen, emit_event):
+    """Emit a progress event for each not-yet-seen agent tool call.
+
+    The built-in workspace tools emit their own start/done events, but
+    the Deep Agent loop also calls model-driven tools (write_file, ls,
+    task delegation, MCP tools) that are otherwise invisible. Surfacing
+    every tool call here lets the frontend show real progress instead of
+    a frozen status during long turns.
+    """
+
+    for message in messages:
+        if getattr(message, "type", "") != "ai":
+            continue
+        for call in getattr(message, "tool_calls", None) or []:
+            call_id = call.get("id") or ""
+            if not call_id or call_id in seen:
+                continue
+            seen.add(call_id)
+            name = call.get("name") or "tool"
+            emit_event(
+                f"tool.{name}.invoke",
+                {"tool": name, "summary": _tool_call_summary(call)},
+            )
+
+
+def _tool_call_summary(call):
+    """Return a short human summary of a tool call's arguments."""
+
+    args = call.get("args") or {}
+    if not isinstance(args, dict):
+        return ""
+    for key in ("path", "file_path", "query", "description", "ref"):
+        value = args.get(key)
+        if value:
+            return str(value)[:120]
+    return ""

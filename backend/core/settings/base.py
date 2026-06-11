@@ -174,6 +174,10 @@ INSTALLED_APPS += [
 SITE_ID = 1
 
 ASGI_APPLICATION = 'core.asgi.application'
+_channel_redis_url = os.getenv(
+    'CHANNEL_LAYER_REDIS_URL',
+    os.getenv('REDIS_URL', 'redis://redis:6379/2'),
+)
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'core.channel_layers.RedisChannelLayer',
@@ -181,12 +185,7 @@ CHANNEL_LAYERS = {
             'brpop_timeout': float(
                 os.getenv('CHANNEL_LAYER_BRPOP_TIMEOUT', '1')
             ),
-            'hosts': [
-                os.getenv(
-                    'CHANNEL_LAYER_REDIS_URL',
-                    os.getenv('REDIS_URL', 'redis://redis:6379/2'),
-                )
-            ],
+            'hosts': [_channel_redis_url],
         },
     },
 }

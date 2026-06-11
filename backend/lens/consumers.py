@@ -11,6 +11,7 @@ from .lensnode_auth import hash_lensnode_token
 from .models import LensNode, Run
 from .services import (
     append_lensnode_output,
+    fail_active_runs_for_lensnode,
     finish_lensnode_run,
     lensnode_group_name,
     record_lensnode_run_event,
@@ -50,6 +51,9 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             return
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
         await self._mark_disconnected(self.lensnode.uuid, self.channel_name)
+        await database_sync_to_async(fail_active_runs_for_lensnode)(
+            self.lensnode.uuid
+        )
 
     async def receive_json(self, content, **kwargs):
         """Route inbound LensNode protocol frames."""
@@ -199,6 +203,7 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             run_uuid,
             content_delta=content.get("content_delta") or "",
             final_content=content.get("final_content"),
+            reset=bool(content.get("reset")),
         )
         delta_chars = len(content.get("content_delta") or "")
         final_chars = len(content.get("final_content") or "")

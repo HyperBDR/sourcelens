@@ -94,12 +94,17 @@ RUN set -eux; \
     uv pip compile pyproject.toml -o requirements.txt --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"; \
     uv pip install --system -r requirements.txt --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"
 
-# Dev mode already resolves agentcore packages from local file paths above.
-# Avoid a second editable install here; some PEP517 editable builds can hang in
-# network-restricted dev environments.
+# In dev mode, reinstall agentcore packages as editable so that volume-mapped
+# source changes are picked up without rebuilding the image.
 RUN set -eux; \
     if [ "$DEV_MODE" = "1" ]; then \
-        echo "Dev mode: agentcore dependencies installed from local paths"; \
+        export PATH="/root/.local/bin:$PATH"; \
+        for d in /opt/backend/agentcore/*/; do \
+            if [ -f "${d}pyproject.toml" ]; then \
+                echo "Dev mode: installing ${d} as editable"; \
+                (cd "$d" && uv pip install --system -e . --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"); \
+            fi; \
+        done; \
     fi
 
 # Compile Django message catalogs (.po -> .mo) so runtime gettext works

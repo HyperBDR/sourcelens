@@ -240,10 +240,10 @@ class AssistantSerializer(serializers.ModelSerializer):
             "lensnode_uuid",
             "selected_task",
             "selected_dirs",
-            "preprocess_model_ref",
-            "postprocess_model_ref",
             "multimodal_model_ref",
             "agent_model_ref",
+            "agent_rounds",
+            "max_concurrency",
             "settings",
             "status",
             "skill_bindings",
@@ -571,6 +571,7 @@ class MessageSerializer(serializers.ModelSerializer):
     """Session message serializer."""
 
     run = serializers.UUIDField(source="run.uuid", read_only=True)
+    thinking = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -580,6 +581,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "content",
             "sequence",
             "run",
+            "thinking",
             "created_at",
         ]
         read_only_fields = [
@@ -588,8 +590,38 @@ class MessageSerializer(serializers.ModelSerializer):
             "content",
             "sequence",
             "run",
+            "thinking",
             "created_at",
         ]
+
+    def get_thinking(self, obj):
+        """Return a persisted reasoning summary for assistant messages.
+
+        Surfaces the run's elapsed time and the accumulated tool-use
+        step events so the frontend can render a collapsed "thought for
+        Xs" panel on historical messages. Only agent_event/activity are
+        included; the friendly wording and grouping happen client-side.
+        """
+
+        run = obj.run
+        if obj.role != Message.Role.ASSISTANT or run is None:
+            return None
+        steps = []
+        for step in run.steps.all():
+            for item in (step.detail or {}).get("events", []):
+                if item.get("agent_event") or item.get("activity"):
+                    steps.append(
+                        {
+                            "agent_event": item.get("agent_event"),
+                            "activity": item.get("activity"),
+                        }
+                    )
+        if not steps:
+            return None
+        duration = None
+        if run.started_at and run.finished_at:
+            duration = (run.finished_at - run.started_at).total_seconds()
+        return {"duration_seconds": duration, "steps": steps}
 
 
 class RunStepSerializer(serializers.ModelSerializer):

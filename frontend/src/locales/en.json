@@ -103,9 +103,14 @@
       "waitingForResult": "Still waiting for execution result.",
       "thinking": "Analyzing project context",
       "waiting": "Waiting",
+      "queued": "Queued, please wait",
+      "queuedNext": "Almost your turn",
+      "queuedPosition": "{position} ahead of you in the queue",
       "running": "Analyzing",
       "generating": "Generating",
       "agentActivity": "Agent activity",
+      "thinkingDone": "Thought for {duration} · {count} steps",
+      "thinkingDoneSteps": "Thought for {count} steps",
       "events": {
         "submitted": "Submitted",
         "sync": "Sync status",
@@ -124,7 +129,20 @@
         "read_evidence": "Finished reading evidence",
         "calling_model": "Calling the model for an answer",
         "completed": "Execution logic completed",
-        "running": "Running"
+        "running": "Running",
+        "thinking": "Thinking...",
+        "loadingResources": "Loading context...",
+        "searchWorkspace": "Searching workspace...",
+        "readFile": "Reading file...",
+        "gitLog": "Checking git history...",
+        "gitDiff": "Comparing code changes...",
+        "summarizeChanges": "Summarizing recent changes...",
+        "writingFile": "Writing file...",
+        "editingFile": "Editing file...",
+        "listFiles": "Listing files...",
+        "planningTasks": "Planning tasks...",
+        "delegatingTask": "Delegating subtask...",
+        "callingTool": "Calling {name}..."
       }
     }
   },

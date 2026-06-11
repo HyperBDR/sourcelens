@@ -103,9 +103,14 @@
       "waitingForResult": "仍在等待执行结果。",
       "thinking": "正在分析项目内容",
       "waiting": "等待中",
+      "queued": "排队中，请稍候",
+      "queuedNext": "即将为您处理",
+      "queuedPosition": "您前面还有 {position} 人在排队",
       "running": "正在分析",
       "generating": "正在生成",
       "agentActivity": "Agent 活动",
+      "thinkingDone": "已思考 {duration} · {count} 步",
+      "thinkingDoneSteps": "已思考 {count} 步",
       "events": {
         "submitted": "已提交",
         "sync": "同步状态",
@@ -124,7 +129,20 @@
         "read_evidence": "已完成证据读取",
         "calling_model": "正在调用模型生成回答",
         "completed": "执行逻辑已完成",
-        "running": "正在执行"
+        "running": "正在执行",
+        "thinking": "正在思考...",
+        "loadingResources": "正在准备上下文...",
+        "searchWorkspace": "搜索工作区...",
+        "readFile": "读取文件...",
+        "gitLog": "查看提交历史...",
+        "gitDiff": "对比代码变更...",
+        "summarizeChanges": "汇总近期变更...",
+        "writingFile": "写入文件...",
+        "editingFile": "编辑文件...",
+        "listFiles": "列出文件...",
+        "planningTasks": "正在规划任务...",
+        "delegatingTask": "委派子任务...",
+        "callingTool": "调用工具 {name}..."
       }
     }
   },

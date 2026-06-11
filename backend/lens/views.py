@@ -301,7 +301,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Return ordered messages for a session."""
 
         session = self.get_object()
-        serializer = MessageSerializer(session.message_set.all(), many=True)
+        messages = session.message_set.select_related("run").prefetch_related(
+            "run__steps"
+        )
+        serializer = MessageSerializer(messages, many=True)
         return Response(serializer.data)
 
     def perform_destroy(self, instance):
@@ -660,42 +663,99 @@ class LensNodeAIGatewayView(APIView):
         tracker_state,
         payload,
     ):
-        """Stream a metered LLM call as SSE chunks."""
+        """Stream a metered LLM call as SSE chunks.
+
+        Runs the sync LLMTracker generator in a thread and yields events via
+        an async generator so Daphne (ASGI) flushes each token immediately
+        instead of buffering the full response.
+        """
 
         from agentcore_metering.adapters.django import LLMTracker
+        import asyncio
+        import logging as _logging
 
-        def event_stream():
-            generator = LLMTracker.call_and_track(
-                messages=messages,
-                model_uuid=model_ref,
-                node_name=f"lensnode:{lensnode.uuid}",
-                state=tracker_state,
-                stream=True,
-                tools=payload.get("tools"),
-                tool_choice=payload.get("tool_choice"),
-                temperature=payload.get("temperature"),
-                max_tokens=payload.get("max_tokens"),
-            )
-            while True:
+        _log = _logging.getLogger("lens.gateway_stream")
+        lensnode_uuid_str = str(lensnode.uuid)
+
+        async def event_stream():
+            loop = asyncio.get_running_loop()
+            queue = asyncio.Queue()
+
+            def run_in_thread():
                 try:
-                    kind, text = next(generator)
-                except StopIteration as exc:
-                    usage = exc.value or {}
-                    yield self._sse(
-                        {
-                            "type": "done",
-                            "usage": usage,
-                            "lensnode_uuid": str(lensnode.uuid),
-                        }
+                    generator = LLMTracker.call_and_track(
+                        messages=messages,
+                        model_uuid=model_ref,
+                        node_name=f"lensnode:{lensnode_uuid_str}",
+                        state=tracker_state,
+                        stream=True,
+                        tools=payload.get("tools"),
+                        tool_choice=payload.get("tool_choice"),
+                        temperature=payload.get("temperature"),
+                        max_tokens=payload.get("max_tokens"),
                     )
-                    return
-                yield self._sse(
-                    {
-                        "type": "token",
-                        "kind": kind,
-                        "content": text,
-                    }
-                )
+                    token_count = 0
+                    while True:
+                        try:
+                            kind, text = next(generator)
+                        except StopIteration as exc:
+                            result = exc.value or {}
+                            tool_calls = result.pop("_tool_calls", None) or []
+                            _log.debug(
+                                "gateway stream done: token_count=%d "
+                                "tool_calls=%d",
+                                token_count,
+                                len(tool_calls),
+                            )
+                            loop.call_soon_threadsafe(
+                                queue.put_nowait,
+                                ("done", {
+                                    "type": "done",
+                                    "usage": result,
+                                    "lensnode_uuid": lensnode_uuid_str,
+                                    "tool_calls": tool_calls,
+                                }),
+                            )
+                            return
+                        except Exception as exc:
+                            _log.error(
+                                "gateway stream exception: type=%s error=%s "
+                                "token_count=%d",
+                                type(exc).__name__,
+                                exc,
+                                token_count,
+                            )
+                            loop.call_soon_threadsafe(
+                                queue.put_nowait, ("error", exc)
+                            )
+                            return
+                        token_count += 1
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            ("event", {
+                                "type": "token",
+                                "kind": kind,
+                                "content": text,
+                            }),
+                        )
+                except Exception as exc:
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait, ("error", exc)
+                    )
+
+            future = loop.run_in_executor(None, run_in_thread)
+            try:
+                while True:
+                    item = await queue.get()
+                    if item[0] == "event":
+                        yield self._sse(item[1])
+                    elif item[0] == "done":
+                        yield self._sse(item[1])
+                        return
+                    elif item[0] == "error":
+                        raise item[1]
+            finally:
+                await future
 
         response = StreamingHttpResponse(
             event_stream(),

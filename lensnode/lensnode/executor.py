@@ -132,12 +132,13 @@ class LensNodeExecutor:
                     }
                 )
 
-            def emit_output(content_delta):
+            def emit_output(content, reset=False):
                 emit(
                     {
                         "type": "run_output",
                         "run_uuid": run_uuid,
-                        "content_delta": content_delta,
+                        "content_delta": content,
+                        "reset": reset,
                     }
                 )
 
