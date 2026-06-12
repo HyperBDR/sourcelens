@@ -1,6 +1,13 @@
-# SourceLens
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/public/brand/logo_with_text_dark.png">
+  <img alt="SourceLens" src="frontend/public/brand/logo_with_text_transparent.png" width="320">
+</picture>
 
 [English](README.md) | [中文](README.zh-CN.md)
+
+</div>
 
 **SourceLens** is a file-system-native retrieval engine that leverages AI coding agents (Claude Code, Codex, etc.) to search, understand, and answer questions from local documents and codebases. It runs inside a sandboxed environment, making it a reliable retrieval backend for RAG pipelines.
 

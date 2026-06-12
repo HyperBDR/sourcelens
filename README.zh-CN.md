@@ -1,6 +1,13 @@
-# SourceLens
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/public/brand/logo_with_text_dark.png">
+  <img alt="SourceLens" src="frontend/public/brand/logo_with_text_transparent.png" width="320">
+</picture>
 
 中文 | [English](README.md)
+
+</div>
 
 **SourceLens** 是一款基于文件系统的检索引擎。它利用 AI 编程工具（Claude Code、Codex 等）在沙箱中对本地文档和代码仓库进行检索、理解和问答，可作为 RAG 管道的可靠 retrieval 后端。
 
