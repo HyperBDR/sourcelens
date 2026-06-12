@@ -17,10 +17,17 @@ SCENARIOS = {
     "knowledge_qa": {
         "title": "Knowledge Q&A",
         "prompt": (
-            "You answer questions over selected documents and code "
-            "workspaces. Use tools to gather evidence before answering. "
-            "Cite file paths when evidence comes from files. If the evidence "
-            "is insufficient, say what is missing."
+            "You answer questions STRICTLY from the selected documents and "
+            "code workspace. Use the tools to gather evidence first, and "
+            "cite file paths when evidence comes from files. Answer ONLY "
+            "what the workspace evidence supports. If the workspace has no "
+            "relevant evidence for the question — even a general-knowledge "
+            "or off-topic question you could answer on your own (e.g. "
+            "geography, cooking, news) — you MUST NOT answer it from your "
+            "own knowledge. Instead, politely tell the user that you "
+            "could not find relevant information in the current workspace "
+            "for this question, and suggest they contact our expert "
+            "support team for further help."
         ),
     },
     "code_analysis": {
@@ -150,17 +157,47 @@ class LensDeepAgentRuntime:
             cleanup_runtime_resources(resources)
 
 
+def _detect_answer_language(question):
+    """Return the answer language name detected from the question.
+
+    Short questions break statistical detectors (a Chinese question
+    carrying an English product name is misread as a European
+    language), so the language is keyed off Unicode script ranges,
+    which stay reliable for the scripts we serve. Latin or
+    undetermined input falls back to English.
+    """
+
+    text = question or ""
+
+    def has(low, high):
+        return any(low <= ord(ch) <= high for ch in text)
+
+    if has(0x3040, 0x30FF):
+        return "Japanese"
+    if has(0xAC00, 0xD7A3):
+        return "Korean"
+    if has(0x4E00, 0x9FFF) or has(0x3400, 0x4DBF):
+        return "Chinese"
+    if has(0x0E00, 0x0E7F):
+        return "Thai"
+    if has(0x0400, 0x04FF):
+        return "Russian"
+    if has(0x0600, 0x06FF):
+        return "Arabic"
+    return "English"
+
+
 def _system_prompt(scenario, command, context_skill_contents=None):
     """Build the per-task Deep Agents system prompt."""
 
     target_dirs = command.get("target_dirs") or []
     dirs = "\n".join(f"- {item.get('path')}" for item in target_dirs)
+    answer_language = _detect_answer_language(command.get("question", ""))
     context_guidance = _context_guidance(context_skill_contents or [])
     return (
         f"{scenario['prompt']}\n\n"
         "You are running inside SourceLens LensNode. The control plane has "
-        "selected the workspace directories below. Keep the final answer in "
-        "the user's language when possible.\n\n"
+        "selected the workspace directories below.\n\n"
         "Workspace and scratch space:\n"
         "- The selected directories below are READ-ONLY source material. "
         "Inspect them only via search_workspace and read_workspace_file; "
@@ -193,9 +230,20 @@ def _system_prompt(scenario, command, context_skill_contents=None):
         "tool and produce the final answer from the evidence already "
         "collected.\n"
         "6. Do not answer from memory when workspace tools can provide "
-        "evidence.\n\n"
+        "evidence.\n"
+        "7. If the selected workspace contains no evidence to answer the "
+        "question, do not guess or answer from general knowledge. Politely "
+        "tell the user that you could not find relevant information in the "
+        "current workspace for this question, and suggest they contact our "
+        "expert support team for further help. Keep the tone warm and "
+        "professional.\n\n"
         f"Selected directories:\n{dirs or '- none'}"
         f"{context_guidance}"
+        f"\n\nFINAL REMINDER ON LANGUAGE: The user's question is written "
+        f"in {answer_language}. You MUST write your ENTIRE final answer "
+        f"in {answer_language}, even when the workspace files you read "
+        f"are in another language. Never switch to the language of the "
+        f"source files you read."
     )
 
 
