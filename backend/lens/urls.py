@@ -2,6 +2,8 @@ from rest_framework.routers import DefaultRouter
 from django.urls import path
 
 from .views import (
+    AdminRunDetailView,
+    AdminRunListView,
     AssistantViewSet,
     DataSourceViewSet,
     GlobalSettingViewSet,
@@ -41,6 +43,16 @@ urlpatterns = [
         "runs/<uuid:uuid>/stream/",
         run_stream_view,
         name="lens-run-stream",
+    ),
+    path(
+        "admin/runs/",
+        AdminRunListView.as_view(),
+        name="lens-admin-runs",
+    ),
+    path(
+        "admin/runs/<uuid:uuid>/",
+        AdminRunDetailView.as_view(),
+        name="lens-admin-run-detail",
     ),
     *router.urls,
     path(

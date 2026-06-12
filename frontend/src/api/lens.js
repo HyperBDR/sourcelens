@@ -44,6 +44,16 @@ export async function listLensNodes() {
   return unwrapList(unwrapResponse(response))
 }
 
+export async function getAdminRuns(params = {}) {
+  const response = await api.get('/lens/admin/runs/', { params })
+  return unwrapResponse(response)
+}
+
+export async function getAdminRun(uuid) {
+  const response = await api.get(`/lens/admin/runs/${uuid}/`)
+  return unwrapResponse(response)
+}
+
 export async function createLensNode(payload) {
   const response = await api.post('/lens/admin/lensnodes/', payload)
   return unwrapResponse(response)

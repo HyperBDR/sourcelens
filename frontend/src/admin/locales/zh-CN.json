@@ -1,4 +1,48 @@
 {
+  "lensRuns": {
+    "menu": "历史记录",
+    "title": "问答历史记录",
+    "subtitle": "追踪所有用户的每一次提问与回答的完整执行过程。",
+    "filterKeyword": "搜索问题…",
+    "filterUsername": "用户名",
+    "assistantAll": "全部助手",
+    "statusAll": "全部状态",
+    "statusDone": "完成",
+    "statusFailed": "失败",
+    "statusRunning": "运行中",
+    "statusQueued": "排队中",
+    "statusCancelled": "已取消",
+    "resetFilters": "重置",
+    "noRuns": "没有找到记录",
+    "colTime": "时间",
+    "colUser": "用户",
+    "colAssistant": "助手",
+    "colQuestion": "问题",
+    "colStatus": "状态",
+    "colDuration": "耗时",
+    "colSteps": "步骤",
+    "subagents": "{n} 个子代理",
+    "detailTitle": "Run 完整追踪",
+    "question": "问题",
+    "answer": "回答",
+    "error": "错误",
+    "timeline": "步骤时间线",
+    "execution": "执行快照",
+    "lensnode": "LensNode",
+    "tabOverview": "基本情况",
+    "tabTrace": "任务详情",
+    "execTime": "执行耗时",
+    "submittedAt": "提交时间",
+    "queueTime": "排队耗时",
+    "execWindow": "执行区间",
+    "noTimeline": "暂无追踪步骤",
+    "tokens": "Token 用量",
+    "totalTokens": "总 Token",
+    "llmCalls": "{n} 次模型调用",
+    "task": "任务",
+    "targetDirs": "工作区目录",
+    "resources": "加载资源"
+  },
   "management": {
     "adminConsole": "管理员控制台",
     "logoTitle": "SourceLens Admin",
@@ -51,7 +95,7 @@
     "adminConsole": "管理员控制台"
   },
   "dataManagement": {
-    "menuTitle": "数据管理"
+    "menuTitle": "资源管理"
   },
   "llm": {
     "menuTitle": "大模型管理",
@@ -537,7 +581,7 @@
     }
   },
   "lensAdmin": {
-    "menuTitle": "Lens 管理",
+    "menuTitle": "Assistant 管理",
     "total": "{label} · {count}",
     "tabs": {
       "assistants": "Assistants",
@@ -549,7 +593,7 @@
     },
     "pages": {
       "assistants": {
-        "title": "Assistant 管理",
+        "title": "助手",
         "description": "配置对外能力、执行节点、任务和工作区目录。",
         "label": "Assistant",
         "action": "新建 Assistant"

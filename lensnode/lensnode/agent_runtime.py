@@ -327,6 +327,7 @@ def _run_agent_with_turn_limit(agent, question, max_turns, emit_event=None):
     last_state = None
     truncated = False
     seen_tool_calls = set()
+    seen_model_calls = set()
 
     for state in agent.stream(
         {"messages": [{"role": "user", "content": question}]},
@@ -336,6 +337,7 @@ def _run_agent_with_turn_limit(agent, question, max_turns, emit_event=None):
         last_state = state
         messages = state.get("messages", [])
         if emit_event is not None:
+            _emit_new_model_calls(messages, seen_model_calls, emit_event)
             _emit_new_tool_calls(messages, seen_tool_calls, emit_event)
         ai_turns = sum(
             1
@@ -353,6 +355,38 @@ def _run_agent_with_turn_limit(agent, question, max_turns, emit_event=None):
             "如需更完整的结果，请调高分析档位后重试。*"
         )
     return answer, truncated
+
+
+def _emit_new_model_calls(messages, seen, emit_event):
+    """Emit an event for each new AI response (one LLM round).
+
+    Each AI message is one round-trip to the model. The gateway returns
+    token usage in the message's response_metadata, so surfacing these
+    makes every LLM call visible in the trace and attributes token usage
+    to the run.
+    """
+
+    ai_index = 0
+    for message in messages:
+        if getattr(message, "type", "") != "ai":
+            continue
+        ai_index += 1
+        if ai_index in seen:
+            continue
+        seen.add(ai_index)
+        meta = getattr(message, "response_metadata", None) or {}
+        usage = meta.get("usage") or {}
+        emit_event(
+            "llm.response",
+            {
+                "round": ai_index,
+                "model": usage.get("model"),
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "completion_tokens": usage.get("completion_tokens"),
+                "total_tokens": usage.get("total_tokens"),
+                "cost": usage.get("cost"),
+            },
+        )
 
 
 def _emit_new_tool_calls(messages, seen, emit_event):

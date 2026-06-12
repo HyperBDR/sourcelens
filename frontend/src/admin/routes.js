@@ -27,6 +27,12 @@ export const adminRoutes = [
     redirect: '/management/lens/assistants'
   },
   {
+    path: '/management/lens/runs',
+    name: 'LensRunObservation',
+    component: () => import('@/admin/pages/lens/RunObservation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
     path: '/management/lens/:pathMatch(.*)*',
     name: 'LensAdmin',
     component: () => import('@/pages/lens/Admin.vue'),

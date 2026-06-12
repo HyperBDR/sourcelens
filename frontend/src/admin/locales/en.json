@@ -1,4 +1,48 @@
 {
+  "lensRuns": {
+    "menu": "History",
+    "title": "Q&A History",
+    "subtitle": "Trace the full execution of every user question and answer across all users.",
+    "filterKeyword": "Search question…",
+    "filterUsername": "Username",
+    "assistantAll": "All assistants",
+    "statusAll": "All status",
+    "statusDone": "Done",
+    "statusFailed": "Failed",
+    "statusRunning": "Running",
+    "statusQueued": "Queued",
+    "statusCancelled": "Cancelled",
+    "resetFilters": "Reset",
+    "noRuns": "No runs found",
+    "colTime": "Time",
+    "colUser": "User",
+    "colAssistant": "Assistant",
+    "colQuestion": "Question",
+    "colStatus": "Status",
+    "colDuration": "Duration",
+    "colSteps": "Steps",
+    "subagents": "{n} subagents",
+    "detailTitle": "Run Trace",
+    "question": "Question",
+    "answer": "Answer",
+    "error": "Error",
+    "timeline": "Step Timeline",
+    "execution": "Execution Snapshot",
+    "lensnode": "LensNode",
+    "tabOverview": "Overview",
+    "tabTrace": "Task details",
+    "execTime": "Exec time",
+    "submittedAt": "Submitted",
+    "queueTime": "Queue time",
+    "execWindow": "Execution window",
+    "noTimeline": "No trace steps",
+    "tokens": "Token usage",
+    "totalTokens": "Total tokens",
+    "llmCalls": "{n} model calls",
+    "task": "Task",
+    "targetDirs": "Workspace dirs",
+    "resources": "Resources"
+  },
   "management": {
     "adminConsole": "Admin Console",
     "logoTitle": "SourceLens Admin",
@@ -51,7 +95,7 @@
     "adminConsole": "Admin Console"
   },
   "dataManagement": {
-    "menuTitle": "Data Management"
+    "menuTitle": "Resource Management"
   },
   "llm": {
     "menuTitle": "Models",
@@ -537,7 +581,7 @@
     }
   },
   "lensAdmin": {
-    "menuTitle": "Lens Admin",
+    "menuTitle": "Assistant Management",
     "total": "{label} · {count}",
     "tabs": {
       "assistants": "Assistants",
@@ -549,7 +593,7 @@
     },
     "pages": {
       "assistants": {
-        "title": "Assistant Management",
+        "title": "Assistants",
         "description": "Configure public capabilities, execution nodes, tasks, and workspace directories.",
         "label": "Assistant",
         "action": "Create Assistant"
