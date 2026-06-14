@@ -119,6 +119,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
+import { useIsMobile } from '@/composables/useIsMobile'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import SidebarQuickMenu from '@/components/layout/SidebarQuickMenu.vue'
 
@@ -137,12 +138,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const homePath = computed(() => userStore.getUserLandingPath())
 
-const MOBILE_BREAKPOINT = 1024
-
-const isMobile = computed(() => {
-  if (typeof window === 'undefined') return false
-  return window.innerWidth < MOBILE_BREAKPOINT
-})
+const { isMobile } = useIsMobile()
 
 const isActive = (path) => {
   if (path === '/dashboard') {

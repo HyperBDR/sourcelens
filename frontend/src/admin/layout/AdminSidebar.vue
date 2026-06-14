@@ -921,10 +921,11 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 defineProps({
   showMobileMenu: {
@@ -947,11 +948,7 @@ const llmMenuOpen = ref(true)
 const taskManagementMenuOpen = ref(true)
 const notificationManagementMenuOpen = ref(true)
 
-const MOBILE_BREAKPOINT = 1024
-const isMobile = computed(() => {
-  if (typeof window === 'undefined') return false
-  return window.innerWidth < MOBILE_BREAKPOINT
-})
+const { isMobile } = useIsMobile()
 
 const isActive = (path) => {
   return route.path === path || route.path.startsWith(path + '/')

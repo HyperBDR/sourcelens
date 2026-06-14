@@ -8,7 +8,7 @@
           <button
             v-if="showMenuButton"
             @click="$emit('toggle-menu')"
-            class="rounded-md p-2 text-ink-600 hover:bg-line-soft hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="lg:hidden rounded-md p-2 text-ink-600 hover:bg-line-soft hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <svg
               class="w-6 h-6"

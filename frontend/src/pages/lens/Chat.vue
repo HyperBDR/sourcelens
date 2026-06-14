@@ -264,6 +264,24 @@
     </aside>
 
     <main class="main-shell">
+      <div v-if="isMobile" class="mobile-topbar">
+        <button
+          type="button"
+          class="sidebar-collapse-btn"
+          :aria-label="t('lens.chat.sessions')"
+          @click="sidebarOpen = true"
+        >
+          <PanelLeftOpen :size="20" :stroke-width="2.1" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          class="sidebar-collapse-btn"
+          :aria-label="t('lens.chat.newSession')"
+          @click="createNewSession"
+        >
+          <Plus :size="20" :stroke-width="2.1" aria-hidden="true" />
+        </button>
+      </div>
       <div ref="scrollRef" class="thread-scroll">
         <div v-if="!selectedAssistantUuid" class="thread-loading">
           <BaseLoading />
@@ -540,6 +558,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import AssistantSwitcher from '@/components/lens/AssistantSwitcher.vue'
 import { useToast } from '@/composables/useToast'
+import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
 import { useUiStore } from '@/store/ui'
 import { useUserStore } from '@/store/user'
@@ -807,10 +826,7 @@ watch(isRunActive, (active) => {
   }
 })
 
-const isMobile = computed(() => {
-  if (typeof window === 'undefined') return false
-  return window.innerWidth < 1024
-})
+const { isMobile } = useIsMobile()
 
 function authHeaders() {
   const token = localStorage.getItem('access_token')
@@ -1419,6 +1435,11 @@ onBeforeUnmount(() => {
   background: #ffffff;
 }
 
+.mobile-topbar {
+  @apply flex flex-shrink-0 items-center gap-1 border-b px-2 py-1.5;
+  border-color: #e5e7eb;
+}
+
 .thread-scroll {
   @apply min-h-0 flex-1 overflow-y-auto;
 }
@@ -1875,11 +1896,46 @@ onBeforeUnmount(() => {
 @media (max-width: 1023px) {
   .sidebar {
     @apply fixed inset-y-0 left-0 z-30 -translate-x-full transition-transform duration-300;
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.1);
+    width: min(86vw, 320px);
+    border-right: none;
+    border-radius: 0 1rem 1rem 0;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
   }
 
   .sidebar-open {
     @apply translate-x-0;
+  }
+
+  .side-head {
+    @apply px-4 pt-5 pb-3;
+  }
+
+  .side-scroll {
+    @apply px-4;
+  }
+
+  .new-chat-btn {
+    @apply py-3;
+  }
+
+  .new-chat-btn span {
+    @apply text-[15px];
+  }
+
+  .sessions-list {
+    @apply space-y-1.5;
+  }
+
+  .session-item {
+    @apply py-3 rounded-2xl;
+  }
+
+  .session-title {
+    @apply text-[15px];
+  }
+
+  .sidebar-footer {
+    @apply p-4;
   }
 
   .thread {
