@@ -20,14 +20,20 @@ SCENARIOS = {
             "You answer questions STRICTLY from the selected documents and "
             "code workspace. Use the tools to gather evidence first, and "
             "cite file paths when evidence comes from files. Answer ONLY "
-            "what the workspace evidence supports. If the workspace has no "
-            "relevant evidence for the question — even a general-knowledge "
-            "or off-topic question you could answer on your own (e.g. "
-            "geography, cooking, news) — you MUST NOT answer it from your "
-            "own knowledge. Instead, politely tell the user that you "
-            "could not find relevant information in the current workspace "
-            "for this question, and suggest they contact our expert "
-            "support team for further help."
+            "what the workspace evidence supports. "
+            "Bridge the user's wording to the workspace's own terminology: "
+            "if the question contains a likely typo, homophone, synonym or "
+            "related concept, map it to the matching term, briefly note the "
+            "mapping (\"you likely mean …\"), and answer from that evidence. "
+            "Do NOT refuse over a surface wording mismatch when related "
+            "evidence exists. Only when the workspace has genuinely NO "
+            "related evidence — including general-knowledge or off-topic "
+            "questions you could answer on your own (e.g. geography, "
+            "cooking, news) — you MUST NOT answer from your own knowledge; "
+            "instead politely tell the user you could not find relevant "
+            "information in the current workspace and suggest contacting "
+            "our expert support team. Never invent facts the workspace "
+            "does not support."
         ),
     },
     "code_analysis": {
@@ -86,6 +92,7 @@ class LensDeepAgentRuntime:
                 "scenario": scenario["title"],
                 "question_chars": len(question),
                 "target_dirs": len(command.get("target_dirs") or []),
+                "history_turns": len(command.get("history") or []),
             },
         )
         resources = prepare_runtime_resources(
@@ -134,8 +141,11 @@ class LensDeepAgentRuntime:
                 "deepagents.agent.invoke",
                 {"max_agent_turns": max_turns},
             )
+            messages = _build_initial_messages(
+                command.get("history"), question
+            )
             answer, truncated = _run_agent_with_turn_limit(
-                agent, question, max_turns, emit_event=emit_agent_event
+                agent, messages, max_turns, emit_event=emit_agent_event
             )
             if truncated:
                 emit_agent_event(
@@ -200,8 +210,9 @@ def _system_prompt(scenario, command, context_skill_contents=None):
         "selected the workspace directories below.\n\n"
         "Workspace and scratch space:\n"
         "- The selected directories below are READ-ONLY source material. "
-        "Inspect them only via search_workspace and read_workspace_file; "
-        "never write into them, as they may be mounted read-only.\n"
+        "Inspect them only via search_workspace, find_files and "
+        "read_workspace_file; never write into them, as they may be "
+        "mounted read-only.\n"
         "- You also have a private, writable scratch directory (your "
         "filesystem root, accessed via write_file, read_file, and ls). Put "
         "any generated or converted artifacts there. For example, if you "
@@ -214,13 +225,37 @@ def _system_prompt(scenario, command, context_skill_contents=None):
         "issuing several tool calls in one message. Only go step by step "
         "when a later action genuinely depends on an earlier result.\n\n"
         f"{_subagent_guidance(command.get('agent_rounds'))}"
+        "How search and read work:\n"
+        "- search_workspace returns matching LINES (path + line number + "
+        "surrounding context), not whole files, and works on files of any "
+        "size. Pass FOCUSED keywords (the core noun / feature / command "
+        "name), not the full question sentence — a whole sentence dilutes "
+        "results with common words. Search with keywords as they appear IN "
+        "THE FILES; if the question is in a different language than the "
+        "documents, translate the key names/terms into the documents' "
+        "language first. If the first search is thin or the user's wording "
+        "may be a typo/synonym, try a few keyword variants (likely correct "
+        "term, synonyms, the documents' own term). For precise patterns set "
+        "regex=True; to limit by file type pass a glob (e.g. \"**/*.md\"); "
+        "use output_mode=\"files\" to see just which files match.\n"
+        "- find_files locates files by name/path glob (e.g. \"**/*.md\", "
+        "\"**/*install*\"). Use it when you know a filename or want to "
+        "enumerate a file type rather than search their contents.\n"
+        "- read_workspace_file reads a line window: pass offset (1-based "
+        "start line) and limit (number of lines). Use the line numbers from "
+        "search_workspace as offsets, and page by increasing offset when "
+        "the relevant part is longer than one window. File size never "
+        "blocks a read.\n"
+        "- If search_workspace returns no matches but a 'files' listing, "
+        "open those files with read_workspace_file (offset/limit) to browse "
+        "their contents.\n\n"
         "Required workflow:\n"
         "1. Call search_workspace before answering any project or code "
         "analysis question.\n"
-        "2. Read the relevant search hits with read_workspace_file. When "
-        "several hits look relevant, issue those calls together in one "
-        "step so they run concurrently, rather than reading and "
-        "validating hits one at a time.\n"
+        "2. Read the relevant matches with read_workspace_file around their "
+        "line numbers. When several matches look relevant, issue those "
+        "calls together in one step so they run concurrently, rather than "
+        "reading and paging one at a time.\n"
         "3. For questions about recent changes, call "
         "summarize_recent_changes first. Use git_log or git_diff only when "
         "the summary evidence is insufficient.\n"
@@ -231,11 +266,14 @@ def _system_prompt(scenario, command, context_skill_contents=None):
         "collected.\n"
         "6. Do not answer from memory when workspace tools can provide "
         "evidence.\n"
-        "7. If the selected workspace contains no evidence to answer the "
-        "question, do not guess or answer from general knowledge. Politely "
-        "tell the user that you could not find relevant information in the "
-        "current workspace for this question, and suggest they contact our "
-        "expert support team for further help. Keep the tone warm and "
+        "7. Bridge surface wording to the workspace's terminology before "
+        "giving up: if the question has a likely typo / synonym / related "
+        "concept that DOES match workspace evidence, map it (note the "
+        "mapping) and answer from that evidence. Only when there is "
+        "genuinely no related evidence, do not guess or answer from "
+        "general knowledge — politely tell the user you could not find "
+        "relevant information in the current workspace and suggest "
+        "contacting our expert support team. Keep the tone warm and "
         "professional.\n\n"
         f"Selected directories:\n{dirs or '- none'}"
         f"{context_guidance}"
@@ -365,8 +403,29 @@ def _activity_from_event(event):
     return "running"
 
 
-def _run_agent_with_turn_limit(agent, question, max_turns, emit_event=None):
-    """Stream agent events and stop after max_turns AI turns.
+def _build_initial_messages(history, question):
+    """Prepend prior conversation turns to the current question.
+
+    Only user/assistant turns with content are kept; tool traces are
+    never carried across turns, so the context stays bounded.
+    """
+
+    messages = []
+    for item in history or []:
+        role = item.get("role")
+        content = item.get("content")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": question})
+    return messages
+
+
+def _run_agent_with_turn_limit(agent, messages, max_turns, emit_event=None):
+    """Stream agent events and stop after max_turns NEW AI turns.
+
+    `messages` may be prefixed with prior conversation turns. Historical
+    assistant turns are excluded from both the turn count and event
+    emission, so the limit and trace reflect only the current run.
 
     Returns (answer, truncated) where truncated=True means the agent
     was stopped before it finished naturally.
@@ -376,22 +435,24 @@ def _run_agent_with_turn_limit(agent, question, max_turns, emit_event=None):
     truncated = False
     seen_tool_calls = set()
     seen_model_calls = set()
+    baseline_ai = sum(1 for m in messages if m.get("role") == "assistant")
+    seen_model_calls.update(range(1, baseline_ai + 1))
 
     for state in agent.stream(
-        {"messages": [{"role": "user", "content": question}]},
+        {"messages": messages},
         stream_mode="values",
         config={"recursion_limit": 500},
     ):
         last_state = state
-        messages = state.get("messages", [])
+        current = state.get("messages", [])
         if emit_event is not None:
-            _emit_new_model_calls(messages, seen_model_calls, emit_event)
-            _emit_new_tool_calls(messages, seen_tool_calls, emit_event)
+            _emit_new_model_calls(current, seen_model_calls, emit_event)
+            _emit_new_tool_calls(current, seen_tool_calls, emit_event)
         ai_turns = sum(
             1
-            for m in messages
+            for m in current
             if getattr(m, "type", "") == "ai"
-        )
+        ) - baseline_ai
         if ai_turns >= max_turns:
             truncated = True
             break

@@ -9,6 +9,7 @@ from .services import (
     create_run_execution_snapshot,
     dispatch_run_to_lensnode,
     finish_lensnode_run,
+    rewrite_query,
     validate_run_dispatch,
 )
 
@@ -63,13 +64,25 @@ def _lensnode_dispatch(state):
     """LangGraph node for creating a snapshot and dispatching to LensNode."""
 
     run = state["run"]
+    question = run.input_message.content
+    if run.session.assistant.preprocess_model_ref:
+        with run_step(run, RunStep.StepType.QUERY_REWRITE, 0) as step:
+            rewrite = rewrite_query(run)
+            question = rewrite["question"]
+            step.detail = {
+                "rewritten": rewrite["rewritten"],
+                "original": rewrite.get("original", run.input_message.content),
+                "query": question,
+            }
+            if rewrite.get("error"):
+                step.detail["error"] = rewrite["error"]
     with run_step(run, RunStep.StepType.RETRIEVAL, 1) as step:
         validate_run_dispatch(run)
         execution = create_run_execution_snapshot(run)
         execution.status = RunExecution.Status.RUNNING
         execution.started_at = timezone.now()
         execution.save(update_fields=["status", "started_at"])
-        dispatch_run_to_lensnode(run, run.input_message.content)
+        dispatch_run_to_lensnode(run, question)
         step.detail = {
             "lensnode_uuid": str(run.lensnode.uuid),
             "task": execution.task,

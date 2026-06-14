@@ -72,14 +72,6 @@ def validate_retrieval_scope(value):
                 f"retrieval_scope.{field} must be a list of strings"
             )
 
-    max_file_size = value.get("max_file_size")
-    if max_file_size is not None and (
-        not isinstance(max_file_size, int) or max_file_size <= 0
-    ):
-        raise serializers.ValidationError(
-            "retrieval_scope.max_file_size must be a positive integer"
-        )
-
     max_depth = value.get("max_depth")
     if max_depth is not None and (not isinstance(max_depth, int) or max_depth <= 0):
         raise serializers.ValidationError(

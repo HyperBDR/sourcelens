@@ -112,4 +112,18 @@ def _call_metered_model(*, model_ref, messages, node_name, user_id):
     )
 
 
+def run_completion(*, model_ref, system, user, node_name, user_id=None):
+    """Run one system+user completion through metering.
+
+    Public entry point for backend LLM calls (e.g. query rewrite).
+    """
+
+    return _call_metered_model(
+        model_ref=model_ref,
+        messages=_messages(system, user),
+        node_name=node_name,
+        user_id=user_id,
+    )
+
+
 

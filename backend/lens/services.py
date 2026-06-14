@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from .llm import run_completion
 from .models import Message, LensNode, Run, RunExecution, RunStep
 
 TERMINAL_RUN_STATUSES = {
@@ -21,6 +22,23 @@ STREAM_PING_INTERVAL_SECONDS = 15
 
 BUSY_RETRY_INTERVAL_S = 5
 BUSY_RETRY_WINDOW_S = 120
+
+HISTORY_MAX_PAIRS = 5
+HISTORY_MAX_MESSAGE_CHARS = 2000
+HISTORY_MAX_TOTAL_CHARS = 8000
+
+QUERY_REWRITE_HISTORY_TURNS = 3
+QUERY_REWRITE_MAX_CHARS = 400
+QUERY_REWRITE_SYSTEM = (
+    "You rewrite a user's latest question into ONE concise, self-contained "
+    "search query for a document and code knowledge base. Resolve pronouns "
+    "and references (\"it\", \"that\", \"the above\") using the conversation. "
+    "Keep entity, product, feature and command names. Prefer the terminology "
+    "the documents likely use, and fix obvious typos or homophones toward the "
+    "domain term. If the question is already clear and self-contained, return "
+    "it unchanged. Answer in the SAME language as the question. Output ONLY "
+    "the rewritten query text — no quotes, no explanation."
+)
 
 
 class LensNodeDispatchError(RuntimeError):
@@ -237,6 +255,82 @@ AGENT_TURNS_BY_ROUNDS = {
 }
 
 
+def build_run_history(run):
+    """Return prior conversation turns for a run as role/content dicts.
+
+    Includes only completed user and assistant messages before the
+    current turn, newest-first up to the caps, then returned in
+    chronological order. A Message stores only final content (never tool
+    traces), so the carried history stays compact and the agent context
+    cannot blow up from a long session.
+    """
+
+    messages = Message.objects.filter(
+        session=run.session,
+        sequence__lt=run.input_message.sequence,
+        role__in=[Message.Role.USER, Message.Role.ASSISTANT],
+    ).order_by("-sequence")
+    history = []
+    total_chars = 0
+    for message in messages:
+        content = (message.content or "").strip()
+        if not content:
+            continue
+        content = content[:HISTORY_MAX_MESSAGE_CHARS]
+        if total_chars + len(content) > HISTORY_MAX_TOTAL_CHARS:
+            break
+        history.append({"role": message.role, "content": content})
+        total_chars += len(content)
+        if len(history) >= HISTORY_MAX_PAIRS * 2:
+            break
+    history.reverse()
+    return history
+
+
+def rewrite_query(run):
+    """Rewrite a run's question into a contextual, search-optimized query.
+
+    Uses the assistant's preprocess model to resolve conversational
+    references and normalize wording toward the documents' terminology.
+    Falls back to the original question when no preprocess model is set
+    or the call fails, so dispatch never blocks on this step.
+    """
+
+    assistant = run.session.assistant
+    original = run.input_message.content
+    if not assistant.preprocess_model_ref:
+        return {"question": original, "rewritten": False}
+
+    history = build_run_history(run)[-(QUERY_REWRITE_HISTORY_TURNS * 2):]
+    context = "\n".join(
+        f"{item['role']}: {item['content']}" for item in history
+    )
+    user = (
+        (f"Conversation so far:\n{context}\n\n" if context else "")
+        + f"Latest question: {original}\n\nRewritten search query:"
+    )
+    try:
+        result = run_completion(
+            model_ref=assistant.preprocess_model_ref,
+            system=QUERY_REWRITE_SYSTEM,
+            user=user,
+            node_name="lens.query_rewrite",
+            user_id=run.session.user_id,
+        )
+    except Exception as exc:
+        return {"question": original, "rewritten": False, "error": str(exc)}
+
+    text = (result.content or "").strip()
+    rewritten = " ".join(text.split())[:QUERY_REWRITE_MAX_CHARS]
+    if not rewritten:
+        return {"question": original, "rewritten": False}
+    return {
+        "question": rewritten,
+        "rewritten": rewritten != original.strip(),
+        "original": original,
+    }
+
+
 def dispatch_run_to_lensnode(run, rewritten_question):
     """Send a run_start command to the connected LensNode."""
 
@@ -254,6 +348,7 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                 "run_uuid": str(run.uuid),
                 "task": execution.task,
                 "question": rewritten_question,
+                "history": build_run_history(run),
                 "target_dirs": execution.target_dirs,
                 "loaded_skills": execution.loaded_skills,
                 "loaded_mcps": execution.loaded_mcps,
@@ -418,6 +513,7 @@ def _step_sequence(step_type):
     """Return the canonical sequence for a step type."""
 
     mapping = {
+        RunStep.StepType.QUERY_REWRITE: 0,
         RunStep.StepType.RETRIEVAL: 1,
         RunStep.StepType.ANSWER: 2,
         RunStep.StepType.STREAM: 3,

@@ -1,11 +1,15 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
 from langchain_core.tools import tool
 
 from .workspace import (
-    read_selected_workspace_files,
+    DEFAULT_EXCLUDED_DIRS,
+    DEFAULT_EXCLUDED_EXTENSIONS,
+    glob_files,
+    read_workspace_window,
     search_workspace as search_workspace_files,
 )
 
@@ -28,40 +32,80 @@ def build_agent_tools(command, emit_event=None):
             emit_event(name, detail or {})
 
     @tool("search_workspace")
-    def search_workspace(query: str, max_files: int = 12) -> str:
-        """Search selected workspace directories for relevant files."""
+    def search_workspace(
+        query: str,
+        max_results: int = 50,
+        regex: bool = False,
+        glob: str = "",
+        output_mode: str = "content",
+        context_lines: int = 2,
+        case_sensitive: bool = False,
+    ) -> str:
+        """Search selected workspace dirs, ripgrep-style.
+
+        output_mode: "content" (default) returns matching lines
+        {path, line, text, before, after}; "files" returns the files that
+        match; "count" returns per-file match counts.
+
+        query is keywords (fixed-string, case-folded) by default; set
+        regex=True to pass a ripgrep regular expression. glob restricts the
+        search by path/type (e.g. "**/*.md", "*.py"). Use keywords/terms as
+        they appear in the files (translate names into the documents'
+        language when needed). File size is not a constraint. In content
+        mode, when nothing matches a 'files' listing of the scope is
+        returned so you can read files directly with read_workspace_file.
+        """
 
         emit(
             "tool.search_workspace.start",
             {
                 "query": query,
-                "max_files": max_files,
+                "max_results": max_results,
+                "regex": regex,
+                "glob": glob,
+                "output_mode": output_mode,
             },
         )
-        hits = search_workspace_files(
+        result = search_workspace_files(
             target_dirs,
             query,
-            max_files=max_files,
+            max_results=max_results,
             policy=retrieval_policy,
+            regex=regex,
+            glob=glob,
+            output_mode=output_mode,
+            context_lines=context_lines,
+            case_sensitive=case_sensitive,
         )
+        matches = result.get("matches") or []
+        files = result.get("files") or []
+        counts = result.get("counts") or []
+        paths = list(dict.fromkeys(item["path"] for item in matches))
         emit(
             "tool.search_workspace.done",
             {
-                "count": len(hits),
-                "paths": [item["path"] for item in hits[:8]],
+                "mode": result.get("mode"),
+                "count": len(matches) or len(files) or len(counts),
+                "paths": paths[:8],
             },
         )
-        return _json({"hits": hits})
+        return _json(result)
 
     @tool("read_workspace_file")
-    def read_workspace_file(path: str, query: str = "") -> str:
-        """Read a selected workspace file or query-focused snippets."""
+    def read_workspace_file(path: str, offset: int = 1, limit: int = 250) -> str:
+        """Read a window of a workspace file: limit lines from offset (1-based).
+
+        Returns numbered lines plus has_more so you can page through any file
+        by increasing offset; file size is not a constraint. Call
+        search_workspace first to get the line numbers worth reading.
+        """
 
         emit(
             "tool.read_workspace_file.start",
             {
                 "path": path,
-                "query": query,
+                "offset": offset,
+                "limit": limit,
             },
         )
         resolved = _resolve_allowed_path(path, target_dirs)
@@ -85,19 +129,54 @@ def build_agent_tools(command, emit_event=None):
                 )
             emit("tool.read_workspace_file.denied", {"path": path})
             return _json({"error": "PATH_NOT_ALLOWED", "path": path})
-        samples = read_selected_workspace_files(
-            [str(resolved)],
-            query=query,
+        window = read_workspace_window(
+            str(resolved),
+            offset=offset,
+            limit=limit,
             policy=retrieval_policy,
         )
         emit(
             "tool.read_workspace_file.done",
             {
                 "path": str(resolved),
-                "snippets": len(samples),
+                "start": window.get("start_line"),
+                "end": window.get("end_line"),
+                "has_more": window.get("has_more"),
             },
         )
-        return _json({"snippets": samples})
+        return _json(window)
+
+    @tool("find_files")
+    def find_files(pattern: str, max_results: int = 50) -> str:
+        """Find files by name/path glob across the workspace (newest first).
+
+        Use when you know a filename or want to enumerate files of a type,
+        e.g. pattern="**/*.md", "**/*install*", "src/**/*.py". Returns file
+        paths sorted by modification time; read them with
+        read_workspace_file.
+        """
+
+        emit(
+            "tool.find_files.start",
+            {
+                "pattern": pattern,
+                "max_results": max_results,
+            },
+        )
+        files = glob_files(
+            target_dirs,
+            pattern,
+            max_results=max_results,
+            policy=retrieval_policy,
+        )
+        emit(
+            "tool.find_files.done",
+            {
+                "count": len(files),
+                "paths": files[:8],
+            },
+        )
+        return _json({"files": files})
 
     @tool("git_log")
     def git_log(path: str = "", max_count: int = 10) -> str:
@@ -266,6 +345,7 @@ def build_agent_tools(command, emit_event=None):
     return [
         search_workspace,
         read_workspace_file,
+        find_files,
         summarize_recent_changes,
         git_log,
         git_diff,
@@ -410,15 +490,25 @@ def _name_tokens(name):
     return tokens
 
 
-def _list_directory_files(directory, limit=20):
-    """Return a small list of candidate files in a directory."""
+def _list_directory_files(directory, limit=50):
+    """Return a bounded, recursive list of candidate files in a directory."""
 
     files = []
-    for child in sorted(directory.iterdir(), key=lambda item: item.name):
-        if len(files) >= limit:
-            break
-        if child.is_file():
-            files.append(str(child))
+    for current, subdirs, filenames in os.walk(directory):
+        subdirs[:] = sorted(
+            name
+            for name in subdirs
+            if not name.startswith(".") and name not in DEFAULT_EXCLUDED_DIRS
+        )
+        for name in sorted(filenames):
+            if len(files) >= limit:
+                return files
+            if name.startswith("."):
+                continue
+            path = Path(current) / name
+            if path.suffix in DEFAULT_EXCLUDED_EXTENSIONS:
+                continue
+            files.append(str(path))
     return files
 
 

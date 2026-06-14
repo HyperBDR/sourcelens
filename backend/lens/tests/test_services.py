@@ -33,8 +33,10 @@ from lens.models import (
 from lens.periodic_tasks import register_periodic_tasks
 from lens.services import (
     append_lensnode_output,
+    build_run_history,
     create_execution_run,
     finish_lensnode_run,
+    rewrite_query,
 )
 from lens.source_sync import reset_cache_path
 from lens.tasks import (
@@ -108,6 +110,62 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(run.input_message.role, Message.Role.USER)
         self.assertEqual(run.output_message.role, Message.Role.ASSISTANT)
         self.assertEqual(self.session.message_set.count(), 2)
+
+    def test_build_run_history_returns_prior_turns_and_skips_empty(self):
+        run1 = create_execution_run(
+            session=self.session, question="q1", enqueue=False
+        )
+        run1.output_message.content = "a1"
+        run1.output_message.save(update_fields=["content"])
+        # second turn left unanswered -> its empty answer must be skipped
+        create_execution_run(
+            session=self.session, question="q2", enqueue=False
+        )
+        current = create_execution_run(
+            session=self.session, question="q3", enqueue=False
+        )
+
+        history = build_run_history(current)
+
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": "q1"},
+                {"role": "assistant", "content": "a1"},
+                {"role": "user", "content": "q2"},
+            ],
+        )
+
+    def test_rewrite_query_passthrough_without_preprocess_model(self):
+        run = create_execution_run(
+            session=self.session, question="how to deploy?", enqueue=False
+        )
+
+        result = rewrite_query(run)
+
+        self.assertFalse(result["rewritten"])
+        self.assertEqual(result["question"], "how to deploy?")
+
+    @patch("lens.services.run_completion")
+    def test_rewrite_query_uses_preprocess_model(self, mock_completion):
+        import uuid
+
+        from lens.llm import LensLLMResult
+
+        self.assistant.preprocess_model_ref = uuid.uuid4()
+        self.assistant.save(update_fields=["preprocess_model_ref"])
+        mock_completion.return_value = LensLLMResult(
+            content="AGIOne 单机部署 步骤", usage={}, metered=True
+        )
+        run = create_execution_run(
+            session=self.session, question="它怎么装", enqueue=False
+        )
+
+        result = rewrite_query(run)
+
+        self.assertTrue(mock_completion.called)
+        self.assertTrue(result["rewritten"])
+        self.assertEqual(result["question"], "AGIOne 单机部署 步骤")
 
     def test_lens_smoke_test_command_passes(self):
         call_command("lens_smoke_test")

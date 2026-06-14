@@ -1,7 +1,11 @@
 import json
+import logging
+from itertools import islice
 from pathlib import Path
 import re
 import subprocess
+
+LOGGER = logging.getLogger("lensnode")
 
 DEFAULT_EXCLUDED_DIRS = {
     ".git",
@@ -16,7 +20,34 @@ DEFAULT_EXCLUDED_EXTENSIONS = {
     ".lock",
     ".pyc",
     ".sqlite3",
+    ".svg",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".webp",
+    ".bmp",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".eot",
+    ".map",
 }
+
+DEFAULT_CONTEXT_LINES = 2
+DEFAULT_MAX_SEARCH_MATCHES = 50
+MAX_SEARCH_MATCHES = 200
+DEFAULT_MAX_MATCHES_PER_FILE = 15
+DEFAULT_MAX_LINE_CHARS = 2000
+DEFAULT_READ_LIMIT = 250
+MAX_READ_LIMIT = 1000
+DEFAULT_FILE_LIST_LIMIT = 100
+GLOB_SCAN_LIMIT = 1000
+BINARY_SNIFF_BYTES = 4096
+
+_DEPRECATED_KEYS_LOGGED = set()
 
 
 def available_dirs(workspace_path):
@@ -43,77 +74,189 @@ def available_dirs(workspace_path):
     return dirs
 
 
-def search_workspace(target_dirs, query, max_files=12, policy=None):
-    """Search selected directories and return ranked candidate files."""
+def search_workspace(
+    target_dirs,
+    query,
+    max_results=None,
+    policy=None,
+    *,
+    regex=False,
+    glob="",
+    output_mode="content",
+    context_lines=None,
+    case_sensitive=False,
+):
+    """Search selected directories, ripgrep-style.
+
+    output_mode controls the result shape:
+    - "content" (default): line matches {path, line, text, before, after};
+      falls back to a file listing when nothing matches.
+    - "files": the list of files that contain a match.
+    - "count": per-file match counts.
+
+    `query` is treated as keywords (fixed-string, case-folded) by default;
+    set regex=True to pass a ripgrep regular expression instead. `glob`
+    restricts the search to matching paths (e.g. "**/*.md", "*.py"). File
+    size never gates a match — ripgrep streams, so any size is searchable.
+    """
 
     policy = policy or {}
-    terms = _query_terms(query)
-    hits = []
+    _note_deprecated_size({}, policy)
+    max_results = _bounded_results(max_results, policy)
+    dirs = []
+    for item in target_dirs:
+        root = Path(item.get("path", ""))
+        if root.exists() and root.is_dir():
+            dirs.append((root, item.get("retrieval_scope") or {}))
+
+    if output_mode == "files":
+        files = []
+        for root, scope in dirs:
+            files.extend(
+                _rg_files_with_matches(
+                    root, query, scope, policy,
+                    regex=regex, glob=glob, case_sensitive=case_sensitive,
+                )
+            )
+            if len(files) >= max_results:
+                break
+        return {"mode": "files", "files": list(dict.fromkeys(files))[:max_results]}
+
+    if output_mode == "count":
+        counts = []
+        for root, scope in dirs:
+            counts.extend(
+                _rg_counts(
+                    root, query, scope, policy,
+                    regex=regex, glob=glob, case_sensitive=case_sensitive,
+                )
+            )
+            if len(counts) >= max_results:
+                break
+        counts.sort(key=lambda item: (-item["count"], item["path"]))
+        return {"mode": "count", "counts": counts[:max_results]}
+
+    terms = [] if regex else _query_terms(query)
+    matches = []
+    for root, scope in dirs:
+        ctx = int(
+            context_lines
+            if context_lines is not None
+            else _option(scope, policy, "context_lines", DEFAULT_CONTEXT_LINES)
+        )
+        matches.extend(
+            _rg_line_matches(
+                root, query, terms, scope, policy, ctx,
+                regex=regex, glob=glob, case_sensitive=case_sensitive,
+            )
+        )
+        if len(matches) >= max_results:
+            break
+
+    if matches:
+        matches = _rank_matches(matches, terms)
+        return {"mode": "content", "matches": matches[:max_results], "files": []}
+
+    files = []
+    for root, scope in dirs:
+        files.extend(
+            _iter_scope_files(
+                root,
+                scope,
+                policy,
+                limit=DEFAULT_FILE_LIST_LIMIT - len(files),
+            )
+        )
+        if len(files) >= DEFAULT_FILE_LIST_LIMIT:
+            break
+    note = (
+        "No matches in the selected workspace. Listing files in scope so "
+        "you can read them directly with read_workspace_file (use "
+        "offset/limit to page). Tip: try different keywords (the "
+        "documents' own terms), a regex, or find_files by name."
+    )
+    return {
+        "mode": "content",
+        "matches": [],
+        "files": [str(path) for path in files],
+        "note": note,
+    }
+
+
+def glob_files(target_dirs, pattern, max_results=None, policy=None):
+    """Find files by name/path glob across selected dirs, newest first.
+
+    Mirrors a Glob tool: returns allowed file paths matching the pattern
+    (e.g. "**/*.md", "src/**/*.py", "**/*install*"), sorted by
+    modification time so the most recently changed files come first.
+    """
+
+    policy = policy or {}
+    max_results = _bounded_results(max_results, policy)
+    pattern = pattern or "**/*"
+    found = []
     for item in target_dirs:
         root = Path(item.get("path", ""))
         if not root.exists() or not root.is_dir():
             continue
         scope = item.get("retrieval_scope") or {}
-        candidate_paths = _rg_candidate_paths(root, terms, scope, policy)
-        if not candidate_paths:
-            candidate_paths = _iter_allowed_paths(root, scope, policy)
-        for path in candidate_paths:
-            if not _is_allowed(root, path, scope, policy):
-                continue
-            score = _score_path(root, path, terms, scope, policy)
-            if score <= 0:
-                continue
-            hits.append(
-                {
-                    "path": str(path),
-                    "score": score,
-                    "size": path.stat().st_size,
-                }
-            )
-
-    hits.sort(key=lambda item: (-item["score"], item["path"]))
-    return hits[:max_files]
+        try:
+            for path in root.glob(pattern):
+                if len(found) >= GLOB_SCAN_LIMIT:
+                    break
+                if _is_allowed(root, path, scope, policy):
+                    found.append(path)
+        except (ValueError, NotImplementedError):
+            continue
+    found = sorted(set(found), key=_safe_mtime, reverse=True)
+    return [str(path) for path in found[:max_results]]
 
 
-def read_selected_workspace_files(
-    paths,
-    query="",
-    max_chars=30000,
-    context_lines=2,
-    max_matches=4,
-    policy=None,
-):
-    """Read selected files and return evidence snippets for the query."""
+def read_workspace_window(path_value, offset=1, limit=None, policy=None):
+    """Read a line window of a file: limit lines starting at offset.
+
+    Reads only the requested window by streaming lines and stopping at
+    offset+limit, so memory is bounded by the window, not the file size.
+    Returns numbered lines plus has_more so the caller can page by
+    increasing offset.
+    """
 
     policy = policy or {}
-    samples = []
-    remaining_chars = max_chars
-    terms = _query_terms(query)
-    for path_value in paths:
-        path = Path(path_value)
-        if not _is_allowed(None, path, {}, policy):
-            continue
-        text = _read_text(path)
-        if not text:
-            continue
-        snippets = _extract_snippets(
-            text,
-            terms,
-            context_lines=context_lines,
-            max_matches=max_matches,
-        )
-        content = "\n\n".join(snippets) if snippets else text
-        content = content[:remaining_chars]
-        remaining_chars -= len(content)
-        samples.append(
-            {
-                "path": str(path),
-                "content": content,
-            }
-        )
-        if remaining_chars <= 0:
-            break
-    return samples
+    _note_deprecated_size({}, policy)
+    max_line_chars = int(_option({}, policy, "max_line_chars", DEFAULT_MAX_LINE_CHARS))
+    limit = _bounded_limit(limit, policy)
+    offset = max(1, int(offset or 1))
+    path = Path(path_value)
+
+    if _is_binary(path):
+        return {
+            "path": str(path),
+            "error": "BINARY_FILE",
+            "message": "Binary file; not readable as text.",
+        }
+
+    lines = []
+    has_more = False
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            window = islice(handle, offset - 1, offset - 1 + limit)
+            for index, raw in enumerate(window, start=offset):
+                lines.append(
+                    {"n": index, "text": _truncate(raw.rstrip("\n"), max_line_chars)}
+                )
+            has_more = handle.readline() != ""
+    except OSError as exc:
+        return {"path": str(path), "error": "READ_FAILED", "message": str(exc)}
+
+    content = "\n".join(f"{item['n']}\t{item['text']}" for item in lines)
+    return {
+        "path": str(path),
+        "start_line": offset if lines else 0,
+        "end_line": offset + len(lines) - 1,
+        "returned_lines": len(lines),
+        "has_more": has_more,
+        "content": content,
+    }
 
 
 def read_text_samples(target_dirs, max_files=16, max_chars=30000, policy=None):
@@ -165,14 +308,16 @@ def summarize_snippets(samples):
 
 
 def _is_allowed(root, path, scope, policy):
-    """Return whether a path is useful as a workspace sample."""
+    """Return whether a path is useful as a workspace sample.
+
+    File size is intentionally not a criterion: large files are read in
+    bounded windows and searched by streaming, so size never excludes a
+    file from retrieval.
+    """
 
     if not path.is_file():
         return False
     if _is_excluded_path(root, path, scope, policy):
-        return False
-    max_file_size = _option(scope, policy, "max_file_size", 256 * 1024)
-    if path.stat().st_size > int(max_file_size):
         return False
     exclude_extensions = _option(
         scope,
@@ -189,7 +334,7 @@ def _query_terms(query):
     """Extract lightweight search terms from a user question."""
 
     terms = []
-    for term in re.findall(r"[\w\u4e00-\u9fff]+", query.lower()):
+    for term in re.findall(r"[\w一-鿿]+", query.lower()):
         if len(term) < 2:
             continue
         terms.append(term)
@@ -206,20 +351,12 @@ def _query_terms(query):
     return unique_terms
 
 
-def _rg_candidate_paths(root, terms, scope, policy):
-    """Return files matched by ripgrep, or an empty list when unavailable."""
+def _run_rg(cmd):
+    """Run ripgrep; return stdout, or None when ripgrep is unavailable.
 
-    if not terms:
-        return []
-
-    cmd = ["rg", "-l", "-i", "-F"]
-    for pattern in scope.get("include_paths") or ["**/*"]:
-        cmd.extend(["-g", pattern])
-    for pattern in _exclude_globs(scope, policy):
-        cmd.extend(["-g", f"!{pattern}"])
-    for term in terms:
-        cmd.extend(["-e", term])
-    cmd.append(str(root))
+    A non-{0,1} return code (e.g. a bad regex) yields "" so the caller
+    treats it as no results rather than falling back.
+    """
 
     try:
         completed = subprocess.run(
@@ -229,21 +366,286 @@ def _rg_candidate_paths(root, terms, scope, policy):
             text=True,
         )
     except OSError:
-        return []
-
+        return None
     if completed.returncode not in {0, 1}:
+        return ""
+    return completed.stdout
+
+
+def _rg_glob_args(scope, policy, glob):
+    """Build ripgrep -g include/exclude args from scope and an extra glob.
+
+    The trivial "**/*" include is skipped: ripgrep unions include globs,
+    so emitting it would defeat a narrower glob (e.g. "**/*.md").
+    Ripgrep's default already searches everything minus the excludes.
+    """
+
+    args = []
+    for pattern in scope.get("include_paths") or []:
+        if pattern == "**/*":
+            continue
+        args.extend(["-g", pattern])
+    if glob:
+        args.extend(["-g", glob])
+    for pattern in _exclude_globs(scope, policy):
+        args.extend(["-g", f"!{pattern}"])
+    return args
+
+
+def _rg_patterns(query, terms, regex):
+    """Return (patterns, fixed) for a search, or (None, _) when empty."""
+
+    if regex:
+        return ([query], False) if query else (None, False)
+    return (terms, True) if terms else (None, True)
+
+
+def _rg_line_matches(
+    root, query, terms, scope, policy, context_lines,
+    *, regex=False, glob="", case_sensitive=False,
+):
+    """Return ripgrep line matches with context, or a Python fallback."""
+
+    patterns, fixed = _rg_patterns(query, terms, regex)
+    if not patterns:
         return []
 
-    paths = []
-    seen = set()
-    for line in completed.stdout.splitlines():
-        path = Path(line.strip())
-        if path in seen:
+    max_per_file = int(
+        _option(scope, policy, "max_matches_per_file", DEFAULT_MAX_MATCHES_PER_FILE)
+    )
+    max_line_chars = int(
+        _option(scope, policy, "max_line_chars", DEFAULT_MAX_LINE_CHARS)
+    )
+    cmd = ["rg", "--json"]
+    if not case_sensitive:
+        cmd.append("-i")
+    if fixed:
+        cmd.append("-F")
+    cmd.extend([
+        "-C",
+        str(max(0, int(context_lines))),
+        "-m",
+        str(max(1, max_per_file)),
+        "--max-columns",
+        str(max(1, max_line_chars)),
+        "--max-columns-preview",
+    ])
+    cmd.extend(_rg_glob_args(scope, policy, glob))
+    for pattern in patterns:
+        cmd.extend(["-e", pattern])
+    cmd.append(str(root))
+
+    stdout = _run_rg(cmd)
+    if stdout is None:
+        if regex:
+            return []
+        return _python_line_matches(
+            root, terms, scope, policy, context_lines, max_per_file, max_line_chars
+        )
+    return _parse_rg_json(stdout, int(context_lines), max_line_chars)
+
+
+def _rg_files_with_matches(
+    root, query, scope, policy, *, regex=False, glob="", case_sensitive=False,
+):
+    """Return files in a directory that contain a match (rg -l)."""
+
+    patterns, fixed = _rg_patterns(query, _query_terms(query), regex)
+    if not patterns:
+        return []
+    cmd = ["rg", "-l"]
+    if not case_sensitive:
+        cmd.append("-i")
+    if fixed:
+        cmd.append("-F")
+    cmd.extend(_rg_glob_args(scope, policy, glob))
+    for pattern in patterns:
+        cmd.extend(["-e", pattern])
+    cmd.append(str(root))
+    stdout = _run_rg(cmd)
+    if not stdout:
+        return []
+    return [line.strip() for line in stdout.splitlines() if line.strip()]
+
+
+def _rg_counts(
+    root, query, scope, policy, *, regex=False, glob="", case_sensitive=False,
+):
+    """Return per-file match counts in a directory (rg -c)."""
+
+    patterns, fixed = _rg_patterns(query, _query_terms(query), regex)
+    if not patterns:
+        return []
+    cmd = ["rg", "-c"]
+    if not case_sensitive:
+        cmd.append("-i")
+    if fixed:
+        cmd.append("-F")
+    cmd.extend(_rg_glob_args(scope, policy, glob))
+    for pattern in patterns:
+        cmd.extend(["-e", pattern])
+    cmd.append(str(root))
+    stdout = _run_rg(cmd)
+    if not stdout:
+        return []
+    counts = []
+    for line in stdout.splitlines():
+        path, sep, value = line.rpartition(":")
+        if not sep:
             continue
-        seen.add(path)
-        if path.is_file():
-            paths.append(path)
-    return paths
+        try:
+            counts.append({"path": path, "count": int(value)})
+        except ValueError:
+            continue
+    return counts
+
+
+def _safe_mtime(path):
+    """Return a file's mtime, or 0 when it cannot be read."""
+
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _rank_matches(matches, terms):
+    """Order matches so the most topically relevant files come first.
+
+    Relevance is the number of distinct query terms a file's matched
+    lines collectively contain (broad coverage ranks above a single
+    common word repeated), with raw match count as a tie-breaker. Files
+    stay grouped and their lines stay in order. The cost is
+    O(matches * terms), so ranking adds no meaningful latency.
+    """
+
+    if not matches or not terms:
+        return matches
+    coverage = {}
+    count = {}
+    for match in matches:
+        path = match["path"]
+        text = match["text"].lower()
+        terms_seen = coverage.setdefault(path, set())
+        for term in terms:
+            if term in text:
+                terms_seen.add(term)
+        count[path] = count.get(path, 0) + 1
+
+    def sort_key(match):
+        path = match["path"]
+        return (-len(coverage[path]), -count[path], path, match["line"])
+
+    return sorted(matches, key=sort_key)
+
+
+def _parse_rg_json(stdout, context_lines, max_line_chars):
+    """Parse ripgrep --json output into match records with context."""
+
+    by_file = {}
+    order = []
+    for raw in stdout.splitlines():
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            continue
+        event_type = event.get("type")
+        if event_type not in {"match", "context"}:
+            continue
+        data = event.get("data") or {}
+        path = (data.get("path") or {}).get("text")
+        line_number = data.get("line_number")
+        text = (data.get("lines") or {}).get("text", "")
+        if path is None or line_number is None:
+            continue
+        if path not in by_file:
+            by_file[path] = []
+            order.append(path)
+        by_file[path].append(
+            (int(line_number), text.rstrip("\n"), event_type == "match")
+        )
+
+    results = []
+    for path in order:
+        items = by_file[path]
+        line_map = {ln: txt for ln, txt, _ in items}
+        for ln, txt, is_match in items:
+            if not is_match:
+                continue
+            before = [
+                {"n": n, "text": _truncate(line_map[n], max_line_chars)}
+                for n in range(ln - context_lines, ln)
+                if n in line_map
+            ]
+            after = [
+                {"n": n, "text": _truncate(line_map[n], max_line_chars)}
+                for n in range(ln + 1, ln + 1 + context_lines)
+                if n in line_map
+            ]
+            results.append(
+                {
+                    "path": path,
+                    "line": ln,
+                    "text": _truncate(txt, max_line_chars),
+                    "before": before,
+                    "after": after,
+                }
+            )
+    return results
+
+
+def _python_line_matches(
+    root, terms, scope, policy, context_lines, max_per_file, max_line_chars
+):
+    """Pure-Python line search fallback when ripgrep is unavailable."""
+
+    lowered = [term.lower() for term in terms]
+    results = []
+    for path in _iter_scope_files(root, scope, policy, limit=DEFAULT_FILE_LIST_LIMIT):
+        if _is_binary(path):
+            continue
+        text = _read_text(path)
+        if not text:
+            continue
+        lines = text.splitlines()
+        count = 0
+        for index, line in enumerate(lines):
+            if count >= max_per_file:
+                break
+            if not any(term in line.lower() for term in lowered):
+                continue
+            before = [
+                {"n": n + 1, "text": _truncate(lines[n], max_line_chars)}
+                for n in range(max(0, index - context_lines), index)
+            ]
+            after = [
+                {"n": n + 1, "text": _truncate(lines[n], max_line_chars)}
+                for n in range(index + 1, min(len(lines), index + 1 + context_lines))
+            ]
+            results.append(
+                {
+                    "path": str(path),
+                    "line": index + 1,
+                    "text": _truncate(line, max_line_chars),
+                    "before": before,
+                    "after": after,
+                }
+            )
+            count += 1
+    return results
+
+
+def _iter_scope_files(root, scope, policy, limit=DEFAULT_FILE_LIST_LIMIT):
+    """Yield up to limit allowed files from include paths (bounded)."""
+
+    found = []
+    for pattern in scope.get("include_paths") or ["**/*"]:
+        for path in root.glob(pattern):
+            if len(found) >= limit:
+                return sorted(set(found))[:limit]
+            if _is_allowed(root, path, scope, policy):
+                found.append(path)
+    return sorted(set(found))[:limit]
 
 
 def _iter_allowed_paths(root, scope, policy):
@@ -259,56 +661,6 @@ def _iter_allowed_paths(root, scope, policy):
     return sorted(set(paths))
 
 
-def _score_path(root, path, terms, scope, policy):
-    """Score a candidate file by path/content query overlap."""
-
-    max_file_size = _option(scope, policy, "max_file_size", 256 * 1024)
-    if path.stat().st_size > int(max_file_size):
-        return 0
-    relative = str(path.relative_to(root)).lower()
-    score = 1
-    for term in terms:
-        if term in relative:
-            score += 12
-    if not terms:
-        return score
-    text_scan_chars = _option(scope, policy, "text_scan_chars", 12000)
-    text = _read_text(path)[: int(text_scan_chars)].lower()
-    for term in terms:
-        if term in text:
-            score += min(text.count(term), 8)
-    return score
-
-
-def _extract_snippets(text, terms, context_lines=2, max_matches=4):
-    """Extract context snippets around matching terms."""
-
-    if not terms:
-        return []
-    lines = text.splitlines()
-    snippets = []
-    matched_ranges = []
-    for index, line in enumerate(lines):
-        lower = line.lower()
-        if not any(term in lower for term in terms):
-            continue
-        start = max(0, index - context_lines)
-        end = min(len(lines), index + context_lines + 1)
-        overlaps = (
-            start <= old_end and end >= old_start
-            for old_start, old_end in matched_ranges
-        )
-        if any(overlaps):
-            continue
-        matched_ranges.append((start, end))
-        snippet = "\n".join(lines[start:end]).strip()
-        if snippet:
-            snippets.append(snippet)
-        if len(snippets) >= max_matches:
-            break
-    return snippets
-
-
 def _option(scope, policy, key, default):
     """Read a retrieval option from scope first, then policy."""
 
@@ -317,6 +669,32 @@ def _option(scope, policy, key, default):
     if key in policy:
         return policy[key]
     return default
+
+
+def _bounded_results(max_results, policy):
+    """Clamp the requested match count to a sane positive ceiling."""
+
+    default = int(_option({}, policy, "max_search_matches", DEFAULT_MAX_SEARCH_MATCHES))
+    try:
+        value = int(max_results)
+    except (TypeError, ValueError):
+        value = default
+    if value <= 0:
+        value = default
+    return min(value, MAX_SEARCH_MATCHES)
+
+
+def _bounded_limit(limit, policy):
+    """Clamp the requested read window to a sane positive ceiling."""
+
+    default = int(_option({}, policy, "max_read_lines", DEFAULT_READ_LIMIT))
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        value = default
+    if value <= 0:
+        value = default
+    return min(value, MAX_READ_LIMIT)
 
 
 def _is_excluded_path(root, path, scope, policy):
@@ -377,7 +755,7 @@ def _normalize_extensions(values):
 def _contains_cjk(value):
     """Return whether a string contains CJK characters."""
 
-    return any("\u4e00" <= char <= "\u9fff" for char in value)
+    return any("一" <= char <= "鿿" for char in value)
 
 
 def _ngrams(value, size):
@@ -386,6 +764,38 @@ def _ngrams(value, size):
     if len(value) < size:
         return []
     return [value[index : index + size] for index in range(len(value) - size + 1)]
+
+
+def _truncate(text, max_chars):
+    """Truncate an over-long line, marking that it was cut."""
+
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "…[truncated]"
+
+
+def _is_binary(path):
+    """Return whether a file looks binary by sniffing for null bytes."""
+
+    try:
+        with path.open("rb") as handle:
+            chunk = handle.read(BINARY_SNIFF_BYTES)
+    except OSError:
+        return False
+    return b"\x00" in chunk
+
+
+def _note_deprecated_size(scope, policy):
+    """Log once when the deprecated max_file_size option is present."""
+
+    if "max_file_size" in _DEPRECATED_KEYS_LOGGED:
+        return
+    if "max_file_size" in (scope or {}) or "max_file_size" in (policy or {}):
+        _DEPRECATED_KEYS_LOGGED.add("max_file_size")
+        LOGGER.info(
+            "retrieval config 'max_file_size' is deprecated and ignored; "
+            "file size no longer limits workspace retrieval."
+        )
 
 
 def _read_text(path):
