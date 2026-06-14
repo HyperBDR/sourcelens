@@ -14,6 +14,19 @@ from .workspace import (
 )
 
 
+# Tools that emit their own tool.<name>.start/.done events. The generic
+# tool.<name>.invoke event is suppressed for these to avoid duplicate trace
+# entries (their .start already carries the richer argument summary).
+SELF_REPORTING_TOOLS = {
+    "search_workspace",
+    "read_workspace_file",
+    "find_files",
+    "git_log",
+    "git_diff",
+    "summarize_recent_changes",
+}
+
+
 def build_agent_tools(command, emit_event=None):
     """Build read-only tools scoped to the selected workspace dirs."""
 
@@ -64,6 +77,7 @@ def build_agent_tools(command, emit_event=None):
                 "regex": regex,
                 "glob": glob,
                 "output_mode": output_mode,
+                "summary": _search_summary(query, regex, glob, output_mode),
             },
         )
         result = search_workspace_files(
@@ -87,6 +101,10 @@ def build_agent_tools(command, emit_event=None):
                 "mode": result.get("mode"),
                 "count": len(matches) or len(files) or len(counts),
                 "paths": paths[:8],
+                "summary": _search_done_summary(
+                    result, matches, files, counts, paths
+                ),
+                "preview": _clip(matches[0]["text"], 140) if matches else "",
             },
         )
         return _json(result)
@@ -106,6 +124,9 @@ def build_agent_tools(command, emit_event=None):
                 "path": path,
                 "offset": offset,
                 "limit": limit,
+                "summary": (
+                    f"{_basename(path)} · lines {offset}-{offset + limit - 1}"
+                ),
             },
         )
         resolved = _resolve_allowed_path(path, target_dirs)
@@ -142,6 +163,12 @@ def build_agent_tools(command, emit_event=None):
                 "start": window.get("start_line"),
                 "end": window.get("end_line"),
                 "has_more": window.get("has_more"),
+                "summary": (
+                    f"{_basename(resolved)} · lines "
+                    f"{window.get('start_line')}-{window.get('end_line')}"
+                    f"{' (+more)' if window.get('has_more') else ''}"
+                ),
+                "preview": _clip(window.get("content") or "", 200),
             },
         )
         return _json(window)
@@ -161,6 +188,7 @@ def build_agent_tools(command, emit_event=None):
             {
                 "pattern": pattern,
                 "max_results": max_results,
+                "summary": pattern,
             },
         )
         files = glob_files(
@@ -174,6 +202,9 @@ def build_agent_tools(command, emit_event=None):
             {
                 "count": len(files),
                 "paths": files[:8],
+                "summary": (
+                    f"{len(files)} files · {_names(files)}" if files else "0 files"
+                ),
             },
         )
         return _json({"files": files})
@@ -545,6 +576,59 @@ def _positive_int(value, default):
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
+
+
+def _basename(path):
+    """Return a path's file name for compact event summaries."""
+
+    return Path(str(path)).name or str(path)
+
+
+def _clip(text, limit):
+    """Collapse whitespace and clip to `limit` chars for a bounded preview."""
+
+    text = " ".join(str(text or "").split())
+    return text[:limit] + "…" if len(text) > limit else text
+
+
+def _names(paths, limit=3):
+    """Return up to `limit` comma-joined basenames, with a +N overflow tag."""
+
+    items = paths or []
+    names = [Path(str(item)).name for item in items[:limit]]
+    text = ", ".join(names)
+    extra = len(items) - len(names)
+    if extra > 0:
+        text += f" +{extra}"
+    return text
+
+
+def _search_summary(query, regex, glob, output_mode):
+    """Build a compact summary of a search request for the trace."""
+
+    parts = [f"/{query}/" if regex else f'"{query}"']
+    if glob:
+        parts.append(f"in {glob}")
+    if output_mode and output_mode != "content":
+        parts.append(f"({output_mode})")
+    return " ".join(parts)
+
+
+def _search_done_summary(result, matches, files, counts, paths):
+    """Build a compact summary of a search result for the trace."""
+
+    mode = result.get("mode")
+    if mode == "files":
+        return f"{len(files)} files · {_names(files)}" if files else "0 files"
+    if mode == "count":
+        return f"{len(counts)} files"
+    if matches:
+        return (
+            f"{len(matches)} matches in {len(paths)} files · {_names(paths)}"
+        )
+    if files:
+        return f"no matches · listing {len(files)} files"
+    return "no matches"
 
 
 def _json(payload):

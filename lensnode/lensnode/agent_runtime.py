@@ -5,7 +5,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
-from .agent_tools import build_agent_tools
+from .agent_tools import build_agent_tools, SELF_REPORTING_TOOLS
 from .gateway_model import LensGatewayChatModel
 from .logging_utils import elapsed_since, task_log, utc_now
 from .runtime_resources import cleanup_runtime_resources
@@ -466,6 +466,44 @@ def _run_agent_with_turn_limit(agent, messages, max_turns, emit_event=None):
     return answer, truncated
 
 
+def _model_summary(message, limit=160):
+    """Return a short preview of a model turn for the trace.
+
+    Prefers the assistant's own text; when the turn only issued tool
+    calls (no text), shows the tools it decided to call instead.
+    """
+
+    content = getattr(message, "content", "")
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text") or ""))
+            else:
+                parts.append(str(block))
+        content = " ".join(parts)
+    text = " ".join(str(content or "").split())
+    if text:
+        return text[:limit] + ("…" if len(text) > limit else "")
+    calls = [
+        call.get("name")
+        for call in (getattr(message, "tool_calls", None) or [])
+        if call.get("name")
+    ]
+    if calls:
+        ordered, counts = [], {}
+        for name in calls:
+            if name not in counts:
+                ordered.append(name)
+            counts[name] = counts.get(name, 0) + 1
+        parts = [
+            f"{name}×{counts[name]}" if counts[name] > 1 else name
+            for name in ordered
+        ]
+        return "→ " + ", ".join(parts)
+    return ""
+
+
 def _emit_new_model_calls(messages, seen, emit_event):
     """Emit an event for each new AI response (one LLM round).
 
@@ -494,6 +532,7 @@ def _emit_new_model_calls(messages, seen, emit_event):
                 "completion_tokens": usage.get("completion_tokens"),
                 "total_tokens": usage.get("total_tokens"),
                 "cost": usage.get("cost"),
+                "summary": _model_summary(message),
             },
         )
 
@@ -517,6 +556,10 @@ def _emit_new_tool_calls(messages, seen, emit_event):
                 continue
             seen.add(call_id)
             name = call.get("name") or "tool"
+            if name in SELF_REPORTING_TOOLS:
+                # avoids a duplicate trace line; the tool emits its own
+                # .start/.done with a richer argument summary
+                continue
             emit_event(
                 f"tool.{name}.invoke",
                 {"tool": name, "summary": _tool_call_summary(call)},

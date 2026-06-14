@@ -483,6 +483,9 @@
                       <div v-if="e.detail" class="timeline-detail">
                         {{ e.detail }}
                       </div>
+                      <div v-if="e.preview" class="timeline-preview">
+                        {{ e.preview }}
+                      </div>
                     </div>
                   </li>
                 </ol>
@@ -578,6 +581,11 @@ function parseTimelineEvent(e) {
   if (e.tool) {
     const action = (e.agent_event || '').split('.').pop()
     text = action && action !== 'invoke' ? `${e.tool} (${action})` : e.tool
+  } else if ((e.agent_event || '').startsWith('tool.')) {
+    const segs = e.agent_event.split('.')
+    const action = segs[segs.length - 1]
+    const name = segs.slice(1, -1).join('.')
+    text = action && action !== 'invoke' ? `${name} (${action})` : name
   } else if (e.agent_event && TIMELINE_LABELS[e.agent_event]) {
     text = TIMELINE_LABELS[e.agent_event]
   } else if (e.agent_event) {
@@ -587,6 +595,7 @@ function parseTimelineEvent(e) {
   }
   const detailParts = []
   if (e.agent_event === 'llm.response') {
+    if (e.summary) detailParts.push(e.summary)
     if (e.total_tokens != null) {
       detailParts.push(`${e.total_tokens} tokens`)
       if (e.prompt_tokens != null && e.completion_tokens != null) {
@@ -596,8 +605,14 @@ function parseTimelineEvent(e) {
   } else if (e.summary) detailParts.push(e.summary)
   else if (e.path) detailParts.push(e.path)
   else if (e.query) detailParts.push(`"${e.query}"`)
-  if (e.count > 1) detailParts.push(`×${e.count}`)
-  return { time, text, detail: detailParts.join('  ·  '), dot: timelineDot(e) }
+  if (e.count > 1 && !e.summary) detailParts.push(`×${e.count}`)
+  return {
+    time,
+    text,
+    detail: detailParts.join('  ·  '),
+    preview: e.preview || '',
+    dot: timelineDot(e)
+  }
 }
 
 const timelineItems = computed(() => {
@@ -793,6 +808,16 @@ watch(detailVisible, (visible) => {
 }
 .timeline-detail {
   @apply mt-0.5 text-xs text-gray-500 break-all;
+}
+
+.timeline-preview {
+  @apply mt-1 rounded border border-gray-100 bg-gray-50 px-2 py-1 text-xs
+    text-gray-600 break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .dot-blue {
   background: #3b82f6;
