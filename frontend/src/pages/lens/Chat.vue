@@ -348,7 +348,7 @@
                     class="thinking-step-item"
                   >
                     <span class="thinking-step-bullet">▸</span>
-                    <span>{{ step.message }}</span>
+                    <span class="thinking-step-text">{{ step.message }}</span>
                     <span v-if="step.count > 1" class="thinking-step-repeat">
                       ×{{ step.count }}
                     </span>
@@ -417,6 +417,34 @@
             </div>
           </div>
 
+          <!-- Empty-answer hint: a finished turn returned no text -->
+          <div
+            v-if="showRetryHint"
+            class="message-row message-row-assistant"
+          >
+            <div class="message-avatar assistant">
+              <img
+                src="/brand/logo_transparent.png"
+                alt="SourceLens"
+                class="h-[20px] w-[20px] object-contain"
+              />
+            </div>
+            <div class="message-body">
+              <div class="retry-hint">
+                <span class="retry-hint-text">
+                  {{ t('lens.chat.emptyAnswerHint') }}
+                </span>
+                <button
+                  type="button"
+                  class="retry-hint-btn"
+                  @click="retryLastQuestion"
+                >
+                  {{ t('lens.chat.retryAction') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Live answer: one row / one avatar — thinking panel + streaming markdown -->
           <div
             v-if="showLiveAnswer"
@@ -438,8 +466,14 @@
                 >
                   <span class="live-progress-dot" />
                   <span class="thinking-panel-status">
-                    {{ latestActivityMessage || liveStatusText }}
-                    <span v-if="!latestActivityMessage" class="typing-dots" aria-hidden="true">
+                    <span class="thinking-panel-status-text">{{
+                      latestLiveStep || latestActivityMessage || liveStatusText
+                    }}</span>
+                    <span
+                      v-if="!latestLiveStep && !latestActivityMessage"
+                      class="typing-dots"
+                      aria-hidden="true"
+                    >
                       <span /><span /><span />
                     </span>
                   </span>
@@ -457,7 +491,7 @@
                 >
                   <div v-for="step in thinkingSteps" :key="step.id" class="thinking-step-item">
                     <span class="thinking-step-bullet">▸</span>
-                    <span>{{ step.message }}</span>
+                    <span class="thinking-step-text">{{ step.message }}</span>
                     <span v-if="step.count > 1" class="thinking-step-repeat">×{{ step.count }}</span>
                   </div>
                   <div v-if="thinkingText" class="thinking-reasoning">
@@ -607,6 +641,8 @@ const thinkingPanelRef = ref(null)
 const thinkingText = ref('')
 const elapsedSeconds = ref(0)
 let elapsedTimer = null
+let revealTimer = null
+const REVEAL_INTERVAL_MS = 300
 
 const selectedAssistant = computed(
   () =>
@@ -692,32 +728,62 @@ const activityEvents = computed(() =>
     .reverse()
 )
 
+function toolLabel(name) {
+  const map = {
+    search_workspace: t('lens.chat.activity.searchWorkspace'),
+    read_workspace_file: t('lens.chat.activity.readFile'),
+    find_files: t('lens.chat.activity.findFiles'),
+    git_log: t('lens.chat.activity.gitLog'),
+    git_diff: t('lens.chat.activity.gitDiff'),
+    summarize_recent_changes: t('lens.chat.activity.summarizeChanges'),
+    write_file: t('lens.chat.activity.writingFile'),
+    read_file: t('lens.chat.activity.readFile'),
+    edit_file: t('lens.chat.activity.editingFile'),
+    ls: t('lens.chat.activity.listFiles'),
+    write_todos: t('lens.chat.activity.planningTasks'),
+    task: t('lens.chat.activity.delegatingTask'),
+  }
+  return map[name] || t('lens.chat.activity.callingTool', { name })
+}
+
 function _friendlyActivityMessage(event) {
   const agentEvent = event.agentEvent || ''
   const activity = event.activity || ''
   if (agentEvent.startsWith('tool.')) {
     const parts = agentEvent.split('.')
-    const toolName = parts[1]
     const action = parts[2]
     if (action === 'done' || action === 'denied') return null
-    const toolLabelMap = {
-      search_workspace: t('lens.chat.activity.searchWorkspace'),
-      read_workspace_file: t('lens.chat.activity.readFile'),
-      git_log: t('lens.chat.activity.gitLog'),
-      git_diff: t('lens.chat.activity.gitDiff'),
-      summarize_recent_changes: t('lens.chat.activity.summarizeChanges'),
-      write_file: t('lens.chat.activity.writingFile'),
-      read_file: t('lens.chat.activity.readFile'),
-      edit_file: t('lens.chat.activity.editingFile'),
-      ls: t('lens.chat.activity.listFiles'),
-      write_todos: t('lens.chat.activity.planningTasks'),
-      task: t('lens.chat.activity.delegatingTask'),
-    }
-    return toolLabelMap[toolName] || t('lens.chat.activity.callingTool', { name: toolName })
+    return toolLabel(parts[1])
   }
   if (activity === 'thinking') return t('lens.chat.activity.thinking')
   if (activity === 'loading_resources') return t('lens.chat.activity.loadingResources')
-  if (activity === 'completed') return null
+  return null
+}
+
+// Rich step label: the tool/model action plus the backend-provided summary
+// (search query, result counts, file + line range, model decision).
+function _liveStepLabel(event) {
+  const agentEvent = event.agentEvent || ''
+  const activity = event.activity || ''
+  const summary = event.summary || ''
+  const trim = (s) => s.replace(/[.…\s]+$/, '')
+  if (agentEvent.startsWith('tool.')) {
+    const parts = agentEvent.split('.')
+    const name = parts[1]
+    const action = parts[2]
+    if (action === 'directory' || action === 'denied') return null
+    // a read reports the same file + range on start and done — keep one line
+    if (action === 'done' && name === 'read_workspace_file') return null
+    return summary ? `${trim(toolLabel(name))} · ${summary}` : toolLabel(name)
+  }
+  if (agentEvent === 'llm.response') {
+    return summary
+      ? `${trim(t('lens.chat.activity.thinking'))} · ${summary}`
+      : null
+  }
+  if (activity === 'loading_resources') {
+    return t('lens.chat.activity.loadingResources')
+  }
   return null
 }
 
@@ -729,11 +795,10 @@ const latestActivityMessage = computed(() => {
   return null
 })
 
-const thinkingSteps = computed(() => {
+const allLiveSteps = computed(() => {
   const grouped = []
   for (const e of streamEvents.value) {
-    if (!e.activity) continue
-    const msg = _friendlyActivityMessage(e)
+    const msg = _liveStepLabel(e)
     if (!msg) continue
     const last = grouped[grouped.length - 1]
     if (last && last.message === msg) {
@@ -743,6 +808,19 @@ const thinkingSteps = computed(() => {
     }
   }
   return grouped
+})
+
+// Paced reveal: surface buffered steps one at a time for a streaming feel.
+const revealedCount = ref(0)
+const thinkingSteps = computed(() =>
+  allLiveSteps.value.slice(0, revealedCount.value)
+)
+
+// The most recently revealed step — shown in the collapsed header so the
+// status line narrates what is happening, updating at the reveal cadence.
+const latestLiveStep = computed(() => {
+  const steps = thinkingSteps.value
+  return steps.length ? steps[steps.length - 1].message : null
 })
 
 watch(
@@ -777,9 +855,10 @@ const elapsedText = computed(() => {
 function thinkingStepsFor(events) {
   const grouped = []
   for (const e of events || []) {
-    const msg = _friendlyActivityMessage({
+    const msg = _liveStepLabel({
       agentEvent: e.agent_event,
-      activity: e.activity
+      activity: e.activity,
+      summary: e.summary
     })
     if (!msg) continue
     const last = grouped[grouped.length - 1]
@@ -805,24 +884,46 @@ function toggleThinking(uuid) {
 }
 
 const decoratedMessages = computed(() =>
-  messages.value.map((message) => {
-    if (message.role === 'assistant' && message.thinking?.steps?.length) {
-      const steps = thinkingStepsFor(message.thinking.steps)
-      if (steps.length) {
-        return { ...message, _thinkingSteps: steps }
+  messages.value
+    .filter(
+      (m) => !(m.role === 'assistant' && !(m.content || '').trim())
+    )
+    .map((message) => {
+      if (message.role === 'assistant' && message.thinking?.steps?.length) {
+        const steps = thinkingStepsFor(message.thinking.steps)
+        if (steps.length) {
+          return { ...message, _thinkingSteps: steps }
+        }
       }
-    }
-    return message
-  })
+      return message
+    })
 )
+
+// A finished turn that produced no answer text — show a transient,
+// retry-oriented hint (framed as a temporary hiccup, not a product fault)
+// instead of an empty bubble.
+const showRetryHint = computed(() => {
+  if (isRunActive.value) return false
+  const last = messages.value[messages.value.length - 1]
+  return !!last && last.role === 'assistant' && !(last.content || '').trim()
+})
 
 watch(isRunActive, (active) => {
   if (active) {
     elapsedSeconds.value = 0
     elapsedTimer = setInterval(() => { elapsedSeconds.value++ }, 1000)
+    revealTimer = setInterval(() => {
+      if (revealedCount.value < allLiveSteps.value.length) {
+        revealedCount.value++
+      }
+    }, REVEAL_INTERVAL_MS)
   } else {
     clearInterval(elapsedTimer)
     elapsedTimer = null
+    clearInterval(revealTimer)
+    revealTimer = null
+    // flush any buffered steps once the run settles
+    revealedCount.value = allLiveSteps.value.length
   }
 })
 
@@ -841,6 +942,7 @@ function pushStreamEvent(event) {
 }
 
 function resetStreamState() {
+  streamController.value?.abort()
   partialAnswer.value = ''
   streamError.value = ''
   streamEvents.value = []
@@ -848,6 +950,7 @@ function resetStreamState() {
   thinkingPanelOpen.value = false
   thinkingText.value = ''
   elapsedSeconds.value = 0
+  revealedCount.value = 0
   seenActivityKeys.clear()
   seenStepEventCounts.clear()
 }
@@ -856,7 +959,7 @@ function pushAgentActivity(item, fallbackTs, fallbackStatus) {
   if (!item?.message && !item?.agent_event) {
     return
   }
-  const key = item.agent_event || item.message
+  const key = `${item.agent_event || ''}|${item.summary || item.message || ''}`
   if (seenActivityKeys.has(key)) {
     return
   }
@@ -867,6 +970,7 @@ function pushAgentActivity(item, fallbackTs, fallbackStatus) {
     message: item.message || item.agent_event,
     agentEvent: item.agent_event,
     activity: item.activity || 'running',
+    summary: item.summary || '',
     ts: fallbackTs || new Date().toISOString()
   })
 }
@@ -899,6 +1003,17 @@ async function handleLogout() {
 }
 
 async function bootstrap() {
+  // Reset transient chat state up front so the previous assistant's draft,
+  // active-run/stream state, or messages cannot leak across an assistant
+  // switch (this runs on every slug change, before the async session load
+  // below). selectedSessionUuid is intentionally NOT cleared here: if the
+  // session load below throws, an empty uuid would leave the composer
+  // permanently disabled. A stale submit during the brief load window is
+  // instead guarded inside submit() by binding to the session it started in.
+  question.value = ''
+  currentRun.value = null
+  messages.value = []
+  resetStreamState()
   try {
     assistants.value = await listAssistants()
 
@@ -918,7 +1033,7 @@ async function bootstrap() {
     selectedAssistantUuid.value = current.uuid
     await loadSessions()
   } catch {
-    showError('加载 Lens chat 失败。')
+    showError(t('lens.chat.loadFailed'))
   }
 }
 
@@ -947,7 +1062,7 @@ async function createNewSession(notify = true) {
 
   const session = await createSession({
     assistant_uuid: selectedAssistant.value.uuid,
-    title: `${selectedAssistant.value.name} 查询`
+    title: t('lens.chat.sessionTitle', { name: selectedAssistant.value.name })
   })
 
   sessions.value = [session, ...sessions.value]
@@ -960,7 +1075,7 @@ async function createNewSession(notify = true) {
   })
 
   if (notify) {
-    showSuccess('已创建会话。')
+    showSuccess(t('lens.chat.sessionCreated'))
   }
 
   return session
@@ -996,6 +1111,7 @@ async function handlePrimaryAction() {
 async function selectSession(session, updateRoute = true) {
   selectedSessionUuid.value = session.uuid
   messages.value = await listMessages(session.uuid)
+  currentRun.value = null
   resetStreamState()
   if (updateRoute) {
     router.replace({
@@ -1004,6 +1120,41 @@ async function selectSession(session, updateRoute = true) {
     })
   }
   await nextTick(scrollToBottom)
+  maybeResumeActiveRun(session.uuid)
+}
+
+// If the session has a run still in progress (e.g. the user navigated away
+// mid-answer), re-attach the SSE stream so the live thinking panel and
+// streamed answer resume, then finalize like a normal run.
+async function maybeResumeActiveRun(sessionUuid) {
+  // the latest message carrying a run uuid (the user message of the most
+  // recent turn) tells us whether that turn is still in progress
+  const withRun = [...messages.value].reverse().find((m) => m.run)
+  if (!withRun) return
+  let run
+  try {
+    run = await getRun(withRun.run)
+  } catch {
+    return
+  }
+  if (!['queued', 'running', 'streaming'].includes(run?.status)) return
+  if (selectedSessionUuid.value !== sessionUuid) return
+  // hand the trailing in-progress assistant placeholder to the live row to
+  // avoid showing it twice; the SSE sync replays its content and steps
+  const last = messages.value[messages.value.length - 1]
+  if (last && last.role === 'assistant') {
+    messages.value = messages.value.slice(0, -1)
+  }
+  currentRun.value = run
+  try {
+    await readSse(run.uuid)
+    currentRun.value = await getRun(run.uuid)
+  } catch {
+    // stream aborted (e.g. the user switched sessions) — fall through
+  }
+  if (selectedSessionUuid.value !== sessionUuid) return
+  messages.value = await listMessages(sessionUuid)
+  resetStreamState()
 }
 
 async function readSse(runUuid) {
@@ -1134,6 +1285,11 @@ function handleStepEvent(event, ts) {
 }
 
 async function submit() {
+  // Bind this submit to the session it started in. If the user switches
+  // assistant/session mid-flight, the stream is aborted on purpose — that is
+  // not a failure, so we must not restore the draft, alarm the user, or write
+  // into the now-current assistant's state.
+  const sessionAtSubmit = selectedSessionUuid.value
   loading.value.run = true
   resetStreamState()
   const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
@@ -1142,11 +1298,14 @@ async function submit() {
   messages.value = [...messages.value, { role: 'user', content: optimisticText, uuid: '__optimistic__', created_at: new Date().toISOString() }]
   await nextTick(scrollToBottom)
   try {
-    const run = await createRun(selectedSessionUuid.value, {
+    const run = await createRun(sessionAtSubmit, {
       question: optimisticText,
       run_inline: false,
       enqueue: true
     })
+    // switched away between createRun and here — don't bind this run's live
+    // state onto the now-current assistant
+    if (selectedSessionUuid.value !== sessionAtSubmit) return
     currentRun.value = run
     pushStreamEvent({
       label: t('lens.chat.events.submitted'),
@@ -1155,8 +1314,10 @@ async function submit() {
       ts: new Date().toISOString()
     })
     await readSse(run.uuid)
+    // switched away while streaming — leave the new assistant untouched
+    if (selectedSessionUuid.value !== sessionAtSubmit) return
     currentRun.value = await getRun(run.uuid)
-    messages.value = await listMessages(selectedSessionUuid.value)
+    messages.value = await listMessages(sessionAtSubmit)
 
     if (currentRun.value?.status === 'failed') {
       // Remove the empty pre-created assistant placeholder from the failed run
@@ -1172,12 +1333,19 @@ async function submit() {
       resetStreamState()
     }
     await nextTick(scrollToBottom)
-  } catch {
+  } catch (err) {
+    // a deliberate stream abort (switch/navigate) or a switch away is not a
+    // submit failure — bail silently without touching the current state
+    if (err?.name === 'AbortError' || selectedSessionUuid.value !== sessionAtSubmit) {
+      return
+    }
     messages.value = messages.value.filter(m => m.uuid !== '__optimistic__')
     question.value = optimisticText
     showError(t('lens.chat.submitFailed'))
   } finally {
-    loading.value.run = false
+    if (selectedSessionUuid.value === sessionAtSubmit) {
+      loading.value.run = false
+    }
   }
 }
 
@@ -1193,9 +1361,9 @@ async function cancel() {
 async function copyMessage(message) {
   try {
     await navigator.clipboard.writeText(message.content || '')
-    showSuccess('已复制消息。')
+    showSuccess(t('lens.chat.messageCopied'))
   } catch {
-    showWarning('复制失败。')
+    showWarning(t('lens.chat.copyFailed'))
   }
 }
 
@@ -1268,6 +1436,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleOutsideClick)
   streamController.value?.abort()
   clearInterval(elapsedTimer)
+  clearInterval(revealTimer)
 })
 </script>
 
@@ -1440,6 +1609,26 @@ onBeforeUnmount(() => {
   border-color: #e5e7eb;
 }
 
+.retry-hint {
+  @apply flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 text-sm;
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.retry-hint-text {
+  @apply min-w-0 flex-1;
+}
+
+.retry-hint-btn {
+  @apply shrink-0 rounded-md px-3 py-1 text-sm font-medium text-white transition-colors;
+  background: #d97706;
+}
+
+.retry-hint-btn:hover {
+  background: #b45309;
+}
+
 .thread-scroll {
   @apply min-h-0 flex-1 overflow-y-auto;
 }
@@ -1609,8 +1798,12 @@ onBeforeUnmount(() => {
 }
 
 .thinking-panel-status {
-  @apply flex flex-1 items-center gap-1 text-sm;
+  @apply flex min-w-0 flex-1 items-center gap-1 text-sm;
   color: #374151;
+}
+
+.thinking-panel-status-text {
+  @apply min-w-0 truncate;
 }
 
 .thinking-step-count {
@@ -1636,13 +1829,18 @@ onBeforeUnmount(() => {
 }
 
 .thinking-step-item {
-  @apply flex items-baseline gap-1.5 py-0.5 text-xs;
+  @apply flex items-start gap-1.5 py-0.5 text-xs;
   color: #6b7280;
 }
 
 .thinking-step-bullet {
   @apply shrink-0;
   color: #d1d5db;
+  line-height: 1.5;
+}
+
+.thinking-step-text {
+  @apply min-w-0 flex-1 break-words;
 }
 
 .thinking-step-repeat {

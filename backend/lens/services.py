@@ -405,8 +405,11 @@ def append_lensnode_output(
         return run
     if run.output_message is None:
         return run
-    if final_content is not None:
+    if final_content:
         run.output_message.content = final_content
+    elif final_content is not None:
+        # an empty final reconciliation must not wipe streamed content
+        pass
     elif reset:
         run.output_message.content = content_delta
     else:
@@ -532,6 +535,9 @@ def stream_run_events(run):
 
     run = _load_run_stream_state(run.pk)
     yield _build_sync_event(run)
+    # the sync event already carries the current content; seed emitted_content
+    # so the loop streams only new deltas (avoids resending it on reconnect)
+    emitted_content = _run_content(run)
 
     while True:
         run = _load_run_stream_state(run.pk)
@@ -613,6 +619,9 @@ async def stream_run_events_async(run):
 
     run = await sync_to_async(_load_run_stream_state)(run_pk)
     yield _build_sync_event(run)
+    # the sync event already carries the current content; seed emitted_content
+    # so the loop streams only new deltas (avoids resending it on reconnect)
+    emitted_content = _run_content(run)
 
     while True:
         run = await sync_to_async(_load_run_stream_state)(run_pk)
