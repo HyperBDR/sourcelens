@@ -1,5 +1,8 @@
+import base64
+import hashlib
 import uuid
 
+from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -164,7 +167,6 @@ class DataSource(TimestampedUUIDModel):
     class SourceType(models.TextChoices):
         GIT = "git", "Git"
         FEISHU = "feishu", "Feishu"
-        JIRA = "jira", "Jira"
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -173,9 +175,23 @@ class DataSource(TimestampedUUIDModel):
 
     name = models.CharField(max_length=160)
     source_type = models.CharField(max_length=32, choices=SourceType.choices)
+    lensnode = models.ForeignKey(
+        LensNode,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="datasources",
+    )
     config = models.JSONField(default=dict, blank=True)
     sync_policy = models.JSONField(default=dict, blank=True)
     target_path = models.CharField(max_length=500, blank=True, default="")
+    credential = models.ForeignKey(
+        "DataSourceCredential",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="datasources",
+    )
     last_synced_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=16,
@@ -186,11 +202,80 @@ class DataSource(TimestampedUUIDModel):
     class Meta:
         indexes = [
             models.Index(fields=["status"], name="lens_datasource_status_idx"),
+            models.Index(
+                fields=["lensnode"],
+                name="lens_datasource_lensnode_idx",
+            ),
         ]
         ordering = ["name"]
 
     def __str__(self):
         return self.name
+
+
+class DataSourceCredential(TimestampedUUIDModel):
+    """Encrypted datasource credential used only during node execution."""
+
+    class Provider(models.TextChoices):
+        GITHUB = "github", "GitHub"
+        GITLAB = "gitlab", "GitLab"
+        GENERIC = "generic", "Generic"
+
+    class AuthType(models.TextChoices):
+        HTTPS_TOKEN = "https_token", "HTTPS Token"
+
+    name = models.CharField(max_length=160)
+    provider = models.CharField(
+        max_length=32,
+        choices=Provider.choices,
+        default=Provider.GENERIC,
+    )
+    auth_type = models.CharField(
+        max_length=32,
+        choices=AuthType.choices,
+        default=AuthType.HTTPS_TOKEN,
+    )
+    encrypted_secret = models.TextField(blank=True, default="")
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def set_secret(self, value):
+        """Encrypt and store a plaintext credential secret."""
+
+        self.encrypted_secret = _datasource_fernet().encrypt(
+            str(value or "").encode("utf-8")
+        ).decode("utf-8")
+
+    def get_secret(self):
+        """Return the decrypted credential secret."""
+
+        if not self.encrypted_secret:
+            return ""
+        try:
+            return _datasource_fernet().decrypt(
+                self.encrypted_secret.encode("utf-8")
+            ).decode("utf-8")
+        except InvalidToken:
+            return ""
+
+    @property
+    def has_secret(self):
+        """Return whether this credential has an encrypted secret."""
+
+        return bool(self.encrypted_secret)
+
+    def __str__(self):
+        return self.name
+
+
+def _datasource_fernet():
+    """Return the symmetric encryptor for datasource credentials."""
+
+    digest = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
+    key = base64.urlsafe_b64encode(digest)
+    return Fernet(key)
 
 
 class AssistantSkill(models.Model):

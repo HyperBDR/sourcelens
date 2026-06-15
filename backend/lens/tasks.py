@@ -6,6 +6,7 @@ from celery import shared_task
 from django.core.cache import cache
 from django.utils import timezone
 
+from .datasource_services import dispatch_datasource_sync
 from .models import (
     DataSource,
     GlobalSetting,
@@ -14,7 +15,6 @@ from .models import (
     RunExecution,
     ScheduledTask,
 )
-from .source_sync import sync_datasource
 
 
 @shared_task(name="lens.execute_answer_run", queue="lens")
@@ -78,26 +78,72 @@ def _is_global_task_enabled(task_type, default=True):
     return bool(record.enabled)
 
 
-@shared_task(name="lens.source_sync", queue="lens")
-def source_sync_task(datasource_uuid):
-    """Celery entrypoint for synchronizing a datasource."""
+@shared_task(bind=True, name="lens.source_sync", queue="lens")
+def source_sync_task(self, datasource_uuid, trigger="scheduled"):
+    """Celery entrypoint for synchronizing a datasource on a LensNode."""
 
-    datasource = DataSource.objects.get(uuid=datasource_uuid)
+    from agentcore_task.adapters.django import TaskTracker
+    from agentcore_task.constants import TaskStatus
+
+    task_id = self.request.id or uuid.uuid4().hex
+    datasource = DataSource.objects.select_related("lensnode").get(
+        uuid=datasource_uuid
+    )
     record = _get_or_create_source_sync_record(datasource)
     now = timezone.now()
     record.last_status = ScheduledTask.Status.RUNNING
     record.last_error = ""
     record.last_run_at = now
     record.save(update_fields=["last_status", "last_error", "last_run_at"])
+    TaskTracker.register_task(
+        task_id=task_id,
+        task_name="datasource_sync",
+        module="lens_datasource",
+        task_args=[str(datasource.uuid)],
+        task_kwargs={"trigger": trigger},
+        metadata=_datasource_task_metadata(datasource, trigger),
+        initial_status=TaskStatus.STARTED,
+    )
+    _append_datasource_task_step(
+        task_id,
+        "prepare",
+        "running",
+        "Datasource sync task started.",
+    )
 
     try:
         with datasource_lock(datasource.uuid, ttl_s=600):
-            synced = sync_datasource(datasource)
+            _append_datasource_task_step(
+                task_id,
+                "dispatch",
+                "running",
+                "Dispatching datasource sync to LensNode.",
+            )
+            result = dispatch_datasource_sync(
+                datasource,
+                task_id=task_id,
+                trigger=trigger,
+            )
+            if result.get("status") != "success":
+                raise RuntimeError(
+                    result.get("error") or "LENS_SOURCE_SYNC_FAILED"
+                )
     except SourceSyncBusy as exc:
         record.last_status = ScheduledTask.Status.FAILED
         record.last_error = str(exc)
         record.last_run_at = timezone.now()
         record.save(update_fields=["last_status", "last_error", "last_run_at"])
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.FAILURE,
+            error=str(exc),
+            metadata=_datasource_step_metadata(
+                task_id,
+                "lock",
+                "failed",
+                str(exc),
+            ),
+        )
         raise
     except Exception as exc:
         datasource.status = DataSource.Status.ERROR
@@ -106,6 +152,17 @@ def source_sync_task(datasource_uuid):
         record.last_error = str(exc)
         record.last_run_at = timezone.now()
         record.save(update_fields=["last_status", "last_error", "last_run_at"])
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.FAILURE,
+            error=str(exc),
+            metadata=_datasource_step_metadata(
+                task_id,
+                "failed",
+                "failed",
+                str(exc),
+            ),
+        )
         raise
 
     datasource.status = DataSource.Status.ACTIVE
@@ -118,10 +175,15 @@ def source_sync_task(datasource_uuid):
             "updated_at",
         ]
     )
+    synced = int(result.get("synced") or 0)
     record.last_status = ScheduledTask.Status.SUCCESS
     record.last_error = ""
     record.last_run_at = timezone.now()
-    record.last_metrics = {"synced": synced}
+    record.last_metrics = {
+        "synced": synced,
+        "files": result.get("files", 0),
+        "target_path": result.get("target_path") or datasource.target_path,
+    }
     record.save(
         update_fields=[
             "last_status",
@@ -130,7 +192,82 @@ def source_sync_task(datasource_uuid):
             "last_metrics",
         ]
     )
+    TaskTracker.update_task_status(
+        task_id,
+        TaskStatus.SUCCESS,
+        result=record.last_metrics,
+        metadata=_datasource_step_metadata(
+            task_id,
+            "completed",
+            "done",
+            "Datasource sync completed.",
+            progress_percent=100,
+        ),
+    )
     return synced
+
+
+def _datasource_task_metadata(datasource, trigger):
+    """Return unified task metadata for datasource synchronization."""
+
+    lensnode = datasource.lensnode
+    return {
+        "type": "datasource",
+        "trigger": trigger,
+        "datasource_uuid": str(datasource.uuid),
+        "datasource_name": datasource.name,
+        "source_type": datasource.source_type,
+        "lensnode_uuid": str(lensnode.uuid) if lensnode else "",
+        "lensnode_name": lensnode.name if lensnode else "",
+        "target_path": datasource.target_path,
+        "steps": [],
+        "logs": [],
+    }
+
+
+def _append_datasource_task_step(task_id, name, status, message):
+    """Append one datasource task step to TaskExecution metadata."""
+
+    from agentcore_task.adapters.django import TaskTracker
+    from agentcore_task.constants import TaskStatus
+
+    TaskTracker.update_task_status(
+        task_id,
+        TaskStatus.STARTED,
+        metadata=_datasource_step_metadata(task_id, name, status, message),
+    )
+
+
+def _datasource_step_metadata(
+    task_id,
+    name,
+    status,
+    message,
+    progress_percent=None,
+):
+    """Return metadata with an appended datasource task step."""
+
+    from agentcore_task.adapters.django.models import TaskExecution
+
+    task = TaskExecution.objects.filter(task_id=task_id).first()
+    metadata = dict(task.metadata or {}) if task else {}
+    steps = list(metadata.get("steps") or [])
+    steps.append(
+        {
+            "name": name,
+            "status": status,
+            "message": message,
+            "timestamp": timezone.now().isoformat(),
+        }
+    )
+    result = {
+        "steps": steps,
+        "progress_step": name,
+        "progress_message": message,
+    }
+    if progress_percent is not None:
+        result["progress_percent"] = progress_percent
+    return result
 
 
 class SourceSyncBusy(RuntimeError):

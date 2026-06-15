@@ -10,6 +10,7 @@ from django.core.management import call_command
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
+from agentcore_task.adapters.django.models import TaskExecution
 from django_celery_beat.models import PeriodicTask
 
 from core.asgi import application
@@ -38,7 +39,6 @@ from lens.services import (
     finish_lensnode_run,
     rewrite_query,
 )
-from lens.source_sync import reset_cache_path
 from lens.tasks import (
     SourceSyncBusy,
     datasource_lock,
@@ -87,9 +87,10 @@ class LensServiceTests(TransactionTestCase):
         self.datasource = DataSource.objects.create(
             name="Repo Cache",
             source_type="git",
+            lensnode=self.lensnode,
             config={"repo_url": "https://example.com/repo.git"},
             sync_policy={"interval_seconds": 3600},
-            target_path="/opt/storage/repo-cache",
+            target_path="/workspace/repo-cache",
         )
         self.session = Session.objects.create(
             assistant=self.assistant,
@@ -350,38 +351,48 @@ class LensServiceTests(TransactionTestCase):
         await communicator.disconnect()
 
     def test_source_sync_task_updates_datasource_and_scheduled_task(self):
-        with self._local_git_repo() as repo_path:
-            with self._target_path() as target_path:
-                self.datasource.config = {
-                    "repo_url": repo_path,
-                    "branch": "main",
-                }
-                self.datasource.target_path = target_path
-                self.datasource.save(update_fields=["config", "target_path"])
+        with patch("lens.tasks.dispatch_datasource_sync") as dispatch:
+            dispatch.return_value = {
+                "status": "success",
+                "synced": 1,
+                "files": 3,
+                "target_path": self.datasource.target_path,
+            }
+            synced = source_sync_task(str(self.datasource.uuid))
+            self.datasource.refresh_from_db()
 
-                synced = source_sync_task(str(self.datasource.uuid))
-                self.datasource.refresh_from_db()
-
-                record = ScheduledTask.objects.get(
-                    task_type="source_sync",
-                    target_type="datasource",
-                    target_id=self.datasource.uuid,
-                )
-                self.assertEqual(synced, 1)
-                self.assertEqual(self.datasource.status, "active")
-                self.assertIsNotNone(self.datasource.last_synced_at)
-                self.assertTrue(Path(self.datasource.target_path).exists())
-                self.assertEqual(record.last_status, "success")
-                self.assertEqual(record.last_metrics, {"synced": 1})
-
-                reset_cache_path(self.datasource.target_path)
+            record = ScheduledTask.objects.get(
+                task_type="source_sync",
+                target_type="datasource",
+                target_id=self.datasource.uuid,
+            )
+            self.assertEqual(synced, 1)
+            self.assertEqual(self.datasource.status, "active")
+            self.assertIsNotNone(self.datasource.last_synced_at)
+            self.assertEqual(record.last_status, "success")
+            self.assertEqual(
+                record.last_metrics,
+                {
+                    "synced": 1,
+                    "files": 3,
+                    "target_path": self.datasource.target_path,
+                },
+            )
+            task = TaskExecution.objects.get(task_name="datasource_sync")
+            steps = task.metadata.get("steps") or []
+            self.assertGreaterEqual(len(steps), 3)
+            self.assertEqual(steps[0]["name"], "prepare")
+            self.assertEqual(steps[-1]["name"], "completed")
+            self.assertEqual(task.metadata["progress_percent"], 100)
 
     def test_source_sync_task_marks_invalid_source_failed(self):
-        self.datasource.config = {}
-        self.datasource.save(update_fields=["config"])
-
-        with self.assertRaises(ValueError):
-            source_sync_task(str(self.datasource.uuid))
+        with patch("lens.tasks.dispatch_datasource_sync") as dispatch:
+            dispatch.return_value = {
+                "status": "failed",
+                "error": "LENS_SOURCE_CONFIG_INVALID",
+            }
+            with self.assertRaises(RuntimeError):
+                source_sync_task(str(self.datasource.uuid))
 
         self.datasource.refresh_from_db()
         record = ScheduledTask.objects.get(
@@ -407,59 +418,25 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(record.last_status, "failed")
         self.assertEqual(record.last_error, "LENS_SOURCE_SYNC_BUSY")
 
-    def test_source_sync_task_writes_jira_cache(self):
-        with self._target_path() as target_path:
-            self.datasource.source_type = DataSource.SourceType.JIRA
-            self.datasource.config = {
-                "base_url": "https://jira.example.com",
-                "query_rules": {"jql": "project = SRC", "max_results": 2},
+    def test_source_sync_task_dispatches_feishu_datasource(self):
+        self.datasource.source_type = DataSource.SourceType.FEISHU
+        self.datasource.config = {
+            "app_token": "app-token",
+            "doc_ids": ["doc-1", "doc-2"],
+        }
+        self.datasource.save(update_fields=["source_type", "config"])
+
+        with patch("lens.tasks.dispatch_datasource_sync") as dispatch:
+            dispatch.return_value = {
+                "status": "success",
+                "synced": 2,
+                "files": 2,
+                "target_path": self.datasource.target_path,
             }
-            self.datasource.target_path = target_path
-            self.datasource.save(
-                update_fields=["source_type", "config", "target_path"]
-            )
+            synced = source_sync_task(str(self.datasource.uuid))
 
-            with patch("lens.source_sync._http_get_json") as get_json:
-                get_json.return_value = {
-                    "issues": [
-                        {"key": "SRC-1", "fields": {"summary": "One"}},
-                        {"key": "SRC-2", "fields": {"summary": "Two"}},
-                    ]
-                }
-                synced = source_sync_task(str(self.datasource.uuid))
-
-            cache_file = Path(self.datasource.target_path) / "jira" / "issues.json"
-            self.assertEqual(synced, 2)
-            self.assertTrue(cache_file.exists())
-            self.assertIn("SRC-1", cache_file.read_text())
-            reset_cache_path(self.datasource.target_path)
-
-    def test_source_sync_task_writes_feishu_cache(self):
-        with self._target_path() as target_path:
-            self.datasource.source_type = DataSource.SourceType.FEISHU
-            self.datasource.config = {
-                "app_token": "app-token",
-                "doc_ids": ["doc-1", "doc-2"],
-            }
-            self.datasource.target_path = target_path
-            self.datasource.save(
-                update_fields=["source_type", "config", "target_path"]
-            )
-
-            with patch("lens.source_sync._http_get_json") as get_json:
-                get_json.side_effect = [
-                    {"data": {"name": "Doc 1"}},
-                    {"data": {"name": "Doc 2"}},
-                ]
-                synced = source_sync_task(str(self.datasource.uuid))
-
-            cache_file = (
-                Path(self.datasource.target_path) / "feishu" / "documents.json"
-            )
-            self.assertEqual(synced, 2)
-            self.assertTrue(cache_file.exists())
-            self.assertIn("Doc 1", cache_file.read_text())
-            reset_cache_path(self.datasource.target_path)
+        self.assertEqual(synced, 2)
+        dispatch.assert_called_once()
 
     def test_lensnode_health_marks_stale_lensnodes_offline(self):
         self.lensnode.status = LensNode.Status.ONLINE
@@ -508,7 +485,7 @@ class LensServiceTests(TransactionTestCase):
         )
 
         TASK_REGISTRY.clear()
-        register_periodic_tasks()
+        discover_and_register()
 
         cleanup = PeriodicTask.objects.get(name="lens-lensnode-cleanup")
         health = PeriodicTask.objects.get(name="lens-lensnode-health")

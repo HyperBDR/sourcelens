@@ -107,9 +107,10 @@ class LensApiTests(TestCase):
         self.datasource = DataSource.objects.create(
             name="Repo Cache",
             source_type="git",
+            lensnode=self.lensnode,
             config={"repo_url": "https://example.com/repo.git"},
             sync_policy={"interval_seconds": 3600},
-            target_path="/opt/storage/repo-cache",
+            target_path="/workspace/repo-cache",
         )
         self.skill = Skill.objects.create(
             name="Code Search",
@@ -566,9 +567,10 @@ class LensApiTests(TestCase):
         payload = {
             "name": "Scheduled Repo",
             "source_type": "git",
+            "lensnode_uuid": str(self.lensnode.uuid),
             "config": {"repo_url": "https://example.com/repo.git"},
             "sync_policy": {"interval_seconds": 120},
-            "target_path": "/opt/storage/scheduled",
+            "target_path": "/workspace/scheduled",
         }
 
         response = self.client.post(
@@ -580,18 +582,61 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(
             response.data["target_path"],
-            "/opt/storage/scheduled",
+            "/workspace/scheduled",
         )
 
-    def test_datasource_rejects_inline_credentials(self):
+    def test_datasource_create_enqueues_initial_sync(self):
         payload = {
-            "name": "Secret Repo",
+            "name": "Initial Sync Repo",
             "source_type": "git",
-            "config": {
-                "repo_url": "https://example.com/repo.git",
-                "token": "secret",
-            },
-            "target_path": "/opt/storage/secret",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "config": {"repo_url": "https://example.com/repo.git"},
+            "target_path": "/workspace/initial-sync",
+        }
+
+        with patch("lens.views.source_sync_task.delay") as delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    "/api/lens/admin/datasources/",
+                    payload,
+                    format="json",
+                )
+
+        self.assertEqual(response.status_code, 201)
+        delay.assert_called_once_with(response.data["uuid"], "initial")
+
+    def test_datasource_create_uses_lensnode_workspace_path(self):
+        self.lensnode.workspace_path = "/data/lens-workspace"
+        self.lensnode.save(update_fields=["workspace_path", "updated_at"])
+        payload = {
+            "name": "Custom Workspace Repo",
+            "source_type": "git",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "config": {"repo_url": "https://example.com/repo.git"},
+            "target_path": "repos/custom",
+        }
+
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.data["target_path"],
+            "/data/lens-workspace/repos/custom",
+        )
+
+    def test_datasource_create_rejects_path_outside_lensnode_workspace(self):
+        self.lensnode.workspace_path = "/data/lens-workspace"
+        self.lensnode.save(update_fields=["workspace_path", "updated_at"])
+        payload = {
+            "name": "Outside Workspace Repo",
+            "source_type": "git",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "config": {"repo_url": "https://example.com/repo.git"},
+            "target_path": "/workspace/old-root",
         }
 
         response = self.client.post(
@@ -601,7 +646,84 @@ class LensApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("credentials", str(response.data))
+        self.assertIn("LENS_SOURCE_TARGET_PATH_INVALID", str(response.data))
+
+    def test_datasource_rejects_inline_credentials(self):
+        payload = {
+            "name": "Secret Repo",
+            "source_type": "git",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "config": {
+                "repo_url": "https://example.com/repo.git",
+                "token": "secret",
+            },
+            "target_path": "/workspace/secret",
+        }
+
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("secret fields", str(response.data))
+
+    def test_datasource_allows_git_access_token(self):
+        payload = {
+            "name": "Token Repo",
+            "source_type": "git",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "config": {
+                "repo_url": "https://example.com/repo.git",
+                "auth_scheme": "token",
+                "access_token": "ghp_example",
+            },
+            "target_path": "/workspace/token-repo",
+        }
+
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["credential_configured"])
+        self.assertNotIn("access_token", response.data["config"])
+        datasource = DataSource.objects.get(uuid=response.data["uuid"])
+        self.assertNotIn("access_token", datasource.config)
+        self.assertEqual(
+            datasource.credential.get_secret(),
+            "ghp_example",
+        )
+
+    def test_lensnode_tests_datasource_connection(self):
+        with patch(
+            "lens.views.test_datasource_connection",
+            return_value={
+                "status": "success",
+                "message_code": "git_branch_available",
+            },
+        ) as test_connection:
+            response = self.client.post(
+                (
+                    "/api/lens/admin/lensnodes/"
+                    f"{self.lensnode.uuid}/test-datasource-connection/"
+                ),
+                {
+                    "source_type": "git",
+                    "config": {
+                        "repo_url": "https://example.com/repo.git",
+                        "branch": "main",
+                    },
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["message_code"], "git_branch_available")
+        test_connection.assert_called_once()
 
     def test_system_health_returns_node_and_retention_tasks(self):
         ScheduledTask.objects.create(

@@ -367,6 +367,9 @@
                       {{ row.source_type }}
                     </td>
                     <td class="table-cell text-ink-600">
+                      {{ row.lensnode_name || lensNodeName(row.lensnode) }}
+                    </td>
+                    <td class="table-cell text-ink-600">
                       {{ row.target_path || emptyValue }}
                     </td>
                     <td class="table-cell text-ink-600">
@@ -467,7 +470,7 @@
 
       <!-- Assistant Drawer (create wizard + edit) -->
       <AssistantFormDrawer
-        :show="showDrawer"
+        :show="showDrawer && activeTab === 'assistants'"
         :mode="mode"
         :form="form"
         :lensnodes="lensnodes"
@@ -480,6 +483,27 @@
         @close="closeDrawer"
         @save="save"
         @refresh-dirs="refreshDirs"
+      />
+
+      <DataSourceFormDrawer
+        :show="showDrawer && activeTab === 'datasources'"
+        :mode="mode"
+        :form="form"
+        :config="datasourceConfig"
+        :lensnodes="lensnodes"
+        v-model:sync-interval-seconds="syncIntervalSeconds"
+        :path-result="datasourcePathResult"
+        :connection-result="datasourceConnectionResult"
+        :checking-path="checkingDatasourcePath"
+        :testing-connection="testingDatasourceConnection"
+        :saving="saving"
+        :form-error="formError"
+        @close="closeDrawer"
+        @save="save"
+        @type-change="handleDatasourceTypeChange"
+        @check-path="checkDatasourcePath"
+        @test-connection="testDatasourceConnection"
+        @connection-change="resetDatasourceConnectionResult"
       />
 
       <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
@@ -506,104 +530,6 @@
                 :value-label="t('lensAdmin.fields.labelValue')"
               />
             </FormRow>
-          </template>
-
-          <template v-else-if="activeTab === 'datasources'">
-            <FormRow :label="t('lensAdmin.fields.name')">
-              <input v-model="form.name" class="form-input" required />
-            </FormRow>
-            <div class="grid gap-4 md:grid-cols-3">
-              <FormRow :label="t('lensAdmin.fields.type')">
-                <select
-                  v-model="form.source_type"
-                  class="form-input"
-                  @change="handleDatasourceTypeChange"
-                >
-                  <option value="git">git</option>
-                  <option value="jira">jira</option>
-                  <option value="feishu">feishu</option>
-                </select>
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.targetPath')">
-                <input v-model="form.target_path" class="form-input" />
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.syncInterval')">
-                <input
-                  v-model.number="syncIntervalSeconds"
-                  class="form-input"
-                  min="1"
-                  type="number"
-                />
-              </FormRow>
-            </div>
-            <template v-if="form.source_type === 'git'">
-              <FormRow :label="t('lensAdmin.fields.repoUrl')">
-                <input v-model="datasourceConfig.repo_url" class="form-input" />
-              </FormRow>
-              <div class="grid gap-4 md:grid-cols-2">
-                <FormRow :label="t('lensAdmin.fields.branch')">
-                  <input v-model="datasourceConfig.branch" class="form-input" />
-                </FormRow>
-                <FormRow :label="t('lensAdmin.fields.credentialsRef')">
-                  <input
-                    v-model="datasourceConfig.credentials_ref"
-                    class="form-input"
-                  />
-                </FormRow>
-              </div>
-            </template>
-            <template v-else-if="form.source_type === 'jira'">
-              <div class="grid gap-4 md:grid-cols-2">
-                <FormRow :label="t('lensAdmin.fields.jiraBaseUrl')">
-                  <input
-                    v-model="datasourceConfig.base_url"
-                    class="form-input"
-                  />
-                </FormRow>
-                <FormRow :label="t('lensAdmin.fields.authScheme')">
-                  <select
-                    v-model="datasourceConfig.auth_scheme"
-                    class="form-input"
-                  >
-                    <option value="bearer">Bearer</option>
-                    <option value="basic">Basic</option>
-                  </select>
-                </FormRow>
-              </div>
-              <div class="grid gap-4 md:grid-cols-2">
-                <FormRow :label="t('lensAdmin.fields.queryRules')">
-                  <KeyValueEditor
-                    v-model="datasourceConfig.query_rules_rows"
-                    :key-label="t('lensAdmin.fields.ruleKey')"
-                    :value-label="t('lensAdmin.fields.ruleValue')"
-                  />
-                </FormRow>
-                <FormRow :label="t('lensAdmin.fields.fieldMapping')">
-                  <KeyValueEditor
-                    v-model="datasourceConfig.field_mapping_rows"
-                    :key-label="t('lensAdmin.fields.sourceField')"
-                    :value-label="t('lensAdmin.fields.targetField')"
-                  />
-                </FormRow>
-              </div>
-            </template>
-            <template v-else-if="form.source_type === 'feishu'">
-              <div class="grid gap-4 md:grid-cols-2">
-                <FormRow :label="t('lensAdmin.fields.appToken')">
-                  <input
-                    v-model="datasourceConfig.app_token"
-                    class="form-input"
-                  />
-                </FormRow>
-                <FormRow :label="t('lensAdmin.fields.docIds')">
-                  <input
-                    v-model="datasourceConfig.doc_ids_text"
-                    class="form-input"
-                    :placeholder="t('lensAdmin.placeholders.docIds')"
-                  />
-                </FormRow>
-              </div>
-            </template>
           </template>
 
           <template v-else-if="activeTab === 'skills'">
@@ -676,6 +602,7 @@ import { llmAdminApi } from '@/admin/api/llmAdmin'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   approveLensNode,
+  checkLensNodeDataSourcePath,
   createAssistant,
   createDataSource,
   createGlobalSetting,
@@ -697,6 +624,7 @@ import {
   listSkills,
   revokeLensNodeToken,
   syncDataSource,
+  testLensNodeDataSourceConnection,
   updateAssistant,
   updateDataSource,
   updateGlobalSetting,
@@ -712,6 +640,7 @@ import BaseModal from '@/components/ui/BaseModal.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import AssistantFormDrawer from './AssistantFormDrawer.vue'
+import DataSourceFormDrawer from './DataSourceFormDrawer.vue'
 import {
   EMPTY_VALUE as emptyValue,
   compactUuid,
@@ -750,6 +679,10 @@ const mode = ref('create')
 const form = ref({})
 const formError = ref('')
 const datasourceConfig = ref({})
+const datasourcePathResult = ref(null)
+const datasourceConnectionResult = ref(null)
+const checkingDatasourcePath = ref(false)
+const testingDatasourceConnection = ref(false)
 const syncIntervalSeconds = ref(3600)
 const llmConfigOptions = ref([])
 
@@ -1034,6 +967,7 @@ const activeColumns = computed(() => {
     datasources: [
       'datasource',
       'type',
+      'lensnode',
       'targetPath',
       'sync',
       'status',
@@ -1127,6 +1061,10 @@ const modalTitle = computed(() => {
       : t('lensAdmin.modal.edit')
   return `${action} ${activeMeta.value.label}`
 })
+
+const selectedDatasourceLensNode = computed(() =>
+  lensnodes.value.find((node) => node.uuid === form.value.lensnode_uuid)
+)
 
 function formatDateTime(value) {
   if (!value) {
@@ -1275,9 +1213,11 @@ function startCreate() {
   mode.value = 'create'
   formError.value = ''
   datasourceConfig.value = {}
+  datasourcePathResult.value = null
+  datasourceConnectionResult.value = null
   syncIntervalSeconds.value = 3600
   form.value = defaultForm(activeTab.value)
-  if (activeTab.value === 'assistants') {
+  if (['assistants', 'datasources'].includes(activeTab.value)) {
     showDrawer.value = true
   } else {
     showModal.value = true
@@ -1288,9 +1228,11 @@ function startEdit(row) {
   mode.value = 'edit'
   formError.value = ''
   datasourceConfig.value = { ...(row.config || {}) }
+  datasourcePathResult.value = null
+  datasourceConnectionResult.value = null
   syncIntervalSeconds.value = row.sync_policy?.interval_seconds || 3600
   form.value = formFromRow(activeTab.value, row)
-  if (activeTab.value === 'assistants') {
+  if (['assistants', 'datasources'].includes(activeTab.value)) {
     showDrawer.value = true
   } else {
     showModal.value = true
@@ -1307,6 +1249,8 @@ function closeDrawer() {
   showDrawer.value = false
   form.value = {}
   formError.value = ''
+  datasourcePathResult.value = null
+  datasourceConnectionResult.value = null
 }
 
 async function refreshDirs() {
@@ -1353,7 +1297,10 @@ function defaultForm(tab) {
     datasources: {
       name: '',
       source_type: 'git',
+      lensnode_uuid: '',
+      workspace_relative_path: '',
       target_path: '',
+      credential_configured: false,
       status: 'active'
     },
     skills: {
@@ -1424,12 +1371,19 @@ function formFromRow(tab, row) {
     }
   }
   if (tab === 'datasources') {
+    const lensnodeUuid = row.lensnode?.uuid || row.lensnode || ''
     datasourceConfig.value = datasourceConfigFromRow(row)
     return {
       uuid: row.uuid,
       name: row.name || '',
       source_type: row.source_type || 'git',
+      lensnode_uuid: lensnodeUuid,
+      workspace_relative_path: workspaceRelativePath(
+        row.target_path || '',
+        lensnodeUuid
+      ),
       target_path: row.target_path || '',
+      credential_configured: !!row.credential_configured,
       status: row.status || 'active'
     }
   }
@@ -1459,42 +1413,36 @@ function formFromRow(tab, row) {
 }
 
 function datasourceConfigFromRow(row) {
-  if (row.source_type === 'jira') {
-    return {
-      ...(row.config || {}),
-      field_mapping_rows: objectToRows(row.config?.field_mapping || {}),
-      query_rules_rows: objectToRows(row.config?.query_rules || {})
-    }
-  }
   if (row.source_type === 'feishu') {
     return {
       ...(row.config || {}),
       doc_ids_text: (row.config?.doc_ids || []).join(',')
     }
   }
-  return { ...(row.config || {}) }
+  const config = { ...(row.config || {}) }
+  delete config.access_token
+  return {
+    ...config,
+    access_token: ''
+  }
 }
 
 function handleDatasourceTypeChange(seed = null) {
+  datasourcePathResult.value = null
+  datasourceConnectionResult.value = null
   const sourceType = seed?.source_type || form.value.source_type
   if (sourceType === 'git') {
     datasourceConfig.value = {
       repo_url: '',
       branch: 'main',
-      credentials_ref: ''
-    }
-  } else if (sourceType === 'jira') {
-    datasourceConfig.value = {
-      base_url: '',
-      auth_scheme: 'bearer',
-      field_mapping_rows: [],
-      query_rules_rows: []
+      auth_scheme: 'none',
+      access_token: ''
     }
   } else if (sourceType === 'feishu') {
     datasourceConfig.value = {
+      document_url: '',
       app_token: '',
-      doc_ids_text: '',
-      credentials_ref: ''
+      doc_ids_text: ''
     }
   }
 }
@@ -1503,6 +1451,9 @@ async function save() {
   saving.value = true
   formError.value = ''
   try {
+    if (activeTab.value === 'datasources' && !canSaveDatasource()) {
+      throw new Error(t('lensAdmin.datasourceWizard.connectionRequired'))
+    }
     const payload = buildPayload(activeTab.value)
     const uuid = form.value.uuid
     if (activeTab.value === 'assistants') {
@@ -1579,7 +1530,8 @@ function buildPayload(tab) {
     return {
       name: form.value.name,
       source_type: form.value.source_type,
-      target_path: form.value.target_path,
+      lensnode_uuid: form.value.lensnode_uuid,
+      target_path: datasourceTargetPath(),
       config: buildDatasourceConfig(),
       sync_policy: {
         interval_seconds: Math.max(1, Number(syncIntervalSeconds.value) || 3600)
@@ -1634,11 +1586,10 @@ function buildAssistantSettings() {
 
 function buildDatasourceConfig() {
   const config = { ...datasourceConfig.value }
-  if (form.value.source_type === 'jira') {
-    config.query_rules = rowsToObject(config.query_rules_rows)
-    config.field_mapping = rowsToObject(config.field_mapping_rows)
-    delete config.query_rules_rows
-    delete config.field_mapping_rows
+  if (form.value.source_type === 'git') {
+    if (!String(config.access_token || '').trim()) {
+      delete config.access_token
+    }
   }
   if (form.value.source_type === 'feishu') {
     config.doc_ids = String(config.doc_ids_text || '')
@@ -1648,6 +1599,82 @@ function buildDatasourceConfig() {
     delete config.doc_ids_text
   }
   return config
+}
+
+function datasourceTargetPath() {
+  const relative = String(form.value.workspace_relative_path || '').trim()
+  const workspace = datasourceWorkspaceRoot()
+  return relative ? `${workspace}/${relative}` : ''
+}
+
+function workspaceRelativePath(targetPath, lensnodeUuid = null) {
+  const value = String(targetPath || '').trim()
+  const workspace = datasourceWorkspaceRoot(lensnodeUuid)
+  if (value.startsWith(`${workspace}/`)) {
+    return value.slice(workspace.length + 1)
+  }
+  return value
+}
+
+function datasourceWorkspaceRoot(lensnodeUuid = null) {
+  const lensnode = lensnodeUuid
+    ? lensnodes.value.find((node) => node.uuid === lensnodeUuid)
+    : selectedDatasourceLensNode.value
+  return String(lensnode?.workspace_path || '/workspace').replace(/\/+$/, '')
+}
+
+async function checkDatasourcePath() {
+  if (!form.value.lensnode_uuid || !form.value.workspace_relative_path) return
+  checkingDatasourcePath.value = true
+  datasourcePathResult.value = null
+  try {
+    datasourcePathResult.value = await checkLensNodeDataSourcePath(
+      form.value.lensnode_uuid,
+      {
+        target_path: datasourceTargetPath(),
+        source_type: form.value.source_type,
+        config: buildDatasourceConfig()
+      }
+    )
+  } catch (error) {
+    datasourcePathResult.value = {
+      status: 'blocked',
+      message: resolveError(error, t('lensAdmin.messages.loadFailed'))
+    }
+  } finally {
+    checkingDatasourcePath.value = false
+  }
+}
+
+function canSaveDatasource() {
+  return datasourceConnectionResult.value?.status === 'success'
+}
+
+function resetDatasourceConnectionResult() {
+  datasourceConnectionResult.value = null
+}
+
+async function testDatasourceConnection() {
+  if (!form.value.lensnode_uuid) return
+  testingDatasourceConnection.value = true
+  datasourceConnectionResult.value = null
+  try {
+    datasourceConnectionResult.value = await testLensNodeDataSourceConnection(
+      form.value.lensnode_uuid,
+      {
+        datasource_uuid: form.value.uuid || null,
+        source_type: form.value.source_type,
+        config: buildDatasourceConfig()
+      }
+    )
+  } catch (error) {
+    datasourceConnectionResult.value = {
+      status: 'failed',
+      message: resolveError(error, t('lensAdmin.messages.loadFailed'))
+    }
+  } finally {
+    testingDatasourceConnection.value = false
+  }
 }
 
 function buildSelectedDirs() {

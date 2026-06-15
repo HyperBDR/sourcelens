@@ -72,6 +72,14 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_run_done(content)
         elif frame_type == "list_dirs_result":
             await self._handle_list_dirs_result(content)
+        elif frame_type == "datasource_path_result":
+            await self._handle_datasource_path_result(content)
+        elif frame_type == "datasource_connection_result":
+            await self._handle_datasource_connection_result(content)
+        elif frame_type == "datasource_sync_event":
+            await self._handle_datasource_sync_event(content)
+        elif frame_type == "datasource_sync_done":
+            await self._handle_datasource_sync_done(content)
         else:
             await self.send_json(
                 {
@@ -270,6 +278,105 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
     def _cache_list_dirs_result(request_id, dirs):
         from django.core.cache import cache
         cache.set(f"lens:list_dirs:{request_id}", dirs, timeout=30)
+
+    async def _handle_datasource_path_result(self, content):
+        """Store datasource path inspection result for the waiting request."""
+
+        request_id = content.get("request_id") or ""
+        if request_id:
+            await database_sync_to_async(self._cache_datasource_path_result)(
+                request_id,
+                content.get("result") or {},
+            )
+
+    @staticmethod
+    def _cache_datasource_path_result(request_id, result):
+        from django.core.cache import cache
+        cache.set(f"lens:datasource_path:{request_id}", result, timeout=30)
+
+    async def _handle_datasource_connection_result(self, content):
+        """Store datasource connection test result for the waiting request."""
+
+        request_id = content.get("request_id") or ""
+        if request_id:
+            await database_sync_to_async(
+                self._cache_datasource_connection_result
+            )(
+                request_id,
+                content.get("result") or {},
+            )
+
+    @staticmethod
+    def _cache_datasource_connection_result(request_id, result):
+        from django.core.cache import cache
+        cache.set(
+            f"lens:datasource_connection:{request_id}",
+            result,
+            timeout=30,
+        )
+
+    async def _handle_datasource_sync_event(self, content):
+        """Record datasource sync progress in TaskExecution metadata."""
+
+        task_id = content.get("task_id") or ""
+        if not task_id:
+            return
+        await database_sync_to_async(self._record_datasource_sync_event)(
+            task_id,
+            content,
+        )
+
+    @staticmethod
+    def _record_datasource_sync_event(task_id, content):
+        from agentcore_task.adapters.django import TaskTracker
+        from agentcore_task.adapters.django.models import TaskExecution
+        from agentcore_task.constants import TaskStatus
+
+        task = TaskExecution.objects.filter(task_id=task_id).first()
+        metadata = dict(task.metadata or {}) if task else {}
+        steps = list(metadata.get("steps") or [])
+        step = {
+            "name": content.get("step") or "sync",
+            "status": content.get("status") or "running",
+            "message": content.get("message") or "",
+            "timestamp": content.get("timestamp") or timezone.now().isoformat(),
+        }
+        steps.append(step)
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.STARTED,
+            metadata={
+                "steps": steps,
+                "progress_step": step["name"],
+                "progress_message": step["message"],
+            },
+        )
+
+    async def _handle_datasource_sync_done(self, content):
+        """Store datasource sync completion result for the waiting task."""
+
+        request_id = content.get("request_id") or ""
+        if request_id:
+            await database_sync_to_async(self._cache_datasource_sync_done)(
+                request_id,
+                content,
+            )
+
+    @staticmethod
+    def _cache_datasource_sync_done(request_id, content):
+        from django.core.cache import cache
+
+        cache.set(
+            f"lens:datasource_sync:{request_id}",
+            {
+                "status": content.get("status") or "failed",
+                "synced": content.get("synced") or 0,
+                "files": content.get("files") or 0,
+                "target_path": content.get("target_path") or "",
+                "error": content.get("error") or "",
+            },
+            timeout=60,
+        )
 
     async def _send_bad_frame(self, message):
         await self.send_json(

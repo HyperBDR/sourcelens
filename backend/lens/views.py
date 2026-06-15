@@ -1,6 +1,7 @@
 import json
 
 from asgiref.sync import sync_to_async
+from django.db import transaction
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -28,6 +29,13 @@ from .periodic_tasks import (
     ensure_datasource_periodic_task,
     sync_global_periodic_task,
 )
+from .datasource_services import (
+    DataSourceDispatchError,
+    DataSourcePathError,
+    check_datasource_path,
+    normalize_workspace_target_path,
+    test_datasource_connection,
+)
 from .serializers import (
     AssistantSerializer,
     DataSourceSerializer,
@@ -42,7 +50,6 @@ from .serializers import (
     SkillSerializer,
 )
 from .services import cancel_run_on_lensnode, stream_run_events_async
-from .source_sync import SourceSyncError
 from .tasks import source_sync_task
 
 
@@ -249,6 +256,53 @@ class LensNodeViewSet(BaseAdminViewSet):
             status=status.HTTP_408_REQUEST_TIMEOUT,
         )
 
+    @action(detail=True, methods=["post"], url_path="check-datasource-path")
+    def check_datasource_path(self, request, uuid=None):
+        """Ask a connected LensNode to inspect a datasource target path."""
+
+        lensnode = self.get_object()
+        try:
+            target_path = normalize_workspace_target_path(
+                request.data.get("target_path") or "",
+                lensnode.workspace_path,
+            )
+            result = check_datasource_path(
+                lensnode,
+                target_path,
+                request.data.get("source_type") or DataSource.SourceType.GIT,
+                config=request.data.get("config") or {},
+            )
+        except DataSourcePathError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except DataSourceDispatchError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(result)
+
+    @action(detail=True, methods=["post"], url_path="test-datasource-connection")
+    def test_datasource_connection(self, request, uuid=None):
+        """Ask a connected LensNode to test datasource connection settings."""
+
+        lensnode = self.get_object()
+        try:
+            result = test_datasource_connection(
+                lensnode,
+                request.data.get("source_type") or DataSource.SourceType.GIT,
+                config=request.data.get("config") or {},
+                datasource_uuid=request.data.get("datasource_uuid") or None,
+            )
+        except DataSourceDispatchError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(result)
+
 
 class AssistantViewSet(BaseAuthenticatedViewSet):
     """CRUD for assistants."""
@@ -401,10 +455,13 @@ class DataSourceViewSet(BaseAdminViewSet):
     serializer_class = DataSourceSerializer
 
     def perform_create(self, serializer):
-        """Create datasource and register its sync schedule."""
+        """Create datasource, register schedule, and enqueue initial sync."""
 
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
+        transaction.on_commit(
+            lambda: source_sync_task.delay(str(datasource.uuid), "initial")
+        )
 
     def perform_update(self, serializer):
         """Update datasource and register its sync schedule."""
@@ -414,22 +471,10 @@ class DataSourceViewSet(BaseAdminViewSet):
 
     @action(detail=True, methods=["post"])
     def sync(self, request, uuid=None):
-        """Enqueue or run datasource synchronization."""
+        """Enqueue datasource synchronization on its LensNode."""
 
         datasource = self.get_object()
-        run_inline = bool(request.data.get("run_inline", False))
-        if run_inline:
-            try:
-                source_sync_task(str(datasource.uuid))
-            except SourceSyncError as exc:
-                return Response(
-                    {"detail": str(exc)},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            datasource.refresh_from_db()
-            return Response(DataSourceSerializer(datasource).data)
-
-        result = source_sync_task.delay(str(datasource.uuid))
+        result = source_sync_task.delay(str(datasource.uuid), "manual")
         return Response(
             {
                 "uuid": str(datasource.uuid),
@@ -491,6 +536,23 @@ class GlobalSettingViewSet(BaseAdminViewSet):
 
         setting = serializer.save()
         self._sync_runtime_schedule(setting)
+
+    def partial_update(self, request, *args, **kwargs):
+        """Update or create a setting addressed by key."""
+
+        key = kwargs.get(self.lookup_field)
+        instance = self.queryset.filter(key=key).first()
+        data = request.data.copy()
+        data["key"] = key
+        serializer = self.get_serializer(
+            instance,
+            data=data,
+            partial=instance is not None,
+        )
+        serializer.is_valid(raise_exception=True)
+        setting = serializer.save()
+        self._sync_runtime_schedule(setting)
+        return Response(self.get_serializer(setting).data)
 
     def _sync_runtime_schedule(self, setting):
         """Propagate interval settings to celery beat rows."""

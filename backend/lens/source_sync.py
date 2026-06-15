@@ -1,5 +1,4 @@
 import json
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -42,33 +41,6 @@ def _validate_no_inline_credentials(config):
     }
     if forbidden_keys.intersection(config):
         raise SourceSyncError("LENS_SOURCE_INLINE_CREDENTIAL_FORBIDDEN")
-
-
-def _credential_env_name(credentials_ref):
-    """Return environment variable name for a credential reference."""
-
-    normalized = "".join(
-        char if char.isalnum() else "_" for char in str(credentials_ref).upper()
-    )
-    return f"LENS_CREDENTIAL_{normalized}"
-
-
-def _load_credentials(config):
-    """Load credentials from environment by config.credentials_ref."""
-
-    credentials_ref = config.get("credentials_ref")
-    if not credentials_ref:
-        return {}
-    raw = os.getenv(_credential_env_name(credentials_ref), "")
-    if not raw:
-        raise SourceSyncError("LENS_SOURCE_CREDENTIAL_NOT_FOUND")
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise SourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID") from exc
-    if not isinstance(value, dict):
-        raise SourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
-    return value
 
 
 def _http_get_json(url, headers=None, params=None):
@@ -152,54 +124,6 @@ def _sync_git(datasource):
     return 1
 
 
-def _sync_jira(datasource):
-    """Synchronize Jira search results into local cache."""
-
-    config = datasource.config
-    _validate_no_inline_credentials(config)
-    base_url = config.get("base_url")
-    if not base_url:
-        raise SourceSyncError("LENS_SOURCE_CONFIG_INVALID")
-    credentials = _load_credentials(config)
-    auth_scheme = config.get("auth_scheme", "bearer")
-    headers = {"Accept": "application/json"}
-    if credentials:
-        if auth_scheme == "bearer":
-            bearer = credentials.get("bearer_token") or credentials.get("token")
-            if not bearer:
-                raise SourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
-            headers["Authorization"] = f"Bearer {bearer}"
-        elif auth_scheme == "basic":
-            import base64
-
-            username = credentials.get("username")
-            api_token = credentials.get("api_token")
-            if not username or not api_token:
-                raise SourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
-            raw = f"{username}:{api_token}".encode("utf-8")
-            headers["Authorization"] = f'Basic {base64.b64encode(raw).decode("ascii")}'
-
-    query_rules = config.get("query_rules") or {}
-    field_mapping = config.get("field_mapping") or {}
-    fields = list(field_mapping.values()) or [
-        "summary",
-        "description",
-        "status",
-        "updated",
-    ]
-    params = {
-        "jql": query_rules.get("jql", "ORDER BY updated DESC"),
-        "fields": ",".join(fields),
-        "maxResults": int(query_rules.get("max_results", 50)),
-    }
-    url = f'{base_url.rstrip("/")}/rest/api/2/search'
-    payload = _http_get_json(url, headers=headers, params=params)
-    issues = payload.get("issues", [])
-    target = _target_cache_path(datasource, "jira")
-    _write_json(target / "issues.json", payload)
-    return len(issues)
-
-
 def _sync_feishu(datasource):
     """Synchronize Feishu document metadata into local cache."""
 
@@ -209,14 +133,7 @@ def _sync_feishu(datasource):
     doc_ids = config.get("doc_ids") or []
     if not app_token or not isinstance(doc_ids, list):
         raise SourceSyncError("LENS_SOURCE_CONFIG_INVALID")
-    credentials = _load_credentials(config)
-    tenant_token = credentials.get("tenant_access_token")
-    if credentials and not tenant_token:
-        raise SourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
-
     headers = {"Accept": "application/json"}
-    if tenant_token:
-        headers["Authorization"] = f"Bearer {tenant_token}"
 
     documents = []
     for doc_id in doc_ids:
@@ -240,9 +157,6 @@ def sync_datasource(datasource):
 
     if datasource.source_type == DataSource.SourceType.GIT:
         return _sync_git(datasource)
-
-    if datasource.source_type == DataSource.SourceType.JIRA:
-        return _sync_jira(datasource)
 
     if datasource.source_type == DataSource.SourceType.FEISHU:
         return _sync_feishu(datasource)

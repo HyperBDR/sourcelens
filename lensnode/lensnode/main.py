@@ -7,6 +7,9 @@ from urllib.parse import urlencode
 from websockets.asyncio.client import connect
 
 from .config import load_config
+from .datasource_sync import DataSourceSyncError
+from .datasource_sync import inspect_datasource_path, sync_datasource
+from .datasource_sync import test_datasource_connection
 from .executor import TASKS, LensNodeExecutor
 from .logging_utils import (
     elapsed_since,
@@ -192,6 +195,12 @@ class LensNodeClient:
             await self._start_command(message, send_queue)
         elif message_type == "list_dirs":
             await self._handle_list_dirs(message, send_queue)
+        elif message_type == "datasource_check_path":
+            await self._handle_datasource_check_path(message, send_queue)
+        elif message_type == "datasource_test_connection":
+            await self._handle_datasource_test_connection(message, send_queue)
+        elif message_type == "datasource_sync":
+            await self._start_datasource_sync(message, send_queue)
         elif message_type == "run_cancel":
             run_uuid = str(message.get("run_uuid") or "")
             task = self.running_tasks.get(run_uuid)
@@ -303,6 +312,124 @@ class LensNodeClient:
             "request_id": request_id,
             "dirs": result,
         })
+
+    async def _handle_datasource_check_path(self, message, send_queue):
+        """Inspect a datasource path and reply to the control plane."""
+
+        request_id = str(message.get("request_id") or "")
+        try:
+            result = inspect_datasource_path(
+                message,
+                workspace_path=self.config.workspace_path,
+            )
+        except DataSourceSyncError as exc:
+            result = {
+                "path": str(message.get("target_path") or ""),
+                "source_compatible": False,
+                "status": "blocked",
+                "message": str(exc),
+            }
+        await send_queue.put(
+            {
+                "type": "datasource_path_result",
+                "request_id": request_id,
+                "result": result,
+            }
+        )
+
+    async def _handle_datasource_test_connection(self, message, send_queue):
+        """Test datasource connectivity and reply to the control plane."""
+
+        request_id = str(message.get("request_id") or "")
+        try:
+            result = await asyncio.to_thread(
+                test_datasource_connection,
+                message,
+            )
+        except DataSourceSyncError as exc:
+            result = {
+                "status": "failed",
+                "message_code": str(exc),
+                "message": str(exc),
+            }
+        await send_queue.put(
+            {
+                "type": "datasource_connection_result",
+                "request_id": request_id,
+                "result": result,
+            }
+        )
+
+    async def _start_datasource_sync(self, message, send_queue):
+        """Start one datasource sync without blocking WebSocket receive."""
+
+        request_id = str(message.get("request_id") or "")
+        task_id = str(message.get("task_id") or request_id)
+        if not task_id:
+            return
+
+        task_key = f"datasource:{task_id}"
+        task = asyncio.create_task(
+            self._execute_datasource_sync(message, send_queue)
+        )
+        self.running_tasks[task_key] = task
+        task.add_done_callback(lambda item: self._consume_task_exception(item))
+
+    async def _execute_datasource_sync(self, message, send_queue):
+        """Execute a datasource sync command in a worker thread."""
+
+        request_id = str(message.get("request_id") or "")
+        task_id = str(message.get("task_id") or request_id)
+        task_key = f"datasource:{task_id}"
+        loop = asyncio.get_running_loop()
+
+        def emit(event):
+            payload = {
+                "type": "datasource_sync_event",
+                "request_id": request_id,
+                "task_id": task_id,
+                **event,
+            }
+            loop.call_soon_threadsafe(send_queue.put_nowait, payload)
+
+        try:
+            result = await asyncio.to_thread(
+                sync_datasource,
+                message,
+                self.config.workspace_path,
+                emit,
+            )
+            await send_queue.put(
+                {
+                    "type": "datasource_sync_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "success",
+                    **result,
+                }
+            )
+        except Exception as exc:
+            await send_queue.put(
+                {
+                    "type": "datasource_sync_event",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "step": "failed",
+                    "status": "failed",
+                    "message": str(exc),
+                }
+            )
+            await send_queue.put(
+                {
+                    "type": "datasource_sync_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            )
+        finally:
+            self.running_tasks.pop(task_key, None)
 
     async def _send_busy(self, run_uuid, send_queue, reason):
         """Report a run that cannot start because local capacity is full."""

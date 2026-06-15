@@ -1,12 +1,19 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from .datasource_services import (
+    DataSourceDispatchError,
+    DataSourcePathError,
+    normalize_workspace_target_path,
+    validate_datasource_lensnode,
+)
 from .model_checks import check_assistant_model_refs
 from .models import (
     Assistant,
     AssistantMCP,
     AssistantSkill,
     DataSource,
+    DataSourceCredential,
     GlobalSetting,
     MCPServer,
     Message,
@@ -369,6 +376,14 @@ class AssistantSerializer(serializers.ModelSerializer):
 class DataSourceSerializer(serializers.ModelSerializer):
     """Datasource serializer."""
 
+    lensnode_uuid = serializers.UUIDField(write_only=True, required=False)
+    lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    lensnode_name = serializers.CharField(
+        source="lensnode.name",
+        read_only=True,
+    )
+    credential_configured = serializers.SerializerMethodField()
+
     def validate(self, attrs):
         """Validate datasource config by source type."""
 
@@ -381,6 +396,22 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "sync_policy",
             getattr(self.instance, "sync_policy", {}),
         )
+        target_path = attrs.get(
+            "target_path",
+            getattr(self.instance, "target_path", ""),
+        )
+        lensnode_uuid = attrs.pop("lensnode_uuid", None)
+        if lensnode_uuid is not None:
+            try:
+                attrs["lensnode"] = LensNode.objects.get(uuid=lensnode_uuid)
+            except LensNode.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"lensnode_uuid": "LensNode does not exist"}
+                )
+        lensnode = attrs.get(
+            "lensnode",
+            getattr(self.instance, "lensnode", None),
+        )
 
         if not isinstance(config, dict):
             raise serializers.ValidationError({"config": "config must be an object"})
@@ -389,20 +420,58 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 {"sync_policy": "sync_policy must be an object"}
             )
 
-        _validate_no_inline_datasource_credentials(config)
+        _validate_datasource_config_secret_fields(config)
         _validate_sync_policy(sync_policy)
+        try:
+            validate_datasource_lensnode(lensnode)
+            attrs["target_path"] = normalize_workspace_target_path(
+                target_path,
+                lensnode.workspace_path,
+            )
+        except (DataSourcePathError, DataSourceDispatchError) as exc:
+            raise serializers.ValidationError({"target_path": str(exc)})
 
         if source_type == DataSource.SourceType.GIT:
-            if not config.get("repo_url"):
-                raise serializers.ValidationError(
-                    {"config": "git config.repo_url is required"}
-                )
-        elif source_type == DataSource.SourceType.JIRA:
-            _validate_jira_config(config)
+            _validate_git_config(config, self.instance)
         elif source_type == DataSource.SourceType.FEISHU:
             _validate_feishu_config(config)
+        else:
+            raise serializers.ValidationError(
+                {"source_type": "source_type must be git or feishu"}
+            )
 
         return attrs
+
+    def get_credential_configured(self, datasource):
+        """Return whether a datasource has a stored credential."""
+
+        credential = getattr(datasource, "credential", None)
+        return bool(credential and credential.has_secret)
+
+    def to_representation(self, instance):
+        """Return datasource data without plaintext credential values."""
+
+        data = super().to_representation(instance)
+        config = dict(data.get("config") or {})
+        config.pop("access_token", None)
+        data["config"] = config
+        return data
+
+    def create(self, validated_data):
+        """Create a datasource and store credentials separately."""
+
+        access_token = _pop_datasource_access_token(validated_data)
+        datasource = DataSource.objects.create(**validated_data)
+        _sync_datasource_credential(datasource, access_token)
+        return datasource
+
+    def update(self, instance, validated_data):
+        """Update a datasource and optionally replace its credential."""
+
+        access_token = _pop_datasource_access_token(validated_data)
+        datasource = super().update(instance, validated_data)
+        _sync_datasource_credential(datasource, access_token)
+        return datasource
 
     class Meta:
         model = DataSource
@@ -410,7 +479,11 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "uuid",
             "name",
             "source_type",
+            "lensnode",
+            "lensnode_uuid",
+            "lensnode_name",
             "config",
+            "credential_configured",
             "sync_policy",
             "target_path",
             "last_synced_at",
@@ -418,7 +491,12 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["uuid", "created_at", "updated_at"]
+        read_only_fields = [
+            "uuid",
+            "credential_configured",
+            "created_at",
+            "updated_at",
+        ]
         extra_kwargs = {
             "target_path": {
                 "allow_blank": True,
@@ -427,21 +505,67 @@ class DataSourceSerializer(serializers.ModelSerializer):
         }
 
 
-def _validate_no_inline_datasource_credentials(config):
-    forbidden_keys = {
-        "password",
-        "token",
-        "access_token",
-        "secret",
-        "private_key",
-    }
+def _pop_datasource_access_token(validated_data):
+    """Remove plaintext access token from datasource config."""
+
+    config = validated_data.get("config") or {}
+    access_token = config.pop("access_token", "")
+    validated_data["config"] = config
+    return str(access_token or "").strip()
+
+
+def _validate_datasource_config_secret_fields(config):
+    """Reject secret-like config fields outside the credential input."""
+
+    forbidden_keys = {"password", "token", "secret", "private_key"}
     for key, value in config.items():
         if key in forbidden_keys:
             raise serializers.ValidationError(
-                {"config": "inline datasource credentials are forbidden"}
+                {"config": "secret fields must be stored as credentials"}
             )
         if isinstance(value, dict):
-            _validate_no_inline_datasource_credentials(value)
+            _validate_datasource_config_secret_fields(value)
+
+
+def _sync_datasource_credential(datasource, access_token):
+    """Create or update the encrypted credential for a datasource."""
+
+    if datasource.config.get("auth_scheme") != "token":
+        if datasource.credential_id:
+            credential = datasource.credential
+            datasource.credential = None
+            datasource.save(update_fields=["credential", "updated_at"])
+            credential.delete()
+        return
+    if not access_token:
+        return
+    provider = _credential_provider(datasource.config.get("repo_url", ""))
+    credential = datasource.credential
+    if credential is None:
+        credential = DataSourceCredential(
+            name=f"{datasource.name} Git credential",
+            provider=provider,
+            auth_type=DataSourceCredential.AuthType.HTTPS_TOKEN,
+        )
+    else:
+        credential.name = f"{datasource.name} Git credential"
+        credential.provider = provider
+        credential.auth_type = DataSourceCredential.AuthType.HTTPS_TOKEN
+    credential.set_secret(access_token)
+    credential.save()
+    datasource.credential = credential
+    datasource.save(update_fields=["credential", "updated_at"])
+
+
+def _credential_provider(repo_url):
+    """Infer credential provider from a Git repository URL."""
+
+    value = str(repo_url or "").lower()
+    if "github.com" in value:
+        return DataSourceCredential.Provider.GITHUB
+    if "gitlab" in value:
+        return DataSourceCredential.Provider.GITLAB
+    return DataSourceCredential.Provider.GENERIC
 
 
 def _validate_sync_policy(sync_policy):
@@ -452,32 +576,38 @@ def _validate_sync_policy(sync_policy):
         )
 
 
-def _validate_jira_config(config):
-    if not config.get("base_url"):
+def _validate_git_config(config, instance=None):
+    if not config.get("repo_url"):
         raise serializers.ValidationError(
-            {"config": "jira config.base_url is required"}
+            {"config": "git config.repo_url is required"}
         )
-    auth_scheme = config.get("auth_scheme", "bearer")
-    if auth_scheme not in ["bearer", "basic"]:
+    auth_scheme = config.get("auth_scheme", "none")
+    if auth_scheme not in ["none", "token"]:
         raise serializers.ValidationError(
-            {"config": "jira auth_scheme must be bearer or basic"}
+            {"config": "git auth_scheme must be none or token"}
         )
-    query_rules = config.get("query_rules", {})
-    field_mapping = config.get("field_mapping", {})
-    if not isinstance(query_rules, dict):
+    has_new_token = bool(str(config.get("access_token") or "").strip())
+    has_existing = bool(instance and instance.credential_id)
+    if auth_scheme == "token" and not has_new_token and not has_existing:
         raise serializers.ValidationError(
-            {"config": "jira query_rules must be an object"}
-        )
-    if not isinstance(field_mapping, dict):
-        raise serializers.ValidationError(
-            {"config": "jira field_mapping must be an object"}
+            {"config": "git access_token is required for HTTPS Token auth"}
         )
 
 
 def _validate_feishu_config(config):
-    if not config.get("app_token"):
+    if not (
+        config.get("document_url")
+        or config.get("app_token")
+        or config.get("wiki_token")
+        or config.get("doc_ids")
+    ):
         raise serializers.ValidationError(
-            {"config": "feishu config.app_token is required"}
+            {
+                "config": (
+                    "feishu config.document_url, app_token, wiki_token "
+                    "or doc_ids is required"
+                )
+            }
         )
     doc_ids = config.get("doc_ids", [])
     if not isinstance(doc_ids, list):

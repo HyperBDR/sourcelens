@@ -36,6 +36,9 @@
                 <option value="agentcore_task">
                   {{ t('taskManagement.list.taskTypeTask') }}
                 </option>
+                <option value="lens_datasource">
+                  {{ t('taskManagement.list.taskTypeDatasource') }}
+                </option>
               </select>
               <label
                 class="text-sm font-medium text-gray-700 whitespace-nowrap"

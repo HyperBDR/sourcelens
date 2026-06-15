@@ -54,6 +54,28 @@ urlpatterns = [
         AdminRunDetailView.as_view(),
         name="lens-admin-run-detail",
     ),
+    path(
+        "admin/global-settings/system-health/",
+        GlobalSettingViewSet.as_view(
+            {
+                "get": "system_health",
+                "patch": "system_health",
+            }
+        ),
+        name="lens-admin-global-settings-system-health",
+    ),
+    path(
+        "admin/global-settings/<str:key>/",
+        GlobalSettingViewSet.as_view(
+            {
+                "get": "retrieve",
+                "patch": "partial_update",
+                "put": "update",
+                "delete": "destroy",
+            }
+        ),
+        name="lens-admin-global-settings-detail",
+    ),
     *router.urls,
     path(
         "lensnode/ai-gateway/",

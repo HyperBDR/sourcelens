@@ -74,6 +74,22 @@ export async function scanLensNodeDirs(uuid, paths) {
   return unwrapResponse(response)
 }
 
+export async function checkLensNodeDataSourcePath(uuid, payload) {
+  const response = await api.post(
+    `/lens/admin/lensnodes/${uuid}/check-datasource-path/`,
+    payload
+  )
+  return unwrapResponse(response)
+}
+
+export async function testLensNodeDataSourceConnection(uuid, payload) {
+  const response = await api.post(
+    `/lens/admin/lensnodes/${uuid}/test-datasource-connection/`,
+    payload
+  )
+  return unwrapResponse(response)
+}
+
 export async function approveLensNode(uuid) {
   const response = await api.post(`/lens/admin/lensnodes/${uuid}/approve/`)
   return unwrapResponse(response)
