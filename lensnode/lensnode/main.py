@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import signal
 from urllib.parse import urlencode
 
@@ -483,6 +484,37 @@ async def _run_client():
     await client.run_forever()
 
 
+def _init_sentry():
+    """Initialize Sentry error tracking if configured.
+
+    Reuses the backend's SENTRY_* environment variables so LensNode and
+    the backend report into the same Sentry project.
+    """
+
+    enabled = os.getenv("SENTRY_ENABLED", "").lower() in ("1", "true", "yes")
+    dsn = os.getenv("SENTRY_DSN", "")
+    if not enabled or not dsn:
+        return
+
+    try:
+        import sentry_sdk
+    except ImportError:
+        LOGGER.warning("sentry-sdk not installed; skipping Sentry init.")
+        return
+
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+        release=os.getenv("SENTRY_RELEASE", "") or None,
+        traces_sample_rate=float(
+            os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")
+        ),
+        send_default_pii=os.getenv(
+            "SENTRY_SEND_DEFAULT_PII", "false"
+        ).lower() in ("1", "true", "yes"),
+    )
+
+
 def main():
     """CLI entrypoint."""
 
@@ -491,6 +523,7 @@ def main():
         format="%(message)s",
     )
     logging.getLogger("websockets").setLevel(logging.WARNING)
+    _init_sentry()
     asyncio.run(_run_client())
 
 

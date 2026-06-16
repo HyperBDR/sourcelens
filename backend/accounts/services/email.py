@@ -163,6 +163,70 @@ class RegistrationEmailService:
             return False
 
 
+class OtpLoginEmailService:
+    """
+    Service class for sending email verification code (OTP) login emails.
+
+    Sends a plaintext email carrying a short-lived numeric code, reusing
+    the shared delivery options and logging conventions.
+    """
+
+    @staticmethod
+    def send_login_code_email(email, code, language='en-US'):
+        """
+        Send a login verification code email.
+
+        Args:
+            email: Recipient email address
+            code: Numeric verification code
+            language: Language code ('en-US', 'zh-CN')
+
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        try:
+            translation_code = get_translation_language_code(language)
+            with translation.override(translation_code):
+                subject = str(_('Your login verification code'))
+                text_content = str(_(
+                    'Your verification code is %(code)s. '
+                    'It expires in a few minutes. '
+                    'If you did not request it, ignore this email.'
+                ) % {'code': code})
+
+            from_email, connection = get_email_delivery_options()
+
+            email_message = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=from_email,
+                to=[email],
+                connection=connection,
+            )
+            email_message.send()
+
+            logger.info(
+                f"Sent login code email to {email} "
+                f"(language: {language})"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Failed to send login code email - "
+                f"Email: {email}, "
+                f"Language: {language}, "
+                f"Error: {type(e).__name__}: {e}",
+                exc_info=True,
+                extra={
+                    'email': email,
+                    'language': language,
+                    'service': 'OtpLoginEmailService',
+                }
+            )
+            return False
+
+
 class PasswordResetEmailService:
     """
     Service class for sending password reset emails.

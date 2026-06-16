@@ -41,7 +41,6 @@ FEATURE_ALIASES = {
 
 LEGACY_DEFAULT_FEATURES = (
     'workspace',
-    'admin_console',
 )
 
 

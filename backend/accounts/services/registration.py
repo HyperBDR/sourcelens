@@ -313,6 +313,65 @@ class RegistrationService:
         return token, profile
 
     @staticmethod
+    @transaction.atomic
+    def get_or_create_otp_user(
+        email: str,
+        language: str = 'zh-CN',
+        timezone_str: str = 'Asia/Shanghai',
+    ) -> User:
+        """
+        Return an existing user by email or auto-provision a new one.
+
+        Used by the email verification-code login flow. Newly created
+        users have no usable password, no staff flag and no roles. The
+        profile is marked as registration_completed so the frontend does
+        not push them into the password onboarding wizard.
+
+        Args:
+            email: User's email address
+            language: Preferred language for AI output
+            timezone_str: User's timezone
+
+        Returns:
+            User: The existing or newly created user
+        """
+        email = email.lower().strip()
+        user = User.objects.filter(email__iexact=email).first()
+
+        if not user:
+            base_username = re.sub(
+                r'[^a-zA-Z0-9._-]', '', email.split('@')[0]
+            )[:140]
+            if not base_username:
+                base_username = f"user_{secrets.token_hex(4)}"
+            username = base_username
+            counter = 1
+            while User.objects.filter(username=username).exists():
+                username = f"{base_username}{counter}"
+                counter += 1
+
+            user = User.objects.create_user(username=username, email=email)
+            user.set_unusable_password()
+            user.save()
+            logger.info(f"Auto-provisioned OTP user: {username} ({email})")
+
+        profile, created = Profile.objects.get_or_create(
+            user=user,
+            defaults={
+                'registration_completed': True,
+                'language': language,
+                'timezone': timezone_str,
+            },
+        )
+        if not created and not profile.registration_completed:
+            profile.registration_completed = True
+            profile.registration_token = None
+            profile.registration_token_expires = None
+            profile.save()
+
+        return user
+
+    @staticmethod
     def verify_registration_token(token: str) -> tuple[bool, Profile]:
         """
         Verify registration token validity and expiration.

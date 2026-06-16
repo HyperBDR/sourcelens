@@ -23,7 +23,9 @@
           </BaseButton>
         </div>
 
-        <div class="grid gap-3 border-b border-line bg-surface-sunken px-5 py-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div
+          class="grid gap-3 border-b border-line bg-surface-sunken px-5 py-4 sm:grid-cols-2 xl:grid-cols-4"
+        >
           <div
             v-for="metric in metrics"
             :key="metric.label"
@@ -120,6 +122,15 @@
                         进入查询
                       </BaseButton>
                       <BaseButton
+                        v-if="assistant.status === 'active'"
+                        variant="outline"
+                        size="sm"
+                        :title="shareUrl(assistant)"
+                        @click="copyShareUrl(assistant)"
+                      >
+                        {{ t('lens.share.copyLink') }}
+                      </BaseButton>
+                      <BaseButton
                         variant="outline"
                         size="sm"
                         @click="goHistory(assistant)"
@@ -139,7 +150,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
@@ -149,15 +160,47 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useToast } from '@/composables/useToast'
+import { listGlobalSettings } from '@/api/lens'
 import { useLensStore } from '@/store/lens'
 
 import { compactUuid, modelCheckStatus } from './format'
 
 const router = useRouter()
 const { t } = useI18n()
-const { showError } = useToast()
+const { showError, showSuccess } = useToast()
 const lensStore = useLensStore()
 const { assistants, loading } = storeToRefs(lensStore)
+
+const publicBaseUrl = ref('')
+
+function shareUrl(assistant) {
+  const base = publicBaseUrl.value || window.location.origin
+  return `${base.replace(/\/+$/, '')}/lens/assistants/${assistant.slug}/chat`
+}
+
+async function copyShareUrl(assistant) {
+  const url = shareUrl(assistant)
+  try {
+    await navigator.clipboard.writeText(url)
+    showSuccess(t('lens.share.copied'))
+  } catch {
+    window.prompt(t('lens.share.copyManually'), url)
+  }
+}
+
+async function loadBaseUrl() {
+  try {
+    const settings = await listGlobalSettings()
+    const rows = Array.isArray(settings) ? settings : settings?.results || []
+    const found = rows.find((row) => row.key === 'public_base_url')
+    if (found && typeof found.value === 'string') {
+      publicBaseUrl.value = found.value
+    }
+  } catch {
+    // Non-admins cannot read global settings; fall back to the origin.
+    publicBaseUrl.value = ''
+  }
+}
 
 const metrics = computed(() => {
   const active = assistants.value.filter((item) => item.status === 'active')
@@ -202,7 +245,10 @@ function goHistory(assistant) {
   router.push(`/lens/assistants/${assistant.slug}/history`)
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadBaseUrl()
+})
 </script>
 
 <style scoped>

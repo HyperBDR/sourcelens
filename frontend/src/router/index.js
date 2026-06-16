@@ -93,7 +93,7 @@ const routes = [
     path: '/lens/assistants',
     name: 'LensAssistants',
     component: () => import('@/pages/lens/Assistants.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
   },
   {
     path: '/lens/assistants/:slug/chat',
@@ -102,7 +102,7 @@ const routes = [
     props: (route) => ({
       assistantSlug: route.params.slug
     }),
-    meta: { requiresAuth: true }
+    meta: { allowAnonymous: true }
   },
   {
     path: '/lens/assistants/:slug/history',

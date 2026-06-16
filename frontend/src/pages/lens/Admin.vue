@@ -112,6 +112,13 @@
                             {{ formatLLMConfigLabel(config) }}
                           </option>
                         </select>
+                        <input
+                          v-else-if="setting.type === 'text'"
+                          v-model="settingsForm[setting.key]"
+                          type="text"
+                          :placeholder="setting.placeholder"
+                          class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                        />
                         <span class="w-16 text-sm text-ink-500">
                           {{ setting.unit }}
                         </span>
@@ -763,6 +770,7 @@ const systemHealth = ref([])
 const taskSaving = ref({})
 
 const defaultSettings = {
+  public_base_url: '',
   'lensnode.defaults.timeout': 600,
   'retention.run_days': 90,
   'lensnode.health.offline_threshold_s': 120,
@@ -1069,6 +1077,14 @@ const defaultScheduledTasks = computed(() => {
 })
 
 const settingDefinitions = computed(() => [
+  {
+    key: 'public_base_url',
+    label: t('lensAdmin.settings.publicBaseUrlTitle'),
+    description: t('lensAdmin.settings.publicBaseUrlDesc'),
+    type: 'text',
+    unit: '',
+    placeholder: 'https://chat.example.com'
+  },
   {
     key: 'lensnode.defaults.timeout',
     label: t('lensAdmin.settings.timeoutTitle'),

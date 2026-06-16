@@ -79,6 +79,11 @@
     "yourAddress": "您的AI智能邮箱"
   },
   "lens": {
+    "share": {
+      "copyLink": "复制链接",
+      "copied": "分享链接已复制",
+      "copyManually": "请手动复制以下链接："
+    },
     "chat": {
       "liveOutput": "实时输出",
       "newSession": "新建会话",
@@ -157,6 +162,31 @@
   "auth": {
     "login": "登录",
     "register": "注册",
+    "noAssistant": {
+      "title": "登录成功",
+      "message": "你当前没有可使用的助手。请通过管理员分享给你的助手链接直接访问应用。"
+    },
+    "codeLogin": {
+      "title": "邮箱验证码登录",
+      "modalSubtitle": "登录后即可继续对话",
+      "emailLabel": "邮箱",
+      "emailPlaceholder": "输入您的邮箱",
+      "sendCode": "发送验证码",
+      "sending": "发送中...",
+      "resend": "重新发送",
+      "resendIn": "{seconds}秒后可重发",
+      "codeLabel": "验证码",
+      "codePlaceholder": "输入邮箱收到的验证码",
+      "codeSent": "验证码已发送，请查收邮箱",
+      "verifyLogin": "登录",
+      "verifying": "登录中...",
+      "switchToPassword": "使用账号密码登录",
+      "switchToCode": "使用邮箱验证码登录",
+      "turnstileRequired": "请先完成人机验证",
+      "sendFailed": "验证码发送失败，请稍后重试",
+      "verifyFailed": "验证码错误或已过期",
+      "invalidEmail": "请输入有效的邮箱地址"
+    },
     "loginTitle": "登录 SourceLens",
     "registerTitle": "创建您的账户",
     "tabs": {
@@ -746,6 +776,8 @@
       "moduleConfigTitle": "模块配置",
       "moduleConfigSubtitle": "设置核心功能的默认规则与参数。",
       "taskManagementSection": "任务管理",
+      "publicBaseUrlTitle": "对外访问基址",
+      "publicBaseUrlDesc": "助手分享链接使用的基础地址（如自有域名），留空则使用当前服务器地址。",
       "timeoutTitle": "任务超时时间",
       "timeoutDesc": "超过设定分钟数未完成的任务会被标记为失败（由定时任务检测）。",
       "timeoutMinutes": "超时时间（分钟）",

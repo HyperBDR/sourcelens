@@ -2,156 +2,88 @@
   <div
     class="flex min-h-screen items-center justify-center bg-surface-sunken px-4 py-12 sm:px-6 lg:px-8"
   >
-    <div class="w-full max-w-md space-y-8">
-      <!-- Header -->
-      <div>
-        <div class="mb-4 flex items-center justify-between">
-          <BrandLogo variant="responsive" />
-          <LanguageSwitcher />
-        </div>
+    <div class="w-full max-w-sm">
+      <div class="mb-3 flex justify-end">
+        <LanguageSwitcher />
       </div>
 
-      <!-- Login Form -->
-      <form class="mt-6 space-y-4" @submit.prevent="handleLogin">
-        <div>
-          <label class="mb-1 block text-sm font-medium text-ink-700">
-            {{ t('auth.username') }}
-          </label>
-          <BaseInput
-            v-model="formData.username"
-            type="text"
-            name="username"
-            autocomplete="username"
-            :placeholder="t('auth.username')"
-            required
-            :error="errors.username"
-            :disabled="loading"
+      <!-- Login card -->
+      <div
+        v-if="!noAssistant"
+        class="rounded-2xl border border-line bg-white p-8 shadow-xl"
+      >
+        <div class="mb-7 text-center">
+          <BrandLogo
+            variant="mark"
+            class="mx-auto mb-4 flex h-8 justify-center"
           />
-        </div>
-
-        <BaseInput
-          v-model="formData.password"
-          :label="t('auth.password')"
-          type="password"
-          name="password"
-          autocomplete="current-password"
-          :placeholder="t('auth.password')"
-          required
-          :error="errors.password"
-          :disabled="loading"
-        />
-
-        <div class="flex items-center">
-          <input
-            id="remember-me"
-            v-model="rememberMe"
-            name="remember-me"
-            type="checkbox"
-            class="h-4 w-4 rounded border-line text-primary-600 focus:ring-primary-500"
-          />
-          <label for="remember-me" class="ml-2 block text-sm text-ink-900">
-            {{ t('auth.rememberMe') }}
-          </label>
-        </div>
-
-        <div
-          v-if="errorMessage"
-          class="rounded-lg border border-danger-100 bg-danger-50 p-4"
-        >
-          <p class="text-sm text-danger-700">
-            {{ errorMessage }}
+          <h1 class="text-xl font-semibold text-ink-900">
+            {{ t('auth.loginTitle') }}
+          </h1>
+          <p class="mt-2 text-sm text-ink-500">
+            {{ t('auth.codeLogin.modalSubtitle') }}
           </p>
         </div>
 
-        <BaseButton
-          type="submit"
-          variant="primary"
-          class="w-full"
-          :loading="loading"
-          :disabled="loading"
-        >
-          {{ loading ? t('auth.signingIn') : t('auth.signIn') }}
-        </BaseButton>
-      </form>
+        <LoginForm @success="redirectAfterLogin" />
+      </div>
+
+      <!-- Signed in but no assistant available (direct /login entry) -->
+      <div
+        v-else
+        class="rounded-2xl border border-line bg-white p-8 text-center shadow-xl"
+      >
+        <BrandLogo
+          variant="mark"
+          class="mx-auto mb-4 flex h-8 justify-center"
+        />
+        <h1 class="text-xl font-semibold text-ink-900">
+          {{ t('auth.noAssistant.title') }}
+        </h1>
+        <p class="mt-3 text-sm leading-relaxed text-ink-500">
+          {{ t('auth.noAssistant.message') }}
+        </p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
-import BaseInput from '@/components/ui/BaseInput.vue'
-import BaseButton from '@/components/ui/BaseButton.vue'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
+import LoginForm from '@/components/auth/LoginForm.vue'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 
-const formData = reactive({
-  username: '',
-  password: ''
-})
+const noAssistant = ref(false)
 
-const errors = reactive({
-  username: '',
-  password: ''
-})
-
-const loading = ref(false)
-const errorMessage = ref('')
-const rememberMe = ref(false)
-
-const validateLogin = () => {
-  errors.username = ''
-  errors.password = ''
-
-  if (!formData.username.trim()) {
-    errors.username = t('auth.required.username')
-    return false
-  }
-
-  if (!formData.password) {
-    errors.password = t('auth.required.password')
-    return false
-  }
-
-  return true
-}
-
-const handleLogin = async () => {
-  if (!validateLogin()) {
+const redirectAfterLogin = async () => {
+  const next = route.query.next
+  if (typeof next === 'string' && next.startsWith('/')) {
+    await navigate(next)
     return
   }
+  // Admins reach their console; regular end-users have no home here and
+  // should enter via a shared assistant link instead.
+  if (userStore.userHasFeature('admin_console')) {
+    await navigate(userStore.getUserLandingPath())
+    return
+  }
+  noAssistant.value = true
+}
 
-  loading.value = true
-  errorMessage.value = ''
-
+const navigate = async (target) => {
   try {
-    await userStore.login({
-      username: formData.username,
-      password: formData.password
-    })
-
-    // Keep loading state during navigation to prevent button re-enabling
-    // Wait for navigation to complete before clearing loading
-    // If navigation succeeds, component will unmount, so loading will be cleared automatically
-    try {
-      await router.push(userStore.getUserLandingPath())
-    } catch (navigationError) {
-      // Navigation failed (e.g., route doesn't exist), clear loading
-      console.error('Navigation error:', navigationError)
-      loading.value = false
-    }
-    // If navigation succeeds, component unmounts and loading is cleared automatically
-  } catch (error) {
-    console.error('Login error:', error)
-    errorMessage.value = t('auth.loginError')
-    // Only clear loading on error
-    loading.value = false
+    await router.push(target)
+  } catch (navigationError) {
+    console.error('Navigation error:', navigationError)
   }
 }
 </script>

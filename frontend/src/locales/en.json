@@ -79,6 +79,11 @@
     "yourAddress": "Your AI Email"
   },
   "lens": {
+    "share": {
+      "copyLink": "Copy link",
+      "copied": "Share link copied",
+      "copyManually": "Please copy the link manually:"
+    },
     "chat": {
       "liveOutput": "Live output",
       "newSession": "New session",
@@ -157,6 +162,31 @@
   "auth": {
     "login": "Login",
     "register": "Register",
+    "noAssistant": {
+      "title": "Signed in",
+      "message": "You don't have any assistant available yet. Please open the app via the assistant link shared with you."
+    },
+    "codeLogin": {
+      "title": "Email code login",
+      "modalSubtitle": "Sign in to continue the conversation",
+      "emailLabel": "Email",
+      "emailPlaceholder": "Enter your email",
+      "sendCode": "Send code",
+      "sending": "Sending...",
+      "resend": "Resend",
+      "resendIn": "Resend in {seconds}s",
+      "codeLabel": "Verification code",
+      "codePlaceholder": "Enter the code from your email",
+      "codeSent": "Code sent, please check your email",
+      "verifyLogin": "Log in",
+      "verifying": "Logging in...",
+      "switchToPassword": "Use account password",
+      "switchToCode": "Use email code",
+      "turnstileRequired": "Please complete the human verification",
+      "sendFailed": "Failed to send the code, please try again later",
+      "verifyFailed": "The code is incorrect or expired",
+      "invalidEmail": "Please enter a valid email address"
+    },
     "loginTitle": "Sign in to SourceLens",
     "registerTitle": "Create your account",
     "username": "Username",
@@ -736,6 +766,8 @@
       "moduleConfigTitle": "Module Configuration",
       "moduleConfigSubtitle": "Set default rules and parameters for core functions.",
       "taskManagementSection": "Task Management",
+      "publicBaseUrlTitle": "Public Base URL",
+      "publicBaseUrlDesc": "Base address used for assistant share links (e.g. your own domain). Leave empty to use the current server address.",
       "timeoutTitle": "Task Overtime Period",
       "timeoutDesc": "Tasks running longer than the configured minutes are marked as failed (by scheduled job).",
       "timeoutMinutes": "Timeout (minutes)",

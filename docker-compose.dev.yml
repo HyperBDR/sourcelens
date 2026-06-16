@@ -191,6 +191,8 @@ services:
     container_name: sourcelens-ui-dev
     pull_policy: missing
     restart: unless-stopped
+    env_file:
+      - ./.env.dev
     volumes:
       - ./frontend/src:/app/src:ro
       - ./frontend/public:/app/public:ro

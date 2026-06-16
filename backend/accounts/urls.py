@@ -1,11 +1,15 @@
 from django.urls import path
+from django.utils.translation import gettext_lazy as _
+from rest_framework import status
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenRefreshView
 from dj_rest_auth.views import (
     LoginView, LogoutView,
     PasswordChangeView,
 )
 
+from accounts.services import turnstile
 from accounts.views import (
     CheckVirtualEmailUsernameView,
     CompleteGoogleSetupView,
@@ -13,8 +17,10 @@ from accounts.views import (
     ConfirmPasswordResetView,
     CustomUserDetailsView,
     GetAvailableScenesView,
+    SendLoginCodeView,
     SendPasswordResetEmailView,
     SendRegistrationEmailView,
+    VerifyLoginCodeView,
     VerifyRegistrationTokenView,
 )
 from accounts.views.management import (
@@ -29,6 +35,25 @@ from accounts.views.management import (
 
 class CustomLoginView(LoginView):
     permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        """Verify Cloudflare Turnstile before password authentication."""
+
+        token = request.data.get('turnstile_token', '')
+        passed, _errors = turnstile.verify_token(
+            token,
+            request.META.get('REMOTE_ADDR'),
+        )
+        if not passed:
+            return Response(
+                {
+                    'success': False,
+                    'error_code': 'TURNSTILE_FAILED',
+                    'message': _('Human verification failed.'),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().post(request, *args, **kwargs)
 
 
 urlpatterns = [
@@ -49,6 +74,17 @@ urlpatterns = [
         'api/v1/auth/token/refresh',
         TokenRefreshView.as_view(),
         name='token_refresh'
+    ),
+    # Passwordless email verification-code login
+    path(
+        'api/v1/auth/login/send-code',
+        SendLoginCodeView.as_view(),
+        name='login_send_code'
+    ),
+    path(
+        'api/v1/auth/login/verify-code',
+        VerifyLoginCodeView.as_view(),
+        name='login_verify_code'
     ),
     # Get or update user details
     path(

@@ -180,7 +180,22 @@
       </div>
 
       <div class="sidebar-footer">
-        <div ref="dockMenuRef" class="dock-menu-wrap">
+        <button
+          v-if="isAnonymous"
+          type="button"
+          class="anon-login-btn"
+          :class="{
+            'anon-login-btn-collapsed': sidebarCollapsedActive && !isMobile
+          }"
+          :title="t('auth.signIn')"
+          @click="requireLogin"
+        >
+          <LogIn :size="18" :stroke-width="2" aria-hidden="true" />
+          <span v-if="!sidebarCollapsedActive || isMobile">
+            {{ t('auth.signIn') }}
+          </span>
+        </button>
+        <div v-else ref="dockMenuRef" class="dock-menu-wrap">
           <button
             class="dock-trigger"
             :class="[
@@ -231,7 +246,10 @@
             leave-to-class="transform opacity-0 translate-y-1 scale-95"
           >
             <div v-if="dockMenuOpen" class="dock-menu">
-              <div class="dock-section border-b border-line">
+              <div
+                v-if="userStore.userHasFeature('admin_console')"
+                class="dock-section border-b border-line"
+              >
                 <AssistantSwitcher mode="flyout" />
               </div>
 
@@ -273,6 +291,7 @@
         >
           <PanelLeftOpen :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
+        <div class="mobile-topbar-title">{{ assistantName }}</div>
         <button
           type="button"
           class="sidebar-collapse-btn"
@@ -282,8 +301,14 @@
           <Plus :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
       </div>
+      <header v-if="!isMobile && assistantName" class="chat-header">
+        <span class="chat-header-title">{{ assistantName }}</span>
+      </header>
       <div ref="scrollRef" class="thread-scroll">
-        <div v-if="!selectedAssistantUuid" class="thread-loading">
+        <div
+          v-if="!selectedAssistantUuid && !isAnonymous"
+          class="thread-loading"
+        >
           <BaseLoading />
         </div>
         <div v-else class="thread">
@@ -535,7 +560,7 @@
                 class="composer-action-btn"
                 :class="isRunActive ? 'composer-action-btn-stop' : ''"
                 type="button"
-                :disabled="!selectedSessionUuid || (!question.trim() && !isRunActive)"
+                :disabled="(!isAnonymous && !selectedSessionUuid) || (!question.trim() && !isRunActive)"
                 :aria-label="isRunActive ? t('common.stop') : t('common.submit')"
                 @click="handlePrimaryAction"
               >
@@ -571,6 +596,12 @@
         </div>
       </div>
     </main>
+
+    <LoginModal
+      :show="showLoginModal"
+      @close="showLoginModal = false"
+      @success="onLoginSuccess"
+    />
   </div>
 </template>
 
@@ -583,7 +614,7 @@ import {
   watch,
   nextTick
 } from 'vue'
-import { PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles } from '@lucide/vue'
+import { PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles, LogIn } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -591,6 +622,7 @@ import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import AssistantSwitcher from '@/components/lens/AssistantSwitcher.vue'
+import LoginModal from '@/components/auth/LoginModal.vue'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
@@ -601,6 +633,7 @@ import {
   createRun,
   createSession,
   deleteSession,
+  getPublicAssistant,
   getRun,
   listAssistants,
   listMessages,
@@ -644,11 +677,20 @@ let elapsedTimer = null
 let revealTimer = null
 const REVEAL_INTERVAL_MS = 300
 
+const publicAssistant = ref(null)
+const showLoginModal = ref(false)
+
 const selectedAssistant = computed(
   () =>
     assistants.value.find(
       (item) => item.uuid === selectedAssistantUuid.value
     ) || null
+)
+
+const isAnonymous = computed(() => !userStore.isAuthenticated)
+
+const assistantName = computed(
+  () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
 const displayName = computed(() => {
@@ -1014,6 +1056,19 @@ async function bootstrap() {
   currentRun.value = null
   messages.value = []
   resetStreamState()
+
+  // Anonymous visitors can browse the shared chat page and see the
+  // assistant name, but only authenticated users load private sessions.
+  if (isAnonymous.value) {
+    try {
+      publicAssistant.value = await getPublicAssistant(route.params.slug)
+    } catch {
+      publicAssistant.value = null
+      showError(t('lens.chat.loadFailed'))
+    }
+    return
+  }
+
   try {
     assistants.value = await listAssistants()
 
@@ -1035,6 +1090,17 @@ async function bootstrap() {
   } catch {
     showError(t('lens.chat.loadFailed'))
   }
+}
+
+function requireLogin() {
+  showLoginModal.value = true
+}
+
+async function onLoginSuccess() {
+  showLoginModal.value = false
+  // Load the now-authenticated user's assistants and sessions so the
+  // composer becomes usable without a full page reload.
+  await bootstrap()
 }
 
 async function loadSessions(selectUuid = '') {
@@ -1285,6 +1351,11 @@ function handleStepEvent(event, ts) {
 }
 
 async function submit() {
+  // Unauthenticated visitors must log in before sending a message.
+  if (isAnonymous.value) {
+    requireLogin()
+    return
+  }
   // Bind this submit to the session it started in. If the user switches
   // assistant/session mid-flight, the stream is aborted on purpose — that is
   // not a failure, so we must not restore the draft, alarm the user, or write
@@ -1420,15 +1491,26 @@ watch(
   () => route.params.slug,
   () => {
     dockMenuOpen.value = false
+    // On a hard load with a stored token, defer the first bootstrap to
+    // onMounted so it runs after the user is hydrated — avoids a flash of
+    // the anonymous view and a redundant public fetch.
+    if (!userStore.user && localStorage.getItem('access_token')) {
+      return
+    }
     bootstrap()
   },
   { immediate: true }
 )
 
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('click', handleOutsideClick)
   if (window.innerWidth < 1024) {
     sidebarOpen.value = false
+  }
+  // Public route: hydrate a stored user (if any), then bootstrap once.
+  if (!userStore.user && localStorage.getItem('access_token')) {
+    await userStore.checkAuthStatus()
+    bootstrap()
   }
 })
 
@@ -1607,6 +1689,19 @@ onBeforeUnmount(() => {
 .mobile-topbar {
   @apply flex flex-shrink-0 items-center gap-1 border-b px-2 py-1.5;
   border-color: #e5e7eb;
+}
+
+.mobile-topbar-title {
+  @apply min-w-0 flex-1 truncate text-center text-sm font-semibold text-ink-900;
+}
+
+.chat-header {
+  @apply flex flex-shrink-0 items-center gap-3 border-b px-5 py-3;
+  border-color: #e5e7eb;
+}
+
+.chat-header-title {
+  @apply min-w-0 truncate text-base font-semibold text-ink-900;
 }
 
 .retry-hint {
@@ -2045,6 +2140,18 @@ onBeforeUnmount(() => {
 
 .dock-trigger-collapsed {
   @apply justify-center px-0;
+}
+
+.anon-login-btn {
+  @apply flex w-full items-center justify-center gap-2 rounded-xl border border-primary-200 bg-primary-50 px-3 py-2.5 text-sm font-medium text-primary-700 shadow-sm transition-colors;
+}
+
+.anon-login-btn:hover {
+  @apply border-primary-300 bg-primary-100;
+}
+
+.anon-login-btn-collapsed {
+  @apply gap-0 px-0;
 }
 
 .dock-avatar {
