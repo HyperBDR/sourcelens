@@ -293,6 +293,7 @@
       "noTasks": "No tasks",
       "details": "Details",
       "basicInfo": "Basic Information",
+      "taskDetails": "Task Details",
       "sync": "Sync Status",
       "syncSuccess": "Synced",
       "syncFailed": "Sync failed",
@@ -316,6 +317,12 @@
       "logMessage": "Message",
       "logTime": "Time",
       "currentProgress": "Current progress",
+      "itemName": "Item",
+      "resultFile": "Result File",
+      "successItems": "Successful Items",
+      "failedItems": "Failed Items",
+      "folders": "Folders",
+      "files": "Files",
       "datasourceInfo": "Data Source Info",
       "datasourceName": "Data Source Name",
       "datasourceType": "Data Source Type",
@@ -693,7 +700,8 @@
       "toolSummary": "Skills {skills} / MCP {mcps}",
       "dirTaskSummary": "Dirs {dirs} / Tasks {tasks}",
       "notRecorded": "Not recorded",
-      "intervalSeconds": "{seconds}s"
+      "intervalSeconds": "{seconds}s",
+      "syncRunning": "Syncing"
     },
     "datasourceDetail": {
       "title": "Data Source Detail",
@@ -713,6 +721,7 @@
       "issueToken": "Issue",
       "revokeToken": "Revoke",
       "sync": "Sync",
+      "cancelSync": "Cancel Sync",
       "addRow": "Add row",
       "removeRow": "Remove"
     },
@@ -929,7 +938,9 @@
       "tokenRevoked": "Token revoked",
       "tokenRevokeFailed": "Token revoke failed",
       "syncStarted": "Sync task triggered",
-      "syncFailed": "Failed to trigger sync task"
+      "syncFailed": "Failed to trigger sync task",
+      "syncCancelled": "Sync task cancelled",
+      "syncCancelFailed": "Failed to cancel sync task"
     }
   }
 }

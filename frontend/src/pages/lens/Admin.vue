@@ -298,7 +298,31 @@
                       </div>
                     </td>
                     <td class="table-cell text-ink-600">
-                      {{ formatSyncPolicy(row.sync_policy, row.last_synced_at) }}
+                      <div class="space-y-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <StatusBadge
+                            :status="
+                              isDataSourceSyncing(row)
+                                ? 'processing'
+                                : 'pending'
+                            "
+                          />
+                          <span class="text-sm text-ink-600">
+                            {{ formatDataSourceSyncState(row) }}
+                          </span>
+                        </div>
+                        <div
+                          v-if="isDataSourceSyncing(row)"
+                          class="space-y-1 text-xs text-ink-500"
+                        >
+                          <div class="break-words">
+                            {{ row.current_sync?.progress_message || row.current_sync?.progress_step || emptyValue }}
+                          </div>
+                          <div class="font-mono">
+                            {{ compactUuid(row.current_sync?.task_id) }}
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td class="table-cell">
                       <StatusBadge :status="row.status" />
@@ -308,9 +332,18 @@
                         <BaseButton
                           size="sm"
                           variant="outline"
+                          :disabled="isDataSourceSyncing(row)"
                           @click="sync(row)"
                         >
                           {{ t('lensAdmin.actions.sync') }}
+                        </BaseButton>
+                        <BaseButton
+                          v-if="isDataSourceSyncing(row)"
+                          size="sm"
+                          variant="danger"
+                          @click="cancelSync(row)"
+                        >
+                          {{ t('lensAdmin.actions.cancelSync') }}
                         </BaseButton>
                         <RowActions :row="row" />
                       </div>
@@ -745,6 +778,7 @@ import { llmAdminApi } from '@/admin/api/llmAdmin'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   approveLensNode,
+  cancelDataSourceSync,
   checkLensNodeDataSourcePath,
   createAssistant,
   createDataSource,
@@ -1283,6 +1317,17 @@ function formatSyncPolicy(syncPolicy, lastSyncedAt) {
     ? t('lensAdmin.table.intervalSeconds', { seconds: interval })
     : emptyValue
   return `${intervalText} · ${formatDateTime(lastSyncedAt)}`
+}
+
+function isDataSourceSyncing(row) {
+  return Boolean(row?.current_sync?.task_id)
+}
+
+function formatDataSourceSyncState(row) {
+  if (isDataSourceSyncing(row)) {
+    return t('lensAdmin.table.syncRunning')
+  }
+  return formatSyncPolicy(row.sync_policy, row.last_synced_at)
 }
 
 function detailItem(label, value, mono = false) {
@@ -2069,6 +2114,21 @@ async function sync(row) {
     await load()
   } catch (error) {
     showError(resolveError(error, t('lensAdmin.messages.syncFailed')))
+  }
+}
+
+async function cancelSync(row) {
+  try {
+    const result = await cancelDataSourceSync(row.uuid)
+    const taskId = result?.task_id || row.current_sync?.task_id || ''
+    showSuccess(
+      taskId
+        ? `${t('lensAdmin.messages.syncCancelled')} (${taskId})`
+        : t('lensAdmin.messages.syncCancelled')
+    )
+    await load()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.syncCancelFailed')))
   }
 }
 

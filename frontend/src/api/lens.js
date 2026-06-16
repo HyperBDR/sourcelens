@@ -181,6 +181,11 @@ export async function syncDataSource(uuid, payload = {}) {
   return unwrapResponse(response)
 }
 
+export async function cancelDataSourceSync(uuid) {
+  const response = await api.post(`/lens/admin/datasources/${uuid}/cancel-sync/`)
+  return unwrapResponse(response)
+}
+
 export async function listSkills() {
   const response = await api.get('/lens/admin/skills/')
   return unwrapList(unwrapResponse(response))

@@ -57,9 +57,39 @@
 
       <!-- Content - Scrollable -->
       <div class="flex-1 overflow-y-auto">
-        <div v-if="task" class="p-6 space-y-6">
-          <!-- Basic Information -->
-          <div>
+        <div v-if="task">
+          <div
+            class="sticky top-0 z-10 flex gap-5 border-b border-gray-200 bg-white px-6"
+          >
+            <button
+              type="button"
+              class="detail-tab"
+              :class="activeDetailTab === 'basic' ? 'detail-tab-active' : ''"
+              @click="activeDetailTab = 'basic'"
+            >
+              {{ t('taskManagement.list.basicInfo') }}
+            </button>
+            <button
+              type="button"
+              class="detail-tab"
+              :class="
+                activeDetailTab === 'details' ? 'detail-tab-active' : ''
+              "
+              @click="activeDetailTab = 'details'"
+            >
+              {{ t('taskManagement.list.taskDetails') }}
+              <span
+                v-if="isDatasourceTask && datasourceItemResults.length"
+                class="ml-1 text-xs text-gray-400"
+              >
+                {{ datasourceItemResults.length }}
+              </span>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-6">
+            <!-- Basic Information -->
+            <div v-show="activeDetailTab === 'basic'">
             <h3 class="text-sm font-semibold text-gray-900 mb-4">
               {{ t('taskManagement.list.basicInfo') }}
             </h3>
@@ -178,13 +208,14 @@
                 </dd>
               </div>
             </dl>
-          </div>
+            </div>
 
-          <!-- Datasource task context -->
-          <div
-            v-if="isDatasourceTask"
-            class="border-t border-gray-200 pt-6"
-          >
+            <!-- Datasource task context -->
+            <div
+              v-if="isDatasourceTask"
+              v-show="activeDetailTab === 'basic'"
+              class="border-t border-gray-200 pt-6"
+            >
             <h3 class="text-sm font-semibold text-gray-900 mb-4">
               {{ t('taskManagement.list.datasourceInfo') }}
             </h3>
@@ -205,10 +236,13 @@
                 </dd>
               </div>
             </dl>
-          </div>
+            </div>
 
-          <!-- Detailed steps / execution logs from metadata -->
-          <div class="border-t border-gray-200 pt-6">
+            <!-- Detailed steps / execution logs from metadata -->
+            <div
+              v-show="activeDetailTab === 'details'"
+              class="border-t border-gray-200 pt-6"
+            >
             <h3 class="text-sm font-semibold text-gray-900 mb-4">
               {{ t('taskManagement.list.detailedSteps') }}
             </h3>
@@ -220,6 +254,73 @@
                 >{{ t('taskManagement.list.currentProgress') }}:</span
               >
               {{ currentProgressText }}
+            </div>
+
+            <div
+              v-if="isDatasourceTask && datasourceSyncStats.length"
+              class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
+            >
+              <div
+                v-for="item in datasourceSyncStats"
+                :key="item.label"
+                class="rounded-lg border border-gray-200 bg-white p-3"
+              >
+                <div class="text-xs font-medium text-gray-500">
+                  {{ item.label }}
+                </div>
+                <div class="mt-1 text-lg font-semibold text-gray-900">
+                  {{ item.value }}
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-if="isDatasourceTask && datasourceItemResults.length"
+              class="mb-4 overflow-hidden rounded-lg border border-gray-200"
+            >
+              <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-3 py-2 text-left font-semibold text-gray-600">
+                      {{ t('taskManagement.list.itemName') }}
+                    </th>
+                    <th class="px-3 py-2 text-left font-semibold text-gray-600">
+                      {{ t('taskManagement.list.status') }}
+                    </th>
+                    <th class="px-3 py-2 text-left font-semibold text-gray-600">
+                      {{ t('taskManagement.list.resultFile') }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 bg-white">
+                  <tr
+                    v-for="item in datasourceItemResults"
+                    :key="`${item.token}-${item.status}-${item.timestamp}`"
+                  >
+                    <td class="px-3 py-2">
+                      <div class="font-medium text-gray-900">
+                        {{ item.item_name || item.token || '-' }}
+                      </div>
+                      <div class="font-mono text-xs text-gray-500">
+                        {{ item.item_type || item.kind || '-' }}
+                      </div>
+                    </td>
+                    <td class="px-3 py-2">
+                      <StatusBadge :status="mapStepStatus(item.status)" />
+                      <div
+                        v-if="item.error"
+                        class="mt-1 max-w-xs truncate text-xs text-red-700"
+                        :title="item.error"
+                      >
+                        {{ item.error }}
+                      </div>
+                    </td>
+                    <td class="px-3 py-2 font-mono text-xs text-gray-600">
+                      {{ item.file || '-' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
             <div
               v-if="detailSteps.length > 0"
@@ -287,10 +388,14 @@
             >
               {{ t('taskManagement.list.noStepsOrLogs') }}
             </p>
-          </div>
+            </div>
 
-          <!-- Traceback -->
-          <div v-if="task.traceback" class="border-t border-gray-200 pt-6">
+            <!-- Traceback -->
+            <div
+              v-if="task.traceback"
+              v-show="activeDetailTab === 'details'"
+              class="border-t border-gray-200 pt-6"
+            >
             <h3 class="text-sm font-semibold text-gray-900 mb-4">
               {{ t('taskManagement.list.traceback') }}
             </h3>
@@ -302,6 +407,7 @@
                 >{{ task.traceback }}</pre
               >
             </div>
+            </div>
           </div>
         </div>
       </div>
@@ -310,7 +416,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
 import { formatDuration } from '@/utils/formatting'
@@ -330,6 +436,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const { t } = useI18n()
+const activeDetailTab = ref('basic')
 
 const metadata = computed(() => props.task?.metadata || {})
 
@@ -339,8 +446,18 @@ const detailSteps = computed(() => {
     return meta.steps.map((s) => ({
       step: s.step ?? s.name,
       name: s.name ?? s.step,
+      status: s.status,
       message: s.message ?? s.description ?? '',
-      timestamp: s.timestamp ?? s.time
+      timestamp: s.timestamp ?? s.time,
+      category: s.category,
+      kind: s.kind,
+      token: s.token,
+      item_type: s.item_type,
+      item_name: s.item_name,
+      file: s.file,
+      file_extension: s.file_extension,
+      error: s.error,
+      summary: s.summary
     }))
   }
   if (Array.isArray(meta.logs) && meta.logs.length > 0) {
@@ -374,6 +491,43 @@ const currentProgressText = computed(() => {
 const isDatasourceTask = computed(() => {
   const meta = metadata.value
   return props.task?.module === 'lens_datasource' || meta.type === 'datasource'
+})
+
+const datasourceItemResults = computed(() => {
+  if (!isDatasourceTask.value) return []
+  return detailSteps.value.filter((step) =>
+    ['item_done', 'item_failed'].includes(step.name || step.step)
+  )
+})
+
+const datasourceSyncStats = computed(() => {
+  if (!isDatasourceTask.value) return []
+  const summary = metadata.value.sync_summary || {}
+  const done = datasourceItemResults.value.filter(
+    (item) => item.status === 'done'
+  ).length
+  const failed = datasourceItemResults.value.filter(
+    (item) => item.status === 'failed'
+  ).length
+  const rows = [
+    {
+      label: t('taskManagement.list.successItems'),
+      value: summary.documents ?? done
+    },
+    {
+      label: t('taskManagement.list.failedItems'),
+      value: summary.failed ?? failed
+    },
+    {
+      label: t('taskManagement.list.folders'),
+      value: summary.folders ?? 0
+    },
+    {
+      label: t('taskManagement.list.files'),
+      value: summary.files ?? done
+    }
+  ]
+  return rows
 })
 
 const datasourceDetailRows = computed(() => {
@@ -485,7 +639,30 @@ const mapTaskStatus = (status) => {
   return m[status] || (status && status.toLowerCase()) || 'pending'
 }
 
+function mapStepStatus(status) {
+  const m = {
+    running: 'processing',
+    done: 'success',
+    failed: 'failed'
+  }
+  return m[status] || status || 'pending'
+}
+
 const handleClose = () => {
   emit('close')
 }
 </script>
+
+<style scoped>
+.detail-tab {
+  @apply py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 transition-colors;
+}
+
+.detail-tab:hover {
+  @apply text-gray-700;
+}
+
+.detail-tab-active {
+  @apply border-primary-500 text-primary-600;
+}
+</style>

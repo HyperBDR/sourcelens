@@ -383,6 +383,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     credential_configured = serializers.SerializerMethodField()
+    current_sync = serializers.SerializerMethodField()
 
     def validate(self, attrs):
         """Validate datasource config by source type."""
@@ -448,6 +449,44 @@ class DataSourceSerializer(serializers.ModelSerializer):
         credential = getattr(datasource, "credential", None)
         return bool(credential and credential.has_secret)
 
+    def get_current_sync(self, datasource):
+        """Return the latest running datasource sync task, if any."""
+
+        from agentcore_task.adapters.django.models import TaskExecution
+        from agentcore_task.constants import TaskStatus
+
+        task = (
+            TaskExecution.objects.filter(
+                module="lens_datasource",
+                metadata__datasource_uuid=str(datasource.uuid),
+                status__in=[
+                    TaskStatus.PENDING,
+                    *TaskStatus.get_running_statuses(),
+                ],
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if task is None:
+            return None
+        return {
+            "id": task.id,
+            "task_id": task.task_id,
+            "task_name": task.task_name,
+            "status": task.status,
+            "started_at": task.started_at,
+            "created_at": task.created_at,
+            "progress_step": (task.metadata or {}).get("progress_step", ""),
+            "progress_message": (task.metadata or {}).get(
+                "progress_message",
+                "",
+            ),
+            "progress_percent": (task.metadata or {}).get(
+                "progress_percent",
+                None,
+            ),
+        }
+
     def to_representation(self, instance):
         """Return datasource data without plaintext credential values."""
 
@@ -488,6 +527,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "lensnode_name",
             "config",
             "credential_configured",
+            "current_sync",
             "sync_policy",
             "target_path",
             "last_synced_at",
@@ -499,6 +539,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "uuid",
             "credential_configured",
+            "current_sync",
             "last_error",
             "created_at",
             "updated_at",

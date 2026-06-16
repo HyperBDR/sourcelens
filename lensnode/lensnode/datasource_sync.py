@@ -362,10 +362,48 @@ def _sync_feishu_documents(config, target, headers, emit):
     synced = 0
     documents = []
     for doc_id in doc_ids:
-        _emit(emit, "sync_content", "running", f"Exporting Feishu {doc_id}.")
-        exported = _export_feishu_document(doc_id, "docx", headers)
+        _emit(
+            emit,
+            "item_started",
+            "running",
+            f"Exporting Feishu {doc_id}.",
+            category="document",
+            kind="document",
+            token=doc_id,
+            item_type="docx",
+            item_name=doc_id,
+        )
+        try:
+            exported = _export_feishu_document(doc_id, "docx", headers)
+        except DataSourceSyncError as exc:
+            _emit(
+                emit,
+                "item_failed",
+                "failed",
+                f"Failed to export Feishu {doc_id}.",
+                category="document",
+                kind="document",
+                token=doc_id,
+                item_type="docx",
+                item_name=doc_id,
+                error=str(exc),
+            )
+            raise
         filename = _export_filename(exported, doc_id, "docx")
         (docs_dir / filename).write_bytes(exported["content"])
+        _emit(
+            emit,
+            "item_done",
+            "done",
+            f"Exported Feishu {doc_id} to docs/{filename}.",
+            category="document",
+            kind="document",
+            token=doc_id,
+            item_type=exported.get("type") or "docx",
+            item_name=exported.get("file_name") or doc_id,
+            file=f"docs/{filename}",
+            file_extension=exported.get("file_extension") or "docx",
+        )
         documents.append(
             {
                 "doc_id": doc_id,
@@ -390,6 +428,12 @@ def _sync_feishu_documents(config, target, headers, emit):
         "manifest",
         "done",
         f"Feishu sync completed with {synced} documents.",
+        category="summary",
+        summary={
+            "documents": synced,
+            "files": synced,
+            "failed": 0,
+        },
     )
     return {"synced": synced, "files": synced, "target_path": str(target)}
 
@@ -448,6 +492,17 @@ def _sync_feishu_folder(config, target, headers, emit):
                     stats["files"] += 1
             except DataSourceSyncError as exc:
                 stats["failed"] += 1
+                _emit(
+                    emit,
+                    "item_failed",
+                    "failed",
+                    f"Failed to sync Feishu {name}.",
+                    category="document",
+                    token=token,
+                    item_type=item_type,
+                    item_name=name,
+                    error=str(exc),
+                )
                 manifest_items.append(
                     {
                         "token": token,
@@ -482,6 +537,8 @@ def _sync_feishu_folder(config, target, headers, emit):
         "manifest",
         "done",
         f"Feishu folder sync completed with {total} files.",
+        category="summary",
+        summary=stats,
     )
     return {
         "synced": total,
@@ -499,10 +556,33 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
     name = _feishu_item_name(item)
     item_type = _feishu_item_type(item)
     if _is_feishu_exportable_type(item_type):
-        _emit(emit, "sync_content", "running", f"Exporting Feishu {name}.")
+        _emit(
+            emit,
+            "item_started",
+            "running",
+            f"Exporting Feishu {name}.",
+            category="document",
+            kind="document",
+            token=token,
+            item_type=item_type,
+            item_name=name,
+        )
         exported = _export_feishu_document(token, item_type, headers)
         filename = _export_filename(exported, name or token, item_type)
         (target_dir / filename).write_bytes(exported["content"])
+        _emit(
+            emit,
+            "item_done",
+            "done",
+            f"Exported Feishu {name} to {filename}.",
+            category="document",
+            kind="document",
+            token=token,
+            item_type=item_type,
+            item_name=exported.get("file_name") or name or token,
+            file=str((target_dir / filename).name),
+            file_extension=exported.get("file_extension") or "",
+        )
         return {
             "kind": "document",
             "token": token,
@@ -512,10 +592,32 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
             "file_extension": exported.get("file_extension") or "",
         }
 
-    _emit(emit, "download_file", "running", f"Downloading Feishu {name}.")
+    _emit(
+        emit,
+        "item_started",
+        "running",
+        f"Downloading Feishu {name}.",
+        category="file",
+        kind="file",
+        token=token,
+        item_type=item_type,
+        item_name=name,
+    )
     filename = _safe_filename(name or token)
     raw = _download_feishu_file(token, headers)
     (target_dir / filename).write_bytes(raw)
+    _emit(
+        emit,
+        "item_done",
+        "done",
+        f"Downloaded Feishu {name} to {filename}.",
+        category="file",
+        kind="file",
+        token=token,
+        item_type=item_type,
+        item_name=name,
+        file=str((target_dir / filename).name),
+    )
     return {
         "kind": "file",
         "token": token,
@@ -1040,15 +1142,15 @@ def _count_files(path):
     return count
 
 
-def _emit(emit, step, status, message):
+def _emit(emit, step, status, message, **extra):
     """Emit a datasource sync progress event."""
 
     if emit is not None:
-        emit(
-            {
-                "step": step,
-                "status": status,
-                "message": message,
-                "timestamp": utc_timestamp(),
-            }
-        )
+        payload = {
+            "step": step,
+            "status": status,
+            "message": message,
+            "timestamp": utc_timestamp(),
+        }
+        payload.update(extra)
+        emit(payload)

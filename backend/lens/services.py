@@ -388,6 +388,27 @@ def cancel_run_on_lensnode(run):
     return None
 
 
+def cancel_datasource_sync_on_lensnode(lensnode, task_id):
+    """Send a datasource_cancel command to the connected LensNode."""
+
+    if lensnode is None or not task_id:
+        return None
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return None
+    async_to_sync(channel_layer.group_send)(
+        lensnode_group_name(lensnode.uuid),
+        {
+            "type": "lensnode.command",
+            "payload": {
+                "type": "datasource_cancel",
+                "task_id": str(task_id),
+            },
+        },
+    )
+    return None
+
+
 def append_lensnode_output(
     run_uuid, content_delta="", final_content=None, reset=False
 ):

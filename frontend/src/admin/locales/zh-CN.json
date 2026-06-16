@@ -293,6 +293,7 @@
       "noTasks": "暂无任务",
       "details": "详情",
       "basicInfo": "基本信息",
+      "taskDetails": "任务详情",
       "sync": "同步状态",
       "syncSuccess": "同步成功",
       "syncFailed": "同步失败",
@@ -316,6 +317,12 @@
       "logMessage": "说明",
       "logTime": "时间",
       "currentProgress": "当前进度",
+      "itemName": "条目",
+      "resultFile": "结果文件",
+      "successItems": "成功条目",
+      "failedItems": "失败条目",
+      "folders": "目录",
+      "files": "文件",
       "datasourceInfo": "数据源信息",
       "datasourceName": "数据源名称",
       "datasourceType": "数据源类型",
@@ -693,7 +700,8 @@
       "toolSummary": "技能 {skills} / MCP {mcps}",
       "dirTaskSummary": "{dirs} 目录 / {tasks} 任务",
       "notRecorded": "未记录",
-      "intervalSeconds": "{seconds}s"
+      "intervalSeconds": "{seconds}s",
+      "syncRunning": "正在同步"
     },
     "datasourceDetail": {
       "title": "数据源详情",
@@ -713,6 +721,7 @@
       "issueToken": "签发",
       "revokeToken": "吊销",
       "sync": "同步",
+      "cancelSync": "取消同步",
       "addRow": "添加一行",
       "removeRow": "移除"
     },
@@ -929,7 +938,9 @@
       "tokenRevoked": "Token 已吊销",
       "tokenRevokeFailed": "Token 吊销失败",
       "syncStarted": "同步任务已触发",
-      "syncFailed": "同步任务触发失败"
+      "syncFailed": "同步任务触发失败",
+      "syncCancelled": "同步任务已取消",
+      "syncCancelFailed": "同步任务取消失败"
     }
   }
 }

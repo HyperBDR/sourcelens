@@ -201,6 +201,20 @@ class LensNodeClient:
             await self._handle_datasource_test_connection(message, send_queue)
         elif message_type == "datasource_sync":
             await self._start_datasource_sync(message, send_queue)
+        elif message_type == "datasource_cancel":
+            task_id = str(message.get("task_id") or "")
+            task_key = f"datasource:{task_id}"
+            task = self.running_tasks.get(task_key)
+            if task is not None:
+                task.cancel()
+            LOGGER.info(
+                task_log(
+                    (
+                        "Cancelled command datasource_sync "
+                        f"{task_id} by control plane."
+                    )
+                )
+            )
         elif message_type == "run_cancel":
             run_uuid = str(message.get("run_uuid") or "")
             task = self.running_tasks.get(run_uuid)

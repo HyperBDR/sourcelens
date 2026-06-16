@@ -333,23 +333,43 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         from agentcore_task.constants import TaskStatus
 
         task = TaskExecution.objects.filter(task_id=task_id).first()
+        if task and task.status in TaskStatus.get_completed_statuses():
+            return
         metadata = dict(task.metadata or {}) if task else {}
         steps = list(metadata.get("steps") or [])
         step = {
             "name": content.get("step") or "sync",
             "status": content.get("status") or "running",
             "message": content.get("message") or "",
-            "timestamp": content.get("timestamp") or timezone.now().isoformat(),
+            "timestamp": (
+                content.get("timestamp") or timezone.now().isoformat()
+            ),
         }
+        for key in [
+            "category",
+            "kind",
+            "token",
+            "item_type",
+            "item_name",
+            "file",
+            "file_extension",
+            "error",
+            "summary",
+        ]:
+            if key in content:
+                step[key] = content.get(key)
         steps.append(step)
+        metadata_update = {
+            "steps": steps,
+            "progress_step": step["name"],
+            "progress_message": step["message"],
+        }
+        if "summary" in content:
+            metadata_update["sync_summary"] = content.get("summary")
         TaskTracker.update_task_status(
             task_id,
             TaskStatus.STARTED,
-            metadata={
-                "steps": steps,
-                "progress_step": step["name"],
-                "progress_message": step["message"],
-            },
+            metadata=metadata_update,
         )
 
     async def _handle_datasource_sync_done(self, content):
@@ -372,6 +392,8 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
                 "status": content.get("status") or "failed",
                 "synced": content.get("synced") or 0,
                 "files": content.get("files") or 0,
+                "folders": content.get("folders") or 0,
+                "failed": content.get("failed") or 0,
                 "target_path": content.get("target_path") or "",
                 "error": content.get("error") or "",
             },

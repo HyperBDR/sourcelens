@@ -50,7 +50,11 @@ from .serializers import (
     SessionSerializer,
     SkillSerializer,
 )
-from .services import cancel_run_on_lensnode, stream_run_events_async
+from .services import (
+    cancel_datasource_sync_on_lensnode,
+    cancel_run_on_lensnode,
+    stream_run_events_async,
+)
 from .tasks import register_datasource_sync_task, source_sync_task
 
 
@@ -524,6 +528,60 @@ class DataSourceViewSet(BaseAdminViewSet):
                 "status": datasource.status,
             },
             status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="cancel-sync")
+    def cancel_sync(self, request, uuid=None):
+        """Cancel the latest running synchronization for this datasource."""
+
+        from agentcore_task.adapters.django.models import TaskExecution
+        from agentcore_task.constants import TaskStatus
+        from core.celery import app
+
+        datasource = self.get_object()
+        task = (
+            TaskExecution.objects.filter(
+                module="lens_datasource",
+                metadata__datasource_uuid=str(datasource.uuid),
+                status__in=[
+                    TaskStatus.PENDING,
+                    *TaskStatus.get_running_statuses(),
+                ],
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if task is None:
+            return Response(
+                {"detail": "No running datasource sync task."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        app.control.revoke(task.task_id, terminate=True, signal="SIGTERM")
+        cancel_datasource_sync_on_lensnode(datasource.lensnode, task.task_id)
+
+        metadata = dict(task.metadata or {})
+        metadata["manual_revoked_at"] = timezone.now().isoformat()
+        metadata["manual_revoked_by"] = request.user.pk
+        task.status = TaskStatus.REVOKED
+        task.finished_at = timezone.now()
+        task.error = "Task manually revoked by operator."
+        task.metadata = metadata
+        task.save(
+            update_fields=[
+                "status",
+                "finished_at",
+                "error",
+                "metadata",
+            ]
+        )
+        return Response(
+            {
+                "uuid": str(datasource.uuid),
+                "task_id": task.task_id,
+                "task_execution_id": task.id,
+                "status": task.status,
+            }
         )
 
 
