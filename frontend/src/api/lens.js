@@ -122,6 +122,11 @@ export async function createSession(payload) {
   return unwrapResponse(response)
 }
 
+export async function updateSession(uuid, payload) {
+  const response = await api.patch(`/lens/sessions/${uuid}/`, payload)
+  return unwrapResponse(response)
+}
+
 export async function deleteSession(uuid) {
   await api.delete(`/lens/sessions/${uuid}/`)
 }

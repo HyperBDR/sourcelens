@@ -92,6 +92,8 @@
       "assistantInfo": "Assistant info",
       "untitledSession": "Untitled session",
       "deleteSession": "Delete session",
+      "renameSession": "Rename",
+      "renameFailed": "Rename failed, please try again",
       "confirmDelete": "Confirm delete",
       "sessionDeleted": "Session deleted",
       "deleteFailed": "Delete failed, please try again",

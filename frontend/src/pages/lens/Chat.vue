@@ -129,51 +129,75 @@
                 deletingSessionUuid === session.uuid ? 'session-item-deleting' : selectedSessionUuid === session.uuid ? 'session-item-active' : ''
               ]"
             >
-              <div
-                class="min-w-0 flex-1 cursor-pointer"
-                :title="session.title || t('lens.chat.untitledSession')"
-                @click="deletingSessionUuid !== session.uuid && selectSession(session)"
-              >
-                <div class="session-title" :class="deletingSessionUuid === session.uuid ? 'opacity-40' : ''">
-                  {{ session.title || t('lens.chat.untitledSession') }}
-                </div>
-              </div>
-
-              <div class="flex shrink-0 items-center gap-1">
-                <template v-if="deletingSessionUuid === session.uuid">
-                  <button
-                    type="button"
-                    class="session-action-btn session-action-confirm"
-                    :aria-label="t('common.confirm')"
-                    @click.stop="doDeleteSession(session)"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                      <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    class="session-action-btn session-action-cancel"
-                    :aria-label="t('common.cancel')"
-                    @click.stop="deletingSessionUuid = ''"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                      <path d="M18 6 6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                  </button>
-                </template>
-                <button
-                  v-else
-                  type="button"
-                  class="session-delete-btn"
-                  :aria-label="t('lens.chat.deleteSession')"
-                  @click.stop="deletingSessionUuid = session.uuid"
+              <input
+                v-if="renamingSessionUuid === session.uuid"
+                v-model="renameDraft"
+                class="session-rename-input"
+                :placeholder="t('lens.chat.untitledSession')"
+                @click.stop
+                @keydown.enter.stop.prevent="saveRename(session)"
+                @keydown.esc.stop="cancelRename"
+                @blur="saveRename(session)"
+              />
+              <template v-else>
+                <div
+                  class="min-w-0 flex-1 cursor-pointer"
+                  :title="session.title || t('lens.chat.untitledSession')"
+                  @click="deletingSessionUuid !== session.uuid && selectSession(session)"
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                    <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg>
-                </button>
-              </div>
+                  <div class="session-title" :class="deletingSessionUuid === session.uuid ? 'opacity-40' : ''">
+                    {{ session.title || t('lens.chat.untitledSession') }}
+                  </div>
+                </div>
+
+                <div class="flex shrink-0 items-center gap-1">
+                  <template v-if="deletingSessionUuid === session.uuid">
+                    <button
+                      type="button"
+                      class="session-action-btn session-action-confirm"
+                      :aria-label="t('common.confirm')"
+                      @click.stop="doDeleteSession(session)"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                        <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="session-action-btn session-action-cancel"
+                      :aria-label="t('common.cancel')"
+                      @click.stop="deletingSessionUuid = ''"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                        <path d="M18 6 6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      type="button"
+                      class="session-rename-btn"
+                      :aria-label="t('lens.chat.renameSession')"
+                      @click.stop="startRename(session)"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path d="M12 20h9" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="session-delete-btn"
+                      :aria-label="t('lens.chat.deleteSession')"
+                      @click.stop="deletingSessionUuid = session.uuid"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </template>
+                </div>
+              </template>
             </div>
           </div>
         </section>
@@ -637,7 +661,8 @@ import {
   getRun,
   listAssistants,
   listMessages,
-  listSessions
+  listSessions,
+  updateSession
 } from '@/api/lens'
 
 const route = useRoute()
@@ -663,6 +688,8 @@ const streamController = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const deletingSessionUuid = ref('')
+const renamingSessionUuid = ref('')
+const renameDraft = ref('')
 const dockMenuOpen = ref(false)
 const composerRef = ref(null)
 const scrollRef = ref(null)
@@ -1128,7 +1155,7 @@ async function createNewSession(notify = true) {
 
   const session = await createSession({
     assistant_uuid: selectedAssistant.value.uuid,
-    title: t('lens.chat.sessionTitle', { name: selectedAssistant.value.name })
+    title: ''
   })
 
   sessions.value = [session, ...sessions.value]
@@ -1145,6 +1172,57 @@ async function createNewSession(notify = true) {
   }
 
   return session
+}
+
+function setSessionTitle(uuid, title) {
+  const session = sessions.value.find((item) => item.uuid === uuid)
+  if (session) {
+    session.title = title
+  }
+}
+
+function deriveSessionTitle(text) {
+  const clean = (text || '').replace(/\s+/g, ' ').trim()
+  return clean.length > 24 ? `${clean.slice(0, 24)}…` : clean
+}
+
+function startRename(session) {
+  deletingSessionUuid.value = ''
+  renamingSessionUuid.value = session.uuid
+  renameDraft.value = session.title || ''
+  nextTick(() => {
+    const el = document.querySelector('.session-rename-input')
+    if (el) {
+      el.focus()
+      el.select()
+    }
+  })
+}
+
+function cancelRename() {
+  renamingSessionUuid.value = ''
+  renameDraft.value = ''
+}
+
+async function saveRename(session) {
+  // Enter and blur can both fire; the guard makes the save idempotent.
+  if (renamingSessionUuid.value !== session.uuid) {
+    return
+  }
+  const title = renameDraft.value.trim()
+  renamingSessionUuid.value = ''
+  renameDraft.value = ''
+  if (title === (session.title || '')) {
+    return
+  }
+  const previous = session.title || ''
+  setSessionTitle(session.uuid, title)
+  try {
+    await updateSession(session.uuid, { title })
+  } catch {
+    setSessionTitle(session.uuid, previous)
+    showError(t('lens.chat.renameFailed'))
+  }
 }
 
 function insertNewline() {
@@ -1361,6 +1439,7 @@ async function submit() {
   // not a failure, so we must not restore the draft, alarm the user, or write
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
+  const isFirstMessage = messages.value.length === 0
   loading.value.run = true
   resetStreamState()
   const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
@@ -1368,6 +1447,19 @@ async function submit() {
   if (composerRef.value) composerRef.value.style.height = 'auto'
   messages.value = [...messages.value, { role: 'user', content: optimisticText, uuid: '__optimistic__', created_at: new Date().toISOString() }]
   await nextTick(scrollToBottom)
+
+  // Name a brand-new conversation after its first question (skip if the
+  // user already gave it a title). Optimistic + best-effort persistence.
+  const sessionAtSubmitObj = sessions.value.find(
+    (item) => item.uuid === sessionAtSubmit
+  )
+  if (isFirstMessage && optimisticText && !(sessionAtSubmitObj?.title || '').trim()) {
+    const autoTitle = deriveSessionTitle(optimisticText)
+    if (autoTitle) {
+      setSessionTitle(sessionAtSubmit, autoTitle)
+      updateSession(sessionAtSubmit, { title: autoTitle }).catch(() => {})
+    }
+  }
   try {
     const run = await createRun(sessionAtSubmit, {
       question: optimisticText,
@@ -1661,6 +1753,30 @@ onBeforeUnmount(() => {
 .session-delete-btn:hover {
   background: #fee2e2;
   color: #ef4444;
+}
+
+.session-rename-btn {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-md opacity-0 transition-colors;
+  color: #9ca3af;
+}
+
+.session-rename-btn svg {
+  @apply h-3.5 w-3.5;
+}
+
+.session-item:hover .session-rename-btn {
+  @apply opacity-100;
+}
+
+.session-rename-btn:hover {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.session-rename-input {
+  @apply w-full rounded-md border px-2 py-1 text-sm font-medium outline-none;
+  border-color: #c7d2fe;
+  color: #111827;
 }
 
 .session-action-confirm {
