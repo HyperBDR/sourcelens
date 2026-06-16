@@ -81,7 +81,9 @@ jobs:
           file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:latest
           # VITE_* args are only consumed by the frontend image; the backend
           # and lensnode builds ignore them (harmless unused-arg warnings).
           build-args: |
