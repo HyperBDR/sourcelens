@@ -2,7 +2,9 @@ import pytest
 
 from lensnode.datasource_sync import (
     DataSourceSyncError,
+    _export_filename,
     _feishu_folder_token,
+    _feishu_export_extension,
     _git_auth_url,
     _http_json,
     _raise_feishu_business_error,
@@ -62,13 +64,14 @@ def test_sync_feishu_folder_preserves_tree(tmp_path, monkeypatch):
             ]
         return []
 
-    def fetch_document(doc_id, headers):
+    def export_document(doc_id, item_type, headers):
+        del item_type
         del headers
         return {
-            "title": doc_id,
-            "content": f"content {doc_id}",
-            "url": "",
-            "raw": {},
+            "file_name": doc_id,
+            "file_extension": "docx",
+            "type": "docx",
+            "content": f"content {doc_id}".encode("utf-8"),
         }
 
     monkeypatch.setattr(
@@ -76,8 +79,8 @@ def test_sync_feishu_folder_preserves_tree(tmp_path, monkeypatch):
         list_children,
     )
     monkeypatch.setattr(
-        "lensnode.datasource_sync._fetch_feishu_document",
-        fetch_document,
+        "lensnode.datasource_sync._export_feishu_document",
+        export_document,
     )
 
     result = _sync_feishu_folder(
@@ -92,8 +95,18 @@ def test_sync_feishu_folder_preserves_tree(tmp_path, monkeypatch):
     )
 
     assert result["synced"] == 2
-    assert (tmp_path / "doc1.md").exists()
-    assert (tmp_path / "Child-Folder" / "doc2.md").exists()
+    assert (tmp_path / "doc1.docx").exists()
+    assert (tmp_path / "Child-Folder" / "doc2.docx").exists()
+
+
+def test_feishu_export_filename_uses_original_extension():
+    exported = {
+        "file_name": "Example Doc",
+        "file_extension": "docx",
+    }
+
+    assert _export_filename(exported, "fallback", "docx") == "Example-Doc.docx"
+    assert _feishu_export_extension("slides") == "pptx"
 
 
 def test_feishu_business_error_is_preserved():

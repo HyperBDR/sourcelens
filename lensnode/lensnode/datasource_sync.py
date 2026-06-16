@@ -1,7 +1,7 @@
-import base64
 import json
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
@@ -260,7 +260,7 @@ def _test_feishu_connection(config):
         "Authorization": f"Bearer {token}",
     }
     try:
-        document = _fetch_feishu_document(doc_ids[0], headers)
+        document = _export_feishu_document(doc_ids[0], "docx", headers)
     except DataSourceSyncError as exc:
         return {
             "status": "failed",
@@ -277,7 +277,7 @@ def _test_feishu_connection(config):
         "message": "Feishu document is reachable.",
         "details": {
             "doc_id": doc_ids[0],
-            "title": document.get("title") or "",
+            "title": document.get("file_name") or "",
         },
     }
 
@@ -351,7 +351,7 @@ def _sync_feishu(command, workspace_path, emit):
 
 
 def _sync_feishu_documents(config, target, headers, emit):
-    """Export configured Feishu documents into Markdown files."""
+    """Export configured Feishu documents into their original file format."""
 
     docs_dir = target / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
@@ -363,18 +363,16 @@ def _sync_feishu_documents(config, target, headers, emit):
     documents = []
     for doc_id in doc_ids:
         _emit(emit, "sync_content", "running", f"Exporting Feishu {doc_id}.")
-        document = _fetch_feishu_document(doc_id, headers)
-        title = document.get("title") or doc_id
-        content = document.get("content") or ""
-        markdown = _document_to_markdown(title, content, document)
-        filename = f"{_safe_filename(title)}.md"
-        (docs_dir / filename).write_text(markdown, encoding="utf-8")
+        exported = _export_feishu_document(doc_id, "docx", headers)
+        filename = _export_filename(exported, doc_id, "docx")
+        (docs_dir / filename).write_bytes(exported["content"])
         documents.append(
             {
                 "doc_id": doc_id,
-                "title": title,
+                "title": exported.get("file_name") or doc_id,
                 "file": f"docs/{filename}",
-                "source_url": document.get("url") or "",
+                "type": exported.get("type") or "docx",
+                "file_extension": exported.get("file_extension") or "docx",
             }
         )
         synced += 1
@@ -493,23 +491,18 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
     token = _feishu_item_token(item)
     name = _feishu_item_name(item)
     item_type = _feishu_item_type(item)
-    if item_type in {"doc", "docx", "docs", "sheet", "bitable", "slides"}:
+    if _is_feishu_exportable_type(item_type):
         _emit(emit, "sync_content", "running", f"Exporting Feishu {name}.")
-        document = _fetch_feishu_document(token, headers)
-        title = document.get("title") or name or token
-        filename = f"{_safe_filename(title)}.md"
-        markdown = _document_to_markdown(
-            title,
-            document.get("content") or "",
-            document,
-        )
-        (target_dir / filename).write_text(markdown, encoding="utf-8")
+        exported = _export_feishu_document(token, item_type, headers)
+        filename = _export_filename(exported, name or token, item_type)
+        (target_dir / filename).write_bytes(exported["content"])
         return {
             "kind": "document",
             "token": token,
-            "name": title,
+            "name": exported.get("file_name") or name or token,
             "type": item_type,
             "file": str((target_dir / filename).name),
+            "file_extension": exported.get("file_extension") or "",
         }
 
     _emit(emit, "download_file", "running", f"Downloading Feishu {name}.")
@@ -731,35 +724,140 @@ def _feishu_item_type(item):
     return value or "file"
 
 
-def _fetch_feishu_document(doc_id, headers):
-    """Fetch Feishu document content with a conservative API fallback."""
+def _is_feishu_exportable_type(item_type):
+    """Return whether a Drive item should use Feishu export tasks."""
 
-    urls = [
-        f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_id}/raw_content",
-        f"https://open.feishu.cn/open-apis/drive/v1/files/{doc_id}",
-    ]
-    last_error = None
-    for url in urls:
-        try:
-            payload = _http_json(url, headers=headers)
-        except DataSourceSyncError as exc:
-            last_error = exc
-            continue
-        data = payload.get("data") or payload
-        title = data.get("title") or data.get("name") or doc_id
-        content = (
-            data.get("content")
-            or data.get("raw_content")
-            or data.get("text")
-            or ""
+    return item_type in {
+        "doc",
+        "docx",
+        "docs",
+        "sheet",
+        "bitable",
+        "base",
+        "slides",
+    }
+
+
+def _feishu_export_type(item_type):
+    """Return the Feishu export API type for a Drive item type."""
+
+    if item_type in {"doc", "docx", "docs"}:
+        return "docx"
+    if item_type == "sheet":
+        return "sheet"
+    if item_type in {"bitable", "base"}:
+        return "bitable"
+    if item_type == "slides":
+        return "slides"
+    return item_type or "docx"
+
+
+def _feishu_export_extension(item_type):
+    """Return the preferred original-format export extension."""
+
+    export_type = _feishu_export_type(item_type)
+    mapping = {
+        "docx": "docx",
+        "sheet": "xlsx",
+        "bitable": "base",
+        "slides": "pptx",
+    }
+    return mapping.get(export_type, "docx")
+
+
+def _export_feishu_document(file_token, item_type, headers):
+    """Export one Feishu document-like item with the official Drive API."""
+
+    export_type = _feishu_export_type(item_type)
+    file_extension = _feishu_export_extension(item_type)
+    ticket = _create_feishu_export_task(
+        file_token,
+        export_type,
+        file_extension,
+        headers,
+    )
+    result = _poll_feishu_export_task(
+        ticket,
+        file_token,
+        export_type,
+        headers,
+    )
+    if result.get("job_status") != 0:
+        raise DataSourceSyncError(
+            result.get("job_error_msg") or "LENS_SOURCE_EXPORT_FAILED"
         )
-        return {
-            "title": title,
-            "content": content,
-            "url": data.get("url") or data.get("shortcut_url") or "",
-            "raw": data,
-        }
-    raise last_error or DataSourceSyncError("LENS_SOURCE_SYNC_FAILED")
+    export_file_token = result.get("file_token")
+    if not export_file_token:
+        raise DataSourceSyncError("LENS_SOURCE_EXPORT_FILE_MISSING")
+    content = _download_feishu_export_file(export_file_token, headers)
+    return {
+        "content": content,
+        "file_name": result.get("file_name") or file_token,
+        "file_extension": result.get("file_extension") or file_extension,
+        "type": result.get("type") or export_type,
+        "file_token": export_file_token,
+    }
+
+
+def _create_feishu_export_task(file_token, file_type, file_extension, headers):
+    """Create a Feishu Drive export task and return its ticket."""
+
+    payload = {
+        "token": file_token,
+        "type": file_type,
+        "file_extension": file_extension,
+    }
+    data = _http_json(
+        "https://open.feishu.cn/open-apis/drive/v1/export_tasks",
+        method="POST",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={**headers, "Content-Type": "application/json"},
+    )
+    ticket = (data.get("data") or {}).get("ticket") or data.get("ticket")
+    if not ticket:
+        raise DataSourceSyncError("LENS_SOURCE_EXPORT_TICKET_MISSING")
+    return ticket
+
+
+def _poll_feishu_export_task(ticket, file_token, file_type, headers):
+    """Poll a Feishu Drive export task until it finishes."""
+
+    query = parse.urlencode({"token": file_token, "type": file_type})
+    url = (
+        "https://open.feishu.cn/open-apis/drive/v1/export_tasks/"
+        f"{ticket}?{query}"
+    )
+    result = {}
+    for _ in range(30):
+        data = _http_json(url, headers=headers)
+        result = (data.get("data") or {}).get("result") or {}
+        status = result.get("job_status")
+        if status in (0, 2, 3):
+            return result
+        time.sleep(2)
+    raise DataSourceSyncError("LENS_SOURCE_EXPORT_TIMEOUT")
+
+
+def _download_feishu_export_file(file_token, headers):
+    """Download an exported Feishu Drive file."""
+
+    url = (
+        "https://open.feishu.cn/open-apis/drive/v1/export_tasks/file/"
+        f"{file_token}/download"
+    )
+    return _http_bytes(url, headers=headers)
+
+
+def _export_filename(exported, fallback_name, fallback_type):
+    """Return a safe filename for an exported Feishu document."""
+
+    file_name = exported.get("file_name") or fallback_name
+    extension = exported.get("file_extension")
+    extension = extension or _feishu_export_extension(fallback_type)
+    stem = _safe_filename(file_name)
+    if stem.lower().endswith(f".{extension.lower()}"):
+        return stem
+    return f"{stem}.{extension}"
 
 
 def _download_feishu_file(file_token, headers):
@@ -853,33 +951,8 @@ def _raise_feishu_business_error(payload):
     raise DataSourceSyncError(f"FEISHU_API_ERROR: {code} {msg}")
 
 
-def _document_to_markdown(title, content, document):
-    """Return Markdown content for a Feishu document export."""
-
-    lines = [f"# {title}", ""]
-    if content:
-        lines.extend([str(content).strip(), ""])
-    else:
-        encoded = base64.b64encode(
-            json.dumps(
-                document.get("raw") or {},
-                ensure_ascii=False,
-                indent=2,
-            ).encode("utf-8")
-        ).decode("ascii")
-        lines.extend(
-            [
-                "> Feishu did not return text content for this document.",
-                "",
-                f"<!-- raw_json_base64: {encoded} -->",
-                "",
-            ]
-        )
-    return "\n".join(lines)
-
-
 def _safe_filename(value):
-    """Return a filesystem-safe Markdown filename stem."""
+    """Return a filesystem-safe filename stem."""
 
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip())
     return cleaned.strip("-") or "document"
