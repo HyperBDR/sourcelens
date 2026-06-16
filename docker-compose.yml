@@ -94,6 +94,7 @@ services:
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
         VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
         VITE_SENTRY_SEND_DEFAULT_PII: ${VITE_SENTRY_SEND_DEFAULT_PII:-}
+        VITE_GA_ID: ${VITE_GA_ID:-}
     image: sourcelens-ui:latest
     expose:
       - "80"
