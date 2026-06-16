@@ -84,11 +84,11 @@
 
         <router-link
           v-if="userStore.userHasFeature('workspace')"
-          to="/lens/assistants"
+          to="/"
           class="nav-item"
           :class="isActive('/lens') ? 'nav-item-active' : ''"
           @click="isMobile && $emit('close')"
-          @mouseenter="preloadRoute('/lens/assistants')"
+          @mouseenter="preloadRoute('/')"
         >
           <svg
             class="w-5 h-5"

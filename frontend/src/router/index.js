@@ -88,16 +88,6 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/lens',
-    redirect: '/lens/assistants'
-  },
-  {
-    path: '/lens/assistants',
-    name: 'LensAssistants',
-    component: () => import('@/pages/lens/Assistants.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
-  },
-  {
     path: '/lens/assistants/:slug/chat',
     name: 'LensAssistantChat',
     component: () => import('@/pages/lens/Chat.vue'),
