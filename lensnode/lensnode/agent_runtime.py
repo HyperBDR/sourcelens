@@ -462,9 +462,14 @@ def _context_guidance(contents):
     joined = "\n\n".join(contents)[:12000]
     return (
         "\n\nWorkspace Guidance from bound context skills:\n"
-        "Apply this guidance before using workspace tools. Treat it as "
-        "authoritative for repository layout, search priority, and stopping "
-        f"rules.\n\n{joined}"
+        "This guidance is authoritative for this assistant — follow it "
+        "throughout the whole task. It governs not only repository layout, "
+        "search priority and stopping rules, but ALSO how you write the "
+        "final answer: output format, wording, and link / URL / path "
+        "conventions. When it conflicts with your default behavior, the "
+        "guidance wins. If it defines how links or paths should be "
+        "presented, apply that transformation in the final answer instead "
+        f"of emitting raw or relative paths.\n\n{joined}"
     )
 
 
