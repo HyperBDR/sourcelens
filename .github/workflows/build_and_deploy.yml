@@ -105,12 +105,36 @@ jobs:
       - prepare-version
       - build-images
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Install SSH Key
         uses: shimataro/ssh-key-action@v2
         with:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
           if_key_exists: fail
+
+      # Only the compose files are shipped to the server; application source
+      # stays out of the deploy host (images carry the code).
+      - name: Ensure deploy directory exists
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          port: ${{ env.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: mkdir -p ${{ env.DEPLOY_PATH }}
+
+      - name: Copy compose files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          port: ${{ env.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml,docker"
+          target: ${{ env.DEPLOY_PATH }}
 
       - name: Deploy to Server
         uses: appleboy/ssh-action@v1.0.3
