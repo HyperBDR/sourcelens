@@ -743,6 +743,8 @@
       "noDirs": "Select a LensNode first, or wait for the node to report available directories."
     },
     "settings": {
+      "publicBaseUrlTitle": "Public Base URL",
+      "publicBaseUrlDesc": "Base address used for assistant share links (e.g. your own domain). Leave empty to use the current server address.",
       "sectionTitle": "Runtime and Retention",
       "timeoutTitle": "Node Default Timeout",
       "timeoutDesc": "Default timeout for LensNode task execution.",
