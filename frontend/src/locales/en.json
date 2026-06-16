@@ -87,9 +87,14 @@
     },
     "onboarding": {
       "title": "Welcome to SourceLens",
-      "subtitle": "You don't have any assistants yet. Create your first one so users can start chatting.",
-      "createButton": "Create your first assistant",
-      "openConsole": "Go to admin console",
+      "subtitle": "Get your first assistant live in three steps.",
+      "step1Title": "Connect a data source",
+      "step1Desc": "Add and sync a source such as a code repository or docs.",
+      "step2Title": "Configure & publish an assistant",
+      "step2Desc": "Pick its data sources and tools, then publish it.",
+      "step3Title": "Start chatting",
+      "step3Desc": "Share the link so users can start the conversation.",
+      "enterConsole": "Go to admin console",
       "visitorTitle": "No assistants available",
       "visitorSubtitle": "There are no assistants to chat with yet. Please contact your administrator."
     },

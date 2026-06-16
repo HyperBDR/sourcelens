@@ -87,9 +87,14 @@
     },
     "onboarding": {
       "title": "欢迎使用 SourceLens",
-      "subtitle": "你还没有任何助手。创建第一个助手，让用户可以开始对话。",
-      "createButton": "创建第一个助手",
-      "openConsole": "进入管理控制台",
+      "subtitle": "三步即可上线你的第一个助手。",
+      "step1Title": "配置数据源",
+      "step1Desc": "添加并同步一个数据源（如代码仓库或文档）。",
+      "step2Title": "配置并发布助手",
+      "step2Desc": "为助手选择数据源与工具，然后发布。",
+      "step3Title": "开始聊天",
+      "step3Desc": "分享链接，用户即可开始对话。",
+      "enterConsole": "进入管理控制台",
       "visitorTitle": "暂无可用助手",
       "visitorSubtitle": "目前还没有可对话的助手，请联系管理员。"
     },

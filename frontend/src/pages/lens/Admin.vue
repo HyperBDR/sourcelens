@@ -1824,13 +1824,7 @@ watch(
   { immediate: true }
 )
 
-onMounted(() => {
-  load()
-  // Deep link from the create-first-assistant guide opens the drawer directly.
-  if (route.query.create === '1' && activeTab.value === 'assistants') {
-    startCreate()
-  }
-})
+onMounted(load)
 </script>
 
 <style scoped>
