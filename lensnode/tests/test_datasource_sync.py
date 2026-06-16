@@ -2,6 +2,7 @@ import pytest
 
 from lensnode.datasource_sync import (
     DataSourceSyncError,
+    _export_feishu_document,
     _export_filename,
     _feishu_folder_token,
     _feishu_export_extension,
@@ -117,6 +118,71 @@ def test_feishu_business_error_is_preserved():
 
     assert "99991663" in str(exc.value)
     assert "permission denied" in str(exc.value)
+
+
+def test_export_feishu_document_preserves_failed_result(monkeypatch):
+    """Export failures keep Feishu result details for diagnosis."""
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._create_feishu_export_task",
+        lambda *args, **kwargs: "ticket1",
+    )
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._poll_feishu_export_task",
+        lambda *args, **kwargs: {
+            "job_status": 2,
+            "job_error_msg": "permission denied",
+            "file_extension": "docx",
+        },
+    )
+
+    with pytest.raises(DataSourceSyncError) as exc:
+        _export_feishu_document("doc1", "docx", {})
+
+    message = str(exc.value)
+    assert "LENS_SOURCE_EXPORT_FAILED" in message
+    assert "doc1" in message
+    assert "ticket1" in message
+    assert "permission denied" in message
+
+
+def test_sync_feishu_folder_fails_when_every_item_fails(tmp_path, monkeypatch):
+    """A folder sync with only failed items should not be marked successful."""
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._list_feishu_folder_children",
+        lambda *args, **kwargs: [
+            {
+                "token": "doc1",
+                "name": "Broken Doc",
+                "type": "docx",
+            }
+        ],
+    )
+
+    def export_document(*args, **kwargs):
+        del args, kwargs
+        raise DataSourceSyncError("export failed")
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._export_feishu_document",
+        export_document,
+    )
+
+    with pytest.raises(DataSourceSyncError) as exc:
+        _sync_feishu_folder(
+            {
+                "folder_token": "root",
+                "recursive": True,
+                "max_depth": 5,
+            },
+            tmp_path,
+            {},
+            None,
+        )
+
+    assert "all Feishu Drive items failed" in str(exc.value)
+    assert (tmp_path / "manifest.json").exists()
 
 
 def test_http_json_preserves_network_error(monkeypatch):

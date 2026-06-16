@@ -470,6 +470,13 @@ def _sync_feishu_folder(config, target, headers, emit):
         },
     )
     total = stats["documents"] + stats["files"]
+    if total == 0 and stats["failed"] > 0:
+        message = (
+            "LENS_SOURCE_SYNC_FAILED: all Feishu Drive items failed; "
+            "see manifest.json for item errors"
+        )
+        _emit(emit, "manifest", "failed", message)
+        raise DataSourceSyncError(message)
     _emit(
         emit,
         "manifest",
@@ -783,13 +790,28 @@ def _export_feishu_document(file_token, item_type, headers):
         headers,
     )
     if result.get("job_status") != 0:
+        detail = _compact_json(result)
         raise DataSourceSyncError(
-            result.get("job_error_msg") or "LENS_SOURCE_EXPORT_FAILED"
+            "LENS_SOURCE_EXPORT_FAILED: "
+            f"token={file_token} type={export_type} "
+            f"extension={file_extension} ticket={ticket} result={detail}"
         )
     export_file_token = result.get("file_token")
     if not export_file_token:
-        raise DataSourceSyncError("LENS_SOURCE_EXPORT_FILE_MISSING")
-    content = _download_feishu_export_file(export_file_token, headers)
+        detail = _compact_json(result)
+        raise DataSourceSyncError(
+            "LENS_SOURCE_EXPORT_FILE_MISSING: "
+            f"token={file_token} type={export_type} "
+            f"extension={file_extension} ticket={ticket} result={detail}"
+        )
+    try:
+        content = _download_feishu_export_file(export_file_token, headers)
+    except DataSourceSyncError as exc:
+        raise DataSourceSyncError(
+            "LENS_SOURCE_EXPORT_DOWNLOAD_FAILED: "
+            f"token={file_token} export_file_token={export_file_token} "
+            f"type={export_type} extension={file_extension} error={exc}"
+        ) from exc
     return {
         "content": content,
         "file_name": result.get("file_name") or file_token,
@@ -815,7 +837,12 @@ def _create_feishu_export_task(file_token, file_type, file_extension, headers):
     )
     ticket = (data.get("data") or {}).get("ticket") or data.get("ticket")
     if not ticket:
-        raise DataSourceSyncError("LENS_SOURCE_EXPORT_TICKET_MISSING")
+        detail = _compact_json(data)
+        raise DataSourceSyncError(
+            "LENS_SOURCE_EXPORT_TICKET_MISSING: "
+            f"token={file_token} type={file_type} "
+            f"extension={file_extension} response={detail}"
+        )
     return ticket
 
 
@@ -835,7 +862,12 @@ def _poll_feishu_export_task(ticket, file_token, file_type, headers):
         if status in (0, 2, 3):
             return result
         time.sleep(2)
-    raise DataSourceSyncError("LENS_SOURCE_EXPORT_TIMEOUT")
+    detail = _compact_json(result)
+    raise DataSourceSyncError(
+        "LENS_SOURCE_EXPORT_TIMEOUT: "
+        f"token={file_token} type={file_type} ticket={ticket} "
+        f"last_result={detail}"
+    )
 
 
 def _download_feishu_export_file(file_token, headers):
@@ -888,7 +920,7 @@ def _http_json(url, method="GET", data=None, headers=None):
 
     req = request.Request(url, data=data, headers=headers or {}, method=method)
     try:
-        with request.urlopen(req, timeout=60) as response:
+        with _urlopen_with_retries(req, timeout=60) as response:
             raw = response.read().decode("utf-8")
     except error.HTTPError as exc:
         detail = _http_error_detail(exc)
@@ -910,7 +942,7 @@ def _http_bytes(url, headers=None):
 
     req = request.Request(url, headers=headers or {}, method="GET")
     try:
-        with request.urlopen(req, timeout=120) as response:
+        with _urlopen_with_retries(req, timeout=120) as response:
             return response.read()
     except error.HTTPError as exc:
         detail = _http_error_detail(exc)
@@ -919,6 +951,23 @@ def _http_bytes(url, headers=None):
         raise DataSourceSyncError(
             f"LENS_SOURCE_SYNC_FAILED: {type(exc).__name__}: {exc}"
         ) from exc
+
+
+def _urlopen_with_retries(req, timeout, attempts=3):
+    """Open a URL with short retries for transient network failures."""
+
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return request.urlopen(req, timeout=timeout)
+        except error.HTTPError:
+            raise
+        except error.URLError as exc:
+            last_error = exc
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(1)
+    raise last_error
 
 
 def _http_error_detail(exc):
@@ -956,6 +1005,18 @@ def _safe_filename(value):
 
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip())
     return cleaned.strip("-") or "document"
+
+
+def _compact_json(value):
+    """Return compact JSON for diagnostics without oversized messages."""
+
+    try:
+        raw = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        raw = str(value)
+    if len(raw) > 1000:
+        return f"{raw[:1000]}..."
+    return raw
 
 
 def _write_manifest(target, payload):
