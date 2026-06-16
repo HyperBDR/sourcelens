@@ -49,6 +49,7 @@
               <input
                 v-model="filters.startDate"
                 type="date"
+                :lang="locale"
                 class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
                 @change="onFiltersChanged"
               />
@@ -56,6 +57,7 @@
               <input
                 v-model="filters.endDate"
                 type="date"
+                :lang="locale"
                 class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
                 @change="onFiltersChanged"
               />

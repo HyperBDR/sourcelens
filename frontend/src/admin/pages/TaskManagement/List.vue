@@ -63,6 +63,7 @@
               <input
                 v-model="filterStartDate"
                 type="date"
+                :lang="locale"
                 :max="filterEndDate || undefined"
                 class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                 @change="onFilterChange"
@@ -71,6 +72,7 @@
               <input
                 v-model="filterEndDate"
                 type="date"
+                :lang="locale"
                 :min="filterStartDate || undefined"
                 class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
                 @change="onFilterChange"
@@ -293,7 +295,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import TaskExecutionDetailPanel from '@/components/task-management/TaskExecutionDetailPanel.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { showError } = useToast()
 const route = useRoute()
 

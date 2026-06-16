@@ -63,6 +63,7 @@
               <input
                 v-model="filters.start_date"
                 type="date"
+                :lang="locale"
                 :max="filters.end_date || undefined"
                 class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
                 @change="onFiltersChanged"
@@ -71,6 +72,7 @@
               <input
                 v-model="filters.end_date"
                 type="date"
+                :lang="locale"
                 :min="filters.start_date || undefined"
                 class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
                 @change="onFiltersChanged"
@@ -514,7 +516,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const { showError } = useToast()
 
 const loading = ref(false)

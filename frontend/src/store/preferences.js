@@ -29,6 +29,7 @@ export const usePreferencesStore = defineStore('preferences', {
       const normalizedLanguage = normalizeUiLanguage(language)
       this.language = normalizedLanguage
       i18n.global.locale.value = normalizedLanguage
+      document.documentElement.lang = normalizedLanguage
       localStorage.setItem('userLanguage', normalizedLanguage)
 
       // Note: saveToBackend is kept for backward compatibility but should not be used
@@ -53,6 +54,7 @@ export const usePreferencesStore = defineStore('preferences', {
         const normalizedLanguage = normalizeUiLanguage(savedLanguage)
         this.language = normalizedLanguage
         i18n.global.locale.value = normalizedLanguage
+        document.documentElement.lang = normalizedLanguage
         if (savedLanguage !== normalizedLanguage) {
           localStorage.setItem('userLanguage', normalizedLanguage)
         }
@@ -85,6 +87,7 @@ export const usePreferencesStore = defineStore('preferences', {
       this.language = normalizedLanguage
       this.timezone = this.detectedTimezone
       i18n.global.locale.value = normalizedLanguage
+      document.documentElement.lang = normalizedLanguage
       localStorage.removeItem('userLanguage')
       localStorage.removeItem('userTimezone')
     }

@@ -46,5 +46,6 @@ app.use(i18n)
 
 const preferencesStore = usePreferencesStore()
 preferencesStore.loadFromLocalStorage()
+document.documentElement.lang = i18n.global.locale.value
 
 app.mount('#app')
