@@ -400,9 +400,9 @@
   "management": {
     "adminConsole": "Admin Console",
     "logoTitle": "SourceLens Admin",
-    "userManagement": "User Management",
-    "groupManagement": "Group Management",
-    "roleManagement": "Role Management",
+    "userManagement": "Users",
+    "groupManagement": "Groups",
+    "roleManagement": "Roles",
     "backToUserPlatform": "Back to Assistant",
     "usersSubtitle": "View and manage all users",
     "groupsSubtitle": "View and manage all groups",
@@ -683,9 +683,9 @@
     }
   },
   "taskManagement": {
-    "menuTitle": "Task Management",
+    "menuTitle": "Tasks",
     "list": {
-      "title": "Task List",
+      "title": "All Tasks",
       "subtitle": "View and filter task execution records",
       "taskName": "Task Name",
       "module": "Module",
@@ -722,7 +722,7 @@
       "currentProgress": "Current progress"
     },
     "stats": {
-      "title": "Task Statistics",
+      "title": "Statistics",
       "subtitle": "Execution stats by status, module and task type",
       "granularity": "Granularity",
       "granularityDay": "By day",
@@ -753,7 +753,7 @@
       "chartByTaskName": "By task type (total)"
     },
     "settings": {
-      "title": "Task Settings",
+      "title": "Settings",
       "subtitle": "Configurable task timeout, retention and default task enablement",
       "moduleConfigTitle": "Module Configuration",
       "moduleConfigSubtitle": "Set default rules and parameters for core functions.",
@@ -802,9 +802,9 @@
     }
   },
   "notificationManagement": {
-    "menuTitle": "Notification Management",
+    "menuTitle": "Notifications",
     "stats": {
-      "title": "Send Statistics",
+      "title": "Statistics",
       "subtitle": "Monitor send trends, success rate and channel distribution",
       "userScope": "User scope",
       "allUsers": "All users",
@@ -856,7 +856,7 @@
       "bucket": "Bucket"
     },
     "records": {
-      "title": "Send Records",
+      "title": "Records",
       "subtitle": "Notification send records with filters and pagination",
       "sourceApp": "Source App",
       "sourceType": "Source Type",
@@ -884,8 +884,8 @@
       "resetFilters": "Reset filters"
     },
     "channels": {
-      "menuTitle": "Notification Channels",
-      "title": "Notification Channels",
+      "menuTitle": "Channels",
+      "title": "Channels",
       "subtitle": "Manage notification channels (Webhook and email SMTP); add multiple and set default.",
       "noChannels": "No channels yet. Click Add Channel to create one.",
       "addChannel": "Add Channel",
@@ -966,8 +966,8 @@
       "setDefaultDesc": "Use this channel when no channel is specified."
     },
     "settings": {
-      "menuTitle": "Notification Settings",
-      "title": "Notification Settings",
+      "menuTitle": "Settings",
+      "title": "Settings",
       "subtitle": "Notification module schedule and cleanup config (admin)",
       "scheduleSection": "Schedule and cleanup",
       "retentionTitle": "Record retention (days)",
