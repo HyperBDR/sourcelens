@@ -85,6 +85,14 @@
       "copyFailed": "Copy failed, please copy manually",
       "copyManually": "Please copy the link manually:"
     },
+    "onboarding": {
+      "title": "Welcome to SourceLens",
+      "subtitle": "You don't have any assistants yet. Create your first one so users can start chatting.",
+      "createButton": "Create your first assistant",
+      "openConsole": "Go to admin console",
+      "visitorTitle": "No assistants available",
+      "visitorSubtitle": "There are no assistants to chat with yet. Please contact your administrator."
+    },
     "chat": {
       "liveOutput": "Live output",
       "newSession": "New session",

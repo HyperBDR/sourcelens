@@ -329,11 +329,11 @@
         <span class="chat-header-title">{{ assistantName }}</span>
       </header>
       <div ref="scrollRef" class="thread-scroll">
-        <div
-          v-if="!selectedAssistantUuid && !isAnonymous"
-          class="thread-loading"
-        >
+        <div v-if="!booted" class="thread-loading">
           <BaseLoading />
+        </div>
+        <div v-else-if="!hasAssistant" class="thread-loading">
+          <AssistantEmptyState :variant="emptyVariant" />
         </div>
         <div v-else class="thread">
           <div
@@ -566,7 +566,7 @@
         </div>
       </div>
 
-      <div class="composer-wrap">
+      <div v-if="hasAssistant" class="composer-wrap">
         <div class="composer-inner">
           <div class="composer-shell">
             <div class="composer">
@@ -646,6 +646,7 @@ import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import AssistantSwitcher from '@/components/lens/AssistantSwitcher.vue'
+import AssistantEmptyState from '@/components/lens/AssistantEmptyState.vue'
 import LoginModal from '@/components/auth/LoginModal.vue'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -706,6 +707,9 @@ const REVEAL_INTERVAL_MS = 300
 
 const publicAssistant = ref(null)
 const showLoginModal = ref(false)
+// False until the current bootstrap settles, so the view can distinguish
+// "still loading" from "loaded, but no assistant to show".
+const booted = ref(false)
 
 const selectedAssistant = computed(
   () =>
@@ -715,6 +719,14 @@ const selectedAssistant = computed(
 )
 
 const isAnonymous = computed(() => !userStore.isAuthenticated)
+
+const hasAssistant = computed(() =>
+  isAnonymous.value ? !!publicAssistant.value : !!selectedAssistantUuid.value
+)
+
+const emptyVariant = computed(() =>
+  userStore.userHasFeature('admin_console') ? 'admin' : 'visitor'
+)
 
 const assistantName = computed(
   () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
@@ -1083,6 +1095,7 @@ async function bootstrap() {
   currentRun.value = null
   messages.value = []
   resetStreamState()
+  booted.value = false
 
   // Anonymous visitors can browse the shared chat page and see the
   // assistant name, but only authenticated users load private sessions.
@@ -1093,6 +1106,7 @@ async function bootstrap() {
       publicAssistant.value = null
       showError(t('lens.chat.loadFailed'))
     }
+    booted.value = true
     return
   }
 
@@ -1104,18 +1118,24 @@ async function bootstrap() {
       assistants.value[0]
 
     if (!current) {
+      // No assistants exist yet — surface the create-first-assistant guide
+      // (admin) or a no-assistant notice (end-user) instead of a spinner.
+      booted.value = true
       return
     }
 
     if (current.slug !== route.params.slug) {
+      // Re-bootstraps under the canonical slug; keep showing the loader.
       await router.replace(`/lens/assistants/${current.slug}/chat`)
       return
     }
 
     selectedAssistantUuid.value = current.uuid
     await loadSessions()
+    booted.value = true
   } catch {
     showError(t('lens.chat.loadFailed'))
+    booted.value = true
   }
 }
 

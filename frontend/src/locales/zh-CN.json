@@ -85,6 +85,14 @@
       "copyFailed": "复制失败，请手动复制",
       "copyManually": "请手动复制以下链接："
     },
+    "onboarding": {
+      "title": "欢迎使用 SourceLens",
+      "subtitle": "你还没有任何助手。创建第一个助手，让用户可以开始对话。",
+      "createButton": "创建第一个助手",
+      "openConsole": "进入管理控制台",
+      "visitorTitle": "暂无可用助手",
+      "visitorSubtitle": "目前还没有可对话的助手，请联系管理员。"
+    },
     "chat": {
       "liveOutput": "实时输出",
       "newSession": "新建会话",
