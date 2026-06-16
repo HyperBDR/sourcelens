@@ -1,6 +1,6 @@
 services:
   backend-api:
-    image: sourcelens-api:latest
+    image: oneprocloud/sourcelens-backend:${APP_VERSION:-latest}
     container_name: sourcelens-api
     restart: unless-stopped
     build:
@@ -40,7 +40,7 @@ services:
       start_period: 120s
 
   backend-worker:
-    image: sourcelens-api:latest
+    image: oneprocloud/sourcelens-backend:${APP_VERSION:-latest}
     container_name: sourcelens-worker
     restart: unless-stopped
     stop_grace_period: 120s
@@ -62,7 +62,7 @@ services:
     command: celery
 
   backend-scheduler:
-    image: sourcelens-api:latest
+    image: oneprocloud/sourcelens-backend:${APP_VERSION:-latest}
     container_name: sourcelens-scheduler
     restart: unless-stopped
     stop_grace_period: 30s
@@ -95,7 +95,7 @@ services:
         VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
         VITE_SENTRY_SEND_DEFAULT_PII: ${VITE_SENTRY_SEND_DEFAULT_PII:-}
         VITE_GA_ID: ${VITE_GA_ID:-}
-    image: sourcelens-ui:latest
+    image: oneprocloud/sourcelens-frontend:${APP_VERSION:-latest}
     expose:
       - "80"
     networks:
@@ -114,7 +114,7 @@ services:
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
-    image: sourcelens-lensnode:latest
+    image: oneprocloud/sourcelens-lensnode:${APP_VERSION:-latest}
     container_name: sourcelens-lensnode
     restart: unless-stopped
     env_file:
