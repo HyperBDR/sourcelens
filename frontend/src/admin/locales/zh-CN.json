@@ -651,7 +651,10 @@
       "transport": "Transport",
       "endpoint": "Endpoint",
       "error": "错误",
-      "lastRun": "上次运行"
+      "lastRun": "上次运行",
+      "workspaceGuideTag": "工作区指引",
+      "workspaceGuideHint": "由所属助手的「工作区背景」自动生成，请在对应助手中编辑",
+      "shareUrl": "对外链接"
     },
     "tasks": {
       "title": "默认定时任务",

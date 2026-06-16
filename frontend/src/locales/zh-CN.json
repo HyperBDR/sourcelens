@@ -82,6 +82,7 @@
     "share": {
       "copyLink": "复制链接",
       "copied": "分享链接已复制",
+      "copyFailed": "复制失败，请手动复制",
       "copyManually": "请手动复制以下链接："
     },
     "chat": {

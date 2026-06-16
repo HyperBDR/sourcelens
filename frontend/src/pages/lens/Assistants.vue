@@ -160,6 +160,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useToast } from '@/composables/useToast'
+import { copyToClipboard } from '@/utils/clipboard'
 import { listGlobalSettings } from '@/api/lens'
 import { useLensStore } from '@/store/lens'
 
@@ -179,12 +180,10 @@ function shareUrl(assistant) {
 }
 
 async function copyShareUrl(assistant) {
-  const url = shareUrl(assistant)
-  try {
-    await navigator.clipboard.writeText(url)
+  if (await copyToClipboard(shareUrl(assistant))) {
     showSuccess(t('lens.share.copied'))
-  } catch {
-    window.prompt(t('lens.share.copyManually'), url)
+  } else {
+    showError(t('lens.share.copyFailed'))
   }
 }
 

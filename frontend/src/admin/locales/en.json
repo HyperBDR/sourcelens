@@ -651,7 +651,10 @@
       "transport": "Transport",
       "endpoint": "Endpoint",
       "error": "Error",
-      "lastRun": "Last Run"
+      "lastRun": "Last Run",
+      "workspaceGuideTag": "Workspace Guide",
+      "workspaceGuideHint": "Auto-generated from the assistant's Workspace Context; edit it in that assistant",
+      "shareUrl": "Share Link"
     },
     "tasks": {
       "title": "Default Scheduled Tasks",

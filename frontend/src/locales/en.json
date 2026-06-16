@@ -82,6 +82,7 @@
     "share": {
       "copyLink": "Copy link",
       "copied": "Share link copied",
+      "copyFailed": "Copy failed, please copy manually",
       "copyManually": "Please copy the link manually:"
     },
     "chat": {
