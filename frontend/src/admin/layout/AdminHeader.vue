@@ -30,7 +30,25 @@
 
         <div class="flex items-center space-x-4">
           <LanguageSwitcher variant="dark" />
-          <PlatformSwitcher variant="dark" />
+          <router-link
+            to="/"
+            class="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 shadow-sm transition-colors hover:border-slate-500 hover:bg-slate-700"
+          >
+            <svg
+              class="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              />
+            </svg>
+            <span>{{ t('management.backToUserPlatform') }}</span>
+          </router-link>
           <div class="relative" ref="userMenuRef">
             <button
               @click="toggleUserMenu"
@@ -129,7 +147,6 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
-import PlatformSwitcher from '@/components/layout/PlatformSwitcher.vue'
 
 defineEmits(['toggle-menu'])
 

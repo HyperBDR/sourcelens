@@ -49,7 +49,7 @@
     "userManagement": "User Management",
     "groupManagement": "Group Management",
     "roleManagement": "Role Management",
-    "backToUserPlatform": "Back to User Platform",
+    "backToUserPlatform": "Back to Assistant",
     "usersSubtitle": "View and manage all users",
     "groupsSubtitle": "View and manage all groups",
     "rolesSubtitle": "Configure roles, visible features, and default landing platforms",

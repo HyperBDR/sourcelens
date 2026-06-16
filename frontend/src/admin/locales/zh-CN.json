@@ -49,7 +49,7 @@
     "userManagement": "用户管理",
     "groupManagement": "组管理",
     "roleManagement": "角色管理",
-    "backToUserPlatform": "返回用户平台",
+    "backToUserPlatform": "返回助手",
     "usersSubtitle": "查看与管理全部用户",
     "groupsSubtitle": "查看与管理全部组",
     "rolesSubtitle": "配置角色、可见功能与默认登录平台",

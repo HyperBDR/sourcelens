@@ -895,10 +895,10 @@
 
       <div class="mt-auto border-t border-ink-800 pt-4">
         <router-link
-          to="/dashboard"
+          to="/"
           class="admin-nav-item"
           @click="isMobile && $emit('close')"
-          @mouseenter="preloadRoute('/dashboard')"
+          @mouseenter="preloadRoute('/')"
         >
           <svg
             class="w-5 h-5"

@@ -10,11 +10,11 @@
       type="button"
       class="assistant-switcher-flyout-trigger"
       :class="{ 'assistant-switcher-flyout-trigger-open': open }"
-      :aria-label="t('settings.modal.allProjects')"
+      :aria-label="t('settings.modal.allAssistants')"
       @click="toggleOpen"
     >
       <span class="assistant-switcher-flyout-trigger-label">
-        {{ t('settings.modal.allProjects') }}
+        {{ t('settings.modal.allAssistants') }}
       </span>
       <svg
         class="assistant-switcher-flyout-trigger-chevron"
@@ -39,7 +39,7 @@
       <div v-if="open" class="assistant-switcher-flyout-panel">
         <div class="assistant-switcher-flyout-panel-head">
           <div class="assistant-switcher-flyout-panel-title">
-            {{ t('settings.modal.allProjects') }}
+            {{ t('settings.modal.allAssistants') }}
           </div>
           <div class="assistant-switcher-flyout-panel-subtitle">
             {{ assistants.length }}
