@@ -434,7 +434,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
         if source_type == DataSource.SourceType.GIT:
             _validate_git_config(config, self.instance)
         elif source_type == DataSource.SourceType.FEISHU:
-            _validate_feishu_config(config)
+            _validate_feishu_config(config, self.instance)
         else:
             raise serializers.ValidationError(
                 {"source_type": "source_type must be git or feishu"}
@@ -461,16 +461,20 @@ class DataSourceSerializer(serializers.ModelSerializer):
         """Create a datasource and store credentials separately."""
 
         access_token = _pop_datasource_access_token(validated_data)
+        feishu_app = _pop_feishu_app_credential(validated_data)
         datasource = DataSource.objects.create(**validated_data)
         _sync_datasource_credential(datasource, access_token)
+        _sync_feishu_credential(datasource, feishu_app)
         return datasource
 
     def update(self, instance, validated_data):
         """Update a datasource and optionally replace its credential."""
 
         access_token = _pop_datasource_access_token(validated_data)
+        feishu_app = _pop_feishu_app_credential(validated_data)
         datasource = super().update(instance, validated_data)
         _sync_datasource_credential(datasource, access_token)
+        _sync_feishu_credential(datasource, feishu_app)
         return datasource
 
     class Meta:
@@ -487,6 +491,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "sync_policy",
             "target_path",
             "last_synced_at",
+            "last_error",
             "status",
             "created_at",
             "updated_at",
@@ -494,6 +499,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "uuid",
             "credential_configured",
+            "last_error",
             "created_at",
             "updated_at",
         ]
@@ -514,6 +520,18 @@ def _pop_datasource_access_token(validated_data):
     return str(access_token or "").strip()
 
 
+def _pop_feishu_app_credential(validated_data):
+    """Remove plaintext Feishu app credential from datasource config."""
+
+    config = validated_data.get("config") or {}
+    app_id = str(config.pop("app_id", "") or "").strip()
+    app_secret = str(config.pop("app_secret", "") or "").strip()
+    validated_data["config"] = config
+    if not app_id and not app_secret:
+        return ""
+    return f"{app_id}:{app_secret}"
+
+
 def _validate_datasource_config_secret_fields(config):
     """Reject secret-like config fields outside the credential input."""
 
@@ -530,6 +548,8 @@ def _validate_datasource_config_secret_fields(config):
 def _sync_datasource_credential(datasource, access_token):
     """Create or update the encrypted credential for a datasource."""
 
+    if datasource.source_type == DataSource.SourceType.FEISHU:
+        return
     if datasource.config.get("auth_scheme") != "token":
         if datasource.credential_id:
             credential = datasource.credential
@@ -552,6 +572,30 @@ def _sync_datasource_credential(datasource, access_token):
         credential.provider = provider
         credential.auth_type = DataSourceCredential.AuthType.HTTPS_TOKEN
     credential.set_secret(access_token)
+    credential.save()
+    datasource.credential = credential
+    datasource.save(update_fields=["credential", "updated_at"])
+
+
+def _sync_feishu_credential(datasource, app_credential):
+    """Create or update the encrypted Feishu credential for a datasource."""
+
+    if datasource.source_type != DataSource.SourceType.FEISHU:
+        return
+    if not app_credential:
+        return
+    credential = datasource.credential
+    if credential is None:
+        credential = DataSourceCredential(
+            name=f"{datasource.name} Feishu credential",
+            provider=DataSourceCredential.Provider.FEISHU,
+            auth_type=DataSourceCredential.AuthType.FEISHU_APP,
+        )
+    else:
+        credential.name = f"{datasource.name} Feishu credential"
+        credential.provider = DataSourceCredential.Provider.FEISHU
+        credential.auth_type = DataSourceCredential.AuthType.FEISHU_APP
+    credential.set_secret(app_credential)
     credential.save()
     datasource.credential = credential
     datasource.save(update_fields=["credential", "updated_at"])
@@ -594,7 +638,37 @@ def _validate_git_config(config, instance=None):
         )
 
 
-def _validate_feishu_config(config):
+def _validate_feishu_config(config, instance=None):
+    has_new_credential = bool(
+        str(config.get("app_id") or "").strip()
+        and str(config.get("app_secret") or "").strip()
+    )
+    has_existing = bool(instance and instance.credential_id)
+    if not has_new_credential and not has_existing:
+        raise serializers.ValidationError(
+            {"config": "feishu app_id and app_secret are required"}
+        )
+    sync_mode = config.get("sync_mode") or "document_list"
+    if sync_mode not in {"document_list", "drive_folder"}:
+        raise serializers.ValidationError(
+            {"config": "feishu sync_mode must be document_list or drive_folder"}
+        )
+    if sync_mode == "drive_folder":
+        if not (config.get("folder_url") or config.get("folder_token")):
+            raise serializers.ValidationError(
+                {
+                    "config": (
+                        "feishu config.folder_url or folder_token is required"
+                    )
+                }
+            )
+        max_depth = config.get("max_depth", 10)
+        if not isinstance(max_depth, int) or max_depth <= 0:
+            raise serializers.ValidationError(
+                {"config": "feishu max_depth must be a positive integer"}
+            )
+        return
+
     if not (
         config.get("document_url")
         or config.get("app_token")

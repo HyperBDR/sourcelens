@@ -3,7 +3,10 @@ Unit tests for agentcore_task.adapters.django.services
 (lock, log_collector, task_tracker, timeout, cleanup, task_config)
 and conf (crontab validation).
 """
+from datetime import datetime, timezone as dt_timezone
+
 import pytest
+from agentcore_task.adapters.django.models import TaskExecution
 
 from agentcore_task.adapters.django.conf import is_valid_crontab_expression
 from agentcore_task.adapters.django.services import (
@@ -12,6 +15,7 @@ from agentcore_task.adapters.django.services import (
     acquire_task_lock,
     cleanup_old_executions,
     is_task_locked,
+    list_task_executions,
     prevent_duplicate_task,
     register_task_execution,
     release_task_lock,
@@ -242,6 +246,29 @@ class TestTaskTrackerAndRegister:
 
         stats_user = TaskTracker.get_task_stats(created_by=user)
         assert stats_user["total"] == 3
+
+    def test_list_task_executions_end_date_includes_whole_day(
+        self, user, db
+    ):
+        te = register_task_execution(
+            task_id="date-range-task",
+            task_name="datasource_sync",
+            module="lens_datasource",
+            created_by=user,
+        )
+        TaskExecution.objects.filter(pk=te.pk).update(
+            created_at=datetime(2026, 6, 16, 2, 22, tzinfo=dt_timezone.utc)
+        )
+
+        rows = list(
+            list_task_executions(
+                module="lens_datasource",
+                start_date="2026-06-13",
+                end_date="2026-06-16",
+            )
+        )
+
+        assert [row.task_id for row in rows] == ["date-range-task"]
 
     def test_register_task_execution_with_initial_status_started(
         self, user, db

@@ -228,6 +228,100 @@
           </div>
 
           <div
+            v-else-if="activeTab === 'datasources'"
+            class="relative overflow-x-auto rounded-lg border border-line bg-surface"
+          >
+              <table class="min-w-full divide-y divide-line">
+                <thead class="bg-surface-sunken">
+                  <tr>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.datasource') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.repository') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.branch') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.lensnode') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.targetPath') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.sync') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.status') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('lensAdmin.columns.actions') }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-line bg-surface">
+                  <tr
+                    v-for="row in dataSources"
+                    :key="row.uuid"
+                    class="cursor-pointer transition-colors hover:bg-line-soft"
+                    :class="selectedDataSource?.uuid === row.uuid ? 'bg-brand-50' : ''"
+                    @click="selectDataSource(row)"
+                  >
+                    <td class="table-cell">
+                      <div class="font-medium text-ink-900">
+                        {{ row.name }}
+                      </div>
+                      <div class="mt-1 flex flex-wrap items-center gap-2">
+                        <span class="font-mono text-xs text-ink-400">
+                          {{ compactUuid(row.uuid) }}
+                        </span>
+                        <span class="rounded border border-line bg-surface-sunken px-1.5 py-0.5 text-xs text-ink-500">
+                          {{ formatSourceType(row.source_type) }}
+                        </span>
+                      </div>
+                    </td>
+                    <td class="table-cell max-w-xs text-ink-600">
+                      <div class="truncate" :title="dataSourceRepository(row)">
+                        {{ dataSourceRepository(row) }}
+                      </div>
+                    </td>
+                    <td class="table-cell font-mono text-xs text-ink-500">
+                      {{ dataSourceBranch(row) }}
+                    </td>
+                    <td class="table-cell text-ink-600">
+                      {{ row.lensnode_name || lensNodeName(row.lensnode) }}
+                    </td>
+                    <td class="table-cell max-w-xs font-mono text-xs text-ink-500">
+                      <div class="truncate" :title="row.target_path || emptyValue">
+                        {{ row.target_path || emptyValue }}
+                      </div>
+                    </td>
+                    <td class="table-cell text-ink-600">
+                      {{ formatSyncPolicy(row.sync_policy, row.last_synced_at) }}
+                    </td>
+                    <td class="table-cell">
+                      <StatusBadge :status="row.status" />
+                    </td>
+                    <td class="table-cell" @click.stop>
+                      <div class="flex flex-wrap gap-2">
+                        <BaseButton
+                          size="sm"
+                          variant="outline"
+                          @click="sync(row)"
+                        >
+                          {{ t('lensAdmin.actions.sync') }}
+                        </BaseButton>
+                        <RowActions :row="row" />
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+          </div>
+
+          <div
             v-else
             class="relative overflow-x-auto rounded-lg border border-line bg-surface"
           >
@@ -354,46 +448,6 @@
                     </td>
                   </template>
 
-                  <template v-else-if="activeTab === 'datasources'">
-                    <td class="table-cell">
-                      <div class="font-medium text-ink-900">
-                        {{ row.name }}
-                      </div>
-                      <div class="mt-1 font-mono text-xs text-ink-400">
-                        {{ compactUuid(row.uuid) }}
-                      </div>
-                    </td>
-                    <td class="table-cell text-ink-600">
-                      {{ row.source_type }}
-                    </td>
-                    <td class="table-cell text-ink-600">
-                      {{ row.lensnode_name || lensNodeName(row.lensnode) }}
-                    </td>
-                    <td class="table-cell text-ink-600">
-                      {{ row.target_path || emptyValue }}
-                    </td>
-                    <td class="table-cell text-ink-600">
-                      {{
-                        formatSyncPolicy(row.sync_policy, row.last_synced_at)
-                      }}
-                    </td>
-                    <td class="table-cell">
-                      <StatusBadge :status="row.status" />
-                    </td>
-                    <td class="table-cell">
-                      <div class="flex flex-wrap gap-2">
-                        <BaseButton
-                          size="sm"
-                          variant="outline"
-                          @click="sync(row)"
-                        >
-                          {{ t('lensAdmin.actions.sync') }}
-                        </BaseButton>
-                        <RowActions :row="row" />
-                      </div>
-                    </td>
-                  </template>
-
                   <template v-else-if="activeTab === 'skills'">
                     <td class="table-cell font-medium text-ink-900">
                       {{ row.name }}
@@ -505,6 +559,95 @@
         @test-connection="testDatasourceConnection"
         @connection-change="resetDatasourceConnectionResult"
       />
+
+      <BaseDrawer
+        :show="showDatasourceDetailDrawer"
+        :title="t('lensAdmin.datasourceDetail.title')"
+        :subtitle="selectedDataSource?.name || ''"
+        width="2xl"
+        @close="closeDataSourceDetail"
+      >
+        <div v-if="selectedDataSource" class="space-y-6">
+          <section>
+            <h3 class="mb-4 text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceDetail.basicInfo') }}
+            </h3>
+            <dl class="grid grid-cols-1 gap-4">
+              <div>
+                <dt class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600">
+                  {{ t('lensAdmin.fields.name') }}
+                </dt>
+                <dd class="break-words text-sm font-medium text-ink-900">
+                  {{ selectedDataSource.name || emptyValue }}
+                </dd>
+              </div>
+              <div>
+                <dt class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600">
+                  UUID
+                </dt>
+                <dd class="break-words font-mono text-xs font-medium text-ink-900">
+                  {{ selectedDataSource.uuid }}
+                </dd>
+              </div>
+              <div>
+                <dt class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600">
+                  {{ t('lensAdmin.fields.status') }}
+                </dt>
+                <dd>
+                  <StatusBadge :status="selectedDataSource.status" />
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="border-t border-line pt-6">
+            <h3 class="mb-4 text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceDetail.connection') }}
+            </h3>
+            <dl class="grid grid-cols-1 gap-4">
+              <div
+                v-for="item in datasourceConnectionDetails"
+                :key="item.label"
+              >
+                <dt class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600">
+                  {{ item.label }}
+                </dt>
+                <dd
+                  class="break-words text-sm font-medium text-ink-900"
+                  :class="item.mono ? 'font-mono text-xs' : ''"
+                >
+                  {{ item.value }}
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="border-t border-line pt-6">
+            <h3 class="mb-4 text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceDetail.sync') }}
+            </h3>
+            <dl class="grid grid-cols-1 gap-4">
+              <div
+                v-for="item in datasourceSyncDetails"
+                :key="item.label"
+              >
+                <dt class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600">
+                  {{ item.label }}
+                </dt>
+                <dd
+                  class="break-words text-sm font-medium text-ink-900"
+                  :class="item.mono ? 'font-mono text-xs' : ''"
+                >
+                  {{ item.value }}
+                </dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+        <div v-else class="py-12 text-center text-sm text-ink-500">
+          {{ t('lensAdmin.datasourceDetail.selectHint') }}
+        </div>
+      </BaseDrawer>
 
       <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
         <form class="space-y-4" @submit.prevent="save">
@@ -635,6 +778,7 @@ import {
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
@@ -675,6 +819,7 @@ const pendingDeleteId = ref(null)
 const refreshingDirs = ref(false)
 const showModal = ref(false)
 const showDrawer = ref(false)
+const showDatasourceDetailDrawer = ref(false)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
@@ -689,6 +834,7 @@ const llmConfigOptions = ref([])
 const assistants = ref([])
 const lensnodes = ref([])
 const dataSources = ref([])
+const selectedDataSource = ref(null)
 const skills = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
@@ -1066,6 +1212,59 @@ const selectedDatasourceLensNode = computed(() =>
   lensnodes.value.find((node) => node.uuid === form.value.lensnode_uuid)
 )
 
+const datasourceConnectionDetails = computed(() => {
+  const row = selectedDataSource.value
+  if (!row) return []
+  const config = row.config || {}
+  if (row.source_type === 'git') {
+    return [
+      detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
+      detailItem(t('lensAdmin.fields.repoUrl'), config.repo_url, true),
+      detailItem(t('lensAdmin.fields.branch'), config.branch || 'main', true),
+      detailItem(t('lensAdmin.fields.authScheme'), authSchemeLabel(config.auth_scheme)),
+      detailItem(
+        t('lensAdmin.datasourceDetail.credential'),
+        row.credential_configured
+          ? t('common.status.enabled')
+          : t('common.status.disabled')
+      )
+    ]
+  }
+  return [
+    detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
+    detailItem(
+      t('lensAdmin.fields.syncScope'),
+      feishuScopeLabel(config.sync_mode)
+    ),
+    detailItem(t('lensAdmin.fields.folderUrl'), config.folder_url, true),
+    detailItem(t('lensAdmin.fields.folderToken'), config.folder_token, true),
+    detailItem(t('lensAdmin.fields.documentUrl'), config.document_url, true),
+    detailItem(t('lensAdmin.fields.appToken'), config.app_token, true),
+    detailItem(t('lensAdmin.fields.docIds'), formatDocIds(config.doc_ids), true)
+  ].filter((item) => item.value !== emptyValue)
+})
+
+const datasourceSyncDetails = computed(() => {
+  const row = selectedDataSource.value
+  if (!row) return []
+  return [
+    detailItem(t('lensAdmin.fields.lensnode'), row.lensnode_name || lensNodeName(row.lensnode)),
+    detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true),
+    detailItem(
+      t('lensAdmin.fields.syncInterval'),
+      row.sync_policy?.interval_seconds
+        ? t('lensAdmin.table.intervalSeconds', {
+            seconds: row.sync_policy.interval_seconds
+          })
+        : emptyValue
+    ),
+    detailItem(t('lensAdmin.datasourceDetail.lastSyncedAt'), formatDateTime(row.last_synced_at)),
+    detailItem(t('lensAdmin.datasourceDetail.lastError'), row.last_error, true),
+    detailItem(t('lensAdmin.datasourceDetail.createdAt'), formatDateTime(row.created_at)),
+    detailItem(t('lensAdmin.datasourceDetail.updatedAt'), formatDateTime(row.updated_at))
+  ]
+})
+
 function formatDateTime(value) {
   if (!value) {
     return t('lensAdmin.table.notRecorded')
@@ -1084,6 +1283,76 @@ function formatSyncPolicy(syncPolicy, lastSyncedAt) {
     ? t('lensAdmin.table.intervalSeconds', { seconds: interval })
     : emptyValue
   return `${intervalText} · ${formatDateTime(lastSyncedAt)}`
+}
+
+function detailItem(label, value, mono = false) {
+  const normalized = Array.isArray(value) ? value.join(', ') : value
+  return {
+    label,
+    value: normalized || emptyValue,
+    mono
+  }
+}
+
+function selectDataSource(row) {
+  selectedDataSource.value = row
+  showDatasourceDetailDrawer.value = true
+}
+
+function closeDataSourceDetail() {
+  showDatasourceDetailDrawer.value = false
+}
+
+function formatSourceType(sourceType) {
+  if (sourceType === 'git') {
+    return 'Git'
+  }
+  if (sourceType === 'feishu') {
+    return t('lensAdmin.datasourceWizard.feishu')
+  }
+  return sourceType || emptyValue
+}
+
+function authSchemeLabel(authScheme) {
+  if (authScheme === 'token') {
+    return t('lensAdmin.datasourceWizard.authToken')
+  }
+  return t('lensAdmin.datasourceWizard.authNone')
+}
+
+function feishuScopeLabel(syncMode) {
+  if (syncMode === 'drive_folder') {
+    return t('lensAdmin.datasourceWizard.feishuScopeDriveFolder')
+  }
+  return t('lensAdmin.datasourceWizard.feishuScopeDocuments')
+}
+
+function formatDocIds(docIds) {
+  if (Array.isArray(docIds)) {
+    return docIds.join(', ')
+  }
+  return docIds || emptyValue
+}
+
+function dataSourceRepository(row) {
+  const config = row.config || {}
+  if (row.source_type === 'git') {
+    return config.repo_url || emptyValue
+  }
+  return (
+    config.folder_url ||
+    config.folder_token ||
+    config.document_url ||
+    config.app_token ||
+    emptyValue
+  )
+}
+
+function dataSourceBranch(row) {
+  if (row.source_type === 'git') {
+    return row.config?.branch || 'main'
+  }
+  return emptyValue
 }
 
 function lensNodeName(value) {
@@ -1130,6 +1399,12 @@ async function load() {
     assistants.value = normalizeList(assistantRows)
     lensnodes.value = normalizeList(lensnodeRows)
     dataSources.value = normalizeList(dataSourceRows)
+    if (activeTab.value === 'datasources') {
+      const existing = dataSources.value.find(
+        (row) => row.uuid === selectedDataSource.value?.uuid
+      )
+      selectedDataSource.value = existing || dataSources.value[0] || null
+    }
     skills.value = normalizeList(skillRows)
     mcps.value = normalizeList(mcpRows)
     globalSettings.value = normalizeList(settingRows)
@@ -1210,6 +1485,7 @@ async function updateScheduledTaskEnabled(taskType, enabled) {
 }
 
 function startCreate() {
+  showDatasourceDetailDrawer.value = false
   mode.value = 'create'
   formError.value = ''
   datasourceConfig.value = {}
@@ -1225,6 +1501,7 @@ function startCreate() {
 }
 
 function startEdit(row) {
+  showDatasourceDetailDrawer.value = false
   mode.value = 'edit'
   formError.value = ''
   datasourceConfig.value = { ...(row.config || {}) }
@@ -1416,7 +1693,12 @@ function datasourceConfigFromRow(row) {
   if (row.source_type === 'feishu') {
     return {
       ...(row.config || {}),
-      doc_ids_text: (row.config?.doc_ids || []).join(',')
+      sync_mode: row.config?.sync_mode || 'document_list',
+      doc_ids_text: (row.config?.doc_ids || []).join(','),
+      recursive: row.config?.recursive !== false,
+      max_depth: row.config?.max_depth || 10,
+      app_id: '',
+      app_secret: ''
     }
   }
   const config = { ...(row.config || {}) }
@@ -1440,9 +1722,16 @@ function handleDatasourceTypeChange(seed = null) {
     }
   } else if (sourceType === 'feishu') {
     datasourceConfig.value = {
+      sync_mode: 'document_list',
       document_url: '',
       app_token: '',
-      doc_ids_text: ''
+      doc_ids_text: '',
+      folder_url: '',
+      folder_token: '',
+      recursive: true,
+      max_depth: 10,
+      app_id: '',
+      app_secret: ''
     }
   }
 }
@@ -1597,6 +1886,22 @@ function buildDatasourceConfig() {
       .map((item) => item.trim())
       .filter(Boolean)
     delete config.doc_ids_text
+    if (config.sync_mode !== 'drive_folder') {
+      delete config.folder_url
+      delete config.folder_token
+      delete config.recursive
+      delete config.max_depth
+    } else {
+      delete config.document_url
+      delete config.app_token
+      delete config.doc_ids
+    }
+    if (!String(config.app_id || '').trim()) {
+      delete config.app_id
+    }
+    if (!String(config.app_secret || '').trim()) {
+      delete config.app_secret
+    }
   }
   return config
 }
@@ -1706,6 +2011,10 @@ async function remove(row) {
     } else if (activeTab.value === 'mcp') {
       await deleteMcpServer(row.uuid)
     }
+    if (selectedDataSource.value?.uuid === row.uuid) {
+      selectedDataSource.value = null
+      showDatasourceDetailDrawer.value = false
+    }
     showSuccess(t('lensAdmin.messages.deleteSuccess'))
     await load()
   } catch (error) {
@@ -1750,8 +2059,13 @@ async function revokeToken(row) {
 
 async function sync(row) {
   try {
-    await syncDataSource(row.uuid)
-    showSuccess(t('lensAdmin.messages.syncStarted'))
+    const result = await syncDataSource(row.uuid)
+    const taskId = result?.task_id || ''
+    showSuccess(
+      taskId
+        ? `${t('lensAdmin.messages.syncStarted')} (${taskId})`
+        : t('lensAdmin.messages.syncStarted')
+    )
     await load()
   } catch (error) {
     showError(resolveError(error, t('lensAdmin.messages.syncFailed')))

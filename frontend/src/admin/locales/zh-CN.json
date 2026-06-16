@@ -315,7 +315,26 @@
       "logLevel": "级别",
       "logMessage": "说明",
       "logTime": "时间",
-      "currentProgress": "当前进度"
+      "currentProgress": "当前进度",
+      "datasourceInfo": "数据源信息",
+      "datasourceName": "数据源名称",
+      "datasourceType": "数据源类型",
+      "lensnode": "节点",
+      "targetPath": "目标路径",
+      "trigger": "触发方式",
+      "syncInterval": "同步间隔",
+      "repoUrl": "仓库 URL",
+      "branch": "分支",
+      "authScheme": "认证方式",
+      "credential": "凭证状态",
+      "documentUrl": "飞书文档链接",
+      "appToken": "App Token",
+      "docIds": "文档 ID",
+      "syncScope": "同步范围",
+      "folderUrl": "飞书目录链接",
+      "folderToken": "目录 Token",
+      "recursive": "递归同步",
+      "maxDepth": "最大深度"
     },
     "stats": {
       "title": "任务统计",
@@ -644,6 +663,8 @@
       "value": "值",
       "datasource": "数据源",
       "type": "类型",
+      "repository": "仓库 / 文档",
+      "branch": "分支",
       "targetPath": "目标路径",
       "sync": "同步",
       "skill": "Skill",
@@ -673,6 +694,18 @@
       "dirTaskSummary": "{dirs} 目录 / {tasks} 任务",
       "notRecorded": "未记录",
       "intervalSeconds": "{seconds}s"
+    },
+    "datasourceDetail": {
+      "title": "数据源详情",
+      "empty": "请选择数据源",
+      "selectHint": "点击左侧数据源查看详情。",
+      "connection": "连接信息",
+      "sync": "同步信息",
+      "credential": "凭证状态",
+      "lastSyncedAt": "最近同步",
+      "lastError": "最近错误",
+      "createdAt": "创建时间",
+      "updatedAt": "更新时间"
     },
     "actions": {
       "approve": "通过",
@@ -727,7 +760,14 @@
       "endpoint": "Endpoint",
       "config": "配置项",
       "configKey": "配置名",
-      "configValue": "配置值"
+      "configValue": "配置值",
+      "syncScope": "同步范围",
+      "folderUrl": "飞书目录链接",
+      "folderToken": "目录 Token",
+      "recursive": "递归同步",
+      "maxDepth": "最大递归深度",
+      "feishuAppId": "飞书 App ID",
+      "feishuAppSecret": "飞书 App Secret"
     },
     "placeholders": {
       "selectLensNode": "请选择节点",
@@ -783,7 +823,7 @@
       "step4Desc": "设置节点本地同步目录和周期同步间隔。",
       "gitDesc": "同步一个 Git 仓库到节点工作区。",
       "feishu": "飞书",
-      "feishuDesc": "导出飞书文档正文为 Markdown。",
+      "feishuDesc": "同步飞书文档或 Drive 目录到节点工作区。",
       "onlineNodeHint": "只显示已审批且在线的节点。",
       "noOnlineNodes": "暂无在线节点，请先确认 LensNode 已连接。",
       "gitRepoHint": "复制 Git 仓库 HTTPS 地址；私有仓库选择 HTTPS Token。",
@@ -809,7 +849,10 @@
         "connection_timeout": "连接测试超时，请稍后重试。",
         "LENS_SOURCE_TYPE_UNSUPPORTED": "暂不支持该数据源类型。",
         "LENS_SOURCE_CONFIG_INVALID": "连接配置不完整，请检查必填项。",
-        "LENS_SOURCE_CREDENTIAL_INVALID": "访问凭证无效或缺失。"
+        "LENS_SOURCE_CREDENTIAL_INVALID": "访问凭证无效或缺失。",
+        "feishu_folder_available": "飞书 Drive 目录可访问。",
+        "feishu_folder_missing": "请填写飞书 Drive 目录链接或目录 Token。",
+        "feishu_folder_unreachable": "飞书 Drive 目录无法访问，请检查目录链接、应用权限或网络。"
       },
       "pathStatus": {
         "available": "目标目录可用。",
@@ -820,7 +863,13 @@
         "not_git_repo": "目录非空，且不是 Git 仓库。",
         "remote_mismatch": "已有 Git 仓库的远程地址与当前仓库 URL 不一致。",
         "git_update": "已有 Git 仓库可以更新。"
-      }
+      },
+      "feishuScopeDocuments": "指定文档",
+      "feishuScopeDriveFolder": "Drive 目录",
+      "feishuFolderHint": "从飞书云文档 Drive 目录页面复制浏览器地址，系统会递归同步目录下的子目录和文件。",
+      "recursiveHint": "同步全部子目录",
+      "feishuCredentialHint": "填写飞书自建应用的 App ID 和 App Secret，凭证会加密保存，仅同步时下发到节点。",
+      "feishuCredentialConfiguredHint": "已配置飞书应用凭证；留空将继续使用现有凭证，填写新值会替换凭证。"
     },
     "wizard": {
       "step1Title": "基础与模型",
@@ -852,16 +901,16 @@
       "noMcp": "暂无可用 MCP Server，请先在 MCP Server 资源库中创建"
     },
     "agentRounds": {
-      "flash":        "极速",
-      "flashHint":    "~5 步",
-      "fast":         "快速",
-      "fastHint":     "~13 步",
-      "balanced":     "均衡",
+      "flash": "极速",
+      "flashHint": "~5 步",
+      "fast": "快速",
+      "fastHint": "~13 步",
+      "balanced": "均衡",
       "balancedHint": "~26 步",
-      "deep":         "深度",
-      "deepHint":     "~50 步",
-      "max":          "极限",
-      "maxHint":      "~100 步"
+      "deep": "深度",
+      "deepHint": "~50 步",
+      "max": "极限",
+      "maxHint": "~100 步"
     },
     "messages": {
       "loadFailed": "加载 Lens 管理数据失败",

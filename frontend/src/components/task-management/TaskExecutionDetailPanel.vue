@@ -180,6 +180,33 @@
             </dl>
           </div>
 
+          <!-- Datasource task context -->
+          <div
+            v-if="isDatasourceTask"
+            class="border-t border-gray-200 pt-6"
+          >
+            <h3 class="text-sm font-semibold text-gray-900 mb-4">
+              {{ t('taskManagement.list.datasourceInfo') }}
+            </h3>
+            <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div
+                v-for="item in datasourceDetailRows"
+                :key="item.label"
+                class="rounded-lg border border-gray-200 bg-gray-50 p-3"
+              >
+                <dt class="text-xs font-semibold text-gray-600 mb-1">
+                  {{ item.label }}
+                </dt>
+                <dd
+                  class="break-words text-sm text-gray-900"
+                  :class="item.mono ? 'font-mono text-xs' : ''"
+                >
+                  {{ item.value }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
           <!-- Detailed steps / execution logs from metadata -->
           <div class="border-t border-gray-200 pt-6">
             <h3 class="text-sm font-semibold text-gray-900 mb-4">
@@ -343,6 +370,76 @@ const currentProgressText = computed(() => {
   if (step) return step
   return ''
 })
+
+const isDatasourceTask = computed(() => {
+  const meta = metadata.value
+  return props.task?.module === 'lens_datasource' || meta.type === 'datasource'
+})
+
+const datasourceDetailRows = computed(() => {
+  const meta = metadata.value
+  const rows = [
+    detailRow(t('taskManagement.list.datasourceName'), meta.datasource_name),
+    detailRow(t('taskManagement.list.datasourceType'), formatSourceType(meta.source_type)),
+    detailRow(t('taskManagement.list.lensnode'), meta.lensnode_name || meta.lensnode_uuid),
+    detailRow(t('taskManagement.list.targetPath'), meta.target_path, true),
+    detailRow(t('taskManagement.list.trigger'), meta.trigger),
+    detailRow(
+      t('taskManagement.list.syncInterval'),
+      meta.sync_interval_seconds ? `${meta.sync_interval_seconds}s` : ''
+    )
+  ]
+  if (meta.source_type === 'git') {
+    rows.push(
+      detailRow(t('taskManagement.list.repoUrl'), meta.repo_url, true),
+      detailRow(t('taskManagement.list.branch'), meta.branch || 'main', true),
+      detailRow(t('taskManagement.list.authScheme'), meta.auth_scheme),
+      detailRow(
+        t('taskManagement.list.credential'),
+        meta.credential_configured
+          ? t('common.status.enabled')
+          : t('common.status.disabled')
+      )
+    )
+  } else if (meta.source_type === 'feishu') {
+    rows.push(
+      detailRow(t('taskManagement.list.syncScope'), meta.sync_mode),
+      detailRow(t('taskManagement.list.folderUrl'), meta.folder_url, true),
+      detailRow(t('taskManagement.list.folderToken'), meta.folder_token, true),
+      detailRow(t('taskManagement.list.documentUrl'), meta.document_url, true),
+      detailRow(t('taskManagement.list.appToken'), meta.app_token, true),
+      detailRow(t('taskManagement.list.docIds'), formatDocIds(meta.doc_ids), true),
+      detailRow(t('taskManagement.list.recursive'), formatBool(meta.recursive)),
+      detailRow(t('taskManagement.list.maxDepth'), meta.max_depth)
+    )
+  }
+  return rows.filter((row) => row.value !== '-')
+})
+
+function detailRow(label, value, mono = false) {
+  return {
+    label,
+    value: Array.isArray(value) ? value.join(', ') || '-' : value || '-',
+    mono
+  }
+}
+
+function formatSourceType(sourceType) {
+  if (sourceType === 'git') return 'Git'
+  if (sourceType === 'feishu') return 'Feishu'
+  return sourceType || '-'
+}
+
+function formatDocIds(docIds) {
+  if (Array.isArray(docIds)) return docIds.join(', ')
+  return docIds || ''
+}
+
+function formatBool(value) {
+  if (value === true) return t('common.yes')
+  if (value === false) return t('common.no')
+  return ''
+}
 
 function formatStepTime(value) {
   if (value == null) return ''

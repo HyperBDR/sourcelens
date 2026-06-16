@@ -197,6 +197,46 @@ def _test_git_connection(config):
 def _test_feishu_connection(config):
     """Test that Feishu document identifiers are available."""
 
+    sync_mode = config.get("sync_mode") or "document_list"
+    credentials = _load_credentials(config)
+    token = _feishu_tenant_token(credentials)
+    if sync_mode == "drive_folder":
+        folder_token = _feishu_folder_token(config)
+        if not folder_token:
+            return {
+                "status": "failed",
+                "message_code": "feishu_folder_missing",
+                "message": "Feishu Drive folder URL or token is required.",
+            }
+        if not token:
+            return {
+                "status": "failed",
+                "message_code": "LENS_SOURCE_CREDENTIAL_INVALID",
+                "message": "Feishu app credential is required.",
+            }
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+        try:
+            children = _list_feishu_folder_children(folder_token, headers)
+        except DataSourceSyncError:
+            return {
+                "status": "failed",
+                "message_code": "feishu_folder_unreachable",
+                "message": "Feishu Drive folder is not reachable.",
+                "details": {"folder_token": folder_token},
+            }
+        return {
+            "status": "success",
+            "message_code": "feishu_folder_available",
+            "message": "Feishu Drive folder is reachable.",
+            "details": {
+                "folder_token": folder_token,
+                "children": len(children),
+            },
+        }
+
     doc_ids = _feishu_doc_ids(config)
     if not doc_ids:
         return {
@@ -205,14 +245,11 @@ def _test_feishu_connection(config):
             "message": "Feishu document ID or URL is required.",
         }
 
-    credentials = _load_credentials(config)
-    token = _feishu_tenant_token(credentials)
     if not token:
         return {
-            "status": "success",
-            "message_code": "feishu_config_available",
-            "message": "Feishu document configuration is available.",
-            "details": {"doc_id": doc_ids[0]},
+            "status": "failed",
+            "message_code": "LENS_SOURCE_CREDENTIAL_INVALID",
+            "message": "Feishu app credential is required.",
         }
 
     headers = {
@@ -289,22 +326,32 @@ def _sync_git(command, workspace_path, emit):
 
 
 def _sync_feishu(command, workspace_path, emit):
-    """Export Feishu document content into Markdown files."""
+    """Export Feishu content into local files."""
 
     config = command.get("config") or {}
     credentials = _load_credentials(config)
     target = normalize_target_path(command.get("target_path"), workspace_path)
     target.mkdir(parents=True, exist_ok=True)
+    token = _feishu_tenant_token(credentials)
+    if not token:
+        raise DataSourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    if (config.get("sync_mode") or "document_list") == "drive_folder":
+        return _sync_feishu_folder(config, target, headers, emit)
+    return _sync_feishu_documents(config, target, headers, emit)
+
+
+def _sync_feishu_documents(config, target, headers, emit):
+    """Export configured Feishu documents into Markdown files."""
+
     docs_dir = target / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     doc_ids = _feishu_doc_ids(config)
     if not doc_ids:
         raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
-
-    token = _feishu_tenant_token(credentials)
-    headers = {"Accept": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
 
     synced = 0
     documents = []
@@ -341,6 +388,135 @@ def _sync_feishu(command, workspace_path, emit):
         f"Feishu sync completed with {synced} documents.",
     )
     return {"synced": synced, "files": synced, "target_path": str(target)}
+
+
+def _sync_feishu_folder(config, target, headers, emit):
+    """Recursively synchronize a Feishu Drive folder."""
+
+    folder_token = _feishu_folder_token(config)
+    if not folder_token:
+        raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+    recursive = config.get("recursive", True) is not False
+    max_depth = int(config.get("max_depth") or 10)
+    root_dir = target
+
+    manifest_items = []
+    stats = {
+        "folders": 0,
+        "documents": 0,
+        "files": 0,
+        "failed": 0,
+    }
+
+    def walk(current_token, current_dir, depth):
+        stats["folders"] += 1
+        _emit(
+            emit,
+            "scan_folder",
+            "running",
+            f"Scanning Feishu folder {current_token}.",
+        )
+        children = _list_feishu_folder_children(current_token, headers)
+        for child in children:
+            name = _feishu_item_name(child)
+            item_type = _feishu_item_type(child)
+            token = _feishu_item_token(child)
+            if not token:
+                continue
+            if item_type == "folder":
+                if not recursive or depth >= max_depth:
+                    continue
+                next_dir = current_dir / _safe_filename(name)
+                next_dir.mkdir(parents=True, exist_ok=True)
+                walk(token, next_dir, depth + 1)
+                continue
+            try:
+                item = _sync_feishu_drive_item(
+                    child,
+                    current_dir,
+                    headers,
+                    emit,
+                )
+                manifest_items.append(item)
+                if item.get("kind") == "document":
+                    stats["documents"] += 1
+                else:
+                    stats["files"] += 1
+            except DataSourceSyncError as exc:
+                stats["failed"] += 1
+                manifest_items.append(
+                    {
+                        "token": token,
+                        "name": name,
+                        "type": item_type,
+                        "error": str(exc),
+                    }
+                )
+
+    walk(folder_token, root_dir, 1)
+    _write_manifest(
+        target,
+        {
+            "source_type": "feishu",
+            "sync_mode": "drive_folder",
+            "folder_token": folder_token,
+            "synced_at": utc_timestamp(),
+            "stats": stats,
+            "items": manifest_items,
+        },
+    )
+    total = stats["documents"] + stats["files"]
+    _emit(
+        emit,
+        "manifest",
+        "done",
+        f"Feishu folder sync completed with {total} files.",
+    )
+    return {
+        "synced": total,
+        "files": total,
+        "target_path": str(target),
+        "folders": stats["folders"],
+        "failed": stats["failed"],
+    }
+
+
+def _sync_feishu_drive_item(item, target_dir, headers, emit):
+    """Synchronize one Feishu Drive file item."""
+
+    token = _feishu_item_token(item)
+    name = _feishu_item_name(item)
+    item_type = _feishu_item_type(item)
+    if item_type in {"doc", "docx", "docs", "sheet", "bitable", "slides"}:
+        _emit(emit, "sync_content", "running", f"Exporting Feishu {name}.")
+        document = _fetch_feishu_document(token, headers)
+        title = document.get("title") or name or token
+        filename = f"{_safe_filename(title)}.md"
+        markdown = _document_to_markdown(
+            title,
+            document.get("content") or "",
+            document,
+        )
+        (target_dir / filename).write_text(markdown, encoding="utf-8")
+        return {
+            "kind": "document",
+            "token": token,
+            "name": title,
+            "type": item_type,
+            "file": str((target_dir / filename).name),
+        }
+
+    _emit(emit, "download_file", "running", f"Downloading Feishu {name}.")
+    filename = _safe_filename(name or token)
+    raw = _download_feishu_file(token, headers)
+    (target_dir / filename).write_bytes(raw)
+    return {
+        "kind": "file",
+        "token": token,
+        "name": name,
+        "type": item_type,
+        "file": str((target_dir / filename).name),
+    }
 
 
 def _run_git(args, cwd=None):
@@ -419,6 +595,11 @@ def _load_credentials(config):
             "token": config.get("access_token"),
             "username": config.get("username") or "oauth2",
         }
+    if config.get("app_id") or config.get("app_secret"):
+        return {
+            "app_id": config.get("app_id") or "",
+            "app_secret": config.get("app_secret") or "",
+        }
     return {}
 
 
@@ -457,6 +638,93 @@ def _feishu_doc_ids(config):
     return [item for item in dict.fromkeys(doc_ids) if item]
 
 
+def _feishu_folder_token(config):
+    """Return a Feishu Drive folder token from explicit token or URL."""
+
+    if config.get("folder_token"):
+        return str(config["folder_token"]).strip()
+    folder_url = config.get("folder_url") or ""
+    patterns = [
+        r"/drive/folder/([A-Za-z0-9_-]+)",
+        r"/folder/([A-Za-z0-9_-]+)",
+        r"[?&]folder_token=([A-Za-z0-9_-]+)",
+        r"[?&]token=([A-Za-z0-9_-]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, folder_url)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _list_feishu_folder_children(folder_token, headers):
+    """List immediate children under a Feishu Drive folder."""
+
+    items = []
+    page_token = ""
+    while True:
+        query = {
+            "folder_token": folder_token,
+            "page_size": "100",
+        }
+        if page_token:
+            query["page_token"] = page_token
+        payload = _http_json(
+            "https://open.feishu.cn/open-apis/drive/v1/files"
+            f"?{parse.urlencode(query)}",
+            headers=headers,
+        )
+        data = payload.get("data") or payload
+        batch = (
+            data.get("files")
+            or data.get("items")
+            or data.get("children")
+            or []
+        )
+        items.extend(batch)
+        page_token = (
+            data.get("next_page_token")
+            or data.get("page_token")
+            or ""
+        )
+        if not data.get("has_more") or not page_token:
+            break
+    return items
+
+
+def _feishu_item_token(item):
+    """Return a Drive item token from common Feishu response fields."""
+
+    return (
+        item.get("token")
+        or item.get("file_token")
+        or item.get("doc_token")
+        or item.get("obj_token")
+        or item.get("id")
+        or ""
+    )
+
+
+def _feishu_item_name(item):
+    """Return a Drive item display name."""
+
+    return item.get("name") or item.get("title") or _feishu_item_token(item)
+
+
+def _feishu_item_type(item):
+    """Return a normalized Drive item type."""
+
+    value = str(
+        item.get("type")
+        or item.get("file_type")
+        or item.get("obj_type")
+        or ""
+    ).lower()
+    if value in {"folder", "dir", "directory"}:
+        return "folder"
+    return value or "file"
+
+
 def _fetch_feishu_document(doc_id, headers):
     """Fetch Feishu document content with a conservative API fallback."""
 
@@ -488,6 +756,29 @@ def _fetch_feishu_document(doc_id, headers):
     raise last_error or DataSourceSyncError("LENS_SOURCE_SYNC_FAILED")
 
 
+def _download_feishu_file(file_token, headers):
+    """Download a Feishu Drive file as bytes."""
+
+    urls = [
+        (
+            "https://open.feishu.cn/open-apis/drive/v1/files/"
+            f"{file_token}/download"
+        ),
+        (
+            "https://open.feishu.cn/open-apis/drive/v1/medias/"
+            f"{file_token}/download"
+        ),
+    ]
+    last_error = None
+    for url in urls:
+        try:
+            return _http_bytes(url, headers=headers)
+        except DataSourceSyncError as exc:
+            last_error = exc
+            continue
+    raise last_error or DataSourceSyncError("LENS_SOURCE_SYNC_FAILED")
+
+
 def _http_json(url, method="GET", data=None, headers=None):
     """Request a JSON endpoint and return the decoded object."""
 
@@ -501,6 +792,17 @@ def _http_json(url, method="GET", data=None, headers=None):
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise DataSourceSyncError("LENS_SOURCE_RESPONSE_INVALID") from exc
+
+
+def _http_bytes(url, headers=None):
+    """Request a binary endpoint and return bytes."""
+
+    req = request.Request(url, headers=headers or {}, method="GET")
+    try:
+        with request.urlopen(req, timeout=120) as response:
+            return response.read()
+    except Exception as exc:
+        raise DataSourceSyncError("LENS_SOURCE_SYNC_FAILED") from exc
 
 
 def _document_to_markdown(title, content, document):

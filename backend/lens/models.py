@@ -193,6 +193,7 @@ class DataSource(TimestampedUUIDModel):
         related_name="datasources",
     )
     last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default="")
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
@@ -219,10 +220,12 @@ class DataSourceCredential(TimestampedUUIDModel):
     class Provider(models.TextChoices):
         GITHUB = "github", "GitHub"
         GITLAB = "gitlab", "GitLab"
+        FEISHU = "feishu", "Feishu"
         GENERIC = "generic", "Generic"
 
     class AuthType(models.TextChoices):
         HTTPS_TOKEN = "https_token", "HTTPS Token"
+        FEISHU_APP = "feishu_app", "Feishu App"
 
     name = models.CharField(max_length=160)
     provider = models.CharField(

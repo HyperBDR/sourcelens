@@ -65,6 +65,36 @@ def _get_or_create_global_record(task_type):
     return record
 
 
+def register_datasource_sync_task(
+    datasource,
+    task_id,
+    trigger,
+    created_by=None,
+):
+    """Register a datasource sync execution before Celery starts it."""
+
+    from agentcore_task.adapters.django import TaskTracker
+
+    return TaskTracker.register_task(
+        task_id=task_id,
+        task_name=_datasource_sync_task_name(datasource),
+        module="lens_datasource",
+        task_args=[str(datasource.uuid)],
+        task_kwargs={"trigger": trigger},
+        created_by=created_by,
+        metadata=_datasource_task_metadata(datasource, trigger),
+    )
+
+
+def _datasource_sync_task_name(datasource):
+    """Return a readable task name for one datasource sync."""
+
+    name = str(getattr(datasource, "name", "") or "").strip()
+    if not name:
+        return "datasource_sync"
+    return f"datasource_sync:{name}"
+
+
 def _is_global_task_enabled(task_type, default=True):
     """Return whether a global periodic task is enabled."""
 
@@ -95,15 +125,8 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
     record.last_error = ""
     record.last_run_at = now
     record.save(update_fields=["last_status", "last_error", "last_run_at"])
-    TaskTracker.register_task(
-        task_id=task_id,
-        task_name="datasource_sync",
-        module="lens_datasource",
-        task_args=[str(datasource.uuid)],
-        task_kwargs={"trigger": trigger},
-        metadata=_datasource_task_metadata(datasource, trigger),
-        initial_status=TaskStatus.STARTED,
-    )
+    register_datasource_sync_task(datasource, task_id, trigger)
+    TaskTracker.update_task_status(task_id, TaskStatus.STARTED)
     _append_datasource_task_step(
         task_id,
         "prepare",
@@ -147,7 +170,8 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
         raise
     except Exception as exc:
         datasource.status = DataSource.Status.ERROR
-        datasource.save(update_fields=["status", "updated_at"])
+        datasource.last_error = str(exc)
+        datasource.save(update_fields=["status", "last_error", "updated_at"])
         record.last_status = ScheduledTask.Status.FAILED
         record.last_error = str(exc)
         record.last_run_at = timezone.now()
@@ -166,10 +190,12 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
         raise
 
     datasource.status = DataSource.Status.ACTIVE
+    datasource.last_error = ""
     datasource.last_synced_at = timezone.now()
     datasource.save(
         update_fields=[
             "status",
+            "last_error",
             "last_synced_at",
             "target_path",
             "updated_at",
@@ -211,15 +237,31 @@ def _datasource_task_metadata(datasource, trigger):
     """Return unified task metadata for datasource synchronization."""
 
     lensnode = datasource.lensnode
+    config = datasource.config or {}
     return {
         "type": "datasource",
         "trigger": trigger,
         "datasource_uuid": str(datasource.uuid),
         "datasource_name": datasource.name,
         "source_type": datasource.source_type,
+        "repo_url": config.get("repo_url", ""),
+        "branch": config.get("branch", ""),
+        "auth_scheme": config.get("auth_scheme", ""),
+        "document_url": config.get("document_url", ""),
+        "app_token": config.get("app_token", ""),
+        "doc_ids": config.get("doc_ids", []),
+        "sync_mode": config.get("sync_mode", ""),
+        "folder_url": config.get("folder_url", ""),
+        "folder_token": config.get("folder_token", ""),
+        "recursive": config.get("recursive", True),
+        "max_depth": config.get("max_depth", ""),
+        "credential_configured": bool(datasource.credential_id),
         "lensnode_uuid": str(lensnode.uuid) if lensnode else "",
         "lensnode_name": lensnode.name if lensnode else "",
         "target_path": datasource.target_path,
+        "sync_interval_seconds": (
+            datasource.sync_policy or {}
+        ).get("interval_seconds"),
         "steps": [],
         "logs": [],
     }

@@ -1,4 +1,5 @@
 import json
+import uuid as uuid_mod
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
@@ -50,7 +51,7 @@ from .serializers import (
     SkillSerializer,
 )
 from .services import cancel_run_on_lensnode, stream_run_events_async
-from .tasks import source_sync_task
+from .tasks import register_datasource_sync_task, source_sync_task
 
 
 class BaseAuthenticatedViewSet(viewsets.ModelViewSet):
@@ -454,13 +455,31 @@ class DataSourceViewSet(BaseAdminViewSet):
     queryset = DataSource.objects.all()
     serializer_class = DataSourceSerializer
 
+    def create(self, request, *args, **kwargs):
+        """Create datasource and return the initial sync task id."""
+
+        self._initial_sync_task_id = ""
+        response = super().create(request, *args, **kwargs)
+        task_id = getattr(self, "_initial_sync_task_id", "")
+        if task_id and isinstance(response.data, dict):
+            response.data["initial_sync_task_id"] = task_id
+        return response
+
     def perform_create(self, serializer):
         """Create datasource, register schedule, and enqueue initial sync."""
 
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
+        task_id = uuid_mod.uuid4().hex
+        self._initial_sync_task_id = task_id
+        user = self.request.user
         transaction.on_commit(
-            lambda: source_sync_task.delay(str(datasource.uuid), "initial")
+            lambda: self._enqueue_datasource_sync(
+                datasource,
+                task_id,
+                "initial",
+                user,
+            )
         )
 
     def perform_update(self, serializer):
@@ -469,16 +488,39 @@ class DataSourceViewSet(BaseAdminViewSet):
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
 
+    @staticmethod
+    def _enqueue_datasource_sync(datasource, task_id, trigger, user=None):
+        """Register and enqueue one datasource sync task."""
+
+        task_execution = register_datasource_sync_task(
+            datasource,
+            task_id,
+            trigger,
+            created_by=user,
+        )
+        source_sync_task.apply_async(
+            args=[str(datasource.uuid), trigger],
+            task_id=task_id,
+        )
+        return task_execution
+
     @action(detail=True, methods=["post"])
     def sync(self, request, uuid=None):
         """Enqueue datasource synchronization on its LensNode."""
 
         datasource = self.get_object()
-        result = source_sync_task.delay(str(datasource.uuid), "manual")
+        task_id = uuid_mod.uuid4().hex
+        task_execution = self._enqueue_datasource_sync(
+            datasource,
+            task_id,
+            "manual",
+            request.user,
+        )
         return Response(
             {
                 "uuid": str(datasource.uuid),
-                "task_id": result.id or "",
+                "task_id": task_id,
+                "task_execution_id": task_execution.id,
                 "status": datasource.status,
             },
             status=status.HTTP_202_ACCEPTED,

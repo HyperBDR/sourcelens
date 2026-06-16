@@ -189,6 +189,14 @@ def datasource_runtime_config(datasource):
             config["access_token"] = secret
             credential.last_used_at = timezone.now()
             credential.save(update_fields=["last_used_at", "updated_at"])
+    if datasource.source_type == DataSource.SourceType.FEISHU and credential:
+        secret = credential.get_secret()
+        if secret:
+            app_id, _, app_secret = secret.partition(":")
+            config["app_id"] = app_id
+            config["app_secret"] = app_secret
+            credential.last_used_at = timezone.now()
+            credential.save(update_fields=["last_used_at", "updated_at"])
     return config
 
 
@@ -203,5 +211,11 @@ def _inject_existing_datasource_credential(config, datasource_uuid):
     if datasource is None or datasource.credential is None:
         return
     secret = datasource.credential.get_secret()
-    if secret:
+    if not secret:
+        return
+    if datasource.source_type == DataSource.SourceType.FEISHU:
+        app_id, _, app_secret = secret.partition(":")
+        config["app_id"] = app_id
+        config["app_secret"] = app_secret
+    else:
         config["access_token"] = secret

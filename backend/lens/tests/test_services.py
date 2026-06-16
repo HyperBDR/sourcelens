@@ -378,7 +378,20 @@ class LensServiceTests(TransactionTestCase):
                     "target_path": self.datasource.target_path,
                 },
             )
-            task = TaskExecution.objects.get(task_name="datasource_sync")
+            task = TaskExecution.objects.get(module="lens_datasource")
+            self.assertEqual(task.task_name, "datasource_sync:Repo Cache")
+            self.assertEqual(task.metadata["type"], "datasource")
+            self.assertEqual(task.metadata["source_type"], "git")
+            self.assertEqual(
+                task.metadata["repo_url"],
+                "https://example.com/repo.git",
+            )
+            self.assertEqual(task.metadata["lensnode_name"], "Local LensNode")
+            self.assertEqual(
+                task.metadata["target_path"],
+                "/workspace/repo-cache",
+            )
+            self.assertEqual(task.metadata["sync_interval_seconds"], 3600)
             steps = task.metadata.get("steps") or []
             self.assertGreaterEqual(len(steps), 3)
             self.assertEqual(steps[0]["name"], "prepare")
@@ -401,6 +414,10 @@ class LensServiceTests(TransactionTestCase):
             target_id=self.datasource.uuid,
         )
         self.assertEqual(self.datasource.status, "error")
+        self.assertEqual(
+            self.datasource.last_error,
+            "LENS_SOURCE_CONFIG_INVALID",
+        )
         self.assertEqual(record.last_status, "failed")
 
     def test_source_sync_task_rejects_concurrent_sync_without_source_error(self):

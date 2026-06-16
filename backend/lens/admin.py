@@ -39,7 +39,13 @@ class AssistantAdmin(admin.ModelAdmin):
 
 @admin.register(DataSource)
 class DataSourceAdmin(admin.ModelAdmin):
-    list_display = ("name", "source_type", "status", "last_synced_at")
+    list_display = (
+        "name",
+        "source_type",
+        "status",
+        "last_synced_at",
+        "last_error",
+    )
     search_fields = ("name",)
 
 

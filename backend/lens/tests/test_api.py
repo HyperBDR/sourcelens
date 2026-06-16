@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
 from agentcore_metering.adapters.django.models import LLMConfig
+from agentcore_task.adapters.django.models import TaskExecution
 
 from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
@@ -594,7 +595,7 @@ class LensApiTests(TestCase):
             "target_path": "/workspace/initial-sync",
         }
 
-        with patch("lens.views.source_sync_task.delay") as delay:
+        with patch("lens.views.source_sync_task.apply_async") as apply_async:
             with self.captureOnCommitCallbacks(execute=True):
                 response = self.client.post(
                     "/api/lens/admin/datasources/",
@@ -603,7 +604,40 @@ class LensApiTests(TestCase):
                 )
 
         self.assertEqual(response.status_code, 201)
-        delay.assert_called_once_with(response.data["uuid"], "initial")
+        task_id = response.data["initial_sync_task_id"]
+        apply_async.assert_called_once_with(
+            args=[response.data["uuid"], "initial"],
+            task_id=task_id,
+        )
+        task = TaskExecution.objects.get(task_id=task_id)
+        self.assertEqual(task.task_name, "datasource_sync:Initial Sync Repo")
+        self.assertEqual(task.module, "lens_datasource")
+        self.assertEqual(task.status, "PENDING")
+        self.assertEqual(task.created_by, self.user)
+
+    def test_datasource_manual_sync_registers_task(self):
+        with patch("lens.views.source_sync_task.apply_async") as apply_async:
+            response = self.client.post(
+                f"/api/lens/admin/datasources/{self.datasource.uuid}/sync/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        task_id = response.data["task_id"]
+        self.assertEqual(
+            response.data["task_execution_id"],
+            TaskExecution.objects.get(task_id=task_id).id,
+        )
+        apply_async.assert_called_once_with(
+            args=[str(self.datasource.uuid), "manual"],
+            task_id=task_id,
+        )
+        task = TaskExecution.objects.get(task_id=task_id)
+        self.assertEqual(task.task_name, "datasource_sync:Repo Cache")
+        self.assertEqual(task.module, "lens_datasource")
+        self.assertEqual(task.status, "PENDING")
+        self.assertEqual(task.created_by, self.user)
 
     def test_datasource_create_uses_lensnode_workspace_path(self):
         self.lensnode.workspace_path = "/data/lens-workspace"
@@ -696,6 +730,40 @@ class LensApiTests(TestCase):
         self.assertEqual(
             datasource.credential.get_secret(),
             "ghp_example",
+        )
+
+    def test_datasource_allows_feishu_drive_folder_credential(self):
+        payload = {
+            "name": "Feishu Folder",
+            "source_type": "feishu",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "config": {
+                "sync_mode": "drive_folder",
+                "folder_url": "https://example.feishu.cn/drive/folder/fld1",
+                "recursive": True,
+                "max_depth": 5,
+                "app_id": "cli_example",
+                "app_secret": "secret_example",
+            },
+            "target_path": "/workspace/feishu-folder",
+        }
+
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["credential_configured"])
+        self.assertNotIn("app_id", response.data["config"])
+        self.assertNotIn("app_secret", response.data["config"])
+        datasource = DataSource.objects.get(uuid=response.data["uuid"])
+        self.assertNotIn("app_id", datasource.config)
+        self.assertNotIn("app_secret", datasource.config)
+        self.assertEqual(
+            datasource.credential.get_secret(),
+            "cli_example:secret_example",
         )
 
     def test_lensnode_tests_datasource_connection(self):

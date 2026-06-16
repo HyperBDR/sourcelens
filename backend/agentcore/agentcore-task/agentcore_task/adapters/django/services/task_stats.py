@@ -242,9 +242,9 @@ def list_task_executions(
     if created_by is not None:
         queryset = queryset.filter(created_by=created_by)
     if start_date:
-        queryset = queryset.filter(created_at__gte=start_date)
+        queryset = queryset.filter(created_at__date__gte=start_date)
     if end_date:
-        queryset = queryset.filter(created_at__lte=end_date)
+        queryset = queryset.filter(created_at__date__lte=end_date)
     if search and search.strip():
         queryset = queryset.filter(task_name__icontains=search.strip())
     if config_platform and config_platform.strip():

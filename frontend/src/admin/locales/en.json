@@ -315,7 +315,26 @@
       "logLevel": "Level",
       "logMessage": "Message",
       "logTime": "Time",
-      "currentProgress": "Current progress"
+      "currentProgress": "Current progress",
+      "datasourceInfo": "Data Source Info",
+      "datasourceName": "Data Source Name",
+      "datasourceType": "Data Source Type",
+      "lensnode": "LensNode",
+      "targetPath": "Target Path",
+      "trigger": "Trigger",
+      "syncInterval": "Sync Interval",
+      "repoUrl": "Repository URL",
+      "branch": "Branch",
+      "authScheme": "Auth Scheme",
+      "credential": "Credential status",
+      "documentUrl": "Feishu Document URL",
+      "appToken": "App Token",
+      "docIds": "Document IDs",
+      "syncScope": "Sync Scope",
+      "folderUrl": "Feishu Folder URL",
+      "folderToken": "Folder Token",
+      "recursive": "Recursive Sync",
+      "maxDepth": "Max Depth"
     },
     "stats": {
       "title": "Task Statistics",
@@ -644,6 +663,8 @@
       "value": "Value",
       "datasource": "Data Source",
       "type": "Type",
+      "repository": "Repository / Document",
+      "branch": "Branch",
       "targetPath": "Target Path",
       "sync": "Sync",
       "skill": "Skill",
@@ -673,6 +694,18 @@
       "dirTaskSummary": "Dirs {dirs} / Tasks {tasks}",
       "notRecorded": "Not recorded",
       "intervalSeconds": "{seconds}s"
+    },
+    "datasourceDetail": {
+      "title": "Data Source Detail",
+      "empty": "Select a data source",
+      "selectHint": "Click a data source on the left to view details.",
+      "connection": "Connection",
+      "sync": "Sync",
+      "credential": "Credential status",
+      "lastSyncedAt": "Last synced",
+      "lastError": "Last error",
+      "createdAt": "Created",
+      "updatedAt": "Updated"
     },
     "actions": {
       "approve": "Approve",
@@ -727,7 +760,14 @@
       "endpoint": "Endpoint",
       "config": "Config Items",
       "configKey": "Config key",
-      "configValue": "Config value"
+      "configValue": "Config value",
+      "syncScope": "Sync Scope",
+      "folderUrl": "Feishu Folder URL",
+      "folderToken": "Folder Token",
+      "recursive": "Recursive Sync",
+      "maxDepth": "Max Depth",
+      "feishuAppId": "Feishu App ID",
+      "feishuAppSecret": "Feishu App Secret"
     },
     "placeholders": {
       "selectLensNode": "Select a LensNode",
@@ -783,7 +823,7 @@
       "step4Desc": "Set the local node directory and periodic sync interval.",
       "gitDesc": "Sync one Git repository into the node workspace.",
       "feishu": "Feishu",
-      "feishuDesc": "Export Feishu document content as Markdown.",
+      "feishuDesc": "Sync Feishu documents or Drive folders into the node workspace.",
       "onlineNodeHint": "Only approved online nodes are shown.",
       "noOnlineNodes": "No online LensNode is available.",
       "gitRepoHint": "Copy the Git HTTPS URL; use HTTPS Token for private repositories.",
@@ -809,7 +849,10 @@
         "connection_timeout": "Connection test timed out. Try again later.",
         "LENS_SOURCE_TYPE_UNSUPPORTED": "This datasource type is not supported.",
         "LENS_SOURCE_CONFIG_INVALID": "Connection settings are incomplete. Check required fields.",
-        "LENS_SOURCE_CREDENTIAL_INVALID": "Access credential is invalid or missing."
+        "LENS_SOURCE_CREDENTIAL_INVALID": "Access credential is invalid or missing.",
+        "feishu_folder_available": "Feishu Drive folder is reachable.",
+        "feishu_folder_missing": "Enter a Feishu Drive folder URL or folder token.",
+        "feishu_folder_unreachable": "Feishu Drive folder is not reachable. Check the URL, app permissions, or network."
       },
       "pathStatus": {
         "available": "Target path is available.",
@@ -820,7 +863,13 @@
         "not_git_repo": "Directory is not empty and is not a Git repo.",
         "remote_mismatch": "Existing Git remote does not match repo URL.",
         "git_update": "Existing Git repository can be updated."
-      }
+      },
+      "feishuScopeDocuments": "Specific documents",
+      "feishuScopeDriveFolder": "Drive folder",
+      "feishuFolderHint": "Copy the browser URL from a Feishu Drive folder. SourceLens will recursively sync subfolders and files.",
+      "recursiveHint": "Sync all subfolders",
+      "feishuCredentialHint": "Enter the App ID and App Secret of a Feishu custom app. Credentials are encrypted at rest and sent to the node only during sync.",
+      "feishuCredentialConfiguredHint": "A Feishu app credential is configured. Leave blank to keep it, or enter a new value to replace it."
     },
     "wizard": {
       "step1Title": "Basics & Models",
@@ -852,16 +901,16 @@
       "noMcp": "No MCP Servers available — create one in the MCP Server Library first"
     },
     "agentRounds": {
-      "flash":       "Flash",
-      "flashHint":   "~5 steps",
-      "fast":        "Fast",
-      "fastHint":    "~13 steps",
-      "balanced":    "Balanced",
-      "balancedHint":"~26 steps",
-      "deep":        "Deep",
-      "deepHint":    "~50 steps",
-      "max":         "Max",
-      "maxHint":     "~100 steps"
+      "flash": "Flash",
+      "flashHint": "~5 steps",
+      "fast": "Fast",
+      "fastHint": "~13 steps",
+      "balanced": "Balanced",
+      "balancedHint": "~26 steps",
+      "deep": "Deep",
+      "deepHint": "~50 steps",
+      "max": "Max",
+      "maxHint": "~100 steps"
     },
     "messages": {
       "loadFailed": "Failed to load Lens admin data",

@@ -152,31 +152,108 @@
         </FormRow>
       </template>
       <template v-else>
-        <FormRow :label="t('lensAdmin.fields.documentUrl')">
-          <input
-            v-model="config.document_url"
-            class="form-input"
-            placeholder="https://xxx.feishu.cn/docx/..."
-          />
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.feishuUrlHint') }}
-          </p>
+        <FormRow :label="t('lensAdmin.fields.syncScope')" required>
+          <select v-model="config.sync_mode" class="form-input">
+            <option value="document_list">
+              {{ t('lensAdmin.datasourceWizard.feishuScopeDocuments') }}
+            </option>
+            <option value="drive_folder">
+              {{ t('lensAdmin.datasourceWizard.feishuScopeDriveFolder') }}
+            </option>
+          </select>
         </FormRow>
+
         <div class="grid gap-4 md:grid-cols-2">
-          <FormRow :label="t('lensAdmin.fields.appToken')">
-            <input v-model="config.app_token" class="form-input" />
+          <FormRow
+            :label="t('lensAdmin.fields.feishuAppId')"
+            :required="!form.credential_configured"
+          >
+            <input
+              v-model="config.app_id"
+              class="form-input"
+              autocomplete="off"
+            />
+          </FormRow>
+          <FormRow
+            :label="t('lensAdmin.fields.feishuAppSecret')"
+            :required="!form.credential_configured"
+          >
+            <input
+              v-model="config.app_secret"
+              class="form-input"
+              type="password"
+              autocomplete="off"
+            />
           </FormRow>
         </div>
-        <FormRow :label="t('lensAdmin.fields.docIds')">
-          <input
-            v-model="config.doc_ids_text"
-            class="form-input"
-            :placeholder="t('lensAdmin.placeholders.docIds')"
-          />
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.feishuDocHint') }}
-          </p>
-        </FormRow>
+        <p class="-mt-3 text-xs text-ink-500">
+          {{
+            form.credential_configured
+              ? t('lensAdmin.datasourceWizard.feishuCredentialConfiguredHint')
+              : t('lensAdmin.datasourceWizard.feishuCredentialHint')
+          }}
+        </p>
+
+        <template v-if="config.sync_mode === 'drive_folder'">
+          <FormRow :label="t('lensAdmin.fields.folderUrl')" required>
+            <input
+              v-model="config.folder_url"
+              class="form-input"
+              placeholder="https://xxx.feishu.cn/drive/folder/..."
+            />
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.feishuFolderHint') }}
+            </p>
+          </FormRow>
+          <div class="grid gap-4 md:grid-cols-2">
+            <FormRow :label="t('lensAdmin.fields.recursive')">
+              <label class="inline-flex items-center gap-2 text-sm text-ink-600">
+                <input
+                  v-model="config.recursive"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                />
+                {{ t('lensAdmin.datasourceWizard.recursiveHint') }}
+              </label>
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.maxDepth')">
+              <input
+                v-model.number="config.max_depth"
+                class="form-input"
+                min="1"
+                type="number"
+              />
+            </FormRow>
+          </div>
+        </template>
+
+        <template v-else>
+          <FormRow :label="t('lensAdmin.fields.documentUrl')">
+            <input
+              v-model="config.document_url"
+              class="form-input"
+              placeholder="https://xxx.feishu.cn/docx/..."
+            />
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.feishuUrlHint') }}
+            </p>
+          </FormRow>
+          <div class="grid gap-4 md:grid-cols-2">
+            <FormRow :label="t('lensAdmin.fields.appToken')">
+              <input v-model="config.app_token" class="form-input" />
+            </FormRow>
+          </div>
+          <FormRow :label="t('lensAdmin.fields.docIds')">
+            <input
+              v-model="config.doc_ids_text"
+              class="form-input"
+              :placeholder="t('lensAdmin.placeholders.docIds')"
+            />
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.feishuDocHint') }}
+            </p>
+          </FormRow>
+        </template>
       </template>
       <div class="flex items-center gap-2">
         <BaseButton
@@ -460,6 +537,15 @@ const canTestConnection = computed(() => {
       !!props.form.credential_configured
     )
   }
+  if (!hasFeishuCredential()) {
+    return false
+  }
+  if (props.config.sync_mode === 'drive_folder') {
+    return !!(
+      props.config.folder_url?.trim() ||
+      props.config.folder_token?.trim()
+    )
+  }
   return !!(
     props.config.document_url?.trim() ||
     props.config.app_token?.trim() ||
@@ -515,6 +601,15 @@ const canProceedWizard = computed(() => {
         !!props.form.credential_configured
       )
     }
+    if (!hasFeishuCredential()) {
+      return false
+    }
+    if (props.config.sync_mode === 'drive_folder') {
+      return !!(
+        props.config.folder_url?.trim() ||
+        props.config.folder_token?.trim()
+      )
+    }
     return !!(
       props.config.document_url?.trim() ||
       props.config.app_token?.trim() ||
@@ -530,6 +625,16 @@ function nextWizardStep() {
 
 function prevWizardStep() {
   if (wizardStep.value > 1) wizardStep.value--
+}
+
+function hasFeishuCredential() {
+  return (
+    !!props.form.credential_configured ||
+    (
+      !!props.config.app_id?.trim() &&
+      !!props.config.app_secret?.trim()
+    )
+  )
 }
 
 watch(
