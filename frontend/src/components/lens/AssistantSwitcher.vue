@@ -41,12 +41,17 @@
           <div class="assistant-switcher-flyout-panel-title">
             {{ t('settings.modal.allAssistants') }}
           </div>
-          <div class="assistant-switcher-flyout-panel-subtitle">
+          <div v-if="!loading" class="assistant-switcher-flyout-panel-subtitle">
             {{ assistants.length }}
           </div>
         </div>
 
+        <div v-if="loading" class="assistant-switcher-empty">
+          {{ t('settings.modal.assistantLoading') }}
+        </div>
+
         <div
+          v-else
           class="assistant-switcher-flyout-grid"
           :style="flyoutGridStyle"
         >
