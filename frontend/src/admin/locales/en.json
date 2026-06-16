@@ -699,6 +699,7 @@
       "title": "Data Source Detail",
       "empty": "Select a data source",
       "selectHint": "Click a data source on the left to view details.",
+      "basicInfo": "Basic Information",
       "connection": "Connection",
       "sync": "Sync",
       "credential": "Credential status",

@@ -31,7 +31,10 @@ from lens.models import (
     ScheduledTask,
     Session,
 )
-from lens.periodic_tasks import register_periodic_tasks
+from lens.periodic_tasks import (
+    ensure_datasource_periodic_task,
+    register_periodic_tasks,
+)
 from lens.services import (
     append_lensnode_output,
     build_run_history,
@@ -511,6 +514,39 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(cleanup.interval.every, 1800)
         self.assertEqual(health.interval.every, 120)
         self.assertEqual(retention.interval.every, 7200)
+
+    def test_datasource_periodic_task_updates_existing_beat_row(self):
+        record = ensure_datasource_periodic_task(self.datasource)
+        task = PeriodicTask.objects.get(pk=record.periodic_task_ref)
+        task.enabled = False
+        task.save(update_fields=["enabled"])
+
+        self.datasource.sync_policy = {"interval_seconds": 120}
+        self.datasource.save(update_fields=["sync_policy", "updated_at"])
+
+        ensure_datasource_periodic_task(self.datasource)
+
+        task.refresh_from_db()
+        self.assertTrue(task.enabled)
+        self.assertEqual(task.interval.every, 120)
+        self.assertEqual(task.interval.period, "seconds")
+        self.assertEqual(task.task, "lens.source_sync")
+        self.assertEqual(task.args, f'["{self.datasource.uuid}"]')
+        self.assertEqual(task.queue, "lens")
+
+    def test_discover_and_register_reconciles_datasource_beat_row(self):
+        record = ensure_datasource_periodic_task(self.datasource)
+        task = PeriodicTask.objects.get(pk=record.periodic_task_ref)
+        task.enabled = False
+        task.save(update_fields=["enabled"])
+        self.datasource.sync_policy = {"interval_seconds": 120}
+        self.datasource.save(update_fields=["sync_policy", "updated_at"])
+
+        discover_and_register()
+
+        task.refresh_from_db()
+        self.assertTrue(task.enabled)
+        self.assertEqual(task.interval.every, 120)
 
     def test_discover_and_register_backfills_periodic_task_refs(self):
         discover_and_register()

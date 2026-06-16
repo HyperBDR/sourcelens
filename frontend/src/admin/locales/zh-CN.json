@@ -699,6 +699,7 @@
       "title": "数据源详情",
       "empty": "请选择数据源",
       "selectHint": "点击左侧数据源查看详情。",
+      "basicInfo": "基本信息",
       "connection": "连接信息",
       "sync": "同步信息",
       "credential": "凭证状态",

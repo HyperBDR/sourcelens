@@ -131,7 +131,29 @@ def ensure_datasource_periodic_task(datasource):
             "enabled": True,
         },
     )
-    if created:
+    changed = created
+    expected_args = f'["{datasource.uuid}"]'
+    update_fields = []
+    if not created:
+        if task.task != "lens.source_sync":
+            task.task = "lens.source_sync"
+            update_fields.append("task")
+        if task.interval_id != schedule.id:
+            task.interval = schedule
+            update_fields.append("interval")
+        if task.args != expected_args:
+            task.args = expected_args
+            update_fields.append("args")
+        if task.queue != "lens":
+            task.queue = "lens"
+            update_fields.append("queue")
+        if not task.enabled:
+            task.enabled = True
+            update_fields.append("enabled")
+        if update_fields:
+            task.save(update_fields=update_fields)
+            changed = True
+    if changed:
         PeriodicTasks.update_changed()
 
     record = _ensure_source_scheduled_task(datasource)
@@ -219,6 +241,7 @@ def sync_registered_periodic_tasks():
         ),
     ]
     for datasource in DataSource.objects.all():
+        ensure_datasource_periodic_task(datasource)
         mappings.append(
             (
                 ScheduledTask.TaskType.SOURCE_SYNC,
