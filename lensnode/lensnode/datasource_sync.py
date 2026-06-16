@@ -4,7 +4,7 @@ import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib import parse, request
+from urllib import error, parse, request
 
 WORKSPACE_ROOT = "/workspace"
 
@@ -220,12 +220,15 @@ def _test_feishu_connection(config):
         }
         try:
             children = _list_feishu_folder_children(folder_token, headers)
-        except DataSourceSyncError:
+        except DataSourceSyncError as exc:
             return {
                 "status": "failed",
                 "message_code": "feishu_folder_unreachable",
                 "message": "Feishu Drive folder is not reachable.",
-                "details": {"folder_token": folder_token},
+                "details": {
+                    "folder_token": folder_token,
+                    "error": str(exc),
+                },
             }
         return {
             "status": "success",
@@ -258,12 +261,15 @@ def _test_feishu_connection(config):
     }
     try:
         document = _fetch_feishu_document(doc_ids[0], headers)
-    except DataSourceSyncError:
+    except DataSourceSyncError as exc:
         return {
             "status": "failed",
             "message_code": "feishu_unreachable",
             "message": "Feishu document is not reachable.",
-            "details": {"doc_id": doc_ids[0]},
+            "details": {
+                "doc_id": doc_ids[0],
+                "error": str(exc),
+            },
         }
     return {
         "status": "success",
@@ -786,12 +792,19 @@ def _http_json(url, method="GET", data=None, headers=None):
     try:
         with request.urlopen(req, timeout=60) as response:
             raw = response.read().decode("utf-8")
+    except error.HTTPError as exc:
+        detail = _http_error_detail(exc)
+        raise DataSourceSyncError(detail) from exc
     except Exception as exc:
-        raise DataSourceSyncError("LENS_SOURCE_SYNC_FAILED") from exc
+        raise DataSourceSyncError(
+            f"LENS_SOURCE_SYNC_FAILED: {type(exc).__name__}: {exc}"
+        ) from exc
     try:
-        return json.loads(raw)
+        payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise DataSourceSyncError("LENS_SOURCE_RESPONSE_INVALID") from exc
+    _raise_feishu_business_error(payload)
+    return payload
 
 
 def _http_bytes(url, headers=None):
@@ -801,8 +814,43 @@ def _http_bytes(url, headers=None):
     try:
         with request.urlopen(req, timeout=120) as response:
             return response.read()
+    except error.HTTPError as exc:
+        detail = _http_error_detail(exc)
+        raise DataSourceSyncError(detail) from exc
     except Exception as exc:
-        raise DataSourceSyncError("LENS_SOURCE_SYNC_FAILED") from exc
+        raise DataSourceSyncError(
+            f"LENS_SOURCE_SYNC_FAILED: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def _http_error_detail(exc):
+    """Return a compact HTTP error detail, including JSON body if present."""
+
+    try:
+        raw = exc.read().decode("utf-8")
+    except Exception:
+        raw = ""
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = {}
+        code = payload.get("code") or payload.get("error")
+        msg = payload.get("msg") or payload.get("message")
+        if code or msg:
+            return f"HTTP_{exc.code}: {code or ''} {msg or ''}".strip()
+        return f"HTTP_{exc.code}: {raw[:300]}"
+    return f"HTTP_{exc.code}: {exc.reason}"
+
+
+def _raise_feishu_business_error(payload):
+    """Raise when Feishu returns a JSON business error with HTTP 200."""
+
+    code = payload.get("code")
+    if code in (None, 0):
+        return
+    msg = payload.get("msg") or payload.get("message") or "Feishu API error"
+    raise DataSourceSyncError(f"FEISHU_API_ERROR: {code} {msg}")
 
 
 def _document_to_markdown(title, content, document):

@@ -1,5 +1,13 @@
-from lensnode.datasource_sync import _feishu_folder_token, _git_auth_url
-from lensnode.datasource_sync import _sync_feishu_folder
+import pytest
+
+from lensnode.datasource_sync import (
+    DataSourceSyncError,
+    _feishu_folder_token,
+    _git_auth_url,
+    _http_json,
+    _raise_feishu_business_error,
+    _sync_feishu_folder,
+)
 
 
 def test_git_auth_url_uses_inline_access_token():
@@ -86,3 +94,26 @@ def test_sync_feishu_folder_preserves_tree(tmp_path, monkeypatch):
     assert result["synced"] == 2
     assert (tmp_path / "doc1.md").exists()
     assert (tmp_path / "Child-Folder" / "doc2.md").exists()
+
+
+def test_feishu_business_error_is_preserved():
+    with pytest.raises(DataSourceSyncError) as exc:
+        _raise_feishu_business_error(
+            {"code": 99991663, "msg": "permission denied"}
+        )
+
+    assert "99991663" in str(exc.value)
+    assert "permission denied" in str(exc.value)
+
+
+def test_http_json_preserves_network_error(monkeypatch):
+    def raise_timeout(*args, **kwargs):
+        del args, kwargs
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("urllib.request.urlopen", raise_timeout)
+
+    with pytest.raises(DataSourceSyncError) as exc:
+        _http_json("https://example.invalid")
+
+    assert "TimeoutError" in str(exc.value)

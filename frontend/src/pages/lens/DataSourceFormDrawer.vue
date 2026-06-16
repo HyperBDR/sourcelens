@@ -577,7 +577,8 @@ const connectionResultMessage = computed(() => {
     const key = `lensAdmin.datasourceWizard.connectionStatus.${code}`
     const translated = t(key)
     if (translated !== key) {
-      return translated
+      const error = props.connectionResult.details?.error
+      return error ? `${translated} ${error}` : translated
     }
   }
   return props.connectionResult.message || ''
