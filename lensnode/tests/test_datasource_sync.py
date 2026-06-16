@@ -8,6 +8,7 @@ from lensnode.datasource_sync import (
     _feishu_export_extension,
     _git_auth_url,
     _http_json,
+    _poll_feishu_export_task,
     _raise_feishu_business_error,
     _sync_feishu_folder,
 )
@@ -107,7 +108,65 @@ def test_feishu_export_filename_uses_original_extension():
     }
 
     assert _export_filename(exported, "fallback", "docx") == "Example-Doc.docx"
-    assert _feishu_export_extension("slides") == "pptx"
+    assert _feishu_export_extension("bitable") == "xlsx"
+
+
+def test_poll_feishu_export_task_waits_while_processing(monkeypatch):
+    """Feishu job_status=2 means processing, not failed."""
+
+    responses = [
+        {"data": {"result": {"job_status": 2}}},
+        {
+            "data": {
+                "result": {
+                    "job_status": 0,
+                    "file_token": "exported",
+                }
+            }
+        },
+    ]
+
+    def http_json(*args, **kwargs):
+        del args, kwargs
+        return responses.pop(0)
+
+    monkeypatch.setattr("lensnode.datasource_sync._http_json", http_json)
+    monkeypatch.setattr("time.sleep", lambda *args, **kwargs: None)
+
+    result = _poll_feishu_export_task("ticket", "doc", "docx", {})
+
+    assert result["job_status"] == 0
+    assert result["file_token"] == "exported"
+    assert responses == []
+
+
+def test_poll_feishu_export_task_accepts_string_processing_status(monkeypatch):
+    """Feishu job_status may be returned as a string by API clients."""
+
+    responses = [
+        {"data": {"result": {"job_status": "2"}}},
+        {
+            "data": {
+                "result": {
+                    "job_status": "0",
+                    "file_token": "exported",
+                }
+            }
+        },
+    ]
+
+    def http_json(*args, **kwargs):
+        del args, kwargs
+        return responses.pop(0)
+
+    monkeypatch.setattr("lensnode.datasource_sync._http_json", http_json)
+    monkeypatch.setattr("time.sleep", lambda *args, **kwargs: None)
+
+    result = _poll_feishu_export_task("ticket", "doc", "docx", {})
+
+    assert result["job_status"] == "0"
+    assert result["file_token"] == "exported"
+    assert responses == []
 
 
 def test_feishu_business_error_is_preserved():
@@ -143,7 +202,33 @@ def test_export_feishu_document_preserves_failed_result(monkeypatch):
     assert "LENS_SOURCE_EXPORT_FAILED" in message
     assert "doc1" in message
     assert "ticket1" in message
+    assert "job_status=2" in message
+    assert "processing" in message
     assert "permission denied" in message
+
+
+def test_export_feishu_document_shows_official_status_reason(monkeypatch):
+    """Export failures include Feishu job status and reason."""
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._create_feishu_export_task",
+        lambda *args, **kwargs: "ticket1",
+    )
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._poll_feishu_export_task",
+        lambda *args, **kwargs: {
+            "job_status": 107,
+            "job_error_msg": "file exceeds limit",
+        },
+    )
+
+    with pytest.raises(DataSourceSyncError) as exc:
+        _export_feishu_document("doc1", "docx", {})
+
+    message = str(exc.value)
+    assert "job_status=107" in message
+    assert "document too large" in message
+    assert "file exceeds limit" in message
 
 
 def test_sync_feishu_folder_fails_when_every_item_fails(tmp_path, monkeypatch):

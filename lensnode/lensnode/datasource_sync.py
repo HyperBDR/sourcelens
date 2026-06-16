@@ -7,6 +7,24 @@ from pathlib import Path
 from urllib import error, parse, request
 
 WORKSPACE_ROOT = "/workspace"
+FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
+FEISHU_EXPORT_SUCCESS_STATUS = 0
+FEISHU_EXPORT_POLL_INTERVAL_S = 2
+FEISHU_EXPORT_TIMEOUT_S = 600
+FEISHU_EXPORT_STATUS_MESSAGES = {
+    0: "success",
+    1: "initializing",
+    2: "processing",
+    3: "internal error",
+    107: "document too large",
+    108: "processing timeout",
+    109: "content block permission denied",
+    110: "permission denied",
+    111: "document deleted",
+    122: "export blocked while creating copy",
+    123: "document not found",
+    6000: "too many images",
+}
 
 
 class DataSourceSyncError(RuntimeError):
@@ -843,7 +861,6 @@ def _is_feishu_exportable_type(item_type):
         "sheet",
         "bitable",
         "base",
-        "slides",
     }
 
 
@@ -856,8 +873,6 @@ def _feishu_export_type(item_type):
         return "sheet"
     if item_type in {"bitable", "base"}:
         return "bitable"
-    if item_type == "slides":
-        return "slides"
     return item_type or "docx"
 
 
@@ -868,8 +883,7 @@ def _feishu_export_extension(item_type):
     mapping = {
         "docx": "docx",
         "sheet": "xlsx",
-        "bitable": "base",
-        "slides": "pptx",
+        "bitable": "xlsx",
     }
     return mapping.get(export_type, "docx")
 
@@ -891,12 +905,13 @@ def _export_feishu_document(file_token, item_type, headers):
         export_type,
         headers,
     )
-    if result.get("job_status") != 0:
-        detail = _compact_json(result)
+    status = _feishu_job_status(result)
+    if status != FEISHU_EXPORT_SUCCESS_STATUS:
+        detail = _feishu_export_status_detail(result)
         raise DataSourceSyncError(
             "LENS_SOURCE_EXPORT_FAILED: "
             f"token={file_token} type={export_type} "
-            f"extension={file_extension} ticket={ticket} result={detail}"
+            f"extension={file_extension} ticket={ticket} {detail}"
         )
     export_file_token = result.get("file_token")
     if not export_file_token:
@@ -957,19 +972,48 @@ def _poll_feishu_export_task(ticket, file_token, file_type, headers):
         f"{ticket}?{query}"
     )
     result = {}
-    for _ in range(30):
+    deadline = time.monotonic() + FEISHU_EXPORT_TIMEOUT_S
+    while time.monotonic() < deadline:
         data = _http_json(url, headers=headers)
-        result = (data.get("data") or {}).get("result") or {}
-        status = result.get("job_status")
-        if status in (0, 2, 3):
+        data = data.get("data") or data
+        result = data.get("result") or data
+        status = _feishu_job_status(result)
+        if status == FEISHU_EXPORT_SUCCESS_STATUS:
             return result
-        time.sleep(2)
-    detail = _compact_json(result)
+        if status not in FEISHU_EXPORT_PENDING_STATUSES:
+            return result
+        time.sleep(FEISHU_EXPORT_POLL_INTERVAL_S)
+    detail = _feishu_export_status_detail(result)
     raise DataSourceSyncError(
         "LENS_SOURCE_EXPORT_TIMEOUT: "
         f"token={file_token} type={file_type} ticket={ticket} "
         f"last_result={detail}"
     )
+
+
+def _feishu_job_status(result):
+    """Return Feishu export job status as an integer when possible."""
+
+    value = result.get("job_status")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _feishu_export_status_detail(result):
+    """Return a readable Feishu export status detail."""
+
+    status = _feishu_job_status(result)
+    message = FEISHU_EXPORT_STATUS_MESSAGES.get(status, "unknown status")
+    error_msg = str(result.get("job_error_msg") or "").strip()
+    detail = (
+        f"job_status={result.get('job_status')} status={message} "
+        f"job_error_msg={error_msg or '-'}"
+    )
+    return f"{detail} result={_compact_json(result)}"
 
 
 def _download_feishu_export_file(file_token, headers):
