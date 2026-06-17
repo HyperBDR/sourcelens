@@ -440,76 +440,158 @@
                 :key="dir.path"
                 class="space-y-1"
               >
-                <button
-                  class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
-                  :class="directoryButtonClass(dir.relative)"
-                  type="button"
-                  @click="selectTargetDirectory(dir.relative)"
-                >
-                  <component
-                    :is="isSelectedDirectory(dir.relative) ? FolderOpenIcon : FolderIcon"
-                    class="h-4 w-4 shrink-0"
-                  />
-                  <span class="truncate">{{ dir.name }}</span>
-                </button>
-                <div
-                  v-if="dir.children.length"
-                  class="ml-5 space-y-1 border-l border-line pl-2"
-                >
+                <div class="flex items-center gap-1">
                   <button
-                    v-for="child in dir.children"
-                    :key="child.path"
-                    class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
-                    :class="directoryButtonClass(child.relative)"
+                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
                     type="button"
-                    @click="selectTargetDirectory(child.relative)"
+                    @click="toggleDirectoryExpanded(dir.relative)"
                   >
                     <component
                       :is="
-                        isSelectedDirectory(child.relative)
+                        isDirectoryExpanded(dir.relative)
+                          ? ChevronDownIcon
+                          : ChevronRightIcon
+                      "
+                      class="h-4 w-4"
+                    />
+                  </button>
+                  <button
+                    class="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
+                    :class="directoryButtonClass(dir.relative)"
+                    type="button"
+                    @click="selectTargetDirectory(dir.relative)"
+                  >
+                    <component
+                      :is="
+                        isSelectedDirectory(dir.relative)
                           ? FolderOpenIcon
                           : FolderIcon
                       "
                       class="h-4 w-4 shrink-0"
                     />
-                    <span class="truncate">{{ child.name }}</span>
+                    <span class="truncate">{{ dir.name }}</span>
+                  </button>
+                  <button
+                    class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                    type="button"
+                    :title="t('lensAdmin.datasourceWizard.createTargetDir')"
+                    @click="startCreateTargetDirectory(dir.relative)"
+                  >
+                    <PlusIcon class="h-4 w-4" />
                   </button>
                 </div>
-              </div>
-            </div>
-          </div>
-          <div class="rounded-md border border-line bg-surface p-3">
-            <div class="mb-2 text-sm font-medium text-ink-900">
-              {{ t('lensAdmin.datasourceWizard.createTargetDir') }}
-            </div>
-            <div class="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
-              <select v-model="newDirectoryParent" class="form-input">
-                <option value="">
-                  {{ workspaceRoot }}
-                </option>
-                <option
-                  v-for="dir in workspaceDirectoryTree"
-                  :key="dir.path"
-                  :value="dir.relative"
+                <div
+                  v-if="creatingDirectoryParent === dir.relative"
+                  class="ml-8 flex gap-2"
                 >
-                  {{ dir.name }}
-                </option>
-              </select>
-              <input
-                v-model="newDirectoryName"
-                class="form-input"
-                :placeholder="t('lensAdmin.datasourceWizard.newDirPlaceholder')"
-              />
-              <BaseButton
-                class="shrink-0"
-                size="sm"
-                variant="outline"
-                :disabled="!canCreateTargetDirectory"
-                @click="selectNewTargetDirectory"
-              >
-                <PlusIcon class="h-4 w-4" />
-                {{ t('lensAdmin.datasourceWizard.useNewDir') }}
-              </BaseButton>
+                  <input
+                    v-model="newDirectoryName"
+                    class="form-input h-9"
+                    :placeholder="t('lensAdmin.datasourceWizard.newDirPlaceholder')"
+                    @keyup.enter="selectNewTargetDirectory"
+                  />
+                  <BaseButton
+                    size="sm"
+                    variant="outline"
+                    :disabled="!canCreateTargetDirectory"
+                    @click="selectNewTargetDirectory"
+                  >
+                    {{ t('lensAdmin.datasourceWizard.useNewDir') }}
+                  </BaseButton>
+                </div>
+                <div
+                  v-if="isDirectoryExpanded(dir.relative)"
+                  class="ml-5 space-y-1 border-l border-line pl-2"
+                >
+                  <div
+                    v-if="!dir.children.length"
+                    class="px-2 py-1.5 text-xs text-ink-400"
+                  >
+                    {{ t('lensAdmin.datasourceWizard.noChildDirs') }}
+                  </div>
+                  <div
+                    v-for="child in dir.children"
+                    :key="child.path"
+                    class="space-y-1"
+                  >
+                    <div class="flex items-center gap-1">
+                      <span class="h-7 w-7 shrink-0" />
+                      <button
+                        class="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
+                        :class="directoryButtonClass(child.relative)"
+                        type="button"
+                        @click="selectTargetDirectory(child.relative)"
+                      >
+                        <component
+                          :is="
+                            isSelectedDirectory(child.relative)
+                              ? FolderOpenIcon
+                              : FolderIcon
+                          "
+                          class="h-4 w-4 shrink-0"
+                        />
+                        <span class="truncate">{{ child.name }}</span>
+                      </button>
+                      <button
+                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                        type="button"
+                        :title="t('lensAdmin.datasourceWizard.createTargetDir')"
+                        @click="startCreateTargetDirectory(child.relative)"
+                      >
+                        <PlusIcon class="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div
+                      v-if="creatingDirectoryParent === child.relative"
+                      class="ml-8 flex gap-2"
+                    >
+                      <input
+                        v-model="newDirectoryName"
+                        class="form-input h-9"
+                        :placeholder="
+                          t('lensAdmin.datasourceWizard.newDirPlaceholder')
+                        "
+                        @keyup.enter="selectNewTargetDirectory"
+                      />
+                      <BaseButton
+                        size="sm"
+                        variant="outline"
+                        :disabled="!canCreateTargetDirectory"
+                        @click="selectNewTargetDirectory"
+                      >
+                        {{ t('lensAdmin.datasourceWizard.useNewDir') }}
+                      </BaseButton>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-2 border-t border-line pt-2">
+                <button
+                  v-if="creatingDirectoryParent !== ''"
+                  class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-ink-600 hover:bg-surface-sunken"
+                  type="button"
+                  @click="startCreateTargetDirectory('')"
+                >
+                  <PlusIcon class="h-4 w-4" />
+                  <span>{{ t('lensAdmin.datasourceWizard.createAtWorkspace') }}</span>
+                </button>
+                <div v-else class="flex gap-2 px-2 py-1">
+                  <input
+                    v-model="newDirectoryName"
+                    class="form-input h-9"
+                    :placeholder="t('lensAdmin.datasourceWizard.newDirPlaceholder')"
+                    @keyup.enter="selectNewTargetDirectory"
+                  />
+                  <BaseButton
+                    size="sm"
+                    variant="outline"
+                    :disabled="!canCreateTargetDirectory"
+                    @click="selectNewTargetDirectory"
+                  >
+                    {{ t('lensAdmin.datasourceWizard.useNewDir') }}
+                  </BaseButton>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -639,6 +721,8 @@
 
 <script setup>
 import {
+  ChevronDown as ChevronDownIcon,
+  ChevronRight as ChevronRightIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
   Plus as PlusIcon
@@ -692,7 +776,8 @@ const quickCredential = ref({
   appSecret: ''
 })
 const showQuickCredential = ref(false)
-const newDirectoryParent = ref('')
+const creatingDirectoryParent = ref('')
+const expandedDirectories = ref(new Set())
 const newDirectoryName = ref('')
 
 const syncIntervalSeconds = computed({
@@ -1034,6 +1119,20 @@ function directoryButtonClass(relative) {
     : 'text-ink-700'
 }
 
+function isDirectoryExpanded(relative) {
+  return expandedDirectories.value.has(relative)
+}
+
+function toggleDirectoryExpanded(relative) {
+  const next = new Set(expandedDirectories.value)
+  if (next.has(relative)) {
+    next.delete(relative)
+  } else {
+    next.add(relative)
+  }
+  expandedDirectories.value = next
+}
+
 function selectTargetDirectory(relative) {
   props.form.workspace_relative_path = relative
   emit('check-path')
@@ -1044,14 +1143,26 @@ function isValidRelativeName(value) {
   return !!name && !name.includes('/') && !['.', '..'].includes(name)
 }
 
+function startCreateTargetDirectory(parent) {
+  creatingDirectoryParent.value = parent
+  newDirectoryName.value = ''
+  if (parent) {
+    expandedDirectories.value = new Set([
+      ...expandedDirectories.value,
+      parent.split('/')[0]
+    ])
+  }
+}
+
 function selectNewTargetDirectory() {
   if (!canCreateTargetDirectory.value) {
     return
   }
-  const parent = String(newDirectoryParent.value || '').replace(/\/+$/, '')
+  const parent = String(creatingDirectoryParent.value || '').replace(/\/+$/, '')
   const name = String(newDirectoryName.value || '').trim()
   props.form.workspace_relative_path = parent ? `${parent}/${name}` : name
   newDirectoryName.value = ''
+  creatingDirectoryParent.value = ''
   emit('check-path')
 }
 
@@ -1096,7 +1207,8 @@ watch(
     if (show) {
       wizardStep.value = 1
       showQuickCredential.value = false
-      newDirectoryParent.value = ''
+      creatingDirectoryParent.value = ''
+      expandedDirectories.value = new Set()
       newDirectoryName.value = ''
     }
   }
@@ -1105,7 +1217,8 @@ watch(
 watch(
   () => props.form.lensnode_uuid,
   () => {
-    newDirectoryParent.value = ''
+    creatingDirectoryParent.value = ''
+    expandedDirectories.value = new Set()
     newDirectoryName.value = ''
   }
 )

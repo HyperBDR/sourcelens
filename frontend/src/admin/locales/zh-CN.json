@@ -890,6 +890,8 @@
       "twoLevelDirs": "两级目录",
       "noWorkspaceDirs": "当前工作区暂无可选目录，可以直接新建目录。",
       "createTargetDir": "新建目标目录",
+      "createAtWorkspace": "在工作区根目录新建",
+      "noChildDirs": "暂无子目录",
       "newDirPlaceholder": "目录名称",
       "useNewDir": "使用新目录",
       "checkPath": "检查目录",
