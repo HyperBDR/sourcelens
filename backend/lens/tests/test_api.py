@@ -14,6 +14,7 @@ from lens.models import (
     Assistant,
     AssistantSkill,
     DataSource,
+    DataSourceCredential,
     GlobalSetting,
     LensNode,
     MCPServer,
@@ -703,15 +704,22 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("secret fields", str(response.data))
 
-    def test_datasource_allows_git_access_token(self):
+    def test_datasource_allows_git_credential_binding(self):
+        credential = DataSourceCredential.objects.create(
+            name="Git token",
+            provider=DataSourceCredential.Provider.GENERIC,
+            auth_type=DataSourceCredential.AuthType.HTTPS_TOKEN,
+        )
+        credential.set_secret("ghp_example")
+        credential.save()
         payload = {
             "name": "Token Repo",
             "source_type": "git",
             "lensnode_uuid": str(self.lensnode.uuid),
+            "credential_uuid": str(credential.uuid),
             "config": {
                 "repo_url": "https://example.com/repo.git",
                 "auth_scheme": "token",
-                "access_token": "ghp_example",
             },
             "target_path": "/workspace/token-repo",
         }
@@ -727,23 +735,26 @@ class LensApiTests(TestCase):
         self.assertNotIn("access_token", response.data["config"])
         datasource = DataSource.objects.get(uuid=response.data["uuid"])
         self.assertNotIn("access_token", datasource.config)
-        self.assertEqual(
-            datasource.credential.get_secret(),
-            "ghp_example",
-        )
+        self.assertEqual(datasource.credential, credential)
 
-    def test_datasource_allows_feishu_drive_folder_credential(self):
+    def test_datasource_allows_feishu_drive_folder_credential_binding(self):
+        credential = DataSourceCredential.objects.create(
+            name="Feishu app",
+            provider=DataSourceCredential.Provider.FEISHU,
+            auth_type=DataSourceCredential.AuthType.FEISHU_APP,
+        )
+        credential.set_secret("cli_example:secret_example")
+        credential.save()
         payload = {
             "name": "Feishu Folder",
             "source_type": "feishu",
             "lensnode_uuid": str(self.lensnode.uuid),
+            "credential_uuid": str(credential.uuid),
             "config": {
                 "sync_mode": "drive_folder",
                 "folder_url": "https://example.feishu.cn/drive/folder/fld1",
                 "recursive": True,
                 "max_depth": 5,
-                "app_id": "cli_example",
-                "app_secret": "secret_example",
             },
             "target_path": "/workspace/feishu-folder",
         }
@@ -761,10 +772,7 @@ class LensApiTests(TestCase):
         datasource = DataSource.objects.get(uuid=response.data["uuid"])
         self.assertNotIn("app_id", datasource.config)
         self.assertNotIn("app_secret", datasource.config)
-        self.assertEqual(
-            datasource.credential.get_secret(),
-            "cli_example:secret_example",
-        )
+        self.assertEqual(datasource.credential, credential)
 
     def test_lensnode_tests_datasource_connection(self):
         with patch(

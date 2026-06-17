@@ -526,7 +526,17 @@
                       {{ credentialAuthTypeLabel(row.auth_type) }}
                     </td>
                     <td class="table-cell text-ink-600">
-                      {{ row.datasource_count || 0 }}
+                      <div
+                        class="inline-flex"
+                        @mouseenter="showCredentialBindings($event, row)"
+                        @mouseleave="hideCredentialBindings"
+                      >
+                        <span
+                          class="cursor-default underline decoration-dotted underline-offset-4"
+                        >
+                          {{ row.datasource_count || 0 }}
+                        </span>
+                      </div>
                     </td>
                     <td class="table-cell text-ink-600">
                       {{ formatDateTime(row.last_used_at) }}
@@ -592,6 +602,33 @@
           </div>
         </div>
     </section>
+
+    <Teleport to="body">
+      <div
+        v-if="credentialBindingTooltip.row"
+        class="pointer-events-none fixed z-[9999] w-64 rounded-md border border-line bg-surface p-3 text-xs shadow-lg"
+        :style="credentialBindingTooltipStyle"
+      >
+        <div class="mb-2 font-medium text-ink-900">
+          {{ t('lensAdmin.credentials.boundDatasources') }}
+        </div>
+        <div class="max-h-64 space-y-2 overflow-y-auto">
+          <div
+            v-for="datasource in credentialBindings(credentialBindingTooltip.row)"
+            :key="datasource.uuid"
+            class="rounded border border-line bg-surface-sunken px-2 py-1.5"
+          >
+            <div class="font-medium text-ink-900">
+              {{ datasource.name }}
+            </div>
+            <div class="mt-0.5 text-ink-500">
+              {{ formatSourceType(datasource.source_type) }}
+              · {{ datasource.status }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
       <!-- Assistant Drawer (create wizard + edit) -->
       <AssistantFormDrawer
@@ -807,48 +844,72 @@
             <FormRow :label="t('lensAdmin.fields.name')">
               <input v-model="form.name" class="form-input" required />
             </FormRow>
-            <div class="grid gap-4 md:grid-cols-2">
-              <FormRow :label="t('lensAdmin.fields.type')">
-                <select v-model="form.provider" class="form-input">
-                  <option value="generic">Git</option>
-                  <option value="feishu">Feishu</option>
-                </select>
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.authScheme')">
-                <div class="form-input bg-surface-sunken text-ink-500">
-                  {{ credentialAuthTypeLabel(credentialFormAuthType) }}
-                </div>
-              </FormRow>
-            </div>
+            <FormRow :label="t('lensAdmin.fields.type')">
+              <select v-model="form.provider" class="form-input">
+                <option value="generic">Git</option>
+                <option value="feishu">Feishu</option>
+              </select>
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.authScheme')">
+              <div class="form-input bg-surface-sunken text-ink-500">
+                {{ credentialAuthTypeLabel(credentialFormAuthType) }}
+              </div>
+            </FormRow>
             <template v-if="credentialFormAuthType === 'feishu_app'">
-              <div class="grid gap-4 md:grid-cols-2">
-                <FormRow :label="t('lensAdmin.fields.feishuAppId')">
-                  <input
-                    v-model="form.app_id"
-                    class="form-input"
-                    autocomplete="off"
-                  />
-                </FormRow>
-                <FormRow :label="t('lensAdmin.fields.feishuAppSecret')">
+              <FormRow :label="t('lensAdmin.fields.feishuAppId')">
+                <input
+                  v-model="form.app_id"
+                  class="form-input"
+                  autocomplete="off"
+                />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.feishuAppSecret')">
+                <div class="flex gap-2">
                   <input
                     v-model="form.app_secret"
                     class="form-input"
-                    type="password"
+                    :type="credentialSecretRevealed ? 'text' : 'password'"
                     autocomplete="off"
                   />
-                </FormRow>
-              </div>
+                  <button
+                    v-if="canRevealCredential"
+                    class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                    type="button"
+                    :title="revealButtonTitle"
+                    @click="toggleCredentialReveal"
+                  >
+                    <component
+                      :is="credentialSecretRevealed ? EyeOffIcon : EyeIcon"
+                      class="h-4 w-4"
+                    />
+                  </button>
+                </div>
+              </FormRow>
             </template>
             <FormRow
               v-else
               :label="t('lensAdmin.fields.accessToken')"
             >
-              <input
-                v-model="form.secret"
-                class="form-input"
-                type="password"
-                autocomplete="off"
-              />
+              <div class="flex gap-2">
+                <input
+                  v-model="form.secret"
+                  class="form-input"
+                  :type="credentialSecretRevealed ? 'text' : 'password'"
+                  autocomplete="off"
+                />
+                <button
+                  v-if="canRevealCredential"
+                  class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                  type="button"
+                  :title="revealButtonTitle"
+                  @click="toggleCredentialReveal"
+                >
+                  <component
+                    :is="credentialSecretRevealed ? EyeOffIcon : EyeIcon"
+                    class="h-4 w-4"
+                  />
+                </button>
+              </div>
             </FormRow>
             <p
               v-if="mode === 'edit'"
@@ -878,6 +939,7 @@
 </template>
 
 <script setup>
+import { Eye as EyeIcon, EyeOff as EyeOffIcon } from '@lucide/vue'
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -910,6 +972,7 @@ import {
   listLensNodes,
   listMcpServers,
   listSkills,
+  revealCredential,
   revokeLensNodeToken,
   syncDataSource,
   testLensNodeDataSourceConnection,
@@ -982,6 +1045,13 @@ const syncIntervalSeconds = ref(3600)
 const syncPolicyMode = ref('interval')
 const syncCron = ref('0 2 * * *')
 const syncTimezone = ref('Asia/Shanghai')
+const credentialSecretRevealed = ref(false)
+const revealingCredential = ref(false)
+const credentialBindingTooltip = ref({
+  row: null,
+  left: 0,
+  top: 0
+})
 const llmConfigOptions = ref([])
 
 const assistants = ref([])
@@ -994,6 +1064,7 @@ const mcps = ref([])
 const globalSettings = ref([])
 const systemHealth = ref([])
 const taskSaving = ref({})
+const CREDENTIAL_MASK = '********'
 
 const defaultSettings = {
   'lensnode.defaults.timeout': 600,
@@ -1294,6 +1365,21 @@ const credentialFormAuthType = computed(() =>
   form.value.provider === 'feishu' ? 'feishu_app' : 'https_token'
 )
 
+const canRevealCredential = computed(
+  () => activeTab.value === 'credentials' && mode.value === 'edit' && !!form.value.uuid
+)
+
+const revealButtonTitle = computed(() =>
+  credentialSecretRevealed.value
+    ? t('lensAdmin.credentials.hideSecret')
+    : t('lensAdmin.credentials.revealSecret')
+)
+
+const credentialBindingTooltipStyle = computed(() => ({
+  left: `${credentialBindingTooltip.value.left}px`,
+  top: `${credentialBindingTooltip.value.top}px`
+}))
+
 const defaultScheduledTasks = computed(() => {
   const taskTypes = [
     'lensnode_cleanup',
@@ -1526,6 +1612,73 @@ function credentialAuthTypeLabel(authType) {
   return labels[authType] || authType || emptyValue
 }
 
+function credentialBindings(row) {
+  return Array.isArray(row?.datasource_bindings)
+    ? row.datasource_bindings
+    : []
+}
+
+function showCredentialBindings(event, row) {
+  if (!credentialBindings(row).length) {
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  const tooltipWidth = 256
+  const tooltipGap = 8
+  const estimatedHeight = Math.min(
+    280,
+    46 + credentialBindings(row).length * 48
+  )
+  const left = Math.min(
+    Math.max(8, rect.left),
+    window.innerWidth - tooltipWidth - 8
+  )
+  const top =
+    rect.top > estimatedHeight + tooltipGap
+      ? rect.top - estimatedHeight - tooltipGap
+      : rect.bottom + tooltipGap
+  credentialBindingTooltip.value = {
+    row,
+    left,
+    top
+  }
+}
+
+function hideCredentialBindings() {
+  credentialBindingTooltip.value = {
+    row: null,
+    left: 0,
+    top: 0
+  }
+}
+
+async function toggleCredentialReveal() {
+  if (!form.value.uuid || revealingCredential.value) {
+    return
+  }
+  if (credentialSecretRevealed.value) {
+    credentialSecretRevealed.value = false
+    form.value.secret = form.value.secret ? CREDENTIAL_MASK : ''
+    form.value.app_secret = form.value.app_secret ? CREDENTIAL_MASK : ''
+    return
+  }
+  revealingCredential.value = true
+  try {
+    const payload = await revealCredential(form.value.uuid)
+    if (credentialFormAuthType.value === 'feishu_app') {
+      form.value.app_id = payload?.app_id || ''
+      form.value.app_secret = payload?.app_secret || ''
+    } else {
+      form.value.secret = payload?.secret || ''
+    }
+    credentialSecretRevealed.value = true
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.loadFailed')))
+  } finally {
+    revealingCredential.value = false
+  }
+}
+
 function feishuScopeLabel(syncMode) {
   if (syncMode === 'drive_folder') {
     return t('lensAdmin.datasourceWizard.feishuScopeDriveFolder')
@@ -1700,6 +1853,8 @@ function startCreate() {
   datasourcePathResult.value = null
   datasourceConnectionResult.value = null
   syncIntervalSeconds.value = 3600
+  credentialSecretRevealed.value = false
+  revealingCredential.value = false
   form.value = defaultForm(activeTab.value)
   if (['assistants', 'datasources'].includes(activeTab.value)) {
     showDrawer.value = true
@@ -1716,6 +1871,8 @@ function startEdit(row) {
   datasourcePathResult.value = null
   datasourceConnectionResult.value = null
   syncIntervalSeconds.value = row.sync_policy?.interval_seconds || 3600
+  credentialSecretRevealed.value = false
+  revealingCredential.value = false
   form.value = formFromRow(activeTab.value, row)
   if (['assistants', 'datasources'].includes(activeTab.value)) {
     showDrawer.value = true
@@ -1728,6 +1885,8 @@ function closeModal() {
   showModal.value = false
   form.value = {}
   formError.value = ''
+  credentialSecretRevealed.value = false
+  revealingCredential.value = false
 }
 
 function closeDrawer() {
@@ -1900,9 +2059,9 @@ function formFromRow(tab, row) {
       uuid: row.uuid,
       name: row.name || '',
       provider: row.auth_type === 'feishu_app' ? 'feishu' : 'generic',
-      secret: '',
-      app_id: '',
-      app_secret: ''
+      secret: row.masked_secret || '',
+      app_id: row.masked_app_id || '',
+      app_secret: row.masked_secret || ''
     }
   }
   if (tab === 'mcp') {
@@ -2069,10 +2228,10 @@ function buildPayload(tab) {
       target_path: datasourceTargetPath(),
       config: buildDatasourceConfig(),
       sync_policy: buildDatasourceSyncPolicy(),
-      status: form.value.status || 'active'
-    }
-    if (shouldUseDatasourceCredential()) {
-      payload.credential_uuid = form.value.credential_uuid
+      status: form.value.status || 'active',
+      credential_uuid: shouldUseDatasourceCredential()
+        ? form.value.credential_uuid
+        : null
     }
     return payload
   }
@@ -2100,13 +2259,22 @@ function buildPayload(tab) {
       auth_type: credentialFormAuthType.value
     }
     if (credentialFormAuthType.value === 'feishu_app') {
-      if (form.value.app_id?.trim()) {
+      if (
+        form.value.app_id?.trim() &&
+        form.value.app_id !== CREDENTIAL_MASK
+      ) {
         payload.app_id = form.value.app_id.trim()
       }
-      if (form.value.app_secret?.trim()) {
+      if (
+        form.value.app_secret?.trim() &&
+        form.value.app_secret !== CREDENTIAL_MASK
+      ) {
         payload.app_secret = form.value.app_secret.trim()
       }
-    } else if (form.value.secret?.trim()) {
+    } else if (
+      form.value.secret?.trim() &&
+      form.value.secret !== CREDENTIAL_MASK
+    ) {
       payload.secret = form.value.secret.trim()
     }
     return payload

@@ -132,7 +132,6 @@ def test_datasource_connection(
     config = dict(config or {})
     _inject_existing_datasource_credential(
         config,
-        datasource_uuid,
         credential_uuid,
     )
     request_id = uuid.uuid4().hex
@@ -207,34 +206,22 @@ def datasource_runtime_config(datasource):
 
 def _inject_existing_datasource_credential(
     config,
-    datasource_uuid,
     credential_uuid=None,
 ):
-    """Add an existing encrypted credential to transient test config."""
+    """Add a selected encrypted credential to transient test config."""
 
-    if config.get("access_token") or (
-        not datasource_uuid and not credential_uuid
-    ):
+    if not credential_uuid:
         return
-    credential = None
-    datasource = None
-    if credential_uuid:
-        credential = DataSourceCredential.objects.filter(
-            uuid=credential_uuid,
-        ).first()
-    elif datasource_uuid:
-        datasource = DataSource.objects.select_related("credential").filter(
-            uuid=datasource_uuid,
-        ).first()
-        credential = datasource.credential if datasource else None
+    credential = DataSourceCredential.objects.filter(
+        uuid=credential_uuid,
+    ).first()
     if credential is None:
         return
     secret = credential.get_secret()
     if not secret:
         return
     if (
-        (datasource and datasource.source_type == DataSource.SourceType.FEISHU)
-        or source_type_from_credential(credential) == DataSource.SourceType.FEISHU
+        source_type_from_credential(credential) == DataSource.SourceType.FEISHU
     ):
         app_id, _, app_secret = secret.partition(":")
         config["app_id"] = app_id

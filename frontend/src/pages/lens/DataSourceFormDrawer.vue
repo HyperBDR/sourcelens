@@ -152,32 +152,38 @@
           required
         >
           <div class="flex flex-col gap-2">
-            <select
-              v-if="filteredCredentials.length"
-              v-model="form.credential_uuid"
-              class="form-input"
-            >
-              <option value="">
-                {{ t('lensAdmin.datasourceWizard.selectCredential') }}
-              </option>
-              <option
-                v-for="credential in filteredCredentials"
-                :key="credential.uuid"
-                :value="credential.uuid"
+            <div v-if="filteredCredentials.length" class="flex gap-2">
+              <select v-model="form.credential_uuid" class="form-input">
+                <option value="">
+                  {{ t('lensAdmin.datasourceWizard.selectCredential') }}
+                </option>
+                <option
+                  v-for="credential in filteredCredentials"
+                  :key="credential.uuid"
+                  :value="credential.uuid"
+                >
+                  {{ credential.name }}
+                </option>
+              </select>
+              <BaseButton
+                class="shrink-0"
+                size="sm"
+                variant="outline"
+                @click="toggleQuickCredential"
               >
-                {{ credential.name }}
-              </option>
-            </select>
+                {{ t('lensAdmin.datasourceWizard.quickCreateCredential') }}
+              </BaseButton>
+            </div>
             <div
-              v-else
+              v-if="shouldShowQuickCredential"
               class="space-y-4 rounded-md border border-line bg-surface p-4"
             >
               <div>
                 <p class="text-sm font-medium text-ink-900">
-                  {{ t('lensAdmin.datasourceWizard.noGitCredentialTitle') }}
+                  {{ quickCredentialTitle }}
                 </p>
                 <p class="mt-1 text-xs text-ink-500">
-                  {{ t('lensAdmin.datasourceWizard.noGitCredentialDesc') }}
+                  {{ quickCredentialDesc }}
                 </p>
               </div>
               <div class="grid gap-3 md:grid-cols-2">
@@ -230,32 +236,38 @@
 
         <FormRow :label="t('lensAdmin.fields.credential')" required>
           <div class="flex flex-col gap-2">
-            <select
-              v-if="filteredCredentials.length"
-              v-model="form.credential_uuid"
-              class="form-input"
-            >
-              <option value="">
-                {{ t('lensAdmin.datasourceWizard.selectFeishuCredential') }}
-              </option>
-              <option
-                v-for="credential in filteredCredentials"
-                :key="credential.uuid"
-                :value="credential.uuid"
+            <div v-if="filteredCredentials.length" class="flex gap-2">
+              <select v-model="form.credential_uuid" class="form-input">
+                <option value="">
+                  {{ t('lensAdmin.datasourceWizard.selectFeishuCredential') }}
+                </option>
+                <option
+                  v-for="credential in filteredCredentials"
+                  :key="credential.uuid"
+                  :value="credential.uuid"
+                >
+                  {{ credential.name }}
+                </option>
+              </select>
+              <BaseButton
+                class="shrink-0"
+                size="sm"
+                variant="outline"
+                @click="toggleQuickCredential"
               >
-                {{ credential.name }}
-              </option>
-            </select>
+                {{ t('lensAdmin.datasourceWizard.quickCreateCredential') }}
+              </BaseButton>
+            </div>
             <div
-              v-else
+              v-if="shouldShowQuickCredential"
               class="space-y-4 rounded-md border border-line bg-surface p-4"
             >
               <div>
                 <p class="text-sm font-medium text-ink-900">
-                  {{ t('lensAdmin.datasourceWizard.noFeishuCredentialTitle') }}
+                  {{ quickCredentialTitle }}
                 </p>
                 <p class="mt-1 text-xs text-ink-500">
-                  {{ t('lensAdmin.datasourceWizard.noFeishuCredentialDesc') }}
+                  {{ quickCredentialDesc }}
                 </p>
               </div>
               <FormRow :label="t('lensAdmin.fields.name')" required>
@@ -396,18 +408,110 @@
         {{ t('lensAdmin.datasourceWizard.step4Desc') }}
       </p>
       <FormRow :label="t('lensAdmin.fields.targetPath')" required>
-        <div class="flex overflow-hidden rounded-lg border border-line">
-          <span
-            class="flex items-center border-r border-line bg-surface-sunken px-3 font-mono text-sm text-ink-500"
-          >
-            {{ workspacePrefix }}
-          </span>
-          <input
-            v-model="form.workspace_relative_path"
-            class="min-w-0 flex-1 bg-surface px-3 py-2 font-mono text-sm text-ink-900 focus:outline-none"
-            placeholder="repos/sourcelens"
-            @blur="$emit('check-path')"
-          />
+        <div class="space-y-3">
+          <div class="rounded-md border border-line bg-surface-sunken px-3 py-2">
+            <div class="text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.selectedTargetPath') }}
+            </div>
+            <div class="mt-1 break-all font-mono text-sm text-ink-900">
+              {{ form.workspace_relative_path ? targetPath : workspacePrefix }}
+            </div>
+          </div>
+          <div class="rounded-md border border-line bg-surface">
+            <div
+              class="flex items-center justify-between border-b border-line px-3 py-2"
+            >
+              <div class="text-sm font-medium text-ink-900">
+                {{ workspaceRoot }}
+              </div>
+              <span class="text-xs text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.twoLevelDirs') }}
+              </span>
+            </div>
+            <div class="max-h-64 overflow-y-auto p-2">
+              <div
+                v-if="!workspaceDirectoryTree.length"
+                class="px-2 py-3 text-sm text-ink-500"
+              >
+                {{ t('lensAdmin.datasourceWizard.noWorkspaceDirs') }}
+              </div>
+              <div
+                v-for="dir in workspaceDirectoryTree"
+                :key="dir.path"
+                class="space-y-1"
+              >
+                <button
+                  class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
+                  :class="directoryButtonClass(dir.relative)"
+                  type="button"
+                  @click="selectTargetDirectory(dir.relative)"
+                >
+                  <component
+                    :is="isSelectedDirectory(dir.relative) ? FolderOpenIcon : FolderIcon"
+                    class="h-4 w-4 shrink-0"
+                  />
+                  <span class="truncate">{{ dir.name }}</span>
+                </button>
+                <div
+                  v-if="dir.children.length"
+                  class="ml-5 space-y-1 border-l border-line pl-2"
+                >
+                  <button
+                    v-for="child in dir.children"
+                    :key="child.path"
+                    class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-surface-sunken"
+                    :class="directoryButtonClass(child.relative)"
+                    type="button"
+                    @click="selectTargetDirectory(child.relative)"
+                  >
+                    <component
+                      :is="
+                        isSelectedDirectory(child.relative)
+                          ? FolderOpenIcon
+                          : FolderIcon
+                      "
+                      class="h-4 w-4 shrink-0"
+                    />
+                    <span class="truncate">{{ child.name }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-md border border-line bg-surface p-3">
+            <div class="mb-2 text-sm font-medium text-ink-900">
+              {{ t('lensAdmin.datasourceWizard.createTargetDir') }}
+            </div>
+            <div class="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <select v-model="newDirectoryParent" class="form-input">
+                <option value="">
+                  {{ workspaceRoot }}
+                </option>
+                <option
+                  v-for="dir in workspaceDirectoryTree"
+                  :key="dir.path"
+                  :value="dir.relative"
+                >
+                  {{ dir.name }}
+                </option>
+              </select>
+              <input
+                v-model="newDirectoryName"
+                class="form-input"
+                :placeholder="t('lensAdmin.datasourceWizard.newDirPlaceholder')"
+              />
+              <BaseButton
+                class="shrink-0"
+                size="sm"
+                variant="outline"
+                :disabled="!canCreateTargetDirectory"
+                @click="selectNewTargetDirectory"
+              >
+                <PlusIcon class="h-4 w-4" />
+                {{ t('lensAdmin.datasourceWizard.useNewDir') }}
+              </BaseButton>
+            </div>
+          </div>
         </div>
         <p class="mt-1 text-xs text-ink-500">
           {{ t('lensAdmin.datasourceWizard.pathHint') }}
@@ -519,6 +623,7 @@
             variant="primary"
             :loading="saving"
             :disabled="
+              !canProceedWizard ||
               pathResult?.status === 'blocked' ||
               connectionResult?.status !== 'success'
             "
@@ -533,6 +638,11 @@
 </template>
 
 <script setup>
+import {
+  Folder as FolderIcon,
+  FolderOpen as FolderOpenIcon,
+  Plus as PlusIcon
+} from '@lucide/vue'
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -581,6 +691,9 @@ const quickCredential = ref({
   appId: '',
   appSecret: ''
 })
+const showQuickCredential = ref(false)
+const newDirectoryParent = ref('')
+const newDirectoryName = ref('')
 
 const syncIntervalSeconds = computed({
   get() {
@@ -706,10 +819,23 @@ const workspaceRoot = computed(() =>
 
 const workspacePrefix = computed(() => `${workspaceRoot.value}/`)
 
+const workspaceDirectoryTree = computed(() => {
+  const dirs = Array.isArray(selectedLensNode.value?.available_dirs)
+    ? selectedLensNode.value.available_dirs
+    : []
+  return dirs
+    .map((dir) => normalizeDirectoryNode(dir))
+    .filter((dir) => dir.relative)
+})
+
 const targetPath = computed(() => {
   const relative = String(props.form.workspace_relative_path || '').trim()
   return relative ? `${workspacePrefix.value}${relative}` : workspacePrefix.value
 })
+
+const canCreateTargetDirectory = computed(() =>
+  isValidRelativeName(newDirectoryName.value)
+)
 
 const canCheckPath = computed(
   () => !!props.form.lensnode_uuid && !!props.form.workspace_relative_path
@@ -796,6 +922,9 @@ const canProceedWizard = computed(() => {
   if (!props.form.workspace_relative_path?.trim()) {
     return false
   }
+  if (props.pathResult?.status === 'blocked' || !props.pathResult) {
+    return false
+  }
   if (syncPolicyMode.value === 'crontab') {
     return String(syncCron.value || '').trim().split(/\s+/).length === 5
   }
@@ -821,6 +950,28 @@ const filteredCredentials = computed(() => {
   )
 })
 
+const shouldShowQuickCredential = computed(
+  () => !filteredCredentials.value.length || showQuickCredential.value
+)
+
+const quickCredentialTitle = computed(() => {
+  if (props.form.source_type === 'feishu') {
+    return filteredCredentials.value.length
+      ? t('lensAdmin.datasourceWizard.newFeishuCredentialTitle')
+      : t('lensAdmin.datasourceWizard.noFeishuCredentialTitle')
+  }
+  return filteredCredentials.value.length
+    ? t('lensAdmin.datasourceWizard.newGitCredentialTitle')
+    : t('lensAdmin.datasourceWizard.noGitCredentialTitle')
+})
+
+const quickCredentialDesc = computed(() => {
+  if (props.form.source_type === 'feishu') {
+    return t('lensAdmin.datasourceWizard.noFeishuCredentialDesc')
+  }
+  return t('lensAdmin.datasourceWizard.noGitCredentialDesc')
+})
+
 const canCreateQuickCredential = computed(
   () => {
     if (!quickCredential.value.name?.trim()) {
@@ -842,6 +993,70 @@ function nextWizardStep() {
 
 function prevWizardStep() {
   if (wizardStep.value > 1) wizardStep.value--
+}
+
+function normalizeDirectoryNode(raw) {
+  const path = typeof raw === 'string' ? raw : raw?.path || raw?.name || ''
+  const name = typeof raw === 'string' ? path.split('/').pop() : raw?.name
+  const relative = pathToWorkspaceRelative(path)
+  const children = Array.isArray(raw?.children)
+    ? raw.children
+        .map((child) => normalizeDirectoryNode(child))
+        .filter((child) => child.relative)
+    : []
+  return {
+    path,
+    name: name || relative || path,
+    relative,
+    children
+  }
+}
+
+function pathToWorkspaceRelative(path) {
+  const value = String(path || '').replace(/\/+$/, '')
+  const workspace = workspaceRoot.value
+  if (!value || value === workspace) {
+    return ''
+  }
+  if (value.startsWith(`${workspace}/`)) {
+    return value.slice(workspace.length + 1)
+  }
+  return value.replace(/^\/+/, '')
+}
+
+function isSelectedDirectory(relative) {
+  return props.form.workspace_relative_path === relative
+}
+
+function directoryButtonClass(relative) {
+  return isSelectedDirectory(relative)
+    ? 'bg-brand-50 text-brand-700'
+    : 'text-ink-700'
+}
+
+function selectTargetDirectory(relative) {
+  props.form.workspace_relative_path = relative
+  emit('check-path')
+}
+
+function isValidRelativeName(value) {
+  const name = String(value || '').trim()
+  return !!name && !name.includes('/') && !['.', '..'].includes(name)
+}
+
+function selectNewTargetDirectory() {
+  if (!canCreateTargetDirectory.value) {
+    return
+  }
+  const parent = String(newDirectoryParent.value || '').replace(/\/+$/, '')
+  const name = String(newDirectoryName.value || '').trim()
+  props.form.workspace_relative_path = parent ? `${parent}/${name}` : name
+  newDirectoryName.value = ''
+  emit('check-path')
+}
+
+function toggleQuickCredential() {
+  showQuickCredential.value = !showQuickCredential.value
 }
 
 function createQuickCredential() {
@@ -868,13 +1083,11 @@ function createQuickCredential() {
     appId: '',
     appSecret: ''
   }
+  showQuickCredential.value = false
 }
 
 function hasFeishuCredential() {
-  return (
-    !!props.form.credential_configured ||
-    !!props.form.credential_uuid
-  )
+  return !!props.form.credential_uuid
 }
 
 watch(
@@ -882,7 +1095,18 @@ watch(
   (show) => {
     if (show) {
       wizardStep.value = 1
+      showQuickCredential.value = false
+      newDirectoryParent.value = ''
+      newDirectoryName.value = ''
     }
+  }
+)
+
+watch(
+  () => props.form.lensnode_uuid,
+  () => {
+    newDirectoryParent.value = ''
+    newDirectoryName.value = ''
   }
 )
 
@@ -894,6 +1118,7 @@ watch(
     JSON.stringify(props.config || {})
   ],
   () => {
+    showQuickCredential.value = false
     emit('connection-change')
   }
 )

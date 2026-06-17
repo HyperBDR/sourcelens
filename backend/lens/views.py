@@ -98,6 +98,22 @@ class DataSourceCredentialViewSet(BaseAuthenticatedViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
+    @action(detail=True, methods=["post"], url_path="reveal")
+    def reveal(self, request, uuid=None):
+        """Return decrypted credential values for the current edit session."""
+
+        credential = self.get_object()
+        secret = credential.get_secret()
+        if credential.auth_type == DataSourceCredential.AuthType.FEISHU_APP:
+            app_id, _, app_secret = secret.partition(":")
+            return Response(
+                {
+                    "app_id": app_id,
+                    "app_secret": app_secret,
+                }
+            )
+        return Response({"secret": secret})
+
 
 class EventStreamRenderer(BaseRenderer):
     """Renderer used only for SSE content negotiation."""

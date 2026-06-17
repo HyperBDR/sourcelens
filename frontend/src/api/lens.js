@@ -188,6 +188,11 @@ export async function updateCredential(uuid, payload) {
   return unwrapResponse(response)
 }
 
+export async function revealCredential(uuid) {
+  const response = await api.post(`/lens/admin/credentials/${uuid}/reveal/`)
+  return unwrapResponse(response)
+}
+
 export async function deleteCredential(uuid) {
   const response = await api.delete(`/lens/admin/credentials/${uuid}/`)
   return unwrapResponse(response)
