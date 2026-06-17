@@ -19,6 +19,11 @@ export async function listAssistants() {
   return unwrapList(unwrapResponse(response))
 }
 
+export async function getPublicAssistant(slug) {
+  const response = await api.get(`/lens/public/assistants/${slug}/`)
+  return unwrapResponse(response)
+}
+
 export async function getAssistant(uuid) {
   const response = await api.get(`/lens/assistants/${uuid}/`)
   return unwrapResponse(response)
@@ -70,7 +75,9 @@ export async function deleteLensNode(uuid) {
 }
 
 export async function scanLensNodeDirs(uuid, paths) {
-  const response = await api.post(`/lens/admin/lensnodes/${uuid}/list-dirs/`, { paths })
+  const response = await api.post(`/lens/admin/lensnodes/${uuid}/list-dirs/`, {
+    paths
+  })
   return unwrapResponse(response)
 }
 
@@ -128,6 +135,11 @@ export async function listMessages(sessionUuid) {
 
 export async function createSession(payload) {
   const response = await api.post('/lens/sessions/', payload)
+  return unwrapResponse(response)
+}
+
+export async function updateSession(uuid, payload) {
+  const response = await api.patch(`/lens/sessions/${uuid}/`, payload)
   return unwrapResponse(response)
 }
 
@@ -275,9 +287,12 @@ export async function getSystemHealth() {
 }
 
 export async function updateSystemTaskEnabled(taskType, enabled) {
-  const response = await api.patch('/lens/admin/global-settings/system-health/', {
-    task_type: taskType,
-    enabled
-  })
+  const response = await api.patch(
+    '/lens/admin/global-settings/system-health/',
+    {
+      task_type: taskType,
+      enabled
+    }
+  )
   return unwrapResponse(response)
 }

@@ -129,58 +129,97 @@
                 deletingSessionUuid === session.uuid ? 'session-item-deleting' : selectedSessionUuid === session.uuid ? 'session-item-active' : ''
               ]"
             >
-              <div
-                class="min-w-0 flex-1 cursor-pointer"
-                :title="session.title || t('lens.chat.untitledSession')"
-                @click="deletingSessionUuid !== session.uuid && selectSession(session)"
-              >
-                <div class="session-title" :class="deletingSessionUuid === session.uuid ? 'opacity-40' : ''">
-                  {{ session.title || t('lens.chat.untitledSession') }}
-                </div>
-              </div>
-
-              <div class="flex shrink-0 items-center gap-1">
-                <template v-if="deletingSessionUuid === session.uuid">
-                  <button
-                    type="button"
-                    class="session-action-btn session-action-confirm"
-                    :aria-label="t('common.confirm')"
-                    @click.stop="doDeleteSession(session)"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                      <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    class="session-action-btn session-action-cancel"
-                    :aria-label="t('common.cancel')"
-                    @click.stop="deletingSessionUuid = ''"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                      <path d="M18 6 6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                  </button>
-                </template>
-                <button
-                  v-else
-                  type="button"
-                  class="session-delete-btn"
-                  :aria-label="t('lens.chat.deleteSession')"
-                  @click.stop="deletingSessionUuid = session.uuid"
+              <input
+                v-if="renamingSessionUuid === session.uuid"
+                v-model="renameDraft"
+                class="session-rename-input"
+                :placeholder="t('lens.chat.untitledSession')"
+                @click.stop
+                @keydown.enter.stop.prevent="saveRename(session)"
+                @keydown.esc.stop="cancelRename"
+                @blur="saveRename(session)"
+              />
+              <template v-else>
+                <div
+                  class="min-w-0 flex-1 cursor-pointer"
+                  :title="session.title || t('lens.chat.untitledSession')"
+                  @click="deletingSessionUuid !== session.uuid && selectSession(session)"
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                    <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg>
-                </button>
-              </div>
+                  <div class="session-title" :class="deletingSessionUuid === session.uuid ? 'opacity-40' : ''">
+                    {{ session.title || t('lens.chat.untitledSession') }}
+                  </div>
+                </div>
+
+                <div class="flex shrink-0 items-center gap-1">
+                  <template v-if="deletingSessionUuid === session.uuid">
+                    <button
+                      type="button"
+                      class="session-action-btn session-action-confirm"
+                      :aria-label="t('common.confirm')"
+                      @click.stop="doDeleteSession(session)"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                        <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="session-action-btn session-action-cancel"
+                      :aria-label="t('common.cancel')"
+                      @click.stop="deletingSessionUuid = ''"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                        <path d="M18 6 6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      type="button"
+                      class="session-rename-btn"
+                      :aria-label="t('lens.chat.renameSession')"
+                      @click.stop="startRename(session)"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path d="M12 20h9" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="session-delete-btn"
+                      :aria-label="t('lens.chat.deleteSession')"
+                      @click.stop="deletingSessionUuid = session.uuid"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </template>
+                </div>
+              </template>
             </div>
           </div>
         </section>
       </div>
 
       <div class="sidebar-footer">
-        <div ref="dockMenuRef" class="dock-menu-wrap">
+        <button
+          v-if="isAnonymous"
+          type="button"
+          class="anon-login-btn"
+          :class="{
+            'anon-login-btn-collapsed': sidebarCollapsedActive && !isMobile
+          }"
+          :title="t('auth.signIn')"
+          @click="requireLogin"
+        >
+          <LogIn :size="18" :stroke-width="2" aria-hidden="true" />
+          <span v-if="!sidebarCollapsedActive || isMobile">
+            {{ t('auth.signIn') }}
+          </span>
+        </button>
+        <div v-else ref="dockMenuRef" class="dock-menu-wrap">
           <button
             class="dock-trigger"
             :class="[
@@ -231,7 +270,10 @@
             leave-to-class="transform opacity-0 translate-y-1 scale-95"
           >
             <div v-if="dockMenuOpen" class="dock-menu">
-              <div class="dock-section border-b border-line">
+              <div
+                v-if="userStore.userHasFeature('admin_console')"
+                class="dock-section border-b border-line"
+              >
                 <AssistantSwitcher mode="flyout" />
               </div>
 
@@ -273,6 +315,7 @@
         >
           <PanelLeftOpen :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
+        <div class="mobile-topbar-title">{{ assistantName }}</div>
         <button
           type="button"
           class="sidebar-collapse-btn"
@@ -282,9 +325,15 @@
           <Plus :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
       </div>
+      <header v-if="!isMobile && assistantName" class="chat-header">
+        <span class="chat-header-title">{{ assistantName }}</span>
+      </header>
       <div ref="scrollRef" class="thread-scroll">
-        <div v-if="!selectedAssistantUuid" class="thread-loading">
+        <div v-if="!booted" class="thread-loading">
           <BaseLoading />
+        </div>
+        <div v-else-if="!hasAssistant" class="thread-loading">
+          <AssistantEmptyState :variant="emptyVariant" />
         </div>
         <div v-else class="thread">
           <div
@@ -348,7 +397,7 @@
                     class="thinking-step-item"
                   >
                     <span class="thinking-step-bullet">▸</span>
-                    <span>{{ step.message }}</span>
+                    <span class="thinking-step-text">{{ step.message }}</span>
                     <span v-if="step.count > 1" class="thinking-step-repeat">
                       ×{{ step.count }}
                     </span>
@@ -417,6 +466,34 @@
             </div>
           </div>
 
+          <!-- Empty-answer hint: a finished turn returned no text -->
+          <div
+            v-if="showRetryHint"
+            class="message-row message-row-assistant"
+          >
+            <div class="message-avatar assistant">
+              <img
+                src="/brand/logo_transparent.png"
+                alt="SourceLens"
+                class="h-[20px] w-[20px] object-contain"
+              />
+            </div>
+            <div class="message-body">
+              <div class="retry-hint">
+                <span class="retry-hint-text">
+                  {{ t('lens.chat.emptyAnswerHint') }}
+                </span>
+                <button
+                  type="button"
+                  class="retry-hint-btn"
+                  @click="retryLastQuestion"
+                >
+                  {{ t('lens.chat.retryAction') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Live answer: one row / one avatar — thinking panel + streaming markdown -->
           <div
             v-if="showLiveAnswer"
@@ -438,8 +515,14 @@
                 >
                   <span class="live-progress-dot" />
                   <span class="thinking-panel-status">
-                    {{ latestActivityMessage || liveStatusText }}
-                    <span v-if="!latestActivityMessage" class="typing-dots" aria-hidden="true">
+                    <span class="thinking-panel-status-text">{{
+                      latestLiveStep || latestActivityMessage || liveStatusText
+                    }}</span>
+                    <span
+                      v-if="!latestLiveStep && !latestActivityMessage"
+                      class="typing-dots"
+                      aria-hidden="true"
+                    >
                       <span /><span /><span />
                     </span>
                   </span>
@@ -457,7 +540,7 @@
                 >
                   <div v-for="step in thinkingSteps" :key="step.id" class="thinking-step-item">
                     <span class="thinking-step-bullet">▸</span>
-                    <span>{{ step.message }}</span>
+                    <span class="thinking-step-text">{{ step.message }}</span>
                     <span v-if="step.count > 1" class="thinking-step-repeat">×{{ step.count }}</span>
                   </div>
                   <div v-if="thinkingText" class="thinking-reasoning">
@@ -483,7 +566,7 @@
         </div>
       </div>
 
-      <div class="composer-wrap">
+      <div v-if="hasAssistant" class="composer-wrap">
         <div class="composer-inner">
           <div class="composer-shell">
             <div class="composer">
@@ -501,7 +584,7 @@
                 class="composer-action-btn"
                 :class="isRunActive ? 'composer-action-btn-stop' : ''"
                 type="button"
-                :disabled="!selectedSessionUuid || (!question.trim() && !isRunActive)"
+                :disabled="(!isAnonymous && !selectedSessionUuid) || (!question.trim() && !isRunActive)"
                 :aria-label="isRunActive ? t('common.stop') : t('common.submit')"
                 @click="handlePrimaryAction"
               >
@@ -537,6 +620,12 @@
         </div>
       </div>
     </main>
+
+    <LoginModal
+      :show="showLoginModal"
+      @close="showLoginModal = false"
+      @success="onLoginSuccess"
+    />
   </div>
 </template>
 
@@ -549,7 +638,7 @@ import {
   watch,
   nextTick
 } from 'vue'
-import { PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles } from '@lucide/vue'
+import { PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles, LogIn } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -557,6 +646,8 @@ import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import AssistantSwitcher from '@/components/lens/AssistantSwitcher.vue'
+import AssistantEmptyState from '@/components/lens/AssistantEmptyState.vue'
+import LoginModal from '@/components/auth/LoginModal.vue'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
@@ -567,10 +658,12 @@ import {
   createRun,
   createSession,
   deleteSession,
+  getPublicAssistant,
   getRun,
   listAssistants,
   listMessages,
-  listSessions
+  listSessions,
+  updateSession
 } from '@/api/lens'
 
 const route = useRoute()
@@ -596,6 +689,8 @@ const streamController = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const deletingSessionUuid = ref('')
+const renamingSessionUuid = ref('')
+const renameDraft = ref('')
 const dockMenuOpen = ref(false)
 const composerRef = ref(null)
 const scrollRef = ref(null)
@@ -607,12 +702,34 @@ const thinkingPanelRef = ref(null)
 const thinkingText = ref('')
 const elapsedSeconds = ref(0)
 let elapsedTimer = null
+let revealTimer = null
+const REVEAL_INTERVAL_MS = 300
+
+const publicAssistant = ref(null)
+const showLoginModal = ref(false)
+// False until the current bootstrap settles, so the view can distinguish
+// "still loading" from "loaded, but no assistant to show".
+const booted = ref(false)
 
 const selectedAssistant = computed(
   () =>
     assistants.value.find(
       (item) => item.uuid === selectedAssistantUuid.value
     ) || null
+)
+
+const isAnonymous = computed(() => !userStore.isAuthenticated)
+
+const hasAssistant = computed(() =>
+  isAnonymous.value ? !!publicAssistant.value : !!selectedAssistantUuid.value
+)
+
+const emptyVariant = computed(() =>
+  userStore.userHasFeature('admin_console') ? 'admin' : 'visitor'
+)
+
+const assistantName = computed(
+  () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
 const displayName = computed(() => {
@@ -692,32 +809,62 @@ const activityEvents = computed(() =>
     .reverse()
 )
 
+function toolLabel(name) {
+  const map = {
+    search_workspace: t('lens.chat.activity.searchWorkspace'),
+    read_workspace_file: t('lens.chat.activity.readFile'),
+    find_files: t('lens.chat.activity.findFiles'),
+    git_log: t('lens.chat.activity.gitLog'),
+    git_diff: t('lens.chat.activity.gitDiff'),
+    summarize_recent_changes: t('lens.chat.activity.summarizeChanges'),
+    write_file: t('lens.chat.activity.writingFile'),
+    read_file: t('lens.chat.activity.readFile'),
+    edit_file: t('lens.chat.activity.editingFile'),
+    ls: t('lens.chat.activity.listFiles'),
+    write_todos: t('lens.chat.activity.planningTasks'),
+    task: t('lens.chat.activity.delegatingTask'),
+  }
+  return map[name] || t('lens.chat.activity.callingTool', { name })
+}
+
 function _friendlyActivityMessage(event) {
   const agentEvent = event.agentEvent || ''
   const activity = event.activity || ''
   if (agentEvent.startsWith('tool.')) {
     const parts = agentEvent.split('.')
-    const toolName = parts[1]
     const action = parts[2]
     if (action === 'done' || action === 'denied') return null
-    const toolLabelMap = {
-      search_workspace: t('lens.chat.activity.searchWorkspace'),
-      read_workspace_file: t('lens.chat.activity.readFile'),
-      git_log: t('lens.chat.activity.gitLog'),
-      git_diff: t('lens.chat.activity.gitDiff'),
-      summarize_recent_changes: t('lens.chat.activity.summarizeChanges'),
-      write_file: t('lens.chat.activity.writingFile'),
-      read_file: t('lens.chat.activity.readFile'),
-      edit_file: t('lens.chat.activity.editingFile'),
-      ls: t('lens.chat.activity.listFiles'),
-      write_todos: t('lens.chat.activity.planningTasks'),
-      task: t('lens.chat.activity.delegatingTask'),
-    }
-    return toolLabelMap[toolName] || t('lens.chat.activity.callingTool', { name: toolName })
+    return toolLabel(parts[1])
   }
   if (activity === 'thinking') return t('lens.chat.activity.thinking')
   if (activity === 'loading_resources') return t('lens.chat.activity.loadingResources')
-  if (activity === 'completed') return null
+  return null
+}
+
+// Rich step label: the tool/model action plus the backend-provided summary
+// (search query, result counts, file + line range, model decision).
+function _liveStepLabel(event) {
+  const agentEvent = event.agentEvent || ''
+  const activity = event.activity || ''
+  const summary = event.summary || ''
+  const trim = (s) => s.replace(/[.…\s]+$/, '')
+  if (agentEvent.startsWith('tool.')) {
+    const parts = agentEvent.split('.')
+    const name = parts[1]
+    const action = parts[2]
+    if (action === 'directory' || action === 'denied') return null
+    // a read reports the same file + range on start and done — keep one line
+    if (action === 'done' && name === 'read_workspace_file') return null
+    return summary ? `${trim(toolLabel(name))} · ${summary}` : toolLabel(name)
+  }
+  if (agentEvent === 'llm.response') {
+    return summary
+      ? `${trim(t('lens.chat.activity.thinking'))} · ${summary}`
+      : null
+  }
+  if (activity === 'loading_resources') {
+    return t('lens.chat.activity.loadingResources')
+  }
   return null
 }
 
@@ -729,11 +876,10 @@ const latestActivityMessage = computed(() => {
   return null
 })
 
-const thinkingSteps = computed(() => {
+const allLiveSteps = computed(() => {
   const grouped = []
   for (const e of streamEvents.value) {
-    if (!e.activity) continue
-    const msg = _friendlyActivityMessage(e)
+    const msg = _liveStepLabel(e)
     if (!msg) continue
     const last = grouped[grouped.length - 1]
     if (last && last.message === msg) {
@@ -743,6 +889,19 @@ const thinkingSteps = computed(() => {
     }
   }
   return grouped
+})
+
+// Paced reveal: surface buffered steps one at a time for a streaming feel.
+const revealedCount = ref(0)
+const thinkingSteps = computed(() =>
+  allLiveSteps.value.slice(0, revealedCount.value)
+)
+
+// The most recently revealed step — shown in the collapsed header so the
+// status line narrates what is happening, updating at the reveal cadence.
+const latestLiveStep = computed(() => {
+  const steps = thinkingSteps.value
+  return steps.length ? steps[steps.length - 1].message : null
 })
 
 watch(
@@ -777,9 +936,10 @@ const elapsedText = computed(() => {
 function thinkingStepsFor(events) {
   const grouped = []
   for (const e of events || []) {
-    const msg = _friendlyActivityMessage({
+    const msg = _liveStepLabel({
       agentEvent: e.agent_event,
-      activity: e.activity
+      activity: e.activity,
+      summary: e.summary
     })
     if (!msg) continue
     const last = grouped[grouped.length - 1]
@@ -805,24 +965,46 @@ function toggleThinking(uuid) {
 }
 
 const decoratedMessages = computed(() =>
-  messages.value.map((message) => {
-    if (message.role === 'assistant' && message.thinking?.steps?.length) {
-      const steps = thinkingStepsFor(message.thinking.steps)
-      if (steps.length) {
-        return { ...message, _thinkingSteps: steps }
+  messages.value
+    .filter(
+      (m) => !(m.role === 'assistant' && !(m.content || '').trim())
+    )
+    .map((message) => {
+      if (message.role === 'assistant' && message.thinking?.steps?.length) {
+        const steps = thinkingStepsFor(message.thinking.steps)
+        if (steps.length) {
+          return { ...message, _thinkingSteps: steps }
+        }
       }
-    }
-    return message
-  })
+      return message
+    })
 )
+
+// A finished turn that produced no answer text — show a transient,
+// retry-oriented hint (framed as a temporary hiccup, not a product fault)
+// instead of an empty bubble.
+const showRetryHint = computed(() => {
+  if (isRunActive.value) return false
+  const last = messages.value[messages.value.length - 1]
+  return !!last && last.role === 'assistant' && !(last.content || '').trim()
+})
 
 watch(isRunActive, (active) => {
   if (active) {
     elapsedSeconds.value = 0
     elapsedTimer = setInterval(() => { elapsedSeconds.value++ }, 1000)
+    revealTimer = setInterval(() => {
+      if (revealedCount.value < allLiveSteps.value.length) {
+        revealedCount.value++
+      }
+    }, REVEAL_INTERVAL_MS)
   } else {
     clearInterval(elapsedTimer)
     elapsedTimer = null
+    clearInterval(revealTimer)
+    revealTimer = null
+    // flush any buffered steps once the run settles
+    revealedCount.value = allLiveSteps.value.length
   }
 })
 
@@ -841,6 +1023,7 @@ function pushStreamEvent(event) {
 }
 
 function resetStreamState() {
+  streamController.value?.abort()
   partialAnswer.value = ''
   streamError.value = ''
   streamEvents.value = []
@@ -848,6 +1031,7 @@ function resetStreamState() {
   thinkingPanelOpen.value = false
   thinkingText.value = ''
   elapsedSeconds.value = 0
+  revealedCount.value = 0
   seenActivityKeys.clear()
   seenStepEventCounts.clear()
 }
@@ -856,7 +1040,7 @@ function pushAgentActivity(item, fallbackTs, fallbackStatus) {
   if (!item?.message && !item?.agent_event) {
     return
   }
-  const key = item.agent_event || item.message
+  const key = `${item.agent_event || ''}|${item.summary || item.message || ''}`
   if (seenActivityKeys.has(key)) {
     return
   }
@@ -867,6 +1051,7 @@ function pushAgentActivity(item, fallbackTs, fallbackStatus) {
     message: item.message || item.agent_event,
     agentEvent: item.agent_event,
     activity: item.activity || 'running',
+    summary: item.summary || '',
     ts: fallbackTs || new Date().toISOString()
   })
 }
@@ -899,6 +1084,32 @@ async function handleLogout() {
 }
 
 async function bootstrap() {
+  // Reset transient chat state up front so the previous assistant's draft,
+  // active-run/stream state, or messages cannot leak across an assistant
+  // switch (this runs on every slug change, before the async session load
+  // below). selectedSessionUuid is intentionally NOT cleared here: if the
+  // session load below throws, an empty uuid would leave the composer
+  // permanently disabled. A stale submit during the brief load window is
+  // instead guarded inside submit() by binding to the session it started in.
+  question.value = ''
+  currentRun.value = null
+  messages.value = []
+  resetStreamState()
+  booted.value = false
+
+  // Anonymous visitors can browse the shared chat page and see the
+  // assistant name, but only authenticated users load private sessions.
+  if (isAnonymous.value) {
+    try {
+      publicAssistant.value = await getPublicAssistant(route.params.slug)
+    } catch {
+      publicAssistant.value = null
+      showError(t('lens.chat.loadFailed'))
+    }
+    booted.value = true
+    return
+  }
+
   try {
     assistants.value = await listAssistants()
 
@@ -907,19 +1118,36 @@ async function bootstrap() {
       assistants.value[0]
 
     if (!current) {
+      // No assistants exist yet — surface the create-first-assistant guide
+      // (admin) or a no-assistant notice (end-user) instead of a spinner.
+      booted.value = true
       return
     }
 
     if (current.slug !== route.params.slug) {
+      // Re-bootstraps under the canonical slug; keep showing the loader.
       await router.replace(`/lens/assistants/${current.slug}/chat`)
       return
     }
 
     selectedAssistantUuid.value = current.uuid
     await loadSessions()
+    booted.value = true
   } catch {
-    showError('加载 Lens chat 失败。')
+    showError(t('lens.chat.loadFailed'))
+    booted.value = true
   }
+}
+
+function requireLogin() {
+  showLoginModal.value = true
+}
+
+async function onLoginSuccess() {
+  showLoginModal.value = false
+  // Load the now-authenticated user's assistants and sessions so the
+  // composer becomes usable without a full page reload.
+  await bootstrap()
 }
 
 async function loadSessions(selectUuid = '') {
@@ -947,7 +1175,7 @@ async function createNewSession(notify = true) {
 
   const session = await createSession({
     assistant_uuid: selectedAssistant.value.uuid,
-    title: `${selectedAssistant.value.name} 查询`
+    title: ''
   })
 
   sessions.value = [session, ...sessions.value]
@@ -960,10 +1188,61 @@ async function createNewSession(notify = true) {
   })
 
   if (notify) {
-    showSuccess('已创建会话。')
+    showSuccess(t('lens.chat.sessionCreated'))
   }
 
   return session
+}
+
+function setSessionTitle(uuid, title) {
+  const session = sessions.value.find((item) => item.uuid === uuid)
+  if (session) {
+    session.title = title
+  }
+}
+
+function deriveSessionTitle(text) {
+  const clean = (text || '').replace(/\s+/g, ' ').trim()
+  return clean.length > 24 ? `${clean.slice(0, 24)}…` : clean
+}
+
+function startRename(session) {
+  deletingSessionUuid.value = ''
+  renamingSessionUuid.value = session.uuid
+  renameDraft.value = session.title || ''
+  nextTick(() => {
+    const el = document.querySelector('.session-rename-input')
+    if (el) {
+      el.focus()
+      el.select()
+    }
+  })
+}
+
+function cancelRename() {
+  renamingSessionUuid.value = ''
+  renameDraft.value = ''
+}
+
+async function saveRename(session) {
+  // Enter and blur can both fire; the guard makes the save idempotent.
+  if (renamingSessionUuid.value !== session.uuid) {
+    return
+  }
+  const title = renameDraft.value.trim()
+  renamingSessionUuid.value = ''
+  renameDraft.value = ''
+  if (title === (session.title || '')) {
+    return
+  }
+  const previous = session.title || ''
+  setSessionTitle(session.uuid, title)
+  try {
+    await updateSession(session.uuid, { title })
+  } catch {
+    setSessionTitle(session.uuid, previous)
+    showError(t('lens.chat.renameFailed'))
+  }
 }
 
 function insertNewline() {
@@ -996,6 +1275,7 @@ async function handlePrimaryAction() {
 async function selectSession(session, updateRoute = true) {
   selectedSessionUuid.value = session.uuid
   messages.value = await listMessages(session.uuid)
+  currentRun.value = null
   resetStreamState()
   if (updateRoute) {
     router.replace({
@@ -1004,6 +1284,41 @@ async function selectSession(session, updateRoute = true) {
     })
   }
   await nextTick(scrollToBottom)
+  maybeResumeActiveRun(session.uuid)
+}
+
+// If the session has a run still in progress (e.g. the user navigated away
+// mid-answer), re-attach the SSE stream so the live thinking panel and
+// streamed answer resume, then finalize like a normal run.
+async function maybeResumeActiveRun(sessionUuid) {
+  // the latest message carrying a run uuid (the user message of the most
+  // recent turn) tells us whether that turn is still in progress
+  const withRun = [...messages.value].reverse().find((m) => m.run)
+  if (!withRun) return
+  let run
+  try {
+    run = await getRun(withRun.run)
+  } catch {
+    return
+  }
+  if (!['queued', 'running', 'streaming'].includes(run?.status)) return
+  if (selectedSessionUuid.value !== sessionUuid) return
+  // hand the trailing in-progress assistant placeholder to the live row to
+  // avoid showing it twice; the SSE sync replays its content and steps
+  const last = messages.value[messages.value.length - 1]
+  if (last && last.role === 'assistant') {
+    messages.value = messages.value.slice(0, -1)
+  }
+  currentRun.value = run
+  try {
+    await readSse(run.uuid)
+    currentRun.value = await getRun(run.uuid)
+  } catch {
+    // stream aborted (e.g. the user switched sessions) — fall through
+  }
+  if (selectedSessionUuid.value !== sessionUuid) return
+  messages.value = await listMessages(sessionUuid)
+  resetStreamState()
 }
 
 async function readSse(runUuid) {
@@ -1134,6 +1449,17 @@ function handleStepEvent(event, ts) {
 }
 
 async function submit() {
+  // Unauthenticated visitors must log in before sending a message.
+  if (isAnonymous.value) {
+    requireLogin()
+    return
+  }
+  // Bind this submit to the session it started in. If the user switches
+  // assistant/session mid-flight, the stream is aborted on purpose — that is
+  // not a failure, so we must not restore the draft, alarm the user, or write
+  // into the now-current assistant's state.
+  const sessionAtSubmit = selectedSessionUuid.value
+  const isFirstMessage = messages.value.length === 0
   loading.value.run = true
   resetStreamState()
   const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
@@ -1141,12 +1467,28 @@ async function submit() {
   if (composerRef.value) composerRef.value.style.height = 'auto'
   messages.value = [...messages.value, { role: 'user', content: optimisticText, uuid: '__optimistic__', created_at: new Date().toISOString() }]
   await nextTick(scrollToBottom)
+
+  // Name a brand-new conversation after its first question (skip if the
+  // user already gave it a title). Optimistic + best-effort persistence.
+  const sessionAtSubmitObj = sessions.value.find(
+    (item) => item.uuid === sessionAtSubmit
+  )
+  if (isFirstMessage && optimisticText && !(sessionAtSubmitObj?.title || '').trim()) {
+    const autoTitle = deriveSessionTitle(optimisticText)
+    if (autoTitle) {
+      setSessionTitle(sessionAtSubmit, autoTitle)
+      updateSession(sessionAtSubmit, { title: autoTitle }).catch(() => {})
+    }
+  }
   try {
-    const run = await createRun(selectedSessionUuid.value, {
+    const run = await createRun(sessionAtSubmit, {
       question: optimisticText,
       run_inline: false,
       enqueue: true
     })
+    // switched away between createRun and here — don't bind this run's live
+    // state onto the now-current assistant
+    if (selectedSessionUuid.value !== sessionAtSubmit) return
     currentRun.value = run
     pushStreamEvent({
       label: t('lens.chat.events.submitted'),
@@ -1155,8 +1497,10 @@ async function submit() {
       ts: new Date().toISOString()
     })
     await readSse(run.uuid)
+    // switched away while streaming — leave the new assistant untouched
+    if (selectedSessionUuid.value !== sessionAtSubmit) return
     currentRun.value = await getRun(run.uuid)
-    messages.value = await listMessages(selectedSessionUuid.value)
+    messages.value = await listMessages(sessionAtSubmit)
 
     if (currentRun.value?.status === 'failed') {
       // Remove the empty pre-created assistant placeholder from the failed run
@@ -1172,12 +1516,19 @@ async function submit() {
       resetStreamState()
     }
     await nextTick(scrollToBottom)
-  } catch {
+  } catch (err) {
+    // a deliberate stream abort (switch/navigate) or a switch away is not a
+    // submit failure — bail silently without touching the current state
+    if (err?.name === 'AbortError' || selectedSessionUuid.value !== sessionAtSubmit) {
+      return
+    }
     messages.value = messages.value.filter(m => m.uuid !== '__optimistic__')
     question.value = optimisticText
     showError(t('lens.chat.submitFailed'))
   } finally {
-    loading.value.run = false
+    if (selectedSessionUuid.value === sessionAtSubmit) {
+      loading.value.run = false
+    }
   }
 }
 
@@ -1193,9 +1544,9 @@ async function cancel() {
 async function copyMessage(message) {
   try {
     await navigator.clipboard.writeText(message.content || '')
-    showSuccess('已复制消息。')
+    showSuccess(t('lens.chat.messageCopied'))
   } catch {
-    showWarning('复制失败。')
+    showWarning(t('lens.chat.copyFailed'))
   }
 }
 
@@ -1252,15 +1603,26 @@ watch(
   () => route.params.slug,
   () => {
     dockMenuOpen.value = false
+    // On a hard load with a stored token, defer the first bootstrap to
+    // onMounted so it runs after the user is hydrated — avoids a flash of
+    // the anonymous view and a redundant public fetch.
+    if (!userStore.user && localStorage.getItem('access_token')) {
+      return
+    }
     bootstrap()
   },
   { immediate: true }
 )
 
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('click', handleOutsideClick)
   if (window.innerWidth < 1024) {
     sidebarOpen.value = false
+  }
+  // Public route: hydrate a stored user (if any), then bootstrap once.
+  if (!userStore.user && localStorage.getItem('access_token')) {
+    await userStore.checkAuthStatus()
+    bootstrap()
   }
 })
 
@@ -1268,6 +1630,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleOutsideClick)
   streamController.value?.abort()
   clearInterval(elapsedTimer)
+  clearInterval(revealTimer)
 })
 </script>
 
@@ -1412,6 +1775,30 @@ onBeforeUnmount(() => {
   color: #ef4444;
 }
 
+.session-rename-btn {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-md opacity-0 transition-colors;
+  color: #9ca3af;
+}
+
+.session-rename-btn svg {
+  @apply h-3.5 w-3.5;
+}
+
+.session-item:hover .session-rename-btn {
+  @apply opacity-100;
+}
+
+.session-rename-btn:hover {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.session-rename-input {
+  @apply w-full rounded-md border px-2 py-1 text-sm font-medium outline-none;
+  border-color: #c7d2fe;
+  color: #111827;
+}
+
 .session-action-confirm {
   background: #ef4444;
   color: #ffffff;
@@ -1438,6 +1825,39 @@ onBeforeUnmount(() => {
 .mobile-topbar {
   @apply flex flex-shrink-0 items-center gap-1 border-b px-2 py-1.5;
   border-color: #e5e7eb;
+}
+
+.mobile-topbar-title {
+  @apply min-w-0 flex-1 truncate text-center text-sm font-semibold text-ink-900;
+}
+
+.chat-header {
+  @apply flex flex-shrink-0 items-center gap-3 border-b px-5 py-3;
+  border-color: #e5e7eb;
+}
+
+.chat-header-title {
+  @apply min-w-0 truncate text-base font-semibold text-ink-900;
+}
+
+.retry-hint {
+  @apply flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2.5 text-sm;
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.retry-hint-text {
+  @apply min-w-0 flex-1;
+}
+
+.retry-hint-btn {
+  @apply shrink-0 rounded-md px-3 py-1 text-sm font-medium text-white transition-colors;
+  background: #d97706;
+}
+
+.retry-hint-btn:hover {
+  background: #b45309;
 }
 
 .thread-scroll {
@@ -1609,8 +2029,12 @@ onBeforeUnmount(() => {
 }
 
 .thinking-panel-status {
-  @apply flex flex-1 items-center gap-1 text-sm;
+  @apply flex min-w-0 flex-1 items-center gap-1 text-sm;
   color: #374151;
+}
+
+.thinking-panel-status-text {
+  @apply min-w-0 truncate;
 }
 
 .thinking-step-count {
@@ -1636,13 +2060,18 @@ onBeforeUnmount(() => {
 }
 
 .thinking-step-item {
-  @apply flex items-baseline gap-1.5 py-0.5 text-xs;
+  @apply flex items-start gap-1.5 py-0.5 text-xs;
   color: #6b7280;
 }
 
 .thinking-step-bullet {
   @apply shrink-0;
   color: #d1d5db;
+  line-height: 1.5;
+}
+
+.thinking-step-text {
+  @apply min-w-0 flex-1 break-words;
 }
 
 .thinking-step-repeat {
@@ -1847,6 +2276,18 @@ onBeforeUnmount(() => {
 
 .dock-trigger-collapsed {
   @apply justify-center px-0;
+}
+
+.anon-login-btn {
+  @apply flex w-full items-center justify-center gap-2 rounded-xl border border-primary-200 bg-primary-50 px-3 py-2.5 text-sm font-medium text-primary-700 shadow-sm transition-colors;
+}
+
+.anon-login-btn:hover {
+  @apply border-primary-300 bg-primary-100;
+}
+
+.anon-login-btn-collapsed {
+  @apply gap-0 px-0;
 }
 
 .dock-avatar {

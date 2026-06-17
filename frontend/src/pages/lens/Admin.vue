@@ -112,6 +112,13 @@
                             {{ formatLLMConfigLabel(config) }}
                           </option>
                         </select>
+                        <input
+                          v-else-if="setting.type === 'text'"
+                          v-model="settingsForm[setting.key]"
+                          type="text"
+                          :placeholder="setting.placeholder"
+                          class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                        />
                         <span class="w-16 text-sm text-ink-500">
                           {{ setting.unit }}
                         </span>
@@ -414,6 +421,29 @@
                       <StatusBadge :status="row.status" />
                     </td>
                     <td class="table-cell">
+                      <div
+                        v-if="row.status === 'active'"
+                        class="flex items-center gap-1.5"
+                      >
+                        <span
+                          class="max-w-[220px] truncate font-mono text-xs text-ink-500"
+                          :title="shareUrl(row)"
+                        >
+                          {{ shareUrl(row) }}
+                        </span>
+                        <button
+                          type="button"
+                          class="shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-primary-600"
+                          :title="t('lens.share.copyLink')"
+                          :aria-label="t('lens.share.copyLink')"
+                          @click="copyShareUrl(row)"
+                        >
+                          <Copy :size="15" :stroke-width="2" aria-hidden="true" />
+                        </button>
+                      </div>
+                      <span v-else class="text-ink-400">{{ emptyValue }}</span>
+                    </td>
+                    <td class="table-cell">
                       <RowActions :row="row" />
                     </td>
                   </template>
@@ -492,6 +522,13 @@
                   <template v-else-if="activeTab === 'skills'">
                     <td class="table-cell font-medium text-ink-900">
                       {{ row.name }}
+                      <span
+                        v-if="isWorkspaceGuideSkill(row)"
+                        class="ml-2 inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
+                        :title="t('lensAdmin.columns.workspaceGuideHint')"
+                      >
+                        {{ t('lensAdmin.columns.workspaceGuideTag') }}
+                      </span>
                     </td>
                     <td class="table-cell font-mono text-ink-500">
                       {{ row.slug }}
@@ -941,10 +978,12 @@
 <script setup>
 import { Eye as EyeIcon, EyeOff as EyeOffIcon } from '@lucide/vue'
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import { Copy } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
+import { copyToClipboard } from '@/utils/clipboard'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   approveLensNode,
@@ -1067,6 +1106,7 @@ const taskSaving = ref({})
 const CREDENTIAL_MASK = '********'
 
 const defaultSettings = {
+  public_base_url: '',
   'lensnode.defaults.timeout': 600,
   'retention.run_days': 90,
   'lensnode.health.offline_threshold_s': 120,
@@ -1326,6 +1366,7 @@ const activeColumns = computed(() => {
       'dirs',
       'tools',
       'status',
+      'shareUrl',
       'actions'
     ],
     lensnodes: [
@@ -1402,6 +1443,14 @@ const defaultScheduledTasks = computed(() => {
 })
 
 const settingDefinitions = computed(() => [
+  {
+    key: 'public_base_url',
+    label: t('lensAdmin.settings.publicBaseUrlTitle'),
+    description: t('lensAdmin.settings.publicBaseUrlDesc'),
+    type: 'text',
+    unit: '',
+    placeholder: 'https://chat.example.com'
+  },
   {
     key: 'lensnode.defaults.timeout',
     label: t('lensAdmin.settings.timeoutTitle'),
@@ -1717,6 +1766,33 @@ function lensNodeName(value) {
   const uuid = typeof value === 'object' ? value?.uuid : value
   const found = lensnodes.value.find((lensnode) => lensnode.uuid === uuid)
   return found?.name || uuid || emptyValue
+}
+
+function isWorkspaceGuideSkill(row) {
+  return (
+    typeof row?.slug === 'string' && row.slug.endsWith('-workspace-guide')
+  )
+}
+
+function publicBaseUrl() {
+  const setting = globalSettings.value.find(
+    (item) => item.key === 'public_base_url'
+  )
+  const value =
+    setting && typeof setting.value === 'string' ? setting.value : ''
+  return (value || window.location.origin).replace(/\/+$/, '')
+}
+
+function shareUrl(row) {
+  return `${publicBaseUrl()}/lens/assistants/${row.slug}/chat`
+}
+
+async function copyShareUrl(row) {
+  if (await copyToClipboard(shareUrl(row))) {
+    showSuccess(t('lens.share.copied'))
+  } else {
+    showError(t('lens.share.copyFailed'))
+  }
 }
 
 function selectedDirs() {

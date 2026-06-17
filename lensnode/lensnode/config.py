@@ -16,6 +16,8 @@ class LensNodeConfig:
     heartbeat_interval_s: int
     request_timeout_s: int
     max_concurrent_runs: int
+    summary_trigger_tokens: int
+    summary_keep_tokens: int
 
 
 def load_config():
@@ -40,4 +42,10 @@ def load_config():
         ),
         request_timeout_s=int(os.getenv("LENSNODE_REQUEST_TIMEOUT_S", "120")),
         max_concurrent_runs=int(os.getenv("LENSNODE_MAX_CONCURRENT_RUNS", "1")),
+        summary_trigger_tokens=int(
+            os.getenv("LENSNODE_SUMMARY_TRIGGER_TOKENS", "80000")
+        ),
+        summary_keep_tokens=int(
+            os.getenv("LENSNODE_SUMMARY_KEEP_TOKENS", "16000")
+        ),
     )

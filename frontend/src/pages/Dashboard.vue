@@ -26,10 +26,12 @@ async function redirectToChat() {
       return
     }
   } catch {
-    // Fall through to the assistant list route below.
+    // Fall through to the home route below.
   }
 
-  await router.replace('/lens/assistants')
+  // No assistant to enter (e.g. none created yet) — let the smart home
+  // route to the create-first-assistant guide.
+  await router.replace('/')
 }
 
 onMounted(() => {

@@ -49,9 +49,17 @@ jobs:
       matrix:
         include:
           - image_name: sourcelens-backend
+            context: .
+            file: ./Dockerfile
             target: backend
           - image_name: sourcelens-frontend
-            target: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile
+            target: ''
+          - image_name: sourcelens-lensnode
+            context: ./lensnode
+            file: ./lensnode/Dockerfile
+            target: ''
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -59,24 +67,34 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # REGISTRY is the Docker Hub namespace (oneprocloud), used as the image
+      # prefix below; the login host for Docker Hub is docker.io.
       - name: Login to Docker Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: docker.io
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           target: ${{ matrix.target }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ matrix.image_name }}:latest
+          # VITE_* args are only consumed by the frontend image; the backend
+          # and lensnode builds ignore them (harmless unused-arg warnings).
           build-args: |
             USE_MIRROR=false
             VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL }}
+            VITE_TURNSTILE_SITE_KEY=${{ vars.VITE_TURNSTILE_SITE_KEY }}
+            VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
+            VITE_SENTRY_ENVIRONMENT=${{ vars.VITE_SENTRY_ENVIRONMENT }}
+            VITE_GA_ID=${{ vars.VITE_GA_ID }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
@@ -87,12 +105,36 @@ jobs:
       - prepare-version
       - build-images
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Install SSH Key
         uses: shimataro/ssh-key-action@v2
         with:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
           if_key_exists: fail
+
+      # Only the compose files are shipped to the server; application source
+      # stays out of the deploy host (images carry the code).
+      - name: Ensure deploy directory exists
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          port: ${{ env.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: mkdir -p ${{ env.DEPLOY_PATH }}
+
+      - name: Copy compose files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          port: ${{ env.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml,docker"
+          target: ${{ env.DEPLOY_PATH }}
 
       - name: Deploy to Server
         uses: appleboy/ssh-action@v1.0.3

@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from langchain_core.tools import tool
@@ -80,6 +81,7 @@ def build_agent_tools(command, emit_event=None):
                 "summary": _search_summary(query, regex, glob, output_mode),
             },
         )
+        started = time.monotonic()
         result = search_workspace_files(
             target_dirs,
             query,
@@ -105,6 +107,7 @@ def build_agent_tools(command, emit_event=None):
                     result, matches, files, counts, paths
                 ),
                 "preview": _clip(matches[0]["text"], 140) if matches else "",
+                "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
         return _json(result)
@@ -150,6 +153,7 @@ def build_agent_tools(command, emit_event=None):
                 )
             emit("tool.read_workspace_file.denied", {"path": path})
             return _json({"error": "PATH_NOT_ALLOWED", "path": path})
+        started = time.monotonic()
         window = read_workspace_window(
             str(resolved),
             offset=offset,
@@ -169,6 +173,7 @@ def build_agent_tools(command, emit_event=None):
                     f"{' (+more)' if window.get('has_more') else ''}"
                 ),
                 "preview": _clip(window.get("content") or "", 200),
+                "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
         return _json(window)
@@ -191,6 +196,7 @@ def build_agent_tools(command, emit_event=None):
                 "summary": pattern,
             },
         )
+        started = time.monotonic()
         files = glob_files(
             target_dirs,
             pattern,
@@ -205,6 +211,7 @@ def build_agent_tools(command, emit_event=None):
                 "summary": (
                     f"{len(files)} files · {_names(files)}" if files else "0 files"
                 ),
+                "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
         return _json({"files": files})

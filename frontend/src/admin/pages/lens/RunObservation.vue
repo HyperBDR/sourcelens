@@ -551,6 +551,8 @@ const TIMELINE_LABELS = {
   'deepagents.agent.create': 'Agent created',
   'deepagents.agent.invoke': 'Calling model',
   'deepagents.agent.truncated': 'Reached turn limit',
+  'deepagents.summarization.enabled': 'Context compaction on',
+  'deepagents.summarization.compacted': 'Context compacted',
   'resources.materialized': 'Workspace resources loaded'
 }
 
@@ -602,10 +604,21 @@ function parseTimelineEvent(e) {
         detailParts.push(`${e.prompt_tokens}↑ ${e.completion_tokens}↓`)
       }
     }
+    if (e.latency_ms != null) detailParts.push(msText(e.latency_ms))
+  } else if (e.agent_event === 'deepagents.summarization.compacted') {
+    if (e.before_tokens != null && e.after_tokens != null) {
+      detailParts.push(`${kText(e.before_tokens)} → ${kText(e.after_tokens)}`)
+    }
+    if (e.saved_tokens != null) detailParts.push(`saved ${kText(e.saved_tokens)}`)
+  } else if (e.agent_event === 'deepagents.summarization.enabled') {
+    if (e.trigger_tokens != null) {
+      detailParts.push(`trigger ${kText(e.trigger_tokens)} · keep ${kText(e.keep_tokens)}`)
+    }
   } else if (e.summary) detailParts.push(e.summary)
   else if (e.path) detailParts.push(e.path)
   else if (e.query) detailParts.push(`"${e.query}"`)
   if (e.count > 1 && !e.summary) detailParts.push(`×${e.count}`)
+  if (e.duration_ms != null) detailParts.push(msText(e.duration_ms))
   return {
     time,
     text,
@@ -631,6 +644,18 @@ function formatDate(val) {
   } catch {
     return String(val)
   }
+}
+
+function msText(ms) {
+  if (ms === null || ms === undefined) return ''
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function kText(tokens) {
+  if (tokens === null || tokens === undefined) return ''
+  if (tokens < 1000) return `${tokens}`
+  return `${(tokens / 1000).toFixed(1)}K`
 }
 
 function durationText(sec) {

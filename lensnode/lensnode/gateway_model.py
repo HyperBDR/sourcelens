@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Any, Optional, Sequence
 
 import httpx
@@ -97,6 +98,7 @@ class LensGatewayChatModel(BaseChatModel):
             return self._generate_streaming(payload)
 
         payload["return_message"] = True
+        start = time.monotonic()
         with httpx.Client(timeout=self.request_timeout_s) as client:
             response = client.post(
                 self.ai_gateway_url,
@@ -108,6 +110,9 @@ class LensGatewayChatModel(BaseChatModel):
 
         message = _message_from_gateway(data.get("message") or {})
         message.response_metadata["usage"] = data.get("usage") or {}
+        message.response_metadata["latency_ms"] = int(
+            (time.monotonic() - start) * 1000
+        )
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": data.get("usage") or {}},
@@ -126,6 +131,7 @@ class LensGatewayChatModel(BaseChatModel):
         # into the main bubble.
         silent = _in_subagent_context()
 
+        start = time.monotonic()
         with httpx.Client(timeout=self.request_timeout_s) as client:
             with client.stream(
                 "POST",
@@ -180,6 +186,9 @@ class LensGatewayChatModel(BaseChatModel):
         }
         message = _message_from_gateway(gateway_message)
         message.response_metadata["usage"] = usage
+        message.response_metadata["latency_ms"] = int(
+            (time.monotonic() - start) * 1000
+        )
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": usage},

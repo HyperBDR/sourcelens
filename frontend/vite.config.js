@@ -112,6 +112,16 @@ export default defineConfig({
     // Listen on all interfaces for Docker / remote access
     host: '0.0.0.0',
     port: 3000,
+    // Hosts allowed to reach the dev server (e.g. external/tunnel domains).
+    // Defaults to the company domain; extend via VITE_ALLOWED_HOSTS
+    // (comma-separated) without editing this file.
+    allowedHosts: [
+      '.oneprocloud.com.cn',
+      ...(process.env.VITE_ALLOWED_HOSTS || '')
+        .split(',')
+        .map((host) => host.trim())
+        .filter(Boolean)
+    ],
     hmr: {
       overlay: false
     },

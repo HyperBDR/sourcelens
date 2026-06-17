@@ -52,6 +52,19 @@ renderer.code = ({ text, lang }) => {
   return `<pre><code class="hljs language-${language}">${body}</code></pre>`
 }
 
+// Open answer links in a new tab so clicking a doc link never replaces the
+// chat page. rel="noopener noreferrer" avoids the opened page accessing
+// window.opener. (sanitizeHtml already allows target/rel attributes.)
+renderer.link = function link({ href, title, text, tokens }) {
+  const inner =
+    tokens && tokens.length ? this.parser.parseInline(tokens) : text
+  const titleAttr = title ? ` title="${title}"` : ''
+  return (
+    `<a href="${href}"${titleAttr} target="_blank" ` +
+    `rel="noopener noreferrer">${inner}</a>`
+  )
+}
+
 marked.setOptions({
   renderer,
   breaks: true,

@@ -11,6 +11,7 @@ from .views import (
     MCPServerViewSet,
     LensNodeAIGatewayView,
     LensNodeViewSet,
+    PublicAssistantView,
     RunViewSet,
     SessionViewSet,
     SkillViewSet,
@@ -45,6 +46,11 @@ router.register(
 )
 
 urlpatterns = [
+    path(
+        "public/assistants/<slug:slug>/",
+        PublicAssistantView.as_view(),
+        name="lens-public-assistant",
+    ),
     path(
         "runs/<uuid:uuid>/stream/",
         run_stream_view,

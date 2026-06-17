@@ -11,7 +11,9 @@ import {
 const routes = [
   {
     path: '/',
-    redirect: '/dashboard'
+    name: 'Home',
+    component: () => import('@/pages/Home.vue'),
+    meta: { requiresAuth: true }
   },
   {
     path: '/login',
@@ -86,23 +88,13 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/lens',
-    redirect: '/lens/assistants'
-  },
-  {
-    path: '/lens/assistants',
-    name: 'LensAssistants',
-    component: () => import('@/pages/lens/Assistants.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
     path: '/lens/assistants/:slug/chat',
     name: 'LensAssistantChat',
     component: () => import('@/pages/lens/Chat.vue'),
     props: (route) => ({
       assistantSlug: route.params.slug
     }),
-    meta: { requiresAuth: true }
+    meta: { allowAnonymous: true }
   },
   {
     path: '/lens/assistants/:slug/history',

@@ -79,6 +79,25 @@
     "yourAddress": "Your AI Email"
   },
   "lens": {
+    "share": {
+      "copyLink": "Copy link",
+      "copied": "Share link copied",
+      "copyFailed": "Copy failed, please copy manually",
+      "copyManually": "Please copy the link manually:"
+    },
+    "onboarding": {
+      "title": "Welcome to SourceLens",
+      "subtitle": "Get your first assistant live in three steps.",
+      "step1Title": "Connect a data source",
+      "step1Desc": "Add and sync a source such as a code repository or docs.",
+      "step2Title": "Configure & publish an assistant",
+      "step2Desc": "Pick its data sources and tools, then publish it.",
+      "step3Title": "Start chatting",
+      "step3Desc": "Share the link so users can start the conversation.",
+      "enterConsole": "Go to admin console",
+      "visitorTitle": "No assistants available",
+      "visitorSubtitle": "There are no assistants to chat with yet. Please contact your administrator."
+    },
     "chat": {
       "liveOutput": "Live output",
       "newSession": "New session",
@@ -86,6 +105,8 @@
       "assistantInfo": "Assistant info",
       "untitledSession": "Untitled session",
       "deleteSession": "Delete session",
+      "renameSession": "Rename",
+      "renameFailed": "Rename failed, please try again",
       "confirmDelete": "Confirm delete",
       "sessionDeleted": "Session deleted",
       "deleteFailed": "Delete failed, please try again",
@@ -94,6 +115,13 @@
     "showTimeline": "Show {count} events",
     "hideTimeline": "Hide events",
     "questionPlaceholder": "Ask anything",
+    "emptyAnswerHint": "The reply didn't come through — this is usually a temporary network hiccup. Tap Retry to send it again.",
+    "retryAction": "Retry",
+    "loadFailed": "Failed to load Lens chat.",
+    "sessionTitle": "{name} query",
+    "sessionCreated": "Session created.",
+    "messageCopied": "Message copied.",
+    "copyFailed": "Copy failed.",
     "runInline": "Run inline",
     "cancelRun": "Cancel",
     "stop": "Stop",
@@ -133,6 +161,7 @@
         "thinking": "Thinking...",
         "loadingResources": "Loading context...",
         "searchWorkspace": "Searching workspace...",
+        "findFiles": "Finding files...",
         "readFile": "Reading file...",
         "gitLog": "Checking git history...",
         "gitDiff": "Comparing code changes...",
@@ -149,6 +178,31 @@
   "auth": {
     "login": "Login",
     "register": "Register",
+    "noAssistant": {
+      "title": "Signed in",
+      "message": "You don't have any assistant available yet. Please open the app via the assistant link shared with you."
+    },
+    "codeLogin": {
+      "title": "Email code login",
+      "modalSubtitle": "Sign in to continue the conversation",
+      "emailLabel": "Email",
+      "emailPlaceholder": "Enter your email",
+      "sendCode": "Send code",
+      "sending": "Sending...",
+      "resend": "Resend",
+      "resendIn": "Resend in {seconds}s",
+      "codeLabel": "Verification code",
+      "codePlaceholder": "Enter the code from your email",
+      "codeSent": "Code sent, please check your email",
+      "verifyLogin": "Log in",
+      "verifying": "Logging in...",
+      "switchToPassword": "Use account password",
+      "switchToCode": "Use email code",
+      "turnstileRequired": "Please complete the human verification",
+      "sendFailed": "Failed to send the code, please try again later",
+      "verifyFailed": "The code is incorrect or expired",
+      "invalidEmail": "Please enter a valid email address"
+    },
     "loginTitle": "Sign in to SourceLens",
     "registerTitle": "Create your account",
     "username": "Username",
@@ -288,14 +342,14 @@
       "user": "User",
       "language": "Language",
       "languageDesc": "Switch the UI language",
-      "allProjects": "All projects",
-      "switchAssistantTitle": "Switch project",
-      "switchAssistantDesc": "Switch the current project from the lower-left menu",
+      "allAssistants": "All Assistants",
+      "switchAssistantTitle": "Switch assistant",
+      "switchAssistantDesc": "Switch the current assistant from the lower-left menu",
       "assistantTitle": "Switch assistant",
       "assistantDesc": "Admins can quickly switch between available assistants",
-      "assistantLoading": "Loading switchable projects...",
-      "assistantEmpty": "No projects available to switch to",
-      "assistantFallback": "Current project",
+      "assistantLoading": "Loading assistants...",
+      "assistantEmpty": "No assistants available to switch to",
+      "assistantFallback": "Current assistant",
       "noteTitle": "Note",
       "noteBody": "More settings will be folded into this panel later. For now, it keeps only the most commonly used account information and language selection."
     },
@@ -339,30 +393,6 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "overview": {
-      "tagline": "SourceLens project foundation",
-      "subtagline": "Authentication, management, tasks, notifications, and LLM operations in one baseline",
-      "pillarRnd": "R&D intelligence",
-      "pillarRndDesc": "From code review to incident triage—AI across the full R&D lifecycle",
-      "modulesTitle": "Product modules",
-      "comingSoon": "Coming soon",
-      "moduleRndAnalytics": "R&D analytics",
-      "moduleRndAnalyticsDesc": "Delivery and quality metrics, data-driven continuous improvement",
-      "moduleHyperMotion": "Source intelligence",
-      "moduleHyperMotionDesc": "A clean foundation for future source analysis and workflow automation",
-      "moduleCodeReview": "Automated code review",
-      "moduleCodeReviewDesc": "AI-powered quality and security review—standards enforced automatically",
-      "highlightsTitle": "Platform capabilities",
-      "highlightAi": "AI-native",
-      "highlightAiDesc": "AI-augmented across the full lifecycle",
-      "highlightMultiCloud": "Task-ready",
-      "highlightMultiCloudDesc": "Agentcore-backed task execution and scheduling",
-      "highlightPlatform": "One platform",
-      "highlightPlatformDesc": "Unified entry for R&D and operations",
-      "highlightSecure": "Secure & compliant",
-      "highlightSecureDesc": "Enterprise-grade access and audit",
-      "moreComing": "More modules in development—stay tuned"
-    },
     "username": "Username",
     "email": "Email",
     "isStaff": "Is Staff"
@@ -370,10 +400,10 @@
   "management": {
     "adminConsole": "Admin Console",
     "logoTitle": "SourceLens Admin",
-    "userManagement": "User Management",
-    "groupManagement": "Group Management",
-    "roleManagement": "Role Management",
-    "backToUserPlatform": "Back to User Platform",
+    "userManagement": "Users",
+    "groupManagement": "Groups",
+    "roleManagement": "Roles",
+    "backToUserPlatform": "Back to Assistant",
     "usersSubtitle": "View and manage all users",
     "groupsSubtitle": "View and manage all groups",
     "rolesSubtitle": "Configure roles, visible features, and default landing platforms",
@@ -653,9 +683,9 @@
     }
   },
   "taskManagement": {
-    "menuTitle": "Task Management",
+    "menuTitle": "Tasks",
     "list": {
-      "title": "Task List",
+      "title": "All Tasks",
       "subtitle": "View and filter task execution records",
       "taskName": "Task Name",
       "module": "Module",
@@ -692,7 +722,7 @@
       "currentProgress": "Current progress"
     },
     "stats": {
-      "title": "Task Statistics",
+      "title": "Statistics",
       "subtitle": "Execution stats by status, module and task type",
       "granularity": "Granularity",
       "granularityDay": "By day",
@@ -723,11 +753,13 @@
       "chartByTaskName": "By task type (total)"
     },
     "settings": {
-      "title": "Task Settings",
+      "title": "Settings",
       "subtitle": "Configurable task timeout, retention and default task enablement",
       "moduleConfigTitle": "Module Configuration",
       "moduleConfigSubtitle": "Set default rules and parameters for core functions.",
       "taskManagementSection": "Task Management",
+      "publicBaseUrlTitle": "Public Base URL",
+      "publicBaseUrlDesc": "Base address used for assistant share links (e.g. your own domain). Leave empty to use the current server address.",
       "timeoutTitle": "Task Overtime Period",
       "timeoutDesc": "Tasks running longer than the configured minutes are marked as failed (by scheduled job).",
       "timeoutMinutes": "Timeout (minutes)",
@@ -770,9 +802,9 @@
     }
   },
   "notificationManagement": {
-    "menuTitle": "Notification Management",
+    "menuTitle": "Notifications",
     "stats": {
-      "title": "Send Statistics",
+      "title": "Statistics",
       "subtitle": "Monitor send trends, success rate and channel distribution",
       "userScope": "User scope",
       "allUsers": "All users",
@@ -824,7 +856,7 @@
       "bucket": "Bucket"
     },
     "records": {
-      "title": "Send Records",
+      "title": "Records",
       "subtitle": "Notification send records with filters and pagination",
       "sourceApp": "Source App",
       "sourceType": "Source Type",
@@ -852,8 +884,8 @@
       "resetFilters": "Reset filters"
     },
     "channels": {
-      "menuTitle": "Notification Channels",
-      "title": "Notification Channels",
+      "menuTitle": "Channels",
+      "title": "Channels",
       "subtitle": "Manage notification channels (Webhook and email SMTP); add multiple and set default.",
       "noChannels": "No channels yet. Click Add Channel to create one.",
       "addChannel": "Add Channel",
@@ -934,8 +966,8 @@
       "setDefaultDesc": "Use this channel when no channel is specified."
     },
     "settings": {
-      "menuTitle": "Notification Settings",
-      "title": "Notification Settings",
+      "menuTitle": "Settings",
+      "title": "Settings",
       "subtitle": "Notification module schedule and cleanup config (admin)",
       "scheduleSection": "Schedule and cleanup",
       "retentionTitle": "Record retention (days)",

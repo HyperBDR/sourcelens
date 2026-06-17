@@ -6,6 +6,10 @@ from .oauth import (
     CompleteGoogleSetupView,
     OAuthCallbackRedirectView,
 )
+from .login_otp import (
+    SendLoginCodeView,
+    VerifyLoginCodeView,
+)
 from .registration import (
     SendRegistrationEmailView,
     VerifyRegistrationTokenView,
@@ -22,6 +26,8 @@ from .scenes import GetAvailableScenesView
 __all__ = [
     'CompleteGoogleSetupView',
     'OAuthCallbackRedirectView',
+    'SendLoginCodeView',
+    'VerifyLoginCodeView',
     'SendRegistrationEmailView',
     'VerifyRegistrationTokenView',
     'CompleteRegistrationView',

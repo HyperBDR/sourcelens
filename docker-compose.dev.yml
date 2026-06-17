@@ -158,7 +158,7 @@ services:
         APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
-    image: sourcelens-lensnode:dev
+    image: sourcelens-lensnode:latest
     container_name: sourcelens-lensnode-dev
     restart: unless-stopped
     env_file:
@@ -187,10 +187,12 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    image: sourcelens-ui:dev
+    image: sourcelens-ui:latest
     container_name: sourcelens-ui-dev
     pull_policy: missing
     restart: unless-stopped
+    env_file:
+      - ./.env.dev
     volumes:
       - ./frontend/src:/app/src:ro
       - ./frontend/public:/app/public:ro

@@ -378,6 +378,33 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class PublicAssistantView(APIView):
+    """Public read-only assistant metadata for the shared chat page."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, slug):
+        """Return minimal metadata for an active assistant by slug."""
+
+        assistant = Assistant.objects.filter(
+            slug=slug,
+            status=Assistant.Status.ACTIVE,
+        ).first()
+        if assistant is None:
+            return Response(
+                {"detail": "Assistant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(
+            {
+                "name": assistant.name,
+                "slug": assistant.slug,
+                "status": assistant.status,
+            }
+        )
+
+
 class SessionViewSet(BaseAuthenticatedViewSet):
     """CRUD for sessions and nested run/message actions."""
 

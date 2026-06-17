@@ -69,6 +69,41 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  const loginWithCode = async ({ email, code }) => {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await authApi.verifyLoginCode({ email, code })
+      const data = response.data.data || response.data
+
+      if (!data.access) {
+        throw new Error('Invalid verify response')
+      }
+
+      token.value = data.access
+      localStorage.setItem('access_token', data.access)
+      if (data.refresh) {
+        localStorage.setItem('refresh_token', data.refresh)
+      }
+
+      // Load the full profile (roles/features) for routing and gating.
+      const profile = await authApi.getProfile()
+      user.value = profile.data.data || profile.data
+      await loadUserPreferences()
+
+      return user.value
+    } catch (err) {
+      error.value =
+        err.response?.data?.message ||
+        err.response?.data?.detail ||
+        'Login failed'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   const clearAuthState = () => {
     user.value = null
     token.value = null
@@ -210,6 +245,7 @@ export const useUserStore = defineStore('user', () => {
     landingPath,
     // Actions
     login,
+    loginWithCode,
     logout,
     checkAuth,
     checkAuthStatus,

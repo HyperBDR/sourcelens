@@ -6,6 +6,16 @@ export const authApi = {
     return api.post('/v1/auth/login', credentials)
   },
 
+  // Request an email verification code for passwordless login
+  sendLoginCode(payload) {
+    return api.post('/v1/auth/login/send-code', payload)
+  },
+
+  // Verify an email login code and receive JWT tokens
+  verifyLoginCode(payload) {
+    return api.post('/v1/auth/login/verify-code', payload)
+  },
+
   // Get user profile
   getProfile() {
     return api.get('/v1/auth/user')
@@ -67,6 +77,8 @@ export const authApi = {
 // Export individual functions for easier imports
 export const {
   login,
+  sendLoginCode,
+  verifyLoginCode,
   getProfile,
   updateProfile,
   logout,

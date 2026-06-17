@@ -9,6 +9,8 @@ This module contains all settings related to:
 """
 import os
 
+from django.core.exceptions import ImproperlyConfigured
+
 
 # ============================
 # Email Configuration
@@ -128,3 +130,48 @@ REGISTRATION_TOKEN_EXPIRY_HOURS = int(
 PASSWORD_RESET_TIMEOUT = int(
     os.getenv('PASSWORD_RESET_TIMEOUT', '86400')
 )
+
+
+# ============================
+# Email Verification Code (OTP) Login
+# ============================
+
+# Lifetime of a login verification code (seconds).
+OTP_CODE_TTL_SECONDS = int(os.getenv('OTP_CODE_TTL_SECONDS', '300'))
+
+# Maximum verify attempts before a code is invalidated.
+OTP_MAX_ATTEMPTS = int(os.getenv('OTP_MAX_ATTEMPTS', '5'))
+
+# Minimum interval between two code sends for the same email (seconds).
+OTP_SEND_COOLDOWN_SECONDS = int(os.getenv('OTP_SEND_COOLDOWN_SECONDS', '60'))
+
+# Maximum code sends per email within a rolling 24h window.
+OTP_SEND_MAX_PER_DAY = int(os.getenv('OTP_SEND_MAX_PER_DAY', '10'))
+
+# Maximum code sends per client IP within a rolling 1h window.
+OTP_SEND_MAX_PER_IP_HOUR = int(os.getenv('OTP_SEND_MAX_PER_IP_HOUR', '20'))
+
+
+# ============================
+# Cloudflare Turnstile
+# ============================
+
+# Server-side secret used to verify Turnstile tokens. Empty disables the
+# check (development bypass).
+TURNSTILE_SECRET_KEY = os.getenv('TURNSTILE_SECRET_KEY', '')
+
+TURNSTILE_VERIFY_URL = (
+    'https://challenges.cloudflare.com/turnstile/v0/siteverify'
+)
+
+# Fail fast in production: an empty secret silently bypasses human
+# verification on every login entry, so refuse to start without it unless
+# explicitly in debug mode.
+if not TURNSTILE_SECRET_KEY and (
+    os.getenv('DJANGO_DEBUG', 'false').lower() != 'true'
+):
+    raise ImproperlyConfigured(
+        'TURNSTILE_SECRET_KEY is required when DJANGO_DEBUG is not true. '
+        'Set it to enable Cloudflare Turnstile, or run with '
+        'DJANGO_DEBUG=true to bypass it in development.'
+    )

@@ -107,8 +107,11 @@ RUN set -eux; \
         done; \
     fi
 
-# Compile Django message catalogs (.po -> .mo) so runtime gettext works
-RUN python manage.py compilemessages -l zh_Hans -l en
+# Compile Django message catalogs (.po -> .mo) so runtime gettext works.
+# DJANGO_DEBUG=true only for this build step: settings import enforces a
+# Turnstile fail-fast that has no .env at build time. Runtime (gunicorn)
+# still imports settings with the real env, so the guard stays in effect.
+RUN DJANGO_DEBUG=true python manage.py compilemessages -l zh_Hans -l en
 
 # Create necessary directories
 RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/sourcelens

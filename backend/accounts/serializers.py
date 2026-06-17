@@ -197,6 +197,45 @@ class SendRegistrationEmailSerializer(serializers.Serializer):
         return value
 
 
+class SendLoginCodeSerializer(serializers.Serializer):
+    """
+    Serializer for requesting an email login verification code.
+    """
+    email = serializers.EmailField(
+        required=True,
+        help_text=_("User's email address")
+    )
+    turnstile_token = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text=_("Cloudflare Turnstile token")
+    )
+
+    def validate_email(self, value):
+        """Normalize the email address."""
+        return value.lower().strip()
+
+
+class VerifyLoginCodeSerializer(serializers.Serializer):
+    """
+    Serializer for verifying an email login code.
+    """
+    email = serializers.EmailField(
+        required=True,
+        help_text=_("User's email address")
+    )
+    code = serializers.CharField(
+        required=True,
+        min_length=4,
+        max_length=8,
+        help_text=_("Verification code from email")
+    )
+
+    def validate_email(self, value):
+        """Normalize the email address."""
+        return value.lower().strip()
+
+
 class VirtualEmailUsernameSerializer(serializers.Serializer):
     """
     Serializer for validating virtual email username.

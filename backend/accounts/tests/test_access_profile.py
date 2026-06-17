@@ -39,7 +39,7 @@ class AccessProfileTests(TestCase):
             '/management/users',
         )
 
-    def test_legacy_default_features_preserved_without_roles(self):
+    def test_default_features_without_roles_exclude_admin_console(self):
         user = User.objects.create_user(
             username='bob',
             email='bob@example.com',
@@ -52,7 +52,6 @@ class AccessProfileTests(TestCase):
             access_profile['visible_features'],
             [
                 'workspace',
-                'admin_console',
             ],
         )
 

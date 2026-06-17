@@ -4,6 +4,8 @@ import logging
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
+from langchain.agents.middleware import SummarizationMiddleware
+from langchain_core.messages import RemoveMessage
 
 from .agent_tools import build_agent_tools, SELF_REPORTING_TOOLS
 from .gateway_model import LensGatewayChatModel
@@ -45,6 +47,98 @@ SCENARIOS = {
         ),
     },
 }
+
+
+CONTINUATION_SUMMARY_PROMPT = (
+    "You are compacting the context of an IN-PROGRESS investigation to "
+    "free up space. The user's question has NOT been answered yet — you "
+    "are still gathering evidence from the workspace and MUST keep working "
+    "after this compaction. The notes below replace the older conversation "
+    "history.\n\n"
+    "Extract only what you need to continue and ultimately answer the "
+    "question. Use these sections, writing 'None' where empty:\n\n"
+    "## ORIGINAL QUESTION\n"
+    "The user's exact question, verbatim.\n\n"
+    "## EVIDENCE GATHERED SO FAR\n"
+    "Concrete findings already discovered, with file paths and the key "
+    "facts/identifiers/values they contain. Be specific.\n\n"
+    "## STILL TO DO\n"
+    "What evidence is still missing to fully answer the question.\n\n"
+    "Do NOT write a final answer here. Do NOT imply the task is complete "
+    "or already answered. This is a working note to yourself so you can "
+    "keep investigating, then produce the final answer in a later step.\n\n"
+    "<messages>\n{messages}\n</messages>"
+)
+
+
+class LensSummarizationMiddleware(SummarizationMiddleware):
+    """Compact older turns once the running context grows past a threshold.
+
+    Deep investigations accumulate large tool outputs (file reads) that
+    make every later LLM round re-send a growing transcript, and per-round
+    latency scales with that context. Compacting the oldest turns into a
+    summary keeps the recent working set verbatim while bounding context,
+    cutting tail latency and the risk of context overflow. The workspace
+    stays fully re-queryable, so any evidence dropped from the summary can
+    simply be searched again.
+    """
+
+    def before_model(self, state, runtime):
+        """Summarize on threshold and report what was compacted."""
+
+        before_tokens = self.token_counter(state["messages"])
+        result = super().before_model(state, runtime)
+        emit = getattr(self, "_emit_event", None)
+        if result is not None and emit is not None:
+            kept = [
+                message
+                for message in result["messages"]
+                if not isinstance(message, RemoveMessage)
+            ]
+            after_tokens = self.token_counter(kept)
+            emit(
+                "deepagents.summarization.compacted",
+                {
+                    "before_tokens": before_tokens,
+                    "after_tokens": after_tokens,
+                    "saved_tokens": max(before_tokens - after_tokens, 0),
+                },
+            )
+        return result
+
+
+def _build_summarization_middleware(config, model_ref, emit_event):
+    """Build context-compaction middleware, or None when disabled.
+
+    The summary is produced by a non-streaming gateway model so its tokens
+    never leak into the user-facing answer stream. A trigger of 0 disables
+    compaction (useful for A/B latency comparisons).
+
+    create_deep_agent also wires its own summarization middleware (default
+    trigger ~170k tokens for a profile-less model). Keeping this trigger
+    well below that ceiling guarantees ours fires first and holds context
+    below the built-in's threshold, so the built-in stays dormant and only
+    one summarizer ever acts. Do not raise summary_trigger_tokens near 170k.
+    """
+
+    trigger_tokens = config.summary_trigger_tokens
+    if trigger_tokens <= 0:
+        return None
+    summary_model = LensGatewayChatModel(
+        model_ref=str(model_ref),
+        ai_gateway_url=config.ai_gateway_url,
+        token=config.token,
+        request_timeout_s=config.request_timeout_s,
+    )
+    middleware = LensSummarizationMiddleware(
+        model=summary_model,
+        trigger=("tokens", trigger_tokens),
+        keep=("tokens", config.summary_keep_tokens),
+        trim_tokens_to_summarize=32000,
+        summary_prompt=CONTINUATION_SUMMARY_PROMPT,
+    )
+    middleware._emit_event = emit_event
+    return middleware
 
 
 class LensDeepAgentRuntime:
@@ -127,6 +221,19 @@ class LensDeepAgentRuntime:
             if resources.skill_paths:
                 kwargs["skills"] = resources.skill_paths
 
+            summarizer = _build_summarization_middleware(
+                self.config, model_ref, emit_agent_event
+            )
+            if summarizer is not None:
+                kwargs["middleware"] = [summarizer]
+                emit_agent_event(
+                    "deepagents.summarization.enabled",
+                    {
+                        "trigger_tokens": self.config.summary_trigger_tokens,
+                        "keep_tokens": self.config.summary_keep_tokens,
+                    },
+                )
+
             emit_agent_event(
                 "deepagents.agent.create",
                 {
@@ -145,8 +252,18 @@ class LensDeepAgentRuntime:
                 command.get("history"), question
             )
             answer, truncated = _run_agent_with_turn_limit(
-                agent, messages, max_turns, emit_event=emit_agent_event
+                agent,
+                messages,
+                max_turns,
+                emit_event=emit_agent_event,
+                answer_language=_detect_answer_language(question),
             )
+            if not (answer or "").strip():
+                # the model finished a turn without emitting answer text (e.g.
+                # a reasoning-only final turn). Leave the answer empty so the
+                # frontend can show a transient retry hint instead of a
+                # persisted system-looking message.
+                emit_agent_event("deepagents.answer.empty", {})
             if truncated:
                 emit_agent_event(
                     "deepagents.agent.truncated",
@@ -345,9 +462,14 @@ def _context_guidance(contents):
     joined = "\n\n".join(contents)[:12000]
     return (
         "\n\nWorkspace Guidance from bound context skills:\n"
-        "Apply this guidance before using workspace tools. Treat it as "
-        "authoritative for repository layout, search priority, and stopping "
-        f"rules.\n\n{joined}"
+        "This guidance is authoritative for this assistant — follow it "
+        "throughout the whole task. It governs not only repository layout, "
+        "search priority and stopping rules, but ALSO how you write the "
+        "final answer: output format, wording, and link / URL / path "
+        "conventions. When it conflicts with your default behavior, the "
+        "guidance wins. If it defines how links or paths should be "
+        "presented, apply that transformation in the final answer instead "
+        f"of emitting raw or relative paths.\n\n{joined}"
     )
 
 
@@ -420,7 +542,9 @@ def _build_initial_messages(history, question):
     return messages
 
 
-def _run_agent_with_turn_limit(agent, messages, max_turns, emit_event=None):
+def _run_agent_with_turn_limit(
+    agent, messages, max_turns, emit_event=None, answer_language="English"
+):
     """Stream agent events and stop after max_turns NEW AI turns.
 
     `messages` may be prefixed with prior conversation turns. Historical
@@ -436,7 +560,7 @@ def _run_agent_with_turn_limit(agent, messages, max_turns, emit_event=None):
     seen_tool_calls = set()
     seen_model_calls = set()
     baseline_ai = sum(1 for m in messages if m.get("role") == "assistant")
-    seen_model_calls.update(range(1, baseline_ai + 1))
+    seeded_baseline = False
 
     for state in agent.stream(
         {"messages": messages},
@@ -445,6 +569,21 @@ def _run_agent_with_turn_limit(agent, messages, max_turns, emit_event=None):
     ):
         last_state = state
         current = state.get("messages", [])
+        if not seeded_baseline:
+            # Seed the historical assistant turns by their (now-assigned)
+            # message id so they are never emitted or counted as new turns.
+            # Dedup keys on message id, so an integer preseed would never
+            # match and would re-emit the carried-over history.
+            ai_count = 0
+            for message in current:
+                if getattr(message, "type", "") != "ai":
+                    continue
+                ai_count += 1
+                if ai_count <= baseline_ai:
+                    seen_model_calls.add(
+                        getattr(message, "id", None) or id(message)
+                    )
+            seeded_baseline = True
         if emit_event is not None:
             _emit_new_model_calls(current, seen_model_calls, emit_event)
             _emit_new_tool_calls(current, seen_tool_calls, emit_event)
@@ -458,11 +597,17 @@ def _run_agent_with_turn_limit(agent, messages, max_turns, emit_event=None):
             break
 
     answer = _extract_final_message(last_state or {})
-    if truncated:
-        answer += (
-            "\n\n---\n*已达到当前分析深度上限，"
-            "如需更完整的结果，请调高分析档位后重试。*"
-        )
+    if truncated and answer.strip():
+        if answer_language == "Chinese":
+            answer += (
+                "\n\n---\n*已达到当前分析深度上限，"
+                "如需更完整的结果，请调高分析档位后重试。*"
+            )
+        else:
+            answer += (
+                "\n\n---\n*Reached the current analysis-depth limit. "
+                "Raise the analysis tier for a more complete result.*"
+            )
     return answer, truncated
 
 
@@ -510,28 +655,30 @@ def _emit_new_model_calls(messages, seen, emit_event):
     Each AI message is one round-trip to the model. The gateway returns
     token usage in the message's response_metadata, so surfacing these
     makes every LLM call visible in the trace and attributes token usage
-    to the run.
+    to the run. Dedup keys on the stable message id rather than position,
+    so summarization (which rewrites the message list) cannot make a new
+    final turn collide with an already-seen positional index.
     """
 
-    ai_index = 0
     for message in messages:
         if getattr(message, "type", "") != "ai":
             continue
-        ai_index += 1
-        if ai_index in seen:
+        key = getattr(message, "id", None) or id(message)
+        if key in seen:
             continue
-        seen.add(ai_index)
+        seen.add(key)
         meta = getattr(message, "response_metadata", None) or {}
         usage = meta.get("usage") or {}
         emit_event(
             "llm.response",
             {
-                "round": ai_index,
+                "round": len(seen),
                 "model": usage.get("model"),
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "completion_tokens": usage.get("completion_tokens"),
                 "total_tokens": usage.get("total_tokens"),
                 "cost": usage.get("cost"),
+                "latency_ms": meta.get("latency_ms"),
                 "summary": _model_summary(message),
             },
         )
