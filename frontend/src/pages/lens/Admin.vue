@@ -248,9 +248,6 @@
                       {{ t('lensAdmin.columns.repository') }}
                     </th>
                     <th class="table-head">
-                      {{ t('lensAdmin.columns.branch') }}
-                    </th>
-                    <th class="table-head">
                       {{ t('lensAdmin.columns.lensnode') }}
                     </th>
                     <th class="table-head">
@@ -300,9 +297,12 @@
                       <div class="truncate" :title="dataSourceRepository(row)">
                         {{ dataSourceRepository(row) }}
                       </div>
-                    </td>
-                    <td class="table-cell font-mono text-xs text-ink-500">
-                      {{ dataSourceBranch(row) }}
+                      <div
+                        v-if="row.source_type === 'git'"
+                        class="mt-1 font-mono text-xs text-ink-500"
+                      >
+                        {{ dataSourceBranch(row) }}
+                      </div>
                     </td>
                     <td class="table-cell text-ink-600">
                       {{ row.lensnode_name || lensNodeName(row.lensnode) }}
