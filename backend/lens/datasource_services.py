@@ -11,7 +11,8 @@ from .models import DataSource, DataSourceCredential, LensNode
 from .services import lensnode_group_name
 
 WORKSPACE_ROOT = "/workspace"
-DATASOURCE_RESULT_TIMEOUT_S = 900
+DATASOURCE_SYNC_TIMEOUT_SETTING = "lens.datasource_sync.timeout_s"
+DEFAULT_DATASOURCE_SYNC_TIMEOUT_S = 21600
 DATASOURCE_RESULT_POLL_S = 0.5
 
 
@@ -96,6 +97,21 @@ def _wait_cache_result(cache_key, timeout_s):
     raise DataSourceDispatchError("LENSNODE_RESULT_TIMEOUT")
 
 
+def get_datasource_sync_timeout_s():
+    """Return the configured datasource sync result timeout in seconds."""
+
+    from .models import GlobalSetting
+
+    setting = GlobalSetting.objects.filter(
+        key=DATASOURCE_SYNC_TIMEOUT_SETTING
+    ).first()
+    try:
+        value = int(setting.value) if setting is not None else 0
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else DEFAULT_DATASOURCE_SYNC_TIMEOUT_S
+
+
 def check_datasource_path(lensnode, target_path, source_type, config=None):
     """Ask a LensNode to inspect a datasource target path."""
 
@@ -178,7 +194,7 @@ def dispatch_datasource_sync(datasource, task_id, trigger="scheduled"):
     )
     return _wait_cache_result(
         f"lens:datasource_sync:{request_id}",
-        timeout_s=DATASOURCE_RESULT_TIMEOUT_S,
+        timeout_s=get_datasource_sync_timeout_s(),
     )
 
 

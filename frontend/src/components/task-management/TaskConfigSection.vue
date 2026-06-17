@@ -39,6 +39,38 @@
       >
         <div class="md:col-span-2">
           <h3 class="text-sm font-semibold text-gray-900 mb-1">
+            {{ t('taskManagement.settings.datasourceTimeoutTitle') }}
+          </h3>
+          <p class="text-sm text-gray-600">
+            {{ t('taskManagement.settings.datasourceTimeoutDesc') }}
+          </p>
+        </div>
+        <div class="md:col-span-1 flex justify-end">
+          <div class="w-full md:w-64 flex items-center justify-end gap-2">
+            <input
+              v-model.number="form.datasource_sync_timeout_minutes"
+              type="number"
+              min="1"
+              max="1440"
+              :placeholder="
+                t(
+                  'taskManagement.settings.datasourceTimeoutMinutesPlaceholder'
+                )
+              "
+              class="rounded-md border border-gray-300 px-3 py-2 text-sm w-24 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+            />
+            <span class="text-sm text-gray-500 w-14">{{
+              t('taskManagement.settings.minutesUnit')
+            }}</span>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start pt-6 pb-6 border-t border-gray-200"
+      >
+        <div class="md:col-span-2">
+          <h3 class="text-sm font-semibold text-gray-900 mb-1">
             {{ t('taskManagement.settings.retentionTitle') }}
           </h3>
           <p class="text-sm text-gray-600">
@@ -191,6 +223,11 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { extractResponseData, extractErrorMessage } from '@/utils/api'
 import { taskManagementApi } from '@/admin/api'
+import {
+  createGlobalSetting,
+  listGlobalSettings,
+  updateGlobalSetting
+} from '@/api/lens'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 
@@ -201,9 +238,14 @@ const loading = ref(false)
 const saving = ref(false)
 const autoCleanupEnabled = ref(true)
 const overtimeMarkingEnabled = ref(true)
+const datasourceTimeoutSettingExists = ref(false)
+
+const DATASOURCE_SYNC_TIMEOUT_KEY = 'lens.datasource_sync.timeout_s'
+const DEFAULT_DATASOURCE_SYNC_TIMEOUT_MINUTES = 360
 
 const form = reactive({
   timeout_minutes: 10,
+  datasource_sync_timeout_minutes: DEFAULT_DATASOURCE_SYNC_TIMEOUT_MINUTES,
   retention_days: 180,
   cleanup_crontab: '0 2 * * *',
   mark_timeout_crontab: '*/30 * * * *'
@@ -211,6 +253,7 @@ const form = reactive({
 
 const initialValues = reactive({
   timeout_minutes: 10,
+  datasource_sync_timeout_minutes: DEFAULT_DATASOURCE_SYNC_TIMEOUT_MINUTES,
   retention_days: 180,
   cleanup_crontab: '0 2 * * *',
   mark_timeout_crontab: '*/30 * * * *'
@@ -218,16 +261,36 @@ const initialValues = reactive({
 
 function resetForm() {
   form.timeout_minutes = initialValues.timeout_minutes
+  form.datasource_sync_timeout_minutes =
+    initialValues.datasource_sync_timeout_minutes
   form.retention_days = initialValues.retention_days
   form.cleanup_crontab = initialValues.cleanup_crontab
   form.mark_timeout_crontab = initialValues.mark_timeout_crontab
 }
 
+function applyDatasourceTimeoutSetting(settings) {
+  const setting = settings.find(
+    (item) => item.key === DATASOURCE_SYNC_TIMEOUT_KEY
+  )
+  datasourceTimeoutSettingExists.value = !!setting
+  const seconds = Number(setting?.value)
+  const minutes =
+    seconds > 0
+      ? Math.ceil(seconds / 60)
+      : DEFAULT_DATASOURCE_SYNC_TIMEOUT_MINUTES
+  form.datasource_sync_timeout_minutes = minutes
+  initialValues.datasource_sync_timeout_minutes = minutes
+}
+
 async function loadConfig() {
   loading.value = true
   try {
-    const res = await taskManagementApi.getConfig()
+    const [res, settings] = await Promise.all([
+      taskManagementApi.getConfig(),
+      listGlobalSettings()
+    ])
     const data = extractResponseData(res)
+    applyDatasourceTimeoutSetting(Array.isArray(settings) ? settings : [])
     if (data) {
       if (typeof data.timeout_minutes === 'number') {
         form.timeout_minutes = data.timeout_minutes
@@ -263,6 +326,7 @@ async function loadConfig() {
 async function saveConfig() {
   const payload = {}
   const tm = Number(form.timeout_minutes)
+  const dstm = Number(form.datasource_sync_timeout_minutes)
   const rd = Number(form.retention_days)
   if (tm >= 1 && tm <= 1440) {
     payload.timeout_minutes = tm
@@ -285,14 +349,34 @@ async function saveConfig() {
   } else if (!overtimeMarkingEnabled.value) {
     payload.mark_timeout_crontab = ''
   }
-  if (Object.keys(payload).length === 0) {
+  const hasDatasourceTimeout = dstm >= 1 && dstm <= 1440
+  if (Object.keys(payload).length === 0 && !hasDatasourceTimeout) {
     showError(t('taskManagement.settings.saveFailed'))
     return
   }
   saving.value = true
   try {
-    const res = await taskManagementApi.updateConfig(payload)
-    const data = extractResponseData(res)
+    const datasourceTimeoutPayload = {
+      key: DATASOURCE_SYNC_TIMEOUT_KEY,
+      value: Math.max(1, Math.round(dstm)) * 60,
+      description: 'Datasource sync result timeout in seconds'
+    }
+    const requests = []
+    if (Object.keys(payload).length > 0) {
+      requests.push(taskManagementApi.updateConfig(payload))
+    }
+    if (hasDatasourceTimeout) {
+      requests.push(
+        datasourceTimeoutSettingExists.value
+          ? updateGlobalSetting(
+              DATASOURCE_SYNC_TIMEOUT_KEY,
+              datasourceTimeoutPayload
+            )
+          : createGlobalSetting(datasourceTimeoutPayload)
+      )
+    }
+    const [res] = await Promise.all(requests)
+    const data = res ? extractResponseData(res) : null
     if (data) {
       if (typeof data.timeout_minutes === 'number') {
         form.timeout_minutes = data.timeout_minutes
@@ -316,6 +400,12 @@ async function saveConfig() {
       overtimeMarkingEnabled.value = !!(
         data.mark_timeout_crontab && String(data.mark_timeout_crontab).trim()
       )
+    }
+    if (hasDatasourceTimeout) {
+      form.datasource_sync_timeout_minutes = Math.max(1, Math.round(dstm))
+      initialValues.datasource_sync_timeout_minutes =
+        form.datasource_sync_timeout_minutes
+      datasourceTimeoutSettingExists.value = true
     }
     showSuccess(t('taskManagement.settings.saveSuccess'))
   } catch (e) {

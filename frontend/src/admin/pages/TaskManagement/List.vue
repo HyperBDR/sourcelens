@@ -277,7 +277,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
@@ -320,6 +320,10 @@ const currentPage = ref(1)
 const totalCount = ref(0)
 const totalPages = ref(1)
 const pageSize = ref(20)
+const processingRefreshTimer = ref(null)
+const processingRefreshInFlight = ref(false)
+
+const PROCESSING_STATUSES = new Set(['PENDING', 'STARTED', 'RETRY'])
 
 const paginationShowing = computed(() => ({
   from: (currentPage.value - 1) * pageSize.value + 1,
@@ -337,6 +341,10 @@ function mapStatus(status) {
     REVOKED: 'failed'
   }
   return m[status] || (status && status.toLowerCase()) || 'pending'
+}
+
+function isProcessingStatus(status) {
+  return PROCESSING_STATUSES.has(String(status || '').toUpperCase())
 }
 
 function formatDate(val) {
@@ -392,6 +400,72 @@ async function loadTasks() {
   } finally {
     loading.value = false
   }
+}
+
+async function refreshProcessingTasks() {
+  if (processingRefreshInFlight.value) {
+    return
+  }
+
+  const processingTasks = tasks.value.filter((task) =>
+    isProcessingStatus(task.status)
+  )
+  if (!processingTasks.length) {
+    return
+  }
+
+  processingRefreshInFlight.value = true
+  try {
+    const results = await Promise.allSettled(
+      processingTasks.map((task) => taskManagementApi.getExecution(task.id))
+    )
+    const refreshedById = new Map()
+    results.forEach((result) => {
+      if (result.status !== 'fulfilled') {
+        return
+      }
+      const row = extractResponseData(result.value)
+      if (row?.id == null) {
+        return
+      }
+      refreshedById.set(String(row.id), row)
+    })
+    if (!refreshedById.size) {
+      return
+    }
+    tasks.value = tasks.value.map((task) =>
+      refreshedById.has(String(task.id))
+        ? { ...task, ...refreshedById.get(String(task.id)) }
+        : task
+    )
+    if (
+      selectedTask.value &&
+      refreshedById.has(String(selectedTask.value.id))
+    ) {
+      selectedTask.value = {
+        ...selectedTask.value,
+        ...refreshedById.get(String(selectedTask.value.id))
+      }
+    }
+  } finally {
+    processingRefreshInFlight.value = false
+  }
+}
+
+function startProcessingRefresh() {
+  stopProcessingRefresh()
+  processingRefreshTimer.value = window.setInterval(
+    refreshProcessingTasks,
+    3000
+  )
+}
+
+function stopProcessingRefresh() {
+  if (!processingRefreshTimer.value) {
+    return
+  }
+  window.clearInterval(processingRefreshTimer.value)
+  processingRefreshTimer.value = null
 }
 
 function onFilterChange() {
@@ -462,5 +536,10 @@ onMounted(async () => {
   fetchUserOptions()
   await loadTasks()
   await openInitialExecution()
+  startProcessingRefresh()
+})
+
+onBeforeUnmount(() => {
+  stopProcessingRefresh()
 })
 </script>

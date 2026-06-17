@@ -6,7 +6,10 @@ from celery import shared_task
 from django.core.cache import cache
 from django.utils import timezone
 
-from .datasource_services import dispatch_datasource_sync
+from .datasource_services import (
+    dispatch_datasource_sync,
+    get_datasource_sync_timeout_s,
+)
 from .models import (
     DataSource,
     GlobalSetting,
@@ -141,7 +144,10 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
     )
 
     try:
-        with datasource_lock(datasource.uuid, ttl_s=600):
+        with datasource_lock(
+            datasource.uuid,
+            ttl_s=get_datasource_sync_timeout_s(),
+        ):
             _append_datasource_task_step(
                 task_id,
                 "dispatch",
