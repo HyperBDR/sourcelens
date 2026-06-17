@@ -7,6 +7,7 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "edit": "Edit",
+    "more": "More",
     "close": "Close",
     "confirm": "Confirm",
     "back": "Back",
@@ -62,6 +63,11 @@
       "enabled": "Enabled",
       "disabled": "Disabled",
       "inactive": "Disabled",
+      "online": "Online",
+      "offline": "Offline",
+      "draining": "Draining",
+      "approved": "Approved",
+      "rejected": "Rejected",
       "unknown": "Unknown"
     },
     "pagination": {

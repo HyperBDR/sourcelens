@@ -615,7 +615,7 @@
     "total": "{label} · {count}",
     "tabs": {
       "assistants": "Assistants",
-      "lensnodes": "LensNodes",
+      "lensnodes": "Nodes",
       "datasources": "Data Sources",
       "skills": "Skills",
       "mcp": "MCP Servers",
@@ -629,10 +629,10 @@
         "action": "Create Assistant"
       },
       "lensnodes": {
-        "title": "LensNodes",
+        "title": "Nodes",
         "description": "Review distributed execution nodes and manage access credentials.",
-        "label": "LensNode",
-        "action": "Create LensNode"
+        "label": "Node",
+        "action": "Create Node"
       },
       "datasources": {
         "title": "Data Sources",
@@ -667,13 +667,15 @@
     },
     "columns": {
       "assistant": "Assistant",
-      "lensnode": "LensNode",
+      "lensnode": "Node",
       "task": "Task",
       "dirs": "Dirs",
       "tools": "Tools",
       "status": "Status",
       "actions": "Actions",
       "workspace": "Workspace",
+      "runtimeStatus": "Runtime",
+      "enrollment": "Enrollment",
       "dirsAndTasks": "Dirs / Tasks",
       "heartbeat": "Heartbeat",
       "value": "Value",
@@ -747,6 +749,7 @@
     },
     "actions": {
       "approve": "Approve",
+      "reject": "Reject",
       "issueToken": "Issue",
       "revokeToken": "Revoke",
       "sync": "Sync",
@@ -830,6 +833,14 @@
     "settings": {
       "publicBaseUrlTitle": "Public Base URL",
       "publicBaseUrlDesc": "Base address used for assistant share links (e.g. your own domain). Leave empty to use the current server address.",
+      "nodeImageTitle": "Node Image",
+      "nodeImageDesc": "Docker image used in the generated compose. Leave empty to use the default oneprocloud/lensnode:latest.",
+      "groups": {
+        "deploy": "Deployment & Enrollment",
+        "runtime": "Runtime & Retention",
+        "health": "Health Check & Scheduling",
+        "advanced": "Other"
+      },
       "sectionTitle": "Runtime and Retention",
       "timeoutTitle": "Node Default Timeout",
       "timeoutDesc": "Default timeout for LensNode task execution.",
@@ -853,6 +864,10 @@
     "modal": {
       "create": "Create",
       "edit": "Edit"
+    },
+    "deleteConfirm": {
+      "title": "Delete Node",
+      "message": "Delete node \"{name}\"? This cannot be undone."
     },
     "drawer": {
       "createTitle": "Create Assistant",
@@ -946,6 +961,58 @@
       "feishuFolderHint": "Copy the browser URL from a Feishu Drive folder. SourceLens will recursively sync subfolders and files.",
       "recursiveHint": "Sync all subfolders"
     },
+    "detail": {
+      "title": "Node Details",
+      "active": "Active",
+      "issuedAt": "issued {time}",
+      "revoked": "Revoked",
+      "notIssued": "Not issued yet",
+      "reissue": "Re-issue token",
+      "reissueHint": "Re-issuing generates a new token and a fresh compose; the old token stops working immediately.",
+      "directoryTree": "Directory Preview",
+      "treeHint": "Expand a folder to fetch its subdirectories in real time.",
+      "treeEmpty": "No directories reported.",
+      "nodeEmpty": "Empty",
+      "offlineHint": "Node is offline — only previously reported directories are shown; deeper levels cannot be fetched.",
+      "loadDirsFailed": "Failed to list subdirectories"
+    },
+    "timeline": {
+      "title": "Enrollment progress",
+      "created": "Created",
+      "approved": "Approved",
+      "credential": "Credential",
+      "connected": "First connected",
+      "online": "Online",
+      "pendingMeta": "Awaiting approval",
+      "rejected": "Rejected",
+      "notConnected": "Not connected yet",
+      "heartbeat": "Heartbeat {time}"
+    },
+    "compose": {
+      "title": "Deployment compose",
+      "tokenOnce": "This token is shown only once. Copy or download the compose now — re-issue it from the node's details if you lose it.",
+      "missingHint": "Set these in Lens Settings first, otherwise the compose won't run:",
+      "copy": "Copy",
+      "copied": "Copied",
+      "download": "Download",
+      "volumeHint": "Point the volume at the code you want this node to analyze."
+    },
+    "nodeForm": {
+      "createTitle": "Create Node",
+      "editTitle": "Edit Node",
+      "nameLabel": "Name",
+      "nameHint": "Only the name is used for display. Workspace, versions, directories and tasks are reported by the node automatically.",
+      "mountLabel": "Code directory (host)",
+      "mountHint": "Host path of the code to analyze; mounted into the container at /workspace.",
+      "issuing": "Issuing token…",
+      "create": "Create node",
+      "createdBanner": "Node created. Copy or download the compose below — the token is shown only once.",
+      "createHint": "Copy, download or Create node automatically issues the token and fills it in — the compose is ready to run.",
+      "tokenPlaceholder": "<generated after you create the node>",
+      "settingsHint": "Image, control WS and AI gateway are configured in Settings → Deployment & Enrollment.",
+      "settingsLink": "Open settings",
+      "finish": "Done"
+    },
     "wizard": {
       "step1Title": "Basics & Models",
       "step1Desc": "Set name, slug, agent model (required), and optional multimodal model",
@@ -997,6 +1064,9 @@
       "invalidJson": "Please enter valid JSON",
       "approveSuccess": "Approved",
       "approveFailed": "Approval failed",
+      "approveBeforeToken": "Approve the node before issuing a token.",
+      "rejectSuccess": "Rejected",
+      "rejectFailed": "Reject failed",
       "tokenIssued": "Token issued",
       "tokenIssuedWithValue": "Token issued: {token}",
       "tokenIssueFailed": "Token issue failed",

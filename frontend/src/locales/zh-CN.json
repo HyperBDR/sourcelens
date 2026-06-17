@@ -7,6 +7,7 @@
     "cancel": "取消",
     "delete": "删除",
     "edit": "编辑",
+    "more": "更多",
     "close": "关闭",
     "confirm": "确认",
     "back": "返回",
@@ -62,6 +63,11 @@
       "enabled": "启用",
       "disabled": "禁用",
       "inactive": "禁用",
+      "online": "在线",
+      "offline": "离线",
+      "draining": "停止接单",
+      "approved": "已审批",
+      "rejected": "已拒绝",
       "unknown": "未知"
     },
     "pagination": {

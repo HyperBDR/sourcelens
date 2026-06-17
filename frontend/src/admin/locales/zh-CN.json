@@ -615,7 +615,7 @@
     "total": "{label} · {count}",
     "tabs": {
       "assistants": "Assistants",
-      "lensnodes": "节点管理",
+      "lensnodes": "节点",
       "datasources": "数据源",
       "skills": "Skills",
       "mcp": "MCP Servers",
@@ -629,9 +629,9 @@
         "action": "新建 Assistant"
       },
       "lensnodes": {
-        "title": "节点管理",
+        "title": "节点",
         "description": "查看和审批分布式执行节点，管理接入凭证。",
-        "label": "节点管理",
+        "label": "节点",
         "action": "新建节点"
       },
       "datasources": {
@@ -674,6 +674,8 @@
       "status": "状态",
       "actions": "操作",
       "workspace": "工作区",
+      "runtimeStatus": "运行状态",
+      "enrollment": "接入状态",
       "dirsAndTasks": "目录 / 任务",
       "heartbeat": "心跳",
       "value": "值",
@@ -747,6 +749,7 @@
     },
     "actions": {
       "approve": "通过",
+      "reject": "拒绝",
       "issueToken": "签发",
       "revokeToken": "吊销",
       "sync": "同步",
@@ -828,6 +831,16 @@
       "noDirs": "请先选择节点，或等待节点上报可用目录。"
     },
     "settings": {
+      "publicBaseUrlTitle": "对外基础地址",
+      "publicBaseUrlDesc": "用于助手分享链接的基础地址（如你自己的域名）。留空则使用当前服务地址。",
+      "nodeImageTitle": "节点镜像地址",
+      "nodeImageDesc": "为新节点生成 compose 时使用的 Docker 镜像。留空则使用默认 oneprocloud/lensnode:latest。",
+      "groups": {
+        "deploy": "部署与接入",
+        "runtime": "运行与保留",
+        "health": "健康检查与调度",
+        "advanced": "其它"
+      },
       "sectionTitle": "运行与保留策略",
       "timeoutTitle": "节点默认超时",
       "timeoutDesc": "节点执行任务的默认超时时间。",
@@ -851,6 +864,10 @@
     "modal": {
       "create": "新建",
       "edit": "编辑"
+    },
+    "deleteConfirm": {
+      "title": "删除节点",
+      "message": "确定删除节点「{name}」？此操作不可恢复。"
     },
     "drawer": {
       "createTitle": "新建 Assistant",
@@ -944,6 +961,58 @@
       "feishuFolderHint": "从飞书云文档 Drive 目录页面复制浏览器地址，系统会递归同步目录下的子目录和文件。",
       "recursiveHint": "同步全部子目录"
     },
+    "detail": {
+      "title": "节点详情",
+      "active": "有效",
+      "issuedAt": "签发于 {time}",
+      "revoked": "已吊销",
+      "notIssued": "尚未签发",
+      "reissue": "重新签发",
+      "reissueHint": "重新签发会生成新 Token 和新 compose，旧 Token 立即失效。",
+      "directoryTree": "目录预览",
+      "treeHint": "展开目录即可实时拉取其下一层子目录。",
+      "treeEmpty": "节点未上报任何目录。",
+      "nodeEmpty": "空",
+      "offlineHint": "节点当前离线，仅显示此前上报的目录，无法实时拉取更深层级。",
+      "loadDirsFailed": "拉取子目录失败"
+    },
+    "timeline": {
+      "title": "接入进度",
+      "created": "已创建",
+      "approved": "已审批",
+      "credential": "凭证",
+      "connected": "首次接入",
+      "online": "在线",
+      "pendingMeta": "待审批",
+      "rejected": "已拒绝",
+      "notConnected": "尚未接入",
+      "heartbeat": "心跳 {time}"
+    },
+    "compose": {
+      "title": "部署 compose",
+      "tokenOnce": "Token 仅显示一次。请立即复制或下载 compose；丢失后可在节点详情里「重新签发」。",
+      "missingHint": "请先在 Lens 全局设置里配置以下项，否则 compose 无法运行：",
+      "copy": "复制",
+      "copied": "已复制",
+      "download": "下载",
+      "volumeHint": "把 volume 指向你想让该节点分析的代码目录。"
+    },
+    "nodeForm": {
+      "createTitle": "新建节点",
+      "editTitle": "编辑节点",
+      "nameLabel": "名称",
+      "nameHint": "只有名称用于管理显示。工作区、版本、目录、任务等均由节点自动上报。",
+      "mountLabel": "代码目录（宿主机）",
+      "mountHint": "节点要分析的代码在宿主机上的路径，挂载到容器 /workspace。",
+      "issuing": "正在签发 Token…",
+      "create": "创建节点",
+      "createdBanner": "节点已创建。请复制或下载下面的 compose——Token 仅显示一次。",
+      "createHint": "复制、下载或「创建节点」都会自动签发 Token 并填入，拷走即可直接部署。",
+      "tokenPlaceholder": "<创建节点后自动生成>",
+      "settingsHint": "镜像、接入 WS、AI 网关等部署参数在「设置 → 部署与接入」中配置。",
+      "settingsLink": "去设置",
+      "finish": "完成"
+    },
     "wizard": {
       "step1Title": "基础与模型",
       "step1Desc": "设置名称、Slug 与 Agent 模型（必填），以及可选的多模态模型",
@@ -995,6 +1064,9 @@
       "invalidJson": "请输入有效的 JSON",
       "approveSuccess": "审批通过",
       "approveFailed": "审批失败",
+      "approveBeforeToken": "请先审批节点，再签发 Token。",
+      "rejectSuccess": "已拒绝",
+      "rejectFailed": "拒绝失败",
       "tokenIssued": "Token 已签发",
       "tokenIssuedWithValue": "Token 已签发：{token}",
       "tokenIssueFailed": "Token 签发失败",

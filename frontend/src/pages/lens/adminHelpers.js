@@ -84,3 +84,60 @@ export function normalizeList(payload) {
   }
   return []
 }
+
+export const DEFAULT_NODE_IMAGE = 'oneprocloud/lensnode:latest'
+
+const COMPOSE_PLACEHOLDER = {
+  serverUrl: 'REPLACE_ME__set_the_public_base_url'
+}
+
+/**
+ * Render a ready-to-run docker-compose.yml for a node.
+ *
+ * The node only needs the base server URL; it derives the control WebSocket
+ * and AI gateway endpoints from it on its own.
+ */
+export function buildLensNodeCompose({
+  name,
+  token,
+  image,
+  serverUrl,
+  hostPath
+}) {
+  const safeName = name || 'lensnode'
+  const safeHost = hostPath || '/workspace'
+  return [
+    'services:',
+    '  lensnode:',
+    `    image: ${image || DEFAULT_NODE_IMAGE}`,
+    '    restart: unless-stopped',
+    '    environment:',
+    `      LENSNODE_NAME: ${JSON.stringify(safeName)}`,
+    `      LENSNODE_TOKEN: ${JSON.stringify(token || '')}`,
+    `      LENSNODE_SERVER_URL: ${JSON.stringify(
+      serverUrl || COMPOSE_PLACEHOLDER.serverUrl
+    )}`,
+    '      LENSNODE_WORKSPACE_PATH: /workspace',
+    '    volumes:',
+    `      - ${safeHost}:/workspace`,
+    ''
+  ].join('\n')
+}
+
+/**
+ * Pull the node compose settings out of the loaded global settings list.
+ *
+ * The server URL falls back to the configured public base URL or the current
+ * origin; the node derives WS / AI gateway endpoints from it.
+ */
+export function lensNodeComposeSettings(globalSettings) {
+  const find = (key) =>
+    (globalSettings || []).find((item) => item.key === key)?.value || ''
+  const serverUrl =
+    find('public_base_url') ||
+    (typeof window !== 'undefined' ? window.location.origin : '')
+  return {
+    image: find('lensnode.image') || DEFAULT_NODE_IMAGE,
+    serverUrl
+  }
+}

@@ -113,6 +113,8 @@ def validate_selected_dirs(value, lensnode=None):
 class LensNodeSerializer(serializers.ModelSerializer):
     """LensNode serializer."""
 
+    has_token = serializers.SerializerMethodField()
+
     class Meta:
         model = LensNode
         fields = [
@@ -129,6 +131,7 @@ class LensNodeSerializer(serializers.ModelSerializer):
             "enrollment_status",
             "token_issued_at",
             "token_revoked",
+            "has_token",
             "last_authenticated_at",
             "last_heartbeat_at",
             "registered_at",
@@ -146,6 +149,11 @@ class LensNodeSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def get_has_token(self, obj):
+        """Whether the node currently has a usable (un-revoked) token."""
+
+        return bool(obj.auth_token_hash) and not obj.token_revoked
 
 
 class SkillBindingsField(serializers.Field):

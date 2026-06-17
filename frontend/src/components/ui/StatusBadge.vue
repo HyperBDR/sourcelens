@@ -34,7 +34,12 @@ const dotClass = computed(() => {
     enabled: 'bg-success-600',
     disabled: 'bg-ink-400',
     inactive: 'bg-ink-400',
-    cancelled: 'bg-ink-400'
+    cancelled: 'bg-ink-400',
+    online: 'bg-success-600',
+    offline: 'bg-ink-400',
+    draining: 'bg-warning-600',
+    approved: 'bg-success-600',
+    rejected: 'bg-danger-600'
   }
   return classes[props.status] || 'bg-ink-400'
 })
@@ -52,7 +57,12 @@ const getStatusClass = (status) => {
     enabled: 'text-success-700',
     disabled: 'text-ink-500',
     inactive: 'text-ink-500',
-    cancelled: 'text-ink-500'
+    cancelled: 'text-ink-500',
+    online: 'text-success-700',
+    offline: 'text-ink-500',
+    draining: 'text-warning-700',
+    approved: 'text-success-700',
+    rejected: 'text-danger-700'
   }
   return classes[status] || 'text-ink-500'
 }
@@ -70,7 +80,12 @@ const getStatusText = (status) => {
     enabled: t('common.status.enabled'),
     disabled: t('common.status.disabled'),
     inactive: t('common.status.disabled'),
-    cancelled: t('common.status.disabled')
+    cancelled: t('common.status.disabled'),
+    online: t('common.status.online'),
+    offline: t('common.status.offline'),
+    draining: t('common.status.draining'),
+    approved: t('common.status.approved'),
+    rejected: t('common.status.rejected')
   }
   return statusTexts[status] || status || t('common.status.unknown')
 }

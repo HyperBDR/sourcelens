@@ -190,6 +190,29 @@ class LensNodeViewSet(BaseAdminViewSet):
     queryset = LensNode.objects.all()
     serializer_class = LensNodeSerializer
 
+    def create(self, request, *args, **kwargs):
+        """Onboard a node: create record, auto-approve, issue token once.
+
+        Nodes are deployed remotely and connect back over WebSocket with
+        the issued token, so the only meaningful input here is the name.
+        The plaintext token is returned a single time for the compose file.
+        """
+
+        name = (request.data.get("name") or "").strip()
+        if not name:
+            return Response(
+                {"detail": "Name is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        lensnode = LensNode.objects.create(
+            name=name,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+        )
+        token = issue_lensnode_token(lensnode)
+        data = LensNodeSerializer(lensnode).data
+        data["token"] = token
+        return Response(data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=["post"])
     def approve(self, request, uuid=None):
         """Approve a pending LensNode for token-based access."""

@@ -1,14 +1,20 @@
 <template>
   <AdminLayout>
-    <div class="mx-auto flex max-w-full flex-col gap-4 px-4 py-4 lg:px-6">
-      <section class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm">
-        <div class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+    <div class="flex max-w-full flex-col gap-4 py-4">
+      <section
+        class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
+      >
+        <div
+          class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
+        >
           <div class="min-w-0 space-y-2">
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="text-xl font-semibold text-ink-900">
                 {{ activeMeta.title }}
               </h1>
-              <span class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs font-medium text-ink-500">
+              <span
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs font-medium text-ink-500"
+              >
                 {{ activeMeta.label }}
               </span>
             </div>
@@ -16,11 +22,15 @@
               {{ activeMeta.description }}
             </p>
             <div class="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-              <span class="rounded-md border border-line bg-surface-sunken px-2 py-1">
-                {{ t('lensAdmin.total', {
-                  label: activeMeta.label,
-                  count: activeCount
-                }) }}
+              <span
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
+              >
+                {{
+                  t('lensAdmin.total', {
+                    label: activeMeta.label,
+                    count: activeCount
+                  })
+                }}
               </span>
               <span
                 v-if="activeTab !== 'settings'"
@@ -54,79 +64,80 @@
           <BaseLoading v-if="loading && activeCount === 0" />
 
           <template v-else-if="activeTab === 'settings'">
-            <div class="overflow-hidden rounded-lg border border-line">
-              <table class="min-w-full table-fixed divide-y divide-line">
-                <colgroup>
-                  <col class="w-[48%]" />
-                  <col class="w-[52%]" />
-                </colgroup>
-                <thead class="bg-surface-sunken">
-                  <tr>
-                    <th class="table-head">
-                      {{ t('lensAdmin.settings.sectionTitle') }}
-                    </th>
-                    <th class="table-head">
-                      {{ t('lensAdmin.columns.value') }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-line bg-surface">
-                  <tr
-                    v-for="setting in settingDefinitions"
-                    :key="setting.key"
-                    class="align-top transition-colors hover:bg-line-soft"
-                  >
-                    <td class="table-cell">
-                      <div class="text-sm font-semibold text-ink-900">
-                        {{ setting.label }}
-                      </div>
-                      <p class="mt-1 text-sm leading-6 text-ink-500">
-                        {{ setting.description }}
-                      </p>
-                      <p class="mt-1 font-mono text-xs text-ink-400">
-                        {{ setting.key }}
-                      </p>
-                    </td>
-                    <td class="table-cell">
-                      <div class="flex w-full items-center justify-end gap-3">
-                        <input
-                          v-if="setting.type === 'number'"
-                          v-model.number="settingsForm[setting.key]"
-                          type="number"
-                          min="1"
-                          class="w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                        />
-                        <select
-                          v-else-if="setting.type === 'model_ref'"
-                          v-model="settingsForm[setting.key]"
-                          class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                        >
-                          <option value="">
-                            {{ t('lensAdmin.placeholders.noModel') }}
-                          </option>
-                          <option
-                            v-for="config in llmConfigOptions"
-                            :key="config.uuid"
-                            :value="config.uuid"
+            <div class="space-y-4">
+              <div
+                v-for="grp in groupedSettings"
+                :key="grp.group"
+                class="overflow-hidden rounded-lg border border-line"
+              >
+                <div class="border-b border-line bg-surface-sunken px-4 py-2.5">
+                  <h3 class="text-sm font-semibold text-ink-900">
+                    {{ grp.title }}
+                  </h3>
+                </div>
+                <table class="min-w-full table-fixed divide-y divide-line">
+                  <colgroup>
+                    <col class="w-[48%]" />
+                    <col class="w-[52%]" />
+                  </colgroup>
+                  <tbody class="divide-y divide-line bg-surface">
+                    <tr
+                      v-for="setting in grp.items"
+                      :key="setting.key"
+                      class="align-top transition-colors hover:bg-line-soft"
+                    >
+                      <td class="table-cell">
+                        <div class="text-sm font-semibold text-ink-900">
+                          {{ setting.label }}
+                        </div>
+                        <p class="mt-1 text-sm leading-6 text-ink-500">
+                          {{ setting.description }}
+                        </p>
+                        <p class="mt-1 font-mono text-xs text-ink-400">
+                          {{ setting.key }}
+                        </p>
+                      </td>
+                      <td class="table-cell">
+                        <div class="flex w-full items-center justify-end gap-3">
+                          <input
+                            v-if="setting.type === 'number'"
+                            v-model.number="settingsForm[setting.key]"
+                            type="number"
+                            min="1"
+                            class="w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                          />
+                          <select
+                            v-else-if="setting.type === 'model_ref'"
+                            v-model="settingsForm[setting.key]"
+                            class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           >
-                            {{ formatLLMConfigLabel(config) }}
-                          </option>
-                        </select>
-                        <input
-                          v-else-if="setting.type === 'text'"
-                          v-model="settingsForm[setting.key]"
-                          type="text"
-                          :placeholder="setting.placeholder"
-                          class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                        />
-                        <span class="w-16 text-sm text-ink-500">
-                          {{ setting.unit }}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                            <option value="">
+                              {{ t('lensAdmin.placeholders.noModel') }}
+                            </option>
+                            <option
+                              v-for="config in llmConfigOptions"
+                              :key="config.uuid"
+                              :value="config.uuid"
+                            >
+                              {{ formatLLMConfigLabel(config) }}
+                            </option>
+                          </select>
+                          <input
+                            v-else-if="setting.type === 'text'"
+                            v-model="settingsForm[setting.key]"
+                            type="text"
+                            :placeholder="setting.placeholder"
+                            class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                          />
+                          <span class="w-16 text-sm text-ink-500">
+                            {{ setting.unit }}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div class="mt-6 overflow-hidden rounded-lg border border-line">
@@ -187,7 +198,11 @@
                           "
                         />
                         <span class="text-sm text-ink-600">
-                          {{ task.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
+                          {{
+                            task.enabled
+                              ? t('common.status.enabled')
+                              : t('common.status.disabled')
+                          }}
                         </span>
                       </label>
                     </td>
@@ -202,7 +217,9 @@
               </table>
             </div>
 
-            <div class="mt-4 flex items-center justify-end gap-3 border-t border-line pt-4">
+            <div
+              class="mt-4 flex items-center justify-end gap-3 border-t border-line pt-4"
+            >
               <BaseButton
                 variant="secondary"
                 size="sm"
@@ -472,7 +489,11 @@
                           :aria-label="t('lens.share.copyLink')"
                           @click="copyShareUrl(row)"
                         >
-                          <Copy :size="15" :stroke-width="2" aria-hidden="true" />
+                          <Copy
+                            :size="15"
+                            :stroke-width="2"
+                            aria-hidden="true"
+                          />
                         </button>
                       </div>
                       <span v-else class="text-ink-400">{{ emptyValue }}</span>
@@ -484,21 +505,55 @@
 
                   <template v-else-if="activeTab === 'lensnodes'">
                     <td class="table-cell">
-                      <div class="font-medium text-ink-900">
-                        {{ row.name }}
-                      </div>
-                      <div class="mt-1 font-mono text-xs text-ink-400">
-                        {{ compactUuid(row.uuid) }}
+                      <button
+                        type="button"
+                        class="group text-left"
+                        :title="t('lensAdmin.detail.title')"
+                        @click="openDetail(row)"
+                      >
+                        <div
+                          class="font-medium text-ink-900 group-hover:text-primary-600 group-hover:underline"
+                        >
+                          {{ row.name }}
+                        </div>
+                        <div class="mt-1 font-mono text-xs text-ink-400">
+                          {{ compactUuid(row.uuid) }}
+                        </div>
+                      </button>
+                    </td>
+                    <td class="table-cell">
+                      <StatusBadge :status="row.status" />
+                    </td>
+                    <td class="table-cell">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <StatusBadge :status="row.enrollment_status" />
+                        <template v-if="row.enrollment_status === 'pending'">
+                          <BaseButton
+                            size="sm"
+                            variant="outline"
+                            @click="approve(row)"
+                          >
+                            {{ t('lensAdmin.actions.approve') }}
+                          </BaseButton>
+                          <BaseButton
+                            size="sm"
+                            variant="ghost"
+                            @click="reject(row)"
+                          >
+                            {{ t('lensAdmin.actions.reject') }}
+                          </BaseButton>
+                        </template>
                       </div>
                     </td>
                     <td class="table-cell">
-                      <div class="flex flex-wrap gap-1">
-                        <StatusBadge :status="row.status" />
-                        <StatusBadge :status="row.enrollment_status" />
-                      </div>
-                    </td>
-                    <td class="table-cell text-ink-600">
-                      {{ row.workspace_path || emptyValue }}
+                      <button
+                        type="button"
+                        class="text-left text-ink-600 transition-colors hover:text-primary-600 hover:underline"
+                        :title="t('lensAdmin.detail.title')"
+                        @click="openDetail(row)"
+                      >
+                        {{ row.workspace_path || emptyValue }}
+                      </button>
                     </td>
                     <td class="table-cell text-ink-600">
                       {{
@@ -512,7 +567,7 @@
                       {{ formatDateTime(row.last_heartbeat_at) }}
                     </td>
                     <td class="table-cell">
-                      <div class="flex flex-wrap gap-2">
+                      <div class="flex items-center gap-2">
                         <BaseButton
                           size="sm"
                           variant="outline"
@@ -521,34 +576,20 @@
                           {{ t('common.edit') }}
                         </BaseButton>
                         <BaseButton
-                          v-if="row.enrollment_status !== 'approved'"
-                          size="sm"
-                          variant="outline"
-                          @click="approve(row)"
-                        >
-                          {{ t('lensAdmin.actions.approve') }}
-                        </BaseButton>
-                        <BaseButton
-                          size="sm"
-                          variant="outline"
-                          @click="issueToken(row)"
-                        >
-                          {{ t('lensAdmin.actions.issueToken') }}
-                        </BaseButton>
-                        <BaseButton
-                          size="sm"
-                          variant="outline"
-                          @click="revokeToken(row)"
-                        >
-                          {{ t('lensAdmin.actions.revokeToken') }}
-                        </BaseButton>
-                        <BaseButton
                           size="sm"
                           variant="danger"
-                          @click="remove(row)"
+                          @click="deleteTarget = row"
                         >
                           {{ t('common.delete') }}
                         </BaseButton>
+                        <button
+                          type="button"
+                          class="rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-ink-700"
+                          :title="t('common.more')"
+                          @click="openMenu(row, $event)"
+                        >
+                          <MoreVertical :size="16" :stroke-width="2" />
+                        </button>
                       </div>
                     </td>
                   </template>
@@ -649,7 +690,9 @@
                     </td>
                     <td
                       class="table-cell"
-                      :class="row.last_error ? 'text-danger-700' : 'text-ink-400'"
+                      :class="
+                        row.last_error ? 'text-danger-700' : 'text-ink-400'
+                      "
                     >
                       {{ row.last_error || emptyValue }}
                     </td>
@@ -672,7 +715,7 @@
             </table>
           </div>
         </div>
-    </section>
+      </section>
 
     <Teleport to="body">
       <div
@@ -843,33 +886,91 @@
         </div>
       </BaseDrawer>
 
+      <!-- LensNode create / edit (name + onboarding compose) -->
+      <LensNodeFormDrawer
+        :show="showLensNodeDrawer"
+        :mode="mode"
+        :node="editingLensNode"
+        :settings="globalSettings"
+        @close="closeLensNodeDrawer"
+        @done="load"
+      />
+
+      <!-- LensNode Detail Drawer (info + lazy directory tree) -->
+      <LensNodeDetailDrawer
+        :show="showDetailDrawer"
+        :node="detailNode"
+        @close="closeDetail"
+      />
+
+      <!-- Re-issue credential drawer (shows fresh compose) -->
+      <BaseDrawer
+        :show="showReissueDrawer"
+        :title="t('lensAdmin.detail.reissue')"
+        :subtitle="reissueNode?.name || ''"
+        @close="closeReissue"
+      >
+        <LensNodeComposePanel
+          v-if="reissueNode"
+          :compose-text="reissueComposeText"
+          :missing-labels="reissueMissingLabels"
+        />
+      </BaseDrawer>
+
+      <!-- Row action menu, teleported so the table overflow can't clip it -->
+      <Teleport to="body">
+        <template v-if="openMenuRow">
+          <div class="fixed inset-0 z-40" @click="closeMenu" />
+          <div
+            class="fixed z-50 w-36 rounded-md border border-line bg-surface py-1 shadow-lg"
+            :style="menuStyle"
+          >
+            <button
+              type="button"
+              class="block w-full px-3 py-1.5 text-left text-sm text-ink-700 transition-colors hover:bg-surface-sunken"
+              @click="reissue(openMenuRow)"
+            >
+              {{ t('lensAdmin.detail.reissue') }}
+            </button>
+            <button
+              type="button"
+              class="block w-full px-3 py-1.5 text-left text-sm text-danger-600 transition-colors hover:bg-danger-50"
+              @click="revokeCredential(openMenuRow)"
+            >
+              {{ t('lensAdmin.actions.revokeToken') }}
+            </button>
+          </div>
+        </template>
+      </Teleport>
+
+      <!-- Delete node confirmation -->
+      <BaseModal
+        :show="!!deleteTarget"
+        :title="t('lensAdmin.deleteConfirm.title')"
+        @close="deleteTarget = null"
+      >
+        <p class="text-sm text-ink-600">
+          {{
+            t('lensAdmin.deleteConfirm.message', {
+              name: deleteTarget?.name
+            })
+          }}
+        </p>
+        <template #footer>
+          <div class="flex flex-row-reverse gap-2">
+            <BaseButton variant="danger" @click="confirmDeleteNode">
+              {{ t('common.delete') }}
+            </BaseButton>
+            <BaseButton variant="outline" @click="deleteTarget = null">
+              {{ t('common.cancel') }}
+            </BaseButton>
+          </div>
+        </template>
+      </BaseModal>
+
       <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
         <form class="space-y-4" @submit.prevent="save">
-          <template v-if="activeTab === 'lensnodes'">
-            <FormRow :label="t('lensAdmin.fields.name')">
-              <input v-model="form.name" class="form-input" required />
-            </FormRow>
-            <div class="grid gap-4 md:grid-cols-3">
-              <FormRow :label="t('lensAdmin.fields.workspacePath')">
-                <input v-model="form.workspace_path" class="form-input" />
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.protocolVersion')">
-                <input v-model="form.protocol_version" class="form-input" />
-              </FormRow>
-              <FormRow :label="t('lensAdmin.fields.agentVersion')">
-                <input v-model="form.agent_version" class="form-input" />
-              </FormRow>
-            </div>
-            <FormRow :label="t('lensAdmin.fields.labels')">
-              <KeyValueEditor
-                v-model="form.labels_rows"
-                :key-label="t('lensAdmin.fields.labelKey')"
-                :value-label="t('lensAdmin.fields.labelValue')"
-              />
-            </FormRow>
-          </template>
-
-          <template v-else-if="activeTab === 'skills'">
+          <template v-if="activeTab === 'skills'">
             <FormRow :label="t('lensAdmin.fields.name')">
               <input v-model="form.name" class="form-input" required />
             </FormRow>
@@ -1010,14 +1111,27 @@
 </template>
 
 <script setup>
-import { Eye as EyeIcon, EyeOff as EyeOffIcon } from '@lucide/vue'
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
-import { Copy } from '@lucide/vue'
+import {
+  Copy,
+  Eye as EyeIcon,
+  EyeOff as EyeOffIcon,
+  MoreVertical
+} from '@lucide/vue'
+import {
+  computed,
+  defineComponent,
+  h,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
 import { copyToClipboard } from '@/utils/clipboard'
+import { extractErrorMessage } from '@/utils/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   approveLensNode,
@@ -1027,7 +1141,6 @@ import {
   createCredential,
   createDataSource,
   createGlobalSetting,
-  createLensNode,
   createMcpServer,
   createSkill,
   deleteAssistant,
@@ -1045,6 +1158,7 @@ import {
   listLensNodes,
   listMcpServers,
   listSkills,
+  rejectLensNode,
   revealCredential,
   revokeLensNodeToken,
   setDataSourceEnabled,
@@ -1054,7 +1168,6 @@ import {
   updateCredential,
   updateDataSource,
   updateGlobalSetting,
-  updateLensNode,
   updateMcpServer,
   updateSkill,
   updateSystemTaskEnabled
@@ -1068,11 +1181,17 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import AssistantFormDrawer from './AssistantFormDrawer.vue'
 import DataSourceFormDrawer from './DataSourceFormDrawer.vue'
+import LensNodeComposePanel from './LensNodeComposePanel.vue'
+import LensNodeDetailDrawer from './LensNodeDetailDrawer.vue'
+import LensNodeFormDrawer from './LensNodeFormDrawer.vue'
 import {
+  DEFAULT_NODE_IMAGE,
   EMPTY_VALUE as emptyValue,
+  buildLensNodeCompose,
   compactUuid,
   formatLLMConfigLabel,
   formatTaskName,
+  lensNodeComposeSettings,
   listToText,
   normalizeList,
   objectToRows,
@@ -1081,8 +1200,9 @@ import {
   splitList,
   stringifyJson
 } from './adminHelpers'
+import { useShortDateTime } from './useShortDateTime'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const { showSuccess, showError } = useToast()
@@ -1105,6 +1225,16 @@ const refreshingDirs = ref(false)
 const showModal = ref(false)
 const showDrawer = ref(false)
 const showDatasourceDetailDrawer = ref(false)
+const showLensNodeDrawer = ref(false)
+const showDetailDrawer = ref(false)
+const detailNode = ref(null)
+const editingLensNode = ref(null)
+const openMenuRow = ref(null)
+const menuStyle = ref({})
+const deleteTarget = ref(null)
+const showReissueDrawer = ref(false)
+const reissueNode = ref(null)
+const reissueToken = ref('')
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
@@ -1141,7 +1271,7 @@ const taskSaving = ref({})
 const CREDENTIAL_MASK = '********'
 
 const defaultSettings = {
-  public_base_url: '',
+  'lensnode.image': '',
   'lensnode.defaults.timeout': 600,
   'retention.run_days': 90,
   'lensnode.health.offline_threshold_s': 120,
@@ -1378,9 +1508,7 @@ const activeCount = computed(() => {
   return activeRows.value.length
 })
 
-const canCreate = computed(
-  () => activeTab.value !== 'settings'
-)
+const canCreate = computed(() => activeTab.value !== 'settings')
 
 const activeMeta = computed(() => {
   const key = activeTab.value
@@ -1406,7 +1534,8 @@ const activeColumns = computed(() => {
     ],
     lensnodes: [
       'lensnode',
-      'status',
+      'runtimeStatus',
+      'enrollment',
       'workspace',
       'dirsAndTasks',
       'heartbeat',
@@ -1457,11 +1586,7 @@ const credentialBindingTooltipStyle = computed(() => ({
 }))
 
 const defaultScheduledTasks = computed(() => {
-  const taskTypes = [
-    'lensnode_cleanup',
-    'lensnode_health',
-    'run_retention'
-  ]
+  const taskTypes = ['lensnode_cleanup', 'lensnode_health', 'run_retention']
   return taskTypes.map((taskType) => {
     const existing =
       systemHealth.value.find((row) => row.task_type === taskType) || {}
@@ -1477,65 +1602,105 @@ const defaultScheduledTasks = computed(() => {
   })
 })
 
-const settingDefinitions = computed(() => [
-  {
-    key: 'public_base_url',
-    label: t('lensAdmin.settings.publicBaseUrlTitle'),
-    description: t('lensAdmin.settings.publicBaseUrlDesc'),
-    type: 'text',
-    unit: '',
-    placeholder: 'https://chat.example.com'
-  },
-  {
-    key: 'lensnode.defaults.timeout',
-    label: t('lensAdmin.settings.timeoutTitle'),
-    description: t('lensAdmin.settings.timeoutDesc'),
-    type: 'number',
-    unit: t('lensAdmin.settings.secondsUnit')
-  },
-  {
-    key: 'retention.run_days',
-    label: t('lensAdmin.settings.retentionTitle'),
-    description: t('lensAdmin.settings.retentionDesc'),
-    type: 'number',
-    unit: t('lensAdmin.settings.daysUnit')
-  },
-  {
-    key: 'lensnode.health.offline_threshold_s',
-    label: t('lensAdmin.settings.offlineTitle'),
-    description: t('lensAdmin.settings.offlineDesc'),
-    type: 'number',
-    unit: t('lensAdmin.settings.secondsUnit')
-  },
-  {
-    key: 'lensnode_cleanup.interval_seconds',
-    label: t('lensAdmin.settings.cleanupIntervalTitle'),
-    description: t('lensAdmin.settings.cleanupIntervalDesc'),
-    type: 'number',
-    unit: t('lensAdmin.settings.secondsUnit')
-  },
-  {
-    key: 'lensnode_health.interval_seconds',
-    label: t('lensAdmin.settings.healthIntervalTitle'),
-    description: t('lensAdmin.settings.healthIntervalDesc'),
-    type: 'number',
-    unit: t('lensAdmin.settings.secondsUnit')
-  },
-  {
-    key: 'run_retention.interval_seconds',
-    label: t('lensAdmin.settings.retentionIntervalTitle'),
-    description: t('lensAdmin.settings.retentionIntervalDesc'),
-    type: 'number',
-    unit: t('lensAdmin.settings.secondsUnit')
-  },
-  {
-    key: 'lens.skills.generator_model_ref',
-    label: t('lensAdmin.settings.skillGeneratorModelTitle'),
-    description: t('lensAdmin.settings.skillGeneratorModelDesc'),
-    type: 'model_ref',
-    unit: ''
-  }
-])
+const settingDefinitions = computed(() => {
+  return [
+    {
+      key: 'lensnode.image',
+      group: 'deploy',
+      label: t('lensAdmin.settings.nodeImageTitle'),
+      description: t('lensAdmin.settings.nodeImageDesc'),
+      type: 'text',
+      unit: '',
+      placeholder: DEFAULT_NODE_IMAGE
+    },
+    {
+      key: 'lensnode.defaults.timeout',
+      group: 'runtime',
+      label: t('lensAdmin.settings.timeoutTitle'),
+      description: t('lensAdmin.settings.timeoutDesc'),
+      type: 'number',
+      unit: t('lensAdmin.settings.secondsUnit')
+    },
+    {
+      key: 'retention.run_days',
+      group: 'runtime',
+      label: t('lensAdmin.settings.retentionTitle'),
+      description: t('lensAdmin.settings.retentionDesc'),
+      type: 'number',
+      unit: t('lensAdmin.settings.daysUnit')
+    },
+    {
+      key: 'lensnode.health.offline_threshold_s',
+      group: 'health',
+      label: t('lensAdmin.settings.offlineTitle'),
+      description: t('lensAdmin.settings.offlineDesc'),
+      type: 'number',
+      unit: t('lensAdmin.settings.secondsUnit')
+    },
+    {
+      key: 'lensnode_cleanup.interval_seconds',
+      group: 'health',
+      label: t('lensAdmin.settings.cleanupIntervalTitle'),
+      description: t('lensAdmin.settings.cleanupIntervalDesc'),
+      type: 'number',
+      unit: t('lensAdmin.settings.secondsUnit')
+    },
+    {
+      key: 'lensnode_health.interval_seconds',
+      group: 'health',
+      label: t('lensAdmin.settings.healthIntervalTitle'),
+      description: t('lensAdmin.settings.healthIntervalDesc'),
+      type: 'number',
+      unit: t('lensAdmin.settings.secondsUnit')
+    },
+    {
+      key: 'run_retention.interval_seconds',
+      group: 'health',
+      label: t('lensAdmin.settings.retentionIntervalTitle'),
+      description: t('lensAdmin.settings.retentionIntervalDesc'),
+      type: 'number',
+      unit: t('lensAdmin.settings.secondsUnit')
+    },
+    {
+      key: 'lens.skills.generator_model_ref',
+      group: 'advanced',
+      label: t('lensAdmin.settings.skillGeneratorModelTitle'),
+      description: t('lensAdmin.settings.skillGeneratorModelDesc'),
+      type: 'model_ref',
+      unit: ''
+    }
+  ]
+})
+
+const settingGroupOrder = ['deploy', 'runtime', 'health', 'advanced']
+
+const groupedSettings = computed(() =>
+  settingGroupOrder
+    .map((group) => ({
+      group,
+      title: t(`lensAdmin.settings.groups.${group}`),
+      items: settingDefinitions.value.filter((item) => item.group === group)
+    }))
+    .filter((entry) => entry.items.length)
+)
+
+const composeConfig = computed(() =>
+  lensNodeComposeSettings(globalSettings.value)
+)
+
+const reissueComposeText = computed(() =>
+  buildLensNodeCompose({
+    name: reissueNode.value?.name,
+    token: reissueToken.value,
+    ...composeConfig.value
+  })
+)
+
+const reissueMissingLabels = computed(() =>
+  composeConfig.value.serverUrl
+    ? []
+    : [t('lensAdmin.settings.publicBaseUrlTitle')]
+)
 
 const modalTitle = computed(() => {
   const action =
@@ -1597,17 +1762,7 @@ const datasourceSyncDetails = computed(() => {
   ]
 })
 
-function formatDateTime(value) {
-  if (!value) {
-    return t('lensAdmin.table.notRecorded')
-  }
-  return new Intl.DateTimeFormat(locale.value, {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value))
-}
+const formatDateTime = useShortDateTime()
 
 function formatSyncPolicy(syncPolicy) {
   if (syncPolicy?.mode === 'crontab') {
@@ -1870,9 +2025,7 @@ function lensNodeName(value) {
 }
 
 function isWorkspaceGuideSkill(row) {
-  return (
-    typeof row?.slug === 'string' && row.slug.endsWith('-workspace-guide')
-  )
+  return typeof row?.slug === 'string' && row.slug.endsWith('-workspace-guide')
 }
 
 function publicBaseUrl() {
@@ -1905,7 +2058,6 @@ function parseRouteTab() {
   const path = Array.isArray(raw) ? raw.join('/') : raw || 'assistants'
   activeTab.value = routeToTab[path] || 'assistants'
 }
-
 
 async function load() {
   loading.value = true
@@ -1950,7 +2102,7 @@ async function load() {
     llmConfigOptions.value = normalizeList(llmRows)
     hydrateSettingsForm()
   } catch (error) {
-    showError(resolveError(error, t('lensAdmin.messages.loadFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
     loading.value = false
   }
@@ -1966,7 +2118,7 @@ function hydrateSettingsForm() {
       next[setting.key] =
         definition?.type === 'number'
           ? Number(setting.value ?? next[setting.key])
-          : setting.value ?? next[setting.key]
+          : (setting.value ?? next[setting.key])
     }
   })
   settingsForm.value = { ...next }
@@ -2002,7 +2154,10 @@ async function saveSettings() {
     showSuccess(t('lensAdmin.messages.saveSuccess'))
     await load()
   } catch (error) {
-    formError.value = resolveError(error, t('lensAdmin.messages.saveFailed'))
+    formError.value = extractErrorMessage(
+      error,
+      t('lensAdmin.messages.saveFailed')
+    )
     showError(formError.value)
   } finally {
     saving.value = false
@@ -2016,7 +2171,7 @@ async function updateScheduledTaskEnabled(taskType, enabled) {
     await load()
     showSuccess(t('lensAdmin.messages.saveSuccess'))
   } catch (error) {
-    showError(resolveError(error, t('lensAdmin.messages.saveFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.saveFailed')))
   } finally {
     taskSaving.value = { ...taskSaving.value, [taskType]: false }
   }
@@ -2026,6 +2181,11 @@ function startCreate() {
   showDatasourceDetailDrawer.value = false
   mode.value = 'create'
   formError.value = ''
+  if (activeTab.value === 'lensnodes') {
+    editingLensNode.value = null
+    showLensNodeDrawer.value = true
+    return
+  }
   datasourceConfig.value = {}
   datasourcePathResult.value = null
   datasourceConnectionResult.value = null
@@ -2044,6 +2204,11 @@ function startEdit(row) {
   showDatasourceDetailDrawer.value = false
   mode.value = 'edit'
   formError.value = ''
+  if (activeTab.value === 'lensnodes') {
+    editingLensNode.value = row
+    showLensNodeDrawer.value = true
+    return
+  }
   datasourceConfig.value = { ...(row.config || {}) }
   datasourcePathResult.value = null
   datasourceConnectionResult.value = null
@@ -2073,6 +2238,90 @@ function closeDrawer() {
   datasourcePathResult.value = null
   datasourceConnectionResult.value = null
   resetDatasourceSyncPolicy()
+}
+
+function closeLensNodeDrawer() {
+  showLensNodeDrawer.value = false
+  editingLensNode.value = null
+}
+
+function openDetail(row) {
+  detailNode.value = row
+  showDetailDrawer.value = true
+}
+
+function closeDetail() {
+  showDetailDrawer.value = false
+  detailNode.value = null
+}
+
+function closeMenu() {
+  openMenuRow.value = null
+  window.removeEventListener('scroll', closeMenu, true)
+  window.removeEventListener('resize', closeMenu)
+}
+
+function openMenu(row, event) {
+  if (openMenuRow.value?.uuid === row.uuid) {
+    closeMenu()
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  menuStyle.value = {
+    top: `${rect.bottom + 4}px`,
+    left: `${rect.right - 144}px`
+  }
+  openMenuRow.value = row
+  // Close on scroll/resize so the fixed-position menu can't detach from the
+  // trigger (the table scrolls horizontally under it).
+  window.addEventListener('scroll', closeMenu, true)
+  window.addEventListener('resize', closeMenu)
+}
+
+function confirmDeleteNode() {
+  const row = deleteTarget.value
+  deleteTarget.value = null
+  if (row) {
+    remove(row)
+  }
+}
+
+function closeReissue() {
+  showReissueDrawer.value = false
+  reissueNode.value = null
+  reissueToken.value = ''
+}
+
+async function reissue(row) {
+  closeMenu()
+  if (row.enrollment_status !== 'approved') {
+    showError(t('lensAdmin.messages.approveBeforeToken'))
+    return
+  }
+  try {
+    const result = await issueLensNodeToken(row.uuid)
+    reissueToken.value = result?.token || result?.auth_token || ''
+    reissueNode.value = row
+    showReissueDrawer.value = true
+    await load()
+  } catch (error) {
+    showError(
+      extractErrorMessage(error, t('lensAdmin.messages.tokenIssueFailed'))
+    )
+  }
+}
+
+async function revokeCredential(row) {
+  closeMenu()
+  try {
+    await revokeLensNodeToken(row.uuid)
+    showSuccess(t('lensAdmin.messages.tokenRevoked'))
+    await load()
+  } catch (error) {
+    showError(
+      extractErrorMessage(error, t('lensAdmin.messages.tokenRevokeFailed'))
+    )
+  }
 }
 
 async function refreshDirs() {
@@ -2108,13 +2357,6 @@ function defaultForm(tab) {
       mcp_uuids: [],
       settings: {},
       status: 'active'
-    },
-    lensnodes: {
-      name: '',
-      workspace_path: '/workspace',
-      protocol_version: 'v1',
-      agent_version: '',
-      labels_rows: []
     },
     datasources: {
       name: '',
@@ -2184,20 +2426,14 @@ function formFromRow(tab, row) {
       workspace_guide_overview: row.workspace_guide?.content || '',
       pre_prompt: row.settings?.pre_prompt || '',
       post_prompt: row.settings?.post_prompt || '',
-      skill_uuids: (row.skill_bindings || []).map((b) => b.skill?.uuid || b.skill_uuid).filter(Boolean),
-      mcp_uuids: (row.mcp_bindings || []).map((b) => b.mcp_server?.uuid || b.mcp_uuid).filter(Boolean),
+      skill_uuids: (row.skill_bindings || [])
+        .map((b) => b.skill?.uuid || b.skill_uuid)
+        .filter(Boolean),
+      mcp_uuids: (row.mcp_bindings || [])
+        .map((b) => b.mcp_server?.uuid || b.mcp_uuid)
+        .filter(Boolean),
       settings: { ...(row.settings || {}) },
       status: row.status || 'active'
-    }
-  }
-  if (tab === 'lensnodes') {
-    return {
-      uuid: row.uuid,
-      name: row.name || '',
-      workspace_path: row.workspace_path || '/workspace',
-      protocol_version: row.protocol_version || 'v1',
-      agent_version: row.agent_version || '',
-      labels_rows: objectToRows(row.labels || {})
     }
   }
   if (tab === 'datasources') {
@@ -2327,8 +2563,6 @@ async function save() {
     const uuid = form.value.uuid
     if (activeTab.value === 'assistants') {
       await saveByMode(uuid, payload, createAssistant, updateAssistant)
-    } else if (activeTab.value === 'lensnodes') {
-      await saveByMode(uuid, payload, createLensNode, updateLensNode)
     } else if (activeTab.value === 'datasources') {
       await saveByMode(uuid, payload, createDataSource, updateDataSource)
     } else if (activeTab.value === 'credentials') {
@@ -2346,7 +2580,10 @@ async function save() {
     }
     await load()
   } catch (error) {
-    formError.value = resolveError(error, t('lensAdmin.messages.saveFailed'))
+    formError.value = extractErrorMessage(
+      error,
+      t('lensAdmin.messages.saveFailed')
+    )
     showError(formError.value)
   } finally {
     saving.value = false
@@ -2386,15 +2623,6 @@ function buildPayload(tab) {
         mcp_uuid: uuid
       })),
       status: form.value.status || 'active'
-    }
-  }
-  if (tab === 'lensnodes') {
-    return {
-      name: form.value.name,
-      workspace_path: form.value.workspace_path,
-      protocol_version: form.value.protocol_version,
-      agent_version: form.value.agent_version,
-      labels: rowsToObject(form.value.labels_rows)
     }
   }
   if (tab === 'datasources') {
@@ -2727,7 +2955,7 @@ async function remove(row) {
     showSuccess(t('lensAdmin.messages.deleteSuccess'))
     await load()
   } catch (error) {
-    showError(resolveError(error, t('lensAdmin.messages.deleteFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.deleteFailed')))
   }
 }
 
@@ -2737,32 +2965,17 @@ async function approve(row) {
     showSuccess(t('lensAdmin.messages.approveSuccess'))
     await load()
   } catch (error) {
-    showError(resolveError(error, t('lensAdmin.messages.approveFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.approveFailed')))
   }
 }
 
-async function issueToken(row) {
+async function reject(row) {
   try {
-    const result = await issueLensNodeToken(row.uuid)
-    const token = result?.token || result?.auth_token
-    showSuccess(
-      token
-        ? t('lensAdmin.messages.tokenIssuedWithValue', { token })
-        : t('lensAdmin.messages.tokenIssued')
-    )
+    await rejectLensNode(row.uuid)
+    showSuccess(t('lensAdmin.messages.rejectSuccess'))
     await load()
   } catch (error) {
-    showError(resolveError(error, t('lensAdmin.messages.tokenIssueFailed')))
-  }
-}
-
-async function revokeToken(row) {
-  try {
-    await revokeLensNodeToken(row.uuid)
-    showSuccess(t('lensAdmin.messages.tokenRevoked'))
-    await load()
-  } catch (error) {
-    showError(resolveError(error, t('lensAdmin.messages.tokenRevokeFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.rejectFailed')))
   }
 }
 
@@ -2781,7 +2994,7 @@ async function sync(row) {
     )
     await load()
   } catch (error) {
-    showError(resolveError(error, t('lensAdmin.messages.syncFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.syncFailed')))
   }
 }
 
@@ -2828,6 +3041,7 @@ watch(
 )
 
 onMounted(load)
+onUnmounted(closeMenu)
 </script>
 
 <style scoped>
