@@ -220,6 +220,7 @@ def list_task_executions(
     search: Optional[str] = None,
     config_platform: Optional[str] = None,
     config_key: Optional[str] = None,
+    datasource_uuid: Optional[str] = None,
     order_by: str = "-created_at",
 ):
     """
@@ -227,7 +228,8 @@ def list_task_executions(
 
     Optional filters: module, task_name, status, created_by, start_date,
     end_date, search (task_name icontains), config_platform (exact on
-    metadata.config_platform), config_key (icontains on metadata.config_key).
+    metadata.config_platform), config_key (icontains on metadata.config_key),
+    datasource_uuid (exact on metadata.datasource_uuid).
     Returns a QuerySet with select_related("created_by") for list/detail
     views; caller may paginate or slice.
     """
@@ -254,5 +256,9 @@ def list_task_executions(
     if config_key and config_key.strip():
         queryset = queryset.filter(
             metadata__config_key__icontains=config_key.strip()
+        )
+    if datasource_uuid and datasource_uuid.strip():
+        queryset = queryset.filter(
+            metadata__datasource_uuid=datasource_uuid.strip()
         )
     return queryset.order_by(order_by)

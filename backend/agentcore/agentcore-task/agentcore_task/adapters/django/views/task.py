@@ -81,6 +81,9 @@ class TaskExecutionViewSet(viewsets.ReadOnlyModelViewSet):
                 self.request.query_params.get("config_platform") or None
             ),
             config_key=self.request.query_params.get("config_key") or None,
+            datasource_uuid=(
+                self.request.query_params.get("datasource_uuid") or None
+            ),
         )
 
     @extend_schema(

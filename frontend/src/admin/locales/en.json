@@ -641,7 +641,7 @@
         "action": "Create Data Source"
       },
       "credentials": {
-        "title": "Credential Management",
+        "title": "Credentials",
         "description": "Manage Git and Feishu datasource sync credentials.",
         "label": "Credential",
         "action": "Create Credential"
@@ -739,13 +739,32 @@
       "empty": "Select a data source",
       "selectHint": "Click a data source on the left to view details.",
       "basicInfo": "Basic Information",
+      "tabs": {
+        "basic": "Basic Information",
+        "details": "Details"
+      },
       "connection": "Connection",
       "sync": "Sync",
       "credential": "Credential status",
       "lastSyncedAt": "Last synced",
       "lastError": "Last error",
       "createdAt": "Created",
-      "updatedAt": "Updated"
+      "updatedAt": "Updated",
+      "details": {
+        "colStartedAt": "Started",
+        "colStatus": "Status",
+        "colTrigger": "Trigger",
+        "colDuration": "Duration",
+        "triggerManual": "Manual",
+        "triggerScheduled": "Scheduled",
+        "triggerSystem": "System",
+        "statSuccess": "Success",
+        "statFailed": "Failed",
+        "statFolders": "Folders",
+        "statFiles": "Files",
+        "openInTaskManager": "Open in task manager",
+        "colTaskName": "Task Name"
+      }
     },
     "actions": {
       "approve": "Approve",
@@ -754,7 +773,7 @@
       "revokeToken": "Revoke",
       "sync": "Sync",
       "enableDatasource": "Enable Data Source",
-      "disableDatasource": "Disable Data Source",
+      "disableDatasource": "Disable",
       "cancelSync": "Cancel Sync",
       "viewTask": "View Task",
       "addRow": "Add row",

@@ -232,14 +232,6 @@
                       >
                         {{ t('lensAdmin.actions.cancelSync') }}
                       </BaseButton>
-                      <BaseButton
-                        v-if="row.current_sync?.id"
-                        size="sm"
-                        variant="outline"
-                        @click="openDataSourceTask(row)"
-                      >
-                        {{ t('lensAdmin.actions.viewTask') }}
-                      </BaseButton>
                       <RowActions
                         :row="row"
                         @edit="startEdit"
@@ -285,7 +277,6 @@
         :datasource="selectedDataSource"
         :lensnodes="lensnodes"
         @close="closeDataSourceDetail"
-        @open-task="openDataSourceTask"
       />
     </div>
   </AdminLayout>
@@ -294,7 +285,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 
 import { extractErrorMessage } from '@/utils/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
@@ -335,7 +325,6 @@ import {
 import { useShortDateTime } from './useShortDateTime'
 
 const { t } = useI18n()
-const router = useRouter()
 const { showSuccess, showError } = useToast()
 
 const loading = ref(false)
@@ -415,16 +404,6 @@ function formatNextDatasourceSync(row) {
     return t('lensAdmin.table.followCrontab')
   }
   return t('lensAdmin.table.notRecorded')
-}
-
-function openDataSourceTask(row) {
-  const executionId = row?.current_sync?.id
-  if (!executionId) return
-  const resolved = router.resolve({
-    path: '/management/task-management/list',
-    query: { execution_id: executionId }
-  })
-  window.open(resolved.href, '_blank', 'noopener')
 }
 
 function selectDataSource(row) {

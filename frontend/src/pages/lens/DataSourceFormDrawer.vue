@@ -275,7 +275,9 @@
                   v-model="quickCredential.name"
                   class="form-input"
                   :placeholder="
-                    t('lensAdmin.datasourceWizard.feishuCredentialNamePlaceholder')
+                    t(
+                      'lensAdmin.datasourceWizard.feishuCredentialNamePlaceholder'
+                    )
                   "
                 />
               </FormRow>
@@ -290,7 +292,10 @@
                     "
                   />
                 </FormRow>
-                <FormRow :label="t('lensAdmin.fields.feishuAppSecret')" required>
+                <FormRow
+                  :label="t('lensAdmin.fields.feishuAppSecret')"
+                  required
+                >
                   <input
                     v-model="quickCredential.appSecret"
                     class="form-input"
@@ -329,7 +334,9 @@
           </FormRow>
           <div class="grid gap-4 md:grid-cols-2">
             <FormRow :label="t('lensAdmin.fields.recursive')">
-              <label class="inline-flex items-center gap-2 text-sm text-ink-600">
+              <label
+                class="inline-flex items-center gap-2 text-sm text-ink-600"
+              >
                 <input
                   v-model="config.recursive"
                   type="checkbox"
@@ -409,7 +416,9 @@
       </p>
       <FormRow :label="t('lensAdmin.fields.targetPath')" required>
         <div class="space-y-3">
-          <div class="rounded-md border border-line bg-surface-sunken px-3 py-2">
+          <div
+            class="rounded-md border border-line bg-surface-sunken px-3 py-2"
+          >
             <div class="text-xs text-ink-500">
               {{ t('lensAdmin.datasourceWizard.selectedTargetPath') }}
             </div>
@@ -487,7 +496,9 @@
                   <input
                     v-model="newDirectoryName"
                     class="form-input h-9"
-                    :placeholder="t('lensAdmin.datasourceWizard.newDirPlaceholder')"
+                    :placeholder="
+                      t('lensAdmin.datasourceWizard.newDirPlaceholder')
+                    "
                     @keyup.enter="selectNewTargetDirectory"
                   />
                   <BaseButton
@@ -573,13 +584,17 @@
                   @click="startCreateTargetDirectory('')"
                 >
                   <PlusIcon class="h-4 w-4" />
-                  <span>{{ t('lensAdmin.datasourceWizard.createAtWorkspace') }}</span>
+                  <span>{{
+                    t('lensAdmin.datasourceWizard.createAtWorkspace')
+                  }}</span>
                 </button>
                 <div v-else class="flex gap-2 px-2 py-1">
                   <input
                     v-model="newDirectoryName"
                     class="form-input h-9"
-                    :placeholder="t('lensAdmin.datasourceWizard.newDirPlaceholder')"
+                    :placeholder="
+                      t('lensAdmin.datasourceWizard.newDirPlaceholder')
+                    "
                     @keyup.enter="selectNewTargetDirectory"
                   />
                   <BaseButton
@@ -711,7 +726,11 @@
             "
             @click="$emit('save')"
           >
-            {{ mode === 'create' ? t('lensAdmin.wizard.finish') : t('common.save') }}
+            {{
+              mode === 'create'
+                ? t('lensAdmin.wizard.finish')
+                : t('common.save')
+            }}
           </BaseButton>
         </div>
       </div>
@@ -830,16 +849,12 @@ const FormRow = defineComponent({
   setup(rowProps, { slots }) {
     return () =>
       h('div', [
-        h(
-          'label',
-          { class: 'mb-1 block text-sm font-medium text-ink-700' },
-          [
-            rowProps.label,
-            rowProps.required
-              ? h('span', { class: 'ml-0.5 text-danger-600' }, '*')
-              : null
-          ]
-        ),
+        h('label', { class: 'mb-1 block text-sm font-medium text-ink-700' }, [
+          rowProps.label,
+          rowProps.required
+            ? h('span', { class: 'ml-0.5 text-danger-600' }, '*')
+            : null
+        ]),
         slots.default?.()
       ])
   }
@@ -915,7 +930,9 @@ const workspaceDirectoryTree = computed(() => {
 
 const targetPath = computed(() => {
   const relative = String(props.form.workspace_relative_path || '').trim()
-  return relative ? `${workspacePrefix.value}${relative}` : workspacePrefix.value
+  return relative
+    ? `${workspacePrefix.value}${relative}`
+    : workspacePrefix.value
 })
 
 const canCreateTargetDirectory = computed(() =>
@@ -934,23 +951,18 @@ const canTestConnection = computed(() => {
     if (!props.config.repo_url?.trim()) {
       return false
     }
-    return (
-      props.config.auth_scheme !== 'token' ||
-      !!props.form.credential_uuid
-    )
+    return props.config.auth_scheme !== 'token' || !!props.form.credential_uuid
   }
   if (!hasFeishuCredential()) {
     return false
   }
   if (props.config.sync_mode === 'drive_folder') {
     return !!(
-      props.config.folder_url?.trim() ||
-      props.config.folder_token?.trim()
+      props.config.folder_url?.trim() || props.config.folder_token?.trim()
     )
   }
   return !!(
-    props.config.document_url?.trim() ||
-    props.config.doc_ids_text?.trim()
+    props.config.document_url?.trim() || props.config.doc_ids_text?.trim()
   )
 })
 
@@ -1011,7 +1023,11 @@ const canProceedWizard = computed(() => {
     return false
   }
   if (syncPolicyMode.value === 'crontab') {
-    return String(syncCron.value || '').trim().split(/\s+/).length === 5
+    return (
+      String(syncCron.value || '')
+        .trim()
+        .split(/\s+/).length === 5
+    )
   }
   return true
 })
@@ -1057,20 +1073,18 @@ const quickCredentialDesc = computed(() => {
   return t('lensAdmin.datasourceWizard.noGitCredentialDesc')
 })
 
-const canCreateQuickCredential = computed(
-  () => {
-    if (!quickCredential.value.name?.trim()) {
-      return false
-    }
-    if (props.form.source_type === 'feishu') {
-      return (
-        !!quickCredential.value.appId?.trim() &&
-        !!quickCredential.value.appSecret?.trim()
-      )
-    }
-    return !!quickCredential.value.secret?.trim()
+const canCreateQuickCredential = computed(() => {
+  if (!quickCredential.value.name?.trim()) {
+    return false
   }
-)
+  if (props.form.source_type === 'feishu') {
+    return (
+      !!quickCredential.value.appId?.trim() &&
+      !!quickCredential.value.appSecret?.trim()
+    )
+  }
+  return !!quickCredential.value.secret?.trim()
+})
 
 function nextWizardStep() {
   if (wizardStep.value < WIZARD_STEP_COUNT) wizardStep.value++

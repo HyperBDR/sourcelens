@@ -739,13 +739,32 @@
       "empty": "请选择数据源",
       "selectHint": "点击左侧数据源查看详情。",
       "basicInfo": "基本信息",
+      "tabs": {
+        "basic": "基本信息",
+        "details": "详情信息"
+      },
       "connection": "连接信息",
       "sync": "同步信息",
       "credential": "凭证状态",
       "lastSyncedAt": "最近同步",
       "lastError": "最近错误",
       "createdAt": "创建时间",
-      "updatedAt": "更新时间"
+      "updatedAt": "更新时间",
+      "details": {
+        "colStartedAt": "触发时间",
+        "colStatus": "状态",
+        "colTrigger": "触发方式",
+        "colDuration": "耗时",
+        "triggerManual": "手动",
+        "triggerScheduled": "定时",
+        "triggerSystem": "系统",
+        "statSuccess": "成功",
+        "statFailed": "失败",
+        "statFolders": "目录",
+        "statFiles": "文件",
+        "openInTaskManager": "在任务管理中打开",
+        "colTaskName": "任务名称"
+      }
     },
     "actions": {
       "approve": "通过",
@@ -754,7 +773,7 @@
       "revokeToken": "吊销",
       "sync": "同步",
       "enableDatasource": "启用数据源",
-      "disableDatasource": "禁用数据源",
+      "disableDatasource": "禁用",
       "cancelSync": "取消同步",
       "viewTask": "查看任务",
       "addRow": "添加一行",

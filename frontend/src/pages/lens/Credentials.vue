@@ -161,8 +161,13 @@
         </div>
       </Teleport>
 
-      <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
-        <form class="space-y-4" @submit.prevent="save">
+      <BaseDrawer
+        :show="showModal"
+        :title="modalTitle"
+        :subtitle="form.name || ''"
+        @close="closeModal"
+      >
+        <form id="credential-form" class="space-y-4" @submit.prevent="save">
           <FormRow :label="t('lensAdmin.fields.name')">
             <input v-model="form.name" class="form-input" required />
           </FormRow>
@@ -240,7 +245,12 @@
         </form>
         <template #footer>
           <div class="flex flex-row-reverse gap-2">
-            <BaseButton :loading="saving" variant="primary" @click="save">
+            <BaseButton
+              :loading="saving"
+              variant="primary"
+              type="submit"
+              form="credential-form"
+            >
               {{ t('common.save') }}
             </BaseButton>
             <BaseButton variant="outline" @click="closeModal">
@@ -248,7 +258,7 @@
             </BaseButton>
           </div>
         </template>
-      </BaseModal>
+      </BaseDrawer>
     </div>
   </AdminLayout>
 </template>
@@ -269,8 +279,8 @@ import {
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
-import BaseModal from '@/components/ui/BaseModal.vue'
 
 import FormRow from './components/FormRow.vue'
 import RowActions from './components/RowActions.vue'
