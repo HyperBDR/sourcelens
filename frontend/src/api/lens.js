@@ -173,6 +173,26 @@ export async function deleteDataSource(uuid) {
   return unwrapResponse(response)
 }
 
+export async function listCredentials(params = {}) {
+  const response = await api.get('/lens/admin/credentials/', { params })
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function createCredential(payload) {
+  const response = await api.post('/lens/admin/credentials/', payload)
+  return unwrapResponse(response)
+}
+
+export async function updateCredential(uuid, payload) {
+  const response = await api.patch(`/lens/admin/credentials/${uuid}/`, payload)
+  return unwrapResponse(response)
+}
+
+export async function deleteCredential(uuid) {
+  const response = await api.delete(`/lens/admin/credentials/${uuid}/`)
+  return unwrapResponse(response)
+}
+
 export async function syncDataSource(uuid, payload = {}) {
   const response = await api.post(
     `/lens/admin/datasources/${uuid}/sync/`,

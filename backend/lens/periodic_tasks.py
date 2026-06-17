@@ -109,23 +109,15 @@ def ensure_datasource_periodic_task(datasource):
         _disable_datasource_periodic_task(datasource)
         return None
 
-    from django_celery_beat.models import (
-        IntervalSchedule,
-        PeriodicTask,
-        PeriodicTasks,
-    )
+    from django_celery_beat.models import PeriodicTask, PeriodicTasks
 
-    interval = datasource.sync_policy.get("interval_seconds", 3600)
-    schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=max(int(interval), 1),
-        period=IntervalSchedule.SECONDS,
-    )
+    schedule_field, schedule = _datasource_schedule(datasource.sync_policy)
     name = f"lens-source-sync-{datasource.uuid}"
     task, created = PeriodicTask.objects.get_or_create(
         name=name,
         defaults={
             "task": "lens.source_sync",
-            "interval": schedule,
+            schedule_field: schedule,
             "args": f'["{datasource.uuid}"]',
             "queue": "lens",
             "enabled": True,
@@ -138,9 +130,12 @@ def ensure_datasource_periodic_task(datasource):
         if task.task != "lens.source_sync":
             task.task = "lens.source_sync"
             update_fields.append("task")
-        if task.interval_id != schedule.id:
-            task.interval = schedule
-            update_fields.append("interval")
+        current_id = getattr(task, f"{schedule_field}_id")
+        if current_id != schedule.id:
+            task.interval = None
+            task.crontab = None
+            setattr(task, schedule_field, schedule)
+            update_fields.extend(["interval", "crontab"])
         if task.args != expected_args:
             task.args = expected_args
             update_fields.append("args")
@@ -163,6 +158,37 @@ def ensure_datasource_periodic_task(datasource):
         record.enabled = True
     record.save(update_fields=["periodic_task_ref", "enabled"])
     return record
+
+
+def _datasource_schedule(sync_policy):
+    """Return the Celery Beat schedule field and instance."""
+
+    sync_policy = sync_policy or {}
+    mode = sync_policy.get("mode") or "interval"
+    if mode == "crontab":
+        from django_celery_beat.models import CrontabSchedule
+
+        minute, hour, day_of_month, month_of_year, day_of_week = str(
+            sync_policy.get("cron") or "0 * * * *"
+        ).split()
+        schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute,
+            hour=hour,
+            day_of_week=day_of_week,
+            day_of_month=day_of_month,
+            month_of_year=month_of_year,
+            timezone=sync_policy.get("timezone") or "UTC",
+        )
+        return "crontab", schedule
+
+    from django_celery_beat.models import IntervalSchedule
+
+    interval = sync_policy.get("interval_seconds", 3600)
+    schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=max(int(interval), 1),
+        period=IntervalSchedule.SECONDS,
+    )
+    return "interval", schedule
 
 
 def _disable_datasource_periodic_task(datasource):

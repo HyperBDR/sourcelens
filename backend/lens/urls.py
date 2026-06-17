@@ -5,6 +5,7 @@ from .views import (
     AdminRunDetailView,
     AdminRunListView,
     AssistantViewSet,
+    DataSourceCredentialViewSet,
     DataSourceViewSet,
     GlobalSettingViewSet,
     MCPServerViewSet,
@@ -25,6 +26,11 @@ router.register(
     "admin/datasources",
     DataSourceViewSet,
     basename="lens-admin-datasources",
+)
+router.register(
+    "admin/credentials",
+    DataSourceCredentialViewSet,
+    basename="lens-admin-credentials",
 )
 router.register("admin/skills", SkillViewSet, basename="lens-admin-skills")
 router.register(

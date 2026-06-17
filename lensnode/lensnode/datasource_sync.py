@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib import error, parse, request
 
 WORKSPACE_ROOT = "/workspace"
+GIT_SHALLOW_DEPTH = "1"
 FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
 FEISHU_EXPORT_SUCCESS_STATUS = 0
 FEISHU_EXPORT_POLL_INTERVAL_S = 2
@@ -173,42 +174,42 @@ def _test_git_connection(config):
     if not repo_url:
         raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
 
-    branch = config.get("branch") or "main"
+    branch = str(config.get("branch") or "").strip()
     auth_url = _git_auth_url(repo_url, config)
     try:
-        result = subprocess.run(
-            ["git", "ls-remote", "--heads", auth_url, branch],
-            check=True,
-            capture_output=True,
-            text=True,
+        result = _run_git(
+            ["ls-remote", "--heads", auth_url],
             timeout=60,
+            detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
         )
-    except subprocess.CalledProcessError as exc:
-        del exc
+    except DataSourceSyncError:
         return {
             "status": "failed",
             "message_code": "git_unreachable",
             "message": "Git repository is not reachable.",
         }
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "failed",
-            "message_code": "connection_timeout",
-            "message": "Connection test timed out.",
-        }
 
-    if not result.stdout.strip():
+    branches = _git_remote_branches(result.stdout)
+    selected_branch = branch or _default_git_branch(branches)
+    if branch and branch not in branches:
         return {
             "status": "failed",
             "message_code": "git_branch_missing",
             "message": "Git branch does not exist or is not accessible.",
-            "details": {"branch": branch},
+            "details": {"branch": branch, "branches": branches},
+        }
+    if not selected_branch:
+        return {
+            "status": "failed",
+            "message_code": "git_branch_missing",
+            "message": "Git branch does not exist or is not accessible.",
+            "details": {"branch": branch, "branches": branches},
         }
     return {
         "status": "success",
         "message_code": "git_branch_available",
         "message": "Git repository is reachable and branch exists.",
-        "details": {"branch": branch},
+        "details": {"branch": selected_branch, "branches": branches},
     }
 
 
@@ -322,17 +323,41 @@ def _sync_git(command, workspace_path, emit):
         _run_git(
             [
                 "clone",
+                "--depth",
+                GIT_SHALLOW_DEPTH,
                 "--branch",
                 branch,
                 "--single-branch",
                 auth_url,
                 str(target),
-            ]
+            ],
+            detail_prefix="LENS_SOURCE_GIT_CLONE_FAILED",
         )
     else:
-        _run_git(["fetch", "origin", branch, "--prune"], cwd=target)
-        _run_git(["checkout", branch], cwd=target)
-        _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
+        _run_git(
+            [
+                "fetch",
+                "--depth",
+                GIT_SHALLOW_DEPTH,
+                "origin",
+                branch,
+                "--prune",
+            ],
+            cwd=target,
+            detail_prefix="LENS_SOURCE_GIT_FETCH_FAILED",
+        )
+        _run_git(
+            ["checkout", branch],
+            cwd=target,
+            detail_prefix="LENS_SOURCE_GIT_CHECKOUT_FAILED",
+        )
+        _run_git(
+            ["reset", "--hard", f"origin/{branch}"],
+            cwd=target,
+            detail_prefix="LENS_SOURCE_GIT_RESET_FAILED",
+        )
+
+    _sync_git_submodules(target)
 
     files = _count_files(target)
     _write_manifest(
@@ -347,6 +372,30 @@ def _sync_git(command, workspace_path, emit):
     )
     _emit(emit, "manifest", "done", f"Git sync completed with {files} files.")
     return {"synced": 1, "files": files, "target_path": str(target)}
+
+
+def _sync_git_submodules(target):
+    """Synchronize Git submodules when the repository declares them."""
+
+    if not (target / ".gitmodules").exists():
+        return
+    _run_git(
+        ["submodule", "sync", "--recursive"],
+        cwd=target,
+        detail_prefix="LENS_SOURCE_GIT_SUBMODULE_SYNC_FAILED",
+    )
+    _run_git(
+        [
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "--depth",
+            GIT_SHALLOW_DEPTH,
+        ],
+        cwd=target,
+        detail_prefix="LENS_SOURCE_GIT_SUBMODULE_UPDATE_FAILED",
+    )
 
 
 def _sync_feishu(command, workspace_path, emit):
@@ -645,22 +694,41 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
     }
 
 
-def _run_git(args, cwd=None):
+def _run_git(
+    args,
+    cwd=None,
+    timeout=600,
+    detail_prefix="LENS_SOURCE_SYNC_FAILED",
+):
     """Run a Git command and raise a datasource error on failure."""
 
     try:
-        subprocess.run(
+        return subprocess.run(
             ["git", *args],
             cwd=cwd,
             check=True,
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=timeout,
         )
     except subprocess.CalledProcessError as exc:
-        raise DataSourceSyncError("LENS_SOURCE_SYNC_FAILED") from exc
+        detail = _git_error_detail(exc)
+        raise DataSourceSyncError(f"{detail_prefix}: {detail}") from exc
     except subprocess.TimeoutExpired as exc:
-        raise DataSourceSyncError("LENS_SOURCE_SYNC_TIMEOUT") from exc
+        raise DataSourceSyncError(
+            f"{detail_prefix}: git command timed out"
+        ) from exc
+
+
+def _git_error_detail(exc):
+    """Return a compact Git error detail for task diagnostics."""
+
+    stderr = (exc.stderr or "").strip()
+    stdout = (exc.stdout or "").strip()
+    detail = stderr or stdout or str(exc)
+    if len(detail) > 1000:
+        return f"{detail[:1000]}..."
+    return detail
 
 
 def _git_output(args, cwd=None):
@@ -678,6 +746,29 @@ def _git_output(args, cwd=None):
     except Exception:
         return ""
     return result.stdout.strip()
+
+
+def _git_remote_branches(output):
+    """Return branch names from git ls-remote --heads output."""
+
+    branches = []
+    for line in str(output or "").splitlines():
+        parts = line.strip().split()
+        if len(parts) < 2 or not parts[1].startswith("refs/heads/"):
+            continue
+        branch = parts[1][len("refs/heads/") :]
+        if branch:
+            branches.append(branch)
+    return branches
+
+
+def _default_git_branch(branches):
+    """Return the preferred branch from a remote branch list."""
+
+    for branch in ["main", "master"]:
+        if branch in branches:
+            return branch
+    return branches[0] if branches else ""
 
 
 def _normalize_repo_url(value):

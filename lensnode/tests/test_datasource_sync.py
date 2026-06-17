@@ -2,14 +2,18 @@ import pytest
 
 from lensnode.datasource_sync import (
     DataSourceSyncError,
+    _default_git_branch,
     _export_feishu_document,
     _export_filename,
     _feishu_folder_token,
     _feishu_export_extension,
+    _git_remote_branches,
     _git_auth_url,
     _http_json,
     _poll_feishu_export_task,
     _raise_feishu_business_error,
+    _sync_git,
+    _sync_git_submodules,
     _sync_feishu_folder,
 )
 
@@ -26,6 +30,132 @@ def test_git_auth_url_uses_inline_access_token():
     )
 
     assert url == "https://oauth2:ghp_example@github.com/example/repo.git"
+
+
+def test_git_remote_branches_parses_heads():
+    """Remote branch discovery returns branch names."""
+
+    output = (
+        "abc\trefs/heads/main\n"
+        "def\trefs/heads/feature/demo\n"
+        "ghi\trefs/tags/v1.0.0\n"
+    )
+
+    assert _git_remote_branches(output) == ["main", "feature/demo"]
+
+
+def test_default_git_branch_prefers_main():
+    """Git connection tests can choose a branch when input is empty."""
+
+    assert _default_git_branch(["dev", "main"]) == "main"
+    assert _default_git_branch(["dev", "master"]) == "master"
+    assert _default_git_branch(["release"]) == "release"
+
+
+def test_sync_git_uses_shallow_clone(tmp_path, monkeypatch):
+    """Git clone uses depth=1 for datasource cache sync."""
+
+    calls = []
+
+    def run_git(args, cwd=None, timeout=600, detail_prefix=""):
+        del timeout
+        calls.append((args, cwd, detail_prefix))
+        target = tmp_path / "repo"
+        target.mkdir(exist_ok=True)
+        return None
+
+    monkeypatch.setattr("lensnode.datasource_sync._run_git", run_git)
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._count_files",
+        lambda path: 1,
+    )
+
+    result = _sync_git(
+        {
+            "config": {
+                "repo_url": "https://github.com/example/repo.git",
+                "branch": "main",
+            },
+            "target_path": str(tmp_path / "repo"),
+        },
+        str(tmp_path),
+        None,
+    )
+
+    assert result["synced"] == 1
+    assert calls[0][0][:3] == ["clone", "--depth", "1"]
+    assert calls[0][2] == "LENS_SOURCE_GIT_CLONE_FAILED"
+
+
+def test_sync_git_update_uses_shallow_fetch(tmp_path, monkeypatch):
+    """Existing Git datasource updates use shallow fetch and hard reset."""
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    calls = []
+
+    def run_git(args, cwd=None, timeout=600, detail_prefix=""):
+        del timeout
+        calls.append((args, cwd, detail_prefix))
+        return None
+
+    monkeypatch.setattr("lensnode.datasource_sync._run_git", run_git)
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._count_files",
+        lambda path: 1,
+    )
+
+    _sync_git(
+        {
+            "config": {
+                "repo_url": "https://github.com/example/repo.git",
+                "branch": "main",
+            },
+            "target_path": str(repo),
+        },
+        str(tmp_path),
+        None,
+    )
+
+    assert calls[0][0] == [
+        "fetch",
+        "--depth",
+        "1",
+        "origin",
+        "main",
+        "--prune",
+    ]
+    assert calls[1][0] == ["checkout", "main"]
+    assert calls[2][0] == ["reset", "--hard", "origin/main"]
+
+
+def test_sync_git_submodules_runs_when_declared(tmp_path, monkeypatch):
+    """Repositories declaring submodules synchronize them recursively."""
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".gitmodules").write_text("", encoding="utf-8")
+    calls = []
+
+    def run_git(args, cwd=None, timeout=600, detail_prefix=""):
+        del timeout
+        calls.append((args, cwd, detail_prefix))
+        return None
+
+    monkeypatch.setattr("lensnode.datasource_sync._run_git", run_git)
+
+    _sync_git_submodules(repo)
+
+    assert calls[0][0] == ["submodule", "sync", "--recursive"]
+    assert calls[1][0] == [
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+        "--depth",
+        "1",
+    ]
+    assert calls[1][2] == "LENS_SOURCE_GIT_SUBMODULE_UPDATE_FAILED"
 
 
 def test_feishu_folder_token_from_drive_url():

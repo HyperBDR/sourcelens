@@ -29,9 +29,15 @@
                 <h2 class="truncate text-base font-semibold text-ink-900">{{ title }}</h2>
                 <p v-if="subtitle" class="mt-0.5 truncate text-sm text-ink-500">{{ subtitle }}</p>
               </div>
+              <div
+                v-if="$slots.actions"
+                class="flex flex-shrink-0 items-center gap-2"
+              >
+                <slot name="actions" />
+              </div>
               <button
                 type="button"
-                class="ml-4 flex-shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-ink-600 focus:outline-none"
+                class="ml-3 flex-shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-ink-600 focus:outline-none"
                 @click="$emit('close')"
               >
                 <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

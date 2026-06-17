@@ -345,6 +345,14 @@
                         >
                           {{ t('lensAdmin.actions.cancelSync') }}
                         </BaseButton>
+                        <BaseButton
+                          v-if="row.current_sync?.id"
+                          size="sm"
+                          variant="outline"
+                          @click="openDataSourceTask(row)"
+                        >
+                          {{ t('lensAdmin.actions.viewTask') }}
+                        </BaseButton>
                         <RowActions :row="row" />
                       </div>
                     </td>
@@ -498,6 +506,36 @@
                     </td>
                   </template>
 
+                  <template v-else-if="activeTab === 'credentials'">
+                    <td class="table-cell">
+                      <div class="font-medium text-ink-900">
+                        {{ row.name }}
+                      </div>
+                      <div class="mt-1 text-xs text-ink-500">
+                        {{
+                          row.has_secret
+                            ? t('lensAdmin.credentials.secretConfigured')
+                            : t('lensAdmin.credentials.secretMissing')
+                        }}
+                      </div>
+                    </td>
+                    <td class="table-cell text-ink-600">
+                      {{ credentialProviderLabel(row.provider) }}
+                    </td>
+                    <td class="table-cell text-ink-600">
+                      {{ credentialAuthTypeLabel(row.auth_type) }}
+                    </td>
+                    <td class="table-cell text-ink-600">
+                      {{ row.datasource_count || 0 }}
+                    </td>
+                    <td class="table-cell text-ink-600">
+                      {{ formatDateTime(row.last_used_at) }}
+                    </td>
+                    <td class="table-cell">
+                      <RowActions :row="row" />
+                    </td>
+                  </template>
+
                   <template v-else-if="activeTab === 'mcp'">
                     <td class="table-cell font-medium text-ink-900">
                       {{ row.name }}
@@ -578,7 +616,11 @@
         :form="form"
         :config="datasourceConfig"
         :lensnodes="lensnodes"
+        :credentials="credentials"
         v-model:sync-interval-seconds="syncIntervalSeconds"
+        v-model:sync-policy-mode="syncPolicyMode"
+        v-model:sync-cron="syncCron"
+        v-model:sync-timezone="syncTimezone"
         :path-result="datasourcePathResult"
         :connection-result="datasourceConnectionResult"
         :checking-path="checkingDatasourcePath"
@@ -591,6 +633,7 @@
         @check-path="checkDatasourcePath"
         @test-connection="testDatasourceConnection"
         @connection-change="resetDatasourceConnectionResult"
+        @create-credential="createInlineCredential"
       />
 
       <BaseDrawer
@@ -600,6 +643,16 @@
         width="2xl"
         @close="closeDataSourceDetail"
       >
+        <template #actions>
+          <BaseButton
+            v-if="selectedDataSource?.current_sync?.id"
+            size="sm"
+            variant="outline"
+            @click="openDataSourceTask(selectedDataSource)"
+          >
+            {{ t('lensAdmin.actions.viewTask') }}
+          </BaseButton>
+        </template>
         <div v-if="selectedDataSource" class="space-y-6">
           <section>
             <h3 class="mb-4 text-sm font-semibold text-ink-900">
@@ -750,6 +803,61 @@
             <BooleanRow v-model="form.enabled" />
           </template>
 
+          <template v-else-if="activeTab === 'credentials'">
+            <FormRow :label="t('lensAdmin.fields.name')">
+              <input v-model="form.name" class="form-input" required />
+            </FormRow>
+            <div class="grid gap-4 md:grid-cols-2">
+              <FormRow :label="t('lensAdmin.fields.type')">
+                <select v-model="form.provider" class="form-input">
+                  <option value="generic">Git</option>
+                  <option value="feishu">Feishu</option>
+                </select>
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.authScheme')">
+                <div class="form-input bg-surface-sunken text-ink-500">
+                  {{ credentialAuthTypeLabel(credentialFormAuthType) }}
+                </div>
+              </FormRow>
+            </div>
+            <template v-if="credentialFormAuthType === 'feishu_app'">
+              <div class="grid gap-4 md:grid-cols-2">
+                <FormRow :label="t('lensAdmin.fields.feishuAppId')">
+                  <input
+                    v-model="form.app_id"
+                    class="form-input"
+                    autocomplete="off"
+                  />
+                </FormRow>
+                <FormRow :label="t('lensAdmin.fields.feishuAppSecret')">
+                  <input
+                    v-model="form.app_secret"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                  />
+                </FormRow>
+              </div>
+            </template>
+            <FormRow
+              v-else
+              :label="t('lensAdmin.fields.accessToken')"
+            >
+              <input
+                v-model="form.secret"
+                class="form-input"
+                type="password"
+                autocomplete="off"
+              />
+            </FormRow>
+            <p
+              v-if="mode === 'edit'"
+              class="-mt-2 text-xs text-ink-500"
+            >
+              {{ t('lensAdmin.credentials.replaceHint') }}
+            </p>
+          </template>
+
           <p v-if="formError" class="text-sm text-danger-700">
             {{ formError }}
           </p>
@@ -772,7 +880,7 @@
 <script setup>
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
@@ -781,12 +889,14 @@ import {
   cancelDataSourceSync,
   checkLensNodeDataSourcePath,
   createAssistant,
+  createCredential,
   createDataSource,
   createGlobalSetting,
   createLensNode,
   createMcpServer,
   createSkill,
   deleteAssistant,
+  deleteCredential,
   deleteDataSource,
   deleteLensNode,
   deleteMcpServer,
@@ -794,6 +904,7 @@ import {
   getSystemHealth,
   issueLensNodeToken,
   listAssistants,
+  listCredentials,
   listDataSources,
   listGlobalSettings,
   listLensNodes,
@@ -803,6 +914,7 @@ import {
   syncDataSource,
   testLensNodeDataSourceConnection,
   updateAssistant,
+  updateCredential,
   updateDataSource,
   updateGlobalSetting,
   updateLensNode,
@@ -835,12 +947,14 @@ import {
 
 const { t, locale } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const { showSuccess, showError } = useToast()
 
 const routeToTab = {
   assistants: 'assistants',
   lensnodes: 'lensnodes',
   datasources: 'datasources',
+  'resources/credentials': 'credentials',
   'resources/skills': 'skills',
   'resources/mcp': 'mcp',
   settings: 'settings'
@@ -860,15 +974,21 @@ const formError = ref('')
 const datasourceConfig = ref({})
 const datasourcePathResult = ref(null)
 const datasourceConnectionResult = ref(null)
+const suppressDatasourceConnectionReset = ref(false)
+const datasourceConnectionBaseSignature = ref('')
 const checkingDatasourcePath = ref(false)
 const testingDatasourceConnection = ref(false)
 const syncIntervalSeconds = ref(3600)
+const syncPolicyMode = ref('interval')
+const syncCron = ref('0 2 * * *')
+const syncTimezone = ref('Asia/Shanghai')
 const llmConfigOptions = ref([])
 
 const assistants = ref([])
 const lensnodes = ref([])
 const dataSources = ref([])
 const selectedDataSource = ref(null)
+const credentials = ref([])
 const skills = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
@@ -1098,6 +1218,7 @@ const activeRows = computed(() => {
     assistants: assistants.value,
     lensnodes: lensnodes.value,
     datasources: dataSources.value,
+    credentials: credentials.value,
     skills: skills.value,
     mcp: mcps.value
   }
@@ -1153,6 +1274,14 @@ const activeColumns = computed(() => {
       'status',
       'actions'
     ],
+    credentials: [
+      'credential',
+      'type',
+      'authScheme',
+      'datasources',
+      'lastUsedAt',
+      'actions'
+    ],
     skills: ['skill', 'slug', 'status', 'actions'],
     mcp: ['mcpServer', 'transport', 'endpoint', 'status', 'actions']
   }
@@ -1160,6 +1289,10 @@ const activeColumns = computed(() => {
     t(`lensAdmin.columns.${column}`)
   )
 })
+
+const credentialFormAuthType = computed(() =>
+  form.value.provider === 'feishu' ? 'feishu_app' : 'https_token'
+)
 
 const defaultScheduledTasks = computed(() => {
   const taskTypes = [
@@ -1273,7 +1406,6 @@ const datasourceConnectionDetails = computed(() => {
     detailItem(t('lensAdmin.fields.folderUrl'), config.folder_url, true),
     detailItem(t('lensAdmin.fields.folderToken'), config.folder_token, true),
     detailItem(t('lensAdmin.fields.documentUrl'), config.document_url, true),
-    detailItem(t('lensAdmin.fields.appToken'), config.app_token, true),
     detailItem(t('lensAdmin.fields.docIds'), formatDocIds(config.doc_ids), true)
   ].filter((item) => item.value !== emptyValue)
 })
@@ -1286,11 +1418,7 @@ const datasourceSyncDetails = computed(() => {
     detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true),
     detailItem(
       t('lensAdmin.fields.syncInterval'),
-      row.sync_policy?.interval_seconds
-        ? t('lensAdmin.table.intervalSeconds', {
-            seconds: row.sync_policy.interval_seconds
-          })
-        : emptyValue
+      formatSyncPolicy(row.sync_policy, row.last_synced_at)
     ),
     detailItem(t('lensAdmin.datasourceDetail.lastSyncedAt'), formatDateTime(row.last_synced_at)),
     detailItem(t('lensAdmin.datasourceDetail.lastError'), row.last_error, true),
@@ -1312,6 +1440,11 @@ function formatDateTime(value) {
 }
 
 function formatSyncPolicy(syncPolicy, lastSyncedAt) {
+  if (syncPolicy?.mode === 'crontab') {
+    const cron = syncPolicy.cron || emptyValue
+    const timezone = syncPolicy.timezone || 'UTC'
+    return `${cron} · ${timezone} · ${formatDateTime(lastSyncedAt)}`
+  }
   const interval = syncPolicy?.interval_seconds
   const intervalText = interval
     ? t('lensAdmin.table.intervalSeconds', { seconds: interval })
@@ -1328,6 +1461,16 @@ function formatDataSourceSyncState(row) {
     return t('lensAdmin.table.syncRunning')
   }
   return formatSyncPolicy(row.sync_policy, row.last_synced_at)
+}
+
+function openDataSourceTask(row) {
+  const executionId = row?.current_sync?.id
+  if (!executionId) return
+  const route = router.resolve({
+    path: '/management/task-management/list',
+    query: { execution_id: executionId }
+  })
+  window.open(route.href, '_blank', 'noopener')
 }
 
 function detailItem(label, value, mono = false) {
@@ -1365,6 +1508,24 @@ function authSchemeLabel(authScheme) {
   return t('lensAdmin.datasourceWizard.authNone')
 }
 
+function credentialProviderLabel(provider) {
+  if (provider === 'feishu') {
+    return 'Feishu'
+  }
+  if (provider) {
+    return 'Git'
+  }
+  return emptyValue
+}
+
+function credentialAuthTypeLabel(authType) {
+  const labels = {
+    https_token: 'HTTPS Token',
+    feishu_app: 'Feishu App'
+  }
+  return labels[authType] || authType || emptyValue
+}
+
 function feishuScopeLabel(syncMode) {
   if (syncMode === 'drive_folder') {
     return t('lensAdmin.datasourceWizard.feishuScopeDriveFolder')
@@ -1388,7 +1549,6 @@ function dataSourceRepository(row) {
     config.folder_url ||
     config.folder_token ||
     config.document_url ||
-    config.app_token ||
     emptyValue
   )
 }
@@ -1425,6 +1585,7 @@ async function load() {
       assistantRows,
       lensnodeRows,
       dataSourceRows,
+      credentialRows,
       skillRows,
       mcpRows,
       settingRows,
@@ -1434,6 +1595,7 @@ async function load() {
       listAssistants(),
       listLensNodes(),
       listDataSources(),
+      listCredentials(),
       listSkills(),
       listMcpServers(),
       listGlobalSettings(),
@@ -1444,6 +1606,7 @@ async function load() {
     assistants.value = normalizeList(assistantRows)
     lensnodes.value = normalizeList(lensnodeRows)
     dataSources.value = normalizeList(dataSourceRows)
+    credentials.value = normalizeList(credentialRows)
     if (activeTab.value === 'datasources') {
       const existing = dataSources.value.find(
         (row) => row.uuid === selectedDataSource.value?.uuid
@@ -1573,6 +1736,7 @@ function closeDrawer() {
   formError.value = ''
   datasourcePathResult.value = null
   datasourceConnectionResult.value = null
+  resetDatasourceSyncPolicy()
 }
 
 async function refreshDirs() {
@@ -1622,8 +1786,16 @@ function defaultForm(tab) {
       lensnode_uuid: '',
       workspace_relative_path: '',
       target_path: '',
+      credential_uuid: '',
       credential_configured: false,
       status: 'active'
+    },
+    credentials: {
+      name: '',
+      provider: 'generic',
+      secret: '',
+      app_id: '',
+      app_secret: ''
     },
     skills: {
       name: '',
@@ -1695,6 +1867,7 @@ function formFromRow(tab, row) {
   if (tab === 'datasources') {
     const lensnodeUuid = row.lensnode?.uuid || row.lensnode || ''
     datasourceConfig.value = datasourceConfigFromRow(row)
+    hydrateDatasourceSyncPolicy(row.sync_policy || {})
     return {
       uuid: row.uuid,
       name: row.name || '',
@@ -1705,6 +1878,7 @@ function formFromRow(tab, row) {
         lensnodeUuid
       ),
       target_path: row.target_path || '',
+      credential_uuid: row.credential || '',
       credential_configured: !!row.credential_configured,
       status: row.status || 'active'
     }
@@ -1719,6 +1893,16 @@ function formFromRow(tab, row) {
           ? row.definition
           : stringifyJson(row.definition || {}),
       enabled: row.enabled !== false
+    }
+  }
+  if (tab === 'credentials') {
+    return {
+      uuid: row.uuid,
+      name: row.name || '',
+      provider: row.auth_type === 'feishu_app' ? 'feishu' : 'generic',
+      secret: '',
+      app_id: '',
+      app_secret: ''
     }
   }
   if (tab === 'mcp') {
@@ -1741,44 +1925,59 @@ function datasourceConfigFromRow(row) {
       sync_mode: row.config?.sync_mode || 'document_list',
       doc_ids_text: (row.config?.doc_ids || []).join(','),
       recursive: row.config?.recursive !== false,
-      max_depth: row.config?.max_depth || 10,
-      app_id: '',
-      app_secret: ''
+      max_depth: row.config?.max_depth || 10
     }
   }
   const config = { ...(row.config || {}) }
   delete config.access_token
-  return {
-    ...config,
-    access_token: ''
-  }
+  return config
 }
 
 function handleDatasourceTypeChange(seed = null) {
   datasourcePathResult.value = null
   datasourceConnectionResult.value = null
+  resetDatasourceSyncPolicy()
+  if (!seed) {
+    form.value.credential_uuid = ''
+  }
   const sourceType = seed?.source_type || form.value.source_type
   if (sourceType === 'git') {
     datasourceConfig.value = {
       repo_url: '',
-      branch: 'main',
-      auth_scheme: 'none',
-      access_token: ''
+      branch: '',
+      auth_scheme: 'none'
     }
   } else if (sourceType === 'feishu') {
     datasourceConfig.value = {
       sync_mode: 'document_list',
       document_url: '',
-      app_token: '',
       doc_ids_text: '',
       folder_url: '',
       folder_token: '',
       recursive: true,
-      max_depth: 10,
-      app_id: '',
-      app_secret: ''
+      max_depth: 10
     }
   }
+}
+
+function resetDatasourceSyncPolicy() {
+  syncPolicyMode.value = 'interval'
+  syncIntervalSeconds.value = 3600
+  syncCron.value = '0 2 * * *'
+  syncTimezone.value = 'Asia/Shanghai'
+}
+
+function hydrateDatasourceSyncPolicy(syncPolicy) {
+  if ((syncPolicy.mode || 'interval') === 'crontab') {
+    syncPolicyMode.value = 'crontab'
+    syncCron.value = syncPolicy.cron || '0 2 * * *'
+    syncTimezone.value = syncPolicy.timezone || 'Asia/Shanghai'
+    return
+  }
+  syncPolicyMode.value = 'interval'
+  syncIntervalSeconds.value = Number(syncPolicy.interval_seconds) || 3600
+  syncCron.value = '0 2 * * *'
+  syncTimezone.value = 'Asia/Shanghai'
 }
 
 async function save() {
@@ -1796,6 +1995,8 @@ async function save() {
       await saveByMode(uuid, payload, createLensNode, updateLensNode)
     } else if (activeTab.value === 'datasources') {
       await saveByMode(uuid, payload, createDataSource, updateDataSource)
+    } else if (activeTab.value === 'credentials') {
+      await saveByMode(uuid, payload, createCredential, updateCredential)
     } else if (activeTab.value === 'skills') {
       await saveByMode(uuid, payload, createSkill, updateSkill)
     } else if (activeTab.value === 'mcp') {
@@ -1861,17 +2062,19 @@ function buildPayload(tab) {
     }
   }
   if (tab === 'datasources') {
-    return {
+    const payload = {
       name: form.value.name,
       source_type: form.value.source_type,
       lensnode_uuid: form.value.lensnode_uuid,
       target_path: datasourceTargetPath(),
       config: buildDatasourceConfig(),
-      sync_policy: {
-        interval_seconds: Math.max(1, Number(syncIntervalSeconds.value) || 3600)
-      },
+      sync_policy: buildDatasourceSyncPolicy(),
       status: form.value.status || 'active'
     }
+    if (shouldUseDatasourceCredential()) {
+      payload.credential_uuid = form.value.credential_uuid
+    }
+    return payload
   }
   if (tab === 'skills') {
     return {
@@ -1889,6 +2092,24 @@ function buildPayload(tab) {
       config: rowsToObject(form.value.config_rows),
       enabled: !!form.value.enabled
     }
+  }
+  if (tab === 'credentials') {
+    const payload = {
+      name: form.value.name,
+      provider: form.value.provider,
+      auth_type: credentialFormAuthType.value
+    }
+    if (credentialFormAuthType.value === 'feishu_app') {
+      if (form.value.app_id?.trim()) {
+        payload.app_id = form.value.app_id.trim()
+      }
+      if (form.value.app_secret?.trim()) {
+        payload.app_secret = form.value.app_secret.trim()
+      }
+    } else if (form.value.secret?.trim()) {
+      payload.secret = form.value.secret.trim()
+    }
+    return payload
   }
   return {}
 }
@@ -1920,11 +2141,6 @@ function buildAssistantSettings() {
 
 function buildDatasourceConfig() {
   const config = { ...datasourceConfig.value }
-  if (form.value.source_type === 'git') {
-    if (!String(config.access_token || '').trim()) {
-      delete config.access_token
-    }
-  }
   if (form.value.source_type === 'feishu') {
     config.doc_ids = String(config.doc_ids_text || '')
       .split(',')
@@ -1938,17 +2154,27 @@ function buildDatasourceConfig() {
       delete config.max_depth
     } else {
       delete config.document_url
-      delete config.app_token
       delete config.doc_ids
     }
-    if (!String(config.app_id || '').trim()) {
-      delete config.app_id
-    }
-    if (!String(config.app_secret || '').trim()) {
-      delete config.app_secret
-    }
+    delete config.app_token
+    delete config.app_id
+    delete config.app_secret
   }
   return config
+}
+
+function buildDatasourceSyncPolicy() {
+  if (syncPolicyMode.value === 'crontab') {
+    return {
+      mode: 'crontab',
+      cron: String(syncCron.value || '').trim(),
+      timezone: String(syncTimezone.value || '').trim() || 'UTC'
+    }
+  }
+  return {
+    mode: 'interval',
+    interval_seconds: Math.max(1, Number(syncIntervalSeconds.value) || 3600)
+  }
 }
 
 function datasourceTargetPath() {
@@ -2001,7 +2227,22 @@ function canSaveDatasource() {
 }
 
 function resetDatasourceConnectionResult() {
+  if (suppressDatasourceConnectionReset.value) {
+    suppressDatasourceConnectionReset.value = false
+    return
+  }
+  if (shouldKeepGitBranchConnectionResult()) {
+    datasourceConnectionResult.value = {
+      ...datasourceConnectionResult.value,
+      details: {
+        ...(datasourceConnectionResult.value?.details || {}),
+        branch: datasourceConfig.value.branch
+      }
+    }
+    return
+  }
   datasourceConnectionResult.value = null
+  datasourceConnectionBaseSignature.value = ''
 }
 
 async function testDatasourceConnection() {
@@ -2009,13 +2250,21 @@ async function testDatasourceConnection() {
   testingDatasourceConnection.value = true
   datasourceConnectionResult.value = null
   try {
-    datasourceConnectionResult.value = await testLensNodeDataSourceConnection(
+    const result = await testLensNodeDataSourceConnection(
       form.value.lensnode_uuid,
       {
         datasource_uuid: form.value.uuid || null,
+        credential_uuid: shouldUseDatasourceCredential()
+          ? form.value.credential_uuid
+          : null,
         source_type: form.value.source_type,
         config: buildDatasourceConfig()
       }
+    )
+    applyDatasourceConnectionResult(result)
+    datasourceConnectionResult.value = result
+    datasourceConnectionBaseSignature.value = datasourceConnectionSignature(
+      true
     )
   } catch (error) {
     datasourceConnectionResult.value = {
@@ -2025,6 +2274,74 @@ async function testDatasourceConnection() {
   } finally {
     testingDatasourceConnection.value = false
   }
+}
+
+function shouldUseDatasourceCredential() {
+  if (!form.value.credential_uuid) {
+    return false
+  }
+  if (form.value.source_type === 'git') {
+    return datasourceConfig.value.auth_scheme === 'token'
+  }
+  return form.value.source_type === 'feishu'
+}
+
+async function createInlineCredential(payload) {
+  try {
+    const credential = await createCredential(payload)
+    credentials.value = [credential, ...credentials.value]
+    form.value.credential_uuid = credential.uuid
+    showSuccess(t('lensAdmin.messages.saveSuccess'))
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.saveFailed')))
+  }
+}
+
+function applyDatasourceConnectionResult(result) {
+  if (form.value.source_type !== 'git' || result?.status !== 'success') {
+    return
+  }
+  const branches = result?.details?.branches
+  if (!Array.isArray(branches) || branches.length !== 1) {
+    return
+  }
+  const branch = branches[0]
+  if (datasourceConfig.value.branch !== branch) {
+    suppressDatasourceConnectionReset.value = true
+    datasourceConfig.value.branch = branch
+  }
+}
+
+function shouldKeepGitBranchConnectionResult() {
+  if (
+    form.value.source_type !== 'git' ||
+    datasourceConnectionResult.value?.status !== 'success'
+  ) {
+    return false
+  }
+  if (
+    datasourceConnectionSignature(true) !==
+    datasourceConnectionBaseSignature.value
+  ) {
+    return false
+  }
+  const branches = datasourceConnectionResult.value?.details?.branches
+  return (
+    Array.isArray(branches) &&
+    branches.includes(datasourceConfig.value.branch)
+  )
+}
+
+function datasourceConnectionSignature(ignoreBranch = false) {
+  const config = buildDatasourceConfig()
+  if (ignoreBranch) {
+    delete config.branch
+  }
+  return JSON.stringify({
+    lensnode_uuid: form.value.lensnode_uuid || '',
+    source_type: form.value.source_type || '',
+    config
+  })
 }
 
 function buildSelectedDirs() {
@@ -2051,6 +2368,8 @@ async function remove(row) {
       await deleteLensNode(row.uuid)
     } else if (activeTab.value === 'datasources') {
       await deleteDataSource(row.uuid)
+    } else if (activeTab.value === 'credentials') {
+      await deleteCredential(row.uuid)
     } else if (activeTab.value === 'skills') {
       await deleteSkill(row.uuid)
     } else if (activeTab.value === 'mcp') {

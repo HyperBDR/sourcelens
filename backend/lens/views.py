@@ -16,6 +16,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from .models import (
     Assistant,
     DataSource,
+    DataSourceCredential,
     GlobalSetting,
     MCPServer,
     LensNode,
@@ -39,6 +40,7 @@ from .datasource_services import (
 )
 from .serializers import (
     AssistantSerializer,
+    DataSourceCredentialSerializer,
     DataSourceSerializer,
     GlobalSettingSerializer,
     MCPServerSerializer,
@@ -63,6 +65,38 @@ class BaseAuthenticatedViewSet(viewsets.ModelViewSet):
 
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = "uuid"
+
+
+class DataSourceCredentialViewSet(BaseAuthenticatedViewSet):
+    """CRUD for reusable datasource credentials."""
+
+    queryset = DataSourceCredential.objects.all().prefetch_related(
+        "datasources"
+    )
+    serializer_class = DataSourceCredentialSerializer
+
+    def get_queryset(self):
+        """Optionally filter credentials by provider or auth type."""
+
+        queryset = super().get_queryset()
+        provider = self.request.query_params.get("provider")
+        auth_type = self.request.query_params.get("auth_type")
+        if provider:
+            queryset = queryset.filter(provider=provider)
+        if auth_type:
+            queryset = queryset.filter(auth_type=auth_type)
+        return queryset
+
+    def destroy(self, request, *args, **kwargs):
+        """Reject deleting credentials that are still referenced."""
+
+        credential = self.get_object()
+        if credential.datasources.exists():
+            return Response(
+                {"detail": "CREDENTIAL_IN_USE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class EventStreamRenderer(BaseRenderer):
@@ -300,6 +334,7 @@ class LensNodeViewSet(BaseAdminViewSet):
                 request.data.get("source_type") or DataSource.SourceType.GIT,
                 config=request.data.get("config") or {},
                 datasource_uuid=request.data.get("datasource_uuid") or None,
+                credential_uuid=request.data.get("credential_uuid") or None,
             )
         except DataSourceDispatchError as exc:
             return Response(

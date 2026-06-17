@@ -7,7 +7,7 @@ from channels.layers import get_channel_layer
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import DataSource, LensNode
+from .models import DataSource, DataSourceCredential, LensNode
 from .services import lensnode_group_name
 
 WORKSPACE_ROOT = "/workspace"
@@ -125,11 +125,16 @@ def test_datasource_connection(
     source_type,
     config=None,
     datasource_uuid=None,
+    credential_uuid=None,
 ):
     """Ask a LensNode to test datasource connection settings."""
 
     config = dict(config or {})
-    _inject_existing_datasource_credential(config, datasource_uuid)
+    _inject_existing_datasource_credential(
+        config,
+        datasource_uuid,
+        credential_uuid,
+    )
     request_id = uuid.uuid4().hex
     _send_lensnode_command(
         lensnode,
@@ -200,22 +205,47 @@ def datasource_runtime_config(datasource):
     return config
 
 
-def _inject_existing_datasource_credential(config, datasource_uuid):
+def _inject_existing_datasource_credential(
+    config,
+    datasource_uuid,
+    credential_uuid=None,
+):
     """Add an existing encrypted credential to transient test config."""
 
-    if config.get("access_token") or not datasource_uuid:
+    if config.get("access_token") or (
+        not datasource_uuid and not credential_uuid
+    ):
         return
-    datasource = DataSource.objects.select_related("credential").filter(
-        uuid=datasource_uuid,
-    ).first()
-    if datasource is None or datasource.credential is None:
+    credential = None
+    datasource = None
+    if credential_uuid:
+        credential = DataSourceCredential.objects.filter(
+            uuid=credential_uuid,
+        ).first()
+    elif datasource_uuid:
+        datasource = DataSource.objects.select_related("credential").filter(
+            uuid=datasource_uuid,
+        ).first()
+        credential = datasource.credential if datasource else None
+    if credential is None:
         return
-    secret = datasource.credential.get_secret()
+    secret = credential.get_secret()
     if not secret:
         return
-    if datasource.source_type == DataSource.SourceType.FEISHU:
+    if (
+        (datasource and datasource.source_type == DataSource.SourceType.FEISHU)
+        or source_type_from_credential(credential) == DataSource.SourceType.FEISHU
+    ):
         app_id, _, app_secret = secret.partition(":")
         config["app_id"] = app_id
         config["app_secret"] = app_secret
     else:
         config["access_token"] = secret
+
+
+def source_type_from_credential(credential):
+    """Infer datasource type from a credential auth type."""
+
+    if credential.auth_type == DataSourceCredential.AuthType.FEISHU_APP:
+        return DataSource.SourceType.FEISHU
+    return DataSource.SourceType.GIT

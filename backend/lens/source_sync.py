@@ -6,6 +6,8 @@ from urllib import parse, request
 
 from .models import DataSource
 
+GIT_SHALLOW_DEPTH = "1"
+
 
 class SourceSyncError(ValueError):
     """Raised when datasource synchronization cannot proceed."""
@@ -24,9 +26,21 @@ def _run_git(args, cwd=None):
             timeout=300,
         )
     except subprocess.CalledProcessError as exc:
-        raise SourceSyncError("LENS_SOURCE_SYNC_FAILED") from exc
+        detail = _git_error_detail(exc)
+        raise SourceSyncError(f"LENS_SOURCE_SYNC_FAILED: {detail}") from exc
     except subprocess.TimeoutExpired as exc:
         raise SourceSyncError("LENS_SOURCE_SYNC_TIMEOUT") from exc
+
+
+def _git_error_detail(exc):
+    """Return a compact Git error detail."""
+
+    stderr = (exc.stderr or "").strip()
+    stdout = (exc.stdout or "").strip()
+    detail = stderr or stdout or str(exc)
+    if len(detail) > 1000:
+        return f"{detail[:1000]}..."
+    return detail
 
 
 def _validate_no_inline_credentials(config):
@@ -108,6 +122,8 @@ def _sync_git(datasource):
         _run_git(
             [
                 "clone",
+                "--depth",
+                GIT_SHALLOW_DEPTH,
                 "--branch",
                 branch,
                 "--single-branch",
@@ -116,12 +132,42 @@ def _sync_git(datasource):
             ]
         )
     else:
-        _run_git(["fetch", "origin", branch, "--prune"], cwd=target)
+        _run_git(
+            [
+                "fetch",
+                "--depth",
+                GIT_SHALLOW_DEPTH,
+                "origin",
+                branch,
+                "--prune",
+            ],
+            cwd=target,
+        )
         _run_git(["checkout", branch], cwd=target)
         _run_git(["reset", "--hard", f"origin/{branch}"], cwd=target)
 
+    _sync_git_submodules(target)
     datasource.target_path = str(target)
     return 1
+
+
+def _sync_git_submodules(target):
+    """Synchronize Git submodules when the repository declares them."""
+
+    if not (target / ".gitmodules").exists():
+        return
+    _run_git(["submodule", "sync", "--recursive"], cwd=target)
+    _run_git(
+        [
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+            "--depth",
+            GIT_SHALLOW_DEPTH,
+        ],
+        cwd=target,
+    )
 
 
 def _sync_feishu(datasource):

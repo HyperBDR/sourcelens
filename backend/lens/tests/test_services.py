@@ -534,6 +534,23 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(task.args, f'["{self.datasource.uuid}"]')
         self.assertEqual(task.queue, "lens")
 
+    def test_datasource_periodic_task_supports_crontab_policy(self):
+        self.datasource.sync_policy = {
+            "mode": "crontab",
+            "cron": "0 2 * * *",
+            "timezone": "Asia/Shanghai",
+        }
+        self.datasource.save(update_fields=["sync_policy", "updated_at"])
+
+        record = ensure_datasource_periodic_task(self.datasource)
+
+        task = PeriodicTask.objects.get(pk=record.periodic_task_ref)
+        self.assertIsNone(task.interval_id)
+        self.assertIsNotNone(task.crontab_id)
+        self.assertEqual(task.crontab.minute, "0")
+        self.assertEqual(task.crontab.hour, "2")
+        self.assertEqual(str(task.crontab.timezone), "Asia/Shanghai")
+
     def test_discover_and_register_reconciles_datasource_beat_row(self):
         record = ensure_datasource_periodic_task(self.datasource)
         task = PeriodicTask.objects.get(pk=record.periodic_task_ref)

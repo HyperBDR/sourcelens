@@ -278,6 +278,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
 import { useDebounceFn } from '@vueuse/core'
@@ -294,6 +295,7 @@ import TaskExecutionDetailPanel from '@/components/task-management/TaskExecution
 
 const { t } = useI18n()
 const { showError } = useToast()
+const route = useRoute()
 
 function getDefaultDetailDateRange() {
   const now = new Date()
@@ -450,8 +452,15 @@ async function handlePreview(task) {
   }
 }
 
-onMounted(() => {
+async function openInitialExecution() {
+  const executionId = route.query.execution_id
+  if (!executionId) return
+  await handlePreview({ id: executionId })
+}
+
+onMounted(async () => {
   fetchUserOptions()
-  loadTasks()
+  await loadTasks()
+  await openInitialExecution()
 })
 </script>

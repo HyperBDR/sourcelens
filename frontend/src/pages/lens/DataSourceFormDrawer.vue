@@ -118,7 +118,22 @@
         </FormRow>
         <div class="grid gap-4 md:grid-cols-2">
           <FormRow :label="t('lensAdmin.fields.branch')">
-            <input v-model="config.branch" class="form-input" />
+            <select
+              v-model="config.branch"
+              class="form-input"
+              :disabled="!gitBranchOptions.length"
+            >
+              <option value="">
+                {{ t('lensAdmin.datasourceWizard.branchPlaceholder') }}
+              </option>
+              <option
+                v-for="branch in gitBranchOptions"
+                :key="branch"
+                :value="branch"
+              >
+                {{ branch }}
+              </option>
+            </select>
           </FormRow>
           <FormRow :label="t('lensAdmin.fields.authScheme')" required>
             <select v-model="config.auth_scheme" class="form-input">
@@ -133,22 +148,72 @@
         </div>
         <FormRow
           v-if="config.auth_scheme === 'token'"
-          :label="t('lensAdmin.fields.accessToken')"
-          :required="!form.credential_configured"
+          :label="t('lensAdmin.fields.credential')"
+          required
         >
-          <input
-            v-model="config.access_token"
-            class="form-input"
-            type="password"
-            autocomplete="off"
-          />
-          <p class="mt-1 text-xs text-ink-500">
-            {{
-              form.credential_configured
-                ? t('lensAdmin.datasourceWizard.accessTokenConfiguredHint')
-                : t('lensAdmin.datasourceWizard.accessTokenHint')
-            }}
-          </p>
+          <div class="flex flex-col gap-2">
+            <select
+              v-if="filteredCredentials.length"
+              v-model="form.credential_uuid"
+              class="form-input"
+            >
+              <option value="">
+                {{ t('lensAdmin.datasourceWizard.selectCredential') }}
+              </option>
+              <option
+                v-for="credential in filteredCredentials"
+                :key="credential.uuid"
+                :value="credential.uuid"
+              >
+                {{ credential.name }}
+              </option>
+            </select>
+            <div
+              v-else
+              class="space-y-4 rounded-md border border-line bg-surface p-4"
+            >
+              <div>
+                <p class="text-sm font-medium text-ink-900">
+                  {{ t('lensAdmin.datasourceWizard.noGitCredentialTitle') }}
+                </p>
+                <p class="mt-1 text-xs text-ink-500">
+                  {{ t('lensAdmin.datasourceWizard.noGitCredentialDesc') }}
+                </p>
+              </div>
+              <div class="grid gap-3 md:grid-cols-2">
+                <FormRow :label="t('lensAdmin.fields.name')" required>
+                  <input
+                    v-model="quickCredential.name"
+                    class="form-input"
+                    :placeholder="
+                      t('lensAdmin.datasourceWizard.credentialNamePlaceholder')
+                    "
+                  />
+                </FormRow>
+                <FormRow :label="t('lensAdmin.fields.accessToken')" required>
+                  <input
+                    v-model="quickCredential.secret"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    :placeholder="
+                      t('lensAdmin.datasourceWizard.credentialTokenPlaceholder')
+                    "
+                  />
+                </FormRow>
+              </div>
+              <div class="flex justify-end">
+                <BaseButton
+                  size="sm"
+                  variant="primary"
+                  :disabled="!canCreateQuickCredential"
+                  @click="createQuickCredential"
+                >
+                  {{ t('lensAdmin.datasourceWizard.saveCredential') }}
+                </BaseButton>
+              </div>
+            </div>
+          </div>
         </FormRow>
       </template>
       <template v-else>
@@ -163,36 +228,81 @@
           </select>
         </FormRow>
 
-        <div class="grid gap-4 md:grid-cols-2">
-          <FormRow
-            :label="t('lensAdmin.fields.feishuAppId')"
-            :required="!form.credential_configured"
-          >
-            <input
-              v-model="config.app_id"
+        <FormRow :label="t('lensAdmin.fields.credential')" required>
+          <div class="flex flex-col gap-2">
+            <select
+              v-if="filteredCredentials.length"
+              v-model="form.credential_uuid"
               class="form-input"
-              autocomplete="off"
-            />
-          </FormRow>
-          <FormRow
-            :label="t('lensAdmin.fields.feishuAppSecret')"
-            :required="!form.credential_configured"
-          >
-            <input
-              v-model="config.app_secret"
-              class="form-input"
-              type="password"
-              autocomplete="off"
-            />
-          </FormRow>
-        </div>
-        <p class="-mt-3 text-xs text-ink-500">
-          {{
-            form.credential_configured
-              ? t('lensAdmin.datasourceWizard.feishuCredentialConfiguredHint')
-              : t('lensAdmin.datasourceWizard.feishuCredentialHint')
-          }}
-        </p>
+            >
+              <option value="">
+                {{ t('lensAdmin.datasourceWizard.selectFeishuCredential') }}
+              </option>
+              <option
+                v-for="credential in filteredCredentials"
+                :key="credential.uuid"
+                :value="credential.uuid"
+              >
+                {{ credential.name }}
+              </option>
+            </select>
+            <div
+              v-else
+              class="space-y-4 rounded-md border border-line bg-surface p-4"
+            >
+              <div>
+                <p class="text-sm font-medium text-ink-900">
+                  {{ t('lensAdmin.datasourceWizard.noFeishuCredentialTitle') }}
+                </p>
+                <p class="mt-1 text-xs text-ink-500">
+                  {{ t('lensAdmin.datasourceWizard.noFeishuCredentialDesc') }}
+                </p>
+              </div>
+              <FormRow :label="t('lensAdmin.fields.name')" required>
+                <input
+                  v-model="quickCredential.name"
+                  class="form-input"
+                  :placeholder="
+                    t('lensAdmin.datasourceWizard.feishuCredentialNamePlaceholder')
+                  "
+                />
+              </FormRow>
+              <div class="grid gap-3 md:grid-cols-2">
+                <FormRow :label="t('lensAdmin.fields.feishuAppId')" required>
+                  <input
+                    v-model="quickCredential.appId"
+                    class="form-input"
+                    autocomplete="off"
+                    :placeholder="
+                      t('lensAdmin.datasourceWizard.feishuAppIdPlaceholder')
+                    "
+                  />
+                </FormRow>
+                <FormRow :label="t('lensAdmin.fields.feishuAppSecret')" required>
+                  <input
+                    v-model="quickCredential.appSecret"
+                    class="form-input"
+                    type="password"
+                    autocomplete="off"
+                    :placeholder="
+                      t('lensAdmin.datasourceWizard.feishuAppSecretPlaceholder')
+                    "
+                  />
+                </FormRow>
+              </div>
+              <div class="flex justify-end">
+                <BaseButton
+                  size="sm"
+                  variant="primary"
+                  :disabled="!canCreateQuickCredential"
+                  @click="createQuickCredential"
+                >
+                  {{ t('lensAdmin.datasourceWizard.saveCredential') }}
+                </BaseButton>
+              </div>
+            </div>
+          </div>
+        </FormRow>
 
         <template v-if="config.sync_mode === 'drive_folder'">
           <FormRow :label="t('lensAdmin.fields.folderUrl')" required>
@@ -238,11 +348,6 @@
               {{ t('lensAdmin.datasourceWizard.feishuUrlHint') }}
             </p>
           </FormRow>
-          <div class="grid gap-4 md:grid-cols-2">
-            <FormRow :label="t('lensAdmin.fields.appToken')">
-              <input v-model="config.app_token" class="form-input" />
-            </FormRow>
-          </div>
           <FormRow :label="t('lensAdmin.fields.docIds')">
             <input
               v-model="config.doc_ids_text"
@@ -255,16 +360,23 @@
           </FormRow>
         </template>
       </template>
+      <div
+        v-if="form.source_type === 'git' && gitBranchOptions.length"
+        class="text-xs text-ink-500"
+      >
+        {{
+          t('lensAdmin.datasourceWizard.branchCount', {
+            count: gitBranchOptions.length
+          })
+        }}
+      </div>
       <div class="flex items-center gap-2">
-        <BaseButton
-          variant="outline"
-          size="sm"
-          :disabled="!canTestConnection"
-          :loading="testingConnection"
-          @click="$emit('test-connection')"
+        <span
+          v-if="form.source_type === 'git' && !gitBranchOptions.length"
+          class="text-xs text-ink-500"
         >
-          {{ t('lensAdmin.datasourceWizard.testConnection') }}
-        </BaseButton>
+          {{ t('lensAdmin.datasourceWizard.branchTestHint') }}
+        </span>
       </div>
       <div
         v-if="connectionResult"
@@ -326,7 +438,21 @@
       >
         {{ pathResultMessage }}
       </div>
-      <FormRow :label="t('lensAdmin.fields.syncInterval')" required>
+      <FormRow :label="t('lensAdmin.fields.syncPolicy')" required>
+        <select v-model="syncPolicyMode" class="form-input w-56">
+          <option value="interval">
+            {{ t('lensAdmin.datasourceWizard.syncPolicyInterval') }}
+          </option>
+          <option value="crontab">
+            {{ t('lensAdmin.datasourceWizard.syncPolicyCrontab') }}
+          </option>
+        </select>
+      </FormRow>
+      <FormRow
+        v-if="syncPolicyMode === 'interval'"
+        :label="t('lensAdmin.fields.syncInterval')"
+        required
+      >
         <input
           v-model.number="syncIntervalSeconds"
           class="form-input w-40"
@@ -337,6 +463,22 @@
           {{ t('lensAdmin.datasourceWizard.intervalHint') }}
         </p>
       </FormRow>
+      <div v-else class="grid gap-4 md:grid-cols-2">
+        <FormRow :label="t('lensAdmin.fields.cron')" required>
+          <input
+            v-model="syncCron"
+            class="form-input font-mono"
+            placeholder="0 2 * * *"
+          />
+        </FormRow>
+        <FormRow :label="t('lensAdmin.fields.timezone')">
+          <input
+            v-model="syncTimezone"
+            class="form-input"
+            placeholder="Asia/Shanghai"
+          />
+        </FormRow>
+      </div>
     </div>
 
     <p v-if="formError" class="mt-4 text-sm text-danger-700">
@@ -352,6 +494,15 @@
           {{ wizardStep > 1 ? t('lensAdmin.wizard.back') : t('common.cancel') }}
         </BaseButton>
         <div class="flex items-center gap-3">
+          <BaseButton
+            v-if="wizardStep === 3"
+            variant="outline"
+            :disabled="!canTestConnection"
+            :loading="testingConnection"
+            @click="$emit('test-connection')"
+          >
+            {{ t('lensAdmin.datasourceWizard.testConnection') }}
+          </BaseButton>
           <span class="text-xs text-ink-400">
             {{ wizardStep }} / {{ WIZARD_STEP_COUNT }}
           </span>
@@ -394,7 +545,11 @@ const props = defineProps({
   form: { type: Object, required: true },
   config: { type: Object, required: true },
   lensnodes: { type: Array, default: () => [] },
+  credentials: { type: Array, default: () => [] },
   syncIntervalSeconds: { type: Number, default: 3600 },
+  syncPolicyMode: { type: String, default: 'interval' },
+  syncCron: { type: String, default: '0 2 * * *' },
+  syncTimezone: { type: String, default: 'Asia/Shanghai' },
   pathResult: { type: Object, default: null },
   connectionResult: { type: Object, default: null },
   checkingPath: Boolean,
@@ -410,12 +565,22 @@ const emit = defineEmits([
   'check-path',
   'test-connection',
   'connection-change',
-  'update:syncIntervalSeconds'
+  'create-credential',
+  'update:syncIntervalSeconds',
+  'update:syncPolicyMode',
+  'update:syncCron',
+  'update:syncTimezone'
 ])
 
 const { t } = useI18n()
 const WIZARD_STEP_COUNT = 4
 const wizardStep = ref(1)
+const quickCredential = ref({
+  name: '',
+  secret: '',
+  appId: '',
+  appSecret: ''
+})
 
 const syncIntervalSeconds = computed({
   get() {
@@ -423,6 +588,33 @@ const syncIntervalSeconds = computed({
   },
   set(value) {
     emit('update:syncIntervalSeconds', value)
+  }
+})
+
+const syncPolicyMode = computed({
+  get() {
+    return props.syncPolicyMode
+  },
+  set(value) {
+    emit('update:syncPolicyMode', value)
+  }
+})
+
+const syncCron = computed({
+  get() {
+    return props.syncCron
+  },
+  set(value) {
+    emit('update:syncCron', value)
+  }
+})
+
+const syncTimezone = computed({
+  get() {
+    return props.syncTimezone
+  },
+  set(value) {
+    emit('update:syncTimezone', value)
   }
 })
 
@@ -533,8 +725,7 @@ const canTestConnection = computed(() => {
     }
     return (
       props.config.auth_scheme !== 'token' ||
-      !!props.config.access_token?.trim() ||
-      !!props.form.credential_configured
+      !!props.form.credential_uuid
     )
   }
   if (!hasFeishuCredential()) {
@@ -548,7 +739,6 @@ const canTestConnection = computed(() => {
   }
   return !!(
     props.config.document_url?.trim() ||
-    props.config.app_token?.trim() ||
     props.config.doc_ids_text?.trim()
   )
 })
@@ -592,33 +782,59 @@ const canProceedWizard = computed(() => {
     return !!props.form.lensnode_uuid
   }
   if (wizardStep.value === 3) {
-    if (props.form.source_type === 'git') {
-      if (!props.config.repo_url?.trim()) {
-        return false
-      }
-      return (
-        props.config.auth_scheme !== 'token' ||
-        !!props.config.access_token?.trim() ||
-        !!props.form.credential_configured
-      )
-    }
-    if (!hasFeishuCredential()) {
+    if (props.connectionResult?.status !== 'success') {
       return false
     }
-    if (props.config.sync_mode === 'drive_folder') {
-      return !!(
-        props.config.folder_url?.trim() ||
-        props.config.folder_token?.trim()
+    if (props.form.source_type === 'git') {
+      return (
+        gitBranchOptions.value.length > 0 &&
+        gitBranchOptions.value.includes(props.config.branch)
       )
     }
-    return !!(
-      props.config.document_url?.trim() ||
-      props.config.app_token?.trim() ||
-      props.config.doc_ids_text?.trim()
+    return true
+  }
+  if (!props.form.workspace_relative_path?.trim()) {
+    return false
+  }
+  if (syncPolicyMode.value === 'crontab') {
+    return String(syncCron.value || '').trim().split(/\s+/).length === 5
+  }
+  return true
+})
+
+const gitBranchOptions = computed(() => {
+  if (props.form.source_type !== 'git') {
+    return []
+  }
+  const branches = props.connectionResult?.details?.branches
+  return Array.isArray(branches) ? branches : []
+})
+
+const filteredCredentials = computed(() => {
+  if (props.form.source_type === 'feishu') {
+    return props.credentials.filter(
+      (credential) => credential.auth_type === 'feishu_app'
     )
   }
-  return !!props.form.workspace_relative_path?.trim()
+  return props.credentials.filter(
+    (credential) => credential.auth_type === 'https_token'
+  )
 })
+
+const canCreateQuickCredential = computed(
+  () => {
+    if (!quickCredential.value.name?.trim()) {
+      return false
+    }
+    if (props.form.source_type === 'feishu') {
+      return (
+        !!quickCredential.value.appId?.trim() &&
+        !!quickCredential.value.appSecret?.trim()
+      )
+    }
+    return !!quickCredential.value.secret?.trim()
+  }
+)
 
 function nextWizardStep() {
   if (wizardStep.value < WIZARD_STEP_COUNT) wizardStep.value++
@@ -628,13 +844,36 @@ function prevWizardStep() {
   if (wizardStep.value > 1) wizardStep.value--
 }
 
+function createQuickCredential() {
+  if (!canCreateQuickCredential.value) {
+    return
+  }
+  const payload = {
+    name: quickCredential.value.name.trim(),
+    provider: 'generic',
+    auth_type: 'https_token'
+  }
+  if (props.form.source_type === 'feishu') {
+    payload.provider = 'feishu'
+    payload.auth_type = 'feishu_app'
+    payload.app_id = quickCredential.value.appId.trim()
+    payload.app_secret = quickCredential.value.appSecret.trim()
+  } else {
+    payload.secret = quickCredential.value.secret.trim()
+  }
+  emit('create-credential', payload)
+  quickCredential.value = {
+    name: '',
+    secret: '',
+    appId: '',
+    appSecret: ''
+  }
+}
+
 function hasFeishuCredential() {
   return (
     !!props.form.credential_configured ||
-    (
-      !!props.config.app_id?.trim() &&
-      !!props.config.app_secret?.trim()
-    )
+    !!props.form.credential_uuid
   )
 }
 
@@ -651,6 +890,7 @@ watch(
   () => [
     props.form.lensnode_uuid,
     props.form.source_type,
+    props.form.credential_uuid,
     JSON.stringify(props.config || {})
   ],
   () => {
