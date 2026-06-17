@@ -218,6 +218,14 @@ export async function syncDataSource(uuid, payload = {}) {
   return unwrapResponse(response)
 }
 
+export async function setDataSourceEnabled(uuid, enabled) {
+  const response = await api.post(
+    `/lens/admin/datasources/${uuid}/set-enabled/`,
+    { enabled }
+  )
+  return unwrapResponse(response)
+}
+
 export async function cancelDataSourceSync(uuid) {
   const response = await api.post(`/lens/admin/datasources/${uuid}/cancel-sync/`)
   return unwrapResponse(response)

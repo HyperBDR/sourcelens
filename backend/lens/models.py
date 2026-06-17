@@ -171,7 +171,6 @@ class DataSource(TimestampedUUIDModel):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         DISABLED = "disabled", "Disabled"
-        ERROR = "error", "Error"
 
     name = models.CharField(max_length=160)
     source_type = models.CharField(max_length=32, choices=SourceType.choices)

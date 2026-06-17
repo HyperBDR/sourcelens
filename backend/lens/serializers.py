@@ -393,6 +393,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
     )
     credential_configured = serializers.SerializerMethodField()
     current_sync = serializers.SerializerMethodField()
+    sync_state = serializers.SerializerMethodField()
 
     def validate(self, attrs):
         """Validate datasource config by source type."""
@@ -529,6 +530,34 @@ class DataSourceSerializer(serializers.ModelSerializer):
             ),
         }
 
+    def get_sync_state(self, datasource):
+        """Return datasource sync status independent from enabled state."""
+
+        from .periodic_tasks import estimate_datasource_next_run
+
+        record = ScheduledTask.objects.filter(
+            task_type=ScheduledTask.TaskType.SOURCE_SYNC,
+            target_type="datasource",
+            target_id=datasource.uuid,
+        ).first()
+        if record is None:
+            return {
+                "enabled": datasource.status != DataSource.Status.DISABLED,
+                "last_status": "",
+                "last_error": datasource.last_error,
+                "last_run_at": None,
+                "last_metrics": {},
+                "next_run_at": None,
+            }
+        return {
+            "enabled": record.enabled,
+            "last_status": record.last_status or "",
+            "last_error": record.last_error or datasource.last_error,
+            "last_run_at": record.last_run_at,
+            "last_metrics": record.last_metrics or {},
+            "next_run_at": estimate_datasource_next_run(datasource, record),
+        }
+
     def to_representation(self, instance):
         """Return datasource data without plaintext credential values."""
 
@@ -565,6 +594,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "config",
             "credential_configured",
             "current_sync",
+            "sync_state",
             "sync_policy",
             "target_path",
             "last_synced_at",
@@ -578,6 +608,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "credential",
             "credential_configured",
             "current_sync",
+            "sync_state",
             "last_error",
             "created_at",
             "updated_at",

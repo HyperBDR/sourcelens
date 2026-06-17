@@ -416,7 +416,7 @@ class LensServiceTests(TransactionTestCase):
             target_type="datasource",
             target_id=self.datasource.uuid,
         )
-        self.assertEqual(self.datasource.status, "error")
+        self.assertEqual(self.datasource.status, "active")
         self.assertEqual(
             self.datasource.last_error,
             "LENS_SOURCE_CONFIG_INVALID",

@@ -552,6 +552,8 @@ class DataSourceViewSet(BaseAdminViewSet):
 
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
+        if datasource.status == DataSource.Status.DISABLED:
+            return
         task_id = uuid_mod.uuid4().hex
         self._initial_sync_task_id = task_id
         user = self.request.user
@@ -574,6 +576,8 @@ class DataSourceViewSet(BaseAdminViewSet):
     def _enqueue_datasource_sync(datasource, task_id, trigger, user=None):
         """Register and enqueue one datasource sync task."""
 
+        if datasource.status == DataSource.Status.DISABLED:
+            raise ValueError("DATASOURCE_DISABLED")
         task_execution = register_datasource_sync_task(
             datasource,
             task_id,
@@ -591,6 +595,11 @@ class DataSourceViewSet(BaseAdminViewSet):
         """Enqueue datasource synchronization on its LensNode."""
 
         datasource = self.get_object()
+        if datasource.status == DataSource.Status.DISABLED:
+            return Response(
+                {"detail": "DATASOURCE_DISABLED"},
+                status=status.HTTP_409_CONFLICT,
+            )
         task_id = uuid_mod.uuid4().hex
         task_execution = self._enqueue_datasource_sync(
             datasource,
@@ -607,6 +616,29 @@ class DataSourceViewSet(BaseAdminViewSet):
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @action(detail=True, methods=["post"], url_path="set-enabled")
+    def set_enabled(self, request, uuid=None):
+        """Enable or disable a datasource and sync its schedule."""
+
+        enabled = request.data.get("enabled")
+        if not isinstance(enabled, bool):
+            return Response(
+                {"detail": "enabled must be a boolean."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        datasource = self.get_object()
+        next_status = (
+            DataSource.Status.ACTIVE
+            if enabled
+            else DataSource.Status.DISABLED
+        )
+        if datasource.status != next_status:
+            datasource.status = next_status
+            datasource.save(update_fields=["status", "updated_at"])
+        ensure_datasource_periodic_task(datasource)
+        return Response(DataSourceSerializer(datasource).data)
 
     @action(detail=True, methods=["post"], url_path="cancel-sync")
     def cancel_sync(self, request, uuid=None):

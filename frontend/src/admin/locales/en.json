@@ -680,6 +680,7 @@
       "branch": "Branch",
       "targetPath": "Target Path",
       "sync": "Sync",
+      "policy": "Policy",
       "credential": "Credential",
       "authScheme": "Auth Scheme",
       "datasources": "Data Sources",
@@ -714,7 +715,11 @@
       "dirTaskSummary": "Dirs {dirs} / Tasks {tasks}",
       "notRecorded": "Not recorded",
       "intervalSeconds": "{seconds}s",
-      "syncRunning": "Syncing"
+      "syncRunning": "Syncing",
+      "notSynced": "Not synced",
+      "lastSync": "Last sync",
+      "nextSync": "Next sync",
+      "followCrontab": "Follow crontab"
     },
     "credentials": {
       "secretConfigured": "Secret configured",
@@ -742,6 +747,8 @@
       "issueToken": "Issue",
       "revokeToken": "Revoke",
       "sync": "Sync",
+      "enableDatasource": "Enable Data Source",
+      "disableDatasource": "Disable Data Source",
       "cancelSync": "Cancel Sync",
       "viewTask": "View Task",
       "addRow": "Add row",
@@ -994,6 +1001,7 @@
       "tokenRevokeFailed": "Token revoke failed",
       "syncStarted": "Sync task triggered",
       "syncFailed": "Failed to trigger sync task",
+      "datasourceDisabled": "Data source is disabled; sync cannot start",
       "syncCancelled": "Sync task cancelled",
       "syncCancelFailed": "Failed to cancel sync task"
     }

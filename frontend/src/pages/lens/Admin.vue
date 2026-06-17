@@ -257,10 +257,10 @@
                       {{ t('lensAdmin.columns.targetPath') }}
                     </th>
                     <th class="table-head">
-                      {{ t('lensAdmin.columns.sync') }}
+                      {{ t('lensAdmin.columns.status') }}
                     </th>
                     <th class="table-head">
-                      {{ t('lensAdmin.columns.status') }}
+                      {{ t('lensAdmin.columns.policy') }}
                     </th>
                     <th class="table-head">
                       {{ t('lensAdmin.columns.actions') }}
@@ -276,8 +276,16 @@
                     @click="selectDataSource(row)"
                   >
                     <td class="table-cell">
-                      <div class="font-medium text-ink-900">
-                        {{ row.name }}
+                      <div class="flex items-center gap-2 font-medium text-ink-900">
+                        <span
+                          :class="
+                            isDataSourceEnabled(row)
+                              ? 'bg-success-600'
+                              : 'bg-danger-600'
+                          "
+                          class="h-2 w-2 shrink-0 rounded-full"
+                        />
+                        <span>{{ row.name }}</span>
                       </div>
                       <div class="mt-1 flex flex-wrap items-center gap-2">
                         <span class="font-mono text-xs text-ink-400">
@@ -305,17 +313,15 @@
                       </div>
                     </td>
                     <td class="table-cell text-ink-600">
-                      <div class="space-y-2">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <StatusBadge
-                            :status="
-                              isDataSourceSyncing(row)
-                                ? 'processing'
-                                : 'pending'
-                            "
-                          />
-                          <span class="text-sm text-ink-600">
-                            {{ formatDataSourceSyncState(row) }}
+                      <div class="flex max-w-sm flex-col items-start gap-2">
+                        <div class="flex flex-wrap gap-1.5">
+                          <span
+                            v-for="tag in datasourceSyncTags(row)"
+                            :key="tag.key"
+                            :class="tag.class"
+                            class="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium"
+                          >
+                            {{ tag.label }}
                           </span>
                         </div>
                         <div
@@ -332,17 +338,45 @@
                       </div>
                     </td>
                     <td class="table-cell">
-                      <StatusBadge :status="row.status" />
+                      <div class="space-y-1 text-xs text-ink-500">
+                        <div class="font-mono text-ink-700">
+                          {{ formatDataSourcePolicyLine(row.sync_policy) }}
+                        </div>
+                        <div>
+                          {{ t('lensAdmin.table.lastSync') }}:
+                          {{ formatDateTime(row.last_synced_at) }}
+                        </div>
+                        <div>
+                          {{ t('lensAdmin.table.nextSync') }}:
+                          {{ formatNextDatasourceSync(row) }}
+                        </div>
+                      </div>
                     </td>
                     <td class="table-cell" @click.stop>
                       <div class="flex flex-wrap gap-2">
                         <BaseButton
                           size="sm"
                           variant="outline"
-                          :disabled="isDataSourceSyncing(row)"
+                          :disabled="
+                            !isDataSourceEnabled(row) ||
+                            isDataSourceSyncing(row)
+                          "
                           @click="sync(row)"
                         >
                           {{ t('lensAdmin.actions.sync') }}
+                        </BaseButton>
+                        <BaseButton
+                          size="sm"
+                          :variant="
+                            isDataSourceEnabled(row) ? 'outline' : 'primary'
+                          "
+                          @click="toggleDataSourceEnabled(row)"
+                        >
+                          {{
+                            isDataSourceEnabled(row)
+                              ? t('lensAdmin.actions.disableDatasource')
+                              : t('lensAdmin.actions.enableDatasource')
+                          }}
                         </BaseButton>
                         <BaseButton
                           v-if="isDataSourceSyncing(row)"
@@ -1013,6 +1047,7 @@ import {
   listSkills,
   revealCredential,
   revokeLensNodeToken,
+  setDataSourceEnabled,
   syncDataSource,
   testLensNodeDataSourceConnection,
   updateAssistant,
@@ -1553,7 +1588,7 @@ const datasourceSyncDetails = computed(() => {
     detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true),
     detailItem(
       t('lensAdmin.fields.syncInterval'),
-      formatSyncPolicy(row.sync_policy, row.last_synced_at)
+      formatSyncPolicy(row.sync_policy)
     ),
     detailItem(t('lensAdmin.datasourceDetail.lastSyncedAt'), formatDateTime(row.last_synced_at)),
     detailItem(t('lensAdmin.datasourceDetail.lastError'), row.last_error, true),
@@ -1574,28 +1609,94 @@ function formatDateTime(value) {
   }).format(new Date(value))
 }
 
-function formatSyncPolicy(syncPolicy, lastSyncedAt) {
+function formatSyncPolicy(syncPolicy) {
   if (syncPolicy?.mode === 'crontab') {
     const cron = syncPolicy.cron || emptyValue
     const timezone = syncPolicy.timezone || 'UTC'
-    return `${cron} · ${timezone} · ${formatDateTime(lastSyncedAt)}`
+    return `${cron} · ${timezone}`
   }
   const interval = syncPolicy?.interval_seconds
-  const intervalText = interval
+  return interval
     ? t('lensAdmin.table.intervalSeconds', { seconds: interval })
     : emptyValue
-  return `${intervalText} · ${formatDateTime(lastSyncedAt)}`
+}
+
+function formatDataSourcePolicyLine(syncPolicy) {
+  if (syncPolicy?.mode === 'crontab') {
+    const cron = syncPolicy.cron || emptyValue
+    const timezone = syncPolicy.timezone || 'UTC'
+    return `Crontab: ${cron} - ${timezone}`
+  }
+  const interval = syncPolicy?.interval_seconds || 3600
+  return `Interval: ${interval}s`
 }
 
 function isDataSourceSyncing(row) {
   return Boolean(row?.current_sync?.task_id)
 }
 
-function formatDataSourceSyncState(row) {
-  if (isDataSourceSyncing(row)) {
-    return t('lensAdmin.table.syncRunning')
+function isDataSourceEnabled(row) {
+  return row?.status !== 'disabled'
+}
+
+function datasourceSyncTags(row) {
+  const tags = []
+  if (!isDataSourceEnabled(row)) {
+    tags.push({
+      key: 'disabled',
+      label: t('common.status.disabled'),
+      class: syncTagClass('disabled')
+    })
+  } else if (isDataSourceSyncing(row)) {
+    tags.push({
+      key: 'running',
+      label: t('lensAdmin.table.syncRunning'),
+      class: syncTagClass('running')
+    })
+  } else {
+    const status = row.sync_state?.last_status || ''
+    tags.push({
+      key: 'last-status',
+      label: formatDatasourceLastSyncStatus(status),
+      class: syncTagClass(status || 'not_synced')
+    })
   }
-  return formatSyncPolicy(row.sync_policy, row.last_synced_at)
+  return tags
+}
+
+function syncTagClass(status) {
+  const classes = {
+    success: 'border-success-200 bg-success-50 text-success-700',
+    failed: 'border-danger-200 bg-danger-50 text-danger-700',
+    running: 'border-warning-200 bg-warning-50 text-warning-700',
+    not_synced: 'border-line bg-surface-sunken text-ink-600',
+    disabled: 'border-line bg-surface-sunken text-ink-500',
+    policy: 'border-primary-200 bg-primary-50 text-primary-700'
+  }
+  return classes[status] || classes.not_synced
+}
+
+function formatDatasourceLastSyncStatus(status) {
+  if (status === 'success') {
+    return t('common.status.success')
+  }
+  if (status === 'failed') {
+    return t('common.status.failed')
+  }
+  return t('lensAdmin.table.notSynced')
+}
+
+function formatNextDatasourceSync(row) {
+  if (!isDataSourceEnabled(row)) {
+    return t('common.status.disabled')
+  }
+  if (row.sync_state?.next_run_at) {
+    return formatDateTime(row.sync_state.next_run_at)
+  }
+  if (row.sync_policy?.mode === 'crontab') {
+    return t('lensAdmin.table.followCrontab')
+  }
+  return t('lensAdmin.table.notRecorded')
 }
 
 function openDataSourceTask(row) {
@@ -2666,6 +2767,10 @@ async function revokeToken(row) {
 }
 
 async function sync(row) {
+  if (!isDataSourceEnabled(row)) {
+    showError(t('lensAdmin.messages.datasourceDisabled'))
+    return
+  }
   try {
     const result = await syncDataSource(row.uuid)
     const taskId = result?.task_id || ''
@@ -2677,6 +2782,16 @@ async function sync(row) {
     await load()
   } catch (error) {
     showError(resolveError(error, t('lensAdmin.messages.syncFailed')))
+  }
+}
+
+async function toggleDataSourceEnabled(row) {
+  try {
+    await setDataSourceEnabled(row.uuid, !isDataSourceEnabled(row))
+    showSuccess(t('lensAdmin.messages.saveSuccess'))
+    await load()
+  } catch (error) {
+    showError(resolveError(error, t('lensAdmin.messages.saveFailed')))
   }
 }
 

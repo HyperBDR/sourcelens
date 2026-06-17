@@ -640,6 +640,21 @@ class LensApiTests(TestCase):
         self.assertEqual(task.status, "PENDING")
         self.assertEqual(task.created_by, self.user)
 
+    def test_disabled_datasource_rejects_manual_sync(self):
+        self.datasource.status = DataSource.Status.DISABLED
+        self.datasource.save(update_fields=["status", "updated_at"])
+
+        with patch("lens.views.source_sync_task.apply_async") as apply_async:
+            response = self.client.post(
+                f"/api/lens/admin/datasources/{self.datasource.uuid}/sync/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["detail"], "DATASOURCE_DISABLED")
+        apply_async.assert_not_called()
+
     def test_datasource_create_uses_lensnode_workspace_path(self):
         self.lensnode.workspace_path = "/data/lens-workspace"
         self.lensnode.save(update_fields=["workspace_path", "updated_at"])

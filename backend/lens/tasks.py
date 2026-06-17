@@ -120,6 +120,12 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
         uuid=datasource_uuid
     )
     record = _get_or_create_source_sync_record(datasource)
+    if datasource.status == DataSource.Status.DISABLED:
+        if record.enabled:
+            record.enabled = False
+            record.save(update_fields=["enabled"])
+        return 0
+
     now = timezone.now()
     record.last_status = ScheduledTask.Status.RUNNING
     record.last_error = ""
@@ -169,9 +175,8 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
         )
         raise
     except Exception as exc:
-        datasource.status = DataSource.Status.ERROR
         datasource.last_error = str(exc)
-        datasource.save(update_fields=["status", "last_error", "updated_at"])
+        datasource.save(update_fields=["last_error", "updated_at"])
         record.last_status = ScheduledTask.Status.FAILED
         record.last_error = str(exc)
         record.last_run_at = timezone.now()
@@ -189,12 +194,10 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
         )
         raise
 
-    datasource.status = DataSource.Status.ACTIVE
     datasource.last_error = ""
     datasource.last_synced_at = timezone.now()
     datasource.save(
         update_fields=[
-            "status",
             "last_error",
             "last_synced_at",
             "target_path",

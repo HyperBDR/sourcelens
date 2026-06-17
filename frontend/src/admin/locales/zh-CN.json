@@ -680,6 +680,7 @@
       "branch": "分支",
       "targetPath": "目标路径",
       "sync": "同步",
+      "policy": "策略",
       "credential": "凭证",
       "authScheme": "认证方式",
       "datasources": "数据源",
@@ -714,7 +715,11 @@
       "dirTaskSummary": "{dirs} 目录 / {tasks} 任务",
       "notRecorded": "未记录",
       "intervalSeconds": "{seconds}s",
-      "syncRunning": "正在同步"
+      "syncRunning": "正在同步",
+      "notSynced": "未同步",
+      "lastSync": "最近同步",
+      "nextSync": "下次同步",
+      "followCrontab": "按 Crontab 触发"
     },
     "credentials": {
       "secretConfigured": "密钥已配置",
@@ -742,6 +747,8 @@
       "issueToken": "签发",
       "revokeToken": "吊销",
       "sync": "同步",
+      "enableDatasource": "启用数据源",
+      "disableDatasource": "禁用数据源",
       "cancelSync": "取消同步",
       "viewTask": "查看任务",
       "addRow": "添加一行",
@@ -992,6 +999,7 @@
       "tokenRevokeFailed": "Token 吊销失败",
       "syncStarted": "同步任务已触发",
       "syncFailed": "同步任务触发失败",
+      "datasourceDisabled": "数据源已禁用，不能触发同步",
       "syncCancelled": "同步任务已取消",
       "syncCancelFailed": "同步任务取消失败"
     }

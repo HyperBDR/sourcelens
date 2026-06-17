@@ -160,6 +160,68 @@ def ensure_datasource_periodic_task(datasource):
     return record
 
 
+def estimate_datasource_next_run(datasource, record=None):
+    """Return a best-effort next run time for datasource sync."""
+
+    if datasource.status == DataSource.Status.DISABLED:
+        return None
+
+    record = record or ScheduledTask.objects.filter(
+        task_type=ScheduledTask.TaskType.SOURCE_SYNC,
+        target_type="datasource",
+        target_id=datasource.uuid,
+    ).first()
+    if record is not None and not record.enabled:
+        return None
+
+    sync_policy = datasource.sync_policy or {}
+    if (sync_policy.get("mode") or "interval") == "crontab":
+        return _estimate_crontab_next_run(sync_policy)
+
+    last_run_at = getattr(record, "last_run_at", None) if record else None
+    if last_run_at is None:
+        return None
+
+    from datetime import timedelta
+
+    interval = max(int(sync_policy.get("interval_seconds") or 3600), 1)
+    return last_run_at + timedelta(seconds=interval)
+
+
+def _estimate_crontab_next_run(sync_policy):
+    """Return the next crontab fire time using Celery's cron parser."""
+
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    from celery.schedules import crontab
+    from django.utils import timezone
+
+    try:
+        cron_timezone = ZoneInfo(sync_policy.get("timezone") or "UTC")
+    except ZoneInfoNotFoundError:
+        cron_timezone = ZoneInfo("UTC")
+
+    try:
+        minute, hour, day_of_month, month_of_year, day_of_week = str(
+            sync_policy.get("cron") or "0 * * * *"
+        ).split()
+    except ValueError:
+        return None
+
+    now = timezone.now().astimezone(cron_timezone)
+    schedule = crontab(
+        minute=minute,
+        hour=hour,
+        day_of_month=day_of_month,
+        month_of_year=month_of_year,
+        day_of_week=day_of_week,
+        nowfun=lambda: now,
+    )
+    remaining = schedule.remaining_estimate(now)
+    return now + max(remaining, timedelta())
+
+
 def _datasource_schedule(sync_policy):
     """Return the Celery Beat schedule field and instance."""
 
@@ -225,9 +287,7 @@ def register_periodic_tasks():
             enabled=True,
         )
 
-    datasources = DataSource.objects.filter(
-        status__in=[DataSource.Status.ACTIVE, DataSource.Status.ERROR]
-    )
+    datasources = DataSource.objects.filter(status=DataSource.Status.ACTIVE)
     for datasource in datasources:
         interval = datasource.sync_policy.get("interval_seconds", 3600)
         _ensure_source_scheduled_task(datasource)
