@@ -358,6 +358,88 @@ class TestTaskTrackerAndRegister:
         assert synced.status == TaskStatus.SUCCESS
         assert synced.result == {"count": 1}
 
+    def test_sync_task_from_celery_skips_external_completion_task(
+        self,
+        user,
+        db,
+        monkeypatch,
+    ):
+        register_task_execution(
+            task_id="tid-sync-external",
+            task_name="t",
+            module="lens_datasource",
+            created_by=user,
+            metadata={"completion_source": "lensnode_callback"},
+        )
+        TaskTracker.update_task_status(
+            task_id="tid-sync-external",
+            status=TaskStatus.STARTED,
+        )
+
+        class FakeSuccessResult:
+            status = "SUCCESS"
+            result = {"count": 1}
+            traceback = None
+
+            @staticmethod
+            def ready():
+                return True
+
+        monkeypatch.setattr(
+            task_tracker_svc,
+            "AsyncResult",
+            lambda _: FakeSuccessResult(),
+        )
+
+        synced = TaskTracker.sync_task_from_celery("tid-sync-external")
+        assert synced is not None
+        synced.refresh_from_db()
+        assert synced.status == TaskStatus.STARTED
+        assert synced.result is None
+
+    def test_sync_task_from_celery_keeps_failed_external_completion_task(
+        self,
+        user,
+        db,
+        monkeypatch,
+    ):
+        register_task_execution(
+            task_id="tid-sync-external-failed",
+            task_name="t",
+            module="lens_datasource",
+            created_by=user,
+            metadata={"completion_source": "lensnode_callback"},
+        )
+        TaskTracker.update_task_status(
+            task_id="tid-sync-external-failed",
+            status=TaskStatus.FAILURE,
+            error="callback failed",
+        )
+
+        class FakeSuccessResult:
+            status = "SUCCESS"
+            result = {"count": 1}
+            traceback = None
+
+            @staticmethod
+            def ready():
+                return True
+
+        monkeypatch.setattr(
+            task_tracker_svc,
+            "AsyncResult",
+            lambda _: FakeSuccessResult(),
+        )
+
+        synced = TaskTracker.sync_task_from_celery(
+            "tid-sync-external-failed"
+        )
+        assert synced is not None
+        synced.refresh_from_db()
+        assert synced.status == TaskStatus.FAILURE
+        assert synced.error == "callback failed"
+        assert synced.result is None
+
     @pytest.mark.parametrize(
         "completed_status",
         [TaskStatus.FAILURE, TaskStatus.REVOKED],

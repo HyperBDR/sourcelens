@@ -44,6 +44,7 @@ from lens.services import (
 )
 from lens.tasks import (
     SourceSyncBusy,
+    complete_datasource_sync_task,
     datasource_lock,
     lensnode_health_task,
     source_sync_task,
@@ -353,14 +354,9 @@ class LensServiceTests(TransactionTestCase):
         )
         await communicator.disconnect()
 
-    def test_source_sync_task_updates_datasource_and_scheduled_task(self):
-        with patch("lens.tasks.dispatch_datasource_sync") as dispatch:
-            dispatch.return_value = {
-                "status": "success",
-                "synced": 1,
-                "files": 3,
-                "target_path": self.datasource.target_path,
-            }
+    def test_source_sync_task_dispatches_without_waiting_for_result(self):
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
             synced = source_sync_task(str(self.datasource.uuid))
             self.datasource.refresh_from_db()
 
@@ -369,21 +365,23 @@ class LensServiceTests(TransactionTestCase):
                 target_type="datasource",
                 target_id=self.datasource.uuid,
             )
-            self.assertEqual(synced, 1)
+            self.assertEqual(synced, 0)
             self.assertEqual(self.datasource.status, "active")
-            self.assertIsNotNone(self.datasource.last_synced_at)
-            self.assertEqual(record.last_status, "success")
-            self.assertEqual(
-                record.last_metrics,
-                {
-                    "synced": 1,
-                    "files": 3,
-                    "target_path": self.datasource.target_path,
-                },
-            )
+            self.assertIsNone(self.datasource.last_synced_at)
+            self.assertEqual(record.last_status, "running")
+            self.assertEqual(record.last_metrics, {})
             task = TaskExecution.objects.get(module="lens_datasource")
             self.assertEqual(task.task_name, "datasource_sync:Repo Cache")
+            self.assertEqual(task.status, "STARTED")
             self.assertEqual(task.metadata["type"], "datasource")
+            self.assertEqual(
+                task.metadata["completion_source"],
+                "lensnode_callback",
+            )
+            self.assertEqual(
+                task.metadata["datasource_sync_request_id"],
+                "request-1",
+            )
             self.assertEqual(task.metadata["source_type"], "git")
             self.assertEqual(
                 task.metadata["repo_url"],
@@ -396,17 +394,51 @@ class LensServiceTests(TransactionTestCase):
             )
             self.assertEqual(task.metadata["sync_interval_seconds"], 3600)
             steps = task.metadata.get("steps") or []
-            self.assertGreaterEqual(len(steps), 3)
+            self.assertGreaterEqual(len(steps), 2)
             self.assertEqual(steps[0]["name"], "prepare")
-            self.assertEqual(steps[-1]["name"], "completed")
-            self.assertEqual(task.metadata["progress_percent"], 100)
+            self.assertEqual(steps[-1]["name"], "dispatch")
+
+    def test_complete_datasource_sync_task_updates_records(self):
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
+            source_sync_task(str(self.datasource.uuid))
+
+        task = TaskExecution.objects.get(module="lens_datasource")
+        complete_datasource_sync_task(
+            task.task_id,
+            {
+                "status": "success",
+                "synced": 1,
+                "files": 3,
+                "target_path": self.datasource.target_path,
+            },
+        )
+
+        self.datasource.refresh_from_db()
+        record = ScheduledTask.objects.get(
+            task_type="source_sync",
+            target_type="datasource",
+            target_id=self.datasource.uuid,
+        )
+        task.refresh_from_db()
+        self.assertIsNotNone(self.datasource.last_synced_at)
+        self.assertEqual(record.last_status, "success")
+        self.assertEqual(
+            record.last_metrics,
+            {
+                "synced": 1,
+                "files": 3,
+                "folders": 0,
+                "failed": 0,
+                "target_path": self.datasource.target_path,
+            },
+        )
+        self.assertEqual(task.status, "SUCCESS")
+        self.assertEqual(task.metadata["progress_percent"], 100)
 
     def test_source_sync_task_marks_invalid_source_failed(self):
-        with patch("lens.tasks.dispatch_datasource_sync") as dispatch:
-            dispatch.return_value = {
-                "status": "failed",
-                "error": "LENS_SOURCE_CONFIG_INVALID",
-            }
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.side_effect = RuntimeError("LENS_SOURCE_CONFIG_INVALID")
             with self.assertRaises(RuntimeError):
                 source_sync_task(str(self.datasource.uuid))
 
@@ -423,7 +455,35 @@ class LensServiceTests(TransactionTestCase):
         )
         self.assertEqual(record.last_status, "failed")
 
-    def test_source_sync_task_rejects_concurrent_sync_without_source_error(self):
+    def test_complete_datasource_sync_task_marks_failure(self):
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
+            source_sync_task(str(self.datasource.uuid))
+
+        task = TaskExecution.objects.get(module="lens_datasource")
+        complete_datasource_sync_task(
+            task.task_id,
+            {
+                "status": "failed",
+                "error": "LENS_SOURCE_CONFIG_INVALID",
+            },
+        )
+
+        self.datasource.refresh_from_db()
+        record = ScheduledTask.objects.get(
+            task_type="source_sync",
+            target_type="datasource",
+            target_id=self.datasource.uuid,
+        )
+        task.refresh_from_db()
+        self.assertEqual(
+            self.datasource.last_error,
+            "LENS_SOURCE_CONFIG_INVALID",
+        )
+        self.assertEqual(record.last_status, "failed")
+        self.assertEqual(task.status, "FAILURE")
+
+    def test_source_sync_task_rejects_concurrent_sync(self):
         with datasource_lock(self.datasource.uuid):
             with self.assertRaises(SourceSyncBusy):
                 source_sync_task(str(self.datasource.uuid))
@@ -446,16 +506,11 @@ class LensServiceTests(TransactionTestCase):
         }
         self.datasource.save(update_fields=["source_type", "config"])
 
-        with patch("lens.tasks.dispatch_datasource_sync") as dispatch:
-            dispatch.return_value = {
-                "status": "success",
-                "synced": 2,
-                "files": 2,
-                "target_path": self.datasource.target_path,
-            }
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
             synced = source_sync_task(str(self.datasource.uuid))
 
-        self.assertEqual(synced, 2)
+        self.assertEqual(synced, 0)
         dispatch.assert_called_once()
 
     def test_lensnode_health_marks_stale_lensnodes_offline(self):

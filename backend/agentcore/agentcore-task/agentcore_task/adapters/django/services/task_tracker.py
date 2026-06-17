@@ -100,6 +100,16 @@ def _should_ignore_pending_sync(
     )
 
 
+def _should_skip_external_completion_sync(
+    task_execution: TaskExecution,
+) -> bool:
+    """
+    Keep externally completed tasks under business callback control.
+    """
+    metadata = task_execution.metadata or {}
+    return metadata.get("completion_source") == "lensnode_callback"
+
+
 def _build_sync_update_payload(
     async_result: AsyncResult,
     celery_status: str,
@@ -280,6 +290,12 @@ class TaskTracker:
         logger.info(f"Starting {TASK_SYNC_CELERY} task_id={task_id}")
         try:
             task_execution = TaskExecution.objects.get(task_id=task_id)
+            if _should_skip_external_completion_sync(task_execution):
+                logger.debug(
+                    "Skip Celery sync for externally completed task "
+                    f"task_id={task_id}"
+                )
+                return task_execution
             async_result = AsyncResult(task_id)
             celery_status = async_result.status
             new_status = CELERY_STATUS_MAPPING.get(

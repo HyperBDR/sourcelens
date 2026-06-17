@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from .datasource_services import (
-    dispatch_datasource_sync,
+    dispatch_datasource_sync_async,
     get_datasource_sync_timeout_s,
 )
 from .models import (
@@ -113,7 +113,7 @@ def _is_global_task_enabled(task_type, default=True):
 
 @shared_task(bind=True, name="lens.source_sync", queue="lens")
 def source_sync_task(self, datasource_uuid, trigger="scheduled"):
-    """Celery entrypoint for synchronizing a datasource on a LensNode."""
+    """Celery entrypoint for dispatching datasource sync to a LensNode."""
 
     from agentcore_task.adapters.django import TaskTracker
     from agentcore_task.constants import TaskStatus
@@ -144,25 +144,31 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
     )
 
     try:
-        with datasource_lock(
+        acquire_datasource_lock(
             datasource.uuid,
+            token=task_id,
             ttl_s=get_datasource_sync_timeout_s(),
-        ):
-            _append_datasource_task_step(
-                task_id,
-                "dispatch",
-                "running",
-                "Dispatching datasource sync to LensNode.",
-            )
-            result = dispatch_datasource_sync(
-                datasource,
-                task_id=task_id,
-                trigger=trigger,
-            )
-            if result.get("status") != "success":
-                raise RuntimeError(
-                    result.get("error") or "LENS_SOURCE_SYNC_FAILED"
-                )
+        )
+        _append_datasource_task_step(
+            task_id,
+            "dispatch",
+            "running",
+            "Dispatching datasource sync to LensNode.",
+        )
+        request_id = dispatch_datasource_sync_async(
+            datasource,
+            task_id=task_id,
+            trigger=trigger,
+        )
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.STARTED,
+            metadata={
+                "completion_source": "lensnode_callback",
+                "datasource_sync_request_id": request_id,
+                "lock_token": task_id,
+            },
+        )
     except SourceSyncBusy as exc:
         record.last_status = ScheduledTask.Status.FAILED
         record.last_error = str(exc)
@@ -181,6 +187,7 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
         )
         raise
     except Exception as exc:
+        release_datasource_lock(datasource.uuid, token=task_id)
         datasource.last_error = str(exc)
         datasource.save(update_fields=["last_error", "updated_at"])
         record.last_status = ScheduledTask.Status.FAILED
@@ -200,46 +207,149 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
         )
         raise
 
-    datasource.last_error = ""
-    datasource.last_synced_at = timezone.now()
-    datasource.save(
-        update_fields=[
-            "last_error",
-            "last_synced_at",
-            "target_path",
-            "updated_at",
-        ]
-    )
-    synced = int(result.get("synced") or 0)
-    record.last_status = ScheduledTask.Status.SUCCESS
-    record.last_error = ""
-    record.last_run_at = timezone.now()
-    record.last_metrics = {
-        "synced": synced,
-        "files": result.get("files", 0),
-        "target_path": result.get("target_path") or datasource.target_path,
+    return 0
+
+
+def complete_datasource_sync_task(task_id, result):
+    """Complete a datasource sync after LensNode reports final status."""
+
+    from agentcore_task.adapters.django import TaskTracker
+    from agentcore_task.adapters.django.models import TaskExecution
+    from agentcore_task.constants import TaskStatus
+
+    task = TaskExecution.objects.filter(task_id=task_id).first()
+    if task is None:
+        return None
+    if task.status in TaskStatus.get_completed_statuses():
+        return task
+
+    metadata = task.metadata or {}
+    datasource_uuid = metadata.get("datasource_uuid")
+    datasource = DataSource.objects.filter(uuid=datasource_uuid).first()
+    record = None
+    if datasource is not None:
+        record = _get_or_create_source_sync_record(datasource)
+
+    status_value = str(result.get("status") or "failed").lower()
+    success = status_value == "success"
+    error = result.get("error") or "LENS_SOURCE_SYNC_FAILED"
+    metrics = {
+        "synced": int(result.get("synced") or 0),
+        "files": int(result.get("files") or 0),
+        "folders": int(result.get("folders") or 0),
+        "failed": int(result.get("failed") or 0),
+        "target_path": result.get("target_path")
+        or (datasource.target_path if datasource else ""),
     }
-    record.save(
-        update_fields=[
-            "last_status",
-            "last_error",
-            "last_run_at",
-            "last_metrics",
-        ]
-    )
-    TaskTracker.update_task_status(
+
+    if datasource is not None:
+        if success:
+            datasource.last_error = ""
+            datasource.last_synced_at = timezone.now()
+            if metrics["target_path"]:
+                datasource.target_path = metrics["target_path"]
+            datasource.save(
+                update_fields=[
+                    "last_error",
+                    "last_synced_at",
+                    "target_path",
+                    "updated_at",
+                ]
+            )
+        else:
+            datasource.last_error = error
+            datasource.save(update_fields=["last_error", "updated_at"])
+
+    if record is not None:
+        record.last_status = (
+            ScheduledTask.Status.SUCCESS
+            if success
+            else ScheduledTask.Status.FAILED
+        )
+        record.last_error = "" if success else error
+        record.last_run_at = timezone.now()
+        record.last_metrics = metrics if success else {}
+        record.save(
+            update_fields=[
+                "last_status",
+                "last_error",
+                "last_run_at",
+                "last_metrics",
+            ]
+        )
+
+    lock_token = metadata.get("lock_token")
+    if datasource_uuid and lock_token:
+        release_datasource_lock(
+            datasource_uuid,
+            token=lock_token,
+        )
+
+    if success:
+        return TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.SUCCESS,
+            result=metrics,
+            metadata=_datasource_step_metadata(
+                task_id,
+                "completed",
+                "done",
+                "Datasource sync completed.",
+                progress_percent=100,
+            ),
+        )
+
+    return TaskTracker.update_task_status(
         task_id,
-        TaskStatus.SUCCESS,
-        result=record.last_metrics,
+        TaskStatus.FAILURE,
+        error=error,
         metadata=_datasource_step_metadata(
             task_id,
-            "completed",
-            "done",
-            "Datasource sync completed.",
-            progress_percent=100,
+            "failed",
+            "failed",
+            error,
         ),
     )
-    return synced
+
+
+def resolve_datasource_sync_task_id(request_id, content):
+    """Resolve a datasource sync task id from callback content."""
+
+    task_id = content.get("task_id") or ""
+    if task_id:
+        return task_id
+
+    cached_task_id = cache.get(f"lens:datasource_sync_request:{request_id}")
+    if cached_task_id:
+        return cached_task_id
+
+    from agentcore_task.adapters.django.models import TaskExecution
+
+    task = TaskExecution.objects.filter(
+        module="lens_datasource",
+        metadata__datasource_sync_request_id=request_id,
+    ).first()
+    return task.task_id if task else ""
+
+
+def acquire_datasource_lock(datasource_uuid, token, ttl_s=600):
+    """Acquire an expiring sync lock for one datasource."""
+
+    key = f"lens:datasource-sync:{datasource_uuid}"
+    acquired = cache.add(key, token, timeout=ttl_s)
+    if not acquired:
+        raise SourceSyncBusy("LENS_SOURCE_SYNC_BUSY")
+    return token
+
+
+def release_datasource_lock(datasource_uuid, token=None):
+    """Release a datasource sync lock when ownership is known."""
+
+    key = f"lens:datasource-sync:{datasource_uuid}"
+    if token is None or cache.get(key) == token:
+        cache.delete(key)
+        return True
+    return False
 
 
 def _datasource_task_metadata(datasource, trigger):
@@ -329,16 +439,12 @@ class SourceSyncBusy(RuntimeError):
 def datasource_lock(datasource_uuid, ttl_s=600):
     """Acquire an expiring sync lock for one datasource."""
 
-    key = f"lens:datasource-sync:{datasource_uuid}"
     token = uuid.uuid4().hex
-    acquired = cache.add(key, token, timeout=ttl_s)
-    if not acquired:
-        raise SourceSyncBusy("LENS_SOURCE_SYNC_BUSY")
+    acquire_datasource_lock(datasource_uuid, token=token, ttl_s=ttl_s)
     try:
         yield
     finally:
-        if cache.get(key) == token:
-            cache.delete(key)
+        release_datasource_lock(datasource_uuid, token=token)
 
 
 @shared_task(name="lens.lensnode_health", queue="lens")

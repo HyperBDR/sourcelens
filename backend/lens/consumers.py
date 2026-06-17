@@ -373,32 +373,43 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def _handle_datasource_sync_done(self, content):
-        """Store datasource sync completion result for the waiting task."""
+        """Complete datasource sync after LensNode reports final status."""
 
         request_id = content.get("request_id") or ""
-        if request_id:
-            await database_sync_to_async(self._cache_datasource_sync_done)(
-                request_id,
-                content,
-            )
+        task_id = content.get("task_id") or ""
+        if not request_id and not task_id:
+            return
+        await database_sync_to_async(self._complete_datasource_sync_done)(
+            request_id,
+            content,
+        )
 
     @staticmethod
-    def _cache_datasource_sync_done(request_id, content):
+    def _complete_datasource_sync_done(request_id, content):
         from django.core.cache import cache
 
-        cache.set(
-            f"lens:datasource_sync:{request_id}",
-            {
-                "status": content.get("status") or "failed",
-                "synced": content.get("synced") or 0,
-                "files": content.get("files") or 0,
-                "folders": content.get("folders") or 0,
-                "failed": content.get("failed") or 0,
-                "target_path": content.get("target_path") or "",
-                "error": content.get("error") or "",
-            },
-            timeout=60,
+        from .tasks import (
+            complete_datasource_sync_task,
+            resolve_datasource_sync_task_id,
         )
+
+        if request_id:
+            cache.set(
+                f"lens:datasource_sync:{request_id}",
+                {
+                    "status": content.get("status") or "failed",
+                    "synced": content.get("synced") or 0,
+                    "files": content.get("files") or 0,
+                    "folders": content.get("folders") or 0,
+                    "failed": content.get("failed") or 0,
+                    "target_path": content.get("target_path") or "",
+                    "error": content.get("error") or "",
+                },
+                timeout=60,
+            )
+        task_id = resolve_datasource_sync_task_id(request_id, content)
+        if task_id:
+            complete_datasource_sync_task(task_id, content)
 
     async def _send_bad_frame(self, message):
         await self.send_json(

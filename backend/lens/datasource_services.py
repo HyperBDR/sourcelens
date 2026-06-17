@@ -169,6 +169,20 @@ def test_datasource_connection(
 def dispatch_datasource_sync(datasource, task_id, trigger="scheduled"):
     """Dispatch one datasource synchronization to its LensNode."""
 
+    request_id = dispatch_datasource_sync_async(
+        datasource,
+        task_id=task_id,
+        trigger=trigger,
+    )
+    return _wait_cache_result(
+        f"lens:datasource_sync:{request_id}",
+        timeout_s=get_datasource_sync_timeout_s(),
+    )
+
+
+def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
+    """Dispatch one datasource synchronization without waiting for result."""
+
     datasource = DataSource.objects.select_related(
         "credential",
         "lensnode",
@@ -192,10 +206,12 @@ def dispatch_datasource_sync(datasource, task_id, trigger="scheduled"):
             "trigger": trigger,
         },
     )
-    return _wait_cache_result(
-        f"lens:datasource_sync:{request_id}",
-        timeout_s=get_datasource_sync_timeout_s(),
+    cache.set(
+        f"lens:datasource_sync_request:{request_id}",
+        task_id,
+        timeout=get_datasource_sync_timeout_s(),
     )
+    return request_id
 
 
 def datasource_runtime_config(datasource):
