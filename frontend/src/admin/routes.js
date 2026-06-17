@@ -33,9 +33,45 @@ export const adminRoutes = [
     meta: { requiresAuth: true, requiredFeature: 'admin_console' }
   },
   {
-    path: '/management/lens/:pathMatch(.*)*',
-    name: 'LensAdmin',
-    component: () => import('@/pages/lens/Admin.vue'),
+    path: '/management/lens/assistants',
+    name: 'LensAssistants',
+    component: () => import('@/pages/lens/Assistants.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/lens/lensnodes',
+    name: 'LensNodes',
+    component: () => import('@/pages/lens/LensNodes.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/lens/datasources',
+    name: 'LensDataSources',
+    component: () => import('@/pages/lens/DataSources.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/lens/resources/credentials',
+    name: 'LensCredentials',
+    component: () => import('@/pages/lens/Credentials.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/lens/resources/skills',
+    name: 'LensSkills',
+    component: () => import('@/pages/lens/Skills.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/lens/resources/mcp',
+    name: 'LensMcp',
+    component: () => import('@/pages/lens/Mcp.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/lens/settings',
+    name: 'LensSettings',
+    component: () => import('@/pages/lens/Settings.vue'),
     meta: { requiresAuth: true, requiredFeature: 'admin_console' }
   },
   {
