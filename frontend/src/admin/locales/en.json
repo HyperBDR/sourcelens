@@ -994,7 +994,12 @@
       "feishuScopeDocuments": "Specific documents",
       "feishuScopeDriveFolder": "Drive folder",
       "feishuFolderHint": "Copy the browser URL from a Feishu Drive folder. SourceLens will recursively sync subfolders and files.",
-      "recursiveHint": "Sync all subfolders"
+      "recursiveHint": "Sync all subfolders",
+      "feishuAdvancedTitle": "Feishu advanced options",
+      "feishuIncrementalTitle": "Incremental sync",
+      "feishuIncrementalHint": "Skip Feishu files and documents that have not changed since the last sync.",
+      "feishuDeleteMissingTitle": "Delete missing local files",
+      "feishuDeleteMissingHint": "When a Feishu item no longer exists remotely, delete the matching local file. Keep disabled to avoid accidental deletion."
     },
     "detail": {
       "title": "Node Details",

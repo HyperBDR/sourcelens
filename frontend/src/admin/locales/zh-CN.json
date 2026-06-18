@@ -994,7 +994,12 @@
       "feishuScopeDocuments": "指定文档",
       "feishuScopeDriveFolder": "Drive 目录",
       "feishuFolderHint": "从飞书云文档 Drive 目录页面复制浏览器地址，系统会递归同步目录下的子目录和文件。",
-      "recursiveHint": "同步全部子目录"
+      "recursiveHint": "同步全部子目录",
+      "feishuAdvancedTitle": "飞书高级选项",
+      "feishuIncrementalTitle": "增量同步",
+      "feishuIncrementalHint": "跳过自上次同步后未变化的飞书文件和文档。",
+      "feishuDeleteMissingTitle": "删除本地缺失项",
+      "feishuDeleteMissingHint": "当飞书远端条目不存在时，删除对应本地文件。建议默认关闭，避免误删。"
     },
     "detail": {
       "title": "节点详情",

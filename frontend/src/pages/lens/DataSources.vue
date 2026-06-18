@@ -530,7 +530,9 @@ function datasourceConfigFromRow(row) {
       sync_mode: row.config?.sync_mode || 'document_list',
       doc_ids_text: (row.config?.doc_ids || []).join(','),
       recursive: row.config?.recursive !== false,
-      max_depth: row.config?.max_depth || 10
+      max_depth: row.config?.max_depth || 10,
+      feishu_incremental: row.config?.feishu_incremental !== false,
+      feishu_delete_missing: row.config?.feishu_delete_missing === true
     }
   }
   const config = { ...(row.config || {}) }
@@ -560,7 +562,9 @@ function handleDatasourceTypeChange(seed = null) {
       folder_url: '',
       folder_token: '',
       recursive: true,
-      max_depth: 10
+      max_depth: 10,
+      feishu_incremental: true,
+      feishu_delete_missing: false
     }
   }
 }
@@ -641,9 +645,13 @@ function buildDatasourceConfig() {
       delete config.folder_token
       delete config.recursive
       delete config.max_depth
+      delete config.feishu_incremental
+      delete config.feishu_delete_missing
     } else {
       delete config.document_url
       delete config.doc_ids
+      config.feishu_incremental = config.feishu_incremental !== false
+      config.feishu_delete_missing = config.feishu_delete_missing === true
     }
     delete config.app_token
     delete config.app_id

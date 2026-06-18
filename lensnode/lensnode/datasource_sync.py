@@ -552,11 +552,25 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
     max_depth = int(config.get("max_depth") or 10)
     root_dir = target
 
+    previous_manifest = _read_manifest(target)
+    previous_items = _manifest_items_by_token(previous_manifest)
+    incremental = config.get(
+        "feishu_incremental",
+        config.get("incremental", True),
+    ) is not False
+    delete_missing = config.get(
+        "feishu_delete_missing",
+        config.get("delete_missing", False),
+    ) is True
+    seen_tokens = set()
     manifest_items = []
     stats = {
         "folders": 0,
         "documents": 0,
         "files": 0,
+        "changed": 0,
+        "skipped": 0,
+        "deleted": 0,
         "failed": 0,
     }
 
@@ -576,12 +590,38 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
             token = _feishu_item_token(child)
             if not token:
                 continue
+            seen_tokens.add(token)
             if item_type == "folder":
                 if not recursive or depth >= max_depth:
                     continue
                 next_dir = current_dir / _safe_filename(name)
                 next_dir.mkdir(parents=True, exist_ok=True)
                 walk(token, next_dir, depth + 1, executor)
+                continue
+            previous_item = previous_items.get(token)
+            if incremental and _feishu_item_unchanged(
+                child,
+                previous_item,
+                current_dir,
+            ):
+                item = _feishu_manifest_item_from_previous(
+                    child,
+                    previous_item,
+                    current_dir,
+                )
+                manifest_items.append(item)
+                stats["skipped"] += 1
+                _emit(
+                    emit,
+                    "item_skipped",
+                    "done",
+                    f"Skipped unchanged Feishu {name}.",
+                    category="document",
+                    token=token,
+                    item_type=item_type,
+                    item_name=name,
+                    file=item.get("file"),
+                )
                 continue
             item_futures[
                 executor.submit(
@@ -600,6 +640,7 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
             try:
                 item = future.result()
                 manifest_items.append(item)
+                stats["changed"] += 1
                 if item.get("kind") == "document":
                     stats["documents"] += 1
                 else:
@@ -629,19 +670,30 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
     max_workers = max(1, int(max_workers or 1))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         walk(folder_token, root_dir, 1, executor)
+    for token, item in previous_items.items():
+        if token in seen_tokens:
+            continue
+        deleted_item = {**item, "status": "deleted"}
+        manifest_items.append(deleted_item)
+        stats["deleted"] += 1
+        if delete_missing and item.get("file"):
+            _delete_manifest_file(target, item.get("file"))
     _write_manifest(
         target,
         {
             "source_type": "feishu",
             "sync_mode": "drive_folder",
             "folder_token": folder_token,
+            "incremental": incremental,
+            "delete_missing": delete_missing,
             "synced_at": utc_timestamp(),
             "stats": stats,
             "items": manifest_items,
         },
     )
     total = stats["documents"] + stats["files"]
-    if total == 0 and stats["failed"] > 0:
+    total_success = total + stats["skipped"]
+    if total_success == 0 and stats["failed"] > 0:
         message = (
             "LENS_SOURCE_SYNC_FAILED: all Feishu Drive items failed; "
             "see manifest.json for item errors"
@@ -652,7 +704,10 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
         emit,
         "manifest",
         "done",
-        f"Feishu folder sync completed with {total} files.",
+        (
+            f"Feishu folder sync completed with {total} files, "
+            f"{stats['skipped']} skipped."
+        ),
         category="summary",
         summary=stats,
     )
@@ -661,6 +716,8 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
         "files": total,
         "target_path": str(target),
         "folders": stats["folders"],
+        "skipped": stats["skipped"],
+        "deleted": stats["deleted"],
         "failed": stats["failed"],
     }
 
@@ -706,6 +763,7 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
             "type": item_type,
             "file": str((target_dir / filename).name),
             "file_extension": exported.get("file_extension") or "",
+            "metadata": _feishu_item_sync_metadata(item),
         }
 
     _emit(
@@ -740,6 +798,7 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
         "name": name,
         "type": item_type,
         "file": str((target_dir / filename).name),
+        "metadata": _feishu_item_sync_metadata(item),
     }
 
 
@@ -1201,6 +1260,115 @@ def _download_feishu_file(file_token, headers):
     raise last_error or DataSourceSyncError("LENS_SOURCE_SYNC_FAILED")
 
 
+def _feishu_item_sync_metadata(item):
+    """Return metadata used to decide whether a Feishu item changed."""
+
+    metadata = {}
+    for source, target in [
+        ("modified_time", "modified_time"),
+        ("updated_time", "modified_time"),
+        ("edit_time", "modified_time"),
+        ("size", "size"),
+        ("checksum", "checksum"),
+        ("md5", "checksum"),
+    ]:
+        value = item.get(source)
+        if value not in (None, ""):
+            metadata[target] = str(value)
+    return metadata
+
+
+def _feishu_item_signature(item):
+    """Return comparable Feishu metadata, or empty when unavailable."""
+
+    metadata = _feishu_item_sync_metadata(item)
+    signature = {
+        key: metadata[key]
+        for key in ["modified_time", "size", "checksum"]
+        if metadata.get(key)
+    }
+    item_type = _feishu_item_type(item)
+    if item_type:
+        signature["type"] = item_type
+    if _is_feishu_exportable_type(item_type):
+        signature["file_extension"] = _feishu_export_extension(item_type)
+    return signature if any(key != "type" for key in signature) else {}
+
+
+def _feishu_manifest_signature(item):
+    """Return comparable metadata from a manifest item."""
+
+    metadata = item.get("metadata") or {}
+    signature = {
+        key: str(metadata[key])
+        for key in ["modified_time", "size", "checksum"]
+        if metadata.get(key) not in (None, "")
+    }
+    if item.get("type"):
+        signature["type"] = item.get("type")
+    if item.get("file_extension"):
+        signature["file_extension"] = item.get("file_extension")
+    return signature if any(key != "type" for key in signature) else {}
+
+
+def _feishu_item_unchanged(item, previous_item, target_dir):
+    """Return whether a remote Feishu item can be skipped."""
+
+    if not previous_item or previous_item.get("status") == "deleted":
+        return False
+    signature = _feishu_item_signature(item)
+    previous_signature = _feishu_manifest_signature(previous_item)
+    if not signature or signature != previous_signature:
+        return False
+    previous_file = previous_item.get("file")
+    if not previous_file:
+        return False
+    return (target_dir / previous_file).exists()
+
+
+def _feishu_manifest_item_from_previous(item, previous_item, target_dir):
+    """Return manifest metadata for an unchanged Feishu item."""
+
+    token = _feishu_item_token(item)
+    name = _feishu_item_name(item)
+    item_type = _feishu_item_type(item)
+    previous_file = previous_item.get("file")
+    return {
+        **previous_item,
+        "kind": previous_item.get("kind") or "document",
+        "token": token,
+        "name": name,
+        "type": item_type,
+        "file": previous_file,
+        "metadata": _feishu_item_sync_metadata(item),
+        "status": "skipped",
+    }
+
+
+def _manifest_items_by_token(manifest):
+    """Return manifest items keyed by token."""
+
+    items = manifest.get("items") if isinstance(manifest, dict) else []
+    result = {}
+    for item in items or []:
+        token = item.get("token")
+        if token:
+            result[token] = item
+    return result
+
+
+def _delete_manifest_file(target, file_name):
+    """Delete a file listed in manifest if it is under target."""
+
+    try:
+        path = (target / str(file_name)).resolve()
+        path.relative_to(target.resolve())
+    except ValueError:
+        return
+    if path.is_file():
+        path.unlink()
+
+
 def _http_json(url, method="GET", data=None, headers=None):
     """Request a JSON endpoint and return the decoded object."""
 
@@ -1305,13 +1473,28 @@ def _compact_json(value):
     return raw
 
 
+def _read_manifest(target):
+    """Read datasource sync manifest if it exists."""
+
+    path = target / "manifest.json"
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def _write_manifest(target, payload):
     """Write datasource sync manifest."""
 
-    (target / "manifest.json").write_text(
+    manifest_path = target / "manifest.json"
+    tmp_path = target / "manifest.json.tmp"
+    tmp_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    tmp_path.replace(manifest_path)
 
 
 def _count_files(path):

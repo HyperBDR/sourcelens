@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
 
 import pytest
@@ -277,6 +278,64 @@ def test_sync_feishu_folder_uses_configured_workers(tmp_path, monkeypatch):
     )
 
     assert max_workers == [4]
+
+
+def test_sync_feishu_folder_skips_unchanged_item(tmp_path, monkeypatch):
+    """Drive folder sync skips unchanged items from previous manifest."""
+
+    exports = []
+
+    def list_children(folder_token, headers):
+        del folder_token, headers
+        return [
+            {
+                "token": "doc1",
+                "name": "Root Doc",
+                "type": "docx",
+                "modified_time": "100",
+            }
+        ]
+
+    def export_document(doc_id, item_type, headers):
+        del item_type, headers
+        exports.append(doc_id)
+        return {
+            "file_name": "Root Doc",
+            "file_extension": "docx",
+            "type": "docx",
+            "content": b"content",
+        }
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._list_feishu_folder_children",
+        list_children,
+    )
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._export_feishu_document",
+        export_document,
+    )
+
+    first = _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+    second = _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+
+    assert exports == ["doc1"]
+    assert first["synced"] == 1
+    assert second["synced"] == 0
+    assert second["skipped"] == 1
+    assert manifest["items"][0]["status"] == "skipped"
 
 
 def test_feishu_export_filename_uses_original_extension():
