@@ -21,6 +21,7 @@ from lens.models import (
     ScheduledTask,
     Skill,
 )
+from lens.tasks import acquire_datasource_lock, release_datasource_lock
 
 User = get_user_model()
 
@@ -654,6 +655,54 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.data["detail"], "DATASOURCE_DISABLED")
         apply_async.assert_not_called()
+
+    def test_cancel_datasource_sync_releases_lock(self):
+        task = TaskExecution.objects.create(
+            task_id="running-sync",
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="STARTED",
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "lock_token": "running-sync",
+            },
+        )
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="running-sync",
+            ttl_s=60,
+        )
+
+        with (
+            patch("core.celery.app.control.revoke") as revoke,
+            patch("lens.views.cancel_datasource_sync_on_lensnode") as cancel,
+        ):
+            url = (
+                f"/api/lens/admin/datasources/{self.datasource.uuid}"
+                "/cancel-sync/"
+            )
+            response = self.client.post(
+                url,
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        revoke.assert_called_once_with(
+            "running-sync",
+            terminate=True,
+            signal="SIGTERM",
+        )
+        cancel.assert_called_once_with(self.lensnode, "running-sync")
+        task.refresh_from_db()
+        self.assertEqual(task.status, "REVOKED")
+
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="new-sync",
+            ttl_s=60,
+        )
+        release_datasource_lock(self.datasource.uuid, token="new-sync")
 
     def test_datasource_create_uses_lensnode_workspace_path(self):
         self.lensnode.workspace_path = "/data/lens-workspace"

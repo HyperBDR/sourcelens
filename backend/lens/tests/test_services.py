@@ -44,9 +44,12 @@ from lens.services import (
 )
 from lens.tasks import (
     SourceSyncBusy,
+    acquire_datasource_lock,
     complete_datasource_sync_task,
+    cleanup_stale_datasource_sync_tasks,
     datasource_lock,
     lensnode_health_task,
+    release_datasource_lock,
     source_sync_task,
 )
 
@@ -497,6 +500,90 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(self.datasource.status, "active")
         self.assertEqual(record.last_status, "failed")
         self.assertEqual(record.last_error, "LENS_SOURCE_SYNC_BUSY")
+
+    def test_cleanup_stale_datasource_sync_releases_lock(self):
+        GlobalSetting.objects.create(
+            key="lens.datasource_sync.timeout_s",
+            value="1",
+        )
+        task = TaskExecution.objects.create(
+            task_id="stale-sync",
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="STARTED",
+            started_at=timezone.now() - timedelta(seconds=2),
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "lock_token": "stale-sync",
+            },
+        )
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="stale-sync",
+            ttl_s=60,
+        )
+
+        with patch(
+            "lens.services.cancel_datasource_sync_on_lensnode"
+        ) as cancel:
+            result = cleanup_stale_datasource_sync_tasks()
+
+        task.refresh_from_db()
+        record = ScheduledTask.objects.get(
+            task_type="source_sync",
+            target_type="datasource",
+            target_id=self.datasource.uuid,
+        )
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(task.status, "FAILURE")
+        self.assertEqual(task.error, "LENS_SOURCE_SYNC_TIMEOUT")
+        self.assertEqual(record.last_status, "failed")
+        self.assertEqual(record.last_error, "LENS_SOURCE_SYNC_TIMEOUT")
+        cancel.assert_called_once_with(self.lensnode, "stale-sync")
+
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="new-sync",
+            ttl_s=60,
+        )
+        release_datasource_lock(self.datasource.uuid, token="new-sync")
+
+    def test_cleanup_releases_completed_datasource_sync_lock(self):
+        GlobalSetting.objects.create(
+            key="lens.datasource_sync.timeout_s",
+            value="60",
+        )
+        TaskExecution.objects.create(
+            task_id="timed-out-sync",
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="FAILURE",
+            finished_at=timezone.now(),
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "lock_token": "timed-out-sync",
+            },
+        )
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="timed-out-sync",
+            ttl_s=60,
+        )
+
+        with patch(
+            "lens.services.cancel_datasource_sync_on_lensnode"
+        ) as cancel:
+            result = cleanup_stale_datasource_sync_tasks()
+
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(result["locks_released"], 1)
+        cancel.assert_called_once_with(self.lensnode, "timed-out-sync")
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="new-sync",
+            ttl_s=60,
+        )
+        release_datasource_lock(self.datasource.uuid, token="new-sync")
 
     def test_source_sync_task_dispatches_feishu_datasource(self):
         self.datasource.source_type = DataSource.SourceType.FEISHU

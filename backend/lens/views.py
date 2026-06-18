@@ -57,7 +57,11 @@ from .services import (
     cancel_run_on_lensnode,
     stream_run_events_async,
 )
-from .tasks import register_datasource_sync_task, source_sync_task
+from .tasks import (
+    register_datasource_sync_task,
+    release_datasource_lock,
+    source_sync_task,
+)
 
 
 class BaseAuthenticatedViewSet(viewsets.ModelViewSet):
@@ -694,6 +698,8 @@ class DataSourceViewSet(BaseAdminViewSet):
         cancel_datasource_sync_on_lensnode(datasource.lensnode, task.task_id)
 
         metadata = dict(task.metadata or {})
+        lock_token = metadata.get("lock_token") or task.task_id
+        release_datasource_lock(datasource.uuid, token=lock_token)
         metadata["manual_revoked_at"] = timezone.now().isoformat()
         metadata["manual_revoked_by"] = request.user.pk
         task.status = TaskStatus.REVOKED

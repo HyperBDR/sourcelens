@@ -4,6 +4,7 @@ import uuid
 
 from celery import shared_task
 from django.core.cache import cache
+from django.db.models import Q
 from django.utils import timezone
 
 from .datasource_services import (
@@ -352,6 +353,97 @@ def release_datasource_lock(datasource_uuid, token=None):
     return False
 
 
+def cleanup_stale_datasource_sync_tasks():
+    """Cancel timed-out datasource syncs and release orphaned sync locks."""
+
+    from agentcore_task.adapters.django.models import TaskExecution
+    from agentcore_task.constants import TaskStatus
+
+    from .services import cancel_datasource_sync_on_lensnode
+
+    now = timezone.now()
+    timeout_s = get_datasource_sync_timeout_s()
+    cutoff = now - timedelta(seconds=timeout_s)
+    running_statuses = [TaskStatus.PENDING, *TaskStatus.get_running_statuses()]
+
+    stale = TaskExecution.objects.filter(
+        module="lens_datasource",
+        status__in=running_statuses,
+        metadata__datasource_uuid__isnull=False,
+    ).filter(
+        Q(started_at__lt=cutoff)
+        | Q(started_at__isnull=True, created_at__lt=cutoff)
+    )
+
+    failed_count = 0
+    for task in stale:
+        metadata = dict(task.metadata or {})
+        datasource_uuid = metadata.get("datasource_uuid")
+        datasource = DataSource.objects.filter(uuid=datasource_uuid).first()
+        if datasource is not None:
+            cancel_datasource_sync_on_lensnode(
+                datasource.lensnode,
+                task.task_id,
+            )
+            record = _get_or_create_source_sync_record(datasource)
+            record.last_status = ScheduledTask.Status.FAILED
+            record.last_error = "LENS_SOURCE_SYNC_TIMEOUT"
+            record.last_run_at = now
+            record.save(
+                update_fields=["last_status", "last_error", "last_run_at"]
+            )
+
+        release_datasource_lock(
+            datasource_uuid,
+            token=metadata.get("lock_token") or task.task_id,
+        )
+        metadata["timeout_cancelled_at"] = now.isoformat()
+        task.status = TaskStatus.FAILURE
+        task.finished_at = now
+        task.error = "LENS_SOURCE_SYNC_TIMEOUT"
+        task.metadata = metadata
+        task.save(
+            update_fields=["status", "finished_at", "error", "metadata"]
+        )
+        failed_count += 1
+
+    completed = TaskExecution.objects.filter(
+        module="lens_datasource",
+        status__in=TaskStatus.get_completed_statuses(),
+        metadata__datasource_uuid__isnull=False,
+        metadata__lock_token__isnull=False,
+        finished_at__gte=cutoff,
+    )
+    released_count = 0
+    for task in completed:
+        metadata = task.metadata or {}
+        datasource_uuid = metadata.get("datasource_uuid")
+        released = release_datasource_lock(
+            datasource_uuid,
+            token=metadata.get("lock_token"),
+        )
+        if released:
+            released_count += 1
+        if released and task.status in [
+            TaskStatus.FAILURE,
+            TaskStatus.REVOKED,
+        ]:
+            datasource = DataSource.objects.filter(
+                uuid=datasource_uuid
+            ).first()
+            if datasource is not None:
+                cancel_datasource_sync_on_lensnode(
+                    datasource.lensnode,
+                    task.task_id,
+                )
+
+    return {
+        "failed": failed_count,
+        "locks_released": released_count,
+        "timeout_s": timeout_s,
+    }
+
+
 def _datasource_task_metadata(datasource, trigger):
     """Return unified task metadata for datasource synchronization."""
 
@@ -521,11 +613,13 @@ def lensnode_cleanup_task():
         status=RunExecution.Status.FAILED,
         finished_at=timezone.now(),
     )
+    datasource_sync_metrics = cleanup_stale_datasource_sync_tasks()
 
     record.last_status = ScheduledTask.Status.SUCCESS
     record.last_metrics = {
         "failed": count,
         "timeout_s": timeout_s,
+        "datasource_sync": datasource_sync_metrics,
     }
     record.last_run_at = timezone.now()
     record.save(update_fields=["last_status", "last_metrics", "last_run_at"])
