@@ -598,59 +598,6 @@
           {{ t('lensAdmin.datasourceWizard.pathHint') }}
         </p>
       </FormRow>
-      <section
-        v-if="form.source_type === 'feishu'"
-        class="rounded-md border border-line bg-surface"
-      >
-        <button
-          class="flex w-full items-center justify-between px-3 py-2 text-left"
-          type="button"
-          @click="feishuAdvancedOpen = !feishuAdvancedOpen"
-        >
-          <span class="text-sm font-medium text-ink-900">
-            {{ t('lensAdmin.datasourceWizard.feishuAdvancedTitle') }}
-          </span>
-          <component
-            :is="feishuAdvancedOpen ? ChevronDownIcon : ChevronRightIcon"
-            class="h-4 w-4 text-ink-500"
-          />
-        </button>
-        <div
-          v-if="feishuAdvancedOpen"
-          class="space-y-3 border-t border-line px-3 py-3"
-        >
-          <label class="flex items-start gap-3">
-            <input
-              v-model="config.feishu_incremental"
-              type="checkbox"
-              class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-            />
-            <span>
-              <span class="block text-sm font-medium text-ink-800">
-                {{ t('lensAdmin.datasourceWizard.feishuIncrementalTitle') }}
-              </span>
-              <span class="mt-0.5 block text-xs leading-5 text-ink-500">
-                {{ t('lensAdmin.datasourceWizard.feishuIncrementalHint') }}
-              </span>
-            </span>
-          </label>
-          <label class="flex items-start gap-3">
-            <input
-              v-model="config.feishu_delete_missing"
-              type="checkbox"
-              class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-            />
-            <span>
-              <span class="block text-sm font-medium text-ink-800">
-                {{ t('lensAdmin.datasourceWizard.feishuDeleteMissingTitle') }}
-              </span>
-              <span class="mt-0.5 block text-xs leading-5 text-ink-500">
-                {{ t('lensAdmin.datasourceWizard.feishuDeleteMissingHint') }}
-              </span>
-            </span>
-          </label>
-        </div>
-      </section>
       <FormRow :label="t('lensAdmin.fields.syncPolicy')" required>
         <select v-model="syncPolicyMode" class="form-input w-56">
           <option value="interval">
@@ -692,6 +639,53 @@
           />
         </FormRow>
       </div>
+      <section v-if="form.source_type === 'feishu'" class="space-y-3 pt-1">
+        <button
+          class="flex w-full items-center justify-between text-left"
+          type="button"
+          @click="feishuAdvancedOpen = !feishuAdvancedOpen"
+        >
+          <span class="text-sm font-semibold text-ink-900">
+            {{ t('lensAdmin.datasourceWizard.feishuAdvancedTitle') }}
+          </span>
+          <component
+            :is="feishuAdvancedOpen ? ChevronDownIcon : ChevronRightIcon"
+            class="h-4 w-4 text-ink-500"
+          />
+        </button>
+        <div v-if="feishuAdvancedOpen" class="space-y-3">
+          <label class="flex items-start gap-3">
+            <input
+              v-model="config.feishu_incremental"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              <span class="block text-sm font-medium text-ink-800">
+                {{ t('lensAdmin.datasourceWizard.feishuIncrementalTitle') }}
+              </span>
+              <span class="mt-0.5 block text-xs leading-5 text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.feishuIncrementalHint') }}
+              </span>
+            </span>
+          </label>
+          <label class="flex items-start gap-3">
+            <input
+              v-model="config.feishu_delete_missing"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              <span class="block text-sm font-medium text-ink-800">
+                {{ t('lensAdmin.datasourceWizard.feishuDeleteMissingTitle') }}
+              </span>
+              <span class="mt-0.5 block text-xs leading-5 text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.feishuDeleteMissingHint') }}
+              </span>
+            </span>
+          </label>
+        </div>
+      </section>
     </div>
 
     <p v-if="formError" class="mt-4 text-sm text-danger-700">
