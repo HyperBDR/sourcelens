@@ -656,7 +656,7 @@
         "action": "Create MCP Server"
       },
       "resourceSettings": {
-        "title": "Resource Settings",
+        "title": "Settings",
         "description": "Configure shared behavior for data sources, credentials, Skills, and MCP resources.",
         "label": "Resource Setting",
         "action": "Create Resource Setting"
@@ -735,7 +735,10 @@
       "replaceHint": "Keep the masked value unchanged to retain the existing secret; enter a new value to replace it.",
       "revealSecret": "Temporarily reveal secret",
       "hideSecret": "Hide secret",
-      "boundDatasources": "Bound data sources"
+      "boundDatasources": "Bound data sources",
+      "tokenPlaceholder": "e.g. ghp_xxx or glpat-xxx",
+      "appIdPlaceholder": "e.g. cli_xxxxxxxxxxxxxxxx",
+      "appSecretPlaceholder": "e.g. xxx_xxxxxxxxxxxxxxxxxxxxxxxx"
     },
     "datasourceDetail": {
       "title": "Data Source Detail",

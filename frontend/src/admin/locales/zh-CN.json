@@ -656,7 +656,7 @@
         "action": "新建 MCP Server"
       },
       "resourceSettings": {
-        "title": "资源配置",
+        "title": "资源设置",
         "description": "配置数据源、凭证、Skill 与 MCP 资源的共享行为。",
         "label": "资源配置项",
         "action": "新建资源配置"
@@ -735,7 +735,10 @@
       "replaceHint": "保持脱敏值不变将保留现有密钥；填写新值会替换密钥。",
       "revealSecret": "临时显示密钥",
       "hideSecret": "隐藏密钥",
-      "boundDatasources": "已绑定数据源"
+      "boundDatasources": "已绑定数据源",
+      "tokenPlaceholder": "例如：ghp_xxx 或 glpat-xxx",
+      "appIdPlaceholder": "例如：cli_xxxxxxxxxxxxxxxx",
+      "appSecretPlaceholder": "例如：xxx_xxxxxxxxxxxxxxxxxxxxxxxx"
     },
     "datasourceDetail": {
       "title": "数据源详情",

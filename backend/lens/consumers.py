@@ -353,6 +353,7 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             "item_name",
             "file",
             "file_extension",
+            "max_workers",
             "error",
             "summary",
         ]:

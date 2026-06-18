@@ -2,12 +2,14 @@ import json
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
 
 WORKSPACE_ROOT = "/workspace"
 GIT_SHALLOW_DEPTH = "1"
+DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
 FEISHU_EXPORT_SUCCESS_STATUS = 0
 FEISHU_EXPORT_POLL_INTERVAL_S = 2
@@ -153,6 +155,16 @@ def sync_datasource(command, workspace_path=WORKSPACE_ROOT, emit=None):
     if source_type == "feishu":
         return _sync_feishu(command, workspace_path, emit)
     raise DataSourceSyncError("LENS_SOURCE_TYPE_UNSUPPORTED")
+
+
+def datasource_sync_workers(command):
+    """Return configured datasource sync worker count."""
+
+    try:
+        value = int(command.get("max_workers") or 0)
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else DEFAULT_DATASOURCE_SYNC_WORKERS
 
 
 def test_datasource_connection(command):
@@ -405,6 +417,15 @@ def _sync_feishu(command, workspace_path, emit):
     credentials = _load_credentials(config)
     target = normalize_target_path(command.get("target_path"), workspace_path)
     target.mkdir(parents=True, exist_ok=True)
+    max_workers = datasource_sync_workers(command)
+    _emit(
+        emit,
+        "sync_config",
+        "running",
+        f"Feishu sync uses {max_workers} workers.",
+        category="config",
+        max_workers=max_workers,
+    )
     token = _feishu_tenant_token(credentials)
     if not token:
         raise DataSourceSyncError("LENS_SOURCE_CREDENTIAL_INVALID")
@@ -413,11 +434,11 @@ def _sync_feishu(command, workspace_path, emit):
         "Authorization": f"Bearer {token}",
     }
     if (config.get("sync_mode") or "document_list") == "drive_folder":
-        return _sync_feishu_folder(config, target, headers, emit)
-    return _sync_feishu_documents(config, target, headers, emit)
+        return _sync_feishu_folder(config, target, headers, emit, max_workers)
+    return _sync_feishu_documents(config, target, headers, emit, max_workers)
 
 
-def _sync_feishu_documents(config, target, headers, emit):
+def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
     """Export configured Feishu documents into their original file format."""
 
     docs_dir = target / "docs"
@@ -428,59 +449,21 @@ def _sync_feishu_documents(config, target, headers, emit):
 
     synced = 0
     documents = []
-    for doc_id in doc_ids:
-        _emit(
-            emit,
-            "item_started",
-            "running",
-            f"Exporting Feishu {doc_id}.",
-            category="document",
-            kind="document",
-            token=doc_id,
-            item_type="docx",
-            item_name=doc_id,
-        )
-        try:
-            exported = _export_feishu_document(doc_id, "docx", headers)
-        except DataSourceSyncError as exc:
-            _emit(
+    max_workers = max(1, int(max_workers or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _sync_feishu_document_item,
+                doc_id,
+                docs_dir,
+                headers,
                 emit,
-                "item_failed",
-                "failed",
-                f"Failed to export Feishu {doc_id}.",
-                category="document",
-                kind="document",
-                token=doc_id,
-                item_type="docx",
-                item_name=doc_id,
-                error=str(exc),
-            )
-            raise
-        filename = _export_filename(exported, doc_id, "docx")
-        (docs_dir / filename).write_bytes(exported["content"])
-        _emit(
-            emit,
-            "item_done",
-            "done",
-            f"Exported Feishu {doc_id} to docs/{filename}.",
-            category="document",
-            kind="document",
-            token=doc_id,
-            item_type=exported.get("type") or "docx",
-            item_name=exported.get("file_name") or doc_id,
-            file=f"docs/{filename}",
-            file_extension=exported.get("file_extension") or "docx",
-        )
-        documents.append(
-            {
-                "doc_id": doc_id,
-                "title": exported.get("file_name") or doc_id,
-                "file": f"docs/{filename}",
-                "type": exported.get("type") or "docx",
-                "file_extension": exported.get("file_extension") or "docx",
-            }
-        )
-        synced += 1
+            ): doc_id
+            for doc_id in doc_ids
+        }
+        for future in as_completed(futures):
+            documents.append(future.result())
+            synced += 1
 
     _write_manifest(
         target,
@@ -505,7 +488,61 @@ def _sync_feishu_documents(config, target, headers, emit):
     return {"synced": synced, "files": synced, "target_path": str(target)}
 
 
-def _sync_feishu_folder(config, target, headers, emit):
+def _sync_feishu_document_item(doc_id, docs_dir, headers, emit):
+    """Export one Feishu document and return manifest metadata."""
+
+    _emit(
+        emit,
+        "item_started",
+        "running",
+        f"Exporting Feishu {doc_id}.",
+        category="document",
+        kind="document",
+        token=doc_id,
+        item_type="docx",
+        item_name=doc_id,
+    )
+    try:
+        exported = _export_feishu_document(doc_id, "docx", headers)
+    except DataSourceSyncError as exc:
+        _emit(
+            emit,
+            "item_failed",
+            "failed",
+            f"Failed to export Feishu {doc_id}.",
+            category="document",
+            kind="document",
+            token=doc_id,
+            item_type="docx",
+            item_name=doc_id,
+            error=str(exc),
+        )
+        raise
+    filename = _export_filename(exported, doc_id, "docx")
+    (docs_dir / filename).write_bytes(exported["content"])
+    _emit(
+        emit,
+        "item_done",
+        "done",
+        f"Exported Feishu {doc_id} to docs/{filename}.",
+        category="document",
+        kind="document",
+        token=doc_id,
+        item_type=exported.get("type") or "docx",
+        item_name=exported.get("file_name") or doc_id,
+        file=f"docs/{filename}",
+        file_extension=exported.get("file_extension") or "docx",
+    )
+    return {
+        "doc_id": doc_id,
+        "title": exported.get("file_name") or doc_id,
+        "file": f"docs/{filename}",
+        "type": exported.get("type") or "docx",
+        "file_extension": exported.get("file_extension") or "docx",
+    }
+
+
+def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
     """Recursively synchronize a Feishu Drive folder."""
 
     folder_token = _feishu_folder_token(config)
@@ -523,7 +560,7 @@ def _sync_feishu_folder(config, target, headers, emit):
         "failed": 0,
     }
 
-    def walk(current_token, current_dir, depth):
+    def walk(current_token, current_dir, depth, executor):
         stats["folders"] += 1
         _emit(
             emit,
@@ -532,6 +569,7 @@ def _sync_feishu_folder(config, target, headers, emit):
             f"Scanning Feishu folder {current_token}.",
         )
         children = _list_feishu_folder_children(current_token, headers)
+        item_futures = {}
         for child in children:
             name = _feishu_item_name(child)
             item_type = _feishu_item_type(child)
@@ -543,15 +581,24 @@ def _sync_feishu_folder(config, target, headers, emit):
                     continue
                 next_dir = current_dir / _safe_filename(name)
                 next_dir.mkdir(parents=True, exist_ok=True)
-                walk(token, next_dir, depth + 1)
+                walk(token, next_dir, depth + 1, executor)
                 continue
-            try:
-                item = _sync_feishu_drive_item(
+            item_futures[
+                executor.submit(
+                    _sync_feishu_drive_item,
                     child,
                     current_dir,
                     headers,
                     emit,
                 )
+            ] = child
+        for future in as_completed(item_futures):
+            child = item_futures[future]
+            name = _feishu_item_name(child)
+            item_type = _feishu_item_type(child)
+            token = _feishu_item_token(child)
+            try:
+                item = future.result()
                 manifest_items.append(item)
                 if item.get("kind") == "document":
                     stats["documents"] += 1
@@ -579,7 +626,9 @@ def _sync_feishu_folder(config, target, headers, emit):
                     }
                 )
 
-    walk(folder_token, root_dir, 1)
+    max_workers = max(1, int(max_workers or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        walk(folder_token, root_dir, 1, executor)
     _write_manifest(
         target,
         {

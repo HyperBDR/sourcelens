@@ -168,11 +168,11 @@
         @close="closeModal"
       >
         <form id="credential-form" class="space-y-4" @submit.prevent="save">
-          <FormRow :label="t('lensAdmin.fields.name')">
+          <FormRow :label="t('lensAdmin.fields.name')" required>
             <input v-model="form.name" class="form-input" required />
           </FormRow>
-          <FormRow :label="t('lensAdmin.fields.type')">
-            <select v-model="form.provider" class="form-input">
+          <FormRow :label="t('lensAdmin.fields.type')" required>
+            <select v-model="form.provider" class="form-input" required>
               <option value="generic">Git</option>
               <option value="feishu">Feishu</option>
             </select>
@@ -183,20 +183,24 @@
             </div>
           </FormRow>
           <template v-if="credentialFormAuthType === 'feishu_app'">
-            <FormRow :label="t('lensAdmin.fields.feishuAppId')">
+            <FormRow :label="t('lensAdmin.fields.feishuAppId')" required>
               <input
                 v-model="form.app_id"
                 class="form-input"
                 autocomplete="off"
+                :placeholder="t('lensAdmin.credentials.appIdPlaceholder')"
+                :required="mode === 'create'"
               />
             </FormRow>
-            <FormRow :label="t('lensAdmin.fields.feishuAppSecret')">
+            <FormRow :label="t('lensAdmin.fields.feishuAppSecret')" required>
               <div class="flex gap-2">
                 <input
                   v-model="form.app_secret"
                   class="form-input"
                   :type="credentialSecretRevealed ? 'text' : 'password'"
                   autocomplete="off"
+                  :placeholder="t('lensAdmin.credentials.appSecretPlaceholder')"
+                  :required="mode === 'create'"
                 />
                 <button
                   v-if="canRevealCredential"
@@ -213,13 +217,15 @@
               </div>
             </FormRow>
           </template>
-          <FormRow v-else :label="t('lensAdmin.fields.accessToken')">
+          <FormRow v-else :label="t('lensAdmin.fields.accessToken')" required>
             <div class="flex gap-2">
               <input
                 v-model="form.secret"
                 class="form-input"
                 :type="credentialSecretRevealed ? 'text' : 'password'"
                 autocomplete="off"
+                :placeholder="t('lensAdmin.credentials.tokenPlaceholder')"
+                :required="mode === 'create'"
               />
               <button
                 v-if="canRevealCredential"

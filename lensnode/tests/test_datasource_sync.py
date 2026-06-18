@@ -1,7 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
+
 import pytest
 
 from lensnode.datasource_sync import (
     DataSourceSyncError,
+    datasource_sync_workers,
     _default_git_branch,
     _export_feishu_document,
     _export_filename,
@@ -16,6 +19,14 @@ from lensnode.datasource_sync import (
     _sync_git_submodules,
     _sync_feishu_folder,
 )
+
+
+def test_datasource_sync_workers_defaults_to_four():
+    """Datasource sync workers default to four and accept command override."""
+
+    assert datasource_sync_workers({}) == 4
+    assert datasource_sync_workers({"max_workers": "8"}) == 8
+    assert datasource_sync_workers({"max_workers": "invalid"}) == 4
 
 
 def test_git_auth_url_uses_inline_access_token():
@@ -229,6 +240,43 @@ def test_sync_feishu_folder_preserves_tree(tmp_path, monkeypatch):
     assert result["synced"] == 2
     assert (tmp_path / "doc1.docx").exists()
     assert (tmp_path / "Child-Folder" / "doc2.docx").exists()
+
+
+def test_sync_feishu_folder_uses_configured_workers(tmp_path, monkeypatch):
+    """Drive folder sync creates a worker pool with configured size."""
+
+    max_workers = []
+
+    def list_children(folder_token, headers):
+        del folder_token, headers
+        return []
+
+    def thread_pool_executor(*args, **kwargs):
+        max_workers.append(kwargs.get("max_workers"))
+        return RealThreadPoolExecutor(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._list_feishu_folder_children",
+        list_children,
+    )
+    monkeypatch.setattr(
+        "lensnode.datasource_sync.ThreadPoolExecutor",
+        thread_pool_executor,
+    )
+
+    _sync_feishu_folder(
+        {
+            "folder_token": "root",
+            "recursive": True,
+            "max_depth": 5,
+        },
+        tmp_path,
+        {},
+        None,
+        max_workers=4,
+    )
+
+    assert max_workers == [4]
 
 
 def test_feishu_export_filename_uses_original_extension():

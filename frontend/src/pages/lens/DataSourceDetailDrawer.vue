@@ -113,7 +113,7 @@
       </div>
       <div v-show="activeTab === 'details'" class="pt-6">
         <div
-          class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
+          class="relative overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
         >
           <ul class="divide-y divide-line bg-surface">
             <li
@@ -137,7 +137,7 @@
               <span></span>
             </li>
             <li
-              v-if="tasksLoading && !tasks.length"
+              v-if="tasksLoading"
               class="px-4 py-6 text-center text-sm text-ink-500"
             >
               {{ t('common.loading') }}
@@ -160,7 +160,12 @@
                 "
               >
                 <div
-                  class="grid cursor-pointer grid-cols-[1fr_140px_100px_100px_80px_24px] items-center gap-3 px-4 py-2 text-center text-sm"
+                  class="grid grid-cols-[1fr_140px_100px_100px_80px_24px] items-center gap-3 px-4 py-2 text-center text-sm"
+                  :class="
+                    tasksLoading
+                      ? 'cursor-not-allowed opacity-60'
+                      : 'cursor-pointer'
+                  "
                   @click="toggleTaskExpand(task)"
                 >
                   <span
@@ -217,7 +222,7 @@
             <BaseButton
               variant="outline"
               size="sm"
-              :disabled="currentPage <= 1"
+              :disabled="tasksLoading || currentPage <= 1"
               @click="goPrevPage"
             >
               {{ t('common.pagination.previous') }}
@@ -225,7 +230,7 @@
             <BaseButton
               variant="outline"
               size="sm"
-              :disabled="currentPage >= totalPages"
+              :disabled="tasksLoading || currentPage >= totalPages"
               @click="goNextPage"
             >
               {{ t('common.pagination.next') }}
@@ -277,6 +282,7 @@ const totalPages = ref(1)
 const pageSize = 10
 const processingRefreshTimer = ref(null)
 const processingRefreshInFlight = ref(false)
+const taskRequestSeq = ref(0)
 
 const expandedTaskId = ref(null)
 const expandedTask = ref(null)
@@ -316,6 +322,8 @@ function formatDate(val) {
 }
 
 async function loadTasks() {
+  const requestSeq = taskRequestSeq.value + 1
+  taskRequestSeq.value = requestSeq
   const uuid = props.datasource?.uuid
   if (!uuid) {
     tasks.value = []
@@ -340,17 +348,25 @@ async function loadTasks() {
     const total = Number.isFinite(Number(serverTotal))
       ? Number(serverTotal)
       : list.length
+    if (requestSeq !== taskRequestSeq.value) {
+      return
+    }
     tasks.value = list
     totalCount.value = total
     totalPages.value = total > 0 ? Math.ceil(total / pageSize) : 1
   } catch (e) {
+    if (requestSeq !== taskRequestSeq.value) {
+      return
+    }
     tasks.value = []
     totalCount.value = 0
     totalPages.value = 1
     // eslint-disable-next-line no-console
     console.error(extractErrorMessage(e, t('common.error')))
   } finally {
-    tasksLoading.value = false
+    if (requestSeq === taskRequestSeq.value) {
+      tasksLoading.value = false
+    }
   }
 }
 
@@ -401,18 +417,19 @@ function stopProcessingRefresh() {
 }
 
 function goPrevPage() {
-  if (currentPage.value <= 1) return
+  if (tasksLoading.value || currentPage.value <= 1) return
   currentPage.value -= 1
   loadTasks()
 }
 
 function goNextPage() {
-  if (currentPage.value >= totalPages.value) return
+  if (tasksLoading.value || currentPage.value >= totalPages.value) return
   currentPage.value += 1
   loadTasks()
 }
 
 async function toggleTaskExpand(task) {
+  if (tasksLoading.value) return
   if (expandedTaskId.value === task.id) {
     expandedTaskId.value = null
     expandedTask.value = null
@@ -455,11 +472,21 @@ watch(
   ([uuid, visible, tab]) => {
     if (!visible || !uuid || tab !== 'details') {
       stopProcessingRefresh()
+      taskRequestSeq.value += 1
+      tasksLoading.value = false
+      tasks.value = []
+      totalCount.value = 0
+      totalPages.value = 1
       expandedTaskId.value = null
       expandedTask.value = null
       return
     }
+    stopProcessingRefresh()
+    taskRequestSeq.value += 1
     currentPage.value = 1
+    tasks.value = []
+    totalCount.value = 0
+    totalPages.value = 1
     expandedTaskId.value = null
     expandedTask.value = null
     loadTasks().then(() => {
