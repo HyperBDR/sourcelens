@@ -274,7 +274,10 @@
                 {{ t('lensAdmin.datasourceWizard.recursiveHint') }}
               </label>
             </FormRow>
-            <FormRow :label="t('lensAdmin.fields.maxDepth')">
+            <FormRow
+              v-if="config.recursive"
+              :label="t('lensAdmin.fields.maxDepth')"
+            >
               <input
                 v-model.number="config.max_depth"
                 class="form-input"
@@ -351,9 +354,38 @@
             <div class="text-xs text-ink-500">
               {{ t('lensAdmin.datasourceWizard.selectedTargetPath') }}
             </div>
-            <div class="mt-1 break-all font-mono text-sm text-ink-900">
-              {{ form.workspace_relative_path ? targetPath : workspacePrefix }}
+            <div class="mt-1 flex items-center gap-2">
+              <div
+                class="min-w-0 flex-1 break-all font-mono text-sm text-ink-900"
+              >
+                {{
+                  form.workspace_relative_path ? targetPath : workspacePrefix
+                }}
+              </div>
+              <LoaderCircleIcon
+                v-if="checkingPath"
+                class="h-4 w-4 shrink-0 animate-spin text-primary-600"
+              />
+              <CheckCircleIcon
+                v-else-if="pathResult && pathResult.status !== 'blocked'"
+                class="h-4 w-4 shrink-0 text-success-600"
+              />
+              <XCircleIcon
+                v-else-if="pathResult && pathResult.status === 'blocked'"
+                class="h-4 w-4 shrink-0 text-danger-600"
+              />
             </div>
+            <p
+              v-if="pathResultMessage"
+              class="mt-1 text-xs"
+              :class="
+                pathResult?.status === 'blocked'
+                  ? 'text-danger-700'
+                  : 'text-success-700'
+              "
+            >
+              {{ pathResultMessage }}
+            </p>
           </div>
           <div class="rounded-md border border-line bg-surface">
             <div
@@ -362,11 +394,47 @@
               <div class="text-sm font-medium text-ink-900">
                 {{ workspaceRoot }}
               </div>
-              <span class="text-xs text-ink-500">
-                {{ t('lensAdmin.datasourceWizard.twoLevelDirs') }}
-              </span>
+              <button
+                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                type="button"
+                :title="t('lensAdmin.datasourceWizard.createAtWorkspace')"
+                @click="startCreateTargetDirectory('')"
+              >
+                <PlusIcon class="h-4 w-4" />
+              </button>
             </div>
             <div class="max-h-64 overflow-y-auto p-2">
+              <div
+                v-if="creatingDirectoryParent === ''"
+                class="flex gap-1 px-2 py-1"
+              >
+                <span class="h-7 w-7 shrink-0" />
+                <input
+                  v-model="newDirectoryName"
+                  class="directory-name-input"
+                  :placeholder="
+                    t('lensAdmin.datasourceWizard.newDirPlaceholder')
+                  "
+                  @keyup.enter="selectNewTargetDirectory"
+                />
+                <button
+                  class="directory-action-button text-success-600 hover:bg-success-50 hover:text-success-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  type="button"
+                  :disabled="!canCreateTargetDirectory"
+                  :title="t('common.confirm')"
+                  @click="selectNewTargetDirectory"
+                >
+                  <CheckIcon class="h-4 w-4" />
+                </button>
+                <button
+                  class="directory-action-button text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                  type="button"
+                  :title="t('common.cancel')"
+                  @click="cancelCreateTargetDirectory"
+                >
+                  <XIcon class="h-4 w-4" />
+                </button>
+              </div>
               <div
                 v-if="!workspaceDirectoryTree.length"
                 class="px-2 py-3 text-sm text-ink-500"
@@ -420,24 +488,33 @@
                 </div>
                 <div
                   v-if="creatingDirectoryParent === dir.relative"
-                  class="ml-8 flex gap-2"
+                  class="ml-5 flex gap-1 border-l border-line pl-10"
                 >
                   <input
                     v-model="newDirectoryName"
-                    class="form-input h-9"
+                    class="directory-name-input"
                     :placeholder="
                       t('lensAdmin.datasourceWizard.newDirPlaceholder')
                     "
                     @keyup.enter="selectNewTargetDirectory"
                   />
-                  <BaseButton
-                    size="sm"
-                    variant="outline"
+                  <button
+                    class="directory-action-button text-success-600 hover:bg-success-50 hover:text-success-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    type="button"
                     :disabled="!canCreateTargetDirectory"
+                    :title="t('common.confirm')"
                     @click="selectNewTargetDirectory"
                   >
-                    {{ t('lensAdmin.datasourceWizard.useNewDir') }}
-                  </BaseButton>
+                    <CheckIcon class="h-4 w-4" />
+                  </button>
+                  <button
+                    class="directory-action-button text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                    type="button"
+                    :title="t('common.cancel')"
+                    @click="cancelCreateTargetDirectory"
+                  >
+                    <XIcon class="h-4 w-4" />
+                  </button>
                 </div>
                 <div
                   v-if="isDirectoryExpanded(dir.relative)"
@@ -483,57 +560,35 @@
                     </div>
                     <div
                       v-if="creatingDirectoryParent === child.relative"
-                      class="ml-8 flex gap-2"
+                      class="ml-8 flex gap-1"
                     >
                       <input
                         v-model="newDirectoryName"
-                        class="form-input h-9"
+                        class="directory-name-input"
                         :placeholder="
                           t('lensAdmin.datasourceWizard.newDirPlaceholder')
                         "
                         @keyup.enter="selectNewTargetDirectory"
                       />
-                      <BaseButton
-                        size="sm"
-                        variant="outline"
+                      <button
+                        class="directory-action-button text-success-600 hover:bg-success-50 hover:text-success-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        type="button"
                         :disabled="!canCreateTargetDirectory"
+                        :title="t('common.confirm')"
                         @click="selectNewTargetDirectory"
                       >
-                        {{ t('lensAdmin.datasourceWizard.useNewDir') }}
-                      </BaseButton>
+                        <CheckIcon class="h-4 w-4" />
+                      </button>
+                      <button
+                        class="directory-action-button text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                        type="button"
+                        :title="t('common.cancel')"
+                        @click="cancelCreateTargetDirectory"
+                      >
+                        <XIcon class="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
-                </div>
-              </div>
-              <div class="mt-2 border-t border-line pt-2">
-                <button
-                  v-if="creatingDirectoryParent !== ''"
-                  class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-ink-600 hover:bg-surface-sunken"
-                  type="button"
-                  @click="startCreateTargetDirectory('')"
-                >
-                  <PlusIcon class="h-4 w-4" />
-                  <span>{{
-                    t('lensAdmin.datasourceWizard.createAtWorkspace')
-                  }}</span>
-                </button>
-                <div v-else class="flex gap-2 px-2 py-1">
-                  <input
-                    v-model="newDirectoryName"
-                    class="form-input h-9"
-                    :placeholder="
-                      t('lensAdmin.datasourceWizard.newDirPlaceholder')
-                    "
-                    @keyup.enter="selectNewTargetDirectory"
-                  />
-                  <BaseButton
-                    size="sm"
-                    variant="outline"
-                    :disabled="!canCreateTargetDirectory"
-                    @click="selectNewTargetDirectory"
-                  >
-                    {{ t('lensAdmin.datasourceWizard.useNewDir') }}
-                  </BaseButton>
                 </div>
               </div>
             </div>
@@ -543,31 +598,6 @@
           {{ t('lensAdmin.datasourceWizard.pathHint') }}
         </p>
       </FormRow>
-      <div class="flex items-center gap-2">
-        <BaseButton
-          variant="outline"
-          size="sm"
-          :disabled="!canCheckPath"
-          :loading="checkingPath"
-          @click="$emit('check-path')"
-        >
-          {{ t('lensAdmin.datasourceWizard.checkPath') }}
-        </BaseButton>
-        <span class="text-xs text-ink-400">
-          {{ targetPath }}
-        </span>
-      </div>
-      <div
-        v-if="pathResult"
-        class="rounded-md border p-3 text-sm"
-        :class="
-          pathResult.status === 'blocked'
-            ? 'border-danger-200 bg-danger-50 text-danger-800'
-            : 'border-success-200 bg-success-50 text-success-800'
-        "
-      >
-        {{ pathResultMessage }}
-      </div>
       <FormRow :label="t('lensAdmin.fields.syncPolicy')" required>
         <select v-model="syncPolicyMode" class="form-input w-56">
           <option value="interval">
@@ -617,22 +647,27 @@
 
     <template #footer>
       <div class="flex items-center justify-between">
-        <BaseButton
-          variant="outline"
-          @click="wizardStep > 1 ? prevWizardStep() : $emit('close')"
-        >
-          {{ wizardStep > 1 ? t('lensAdmin.wizard.back') : t('common.cancel') }}
-        </BaseButton>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <BaseButton
+            variant="outline"
+            @click="wizardStep > 1 ? prevWizardStep() : $emit('close')"
+          >
+            {{
+              wizardStep > 1 ? t('lensAdmin.wizard.back') : t('common.cancel')
+            }}
+          </BaseButton>
           <BaseButton
             v-if="wizardStep === 3"
             variant="outline"
+            class="!border-primary-200 !bg-primary-50 !text-primary-700 hover:!border-primary-300 hover:!bg-primary-100"
             :disabled="!canTestConnection"
             :loading="testingConnection"
             @click="$emit('test-connection')"
           >
             {{ t('lensAdmin.datasourceWizard.testConnection') }}
           </BaseButton>
+        </div>
+        <div class="flex items-center gap-3">
           <span class="text-xs text-ink-400">
             {{ wizardStep }} / {{ WIZARD_STEP_COUNT }}
           </span>
@@ -669,12 +704,17 @@
 
 <script setup>
 import {
+  CheckCircle as CheckCircleIcon,
+  Check as CheckIcon,
   ChevronDown as ChevronDownIcon,
   ChevronRight as ChevronRightIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
+  LoaderCircle as LoaderCircleIcon,
   Plus as PlusIcon,
-  RefreshCw as RefreshCwIcon
+  RefreshCw as RefreshCwIcon,
+  X as XIcon,
+  XCircle as XCircleIcon
 } from '@lucide/vue'
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -719,7 +759,7 @@ const emit = defineEmits([
 const { t } = useI18n()
 const WIZARD_STEP_COUNT = 4
 const wizardStep = ref(1)
-const creatingDirectoryParent = ref('')
+const creatingDirectoryParent = ref(null)
 const expandedDirectories = ref(new Set())
 const newDirectoryName = ref('')
 
@@ -861,10 +901,6 @@ const targetPath = computed(() => {
 
 const canCreateTargetDirectory = computed(() =>
   isValidRelativeName(newDirectoryName.value)
-)
-
-const canCheckPath = computed(
-  () => !!props.form.lensnode_uuid && !!props.form.workspace_relative_path
 )
 
 const canTestConnection = computed(() => {
@@ -1065,8 +1101,13 @@ function selectNewTargetDirectory() {
   const name = String(newDirectoryName.value || '').trim()
   props.form.workspace_relative_path = parent ? `${parent}/${name}` : name
   newDirectoryName.value = ''
-  creatingDirectoryParent.value = ''
+  creatingDirectoryParent.value = null
   emit('check-path')
+}
+
+function cancelCreateTargetDirectory() {
+  newDirectoryName.value = ''
+  creatingDirectoryParent.value = null
 }
 
 function hasFeishuCredential() {
@@ -1078,7 +1119,7 @@ watch(
   (show) => {
     if (show) {
       wizardStep.value = 1
-      creatingDirectoryParent.value = ''
+      creatingDirectoryParent.value = null
       expandedDirectories.value = new Set()
       newDirectoryName.value = ''
     }
@@ -1088,7 +1129,7 @@ watch(
 watch(
   () => props.form.lensnode_uuid,
   () => {
-    creatingDirectoryParent.value = ''
+    creatingDirectoryParent.value = null
     expandedDirectories.value = new Set()
     newDirectoryName.value = ''
   }
@@ -1110,5 +1151,13 @@ watch(
 <style scoped>
 .form-input {
   @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
+.directory-action-button {
+  @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
+.directory-name-input {
+  @apply h-7 min-w-0 flex-1 rounded border border-line bg-surface px-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
 }
 </style>
