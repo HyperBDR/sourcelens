@@ -169,6 +169,7 @@ const pageTitle = computed(() => {
     LensCredentials: t('lensAdmin.pages.credentials.title'),
     LensSkills: t('lensAdmin.pages.skills.title'),
     LensMcp: t('lensAdmin.pages.mcp.title'),
+    LensResourceSettings: t('lensAdmin.pages.resourceSettings.title'),
     LensSettings: t('lensAdmin.pages.settings.title'),
     LLMStats: t('llm.stats.title'),
     LLMUsage: t('llm.usage.title'),

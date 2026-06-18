@@ -384,9 +384,6 @@
       "timeoutDesc": "Tasks running longer than the configured minutes are marked as failed (by scheduled job).",
       "timeoutMinutes": "Timeout (minutes)",
       "timeoutMinutesPlaceholder": "e.g. 10",
-      "datasourceTimeoutTitle": "Datasource Sync Timeout",
-      "datasourceTimeoutDesc": "Maximum time the backend waits for LensNode to return the final datasource sync result. Also used as the sync lock TTL.",
-      "datasourceTimeoutMinutesPlaceholder": "e.g. 360",
       "retentionTitle": "Record Retention Days",
       "retentionDesc": "The number of days completed/failed records are kept before cleanup.",
       "retentionDays": "Retention (days)",
@@ -658,6 +655,12 @@
         "label": "MCP Server",
         "action": "Create MCP Server"
       },
+      "resourceSettings": {
+        "title": "Resource Settings",
+        "description": "Configure shared behavior for data sources, credentials, Skills, and MCP resources.",
+        "label": "Resource Setting",
+        "action": "Create Resource Setting"
+      },
       "settings": {
         "title": "Lens Global Settings",
         "description": "Configure node defaults, Run retention, health-check thresholds, and default task enablement.",
@@ -879,6 +882,17 @@
       "daysUnit": "days",
       "reset": "Reset",
       "saveChanges": "Save Changes"
+    },
+    "resourceSettings": {
+      "groups": {
+        "datasource": "Data Source Sync"
+      },
+      "syncTimeoutTitle": "Sync Timeout",
+      "syncTimeoutDesc": "Maximum time SourceLens waits for LensNode to finish a data source sync. It is also used as the sync lock TTL.",
+      "syncWorkersTitle": "Sync Workers",
+      "syncWorkersDesc": "Maximum parallel workers used by LensNode. Git uses workers for repository file scanning and indexing; Feishu uses workers for document or folder item fetching and conversion.",
+      "minutesUnit": "Minutes",
+      "workersUnit": "Workers"
     },
     "modal": {
       "create": "Create",

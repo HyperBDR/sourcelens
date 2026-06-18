@@ -12,7 +12,9 @@ from .services import lensnode_group_name
 
 WORKSPACE_ROOT = "/workspace"
 DATASOURCE_SYNC_TIMEOUT_SETTING = "lens.datasource_sync.timeout_s"
+DATASOURCE_SYNC_WORKERS_SETTING = "lens.datasource_sync.workers"
 DEFAULT_DATASOURCE_SYNC_TIMEOUT_S = 21600
+DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 DATASOURCE_RESULT_POLL_S = 0.5
 
 
@@ -112,6 +114,21 @@ def get_datasource_sync_timeout_s():
     return value if value > 0 else DEFAULT_DATASOURCE_SYNC_TIMEOUT_S
 
 
+def get_datasource_sync_max_workers():
+    """Return the configured datasource sync worker count."""
+
+    from .models import GlobalSetting
+
+    setting = GlobalSetting.objects.filter(
+        key=DATASOURCE_SYNC_WORKERS_SETTING
+    ).first()
+    try:
+        value = int(setting.value) if setting is not None else 0
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else DEFAULT_DATASOURCE_SYNC_WORKERS
+
+
 def check_datasource_path(lensnode, target_path, source_type, config=None):
     """Ask a LensNode to inspect a datasource target path."""
 
@@ -204,6 +221,7 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
             "config": config,
             "target_path": datasource.target_path,
             "trigger": trigger,
+            "max_workers": get_datasource_sync_max_workers(),
         },
     )
     cache.set(

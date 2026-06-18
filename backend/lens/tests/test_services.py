@@ -18,6 +18,7 @@ from core.management.commands.register_periodic_tasks import (
     discover_and_register,
 )
 from core.periodic_registry import TASK_REGISTRY
+from lens.datasource_services import dispatch_datasource_sync_async
 from lens.execution import execute_answer_run
 from lens.lensnode_auth import issue_lensnode_token
 from lens.models import (
@@ -400,6 +401,23 @@ class LensServiceTests(TransactionTestCase):
             self.assertGreaterEqual(len(steps), 2)
             self.assertEqual(steps[0]["name"], "prepare")
             self.assertEqual(steps[-1]["name"], "dispatch")
+
+    def test_datasource_sync_dispatch_includes_max_workers(self):
+        GlobalSetting.objects.create(
+            key="lens.datasource_sync.workers",
+            value=8,
+            description="",
+        )
+
+        with patch("lens.datasource_services._send_lensnode_command") as send:
+            dispatch_datasource_sync_async(
+                self.datasource,
+                task_id="task-1",
+                trigger="manual",
+            )
+
+        payload = send.call_args.args[1]
+        self.assertEqual(payload["max_workers"], 8)
 
     def test_complete_datasource_sync_task_updates_records(self):
         with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:

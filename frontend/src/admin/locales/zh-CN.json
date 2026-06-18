@@ -384,9 +384,6 @@
       "timeoutDesc": "超过设定分钟数未完成的任务会被标记为失败（由定时任务检测）。",
       "timeoutMinutes": "超时时间（分钟）",
       "timeoutMinutesPlaceholder": "例如 10",
-      "datasourceTimeoutTitle": "数据源同步超时时间",
-      "datasourceTimeoutDesc": "后端等待 LensNode 返回数据源同步最终结果的最长时间，同时用于同步锁有效期。",
-      "datasourceTimeoutMinutesPlaceholder": "例如 360",
       "retentionTitle": "记录保留天数",
       "retentionDesc": "在清理前已完成/失败记录的保留天数。",
       "retentionDays": "保留天数",
@@ -658,6 +655,12 @@
         "label": "MCP Server",
         "action": "新建 MCP Server"
       },
+      "resourceSettings": {
+        "title": "资源配置",
+        "description": "配置数据源、凭证、Skill 与 MCP 资源的共享行为。",
+        "label": "资源配置项",
+        "action": "新建资源配置"
+      },
       "settings": {
         "title": "Lens 全局配置",
         "description": "配置节点默认超时、Run 保留天数、健康检查阈值，以及默认定时任务启用状态。",
@@ -879,6 +882,17 @@
       "daysUnit": "天",
       "reset": "重置",
       "saveChanges": "保存修改"
+    },
+    "resourceSettings": {
+      "groups": {
+        "datasource": "数据源同步"
+      },
+      "syncTimeoutTitle": "同步超时时间",
+      "syncTimeoutDesc": "SourceLens 等待 LensNode 完成数据源同步的最长时间，同时作为同步锁的有效期。",
+      "syncWorkersTitle": "同步并发数",
+      "syncWorkersDesc": "LensNode 同步数据源时允许并行处理的最大工作数。Git 同步主要用于仓库文件扫描与索引；飞书同步主要用于文档或目录条目的拉取与转换。",
+      "minutesUnit": "分钟",
+      "workersUnit": "个"
     },
     "modal": {
       "create": "新建",
