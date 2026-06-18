@@ -916,6 +916,8 @@
       "authToken": "HTTPS Token",
       "noCredential": "不使用已有凭证",
       "selectCredential": "请选择 Git HTTPS Token 凭证",
+      "createCredentialHint": "未找到合适的凭证？请先在凭证管理中创建，创建完成后返回本页面刷新选择。",
+      "createCredentialLink": "前往创建凭证",
       "quickCreateCredential": "新建凭证",
       "saveCredential": "保存凭证",
       "newGitCredentialTitle": "新建 Git HTTPS Token 凭证",

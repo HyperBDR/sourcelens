@@ -50,7 +50,7 @@
     <div class="mt-3 flex justify-end">
       <a
         v-if="taskId"
-        :href="`/admin/tasks?execution_id=${taskId}`"
+        :href="`/management/task-management/list?execution_id=${taskId}`"
         target="_blank"
         rel="noopener"
         class="text-xs font-medium text-primary-600 hover:text-primary-700 hover:underline"

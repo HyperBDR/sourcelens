@@ -261,6 +261,7 @@
         :connection-result="datasourceConnectionResult"
         :checking-path="checkingDatasourcePath"
         :testing-connection="testingDatasourceConnection"
+        :refreshing-credentials="refreshingCredentials"
         :saving="saving"
         :form-error="formError"
         @close="closeDrawer"
@@ -269,7 +270,7 @@
         @check-path="checkDatasourcePath"
         @test-connection="testDatasourceConnection"
         @connection-change="resetDatasourceConnectionResult"
-        @create-credential="createInlineCredential"
+        @refresh-credentials="refreshCredentials"
       />
 
       <DataSourceDetailDrawer
@@ -291,7 +292,6 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   cancelDataSourceSync,
   checkLensNodeDataSourcePath,
-  createCredential,
   createDataSource,
   deleteDataSource,
   listCredentials,
@@ -347,6 +347,7 @@ const suppressDatasourceConnectionReset = ref(false)
 const datasourceConnectionBaseSignature = ref('')
 const checkingDatasourcePath = ref(false)
 const testingDatasourceConnection = ref(false)
+const refreshingCredentials = ref(false)
 const syncIntervalSeconds = ref(3600)
 const syncPolicyMode = ref('interval')
 const syncCron = ref('0 2 * * *')
@@ -773,14 +774,14 @@ function shouldUseDatasourceCredential() {
   return form.value.source_type === 'feishu'
 }
 
-async function createInlineCredential(payload) {
+async function refreshCredentials() {
+  refreshingCredentials.value = true
   try {
-    const credential = await createCredential(payload)
-    credentials.value = [credential, ...credentials.value]
-    form.value.credential_uuid = credential.uuid
-    showSuccess(t('lensAdmin.messages.saveSuccess'))
+    credentials.value = normalizeList(await listCredentials())
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.messages.saveFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
+  } finally {
+    refreshingCredentials.value = false
   }
 }
 

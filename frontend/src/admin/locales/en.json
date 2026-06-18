@@ -916,6 +916,8 @@
       "authToken": "HTTPS Token",
       "noCredential": "Do not use saved credential",
       "selectCredential": "Select a Git HTTPS Token credential",
+      "createCredentialHint": "No suitable credential? Create one, then refresh this page to select it.",
+      "createCredentialLink": "Create Credentials",
       "quickCreateCredential": "Create credential",
       "saveCredential": "Save credential",
       "newGitCredentialTitle": "Create Git HTTPS Token credential",

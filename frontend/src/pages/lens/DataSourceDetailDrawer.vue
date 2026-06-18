@@ -6,16 +6,6 @@
     width="2xl"
     @close="$emit('close')"
   >
-    <template #actions>
-      <BaseButton
-        v-if="datasource?.current_sync?.id"
-        size="sm"
-        variant="outline"
-        @click="$emit('open-task', datasource)"
-      >
-        {{ t('lensAdmin.actions.viewTask') }}
-      </BaseButton>
-    </template>
     <div v-if="datasource">
       <div
         class="sticky top-0 z-10 -mx-6 flex gap-5 border-b border-line bg-surface px-6"
@@ -273,7 +263,7 @@ const props = defineProps({
   lensnodes: { type: Array, default: () => [] }
 })
 
-defineEmits(['close', 'open-task'])
+defineEmits(['close'])
 
 const { t } = useI18n()
 const formatDateTime = useShortDateTime()

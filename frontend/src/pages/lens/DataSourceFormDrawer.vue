@@ -152,7 +152,7 @@
           required
         >
           <div class="flex flex-col gap-2">
-            <div v-if="filteredCredentials.length" class="flex gap-2">
+            <div class="flex gap-2">
               <select v-model="form.credential_uuid" class="form-input">
                 <option value="">
                   {{ t('lensAdmin.datasourceWizard.selectCredential') }}
@@ -169,56 +169,28 @@
                 class="shrink-0"
                 size="sm"
                 variant="outline"
-                @click="toggleQuickCredential"
+                :disabled="refreshingCredentials"
+                :title="t('common.refresh')"
+                @click="$emit('refresh-credentials')"
               >
-                {{ t('lensAdmin.datasourceWizard.quickCreateCredential') }}
+                <RefreshCwIcon
+                  class="h-4 w-4"
+                  :class="{ 'animate-spin': refreshingCredentials }"
+                />
+                <span class="sr-only">{{ t('common.refresh') }}</span>
               </BaseButton>
             </div>
-            <div
-              v-if="shouldShowQuickCredential"
-              class="space-y-4 rounded-md border border-line bg-surface p-4"
-            >
-              <div>
-                <p class="text-sm font-medium text-ink-900">
-                  {{ quickCredentialTitle }}
-                </p>
-                <p class="mt-1 text-xs text-ink-500">
-                  {{ quickCredentialDesc }}
-                </p>
-              </div>
-              <div class="grid gap-3 md:grid-cols-2">
-                <FormRow :label="t('lensAdmin.fields.name')" required>
-                  <input
-                    v-model="quickCredential.name"
-                    class="form-input"
-                    :placeholder="
-                      t('lensAdmin.datasourceWizard.credentialNamePlaceholder')
-                    "
-                  />
-                </FormRow>
-                <FormRow :label="t('lensAdmin.fields.accessToken')" required>
-                  <input
-                    v-model="quickCredential.secret"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    :placeholder="
-                      t('lensAdmin.datasourceWizard.credentialTokenPlaceholder')
-                    "
-                  />
-                </FormRow>
-              </div>
-              <div class="flex justify-end">
-                <BaseButton
-                  size="sm"
-                  variant="primary"
-                  :disabled="!canCreateQuickCredential"
-                  @click="createQuickCredential"
-                >
-                  {{ t('lensAdmin.datasourceWizard.saveCredential') }}
-                </BaseButton>
-              </div>
-            </div>
+            <p class="text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.createCredentialHint') }}
+              <a
+                class="font-medium text-brand-600 hover:text-brand-700"
+                href="/management/lens/resources/credentials"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                {{ t('lensAdmin.datasourceWizard.createCredentialLink') }}
+              </a>
+            </p>
           </div>
         </FormRow>
       </template>
@@ -236,7 +208,7 @@
 
         <FormRow :label="t('lensAdmin.fields.credential')" required>
           <div class="flex flex-col gap-2">
-            <div v-if="filteredCredentials.length" class="flex gap-2">
+            <div class="flex gap-2">
               <select v-model="form.credential_uuid" class="form-input">
                 <option value="">
                   {{ t('lensAdmin.datasourceWizard.selectFeishuCredential') }}
@@ -253,71 +225,28 @@
                 class="shrink-0"
                 size="sm"
                 variant="outline"
-                @click="toggleQuickCredential"
+                :disabled="refreshingCredentials"
+                :title="t('common.refresh')"
+                @click="$emit('refresh-credentials')"
               >
-                {{ t('lensAdmin.datasourceWizard.quickCreateCredential') }}
+                <RefreshCwIcon
+                  class="h-4 w-4"
+                  :class="{ 'animate-spin': refreshingCredentials }"
+                />
+                <span class="sr-only">{{ t('common.refresh') }}</span>
               </BaseButton>
             </div>
-            <div
-              v-if="shouldShowQuickCredential"
-              class="space-y-4 rounded-md border border-line bg-surface p-4"
-            >
-              <div>
-                <p class="text-sm font-medium text-ink-900">
-                  {{ quickCredentialTitle }}
-                </p>
-                <p class="mt-1 text-xs text-ink-500">
-                  {{ quickCredentialDesc }}
-                </p>
-              </div>
-              <FormRow :label="t('lensAdmin.fields.name')" required>
-                <input
-                  v-model="quickCredential.name"
-                  class="form-input"
-                  :placeholder="
-                    t(
-                      'lensAdmin.datasourceWizard.feishuCredentialNamePlaceholder'
-                    )
-                  "
-                />
-              </FormRow>
-              <div class="grid gap-3 md:grid-cols-2">
-                <FormRow :label="t('lensAdmin.fields.feishuAppId')" required>
-                  <input
-                    v-model="quickCredential.appId"
-                    class="form-input"
-                    autocomplete="off"
-                    :placeholder="
-                      t('lensAdmin.datasourceWizard.feishuAppIdPlaceholder')
-                    "
-                  />
-                </FormRow>
-                <FormRow
-                  :label="t('lensAdmin.fields.feishuAppSecret')"
-                  required
-                >
-                  <input
-                    v-model="quickCredential.appSecret"
-                    class="form-input"
-                    type="password"
-                    autocomplete="off"
-                    :placeholder="
-                      t('lensAdmin.datasourceWizard.feishuAppSecretPlaceholder')
-                    "
-                  />
-                </FormRow>
-              </div>
-              <div class="flex justify-end">
-                <BaseButton
-                  size="sm"
-                  variant="primary"
-                  :disabled="!canCreateQuickCredential"
-                  @click="createQuickCredential"
-                >
-                  {{ t('lensAdmin.datasourceWizard.saveCredential') }}
-                </BaseButton>
-              </div>
-            </div>
+            <p class="text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.createCredentialHint') }}
+              <a
+                class="font-medium text-brand-600 hover:text-brand-700"
+                href="/management/lens/resources/credentials"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                {{ t('lensAdmin.datasourceWizard.createCredentialLink') }}
+              </a>
+            </p>
           </div>
         </FormRow>
 
@@ -744,7 +673,8 @@ import {
   ChevronRight as ChevronRightIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
-  Plus as PlusIcon
+  Plus as PlusIcon,
+  RefreshCw as RefreshCwIcon
 } from '@lucide/vue'
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -767,6 +697,7 @@ const props = defineProps({
   connectionResult: { type: Object, default: null },
   checkingPath: Boolean,
   testingConnection: Boolean,
+  refreshingCredentials: Boolean,
   saving: Boolean,
   formError: { type: String, default: '' }
 })
@@ -778,7 +709,7 @@ const emit = defineEmits([
   'check-path',
   'test-connection',
   'connection-change',
-  'create-credential',
+  'refresh-credentials',
   'update:syncIntervalSeconds',
   'update:syncPolicyMode',
   'update:syncCron',
@@ -788,13 +719,6 @@ const emit = defineEmits([
 const { t } = useI18n()
 const WIZARD_STEP_COUNT = 4
 const wizardStep = ref(1)
-const quickCredential = ref({
-  name: '',
-  secret: '',
-  appId: '',
-  appSecret: ''
-})
-const showQuickCredential = ref(false)
 const creatingDirectoryParent = ref('')
 const expandedDirectories = ref(new Set())
 const newDirectoryName = ref('')
@@ -1051,41 +975,6 @@ const filteredCredentials = computed(() => {
   )
 })
 
-const shouldShowQuickCredential = computed(
-  () => !filteredCredentials.value.length || showQuickCredential.value
-)
-
-const quickCredentialTitle = computed(() => {
-  if (props.form.source_type === 'feishu') {
-    return filteredCredentials.value.length
-      ? t('lensAdmin.datasourceWizard.newFeishuCredentialTitle')
-      : t('lensAdmin.datasourceWizard.noFeishuCredentialTitle')
-  }
-  return filteredCredentials.value.length
-    ? t('lensAdmin.datasourceWizard.newGitCredentialTitle')
-    : t('lensAdmin.datasourceWizard.noGitCredentialTitle')
-})
-
-const quickCredentialDesc = computed(() => {
-  if (props.form.source_type === 'feishu') {
-    return t('lensAdmin.datasourceWizard.noFeishuCredentialDesc')
-  }
-  return t('lensAdmin.datasourceWizard.noGitCredentialDesc')
-})
-
-const canCreateQuickCredential = computed(() => {
-  if (!quickCredential.value.name?.trim()) {
-    return false
-  }
-  if (props.form.source_type === 'feishu') {
-    return (
-      !!quickCredential.value.appId?.trim() &&
-      !!quickCredential.value.appSecret?.trim()
-    )
-  }
-  return !!quickCredential.value.secret?.trim()
-})
-
 function nextWizardStep() {
   if (wizardStep.value < WIZARD_STEP_COUNT) wizardStep.value++
 }
@@ -1180,37 +1069,6 @@ function selectNewTargetDirectory() {
   emit('check-path')
 }
 
-function toggleQuickCredential() {
-  showQuickCredential.value = !showQuickCredential.value
-}
-
-function createQuickCredential() {
-  if (!canCreateQuickCredential.value) {
-    return
-  }
-  const payload = {
-    name: quickCredential.value.name.trim(),
-    provider: 'generic',
-    auth_type: 'https_token'
-  }
-  if (props.form.source_type === 'feishu') {
-    payload.provider = 'feishu'
-    payload.auth_type = 'feishu_app'
-    payload.app_id = quickCredential.value.appId.trim()
-    payload.app_secret = quickCredential.value.appSecret.trim()
-  } else {
-    payload.secret = quickCredential.value.secret.trim()
-  }
-  emit('create-credential', payload)
-  quickCredential.value = {
-    name: '',
-    secret: '',
-    appId: '',
-    appSecret: ''
-  }
-  showQuickCredential.value = false
-}
-
 function hasFeishuCredential() {
   return !!props.form.credential_uuid
 }
@@ -1220,7 +1078,6 @@ watch(
   (show) => {
     if (show) {
       wizardStep.value = 1
-      showQuickCredential.value = false
       creatingDirectoryParent.value = ''
       expandedDirectories.value = new Set()
       newDirectoryName.value = ''
@@ -1245,7 +1102,6 @@ watch(
     JSON.stringify(props.config || {})
   ],
   () => {
-    showQuickCredential.value = false
     emit('connection-change')
   }
 )
