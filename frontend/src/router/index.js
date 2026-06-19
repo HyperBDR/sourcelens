@@ -164,7 +164,7 @@ router.beforeEach(async (to, from, next) => {
     const hasToken = !!localStorage.getItem('access_token')
 
     if (!hasToken) {
-      next('/login')
+      next({ path: '/login', query: { next: to.fullPath } })
       return
     }
 
@@ -172,11 +172,11 @@ router.beforeEach(async (to, from, next) => {
       try {
         const authSuccess = await userStore.checkAuth()
         if (!authSuccess) {
-          next('/login')
+          next({ path: '/login', query: { next: to.fullPath } })
           return
         }
       } catch {
-        next('/login')
+        next({ path: '/login', query: { next: to.fullPath } })
         return
       }
     }

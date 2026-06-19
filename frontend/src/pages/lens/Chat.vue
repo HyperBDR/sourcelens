@@ -287,7 +287,7 @@
                 </router-link>
               </div>
 
-              <div class="dock-section border-t border-line">
+              <div class="dock-section" :class="{ 'border-t border-line': userStore.userHasFeature('admin_console') }">
                 <button
                   type="button"
                   class="dock-link"

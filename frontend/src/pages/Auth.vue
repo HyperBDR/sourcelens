@@ -81,7 +81,7 @@ const redirectAfterLogin = async () => {
 
 const navigate = async (target) => {
   try {
-    await router.push(target)
+    await router.replace(target)
   } catch (navigationError) {
     console.error('Navigation error:', navigationError)
   }
