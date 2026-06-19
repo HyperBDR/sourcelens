@@ -148,6 +148,24 @@ docker-compose up -d
 
 默认端口：HTTP 10080, HTTPS 10443（可通过 `NGINX_HTTP_PORT`、`NGINX_HTTPS_PORT` 调整）。
 
+### 容量与并发调优
+
+生产面向多用户，按负载在服务器 `.env` 中调整这些值（CI 不会覆盖 `.env`，跨部署保留）：
+
+| 变量 | 作用 | 默认 | 调优建议 |
+|---|---|---|---|
+| `LENSNODE_MAX_CONCURRENT_RUNS` | 单个 LensNode 的并发问答数 | `1` | **真正的吞吐上限——务必调大。** 节点满时新 run 会停在 `Queued`（每 5s 重试，最长 120s）。设为 ≥ 最繁忙助手的 `max_concurrency`，并按内存（每个 deep-agent 回答约数百 MB）与上游 LLM 限流量力而行。 |
+| `CELERY_CONCURRENCY` | Celery worker 进程数 | CPU 核数 | 很少是瓶颈：worker 任务只是把活派发给 LensNode（重活在 LensNode 上跑）。适度上调只为留余量。 |
+| `max_concurrency`（每助手，DB） | 单个助手的并发 run 数 | `5` | 按助手限流；系统级上限是 `LENSNODE_MAX_CONCURRENT_RUNS`。 |
+
+- API 实为**单个 Daphne ASGI 进程**（只占 1 核）。async 能抗大量并发连接，但要用更多核需多开 ASGI worker/副本——不是 `.env` 能搞定的。
+- 服务器上用 **Docker Compose v2**（`docker compose`）。旧版 v1（`docker-compose`）会因部署未下发的 `build:` 上下文而中止 `up -d`。
+- 改完 `.env` 需重建而非重启（`docker restart` 不会重读 env 文件）：
+
+  ```bash
+  APP_VERSION=<version> docker compose up -d --force-recreate --no-deps lensnode backend-worker
+  ```
+
 ## 技术栈
 
 **后端**：Python · Django REST Framework · Celery · PostgreSQL  

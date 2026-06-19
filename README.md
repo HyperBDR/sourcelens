@@ -148,6 +148,24 @@ docker-compose up -d
 
 Default ports: HTTP 10080, HTTPS 10443 (configurable via `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`).
 
+### Capacity & Concurrency Tuning
+
+Production serves many users, so size these in the server `.env` (CI never overwrites `.env`, so values persist across deploys):
+
+| Variable | Controls | Default | Guidance |
+|---|---|---|---|
+| `LENSNODE_MAX_CONCURRENT_RUNS` | Concurrent answer runs on a LensNode | `1` | **The real throughput cap — raise it.** When the node is full a run sits in `Queued` (retried every 5s, up to 120s). Set it ≥ the busiest assistant's `max_concurrency`, sized to RAM (each deep-agent run uses hundreds of MB) and upstream LLM rate limits. |
+| `CELERY_CONCURRENCY` | Celery worker processes | CPU count | Rarely the bottleneck: worker tasks just dispatch to the LensNode (the heavy work runs there). A modest bump only adds headroom. |
+| `max_concurrency` (per assistant, DB) | Concurrent runs per assistant | `5` | Per-assistant limit; the system-wide cap is `LENSNODE_MAX_CONCURRENT_RUNS`. |
+
+- The API runs as a **single Daphne ASGI process** (one core). Async handles many concurrent connections, but using more cores means running multiple ASGI workers/replicas — not an `.env` change.
+- Use **Docker Compose v2** (`docker compose`) on the server. Legacy v1 (`docker-compose`) aborts `up -d` on `build:` contexts the deploy does not ship to the host.
+- `.env` changes need a recreate, not a restart (`docker restart` does not re-read env files):
+
+  ```bash
+  APP_VERSION=<version> docker compose up -d --force-recreate --no-deps lensnode backend-worker
+  ```
+
 ## Tech Stack
 
 **Backend**: Python · Django REST Framework · Celery · PostgreSQL  
