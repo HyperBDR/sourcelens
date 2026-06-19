@@ -1,3 +1,4 @@
+import logging
 from contextlib import contextmanager
 
 from django.db import transaction
@@ -12,6 +13,8 @@ from .services import (
     rewrite_query,
     validate_run_dispatch,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LensExecutionError(Exception):
@@ -147,10 +150,23 @@ def execute_answer_run(run, dispatch=True):
             .count()
         )
         if active_count >= max_concurrency:
+            logger.info(
+                "run %s [%s]: assistant concurrency cap (active=%d/%d),"
+                " retrying in 3s",
+                run.uuid,
+                assistant.slug,
+                active_count,
+                max_concurrency,
+            )
             from .tasks import execute_answer_run as _task
             _task.apply_async(args=[str(run.uuid)], countdown=3)
             return run
 
+    logger.info(
+        "run %s [%s]: starting execution",
+        run.uuid,
+        assistant.slug,
+    )
     try:
         run.status = Run.Status.RUNNING
         run.started_at = run.started_at or timezone.now()
@@ -168,9 +184,11 @@ def execute_answer_run(run, dispatch=True):
             run.save(update_fields=["status", "updated_at"])
 
     except LensNodeDispatchError as exc:
+        logger.error("run %s: dispatch failed: %s", run.uuid, exc)
         _mark_run_failed(run, exc)
         raise
     except Exception as exc:
+        logger.exception("run %s: unexpected execution error", run.uuid)
         _mark_run_failed(run, exc)
         raise
 

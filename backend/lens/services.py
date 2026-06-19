@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 from time import sleep
 
 from asgiref.sync import async_to_sync, sync_to_async
@@ -11,6 +12,8 @@ from django.utils import timezone
 
 from .llm import run_completion
 from .models import Message, LensNode, Run, RunExecution, RunStep
+
+logger = logging.getLogger(__name__)
 
 TERMINAL_RUN_STATUSES = {
     Run.Status.DONE,
@@ -482,6 +485,14 @@ def finish_lensnode_run(run_uuid, status, error=""):
     if status == Run.Status.FAILED and error == "LENSNODE_BUSY":
         elapsed = (now - run.created_at).total_seconds()
         if elapsed < BUSY_RETRY_WINDOW_S:
+            logger.warning(
+                "run %s: LENSNODE_BUSY (elapsed=%.0fs < window=%ds),"
+                " re-queueing in %ds",
+                run_uuid,
+                elapsed,
+                BUSY_RETRY_WINDOW_S,
+                BUSY_RETRY_INTERVAL_S,
+            )
             run.status = Run.Status.QUEUED
             run.error = ""
             run.save(update_fields=["status", "error", "updated_at"])
@@ -491,6 +502,13 @@ def finish_lensnode_run(run_uuid, status, error=""):
                 countdown=BUSY_RETRY_INTERVAL_S,
             )
             return run
+        logger.error(
+            "run %s: LENSNODE_BUSY retry window exceeded (elapsed=%.0fs > %ds),"
+            " failing run",
+            run_uuid,
+            elapsed,
+            BUSY_RETRY_WINDOW_S,
+        )
 
     if status == Run.Status.DONE:
         run.status = Run.Status.DONE
@@ -528,6 +546,11 @@ def _promote_next_queued_run(assistant):
         .first()
     )
     if next_run:
+        logger.info(
+            "assistant %s: promoting queued run %s",
+            assistant.slug,
+            next_run.uuid,
+        )
         from .tasks import execute_answer_run
         execute_answer_run.delay(str(next_run.uuid))
 

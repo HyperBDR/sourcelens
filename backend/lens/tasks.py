@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import timedelta
+import logging
 import uuid
 
 from celery import shared_task
@@ -20,11 +21,14 @@ from .models import (
     ScheduledTask,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @shared_task(name="lens.execute_answer_run", queue="lens")
 def execute_answer_run(run_uuid):
     """Celery entrypoint for executing a Lens run."""
 
+    logger.info("task execute_answer_run received: run_uuid=%s", run_uuid)
     from .execution import execute_answer_run as execute_answer_run_service
 
     run = Run.objects.select_related(

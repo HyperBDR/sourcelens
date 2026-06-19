@@ -241,7 +241,6 @@ import { llmAdminApi } from '@/admin/api/llmAdmin'
 import { extractErrorMessage } from '@/utils/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
-  createGlobalSetting,
   getSystemHealth,
   listGlobalSettings,
   updateGlobalSetting,
@@ -466,12 +465,7 @@ async function saveSettings() {
         value,
         description: setting.description
       }
-      const exists = globalSettings.value.some((row) => row.key === setting.key)
-      if (exists) {
-        await updateGlobalSetting(setting.key, payload)
-      } else {
-        await createGlobalSetting(payload)
-      }
+      await updateGlobalSetting(setting.key, payload)
     }
     showSuccess(t('lensAdmin.messages.saveSuccess'))
     await load()

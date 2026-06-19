@@ -40,11 +40,31 @@ run_startup_init() {
 
 # --- Process Starters ---
 start_gunicorn() {
-    log "Starting Daphne ASGI server..."
-    exec daphne core.asgi:application \
-        --bind 0.0.0.0 \
+    # ASGI server. Default: multiple Uvicorn workers (multi-core; serves HTTP,
+    # SSE, and the Channels WebSocket). All cross-process state goes through
+    # Redis (channel layer + cache) and the DB, so workers scale horizontally.
+    # Size via API_WORKERS. Set ASGI_SERVER=daphne to fall back to a single
+    # Daphne process if ever needed.
+    if [ "${ASGI_SERVER:-uvicorn}" = "daphne" ]; then
+        log "Starting Daphne ASGI server (single process)..."
+        exec daphne core.asgi:application \
+            --bind 0.0.0.0 \
+            --port 8000 \
+            --access-log $ACCESS_LOG
+    fi
+    log "Starting Uvicorn ASGI workers (API_WORKERS=${API_WORKERS:-3})..."
+    exec uvicorn core.asgi:application \
+        --host 0.0.0.0 \
         --port 8000 \
-        --access-log $ACCESS_LOG
+        --workers ${API_WORKERS:-3} \
+        --loop uvloop \
+        --http httptools \
+        --limit-max-requests ${UVICORN_MAX_REQUESTS:-10000} \
+        --timeout-keep-alive ${UVICORN_KEEPALIVE:-75} \
+        --timeout-graceful-shutdown ${UVICORN_GRACEFUL_TIMEOUT:-120} \
+        --access-log \
+        --no-server-header \
+        --log-level ${API_LOG_LEVEL:-info}
 }
 
 start_wsgi_gunicorn() {
