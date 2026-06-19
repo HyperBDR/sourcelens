@@ -82,12 +82,6 @@ const routes = [
     redirect: '/management/task-management/list'
   },
   {
-    path: '/ai-query',
-    name: 'AIQueryPrototype',
-    component: () => import('@/pages/AIQuery.vue'),
-    meta: { requiresAuth: true }
-  },
-  {
     path: '/lens/assistants/:slug/chat',
     name: 'LensAssistantChat',
     component: () => import('@/pages/lens/Chat.vue'),

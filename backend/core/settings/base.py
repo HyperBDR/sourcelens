@@ -65,15 +65,6 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 LOG_LEVEL = os.getenv('DJANGO_LOG_LEVEL', 'info').upper()
 configure_logging(LOG_LEVEL)
 
-AI_QUERY_ALLOWED_BASE_DIRS = [
-    item.strip()
-    for item in os.getenv(
-        'AI_QUERY_ALLOWED_BASE_DIRS',
-        '/opt/backend,/opt/storage',
-    ).split(',')
-    if item.strip()
-]
-
 # ============================
 # Application Definitions
 # ============================
