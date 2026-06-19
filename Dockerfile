@@ -83,13 +83,13 @@ RUN set -eux; \
         uv; \
     echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc; \
     export PATH="/root/.local/bin:$PATH"; \
-    if [ "$DEV_MODE" = "1" ]; then \
-        sed -i \
-            -e 's#agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git#agentcore-metering @ file:///opt/backend/agentcore/agentcore-metering#' \
-            -e 's#agentcore-task @ git+https://github.com/cloud2ai/agentcore-task.git#agentcore-task @ file:///opt/backend/agentcore/agentcore-task#' \
-            -e 's#agentcore-notifier @ git+https://github.com/cloud2ai/agentcore-notifier.git#agentcore-notifier @ file:///opt/backend/agentcore/agentcore-notifier#' \
-            pyproject.toml; \
-    fi; \
+    # Always install agentcore from the bundled submodules (the pinned
+    # source of truth) so image builds never drift to an unpinned git ref.
+    sed -i \
+        -e 's#agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git#agentcore-metering @ file:///opt/backend/agentcore/agentcore-metering#' \
+        -e 's#agentcore-task @ git+https://github.com/cloud2ai/agentcore-task.git#agentcore-task @ file:///opt/backend/agentcore/agentcore-task#' \
+        -e 's#agentcore-notifier @ git+https://github.com/cloud2ai/agentcore-notifier.git#agentcore-notifier @ file:///opt/backend/agentcore/agentcore-notifier#' \
+        pyproject.toml; \
     echo "Using Python index: ${PIP_INDEX_URL}"; \
     uv pip compile pyproject.toml -o requirements.txt --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"; \
     uv pip install --system -r requirements.txt --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"
