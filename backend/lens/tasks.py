@@ -119,7 +119,13 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
     from agentcore_task.adapters.django import TaskTracker
     from agentcore_task.constants import TaskStatus
 
-    task_id = self.request.id or uuid.uuid4().hex
+    # Track this run under a standalone id, not the Celery task id. The
+    # Celery task returns SUCCESS right after dispatching to the LensNode,
+    # so a tracked id equal to the Celery id would let the periodic sync
+    # mark the run complete prematurely. With a standalone id Celery reports
+    # PENDING (unknown id) and the LensNode completion callback owns the
+    # final status.
+    task_id = uuid.uuid4().hex
     datasource = DataSource.objects.select_related("lensnode").get(
         uuid=datasource_uuid
     )

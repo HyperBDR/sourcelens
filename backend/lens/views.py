@@ -667,6 +667,27 @@ class DataSourceViewSet(BaseAdminViewSet):
         ensure_datasource_periodic_task(datasource)
         return Response(DataSourceSerializer(datasource).data)
 
+    @action(detail=True, methods=["get"], url_path="sync-tasks")
+    def sync_tasks(self, request, uuid=None):
+        """List sync task executions for this datasource (paginated)."""
+
+        from agentcore_task.adapters.django.models import TaskExecution
+        from agentcore_task.adapters.django.serializers import (
+            TaskExecutionListSerializer,
+        )
+
+        datasource = self.get_object()
+        queryset = TaskExecution.objects.filter(
+            module="lens_datasource",
+            metadata__datasource_uuid=str(datasource.uuid),
+        ).order_by("-created_at")
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = TaskExecutionListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = TaskExecutionListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
     @action(detail=True, methods=["post"], url_path="cancel-sync")
     def cancel_sync(self, request, uuid=None):
         """Cancel the latest running synchronization for this datasource."""

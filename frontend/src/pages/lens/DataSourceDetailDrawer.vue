@@ -250,6 +250,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
 
+import api from '@/api'
 import { taskManagementApi } from '@/admin/api/taskManagement'
 import { extractErrorMessage, extractResponseData } from '@/utils/api'
 import { formatDuration } from '@/utils/formatting'
@@ -335,12 +336,12 @@ async function loadTasks() {
   try {
     const params = {
       page: currentPage.value,
-      page_size: pageSize,
-      my_tasks: 'false',
-      module: 'lens_datasource',
-      datasource_uuid: uuid
+      page_size: pageSize
     }
-    const res = await taskManagementApi.getExecutions(params)
+    const res = await api.get(
+      `/lens/admin/datasources/${uuid}/sync-tasks/`,
+      { params }
+    )
     const data = extractResponseData(res)
     const list =
       data?.results ?? data?.list ?? (Array.isArray(data) ? data : [])
