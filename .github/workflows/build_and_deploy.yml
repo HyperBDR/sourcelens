@@ -174,9 +174,14 @@ jobs:
             echo "Starting sourcelens deployment for version ${APP_VERSION}..."
             # Pull the specified image tag
             APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml pull
-            # Start containers in detached mode - this returns immediately
-            # The containers will gracefully shutdown old tasks in the background
-            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml up -d --force-recreate
+            # Recreate only the containers whose image/config changed (the
+            # new app images). Avoid --force-recreate: it rebuilds every
+            # service (incl. db/nginx) and can abort the deploy mid-way.
+            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml up -d
+            # Reload nginx config in place; fall back to a restart if reload
+            # fails. (The old nginx-reload issue that motivated force-recreate
+            # is fixed, so a full recreate is no longer needed.)
+            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml exec -T nginx nginx -s reload 2>/dev/null || APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml restart nginx
             docker system prune -f
 
             echo "sourcelens deployment completed for version ${APP_VERSION}"
