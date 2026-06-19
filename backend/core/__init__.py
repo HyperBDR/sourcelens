@@ -70,6 +70,11 @@ def _init_sentry():
         profiles_sample_rate=SENTRY_PROFILING_SAMPLE_RATE,
         send_default_pii=SENTRY_SEND_DEFAULT_PII,
         before_send=_drop_transient_infra_events,
+        # Disable auto-discovery to prevent Sentry from eagerly importing
+        # langgraph, openai, and huggingface_hub integration shims at startup.
+        # Those packages are lazily loaded in application code; auto-enabling
+        # overrides that and adds ~2.8 s per process to cold-start time.
+        auto_enabling_integrations=False,
         integrations=[
             DjangoIntegration(),
             CeleryIntegration(),
