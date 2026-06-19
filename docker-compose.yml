@@ -84,10 +84,17 @@ services:
   frontend:
     container_name: sourcelens-ui
     restart: unless-stopped
-    # No `build:` here: this is the deploy compose and only the compose files
-    # are shipped to the server (no ./frontend source). A build context that
-    # does not exist on the host makes `docker-compose up -d` abort. Images
-    # are built in CI and pulled by tag; local builds use docker-compose.dev.yml.
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
+        VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
+        VITE_SENTRY_SEND_DEFAULT_PII: ${VITE_SENTRY_SEND_DEFAULT_PII:-}
+        VITE_GA_ID: ${VITE_GA_ID:-}
     image: oneprocloud/sourcelens-frontend:${APP_VERSION:-latest}
     expose:
       - "80"
@@ -101,8 +108,12 @@ services:
       start_period: 60s
 
   lensnode:
-    # No `build:` here (see frontend): ./lensnode is absent on the deploy host
-    # and a missing build context aborts `docker-compose up -d`.
+    build:
+      context: ./lensnode
+      dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
     image: oneprocloud/sourcelens-lensnode:${APP_VERSION:-latest}
     container_name: sourcelens-lensnode
     restart: unless-stopped

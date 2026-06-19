@@ -152,6 +152,11 @@ jobs:
           # deploy (e.g. `up -d` aborting) surfaces as red instead of a
           # false "success".
           script_stop: true
+          # Use Docker Compose v2 (`docker compose`). Unlike legacy
+          # docker-compose v1, v2 does not require a service's build context to
+          # exist on the host when an image is present — it pulls the tagged
+          # image and only builds on `--build`, so `build:` can stay in the
+          # compose file while prod deploys purely from pushed images.
           script: |
             cd ${{ env.DEPLOY_PATH }}
             APP_VERSION="${{ needs.prepare-version.outputs.version }}"
@@ -177,15 +182,15 @@ jobs:
 
             echo "Starting sourcelens deployment for version ${APP_VERSION}..."
             # Pull the specified image tag
-            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml pull
+            APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml pull
             # Recreate only the containers whose image/config changed (the
             # new app images). Avoid --force-recreate: it rebuilds every
             # service (incl. db/nginx) and can abort the deploy mid-way.
-            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml up -d
+            APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml up -d
             # Reload nginx config in place; fall back to a restart if reload
             # fails. (The old nginx-reload issue that motivated force-recreate
             # is fixed, so a full recreate is no longer needed.)
-            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml exec -T nginx nginx -s reload 2>/dev/null || APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml restart nginx
+            APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml exec -T nginx nginx -s reload 2>/dev/null || APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml restart nginx
             docker system prune -f
 
             echo "sourcelens deployment completed for version ${APP_VERSION}"
