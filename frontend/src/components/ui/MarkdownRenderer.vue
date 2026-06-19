@@ -223,6 +223,10 @@ const renderedContent = computed(() => {
 
     return sanitizeHtml(processedHtml)
   } catch (error) {
+    // Surface the real failure instead of silently degrading to plain text;
+    // a throw here means the answer renders unformatted, so it must be
+    // visible in the console for diagnosis rather than swallowed.
+    console.error('MarkdownRenderer failed to render content:', error)
     return `<pre class="text-gray-600">${escapeHtml(props.content || '')}</pre>`
   }
 })
