@@ -185,14 +185,34 @@ class OtpLoginEmailService:
             bool: True if email sent successfully, False otherwise
         """
         try:
+            from django.conf import settings as django_settings
+            expiry_minutes = max(
+                1,
+                getattr(django_settings, 'OTP_CODE_TTL_SECONDS', 300) // 60,
+            )
+            frontend_url = getattr(
+                django_settings, 'FRONTEND_URL', ''
+            ).rstrip('/')
+
+            template_map = {
+                'zh-CN': 'emails/login_otp/login_otp_email_zh.html',
+                'en-US': 'emails/login_otp/login_otp_email_en.html',
+            }
+            template = template_map.get(language, template_map['en-US'])
+            html_content = render_to_string(template, {
+                'code': code,
+                'expiry_minutes': expiry_minutes,
+                'frontend_url': frontend_url,
+            })
+
             translation_code = get_translation_language_code(language)
             with translation.override(translation_code):
                 subject = str(_('Your login verification code'))
                 text_content = str(_(
                     'Your verification code is %(code)s. '
-                    'It expires in a few minutes. '
+                    'It expires in %(minutes)s minutes. '
                     'If you did not request it, ignore this email.'
-                ) % {'code': code})
+                ) % {'code': code, 'minutes': expiry_minutes})
 
             from_email, connection = get_email_delivery_options()
 
@@ -203,6 +223,7 @@ class OtpLoginEmailService:
                 to=[email],
                 connection=connection,
             )
+            email_message.attach_alternative(html_content, 'text/html')
             email_message.send()
 
             logger.info(

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-01-29 09:27+0800\n"
+"POT-Creation-Date: 2026-06-19 23:14+0000\n"
 "PO-Revision-Date: 2025-01-01 12:00+0800\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -41,140 +41,210 @@ msgstr ""
 msgid "Scene description in requested language"
 msgstr ""
 
-#: accounts/serializers.py:135
+#: accounts/serializers.py:135 accounts/serializers.py:206
+#: accounts/serializers.py:225
 msgid "User's email address"
 msgstr ""
 
 #: accounts/serializers.py:178
 #, python-format
-msgid ""
-"This email is already registered via %(providers)s. Please use %(providers)s "
-"to login instead."
+msgid "This email is already registered via %(providers)s. Please use %(providers)s to login instead."
 msgstr ""
 
 #: accounts/serializers.py:187
 msgid "This email address is already registered. Please login instead."
 msgstr ""
 
-#: accounts/serializers.py:209
+#: accounts/serializers.py:211
+msgid "Cloudflare Turnstile token"
+msgstr ""
+
+#: accounts/serializers.py:231
+msgid "Verification code from email"
+msgstr ""
+
+#: accounts/serializers.py:248
 msgid "Virtual email username (will become username@domain)"
 msgstr ""
 
-#: accounts/serializers.py:223
-msgid ""
-"Username can only contain letters, numbers, dots, hyphens, and underscores"
+#: accounts/serializers.py:262
+msgid "Username can only contain letters, numbers, dots, hyphens, and underscores"
 msgstr ""
 
-#: accounts/serializers.py:230
+#: accounts/serializers.py:269
 msgid "Username cannot start or end with a dot"
 msgstr ""
 
-#: accounts/serializers.py:241
+#: accounts/serializers.py:280
 msgid "This username is reserved and cannot be used"
 msgstr ""
 
-#: accounts/serializers.py:246
+#: accounts/serializers.py:285
 msgid "This username is already taken"
 msgstr ""
 
-#: accounts/serializers.py:258 accounts/views/registration.py:200
+#: accounts/serializers.py:297 accounts/views/registration.py:200
 msgid "Registration verification token"
 msgstr ""
 
-#: accounts/serializers.py:267
+#: accounts/serializers.py:306
 msgid "User password (8-32 characters, must contain letters and numbers)"
 msgstr ""
 
-#: accounts/serializers.py:276 accounts/serializers.py:365
+#: accounts/serializers.py:315 accounts/serializers.py:404
 msgid "Virtual email username"
 msgstr ""
 
-#: accounts/serializers.py:282
+#: accounts/serializers.py:321
 msgid "User's selected scene (e.g., 'chat', 'product_issue')"
 msgstr ""
 
-#: accounts/serializers.py:290 accounts/serializers.py:376
-msgid ""
-"Specifies the language used by AI when generating summaries, titles, and "
-"metadata."
+#: accounts/serializers.py:329 accounts/serializers.py:415
+msgid "Specifies the language used by AI when generating summaries, titles, and metadata."
 msgstr ""
 
-#: accounts/serializers.py:298
+#: accounts/serializers.py:337
 msgid "User's timezone (e.g., 'UTC', 'Asia/Shanghai')"
 msgstr ""
 
-#: accounts/serializers.py:310 accounts/views/password.py:317
+#: accounts/serializers.py:349 accounts/views/password.py:317
 msgid "Password must be at least 8 characters long"
 msgstr ""
 
-#: accounts/serializers.py:315 accounts/views/password.py:327
+#: accounts/serializers.py:354 accounts/views/password.py:327
 msgid "Password cannot exceed 32 characters"
 msgstr ""
 
-#: accounts/serializers.py:323 accounts/views/password.py:340
+#: accounts/serializers.py:362 accounts/views/password.py:340
 msgid "Password must contain both letters and numbers"
 msgstr ""
 
-#: accounts/serializers.py:370
+#: accounts/serializers.py:409
 msgid "User's selected scene"
 msgstr ""
 
-#: accounts/serializers.py:383
+#: accounts/serializers.py:422
 msgid "User's timezone"
 msgstr ""
 
-#: accounts/serializers.py:428
-msgid ""
-"User-friendly display name, prioritizing first_name + last_name from OAuth "
-"providers, falling back to username"
+#: accounts/serializers.py:467
+msgid "User-friendly display name, prioritizing first_name + last_name from OAuth providers, falling back to username"
 msgstr ""
 
-#: accounts/serializers.py:436
+#: accounts/serializers.py:476
 msgid "Primary virtual email address for receiving emails"
 msgstr ""
 
-#: accounts/serializers.py:442
+#: accounts/serializers.py:481
 msgid "User profile information"
 msgstr ""
 
-#: accounts/serializers.py:447
+#: accounts/serializers.py:487
+msgid "User's preferred language for AI generation and backend logic (not UI display)"
+msgstr ""
+
+#: accounts/serializers.py:495
+msgid "User's timezone for backend logic and date/time display"
+msgstr ""
+
+#: accounts/serializers.py:502
 msgid "Authentication method and related information"
 msgstr ""
 
-#: accounts/serializers.py:608
+#: accounts/serializers.py:506
+msgid "Resolved platform visibility and landing route"
+msgstr ""
+
+#: accounts/serializers.py:510
+msgid "Effective roles resolved from direct and group bindings."
+msgstr ""
+
+#: accounts/serializers.py:514
+msgid "Effective Django permission codenames."
+msgstr ""
+
+#: accounts/serializers.py:745
 msgid "No user found with this email address"
 msgstr ""
 
-#: accounts/serializers.py:614 accounts/views/password.py:68
-msgid ""
-"OAuth users cannot reset password. Please login with your OAuth provider."
+#: accounts/serializers.py:751 accounts/views/password.py:68
+msgid "OAuth users cannot reset password. Please login with your OAuth provider."
 msgstr ""
 
-#: accounts/serializers.py:623
+#: accounts/serializers.py:760
 msgid "Please complete registration first"
 msgstr ""
 
-#: accounts/serializers.py:627
+#: accounts/serializers.py:764
 msgid "User profile not found"
 msgstr ""
 
-#: accounts/services/email.py:77
+#: accounts/services/email.py:89
 msgid "Complete Your Registration"
 msgstr ""
 
-#: accounts/services/email.py:79
+#: accounts/services/email.py:91
 #, python-format
 msgid "Please complete your registration by visiting: %(url)s"
 msgstr ""
 
-#: accounts/services/email.py:205
+#: accounts/services/email.py:210
+msgid "Your login verification code"
+msgstr "你的登录验证码"
+
+#: accounts/services/email.py:212
+#, python-format
+msgid "Your verification code is %(code)s. It expires in %(minutes)s minutes. If you did not request it, ignore this email."
+msgstr "你的验证码是 %(code)s，有效期 %(minutes)s 分钟。如非本人操作，请忽略此邮件。"
+
+#: accounts/services/email.py:299
 msgid "Reset Your Password"
 msgstr ""
 
-#: accounts/services/email.py:207
+#: accounts/services/email.py:301
 #, python-format
 msgid "Please reset your password by visiting: %(url)s"
 msgstr ""
+
+#: accounts/urls.py:52 accounts/views/login_otp.py:72
+#, fuzzy
+#| msgid "Validation failed"
+msgid "Human verification failed."
+msgstr "校验失败"
+
+#: accounts/views/login_otp.py:43
+msgid "Send login verification code"
+msgstr ""
+
+#: accounts/views/login_otp.py:89
+msgid "Too many requests. Please try again later."
+msgstr ""
+
+#: accounts/views/login_otp.py:102
+msgid "Verification code sent."
+msgstr ""
+
+#: accounts/views/login_otp.py:118
+msgid "The verification code has expired."
+msgstr ""
+
+#: accounts/views/login_otp.py:120
+msgid "Too many incorrect attempts. Request a new code."
+msgstr ""
+
+#: accounts/views/login_otp.py:122
+msgid "The verification code is incorrect."
+msgstr ""
+
+#: accounts/views/login_otp.py:127
+msgid "Verify login code"
+msgstr ""
+
+#: accounts/views/login_otp.py:152
+#, fuzzy
+#| msgid "Validation failed"
+msgid "Verification failed."
+msgstr "校验失败"
 
 #: accounts/views/oauth.py:49
 msgid "Complete OAuth user setup"
@@ -184,13 +254,13 @@ msgstr ""
 msgid "User has already completed registration"
 msgstr ""
 
-#: accounts/views/oauth.py:152
+#: accounts/views/oauth.py:121
 #, fuzzy
 #| msgid "OSS configuration validated successfully"
 msgid "Setup completed successfully"
 msgstr "OSS配置验证成功"
 
-#: accounts/views/oauth.py:194
+#: accounts/views/oauth.py:163
 msgid "Failed to complete setup"
 msgstr ""
 
@@ -314,426 +384,375 @@ msgstr ""
 msgid "Invalid username"
 msgstr ""
 
-#: accounts/views/scenes.py:46
+#: accounts/views/scenes.py:27
 msgid "Get available scenes"
 msgstr ""
 
-#: accounts/views/scenes.py:52
-msgid "Language code (e.g., 'zh-CN', 'en-US', 'es')"
+#: accounts/views/scenes.py:33
+msgid "Language code (e.g., 'zh-CN', 'en-US')"
 msgstr ""
 
-#: accounts/views/scenes.py:130
+#: accounts/views/scenes.py:60
 msgid "Failed to retrieve available scenes"
 msgstr ""
 
-#: cloud_billing/services/notification_service.py:70
-msgid "[Important] Cloud Billing Alert"
-msgstr "[重点关注]云平台账单消费提醒"
-
-#: cloud_billing/services/notification_service.py:83
-#, python-format
-msgid ""
-"%(provider_name)s current total cost %(current_cost).2f %(currency)s exceeds "
-"threshold %(threshold).2f %(currency)s\n"
-"Previous hour cost: %(previous_cost).2f %(currency)s"
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/services/webhook_service.py:125
+msgid "Invalid response format from webhook. Expected JSON but got: {}"
 msgstr ""
-"%(provider_name)s 当前总消费 %(current_cost).2f %(currency)s 超过阈值 "
-"%(threshold).2f %(currency)s\n"
-"上一小时费用: %(previous_cost).2f %(currency)s"
 
-#: cloud_billing/services/notification_service.py:97
-#, python-format
-msgid ""
-"%(provider_name)s account billing increased by %(increase_cost).2f "
-"%(currency)s in the last hour, growth rate: %(increase_percent).2f%%\n"
-"Current cost: %(current_cost).2f %(currency)s\n"
-"Previous hour cost: %(previous_cost).2f %(currency)s"
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/services/webhook_service.py:136
+msgid "Webhook request failed with HTTP status {}. Response: {}"
 msgstr ""
-"%(provider_name)s 账户在过去一小时的消费增长了 %(increase_cost).2f "
-"%(currency)s，增长率为 %(increase_percent).2f%%\n"
-"当前费用: %(current_cost).2f %(currency)s\n"
-"上一小时费用: %(previous_cost).2f %(currency)s"
 
-#: cloud_billing/services/notification_service.py:156
-msgid ""
-"## Cloud Billing Alert\n"
-"\n"
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/services/webhook_service.py:149
+msgid "Webhook validation failed: {}. Please check if the webhook URL is correct, or verify security settings (e.g., IP whitelist, API key)."
 msgstr ""
-"## 云平台账单消费提醒\n"
-"\n"
 
-#: cloud_billing/services/notification_service.py:169
-#, python-brace-format
-msgid ""
-"{title}**{provider_name}** current total cost **{current_cost:.2f} {currency}"
-"** exceeds threshold **{threshold:.2f} {currency}**\n"
-"\n"
-"- Previous hour cost: {previous_cost:.2f} {currency}\n"
-"\n"
-"<@all>"
-msgstr ""
-"{title}**{provider_name}** 当前总消费 **{current_cost:.2f} {currency}** 超过"
-"阈值 **{threshold:.2f} {currency}**\n"
-"\n"
-"- 上一小时费用: {previous_cost:.2f} {currency}\n"
-"\n"
-"<@all>"
-
-#: cloud_billing/services/notification_service.py:185
-#, python-brace-format
-msgid ""
-"{title}**{provider_name}** account billing increased by "
-"**{increase_cost:.2f} {currency}** in the last hour, growth rate: "
-"**{increase_percent:.2f}%**\n"
-"\n"
-"- Current cost: {current_cost:.2f} {currency}\n"
-"- Previous hour cost: {previous_cost:.2f} {currency}\n"
-"\n"
-"<@all>"
-msgstr ""
-"{title}**{provider_name}** 账户在过去一小时的消费增长了 "
-"**{increase_cost:.2f} {currency}**，增长率为 **{increase_percent:.2f}%**\n"
-"\n"
-"- 当前费用: {current_cost:.2f} {currency}\n"
-"- 上一小时费用: {previous_cost:.2f} {currency}\n"
-"\n"
-"<@all>"
-
-#: cloud_billing/tasks.py:579
-#, python-brace-format
-msgid " (Account: {account_id})"
-msgstr " (账号: {account_id})"
-
-#: cloud_billing/tasks.py:588
-#, python-brace-format
-msgid ""
-"{provider_name}{account_display} current total cost {current_cost:.2f} "
-"{currency} exceeds threshold {threshold:.2f} {currency}"
-msgstr ""
-"{provider_name}{account_display} 当前总消费 {current_cost:.2f} {currency} 超"
-"过阈值 {threshold:.2f} {currency}"
-
-#: cloud_billing/tasks.py:601
-#, python-brace-format
-msgid ""
-"{provider_name}{account_display} billing increased by {increase_cost:.2f} "
-"{currency} in the last hour, growth rate: {increase_percent:.2f}%"
-msgstr ""
-"{provider_name}{account_display} 在过去一小时的消费增长了 "
-"{increase_cost:.2f} {currency}，增长率为 {increase_percent:.2f}%"
-
-#: cloud_billing/tasks.py
-msgid "Alert type"
-msgstr "告警类型"
-
-#: cloud_billing/tasks.py
-msgid "Cloud provider"
-msgstr "云平台"
-
-#: cloud_billing/tasks.py
-msgid "Account"
-msgstr "账号"
-
-#: cloud_billing/tasks.py
-msgid "Notes"
-msgstr "备注"
-
-#: cloud_billing/tasks.py
-msgid "Tags"
-msgstr "标签"
-
-#: cloud_billing/tasks.py
-msgid "Current balance"
-msgstr "当前余额"
-
-#: cloud_billing/tasks.py
-msgid "Alert threshold"
-msgstr "告警阈值"
-
-#: cloud_billing/tasks.py
-msgid "Alert description"
-msgstr "告警说明"
-
-#: cloud_billing/tasks.py
-msgid "Balance threshold alert"
-msgstr "余额阈值告警"
-
-#: cloud_billing/tasks.py
-msgid "Estimated days remaining alert"
-msgstr "预计使用天数告警"
-
-#: cloud_billing/tasks.py
-msgid "Cost threshold alert"
-msgstr "费用阈值告警"
-
-#: cloud_billing/tasks.py
-msgid "Cost growth alert"
-msgstr "费用增长告警"
-
-#: cloud_billing/tasks.py
-msgid "Current total cost"
-msgstr "当前总费用"
-
-#: cloud_billing/tasks.py
-msgid "Estimated days remaining"
-msgstr "预计使用天数"
-
-#: cloud_billing/tasks.py
-msgid "Previous hour cost"
-msgstr "上一小时费用"
-
-#: cloud_billing/tasks.py
-msgid "Increase amount"
-msgstr "增长金额"
-
-#: cloud_billing/tasks.py
-msgid "Growth rate"
-msgstr "增长比例"
-
-#: cloud_billing/tasks.py
-msgid "Percentage threshold"
-msgstr "百分比阈值"
-
-#: cloud_billing/tasks.py
-msgid "Amount threshold"
-msgstr "金额阈值"
-
-#: cloud_billing/tasks.py
-msgid ""
-"Remaining balance is below the configured threshold. Please recharge "
-"promptly."
-msgstr "账户剩余余额低于设定阈值，请及时充值"
-
-#: cloud_billing/tasks.py
-msgid ""
-"Projected remaining days are below the configured threshold. Please recharge "
-"promptly."
-msgstr "预计使用天数低于设定阈值，请及时充值"
-
-#: cloud_billing/tasks.py
-msgid "Current total cost exceeds the configured threshold"
-msgstr "当前总费用已超过设定阈值"
-
-#: cloud_billing/tasks.py
-msgid "Billing growth exceeds the configured threshold"
-msgstr "费用增长超过设定阈值"
-
-#: cloud_billing/dashboard.py
-msgid "US Dollar"
-msgstr "美元"
-
-#: cloud_billing/dashboard.py
-msgid "Chinese Yuan"
-msgstr "人民币"
-
-#: cloud_billing/services/notification_service.py
-msgid "Cloud Billing Alert"
-msgstr "云平台账单消费提醒"
-
-#: cloud_billing/alert_messages.py — alert type labels
-msgid "Balance Alert"
-msgstr "余额阈值告警"
-
-msgid "Days Remaining Alert"
-msgstr "预计使用天数告警"
-
-msgid "Cost Threshold Alert"
-msgstr "成本阈值告警"
-
-msgid "Cost Growth Alert"
-msgstr "成本增长告警"
-
-#: cloud_billing/alert_messages.py — trigger texts
-msgid "Balance %(bal).2f %(cur)s below threshold %(thr).2f %(cur)s"
-msgstr "余额 %(bal).2f %(cur)s 低于阈值 %(thr).2f %(cur)s"
-
-msgid "%(days)s days remaining below threshold %(thr)s"
-msgstr "预计剩余 %(days)s 天 低于阈值 %(thr)s 天"
-
-msgid "Total cost %(cost).2f %(cur)s exceeds threshold %(thr).2f %(cur)s"
-msgstr "累计成本 %(cost).2f %(cur)s 超过阈值 %(thr).2f %(cur)s"
-
-msgid "Growth %(pct).1f%%"
-msgstr "增长 %(pct).1f%%"
-
-msgid "threshold %(thr).1f%%"
-msgstr "阈值 %(thr).1f%%"
-
-#: cloud_billing/alert_messages.py — structural labels
-msgid "Provider"
-msgstr "云平台"
-
-msgid "Balance"
-msgstr "当前余额"
-
-msgid "Cost Breakdown"
-msgstr "费用明细"
-
-msgid "Monthly Cost Breakdown"
-msgstr "当月累计费用明细"
-
-msgid "Resource"
-msgstr "资源"
-
-msgid "Cost"
-msgstr "花费"
-
-msgid "Owner"
-msgstr "创建者"
-
-#, fuzzy
-msgid "DevMind Cloud Billing · @all"
-msgstr ""
-"#-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#\n"
-"DevMind 云账单监控 · @所有人\n"
-"#-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#\n"
-"DevMind 云账单监控 · @all"
-
-msgid ": "
-msgstr "："
-
-msgid ", "
-msgstr "，"
-
-msgid "Current Total"
-msgstr "当前小时"
-
-msgid "Previous Hour"
-msgstr "上一小时"
-
-msgid "Increase"
-msgstr "增加金额"
-
-msgid "Growth Rate"
-msgstr "增长率"
-
-msgid "Growth %"
-msgstr "百分比阈值"
-
-msgid "Amount"
-msgstr "金额阈值"
-
-#: agentcore_notifier/adapters/django/views/channels.py
-#, python-format
-msgid ""
-"Server cannot reach SMTP host (no route). Check deployment: firewall/"
-"security group outbound rules, or container network. Original: %(error)s"
-msgstr ""
-"服务器无法连接到 SMTP 主机（无路由）。请检查部署环境：防火墙/安全组是否放行出"
-"站访问该主机与端口；若在容器内，网络是否允许访问外网。原始错误: %(error)s"
-
-#: agentcore_notifier/adapters/django/views/channels.py
-#, python-format
-msgid ""
-"SMTP connection timed out. Check server network and firewall/proxy. "
-"Original: %(error)s"
-msgstr ""
-"连接 SMTP 服务器超时。请检查：服务器网络是否能访问该主机与端口；防火墙或代理"
-"是否拦截。原始错误: %(error)s"
-
-#: agentcore_notifier/adapters/django/views/channels.py
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:50
 msgid "Webhook URL not configured"
 msgstr "未配置 Webhook URL"
 
-#: agentcore_notifier/adapters/django/views/channels.py
-msgid "[DevMind] Channel validation test"
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:61
+#, fuzzy, python-format
+#| msgid "[DevMind] Channel validation test"
+msgid "[%s] Channel validation test"
 msgstr "[DevMind] 渠道校验测试"
 
-#: agentcore_notifier/adapters/django/views/channels.py
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:96
 msgid "Send failed"
 msgstr "发送失败"
 
-#: agentcore_notifier/adapters/django/views/channels.py
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:111
 msgid "SMTP host not configured"
 msgstr "未配置 SMTP 主机"
 
-#: agentcore_notifier/adapters/django/views/channels.py
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:121
 msgid "From address required to send test"
 msgstr "发送测试邮件需要填写发件人地址"
 
-#: agentcore_notifier/adapters/django/views/channels.py
-msgid "[DevMind] Email validation test"
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:124
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:145
+#, fuzzy, python-format
+#| msgid "[DevMind] Email validation test"
+msgid "[%s] Email validation test"
 msgstr "[DevMind] 校验收件测试"
 
-#: agentcore_notifier/adapters/django/views/channels.py
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:125
 msgid "(connection only)"
 msgstr "（仅连接）"
 
-#: agentcore_notifier/adapters/django/views/channels.py
-msgid "[DevMind] Email channel validation test"
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:141
+#, fuzzy, python-format
+#| msgid "[DevMind] Email channel validation test"
+msgid "[%s] Email channel validation test"
 msgstr "[DevMind] 邮件渠道校验测试"
 
-#: agentcore_notifier/adapters/django/views/channels.py
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:206
+#, fuzzy
+#| msgid "Server cannot reach SMTP host (no route). Check deployment: firewall/security group outbound rules, or container network. Original: %(error)s"
+msgid "Server cannot reach SMTP host (no route). Check deployment: firewall/security group outbound, or container network. Original: "
+msgstr "服务器无法连接到 SMTP 主机（无路由）。请检查部署环境：防火墙/安全组是否放行出站访问该主机与端口；若在容器内，网络是否允许访问外网。原始错误: %(error)s"
+
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:213
+#, fuzzy
+#| msgid "SMTP connection timed out. Check server network and firewall/proxy. Original: %(error)s"
+msgid "SMTP connection timed out. Check server network and firewall/proxy. Original: "
+msgstr "连接 SMTP 服务器超时。请检查：服务器网络是否能访问该主机与端口；防火墙或代理是否拦截。原始错误: %(error)s"
+
+#: agentcore/agentcore-notifier/agentcore_notifier/adapters/django/views/channels.py:508
 msgid "Validation failed"
 msgstr "校验失败"
 
-#: data_collector/tasks.py
-msgid "Start collection"
-msgstr "开始采集"
+#~ msgid "[Important] Cloud Billing Alert"
+#~ msgstr "[重点关注]云平台账单消费提醒"
 
-#: data_collector/tasks.py
-msgid "Fetching raw data"
-msgstr "拉取原始数据"
+#, python-format
+#~ msgid ""
+#~ "%(provider_name)s current total cost %(current_cost).2f %(currency)s exceeds threshold %(threshold).2f %(currency)s\n"
+#~ "Previous hour cost: %(previous_cost).2f %(currency)s"
+#~ msgstr ""
+#~ "%(provider_name)s 当前总消费 %(current_cost).2f %(currency)s 超过阈值 %(threshold).2f %(currency)s\n"
+#~ "上一小时费用: %(previous_cost).2f %(currency)s"
 
-#: data_collector/tasks.py
-msgid "Collection done"
-msgstr "采集完成"
+#, python-format
+#~ msgid ""
+#~ "%(provider_name)s account billing increased by %(increase_cost).2f %(currency)s in the last hour, growth rate: %(increase_percent).2f%%\n"
+#~ "Current cost: %(current_cost).2f %(currency)s\n"
+#~ "Previous hour cost: %(previous_cost).2f %(currency)s"
+#~ msgstr ""
+#~ "%(provider_name)s 账户在过去一小时的消费增长了 %(increase_cost).2f %(currency)s，增长率为 %(increase_percent).2f%%\n"
+#~ "当前费用: %(current_cost).2f %(currency)s\n"
+#~ "上一小时费用: %(previous_cost).2f %(currency)s"
 
-#: data_collector/tasks.py
-msgid "Start cleanup"
-msgstr "开始清理"
+#~ msgid ""
+#~ "## Cloud Billing Alert\n"
+#~ "\n"
+#~ msgstr ""
+#~ "## 云平台账单消费提醒\n"
+#~ "\n"
 
-#: data_collector/tasks.py
-msgid "Cleanup done"
-msgstr "清理完成"
+#, python-brace-format
+#~ msgid ""
+#~ "{title}**{provider_name}** current total cost **{current_cost:.2f} {currency}** exceeds threshold **{threshold:.2f} {currency}**\n"
+#~ "\n"
+#~ "- Previous hour cost: {previous_cost:.2f} {currency}\n"
+#~ "\n"
+#~ "<@all>"
+#~ msgstr ""
+#~ "{title}**{provider_name}** 当前总消费 **{current_cost:.2f} {currency}** 超过阈值 **{threshold:.2f} {currency}**\n"
+#~ "\n"
+#~ "- 上一小时费用: {previous_cost:.2f} {currency}\n"
+#~ "\n"
+#~ "<@all>"
+
+#, python-brace-format
+#~ msgid ""
+#~ "{title}**{provider_name}** account billing increased by **{increase_cost:.2f} {currency}** in the last hour, growth rate: **{increase_percent:.2f}%**\n"
+#~ "\n"
+#~ "- Current cost: {current_cost:.2f} {currency}\n"
+#~ "- Previous hour cost: {previous_cost:.2f} {currency}\n"
+#~ "\n"
+#~ "<@all>"
+#~ msgstr ""
+#~ "{title}**{provider_name}** 账户在过去一小时的消费增长了 **{increase_cost:.2f} {currency}**，增长率为 **{increase_percent:.2f}%**\n"
+#~ "\n"
+#~ "- 当前费用: {current_cost:.2f} {currency}\n"
+#~ "- 上一小时费用: {previous_cost:.2f} {currency}\n"
+#~ "\n"
+#~ "<@all>"
+
+#, python-brace-format
+#~ msgid " (Account: {account_id})"
+#~ msgstr " (账号: {account_id})"
+
+#, python-brace-format
+#~ msgid "{provider_name}{account_display} current total cost {current_cost:.2f} {currency} exceeds threshold {threshold:.2f} {currency}"
+#~ msgstr "{provider_name}{account_display} 当前总消费 {current_cost:.2f} {currency} 超过阈值 {threshold:.2f} {currency}"
+
+#, python-brace-format
+#~ msgid "{provider_name}{account_display} billing increased by {increase_cost:.2f} {currency} in the last hour, growth rate: {increase_percent:.2f}%"
+#~ msgstr "{provider_name}{account_display} 在过去一小时的消费增长了 {increase_cost:.2f} {currency}，增长率为 {increase_percent:.2f}%"
+
+#~ msgid "Alert type"
+#~ msgstr "告警类型"
+
+#~ msgid "Cloud provider"
+#~ msgstr "云平台"
+
+#~ msgid "Account"
+#~ msgstr "账号"
+
+#~ msgid "Notes"
+#~ msgstr "备注"
+
+#~ msgid "Tags"
+#~ msgstr "标签"
+
+#~ msgid "Current balance"
+#~ msgstr "当前余额"
+
+#~ msgid "Alert threshold"
+#~ msgstr "告警阈值"
+
+#~ msgid "Alert description"
+#~ msgstr "告警说明"
+
+#~ msgid "Balance threshold alert"
+#~ msgstr "余额阈值告警"
+
+#~ msgid "Estimated days remaining alert"
+#~ msgstr "预计使用天数告警"
+
+#~ msgid "Cost threshold alert"
+#~ msgstr "费用阈值告警"
+
+#~ msgid "Cost growth alert"
+#~ msgstr "费用增长告警"
+
+#~ msgid "Current total cost"
+#~ msgstr "当前总费用"
+
+#~ msgid "Estimated days remaining"
+#~ msgstr "预计使用天数"
+
+#~ msgid "Previous hour cost"
+#~ msgstr "上一小时费用"
+
+#~ msgid "Increase amount"
+#~ msgstr "增长金额"
+
+#~ msgid "Growth rate"
+#~ msgstr "增长比例"
+
+#~ msgid "Percentage threshold"
+#~ msgstr "百分比阈值"
+
+#~ msgid "Amount threshold"
+#~ msgstr "金额阈值"
+
+#~ msgid "Remaining balance is below the configured threshold. Please recharge promptly."
+#~ msgstr "账户剩余余额低于设定阈值，请及时充值"
+
+#~ msgid "Projected remaining days are below the configured threshold. Please recharge promptly."
+#~ msgstr "预计使用天数低于设定阈值，请及时充值"
+
+#~ msgid "Current total cost exceeds the configured threshold"
+#~ msgstr "当前总费用已超过设定阈值"
+
+#~ msgid "Billing growth exceeds the configured threshold"
+#~ msgstr "费用增长超过设定阈值"
+
+#~ msgid "US Dollar"
+#~ msgstr "美元"
+
+#~ msgid "Chinese Yuan"
+#~ msgstr "人民币"
+
+#~ msgid "Cloud Billing Alert"
+#~ msgstr "云平台账单消费提醒"
+
+#~ msgid "Balance Alert"
+#~ msgstr "余额阈值告警"
+
+#~ msgid "Days Remaining Alert"
+#~ msgstr "预计使用天数告警"
+
+#~ msgid "Cost Threshold Alert"
+#~ msgstr "成本阈值告警"
+
+#~ msgid "Cost Growth Alert"
+#~ msgstr "成本增长告警"
+
+#~ msgid "Balance %(bal).2f %(cur)s below threshold %(thr).2f %(cur)s"
+#~ msgstr "余额 %(bal).2f %(cur)s 低于阈值 %(thr).2f %(cur)s"
+
+#~ msgid "%(days)s days remaining below threshold %(thr)s"
+#~ msgstr "预计剩余 %(days)s 天 低于阈值 %(thr)s 天"
+
+#~ msgid "Total cost %(cost).2f %(cur)s exceeds threshold %(thr).2f %(cur)s"
+#~ msgstr "累计成本 %(cost).2f %(cur)s 超过阈值 %(thr).2f %(cur)s"
+
+#~ msgid "Growth %(pct).1f%%"
+#~ msgstr "增长 %(pct).1f%%"
+
+#~ msgid "threshold %(thr).1f%%"
+#~ msgstr "阈值 %(thr).1f%%"
+
+#~ msgid "Provider"
+#~ msgstr "云平台"
+
+#~ msgid "Balance"
+#~ msgstr "当前余额"
+
+#~ msgid "Cost Breakdown"
+#~ msgstr "费用明细"
+
+#~ msgid "Monthly Cost Breakdown"
+#~ msgstr "当月累计费用明细"
+
+#~ msgid "Resource"
+#~ msgstr "资源"
+
+#~ msgid "Cost"
+#~ msgstr "花费"
+
+#~ msgid "Owner"
+#~ msgstr "创建者"
+
+#, fuzzy
+#~ msgid "DevMind Cloud Billing · @all"
+#~ msgstr ""
+#~ "#-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#\n"
+#~ "DevMind 云账单监控 · @所有人\n"
+#~ "#-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#\n"
+#~ "DevMind 云账单监控 · @all"
+
+#~ msgid ": "
+#~ msgstr "："
+
+#~ msgid ", "
+#~ msgstr "，"
+
+#~ msgid "Current Total"
+#~ msgstr "当前小时"
+
+#~ msgid "Previous Hour"
+#~ msgstr "上一小时"
+
+#~ msgid "Increase"
+#~ msgstr "增加金额"
+
+#~ msgid "Growth Rate"
+#~ msgstr "增长率"
+
+#~ msgid "Growth %"
+#~ msgstr "百分比阈值"
+
+#~ msgid "Amount"
+#~ msgstr "金额阈值"
+
+#~ msgid "Start collection"
+#~ msgstr "开始采集"
+
+#~ msgid "Fetching raw data"
+#~ msgstr "拉取原始数据"
+
+#~ msgid "Collection done"
+#~ msgstr "采集完成"
+
+#~ msgid "Start cleanup"
+#~ msgstr "开始清理"
+
+#~ msgid "Cleanup done"
+#~ msgstr "清理完成"
 
 # #-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#
 # ── Cloud Billing Alert Labels ──
-msgid "Balance Threshold"
-msgstr "余额阈值"
+#~ msgid "Balance Threshold"
+#~ msgstr "余额阈值"
 
-msgid "Today's Cost Breakdown"
-msgstr "当天 费用明细"
+#~ msgid "Today's Cost Breakdown"
+#~ msgstr "当天 费用明细"
 
-msgid "Month's Cost Breakdown"
-msgstr "当月 费用明细"
+#~ msgid "Month's Cost Breakdown"
+#~ msgstr "当月 费用明细"
 
-msgid "Today's Cost"
-msgstr "当天 费用"
+#~ msgid "Today's Cost"
+#~ msgstr "当天 费用"
 
-msgid "Month's Cost"
-msgstr "当月 费用"
+#~ msgid "Month's Cost"
+#~ msgstr "当月 费用"
 
-msgid "Percentage Threshold"
-msgstr "百分比阈值"
+#~ msgid "Percentage Threshold"
+#~ msgstr "百分比阈值"
 
-msgid "Amount Threshold"
-msgstr "金额阈值"
+#~ msgid "Amount Threshold"
+#~ msgstr "金额阈值"
 
-msgid "Cost Threshold"
-msgstr "成本阈值"
+#~ msgid "Cost Threshold"
+#~ msgstr "成本阈值"
 
 # ── Alert Labels ──
-msgid "Current Balance"
-msgstr "当前余额"
+#~ msgid "Current Balance"
+#~ msgstr "当前余额"
 
-msgid "Current Hour Cost"
-msgstr "当前小时费用"
+#~ msgid "Current Hour Cost"
+#~ msgstr "当前小时费用"
 
-msgid "Previous Hour Cost"
-msgstr "上一小时费用"
+#~ msgid "Previous Hour Cost"
+#~ msgstr "上一小时费用"
 
-msgid "Increase Amount"
-msgstr "增加金额"
+#~ msgid "Increase Amount"
+#~ msgstr "增加金额"
 
-msgid "Growth Percentage Threshold"
-msgstr "百分比阈值"
+#~ msgid "Growth Percentage Threshold"
+#~ msgstr "百分比阈值"
 
-msgid "Today's"
-msgstr "当天"
+#~ msgid "Today's"
+#~ msgstr "当天"
 
-msgid "Month's"
-msgstr "当月"
+#~ msgid "Month's"
+#~ msgstr "当月"
 
 #~ msgid "OSS storage is disabled, validation skipped"
 #~ msgstr "OSS存储已禁用，跳过验证"
@@ -771,9 +790,7 @@ msgstr "当月"
 #~ msgid "Please check if you have permission to access this Bucket"
 #~ msgstr "请检查是否有访问该 Bucket 的权限"
 
-#~ msgid ""
-#~ "The \"Use Virtual Host Style\" configuration may be incorrect, please try "
-#~ "toggling this option"
+#~ msgid "The \"Use Virtual Host Style\" configuration may be incorrect, please try toggling this option"
 #~ msgstr "可能是\"使用虚拟主机样式\"配置不正确，请尝试切换该选项"
 
 #~ msgid "Access denied"
