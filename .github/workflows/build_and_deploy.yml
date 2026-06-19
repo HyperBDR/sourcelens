@@ -148,6 +148,10 @@ jobs:
           port: ${{ env.SSH_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 3600s
+          # Stop and fail the job on the first failing command so a broken
+          # deploy (e.g. `up -d` aborting) surfaces as red instead of a
+          # false "success".
+          script_stop: true
           script: |
             cd ${{ env.DEPLOY_PATH }}
             APP_VERSION="${{ needs.prepare-version.outputs.version }}"
