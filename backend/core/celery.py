@@ -138,6 +138,30 @@ def setup_periodic_zombie_reaper():
         logger.warning(f"Could not start zombie reaper thread: {e}")
 
 
+def _run_startup_datasource_reconcile():
+    """Release datasource sync locks orphaned by a prior worker restart.
+
+    Reuses cleanup_stale_datasource_sync_tasks(startup=True): any sync
+    still marked running when this worker starts was interrupted by the
+    previous process, so its lock is released and the run is cancelled on
+    the LensNode. Guarded by a short cache lock so only one pool process
+    runs it per worker start. Best-effort: never blocks or fails startup.
+    """
+    try:
+        from django.core.cache import cache
+
+        if not cache.add("lens:startup-sync-reconcile", "1", timeout=120):
+            return
+        from lens.tasks import cleanup_stale_datasource_sync_tasks
+
+        result = cleanup_stale_datasource_sync_tasks(startup=True)
+        logger.info("Startup datasource sync reconcile: %s", result)
+    except Exception as exc:
+        logger.warning(
+            "Startup datasource sync reconcile failed: %s", exc
+        )
+
+
 @worker_process_init.connect
 def on_worker_process_init(sender=None, **kwargs):
     """
@@ -154,8 +178,10 @@ def on_worker_process_init(sender=None, **kwargs):
     # This ensures all app configs are loaded before task discovery.
     _lazy_autodiscover()
 
-    # Worker startup cleanup can be added here if needed
-    # Example: cleanup stale locks, reset states, etc.
+    # Worker startup cleanup: release datasource sync locks orphaned by a
+    # previous worker that was killed/restarted mid-sync, so they clear in
+    # seconds instead of lingering for the full lock TTL (~6h).
+    _run_startup_datasource_reconcile()
 
     # Setup SIGCHLD handler for this process
     # Note: This only works in the worker process, not the main process

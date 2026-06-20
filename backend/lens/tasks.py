@@ -363,8 +363,14 @@ def release_datasource_lock(datasource_uuid, token=None):
     return False
 
 
-def cleanup_stale_datasource_sync_tasks():
-    """Cancel timed-out datasource syncs and release orphaned sync locks."""
+def cleanup_stale_datasource_sync_tasks(startup=False):
+    """Cancel timed-out datasource syncs and release orphaned sync locks.
+
+    When startup=True, treat every still-running sync as interrupted
+    (cutoff=now) so locks orphaned by a worker restart/crash are released
+    immediately, instead of lingering for the full sync timeout (the lock
+    TTL, default 6h).
+    """
 
     from agentcore_task.adapters.django.models import TaskExecution
     from agentcore_task.constants import TaskStatus
@@ -373,7 +379,7 @@ def cleanup_stale_datasource_sync_tasks():
 
     now = timezone.now()
     timeout_s = get_datasource_sync_timeout_s()
-    cutoff = now - timedelta(seconds=timeout_s)
+    cutoff = now if startup else now - timedelta(seconds=timeout_s)
     running_statuses = [TaskStatus.PENDING, *TaskStatus.get_running_statuses()]
 
     stale = TaskExecution.objects.filter(
@@ -451,6 +457,7 @@ def cleanup_stale_datasource_sync_tasks():
         "failed": failed_count,
         "locks_released": released_count,
         "timeout_s": timeout_s,
+        "startup": startup,
     }
 
 
