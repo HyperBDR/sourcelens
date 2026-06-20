@@ -18,6 +18,9 @@ _TRANSIENT_NOISE_PATTERNS = (
     'connection closed by server',
     'timed out waiting for up message',
     'signal 9 (sigkill)',
+    # Raised by concurrent.futures only while the interpreter/executor is
+    # shutting down (container restart/deploy), never by application code.
+    'cannot schedule new futures after',
 )
 
 
