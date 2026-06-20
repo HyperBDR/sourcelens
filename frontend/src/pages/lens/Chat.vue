@@ -1104,7 +1104,7 @@ async function bootstrap() {
       publicAssistant.value = await getPublicAssistant(route.params.slug)
     } catch {
       publicAssistant.value = null
-      showError(t('lens.chat.loadFailed'))
+      showError(t('lens.chat.assistantNotFound'))
     }
     booted.value = true
     return
