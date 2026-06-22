@@ -107,19 +107,10 @@ export function getAvailablePlatforms(user, t) {
 
 export function getLandingPath(user) {
   if (!user) return '/dashboard'
-  // Admins land on the assistant-centric home, which routes them into a
-  // default assistant's chat or the create-first-assistant guide.
-  if (isAdminUser(user)) return '/'
-  const landingPath = getAccessProfile(user).landing_path
-
-  if (landingPath && hasFeature(user, getCurrentPlatformKey(landingPath))) {
-    return landingPath
-  }
-
-  const fallback = FEATURE_DEFINITIONS.find((item) =>
-    hasFeature(user, item.key)
-  )
-  return fallback?.defaultPath || '/dashboard'
+  // All authenticated users land on the assistant-centric home, which
+  // resolves a default assistant and enters its chat (or shows the
+  // no-assistant guide). This unifies admin and regular-user landing.
+  return '/'
 }
 
 export function getCurrentPlatformKey(path) {

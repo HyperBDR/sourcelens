@@ -28,25 +28,23 @@ function pickAssistant(list) {
 }
 
 onMounted(async () => {
-  // The router guard guarantees an authenticated user here. Admins resolve a
-  // default assistant and enter its chat; with none, they see the
-  // create-first-assistant guide. Regular end-users enter via shared links,
-  // so the bare home only shows the no-assistant notice.
-  if (userStore.userHasFeature('admin_console')) {
-    try {
-      const assistants = await listAssistants()
-      const target = pickAssistant(assistants || [])
-      if (target) {
-        await router.replace(`/lens/assistants/${target.slug}/chat`)
-        return
-      }
-    } catch {
-      // Fall through to the create-first-assistant guide.
+  // The router guard guarantees an authenticated user here. Every user
+  // resolves a default assistant and enters its chat. With none available,
+  // fall back to a role-aware guide: admins see the create-first-assistant
+  // guide, regular users the no-assistant notice.
+  try {
+    const assistants = await listAssistants()
+    const target = pickAssistant(assistants || [])
+    if (target) {
+      await router.replace(`/lens/assistants/${target.slug}/chat`)
+      return
     }
-    variant.value = 'admin'
-  } else {
-    variant.value = 'visitor'
+  } catch {
+    // Fall through to the guide below.
   }
+  variant.value = userStore.userHasFeature('admin_console')
+    ? 'admin'
+    : 'visitor'
   loading.value = false
 })
 </script>

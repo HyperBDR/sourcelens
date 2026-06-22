@@ -177,6 +177,7 @@ import { useI18n } from 'vue-i18n'
 import { llmAdminApi } from '@/admin/api/llmAdmin'
 import { copyToClipboard } from '@/utils/clipboard'
 import { extractErrorMessage } from '@/utils/api'
+import { assistantChatUrl } from '@/utils/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   createAssistant,
@@ -240,17 +241,8 @@ function lensNodeName(value) {
   return found?.name || uuid || emptyValue
 }
 
-function publicBaseUrl() {
-  const setting = globalSettings.value.find(
-    (item) => item.key === 'public_base_url'
-  )
-  const value =
-    setting && typeof setting.value === 'string' ? setting.value : ''
-  return (value || window.location.origin).replace(/\/+$/, '')
-}
-
 function shareUrl(row) {
-  return `${publicBaseUrl()}/lens/assistants/${row.slug}/chat`
+  return assistantChatUrl(row.slug, globalSettings.value)
 }
 
 async function copyShareUrl(row) {

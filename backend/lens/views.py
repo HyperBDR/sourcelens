@@ -1,8 +1,10 @@
 import json
+import secrets
 import uuid as uuid_mod
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
+from django.db.models import F
 from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -23,6 +25,7 @@ from .models import (
     Run,
     ScheduledTask,
     Session,
+    SharedQA,
     Skill,
 )
 from .lensnode_auth import issue_lensnode_token, token_matches
@@ -50,6 +53,10 @@ from .serializers import (
     RunSerializer,
     SessionCreateSerializer,
     SessionSerializer,
+    SharedQAAdminSerializer,
+    SharedQAListSerializer,
+    SharedQAMineSerializer,
+    SharedQAPublicSerializer,
     SkillSerializer,
 )
 from .services import (
@@ -556,6 +563,51 @@ class RunViewSet(BaseAuthenticatedViewSet):
         run.save(update_fields=["status", "finished_at", "updated_at"])
         cancel_run_on_lensnode(run)
         return Response(RunSerializer(run).data)
+
+    @action(detail=True, methods=["post"])
+    def share(self, request, uuid=None):
+        """Publish this run's Q&A as a public, link-shareable snapshot.
+
+        Idempotent per (run, user): re-sharing returns the existing
+        snapshot. The snapshot copies the question/answer text so the
+        public page is decoupled from the private session.
+        """
+
+        run = self.get_object()
+        if run.status != Run.Status.DONE or run.output_message is None:
+            return Response(
+                {"detail": "RUN_NOT_SHAREABLE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        existing = SharedQA.objects.filter(
+            run=run,
+            published_by=request.user,
+        ).first()
+        if existing is not None:
+            return Response(SharedQAMineSerializer(existing).data)
+
+        question = run.input_message.content if run.input_message else ""
+        answer = run.output_message.content or ""
+        assistant = run.session.assistant
+        title = (request.data.get("title") or "").strip()[:200]
+        if not title:
+            title = _shared_qa_default_title(question)
+        share = SharedQA.objects.create(
+            token=_unique_share_token(),
+            run=run,
+            assistant=assistant,
+            assistant_name=assistant.name if assistant else "",
+            assistant_slug=assistant.slug if assistant else "",
+            question=question,
+            answer=answer,
+            title=title,
+            published_by=request.user,
+            published_at=timezone.now(),
+        )
+        return Response(
+            SharedQAMineSerializer(share).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class DataSourceViewSet(BaseAdminViewSet):
@@ -1309,3 +1361,131 @@ class AdminRunDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(_admin_run_detail(run))
+
+
+def _unique_share_token():
+    """Generate a collision-free URL-safe share token."""
+
+    for _ in range(5):
+        token = secrets.token_urlsafe(16)
+        if not SharedQA.objects.filter(token=token).exists():
+            return token
+    return secrets.token_urlsafe(24)
+
+
+def _shared_qa_default_title(question, limit=60):
+    """Derive a default share title from the question text."""
+
+    text = " ".join((question or "").split())
+    return text[:limit] or "Shared Q&A"
+
+
+class SharedQAViewSet(BaseAuthenticatedViewSet):
+    """List, rename, and revoke the current user's own shared Q&As."""
+
+    queryset = SharedQA.objects.all().select_related("published_by")
+    serializer_class = SharedQAMineSerializer
+    http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        """Restrict to shares published by the current user."""
+
+        return super().get_queryset().filter(
+            published_by=self.request.user
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        """Let the owner edit the share title after publishing."""
+
+        share = self.get_object()
+        title = (request.data.get("title") or "").strip()
+        if title:
+            share.title = title[:200]
+            share.save(update_fields=["title", "updated_at"])
+        return Response(SharedQAMineSerializer(share).data)
+
+
+class AdminSharedQAViewSet(BaseAdminViewSet):
+    """Admin moderation/curation of shared Q&As."""
+
+    queryset = SharedQA.objects.all().select_related("published_by")
+    serializer_class = SharedQAAdminSerializer
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_queryset(self):
+        """Filter by listed/status for the moderation queue."""
+
+        queryset = super().get_queryset()
+        params = self.request.query_params
+        listed = params.get("listed")
+        if listed in ("true", "false"):
+            queryset = queryset.filter(is_listed=(listed == "true"))
+        status_param = (params.get("status") or "").strip()
+        if status_param:
+            queryset = queryset.filter(status=status_param)
+        return queryset
+
+
+class PublicSharedQAView(APIView):
+    """Public single shared Q&A by token (anonymous, read-only)."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, token):
+        """Return one published shared Q&A and bump its view count."""
+
+        share = SharedQA.objects.filter(
+            token=token,
+            status=SharedQA.Status.PUBLISHED,
+        ).first()
+        if share is None:
+            return Response(
+                {"detail": "Shared Q&A not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        SharedQA.objects.filter(pk=share.pk).update(
+            view_count=F("view_count") + 1
+        )
+        share.refresh_from_db(fields=["view_count"])
+        return Response(SharedQAPublicSerializer(share).data)
+
+
+class PublicSharedQAListView(APIView):
+    """Public list of an assistant's curated shared Q&As (anonymous)."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, slug):
+        """Return curated, listed shares for one active assistant."""
+
+        assistant = Assistant.objects.filter(
+            slug=slug,
+            status=Assistant.Status.ACTIVE,
+        ).first()
+        if assistant is None:
+            return Response(
+                {"detail": "Assistant not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        params = request.query_params
+        limit = _admin_safe_int(params.get("limit"), 20, maximum=50)
+        offset = _admin_safe_int(params.get("offset"), 0, minimum=0)
+        queryset = SharedQA.objects.filter(
+            assistant=assistant,
+            is_listed=True,
+            status=SharedQA.Status.PUBLISHED,
+        ).order_by("-published_at", "-created_at")
+        total = queryset.count()
+        rows = SharedQAListSerializer(
+            queryset[offset:offset + limit],
+            many=True,
+        ).data
+        has_more = offset + limit < total
+        return Response({
+            "assistant": {"name": assistant.name, "slug": assistant.slug},
+            "results": rows,
+            "total": total,
+            "next_offset": offset + limit if has_more else None,
+        })

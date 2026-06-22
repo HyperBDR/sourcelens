@@ -173,11 +173,36 @@
   </div>
 
   <div
-    v-if="['floating', 'menu'].includes(mode) && isVisible"
+    v-if="['floating', 'menu', 'header'].includes(mode) && isVisible"
     class="relative"
     ref="switcherRef"
   >
     <button
+      v-if="mode === 'header'"
+      type="button"
+      class="assistant-switcher-header-trigger"
+      :class="open ? 'assistant-switcher-header-trigger-open' : ''"
+      :aria-label="t('settings.modal.switchAssistantTitle')"
+      @click="toggleOpen"
+    >
+      <span class="assistant-switcher-header-name">
+        {{ currentAssistantLabel }}
+      </span>
+      <svg
+        class="assistant-switcher-header-chevron"
+        :class="{ 'rotate-180': open }"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+        aria-hidden="true"
+      >
+        <path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
+
+    <button
+      v-else
       type="button"
       class="assistant-switcher-trigger"
       :class="[
@@ -243,7 +268,11 @@
       leave-from-class="transform opacity-100 translate-y-0 scale-100"
       leave-to-class="transform opacity-0 translate-y-1 scale-95"
     >
-      <div v-if="open" class="assistant-switcher-panel">
+      <div
+        v-if="open"
+        class="assistant-switcher-panel"
+        :class="mode === 'header' ? 'assistant-switcher-panel-down' : ''"
+      >
         <div class="assistant-switcher-head">
           <div class="assistant-switcher-title">
             {{ t('settings.modal.switchAssistantTitle') }}
@@ -304,12 +333,10 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useLensStore } from '@/store/lens'
-import { useUserStore } from '@/store/user'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const userStore = useUserStore()
 const lensStore = useLensStore()
 
 defineProps({
@@ -317,7 +344,7 @@ defineProps({
     type: String,
     default: 'floating',
     validator: (value) =>
-      ['floating', 'menu', 'embedded', 'flyout'].includes(value)
+      ['floating', 'menu', 'embedded', 'flyout', 'header'].includes(value)
   },
   compact: {
     type: Boolean,
@@ -400,9 +427,7 @@ const filteredAssistants = computed(() => {
   )
 })
 
-const isVisible = computed(
-  () => userStore.userHasFeature('admin_console') && assistants.value.length > 1
-)
+const isVisible = computed(() => assistants.value.length > 1)
 
 const toggleOpen = () => {
   open.value = !open.value
@@ -453,7 +478,6 @@ watch(
 )
 
 const ensureAssistants = async () => {
-  if (!userStore.userHasFeature('admin_console')) return
   if (assistants.value.length > 0) return
   await lensStore.loadAssistants().catch(() => {})
 }
@@ -533,8 +557,29 @@ onUnmounted(() => {
   @apply ml-auto;
 }
 
+.assistant-switcher-header-trigger {
+  @apply flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left transition-colors;
+}
+
+.assistant-switcher-header-trigger:hover,
+.assistant-switcher-header-trigger-open {
+  @apply bg-line-soft;
+}
+
+.assistant-switcher-header-name {
+  @apply min-w-0 truncate text-base font-semibold text-ink-900;
+}
+
+.assistant-switcher-header-chevron {
+  @apply h-4 w-4 shrink-0 text-ink-400 transition-transform;
+}
+
 .assistant-switcher-panel {
   @apply absolute bottom-full left-0 z-50 mb-2 w-[22rem] overflow-hidden rounded-2xl border border-line bg-surface shadow-xl;
+}
+
+.assistant-switcher-panel-down {
+  @apply bottom-auto top-full mb-0 mt-2;
 }
 
 .assistant-switcher-head {

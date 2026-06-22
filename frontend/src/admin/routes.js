@@ -33,6 +33,12 @@ export const adminRoutes = [
     meta: { requiresAuth: true, requiredFeature: 'admin_console' }
   },
   {
+    path: '/management/lens/shares',
+    name: 'LensShareReview',
+    component: () => import('@/admin/pages/lens/ShareReview.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
     path: '/management/lens/assistants',
     name: 'LensAssistants',
     component: () => import('@/pages/lens/Assistants.vue'),

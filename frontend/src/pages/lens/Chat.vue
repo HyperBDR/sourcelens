@@ -204,110 +204,28 @@
       </div>
 
       <div class="sidebar-footer">
-        <button
-          v-if="isAnonymous"
-          type="button"
-          class="anon-login-btn"
-          :class="{
-            'anon-login-btn-collapsed': sidebarCollapsedActive && !isMobile
-          }"
-          :title="t('auth.signIn')"
-          @click="requireLogin"
-        >
-          <LogIn :size="18" :stroke-width="2" aria-hidden="true" />
-          <span v-if="!sidebarCollapsedActive || isMobile">
-            {{ t('auth.signIn') }}
-          </span>
-        </button>
-        <div v-else ref="dockMenuRef" class="dock-menu-wrap">
-          <button
-            class="dock-trigger"
-            :class="[
-              dockMenuOpen ? 'dock-trigger-open' : '',
-              sidebarCollapsedActive ? 'dock-trigger-collapsed' : ''
-            ]"
-            type="button"
-            @click="dockMenuOpen = !dockMenuOpen"
-          >
-            <div class="dock-avatar" :class="avatarBgColor">
-              <span>{{ userInitials }}</span>
-            </div>
-            <div
-              v-if="!sidebarCollapsedActive || isMobile"
-              class="min-w-0 flex-1 text-left"
-            >
-              <div class="truncate text-sm font-medium text-ink-900">
-                {{ displayName }}
-              </div>
-              <div class="truncate text-xs text-ink-500">
-                {{ t('platforms.workspace') }}
-              </div>
-            </div>
-            <svg
-              v-if="!sidebarCollapsedActive || isMobile"
-              class="h-4 w-4 shrink-0 text-ink-500 transition-transform"
-              :class="{ 'rotate-180': dockMenuOpen }"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              aria-hidden="true"
-            >
-              <path
-                d="m6 9 6 6 6-6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-
-          <Transition
-            enter-active-class="transition ease-out duration-100"
-            enter-from-class="transform opacity-0 translate-y-1 scale-95"
-            enter-to-class="transform opacity-100 translate-y-0 scale-100"
-            leave-active-class="transition ease-in duration-75"
-            leave-from-class="transform opacity-100 translate-y-0 scale-100"
-            leave-to-class="transform opacity-0 translate-y-1 scale-95"
-          >
-            <div v-if="dockMenuOpen" class="dock-menu">
-              <div
-                v-if="userStore.userHasFeature('admin_console')"
-                class="dock-section border-b border-line"
-              >
-                <AssistantSwitcher mode="flyout" />
-              </div>
-
-              <div v-if="userStore.userHasFeature('admin_console')" class="dock-section">
-                <router-link
-                  to="/management/users"
-                  class="dock-link"
-                  @click="dockMenuOpen = false"
-                >
-                  <span class="truncate">{{ t('platforms.adminConsole') }}</span>
-                </router-link>
-              </div>
-
-              <div class="dock-section" :class="{ 'border-t border-line': userStore.userHasFeature('admin_console') }">
-                <button
-                  type="button"
-                  class="dock-link"
-                  @click="openSettings"
-                >
-                  <span class="truncate">{{ t('common.settings') }}</span>
-                </button>
-                <button type="button" class="dock-link" @click="handleLogout">
-                  <span class="truncate">{{ t('common.logout') }}</span>
-                </button>
-              </div>
-            </div>
-          </Transition>
-        </div>
+        <UserDock
+          :collapsed="sidebarCollapsedActive"
+          :is-mobile="isMobile"
+          @require-login="requireLogin"
+          @open-my-shares="openMyShares"
+        />
       </div>
     </aside>
 
     <main class="main-shell">
       <div v-if="isMobile" class="mobile-topbar">
         <button
+          v-if="mySharesOpen"
+          type="button"
+          class="sidebar-collapse-btn"
+          :aria-label="t('common.back')"
+          @click="mySharesOpen = false"
+        >
+          <ArrowLeft :size="20" :stroke-width="2.1" aria-hidden="true" />
+        </button>
+        <button
+          v-else
           type="button"
           class="sidebar-collapse-btn"
           :aria-label="t('lens.chat.sessions')"
@@ -315,7 +233,9 @@
         >
           <PanelLeftOpen :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
-        <div class="mobile-topbar-title">{{ assistantName }}</div>
+        <div class="mobile-topbar-title">
+          {{ mySharesOpen ? t('lens.qa.mineTitle') : assistantName }}
+        </div>
         <button
           type="button"
           class="sidebar-collapse-btn"
@@ -325,9 +245,36 @@
           <Plus :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
       </div>
-      <header v-if="!isMobile && assistantName" class="chat-header">
-        <span class="chat-header-title">{{ assistantName }}</span>
+      <header
+        v-if="!isMobile && (mySharesOpen || assistantName)"
+        class="chat-header"
+      >
+        <template v-if="mySharesOpen">
+          <button
+            type="button"
+            class="chat-header-back"
+            :aria-label="t('common.back')"
+            @click="mySharesOpen = false"
+          >
+            <ArrowLeft :size="18" :stroke-width="2.1" aria-hidden="true" />
+          </button>
+          <span class="chat-header-title">{{ t('lens.qa.mineTitle') }}</span>
+        </template>
+        <template v-else>
+          <AssistantSwitcher v-if="switchable" mode="header" />
+          <span v-else class="chat-header-title">{{ assistantName }}</span>
+          <router-link
+            v-if="assistantSlug"
+            :to="`/lens/assistants/${assistantSlug}/qa`"
+            class="chat-header-link ml-auto"
+          >
+            <MessagesSquare :size="15" :stroke-width="2" aria-hidden="true" />
+            {{ t('lens.qa.publicListLink') }}
+          </router-link>
+        </template>
       </header>
+      <MySharesPanel v-if="mySharesOpen" />
+      <template v-else>
       <div ref="scrollRef" class="thread-scroll">
         <div v-if="!booted" class="thread-loading">
           <BaseLoading />
@@ -457,6 +404,30 @@
                     />
                     <path
                       d="M3 3v5h5"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button
+                  v-if="!isAnonymous && message.run"
+                  type="button"
+                  class="icon-btn"
+                  :title="t('lens.qa.shareButton')"
+                  @click="openShare(message)"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    aria-hidden="true"
+                  >
+                    <circle cx="18" cy="5" r="3" />
+                    <circle cx="6" cy="12" r="3" />
+                    <circle cx="18" cy="19" r="3" />
+                    <path
+                      d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"
                       stroke-linecap="round"
                       stroke-linejoin="round"
                     />
@@ -619,12 +590,21 @@
           </p>
         </div>
       </div>
+      </template>
     </main>
 
     <LoginModal
       :show="showLoginModal"
       @close="showLoginModal = false"
       @success="onLoginSuccess"
+    />
+
+    <QaShareModal
+      :open="shareOpen"
+      :run-uuid="shareRunUuid"
+      :question="shareQuestion"
+      :answer-preview="shareAnswer"
+      @close="shareOpen = false"
     />
   </div>
 </template>
@@ -638,7 +618,7 @@ import {
   watch,
   nextTick
 } from 'vue'
-import { PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles, LogIn } from '@lucide/vue'
+import { ArrowLeft, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -646,12 +626,15 @@ import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import AssistantSwitcher from '@/components/lens/AssistantSwitcher.vue'
+import UserDock from '@/components/lens/UserDock.vue'
+import MySharesPanel from '@/components/lens/MySharesPanel.vue'
 import AssistantEmptyState from '@/components/lens/AssistantEmptyState.vue'
 import LoginModal from '@/components/auth/LoginModal.vue'
+import QaShareModal from '@/components/lens/QaShareModal.vue'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
-import { useUiStore } from '@/store/ui'
+import { useLensStore } from '@/store/lens'
 import { useUserStore } from '@/store/user'
 import {
   cancelRun,
@@ -671,7 +654,7 @@ const router = useRouter()
 const { t } = useI18n()
 const { showError, showInfo, showSuccess, showWarning } = useToast()
 const userStore = useUserStore()
-const uiStore = useUiStore()
+const lensStore = useLensStore()
 
 const assistants = ref([])
 const sessions = ref([])
@@ -691,10 +674,8 @@ const sidebarCollapsed = ref(false)
 const deletingSessionUuid = ref('')
 const renamingSessionUuid = ref('')
 const renameDraft = ref('')
-const dockMenuOpen = ref(false)
 const composerRef = ref(null)
 const scrollRef = ref(null)
-const dockMenuRef = ref(null)
 const seenActivityKeys = new Set()
 const seenStepEventCounts = new Map()
 const thinkingPanelOpen = ref(false)
@@ -707,6 +688,11 @@ const REVEAL_INTERVAL_MS = 300
 
 const publicAssistant = ref(null)
 const showLoginModal = ref(false)
+const shareOpen = ref(false)
+const shareRunUuid = ref('')
+const shareAnswer = ref('')
+const shareQuestion = ref('')
+const mySharesOpen = ref(false)
 // False until the current bootstrap settles, so the view can distinguish
 // "still loading" from "loaded, but no assistant to show".
 const booted = ref(false)
@@ -731,6 +717,20 @@ const emptyVariant = computed(() =>
 const assistantName = computed(
   () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
+
+// The top header turns the assistant name into a switcher only when an
+// authenticated user has more than one assistant to choose from. Mirror the
+// switcher's own visibility rule (active assistants only) so the header never
+// renders an empty switcher in place of the name.
+const switchable = computed(
+  () =>
+    !isAnonymous.value &&
+    assistants.value.filter((item) => item.status === 'active').length > 1
+)
+
+// Slug of the assistant in view — drives the public Q&A list entry in the
+// header for both authenticated and anonymous visitors.
+const assistantSlug = computed(() => route.params.slug || '')
 
 const displayName = computed(() => {
   const userInfo = userStore.userInfo
@@ -1067,22 +1067,6 @@ function scrollToBottom() {
   el.scrollTop = el.scrollHeight
 }
 
-const openSettings = () => {
-  uiStore.openSettings()
-  dockMenuOpen.value = false
-}
-
-async function handleLogout() {
-  try {
-    await userStore.logout()
-  } catch {
-    // Fall through to local redirect.
-  } finally {
-    dockMenuOpen.value = false
-    await router.push('/login')
-  }
-}
-
 async function bootstrap() {
   // Reset transient chat state up front so the previous assistant's draft,
   // active-run/stream state, or messages cannot leak across an assistant
@@ -1094,6 +1078,7 @@ async function bootstrap() {
   question.value = ''
   currentRun.value = null
   messages.value = []
+  mySharesOpen.value = false
   resetStreamState()
   booted.value = false
 
@@ -1112,6 +1097,9 @@ async function bootstrap() {
 
   try {
     assistants.value = await listAssistants()
+    // Share the loaded list with the store so the header AssistantSwitcher
+    // renders immediately (no flash) and skips its own redundant fetch.
+    lensStore.assistants = assistants.value
 
     const current =
       assistants.value.find((item) => item.slug === route.params.slug) ||
@@ -1143,6 +1131,13 @@ function requireLogin() {
   showLoginModal.value = true
 }
 
+function openMyShares() {
+  mySharesOpen.value = true
+  if (isMobile.value) {
+    sidebarOpen.value = false
+  }
+}
+
 async function onLoginSuccess() {
   showLoginModal.value = false
   // Load the now-authenticated user's assistants and sessions so the
@@ -1172,6 +1167,7 @@ async function createNewSession(notify = true) {
   if (!selectedAssistant.value) {
     return null
   }
+  mySharesOpen.value = false
 
   const session = await createSession({
     assistant_uuid: selectedAssistant.value.uuid,
@@ -1273,6 +1269,7 @@ async function handlePrimaryAction() {
 }
 
 async function selectSession(session, updateRoute = true) {
+  mySharesOpen.value = false
   selectedSessionUuid.value = session.uuid
   messages.value = await listMessages(session.uuid)
   currentRun.value = null
@@ -1550,6 +1547,24 @@ async function copyMessage(message) {
   }
 }
 
+function openShare(message) {
+  shareRunUuid.value = message.run || ''
+  shareAnswer.value = message.content || ''
+  shareQuestion.value = questionForMessage(message)
+  shareOpen.value = true
+}
+
+function questionForMessage(message) {
+  const list = messages.value
+  const idx = list.findIndex((item) => item.uuid === message.uuid)
+  for (let i = idx - 1; i >= 0; i -= 1) {
+    if (list[i].role === 'user') {
+      return list[i].content || ''
+    }
+  }
+  return ''
+}
+
 function retryLastQuestion() {
   const lastUserMessage = [...messages.value].reverse().find(
     (message) => message.role === 'user'
@@ -1592,17 +1607,9 @@ async function doDeleteSession(session) {
   }
 }
 
-function handleOutsideClick(event) {
-  const target = event.target
-  if (dockMenuRef.value && !dockMenuRef.value.contains(target)) {
-    dockMenuOpen.value = false
-  }
-}
-
 watch(
   () => route.params.slug,
   () => {
-    dockMenuOpen.value = false
     // On a hard load with a stored token, defer the first bootstrap to
     // onMounted so it runs after the user is hydrated — avoids a flash of
     // the anonymous view and a redundant public fetch.
@@ -1615,7 +1622,6 @@ watch(
 )
 
 onMounted(async () => {
-  document.addEventListener('click', handleOutsideClick)
   if (window.innerWidth < 1024) {
     sidebarOpen.value = false
   }
@@ -1627,7 +1633,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', handleOutsideClick)
   streamController.value?.abort()
   clearInterval(elapsedTimer)
   clearInterval(revealTimer)
@@ -1838,6 +1843,27 @@ onBeforeUnmount(() => {
 
 .chat-header-title {
   @apply min-w-0 truncate text-base font-semibold text-ink-900;
+}
+
+.chat-header-back {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-500 transition-colors;
+}
+
+.chat-header-back:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.chat-header-link {
+  @apply inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium no-underline transition-colors;
+  border-color: #e5e7eb;
+  color: #4b5563;
+}
+
+.chat-header-link:hover {
+  background: #f9fafb;
+  border-color: #d1d5db;
+  color: #111827;
 }
 
 .retry-hint {
@@ -2259,55 +2285,6 @@ onBeforeUnmount(() => {
 
 .sidebar-footer {
   @apply border-t border-line p-3;
-}
-
-.dock-menu-wrap {
-  @apply relative;
-}
-
-.dock-trigger {
-  @apply flex w-full items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2 text-left shadow-sm transition-colors;
-}
-
-.dock-trigger:hover,
-.dock-trigger-open {
-  @apply border-primary-200 bg-primary-50;
-}
-
-.dock-trigger-collapsed {
-  @apply justify-center px-0;
-}
-
-.anon-login-btn {
-  @apply flex w-full items-center justify-center gap-2 rounded-xl border border-primary-200 bg-primary-50 px-3 py-2.5 text-sm font-medium text-primary-700 shadow-sm transition-colors;
-}
-
-.anon-login-btn:hover {
-  @apply border-primary-300 bg-primary-100;
-}
-
-.anon-login-btn-collapsed {
-  @apply gap-0 px-0;
-}
-
-.dock-avatar {
-  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white;
-}
-
-.dock-menu {
-  @apply absolute bottom-full left-0 z-40 mb-2 w-full overflow-visible rounded-2xl border border-line bg-surface shadow-xl;
-}
-
-.dock-section {
-  @apply border-b border-line px-3 py-3 last:border-b-0;
-}
-
-.dock-link {
-  @apply flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-ink-700 transition-colors;
-}
-
-.dock-link:hover {
-  @apply bg-line-soft text-ink-900;
 }
 
 @keyframes cursor-blink {

@@ -4,6 +4,7 @@ from django.urls import path
 from .views import (
     AdminRunDetailView,
     AdminRunListView,
+    AdminSharedQAViewSet,
     AssistantViewSet,
     DataSourceCredentialViewSet,
     DataSourceViewSet,
@@ -12,8 +13,11 @@ from .views import (
     LensNodeAIGatewayView,
     LensNodeViewSet,
     PublicAssistantView,
+    PublicSharedQAListView,
+    PublicSharedQAView,
     RunViewSet,
     SessionViewSet,
+    SharedQAViewSet,
     SkillViewSet,
     run_stream_view,
 )
@@ -22,6 +26,12 @@ router = DefaultRouter()
 router.register("assistants", AssistantViewSet, basename="lens-assistants")
 router.register("sessions", SessionViewSet, basename="lens-sessions")
 router.register("runs", RunViewSet, basename="lens-runs")
+router.register("shares", SharedQAViewSet, basename="lens-shares")
+router.register(
+    "admin/shares",
+    AdminSharedQAViewSet,
+    basename="lens-admin-shares",
+)
 router.register("admin/lensnodes", LensNodeViewSet, basename="lens-admin-lensnodes")
 router.register(
     "admin/datasources",
@@ -50,6 +60,16 @@ urlpatterns = [
         "public/assistants/<slug:slug>/",
         PublicAssistantView.as_view(),
         name="lens-public-assistant",
+    ),
+    path(
+        "public/assistants/<slug:slug>/qa/",
+        PublicSharedQAListView.as_view(),
+        name="lens-public-assistant-qa",
+    ),
+    path(
+        "public/qa/<str:token>/",
+        PublicSharedQAView.as_view(),
+        name="lens-public-qa",
     ),
     path(
         "runs/<uuid:uuid>/stream/",
