@@ -297,7 +297,7 @@
               :placeholder="t('common.search')"
             />
           </div>
-          <div class="max-h-72 overflow-y-auto px-2 pb-2">
+          <div class="max-h-80 space-y-0.5 overflow-y-auto px-2 pb-2 pt-1">
             <button
               v-for="assistant in filteredAssistants"
               :key="assistant.uuid"
@@ -310,7 +310,13 @@
               "
               @click="selectAssistant(assistant.slug)"
             >
-              <span class="min-w-0 truncate font-medium">
+              <span
+                class="assistant-switcher-item-avatar"
+                :class="assistantToneClass(assistant)"
+              >
+                {{ assistantInitial(assistant) }}
+              </span>
+              <span class="min-w-0 flex-1 truncate font-medium">
                 {{ assistant.name || assistant.slug }}
               </span>
               <span
@@ -575,7 +581,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-panel {
-  @apply absolute bottom-full left-0 z-50 mb-2 w-[22rem] overflow-hidden rounded-2xl border border-line bg-surface shadow-xl;
+  @apply absolute bottom-full left-0 z-50 mb-2 w-[24rem] overflow-hidden rounded-2xl border border-line bg-surface shadow-xl;
 }
 
 .assistant-switcher-panel-down {
@@ -595,7 +601,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-search {
-  @apply px-2 pt-2;
+  @apply px-2 pb-2 pt-2;
 }
 
 .assistant-switcher-input {
@@ -615,7 +621,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-item {
-  @apply flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-sm text-ink-700 transition-colors;
 }
 
 .assistant-switcher-item:hover {
@@ -624,6 +630,10 @@ onUnmounted(() => {
 
 .assistant-switcher-item-active {
   @apply bg-primary-50 text-primary-700;
+}
+
+.assistant-switcher-item-avatar {
+  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white;
 }
 
 .assistant-switcher-pill {
