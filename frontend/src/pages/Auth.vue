@@ -8,10 +8,7 @@
       </div>
 
       <!-- Login card -->
-      <div
-        v-if="!noAssistant"
-        class="rounded-2xl border border-line bg-white p-8 shadow-xl"
-      >
+      <div class="rounded-2xl border border-line bg-white p-8 shadow-xl">
         <div class="mb-7 text-center">
           <BrandLogo
             variant="mark"
@@ -27,29 +24,11 @@
 
         <LoginForm @success="redirectAfterLogin" />
       </div>
-
-      <!-- Signed in but no assistant available (direct /login entry) -->
-      <div
-        v-else
-        class="rounded-2xl border border-line bg-white p-8 text-center shadow-xl"
-      >
-        <BrandLogo
-          variant="mark"
-          class="mx-auto mb-4 flex h-8 justify-center"
-        />
-        <h1 class="text-xl font-semibold text-ink-900">
-          {{ t('auth.noAssistant.title') }}
-        </h1>
-        <p class="mt-3 text-sm leading-relaxed text-ink-500">
-          {{ t('auth.noAssistant.message') }}
-        </p>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
@@ -62,21 +41,15 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
-const noAssistant = ref(false)
-
 const redirectAfterLogin = async () => {
   const next = route.query.next
   if (typeof next === 'string' && next.startsWith('/')) {
     await navigate(next)
     return
   }
-  // Admins reach their console; regular end-users have no home here and
-  // should enter via a shared assistant link instead.
-  if (userStore.userHasFeature('admin_console')) {
-    await navigate(userStore.getUserLandingPath())
-    return
-  }
-  noAssistant.value = true
+  // Every authenticated user lands on '/', where Home resolves a default
+  // assistant and enters chat (or shows a role-aware empty state).
+  await navigate(userStore.getUserLandingPath())
 }
 
 const navigate = async (target) => {

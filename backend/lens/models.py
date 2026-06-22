@@ -550,3 +550,64 @@ class GlobalSetting(models.Model):
     value = models.JSONField(default=dict, blank=True)
     description = models.CharField(max_length=255, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class SharedQA(TimestampedUUIDModel):
+    """Public, immutable snapshot of one Q&A turn, shareable anonymously.
+
+    The question and answer text are snapshotted at share time so the
+    public page stays stable and decoupled from the private session
+    lifecycle (deleting the source session/run does not break the share).
+    """
+
+    class Status(models.TextChoices):
+        PUBLISHED = "published", "Published"
+        HIDDEN = "hidden", "Hidden"
+
+    token = models.CharField(max_length=64, unique=True)
+    run = models.ForeignKey(
+        Run,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shares",
+    )
+    assistant = models.ForeignKey(
+        Assistant,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shared_qas",
+    )
+    assistant_name = models.CharField(max_length=160, blank=True, default="")
+    assistant_slug = models.SlugField(max_length=180, blank=True, default="")
+    question = models.TextField(blank=True, default="")
+    answer = models.TextField(blank=True, default="")
+    title = models.CharField(max_length=200, blank=True, default="")
+    is_listed = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PUBLISHED,
+    )
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shared_qas",
+    )
+    view_count = models.PositiveIntegerField(default=0)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["assistant", "is_listed", "status", "-published_at"],
+                name="lens_sharedqa_list_idx",
+            ),
+        ]
+        ordering = ["-published_at", "-created_at"]
+
+    def __str__(self):
+        return self.title or str(self.token)

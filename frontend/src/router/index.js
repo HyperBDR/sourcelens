@@ -95,6 +95,20 @@ const routes = [
     meta: { allowAnonymous: true }
   },
   {
+    path: '/lens/assistants/:slug/qa',
+    name: 'PublicQaList',
+    component: () => import('@/pages/lens/PublicQaList.vue'),
+    props: (route) => ({ slug: route.params.slug }),
+    meta: { allowAnonymous: true }
+  },
+  {
+    path: '/lens/qa/:token',
+    name: 'PublicQa',
+    component: () => import('@/pages/lens/PublicQa.vue'),
+    props: (route) => ({ token: route.params.token }),
+    meta: { allowAnonymous: true }
+  },
+  {
     path: '/lens/assistants/:slug/history',
     name: 'LensAssistantHistory',
     component: () => import('@/pages/lens/History.vue'),

@@ -304,3 +304,46 @@ export async function updateSystemTaskEnabled(taskType, enabled) {
   )
   return unwrapResponse(response)
 }
+
+// Public shareable Q&A
+
+export async function shareRun(runUuid, payload = {}) {
+  const response = await api.post(`/lens/runs/${runUuid}/share/`, payload)
+  return unwrapResponse(response)
+}
+
+export async function listMyShares() {
+  const response = await api.get('/lens/shares/')
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function updateMyShare(uuid, payload) {
+  const response = await api.patch(`/lens/shares/${uuid}/`, payload)
+  return unwrapResponse(response)
+}
+
+export async function deleteShare(uuid) {
+  await api.delete(`/lens/shares/${uuid}/`)
+}
+
+export async function getPublicQa(token) {
+  const response = await api.get(`/lens/public/qa/${token}/`)
+  return unwrapResponse(response)
+}
+
+export async function getPublicAssistantQa(slug, params = {}) {
+  const response = await api.get(`/lens/public/assistants/${slug}/qa/`, {
+    params
+  })
+  return unwrapResponse(response)
+}
+
+export async function listAdminShares(params = {}) {
+  const response = await api.get('/lens/admin/shares/', { params })
+  return unwrapResponse(response)
+}
+
+export async function updateAdminShare(uuid, payload) {
+  const response = await api.patch(`/lens/admin/shares/${uuid}/`, payload)
+  return unwrapResponse(response)
+}

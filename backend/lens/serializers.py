@@ -23,6 +23,7 @@ from .models import (
     RunStep,
     ScheduledTask,
     Session,
+    SharedQA,
     Skill,
 )
 from .services import create_execution_run
@@ -1191,3 +1192,116 @@ class RunCreateSerializer(serializers.Serializer):
             else:
                 run.refresh_from_db()
         return run
+
+
+def _answer_snippet(text, limit=160):
+    """Collapse whitespace and truncate answer text for list previews."""
+
+    return " ".join((text or "").split())[:limit]
+
+
+class SharedQAPublicSerializer(serializers.ModelSerializer):
+    """Public single shared Q&A (anonymous, read-only)."""
+
+    class Meta:
+        model = SharedQA
+        fields = [
+            "token",
+            "title",
+            "question",
+            "answer",
+            "assistant_name",
+            "assistant_slug",
+            "view_count",
+            "published_at",
+        ]
+        read_only_fields = fields
+
+
+class SharedQAListSerializer(serializers.ModelSerializer):
+    """Public list item for an assistant's Q&A gallery."""
+
+    answer_snippet = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SharedQA
+        fields = [
+            "token",
+            "title",
+            "answer_snippet",
+            "view_count",
+            "published_at",
+        ]
+        read_only_fields = fields
+
+    def get_answer_snippet(self, obj):
+        """Return a short plain-text preview of the answer."""
+
+        return _answer_snippet(obj.answer)
+
+
+class SharedQAMineSerializer(serializers.ModelSerializer):
+    """A user's own shared Q&A with publish/list state and content."""
+
+    class Meta:
+        model = SharedQA
+        fields = [
+            "uuid",
+            "token",
+            "title",
+            "question",
+            "answer",
+            "assistant_name",
+            "assistant_slug",
+            "is_listed",
+            "status",
+            "view_count",
+            "published_at",
+        ]
+        read_only_fields = fields
+
+
+class SharedQAAdminSerializer(serializers.ModelSerializer):
+    """Admin moderation view of a shared Q&A."""
+
+    published_by = serializers.SerializerMethodField()
+    answer_snippet = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SharedQA
+        fields = [
+            "uuid",
+            "token",
+            "title",
+            "answer_snippet",
+            "assistant_name",
+            "assistant_slug",
+            "is_listed",
+            "status",
+            "published_by",
+            "view_count",
+            "published_at",
+            "created_at",
+        ]
+        read_only_fields = [
+            "uuid",
+            "token",
+            "title",
+            "answer_snippet",
+            "assistant_name",
+            "assistant_slug",
+            "published_by",
+            "view_count",
+            "published_at",
+            "created_at",
+        ]
+
+    def get_published_by(self, obj):
+        """Return the publisher's username (internal use only)."""
+
+        return obj.published_by.username if obj.published_by else ""
+
+    def get_answer_snippet(self, obj):
+        """Return a short plain-text preview of the answer."""
+
+        return _answer_snippet(obj.answer)
