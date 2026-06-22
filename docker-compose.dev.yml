@@ -172,7 +172,7 @@ services:
       LENSNODE_HEARTBEAT_INTERVAL_S: 15
       LENSNODE_REQUEST_TIMEOUT_S: 600
       # Max concurrent runs per node. Increase in production based on node resources.
-      LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-5}
+      LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-8}
       PYTHONPATH: /opt/lensnode
     volumes:
       - ./data.dev/workspace:/workspace
