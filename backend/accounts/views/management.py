@@ -6,7 +6,11 @@ from django.http import Http404
 from django.db.models import Count, Prefetch
 from rest_framework.status import HTTP_200_OK
 from rest_framework.response import Response
-from rest_framework.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST
+from rest_framework.status import (
+    HTTP_201_CREATED,
+    HTTP_204_NO_CONTENT,
+    HTTP_400_BAD_REQUEST,
+)
 from rest_framework.views import APIView
 
 from accounts.access import (
@@ -363,6 +367,11 @@ def _group_payload(g):
             'permission_count',
             g.permissions.count(),
         ),
+        'assistant_grant_count': getattr(
+            g,
+            'assistant_grant_count',
+            g.assistant_grants.count(),
+        ),
         'roles': [_role_summary_payload(role) for role in direct_roles],
     }
 
@@ -391,6 +400,7 @@ class ManagementGroupListView(APIView):
         qs = Group.objects.annotate(
             user_count=Count('user', distinct=True),
             permission_count=Count('permissions', distinct=True),
+            assistant_grant_count=Count('assistant_grants', distinct=True),
         ).prefetch_related(role_prefetch).order_by('name')
         total = qs.count()
         start = (page - 1) * page_size
@@ -414,6 +424,14 @@ class ManagementGroupListView(APIView):
                 status=HTTP_400_BAD_REQUEST
             )
         group = Group.objects.create(name=name)
+        user_ids = request.data.get('user_ids')
+        if isinstance(user_ids, list) and user_ids:
+            valid_user_ids = list(
+                User.objects.filter(pk__in=user_ids).values_list(
+                    'pk', flat=True
+                )
+            )
+            group.user_set.set(valid_user_ids)
         return Response(_group_payload(group), status=HTTP_201_CREATED)
 
 
@@ -454,7 +472,30 @@ class ManagementGroupDetailView(APIView):
             )
             group.platform_roles.set(valid_role_ids)
 
+        user_ids = request.data.get('user_ids')
+        if user_ids is not None:
+            if not isinstance(user_ids, list):
+                user_ids = []
+            valid_user_ids = list(
+                User.objects.filter(pk__in=user_ids).values_list(
+                    'pk', flat=True
+                )
+            )
+            group.user_set.set(valid_user_ids)
+
         return Response(_group_payload(group), status=HTTP_200_OK)
+
+    def delete(self, request, group_id):
+        """Delete a group.
+
+        AssistantAccess grants made through this group cascade away, so
+        members lose any access that depended on this group. Role and
+        membership links are removed automatically.
+        """
+
+        group = _get_group_or_404(group_id)
+        group.delete()
+        return Response(status=HTTP_204_NO_CONTENT)
 
 
 def _role_summary_payload(role):

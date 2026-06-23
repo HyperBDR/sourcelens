@@ -38,6 +38,10 @@ export const managementApi = {
       .then(extractData)
   },
 
+  deleteGroup(groupId) {
+    return apiClient.delete(`/v1/management/groups/${groupId}/`)
+  },
+
   getRoles(params = {}) {
     return apiClient.get('/v1/management/roles/', { params }).then(extractData)
   },
