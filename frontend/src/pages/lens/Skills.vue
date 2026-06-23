@@ -88,18 +88,35 @@
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
-                  <td class="table-cell font-medium text-ink-900">
-                    {{ row.name }}
+                  <td class="table-cell">
+                    <button
+                      type="button"
+                      class="text-left font-medium text-ink-900 hover:text-primary-700 hover:underline"
+                      @click="openDetail(row)"
+                    >
+                      {{ row.name }}
+                    </button>
+                    <div
+                      v-if="skillDescription(row)"
+                      class="mt-1 max-w-xl truncate text-xs text-ink-500"
+                    >
+                      {{ skillDescription(row) }}
+                    </div>
+                  </td>
+                  <td class="table-cell font-mono text-ink-500">
+                    {{ row.slug }}
+                  </td>
+                  <td class="table-cell">
                     <span
                       v-if="isWorkspaceGuideSkill(row)"
-                      class="ml-2 inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
+                      class="inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
                       :title="t('lensAdmin.columns.workspaceGuideHint')"
                     >
                       {{ t('lensAdmin.columns.workspaceGuideTag') }}
                     </span>
-                  </td>
-                  <td class="table-cell font-mono text-ink-500">
-                    {{ row.slug }}
+                    <span v-else class="text-sm text-ink-400">
+                      {{ t('lensAdmin.pages.skills.label') }}
+                    </span>
                   </td>
                   <td class="table-cell">
                     <StatusBadge
@@ -116,19 +133,45 @@
         </div>
       </section>
 
-      <BaseModal :show="showModal" :title="modalTitle" @close="closeModal">
-        <form class="space-y-4" @submit.prevent="save">
-          <FormRow :label="t('lensAdmin.fields.name')">
+      <BaseDrawer
+        :show="showModal"
+        :title="modalTitle"
+        :subtitle="form.name || ''"
+        @close="closeModal"
+      >
+        <form id="skill-form" class="space-y-4" @submit.prevent="save">
+          <FormRow :label="t('lensAdmin.fields.name')" required>
             <input v-model="form.name" class="form-input" required />
           </FormRow>
-          <FormRow :label="t('lensAdmin.fields.slug')">
+          <FormRow :label="t('lensAdmin.fields.slug')" required>
             <input v-model="form.slug" class="form-input" required />
           </FormRow>
-          <FormRow :label="t('lensAdmin.fields.definition')">
+          <FormRow :label="t('lensAdmin.fields.description')">
+            <input
+              v-model="form.description"
+              class="form-input"
+              :placeholder="t('lensAdmin.placeholders.skillDescription')"
+            />
+          </FormRow>
+          <FormRow :label="t('lensAdmin.fields.content')">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <span class="text-xs text-ink-400">
+                {{ t('lensAdmin.skills.beautifyHint') }}
+              </span>
+              <BaseButton
+                size="sm"
+                variant="outline"
+                :loading="beautifying"
+                :disabled="beautifying"
+                @click="beautify"
+              >
+                {{ t('lensAdmin.skills.beautify') }}
+              </BaseButton>
+            </div>
             <textarea
-              v-model="form.definition_text"
-              class="json-input"
-              rows="6"
+              v-model="form.content"
+              class="form-input min-h-96"
+              :placeholder="t('lensAdmin.placeholders.skillContent')"
             />
           </FormRow>
           <BooleanRow v-model="form.enabled" />
@@ -139,7 +182,12 @@
         </form>
         <template #footer>
           <div class="flex flex-row-reverse gap-2">
-            <BaseButton :loading="saving" variant="primary" @click="save">
+            <BaseButton
+              :loading="saving"
+              variant="primary"
+              type="submit"
+              form="skill-form"
+            >
               {{ t('common.save') }}
             </BaseButton>
             <BaseButton variant="outline" @click="closeModal">
@@ -147,7 +195,69 @@
             </BaseButton>
           </div>
         </template>
-      </BaseModal>
+      </BaseDrawer>
+
+      <BaseDrawer
+        :show="showDetail"
+        :title="t('lensAdmin.skillDetail.title')"
+        @close="closeDetail"
+      >
+        <template #actions>
+          <BaseButton size="sm" variant="outline" @click="editFromDetail">
+            {{ t('common.edit') }}
+          </BaseButton>
+        </template>
+        <div v-if="detailRow" class="space-y-5">
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <StatusBadge
+                :status="detailRow.enabled ? 'enabled' : 'disabled'"
+              />
+              <h3 class="text-base font-semibold text-ink-900">
+                {{ detailRow.name }}
+              </h3>
+              <span
+                v-if="isWorkspaceGuideSkill(detailRow)"
+                class="inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
+                :title="t('lensAdmin.columns.workspaceGuideHint')"
+              >
+                {{ t('lensAdmin.columns.workspaceGuideTag') }}
+              </span>
+              <span
+                v-else
+                class="inline-block rounded-md border border-line bg-surface-sunken px-1.5 py-0.5 text-xs font-medium text-ink-500"
+              >
+                {{ t('lensAdmin.pages.skills.label') }}
+              </span>
+            </div>
+            <p class="font-mono text-xs text-ink-500">{{ detailRow.slug }}</p>
+          </div>
+
+          <div v-if="skillDescription(detailRow)">
+            <div class="mb-1 text-sm font-medium text-ink-700">
+              {{ t('lensAdmin.fields.description') }}
+            </div>
+            <p class="text-sm leading-6 text-ink-600">
+              {{ skillDescription(detailRow) }}
+            </p>
+          </div>
+
+          <div>
+            <div class="mb-2 text-sm font-medium text-ink-700">
+              {{ t('lensAdmin.fields.content') }}
+            </div>
+            <div
+              v-if="skillContent(detailRow)"
+              class="rounded-lg border border-line bg-surface-sunken p-4"
+            >
+              <MarkdownRenderer :content="skillContent(detailRow)" />
+            </div>
+            <p v-else class="text-sm text-ink-400">
+              {{ t('common.noData') }}
+            </p>
+          </div>
+        </div>
+      </BaseDrawer>
     </div>
   </AdminLayout>
 </template>
@@ -157,18 +267,25 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
-import { createSkill, deleteSkill, listSkills, updateSkill } from '@/api/lens'
+import {
+  beautifySkill,
+  createSkill,
+  deleteSkill,
+  listSkills,
+  updateSkill
+} from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
-import BaseModal from '@/components/ui/BaseModal.vue'
+import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { extractErrorMessage } from '@/utils/api'
 
 import BooleanRow from './components/BooleanRow.vue'
 import FormRow from './components/FormRow.vue'
 import RowActions from './components/RowActions.vue'
-import { normalizeList, stringifyJson } from './adminHelpers'
+import { normalizeList } from './adminHelpers'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
@@ -176,13 +293,16 @@ const { showSuccess, showError } = useToast()
 const skills = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const beautifying = ref(false)
 const showModal = ref(false)
+const showDetail = ref(false)
+const detailRow = ref(null)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
 
 const columns = computed(() =>
-  ['skill', 'slug', 'status', 'actions'].map((column) =>
+  ['skill', 'slug', 'type', 'status', 'actions'].map((column) =>
     t(`lensAdmin.columns.${column}`)
   )
 )
@@ -199,11 +319,33 @@ function isWorkspaceGuideSkill(row) {
   return typeof row?.slug === 'string' && row.slug.endsWith('-workspace-guide')
 }
 
+function skillDescription(row) {
+  const definition = row?.definition
+  if (definition && typeof definition === 'object') {
+    return definition.description || ''
+  }
+  return ''
+}
+
+function skillContent(row) {
+  const definition = row?.definition
+  if (typeof definition === 'string') {
+    return definition
+  }
+  if (definition && typeof definition === 'object') {
+    return (
+      definition.content || definition.markdown || definition.skill_md || ''
+    )
+  }
+  return ''
+}
+
 function defaultForm() {
   return {
     name: '',
     slug: '',
-    definition_text: '',
+    description: '',
+    content: '',
     enabled: true
   }
 }
@@ -213,19 +355,22 @@ function formFromRow(row) {
     uuid: row.uuid,
     name: row.name || '',
     slug: row.slug || '',
-    definition_text:
-      typeof row.definition === 'string'
-        ? row.definition
-        : stringifyJson(row.definition || {}),
+    description: skillDescription(row),
+    content: skillContent(row),
     enabled: row.enabled !== false
   }
 }
 
 function buildPayload() {
+  const definition = { content: form.value.content || '' }
+  const description = (form.value.description || '').trim()
+  if (description) {
+    definition.description = description
+  }
   return {
     name: form.value.name,
     slug: form.value.slug,
-    definition: form.value.definition_text,
+    definition,
     enabled: !!form.value.enabled
   }
 }
@@ -260,6 +405,42 @@ function closeModal() {
   showModal.value = false
   form.value = {}
   formError.value = ''
+}
+
+function openDetail(row) {
+  detailRow.value = row
+  showDetail.value = true
+}
+
+function closeDetail() {
+  showDetail.value = false
+  detailRow.value = null
+}
+
+function editFromDetail() {
+  const row = detailRow.value
+  closeDetail()
+  if (row) {
+    startEdit(row)
+  }
+}
+
+async function beautify() {
+  beautifying.value = true
+  try {
+    const result = await beautifySkill({
+      name: form.value.name || '',
+      content: form.value.content || ''
+    })
+    if (result?.content) {
+      form.value.content = result.content
+      showSuccess(t('lensAdmin.skills.beautifySuccess'))
+    }
+  } catch (error) {
+    showError(extractErrorMessage(error, t('lensAdmin.skills.beautifyFailed')))
+  } finally {
+    beautifying.value = false
+  }
 }
 
 async function saveByMode(uuid, payload) {
@@ -305,10 +486,6 @@ onMounted(load)
 <style scoped>
 .form-input {
   @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
-}
-
-.json-input {
-  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
 }
 
 .table-head {

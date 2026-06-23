@@ -668,6 +668,15 @@
         "action": "Create Setting"
       }
     },
+    "skills": {
+      "beautify": "Beautify",
+      "beautifyHint": "Polish or generate the SKILL.md with the configured generator model",
+      "beautifySuccess": "Content beautified",
+      "beautifyFailed": "Beautify failed — configure a Skill generator model in Settings"
+    },
+    "skillDetail": {
+      "title": "Skill Detail"
+    },
     "columns": {
       "assistant": "Assistant",
       "lensnode": "Node",
@@ -788,6 +797,8 @@
     "fields": {
       "name": "Name",
       "slug": "Slug",
+      "description": "Description",
+      "content": "Content",
       "lensnode": "LensNode",
       "task": "Task",
       "selectedDirs": "Select Directory",
@@ -828,7 +839,6 @@
       "appToken": "App Token",
       "documentUrl": "Feishu Document URL",
       "docIds": "Document IDs",
-      "definition": "Definition",
       "enabled": "Enabled",
       "transport": "Transport",
       "endpoint": "Endpoint",
@@ -853,7 +863,9 @@
       "includePaths": "One path rule per line, e.g. src/**",
       "extensions": "e.g. .lock,.pyc,.sqlite3",
       "excludeDirs": "e.g. .git,node_modules,dist",
-      "noDirs": "Select a LensNode first, or wait for the node to report available directories."
+      "noDirs": "Select a LensNode first, or wait for the node to report available directories.",
+      "skillDescription": "One-line summary of what this Skill does (optional)",
+      "skillContent": "Write the SKILL.md content (Markdown)"
     },
     "settings": {
       "publicBaseUrlTitle": "Public Base URL",

@@ -668,6 +668,15 @@
         "action": "新建配置"
       }
     },
+    "skills": {
+      "beautify": "一键美化",
+      "beautifyHint": "使用已配置的 Skill 生成模型润色 / 生成 SKILL.md 内容",
+      "beautifySuccess": "已生成美化内容",
+      "beautifyFailed": "美化失败，请确认已在「设置」中配置 Skill 生成模型"
+    },
+    "skillDetail": {
+      "title": "Skill 详情"
+    },
     "columns": {
       "assistant": "Assistant",
       "lensnode": "节点",
@@ -788,6 +797,8 @@
     "fields": {
       "name": "名称",
       "slug": "Slug",
+      "description": "描述",
+      "content": "内容",
       "lensnode": "节点",
       "task": "任务",
       "selectedDirs": "选择目录",
@@ -828,7 +839,6 @@
       "appToken": "App Token",
       "documentUrl": "飞书文档链接",
       "docIds": "文档 ID",
-      "definition": "定义",
       "enabled": "启用",
       "transport": "Transport",
       "endpoint": "Endpoint",
@@ -853,7 +863,9 @@
       "includePaths": "每行一个路径规则，如 src/**",
       "extensions": "如 .lock,.pyc,.sqlite3",
       "excludeDirs": "如 .git,node_modules,dist",
-      "noDirs": "请先选择节点，或等待节点上报可用目录。"
+      "noDirs": "请先选择节点，或等待节点上报可用目录。",
+      "skillDescription": "一句话描述该 Skill 的用途（可选）",
+      "skillContent": "填写 SKILL.md 内容（Markdown 格式）"
     },
     "settings": {
       "publicBaseUrlTitle": "对外基础地址",

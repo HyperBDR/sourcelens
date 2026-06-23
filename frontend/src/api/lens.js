@@ -251,6 +251,11 @@ export async function deleteSkill(uuid) {
   return unwrapResponse(response)
 }
 
+export async function beautifySkill(payload) {
+  const response = await api.post('/lens/admin/skills/beautify/', payload)
+  return unwrapResponse(response)
+}
+
 export async function listMcpServers() {
   const response = await api.get('/lens/admin/mcp-servers/')
   return unwrapList(unwrapResponse(response))

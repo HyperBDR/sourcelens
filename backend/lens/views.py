@@ -64,6 +64,10 @@ from .services import (
     cancel_run_on_lensnode,
     stream_run_events_async,
 )
+from .skill_generation import (
+    SkillGeneratorNotConfigured,
+    beautify_skill_content,
+)
 from .tasks import (
     register_datasource_sync_task,
     release_datasource_lock,
@@ -811,6 +815,28 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=["post"])
+    def beautify(self, request):
+        """Polish a draft SKILL.md via the configured generator model."""
+
+        try:
+            content = beautify_skill_content(
+                content=request.data.get("content", ""),
+                name=request.data.get("name", ""),
+                user_id=request.user.id,
+            )
+        except SkillGeneratorNotConfigured:
+            return Response(
+                {"detail": "Skill generator model is not configured."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({"content": content})
 
 
 class MCPServerViewSet(BaseAdminViewSet):

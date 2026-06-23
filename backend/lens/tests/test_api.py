@@ -258,6 +258,40 @@ class LensApiTests(TestCase):
             "016d5cf7-2245-4015-b242-d6323e795b58",
         )
 
+    def test_skill_beautify_requires_generator_model(self):
+        response = self.client.post(
+            "/api/lens/admin/skills/beautify/",
+            {"name": "Demo", "content": "draft"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch("lens.skill_generation.run_completion")
+    def test_skill_beautify_returns_polished_content(self, mock_run):
+        GlobalSetting.objects.create(
+            key="lens.skills.generator_model_ref",
+            value="016d5cf7-2245-4015-b242-d6323e795b58",
+        )
+        mock_run.return_value = type(
+            "Result", (), {"content": "```markdown\n# Polished\n```"}
+        )()
+
+        response = self.client.post(
+            "/api/lens/admin/skills/beautify/",
+            {"name": "Demo", "content": "rough draft"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["content"], "# Polished")
+        _, kwargs = mock_run.call_args
+        self.assertEqual(
+            kwargs["model_ref"],
+            "016d5cf7-2245-4015-b242-d6323e795b58",
+        )
+        self.assertEqual(kwargs["node_name"], "lens.skill_beautify")
+
     def test_assistant_create_rejects_unreported_task(self):
         payload = {
             "name": "Bad Task",
