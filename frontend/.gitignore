@@ -2,3 +2,6 @@ node_modules/
 dist/
 playwright-report/
 test-results/
+
+# access-control E2E generated fixtures (seeded per run)
+e2e/access-control/fixtures.json
