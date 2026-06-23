@@ -64,17 +64,27 @@
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.agentModel') + ' *'">
         <select v-model="form.agent_model_ref" class="form-input" required>
-          <option value="">{{ t('lensAdmin.placeholders.selectModel') }}</option>
-          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+          <option value="">
+            {{ t('lensAdmin.placeholders.selectModel') }}
+          </option>
+          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">
+            {{ formatLLMConfigLabel(c) }}
+          </option>
         </select>
-        <p class="mt-1 text-xs text-ink-500">{{ t('lensAdmin.wizard.agentModelHint') }}</p>
+        <p class="mt-1 text-xs text-ink-500">
+          {{ t('lensAdmin.wizard.agentModelHint') }}
+        </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.multimodalModel')">
         <select v-model="form.multimodal_model_ref" class="form-input">
           <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
-          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">{{ formatLLMConfigLabel(c) }}</option>
+          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">
+            {{ formatLLMConfigLabel(c) }}
+          </option>
         </select>
-        <p class="mt-1 text-xs text-ink-500">{{ t('lensAdmin.wizard.multimodalModelHint') }}</p>
+        <p class="mt-1 text-xs text-ink-500">
+          {{ t('lensAdmin.wizard.multimodalModelHint') }}
+        </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.maxConcurrency')">
         <input
@@ -84,7 +94,9 @@
           max="50"
           class="form-input w-32"
         />
-        <p class="mt-1 text-xs text-ink-500">{{ t('lensAdmin.wizard.maxConcurrencyHint') }}</p>
+        <p class="mt-1 text-xs text-ink-500">
+          {{ t('lensAdmin.wizard.maxConcurrencyHint') }}
+        </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.agentRounds')">
         <div class="grid grid-cols-5 gap-2">
@@ -92,11 +104,18 @@
             v-for="tier in agentRoundsTiers"
             :key="tier.value"
             class="flex cursor-pointer flex-col items-center rounded-lg border-2 p-2 text-center transition-colors"
-            :class="form.agent_rounds === tier.value
-              ? 'border-brand-600 bg-brand-50 text-brand-700'
-              : 'border-line bg-surface text-ink-600 hover:border-brand-300'"
+            :class="
+              form.agent_rounds === tier.value
+                ? 'border-brand-600 bg-brand-50 text-brand-700'
+                : 'border-line bg-surface text-ink-600 hover:border-brand-300'
+            "
           >
-            <input type="radio" :value="tier.value" v-model="form.agent_rounds" class="sr-only" />
+            <input
+              type="radio"
+              :value="tier.value"
+              v-model="form.agent_rounds"
+              class="sr-only"
+            />
             <span class="text-sm font-medium">{{ tier.label }}</span>
             <span class="mt-0.5 text-xs opacity-60">{{ tier.hint }}</span>
           </label>
@@ -110,13 +129,19 @@
       <div class="grid gap-4 md:grid-cols-2">
         <FormRow :label="t('lensAdmin.fields.lensnode')">
           <select v-model="form.lensnode_uuid" class="form-input" required>
-            <option value="">{{ t('lensAdmin.placeholders.selectLensNode') }}</option>
-            <option v-for="ln in lensnodes" :key="ln.uuid" :value="ln.uuid">{{ ln.name }}</option>
+            <option value="">
+              {{ t('lensAdmin.placeholders.selectLensNode') }}
+            </option>
+            <option v-for="ln in lensnodes" :key="ln.uuid" :value="ln.uuid">
+              {{ ln.name }}
+            </option>
           </select>
         </FormRow>
         <FormRow :label="t('lensAdmin.fields.task')">
           <select v-model="form.selected_task" class="form-input" required>
-            <option value="">{{ t('lensAdmin.placeholders.selectTask') }}</option>
+            <option value="">
+              {{ t('lensAdmin.placeholders.selectTask') }}
+            </option>
             <option
               v-for="task in selectedLensNodeTasks"
               :key="task.name"
@@ -130,7 +155,9 @@
       </div>
       <div>
         <div class="mb-1 flex items-center justify-between">
-          <span class="text-sm font-medium text-ink-700">{{ t('lensAdmin.fields.selectedDirs') }}</span>
+          <span class="text-sm font-medium text-ink-700">{{
+            t('lensAdmin.fields.selectedDirs')
+          }}</span>
           <button
             v-if="form.lensnode_uuid"
             type="button"
@@ -138,8 +165,19 @@
             :disabled="refreshingDirs"
             @click="$emit('refresh-dirs')"
           >
-            <svg class="h-3.5 w-3.5" :class="{ 'animate-spin': refreshingDirs }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            <svg
+              class="h-3.5 w-3.5"
+              :class="{ 'animate-spin': refreshingDirs }"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
             </svg>
             {{ t('common.refresh') }}
           </button>
@@ -150,7 +188,11 @@
           class="form-input font-mono"
         >
           <option value="">{{ t('lensAdmin.placeholders.selectDir') }}</option>
-          <option v-for="dir in selectedLensNodeDirs" :key="dir.path" :value="dir.path">
+          <option
+            v-for="dir in selectedLensNodeDirs"
+            :key="dir.path"
+            :value="dir.path"
+          >
             {{ dir.path }}
           </option>
         </select>
@@ -173,43 +215,55 @@
         </div>
       </div>
       <FormRow :label="t('lensAdmin.fields.retrievalPolicy')">
-        <div class="grid gap-3 rounded-md border border-line bg-surface-sunken p-3">
+        <div
+          class="grid gap-3 rounded-md border border-line bg-surface-sunken p-3"
+        >
           <label class="block text-xs font-medium text-ink-600">
             {{ t('lensAdmin.fields.excludeExtensions') }}
-            <textarea v-model="form.exclude_extensions_text" class="form-input mt-1 min-h-28 font-mono" :placeholder="t('lensAdmin.placeholders.extensions')" />
+            <textarea
+              v-model="form.exclude_extensions_text"
+              class="form-input mt-1 min-h-28 font-mono"
+              :placeholder="t('lensAdmin.placeholders.extensions')"
+            />
           </label>
           <label class="block text-xs font-medium text-ink-600">
             {{ t('lensAdmin.fields.excludeDirs') }}
-            <textarea v-model="form.exclude_dirs_text" class="form-input mt-1 min-h-28 font-mono" :placeholder="t('lensAdmin.placeholders.excludeDirs')" />
+            <textarea
+              v-model="form.exclude_dirs_text"
+              class="form-input mt-1 min-h-28 font-mono"
+              :placeholder="t('lensAdmin.placeholders.excludeDirs')"
+            />
           </label>
         </div>
       </FormRow>
     </div>
 
-    <!-- Wizard Step 3 — Prompts -->
+    <!-- Wizard Step 3 — Workspace, Skills & MCP -->
     <div v-else-if="wizardStep === 3" class="space-y-5">
       <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step3Desc') }}</p>
-
-      <!-- Workspace context (optional, free text injected before query) -->
       <div>
-        <span class="text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.contextLabel') }}</span>
-        <p class="mb-2 text-xs text-ink-500">{{ t('lensAdmin.wizard.contextHint') }}</p>
+        <span class="text-sm font-medium text-ink-700">{{
+          t('lensAdmin.wizard.contextLabel')
+        }}</span>
+        <p class="mb-2 text-xs text-ink-500">
+          {{ t('lensAdmin.wizard.contextHint') }}
+        </p>
         <textarea
           v-model="form.workspace_guide_overview"
-          class="form-input min-h-96"
+          class="form-input min-h-60"
           :placeholder="t('lensAdmin.wizard.contextPlaceholder')"
         />
       </div>
-    </div>
-
-    <!-- Wizard Step 4 — Skills & MCP -->
-    <div v-else-if="wizardStep === 4" class="space-y-5">
-      <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step4Desc') }}</p>
       <div>
-        <div class="mb-2 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.skillsSection') }}</div>
-        <div v-if="skills.length" class="space-y-1 rounded-md border border-line bg-surface-sunken p-2">
+        <div class="mb-2 text-sm font-medium text-ink-700">
+          {{ t('lensAdmin.wizard.skillsSection') }}
+        </div>
+        <div
+          v-if="selectableSkills.length"
+          class="space-y-1 rounded-md border border-line bg-surface-sunken p-2"
+        >
           <label
-            v-for="skill in skills"
+            v-for="skill in selectableSkills"
             :key="skill.uuid"
             class="flex cursor-pointer items-center gap-3 rounded px-2 py-2 transition-colors hover:bg-surface"
           >
@@ -220,19 +274,29 @@
               class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
             />
             <div class="min-w-0 flex-1">
-              <div class="text-sm font-medium text-ink-900">{{ skill.name }}</div>
+              <div class="text-sm font-medium text-ink-900">
+                {{ skill.name }}
+              </div>
               <div class="font-mono text-xs text-ink-400">{{ skill.slug }}</div>
             </div>
             <StatusBadge :status="skill.enabled ? 'enabled' : 'disabled'" />
           </label>
         </div>
-        <div v-else class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500">
+        <div
+          v-else
+          class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500"
+        >
           {{ t('lensAdmin.wizard.noSkills') }}
         </div>
       </div>
       <div>
-        <div class="mb-2 text-sm font-medium text-ink-700">{{ t('lensAdmin.wizard.mcpSection') }}</div>
-        <div v-if="mcps.length" class="space-y-1 rounded-md border border-line bg-surface-sunken p-2">
+        <div class="mb-2 text-sm font-medium text-ink-700">
+          {{ t('lensAdmin.wizard.mcpSection') }}
+        </div>
+        <div
+          v-if="mcps.length"
+          class="space-y-1 rounded-md border border-line bg-surface-sunken p-2"
+        >
           <label
             v-for="mcp in mcps"
             :key="mcp.uuid"
@@ -246,13 +310,182 @@
             />
             <div class="min-w-0 flex-1">
               <div class="text-sm font-medium text-ink-900">{{ mcp.name }}</div>
-              <div class="text-xs text-ink-400">{{ mcp.transport }} · {{ mcp.endpoint || emptyValue }}</div>
+              <div class="text-xs text-ink-400">
+                {{ mcp.transport }} · {{ mcp.endpoint || emptyValue }}
+              </div>
             </div>
             <StatusBadge :status="mcp.enabled ? 'enabled' : 'disabled'" />
           </label>
         </div>
-        <div v-else class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500">
+        <div
+          v-else
+          class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500"
+        >
           {{ t('lensAdmin.wizard.noMcp') }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Wizard Step 4 — Authorization -->
+    <div v-else-if="wizardStep === 4" class="space-y-5">
+      <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step4Desc') }}</p>
+      <FormRow :label="t('lensAdmin.fields.visibility')">
+        <div class="grid grid-cols-2 gap-3">
+          <label
+            v-for="opt in ['public', 'private']"
+            :key="opt"
+            class="flex cursor-pointer items-start gap-3 rounded-lg border-2 p-3 transition-colors"
+            :class="
+              form.visibility === opt
+                ? opt === 'private'
+                  ? 'border-amber-400 bg-amber-50'
+                  : 'border-emerald-400 bg-emerald-50'
+                : 'border-line bg-surface hover:border-brand-300'
+            "
+          >
+            <input
+              type="radio"
+              :value="opt"
+              v-model="form.visibility"
+              class="sr-only"
+            />
+            <component
+              :is="opt === 'private' ? LockIcon : GlobeIcon"
+              class="mt-0.5 h-5 w-5 flex-shrink-0"
+              :class="
+                form.visibility === opt
+                  ? opt === 'private'
+                    ? 'text-amber-600'
+                    : 'text-emerald-600'
+                  : 'text-ink-400'
+              "
+            />
+            <div class="min-w-0">
+              <div
+                class="text-sm font-semibold"
+                :class="
+                  form.visibility === opt ? 'text-ink-900' : 'text-ink-600'
+                "
+              >
+                {{ t(`lensAdmin.visibility.${opt}`) }}
+              </div>
+              <div class="mt-0.5 text-xs leading-5 text-ink-500">
+                {{ t(`lensAdmin.visibility.${opt}Desc`) }}
+              </div>
+            </div>
+          </label>
+        </div>
+        <p class="mt-2 text-xs text-ink-500">
+          {{ t('lensAdmin.wizard.visibilityHint') }}
+        </p>
+      </FormRow>
+
+      <div v-if="form.visibility === 'private'" class="space-y-4">
+        <div
+          class="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+        >
+          <LockIcon class="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <span>{{ t('lensAdmin.access.hint') }}</span>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="overflow-hidden rounded-lg border border-line">
+            <div
+              class="flex items-center justify-between border-b border-line bg-surface-sunken px-3 py-2"
+            >
+              <div
+                class="flex items-center gap-2 text-sm font-medium text-ink-700"
+              >
+                <UsersIcon class="h-4 w-4 text-ink-400" />
+                {{ t('lensAdmin.access.groups') }}
+              </div>
+              <span
+                class="rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-ink-500"
+              >
+                {{ form.access_group_ids.length }}
+              </span>
+            </div>
+            <div
+              v-if="groups.length"
+              class="max-h-52 space-y-1 overflow-y-auto p-2"
+            >
+              <label
+                v-for="g in groups"
+                :key="g.id"
+                class="flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-sm transition-colors"
+                :class="
+                  form.access_group_ids.includes(g.id)
+                    ? 'border-brand-300 bg-brand-50 text-ink-900'
+                    : 'border-transparent text-ink-700 hover:bg-surface-sunken'
+                "
+              >
+                <input
+                  type="checkbox"
+                  :value="g.id"
+                  v-model="form.access_group_ids"
+                  class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+                />
+                <UsersIcon class="h-4 w-4 flex-shrink-0 text-ink-400" />
+                <span class="truncate">{{ g.name }}</span>
+              </label>
+            </div>
+            <p v-else class="px-3 py-8 text-center text-xs text-ink-400">
+              {{ t('lensAdmin.access.noGroups') }}
+            </p>
+          </div>
+
+          <div class="overflow-hidden rounded-lg border border-line">
+            <div
+              class="flex items-center justify-between border-b border-line bg-surface-sunken px-3 py-2"
+            >
+              <div
+                class="flex items-center gap-2 text-sm font-medium text-ink-700"
+              >
+                <UserIcon class="h-4 w-4 text-ink-400" />
+                {{ t('lensAdmin.access.users') }}
+              </div>
+              <span
+                class="rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-ink-500"
+              >
+                {{ form.access_user_ids.length }}
+              </span>
+            </div>
+            <div
+              v-if="selectableUsers.length"
+              class="max-h-52 space-y-1 overflow-y-auto p-2"
+            >
+              <label
+                v-for="u in selectableUsers"
+                :key="u.id"
+                class="flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-sm transition-colors"
+                :class="
+                  form.access_user_ids.includes(u.id)
+                    ? 'border-brand-300 bg-brand-50'
+                    : 'border-transparent hover:bg-surface-sunken'
+                "
+              >
+                <input
+                  type="checkbox"
+                  :value="u.id"
+                  v-model="form.access_user_ids"
+                  class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+                />
+                <span
+                  class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700"
+                >
+                  {{ userInitial(u) }}
+                </span>
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-ink-900">{{ userLabel(u) }}</div>
+                  <div v-if="u.email" class="truncate text-xs text-ink-400">
+                    {{ u.email }}
+                  </div>
+                </div>
+              </label>
+            </div>
+            <p v-else class="px-3 py-8 text-center text-xs text-ink-400">
+              {{ t('lensAdmin.access.noUsers') }}
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -268,7 +501,9 @@
           {{ wizardStep > 1 ? t('lensAdmin.wizard.back') : t('common.cancel') }}
         </BaseButton>
         <div class="flex items-center gap-3">
-          <span class="text-xs text-ink-400">{{ wizardStep }} / {{ WIZARD_STEP_COUNT }}</span>
+          <span class="text-xs text-ink-400"
+            >{{ wizardStep }} / {{ WIZARD_STEP_COUNT }}</span
+          >
           <BaseButton
             v-if="wizardStep < WIZARD_STEP_COUNT"
             variant="primary"
@@ -283,7 +518,11 @@
             :loading="saving"
             @click="$emit('save')"
           >
-            {{ mode === 'create' ? t('lensAdmin.wizard.finish') : t('common.save') }}
+            {{
+              mode === 'create'
+                ? t('lensAdmin.wizard.finish')
+                : t('common.save')
+            }}
           </BaseButton>
         </div>
       </div>
@@ -292,6 +531,12 @@
 </template>
 
 <script setup>
+import {
+  Globe as GlobeIcon,
+  Lock as LockIcon,
+  User as UserIcon,
+  Users as UsersIcon
+} from '@lucide/vue'
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -311,6 +556,8 @@ const props = defineProps({
   skills: { type: Array, default: () => [] },
   mcps: { type: Array, default: () => [] },
   llmConfigOptions: { type: Array, default: () => [] },
+  groups: { type: Array, default: () => [] },
+  users: { type: Array, default: () => [] },
   saving: Boolean,
   formError: { type: String, default: '' },
   refreshingDirs: Boolean
@@ -364,18 +611,38 @@ const drawerSubtitle = computed(() =>
 )
 
 const agentRoundsTiers = computed(() => [
-  { value: 'flash',    label: t('lensAdmin.agentRounds.flash'),    hint: t('lensAdmin.agentRounds.flashHint') },
-  { value: 'fast',     label: t('lensAdmin.agentRounds.fast'),     hint: t('lensAdmin.agentRounds.fastHint') },
-  { value: 'balanced', label: t('lensAdmin.agentRounds.balanced'), hint: t('lensAdmin.agentRounds.balancedHint') },
-  { value: 'deep',     label: t('lensAdmin.agentRounds.deep'),     hint: t('lensAdmin.agentRounds.deepHint') },
-  { value: 'max',      label: t('lensAdmin.agentRounds.max'),      hint: t('lensAdmin.agentRounds.maxHint') },
+  {
+    value: 'flash',
+    label: t('lensAdmin.agentRounds.flash'),
+    hint: t('lensAdmin.agentRounds.flashHint')
+  },
+  {
+    value: 'fast',
+    label: t('lensAdmin.agentRounds.fast'),
+    hint: t('lensAdmin.agentRounds.fastHint')
+  },
+  {
+    value: 'balanced',
+    label: t('lensAdmin.agentRounds.balanced'),
+    hint: t('lensAdmin.agentRounds.balancedHint')
+  },
+  {
+    value: 'deep',
+    label: t('lensAdmin.agentRounds.deep'),
+    hint: t('lensAdmin.agentRounds.deepHint')
+  },
+  {
+    value: 'max',
+    label: t('lensAdmin.agentRounds.max'),
+    hint: t('lensAdmin.agentRounds.maxHint')
+  }
 ])
 
 const wizardStepsMeta = computed(() => [
   { key: 'basic', title: t('lensAdmin.wizard.step1Title') },
   { key: 'execution', title: t('lensAdmin.wizard.step2Title') },
-  { key: 'prompts', title: t('lensAdmin.wizard.step3Title') },
-  { key: 'tools', title: t('lensAdmin.wizard.step4Title') }
+  { key: 'tools', title: t('lensAdmin.wizard.step3Title') },
+  { key: 'access', title: t('lensAdmin.wizard.step4Title') }
 ])
 
 const canProceedWizard = computed(() => {
@@ -427,6 +694,28 @@ function nextWizardStep() {
 function prevWizardStep() {
   if (wizardStep.value > 1) wizardStep.value--
 }
+
+function userLabel(user) {
+  return user.display_name || user.username || user.email || `#${user.id}`
+}
+
+function userInitial(user) {
+  return (userLabel(user).trim()[0] || '?').toUpperCase()
+}
+
+const selectableUsers = computed(() =>
+  props.users.filter((user) => !user.is_staff && !user.is_superuser)
+)
+
+const selectableSkills = computed(() =>
+  props.skills.filter(
+    (skill) =>
+      !(
+        typeof skill.slug === 'string' &&
+        skill.slug.endsWith('-workspace-guide')
+      )
+  )
+)
 
 function selectedDirs() {
   return Array.isArray(props.form.selected_dirs) ? props.form.selected_dirs : []

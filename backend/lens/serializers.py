@@ -1,5 +1,7 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
 from .datasource_services import (
     DataSourceDispatchError,
@@ -10,6 +12,7 @@ from .datasource_services import (
 from .model_checks import check_assistant_model_refs
 from .models import (
     Assistant,
+    AssistantAccess,
     AssistantMCP,
     AssistantSkill,
     DataSource,
@@ -227,6 +230,56 @@ class McpBindingsField(serializers.Field):
         return validated
 
 
+class AccessGrantsField(serializers.Field):
+    """Read/write field for assistant access grants (group or user)."""
+
+    def to_representation(self, grants):
+        grants = grants.select_related("group", "user").all()
+        result = []
+        for grant in grants:
+            if grant.group_id:
+                result.append(
+                    {
+                        "type": "group",
+                        "id": grant.group_id,
+                        "name": grant.group.name,
+                    }
+                )
+            elif grant.user_id:
+                result.append(
+                    {
+                        "type": "user",
+                        "id": grant.user_id,
+                        "name": grant.user.get_username(),
+                    }
+                )
+        return result
+
+    def to_internal_value(self, data):
+        if not isinstance(data, list):
+            raise serializers.ValidationError("Expected a list of grants.")
+
+        validated = []
+        seen = set()
+        for item in data:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(
+                    "Each grant must be an object."
+                )
+            grant_type = item.get("type")
+            grant_id = item.get("id")
+            if grant_type not in ("group", "user") or grant_id is None:
+                raise serializers.ValidationError(
+                    "Each grant needs type (group|user) and id."
+                )
+            key = (grant_type, grant_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            validated.append({"type": grant_type, "id": grant_id})
+        return validated
+
+
 class AssistantSerializer(serializers.ModelSerializer):
     """Assistant serializer with LensNode and capability validation."""
 
@@ -234,6 +287,7 @@ class AssistantSerializer(serializers.ModelSerializer):
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
     skill_bindings = SkillBindingsField(required=False)
     mcp_bindings = McpBindingsField(required=False)
+    access_grants = AccessGrantsField(required=False)
     workspace_guide = serializers.JSONField(required=False)
     skill_summary = serializers.SerializerMethodField()
     mcp_summary = serializers.SerializerMethodField()
@@ -254,8 +308,10 @@ class AssistantSerializer(serializers.ModelSerializer):
             "max_concurrency",
             "settings",
             "status",
+            "visibility",
             "skill_bindings",
             "mcp_bindings",
+            "access_grants",
             "workspace_guide",
             "skill_summary",
             "mcp_summary",
@@ -353,11 +409,44 @@ class AssistantSerializer(serializers.ModelSerializer):
                     load_config=binding.get("load_config", {}),
                 )
 
+    def _sync_access_grants(self, assistant, grants):
+        if grants is None:
+            return
+        request = self.context.get("request")
+        granted_by = getattr(request, "user", None)
+        if granted_by is not None and not granted_by.is_authenticated:
+            granted_by = None
+        assistant.access_grants.all().delete()
+        for grant in grants:
+            if grant["type"] == "group":
+                group = Group.objects.filter(pk=grant["id"]).first()
+                if group is None:
+                    raise serializers.ValidationError(
+                        {"access_grants": f"Group {grant['id']} not found."}
+                    )
+                AssistantAccess.objects.create(
+                    assistant=assistant,
+                    group=group,
+                    granted_by=granted_by,
+                )
+            else:
+                user = get_user_model().objects.filter(pk=grant["id"]).first()
+                if user is None:
+                    raise serializers.ValidationError(
+                        {"access_grants": f"User {grant['id']} not found."}
+                    )
+                AssistantAccess.objects.create(
+                    assistant=assistant,
+                    user=user,
+                    granted_by=granted_by,
+                )
+
     def create(self, validated_data):
         """Create assistant and optional bindings."""
 
         skill_bindings = validated_data.pop("skill_bindings", None)
         mcp_bindings = validated_data.pop("mcp_bindings", None)
+        access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
         assistant = Assistant.objects.create(**validated_data)
         self._sync_bindings(
@@ -367,6 +456,7 @@ class AssistantSerializer(serializers.ModelSerializer):
                 "mcp_bindings": mcp_bindings,
             },
         )
+        self._sync_access_grants(assistant, access_grants)
         sync_workspace_guide_skill(assistant, workspace_guide)
         check_assistant_model_refs(assistant)
         return assistant
@@ -374,9 +464,11 @@ class AssistantSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update assistant and optional bindings."""
 
+        access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
         self._sync_bindings(instance, validated_data)
         assistant = super().update(instance, validated_data)
+        self._sync_access_grants(assistant, access_grants)
         sync_workspace_guide_skill(assistant, workspace_guide)
         check_assistant_model_refs(assistant)
         return assistant
@@ -1158,6 +1250,10 @@ class SessionCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         assistant = Assistant.objects.get(uuid=validated_data["assistant_uuid"])
         request = self.context["request"]
+        if not assistant.is_accessible_by(request.user):
+            raise PermissionDenied(
+                "You do not have access to this assistant."
+            )
         return Session.objects.create(
             assistant=assistant,
             user=request.user,

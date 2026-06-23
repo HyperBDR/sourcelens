@@ -711,7 +711,8 @@
       "lastRun": "上次运行",
       "workspaceGuideTag": "工作区指引",
       "workspaceGuideHint": "由所属助手的「工作区背景」自动生成，请在对应助手中编辑",
-      "shareUrl": "对外链接"
+      "shareUrl": "对外链接",
+      "visibility": "可见性"
     },
     "tasks": {
       "title": "默认定时任务",
@@ -851,7 +852,8 @@
       "recursive": "递归同步",
       "maxDepth": "最大递归深度",
       "feishuAppId": "飞书 App ID",
-      "feishuAppSecret": "飞书 App Secret"
+      "feishuAppSecret": "飞书 App Secret",
+      "visibility": "可见性"
     },
     "placeholders": {
       "selectLensNode": "请选择节点",
@@ -1073,10 +1075,10 @@
       "maxConcurrencyHint": "该 Assistant 同时运行的最大任务数，超出后自动排队。",
       "step2Title": "执行配置",
       "step2Desc": "选择执行节点、任务、目录与检索策略",
-      "step3Title": "提示词",
-      "step3Desc": "补充查询前的背景与检索指令，均为可选",
-      "step4Title": "Skills 与 MCP",
-      "step4Desc": "为该助手绑定 Skills 与 MCP Server，均为可选",
+      "step3Title": "技能与工作区",
+      "step3Desc": "绑定 Skills 与 MCP，并补充工作区背景，均为可选",
+      "step4Title": "授权",
+      "step4Desc": "设置可见性，并指定可访问该助手的组或用户",
       "contextLabel": "工作区背景（可选）",
       "contextHint": "把模型仅凭读代码无法知道的信息写在这里：业务背景、团队约定、检索优先级、禁止参考的目录。",
       "contextPlaceholder": "# 模型不读代码就不知道的信息，写在这里能让它更快、更准。\n\n## 项目说明\n# SourceLens 是一个私有部署的 AI 代码问答平台。\n# backend/ 是 Django REST API 主服务；lensnode/ 是独立部署的执行节点，\n# 负责运行 Deep Agent 并通过 WebSocket 把结果推回主服务。\n# frontend/ 是 Vue 3 管理台，只和 backend/ 的 REST API 通信。\n\n## 检索优先级\n# 业务逻辑找 backend/lens/；backend/agentcore/ 是 git 子模块，不要在那里找业务代码。\n# 前端页面在 frontend/src/pages/lens/，管理台组件在 frontend/src/admin/。\n# lensnode 的 agent 行为看 lensnode/lensnode/agent_runtime.py。\n\n## 避免误判\n# references/ 是参考文档，不是源码，不要当作代码分析对象。\n# backend/lens/migrations/ 只看最新迁移文件，不要从历史迁移推断当前字段结构。",
@@ -1092,7 +1094,8 @@
       "skillsSection": "Skills",
       "mcpSection": "MCP Servers",
       "noSkills": "暂无可用 Skill，请先在 Skill 资源库中创建",
-      "noMcp": "暂无可用 MCP Server，请先在 MCP Server 资源库中创建"
+      "noMcp": "暂无可用 MCP Server，请先在 MCP Server 资源库中创建",
+      "visibilityHint": "管理员始终可访问全部助手。"
     },
     "agentRounds": {
       "flash": "极速",
@@ -1129,6 +1132,19 @@
       "datasourceDisabled": "数据源已禁用，不能触发同步",
       "syncCancelled": "同步任务已取消",
       "syncCancelFailed": "同步任务取消失败"
+    },
+    "visibility": {
+      "public": "公开",
+      "private": "私有",
+      "publicDesc": "所有已登录用户均可访问该助手及其问答",
+      "privateDesc": "仅被授权的用户或组可访问该助手及其问答"
+    },
+    "access": {
+      "hint": "勾选可访问该私有助手的组或用户；管理员始终可见。",
+      "groups": "授权组",
+      "users": "授权用户",
+      "noGroups": "暂无可选组",
+      "noUsers": "暂无可选用户"
     }
   }
 }

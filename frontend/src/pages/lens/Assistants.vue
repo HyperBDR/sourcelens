@@ -114,6 +114,33 @@
                     }}
                   </td>
                   <td class="table-cell">
+                    <span
+                      class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold"
+                      :class="
+                        row.visibility === 'private'
+                          ? 'border-amber-300 bg-amber-100 text-amber-800'
+                          : 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                      "
+                      :title="
+                        t(
+                          `lensAdmin.visibility.${row.visibility === 'private' ? 'private' : 'public'}Desc`
+                        )
+                      "
+                    >
+                      <component
+                        :is="
+                          row.visibility === 'private' ? LockIcon : GlobeIcon
+                        "
+                        class="h-3.5 w-3.5"
+                      />
+                      {{
+                        t(
+                          `lensAdmin.visibility.${row.visibility === 'private' ? 'private' : 'public'}`
+                        )
+                      }}
+                    </span>
+                  </td>
+                  <td class="table-cell">
                     <StatusBadge :status="row.status" />
                   </td>
                   <td class="table-cell">
@@ -158,6 +185,8 @@
         :skills="skills"
         :mcps="mcps"
         :llm-config-options="llmConfigOptions"
+        :groups="groups"
+        :users="users"
         :saving="saving"
         :form-error="formError"
         :refreshing-dirs="refreshingDirs"
@@ -170,11 +199,12 @@
 </template>
 
 <script setup>
-import { Copy } from '@lucide/vue'
+import { Copy, Globe as GlobeIcon, Lock as LockIcon } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
+import { managementApi } from '@/admin/api/management'
 import { copyToClipboard } from '@/utils/clipboard'
 import { extractErrorMessage } from '@/utils/api'
 import { assistantChatUrl } from '@/utils/lens'
@@ -221,6 +251,8 @@ const skills = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
+const groups = ref([])
+const users = ref([])
 
 const activeColumns = computed(() =>
   [
@@ -229,6 +261,7 @@ const activeColumns = computed(() =>
     'task',
     'dirs',
     'tools',
+    'visibility',
     'status',
     'shareUrl',
     'actions'
@@ -267,14 +300,18 @@ async function load() {
       skillRows,
       mcpRows,
       settingRows,
-      llmRows
+      llmRows,
+      groupRows,
+      userRows
     ] = await Promise.all([
       listAssistants(),
       listLensNodes(),
       listSkills(),
       listMcpServers(),
       listGlobalSettings(),
-      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
+      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => []),
+      managementApi.getGroups({ page_size: 1000 }).catch(() => []),
+      managementApi.getUsers({ page_size: 1000 }).catch(() => [])
     ])
 
     assistants.value = normalizeList(assistantRows)
@@ -283,6 +320,8 @@ async function load() {
     mcps.value = normalizeList(mcpRows)
     globalSettings.value = normalizeList(settingRows)
     llmConfigOptions.value = normalizeList(llmRows)
+    groups.value = normalizeList(groupRows)
+    users.value = normalizeList(userRows)
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
@@ -340,12 +379,26 @@ function defaultForm() {
     post_prompt: '',
     skill_uuids: [],
     mcp_uuids: [],
+    visibility: 'private',
+    access_group_ids: [],
+    access_user_ids: [],
     settings: {},
     status: 'active'
   }
 }
 
+function workspaceGuideSkillUuids() {
+  return new Set(
+    skills.value
+      .filter(
+        (s) => typeof s.slug === 'string' && s.slug.endsWith('-workspace-guide')
+      )
+      .map((s) => s.uuid)
+  )
+}
+
 function formFromRow(row) {
+  const wgUuids = workspaceGuideSkillUuids()
   return {
     uuid: row.uuid,
     name: row.name || '',
@@ -379,10 +432,17 @@ function formFromRow(row) {
     post_prompt: row.settings?.post_prompt || '',
     skill_uuids: (row.skill_bindings || [])
       .map((b) => b.skill?.uuid || b.skill_uuid)
-      .filter(Boolean),
+      .filter((u) => u && !wgUuids.has(u)),
     mcp_uuids: (row.mcp_bindings || [])
       .map((b) => b.mcp_server?.uuid || b.mcp_uuid)
       .filter(Boolean),
+    visibility: row.visibility || 'public',
+    access_group_ids: (row.access_grants || [])
+      .filter((g) => g.type === 'group')
+      .map((g) => g.id),
+    access_user_ids: (row.access_grants || [])
+      .filter((g) => g.type === 'user')
+      .map((g) => g.id),
     settings: { ...(row.settings || {}) },
     status: row.status || 'active'
   }
@@ -440,8 +500,26 @@ function buildPayload() {
     mcp_bindings: (form.value.mcp_uuids || []).map((uuid) => ({
       mcp_uuid: uuid
     })),
+    visibility: form.value.visibility || 'public',
+    access_grants: buildAccessGrants(),
     status: form.value.status || 'active'
   }
+}
+
+function buildAccessGrants() {
+  if (form.value.visibility !== 'private') {
+    return []
+  }
+  return [
+    ...(form.value.access_group_ids || []).map((id) => ({
+      type: 'group',
+      id
+    })),
+    ...(form.value.access_user_ids || []).map((id) => ({
+      type: 'user',
+      id
+    }))
+  ]
 }
 
 function buildAssistantSettings() {

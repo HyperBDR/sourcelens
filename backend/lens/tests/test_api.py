@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
@@ -12,6 +13,7 @@ from agentcore_task.adapters.django.models import TaskExecution
 from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
     Assistant,
+    AssistantAccess,
     AssistantSkill,
     DataSource,
     DataSourceCredential,
@@ -19,6 +21,7 @@ from lens.models import (
     LensNode,
     MCPServer,
     ScheduledTask,
+    SharedQA,
     Skill,
 )
 from lens.tasks import acquire_datasource_lock, release_datasource_lock
@@ -959,3 +962,173 @@ class LensApiTests(TestCase):
         task = PeriodicTask.objects.get(name="lens-lensnode-cleanup")
         self.assertEqual(task.interval.every, 7200)
         self.assertEqual(task.interval.period, "seconds")
+
+
+class AssistantAccessTests(TestCase):
+    """Visibility + group/user authorization for assistants and QA."""
+
+    def setUp(self):
+        self.lensnode = LensNode.objects.create(
+            name="Node",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            workspace_path="/workspace",
+            available_dirs=[{"path": "/workspace/repo"}],
+            tasks=[{"name": "knowledge_qa", "description": "qa"}],
+        )
+        self.assistant = Assistant.objects.create(
+            name="Private One",
+            slug="private-one",
+            lensnode=self.lensnode,
+            selected_task="knowledge_qa",
+            selected_dirs=[{"path": "/workspace/repo"}],
+            status=Assistant.Status.ACTIVE,
+            visibility=Assistant.Visibility.PRIVATE,
+        )
+        self.admin = get_user_model().objects.create_user(
+            username="aac-admin", password="x", is_staff=True
+        )
+        self.member = get_user_model().objects.create_user(
+            username="aac-member", password="x"
+        )
+
+    def _client(self, user):
+        client = APIClient()
+        client.force_authenticate(user)
+        return client
+
+    def test_public_view_404_for_private_assistant(self):
+        resp = self.client.get(
+            f"/api/lens/public/assistants/{self.assistant.slug}/"
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_public_view_200_when_public(self):
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        resp = self.client.get(
+            f"/api/lens/public/assistants/{self.assistant.slug}/"
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    def test_list_hides_private_from_unauthorized_then_group_grant(self):
+        client = self._client(self.member)
+        slugs = [a["slug"] for a in client.get(
+            "/api/lens/assistants/"
+        ).data["results"]]
+        self.assertNotIn(self.assistant.slug, slugs)
+
+        group = Group.objects.create(name="team")
+        self.member.groups.add(group)
+        AssistantAccess.objects.create(assistant=self.assistant, group=group)
+
+        slugs = [a["slug"] for a in client.get(
+            "/api/lens/assistants/"
+        ).data["results"]]
+        self.assertIn(self.assistant.slug, slugs)
+
+    def test_list_shows_private_to_admin(self):
+        slugs = [a["slug"] for a in self._client(self.admin).get(
+            "/api/lens/assistants/"
+        ).data["results"]]
+        self.assertIn(self.assistant.slug, slugs)
+
+    def test_session_create_403_then_201_with_user_grant(self):
+        client = self._client(self.member)
+        payload = {"assistant_uuid": str(self.assistant.uuid)}
+        resp = client.post("/api/lens/sessions/", payload, format="json")
+        self.assertEqual(resp.status_code, 403)
+
+        AssistantAccess.objects.create(
+            assistant=self.assistant, user=self.member
+        )
+        resp = client.post("/api/lens/sessions/", payload, format="json")
+        self.assertEqual(resp.status_code, 201)
+
+    def test_run_blocked_after_access_revoked(self):
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        client = self._client(self.member)
+        session = client.post(
+            "/api/lens/sessions/",
+            {"assistant_uuid": str(self.assistant.uuid)},
+            format="json",
+        )
+        self.assertEqual(session.status_code, 201)
+        session_uuid = session.data["uuid"]
+
+        self.assistant.visibility = Assistant.Visibility.PRIVATE
+        self.assistant.save(update_fields=["visibility"])
+
+        run = client.post(
+            f"/api/lens/sessions/{session_uuid}/runs/",
+            {"question": "still there?"},
+            format="json",
+        )
+        self.assertEqual(run.status_code, 403)
+
+    def test_public_qa_404_for_private_assistant(self):
+        share = SharedQA.objects.create(
+            token="tok-private",
+            assistant=self.assistant,
+            assistant_name=self.assistant.name,
+            assistant_slug=self.assistant.slug,
+            question="q",
+            answer="a",
+            title="t",
+            is_listed=True,
+            status=SharedQA.Status.PUBLISHED,
+        )
+        list_resp = self.client.get(
+            f"/api/lens/public/assistants/{self.assistant.slug}/qa/"
+        )
+        self.assertEqual(list_resp.status_code, 404)
+        single_resp = self.client.get(
+            f"/api/lens/public/qa/{share.token}/"
+        )
+        self.assertEqual(single_resp.status_code, 404)
+
+    def test_access_grants_round_trip_via_serializer(self):
+        group = Group.objects.create(name="grp")
+        client = self._client(self.admin)
+        resp = client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {
+                "visibility": "private",
+                "access_grants": [{"type": "group", "id": group.pk}],
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            self.assistant.access_grants.filter(group=group).count(), 1
+        )
+        grants = resp.data["access_grants"]
+        self.assertEqual(grants, [
+            {"type": "group", "id": group.pk, "name": "grp"}
+        ])
+
+    def test_write_requires_admin_console(self):
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        client = self._client(self.member)
+
+        update = client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {"name": "Renamed"},
+            format="json",
+        )
+        self.assertEqual(update.status_code, 403)
+
+        create = client.post(
+            "/api/lens/assistants/",
+            {
+                "name": "X",
+                "slug": "x-new",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "selected_task": "knowledge_qa",
+                "selected_dirs": [{"path": "/workspace/repo"}],
+            },
+            format="json",
+        )
+        self.assertEqual(create.status_code, 403)

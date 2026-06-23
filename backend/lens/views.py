@@ -10,10 +10,13 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
+
+from accounts.permissions import HasRequiredFeature
 
 from .models import (
     Assistant,
@@ -399,13 +402,33 @@ class LensNodeViewSet(BaseAdminViewSet):
 
 
 class AssistantViewSet(BaseAuthenticatedViewSet):
-    """CRUD for assistants."""
+    """CRUD for assistants.
 
+    Anyone authenticated may list/retrieve the assistants visible to them;
+    creating, editing, and deleting assistants (including visibility and
+    access grants) requires the admin console feature.
+    """
+
+    required_feature = "admin_console"
     queryset = Assistant.objects.select_related("lensnode").prefetch_related(
         "skill_bindings",
         "mcp_bindings",
+        "access_grants__group",
+        "access_grants__user",
     )
     serializer_class = AssistantSerializer
+
+    def get_permissions(self):
+        """Require the admin console feature for write actions."""
+
+        if self.action in ("create", "update", "partial_update", "destroy"):
+            return [permissions.IsAuthenticated(), HasRequiredFeature()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        """Scope assistants to those the caller may see."""
+
+        return super().get_queryset().visible_to(self.request.user)
 
     def destroy(self, request, *args, **kwargs):
         """Soft-retire assistant instead of hard delete."""
@@ -428,6 +451,7 @@ class PublicAssistantView(APIView):
         assistant = Assistant.objects.filter(
             slug=slug,
             status=Assistant.Status.ACTIVE,
+            visibility=Assistant.Visibility.PUBLIC,
         ).first()
         if assistant is None:
             return Response(
@@ -500,6 +524,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Create an execution run for a session."""
 
         session = self.get_object()
+        if not session.assistant.is_accessible_by(request.user):
+            raise PermissionDenied(
+                "You do not have access to this assistant."
+            )
         serializer = RunCreateSerializer(
             data=request.data,
             context={"session": session},
@@ -1461,11 +1489,15 @@ class PublicSharedQAView(APIView):
     def get(self, request, token):
         """Return one published shared Q&A and bump its view count."""
 
-        share = SharedQA.objects.filter(
-            token=token,
-            status=SharedQA.Status.PUBLISHED,
-        ).first()
-        if share is None:
+        share = (
+            SharedQA.objects.select_related("assistant")
+            .filter(token=token, status=SharedQA.Status.PUBLISHED)
+            .first()
+        )
+        if share is None or (
+            share.assistant_id
+            and share.assistant.visibility != Assistant.Visibility.PUBLIC
+        ):
             return Response(
                 {"detail": "Shared Q&A not found."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -1489,6 +1521,7 @@ class PublicSharedQAListView(APIView):
         assistant = Assistant.objects.filter(
             slug=slug,
             status=Assistant.Status.ACTIVE,
+            visibility=Assistant.Visibility.PUBLIC,
         ).first()
         if assistant is None:
             return Response(

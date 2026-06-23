@@ -71,6 +71,40 @@ class LensNode(TimestampedUUIDModel):
         return self.name
 
 
+def user_sees_all_assistants(user):
+    """Return True when the user manages assistants (sees private ones).
+
+    Keyed on the admin_console feature so role-granted admins (not only
+    Django staff) can manage private assistants. Staff/superusers already
+    resolve to all features.
+    """
+
+    if not (user and user.is_authenticated):
+        return False
+    if user.is_superuser or user.is_staff:
+        return True
+    from accounts.access import get_effective_feature_keys
+
+    return "admin_console" in get_effective_feature_keys(user)
+
+
+class AssistantQuerySet(models.QuerySet):
+    """Queryset with visibility-aware filtering."""
+
+    def visible_to(self, user):
+        """Return assistants the user is allowed to see."""
+
+        if user_sees_all_assistants(user):
+            return self
+        public = Q(visibility=Assistant.Visibility.PUBLIC)
+        if not (user and user.is_authenticated):
+            return self.filter(public)
+        granted = Q(access_grants__user=user) | Q(
+            access_grants__group__in=user.groups.all()
+        )
+        return self.filter(public | granted).distinct()
+
+
 class Assistant(TimestampedUUIDModel):
     """Externally visible capability bound to one LensNode."""
 
@@ -78,8 +112,19 @@ class Assistant(TimestampedUUIDModel):
         ACTIVE = "active", "Active"
         DISABLED = "disabled", "Disabled"
 
+    class Visibility(models.TextChoices):
+        PUBLIC = "public", "Public"
+        PRIVATE = "private", "Private"
+
+    objects = AssistantQuerySet.as_manager()
+
     name = models.CharField(max_length=160)
     slug = models.SlugField(max_length=180, unique=True)
+    visibility = models.CharField(
+        max_length=16,
+        choices=Visibility.choices,
+        default=Visibility.PRIVATE,
+    )
     lensnode = models.ForeignKey(
         LensNode,
         on_delete=models.PROTECT,
@@ -122,6 +167,86 @@ class Assistant(TimestampedUUIDModel):
 
     def __str__(self):
         return self.name
+
+    def is_accessible_by(self, user):
+        """Return True when the user may view/use this assistant."""
+
+        if self.visibility == Assistant.Visibility.PUBLIC:
+            return True
+        if not (user and user.is_authenticated):
+            return False
+        if user_sees_all_assistants(user):
+            return True
+        if self.access_grants.filter(user=user).exists():
+            return True
+        return self.access_grants.filter(
+            group__in=user.groups.all()
+        ).exists()
+
+
+class AssistantAccess(TimestampedUUIDModel):
+    """Authorization grant for a private assistant (group or user).
+
+    Exactly one of group/user is set. Extra columns (level, granted_by)
+    are reserved for future access levels and audit.
+    """
+
+    LEVEL_VIEW = "view"
+
+    assistant = models.ForeignKey(
+        Assistant,
+        on_delete=models.CASCADE,
+        related_name="access_grants",
+    )
+    group = models.ForeignKey(
+        "auth.Group",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="assistant_grants",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="assistant_grants",
+    )
+    level = models.CharField(max_length=16, default=LEVEL_VIEW)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    Q(group__isnull=False, user__isnull=True)
+                    | Q(group__isnull=True, user__isnull=False)
+                ),
+                name="assistant_access_group_xor_user",
+            ),
+            models.UniqueConstraint(
+                fields=["assistant", "group"],
+                condition=Q(group__isnull=False),
+                name="uniq_assistant_group",
+            ),
+            models.UniqueConstraint(
+                fields=["assistant", "user"],
+                condition=Q(user__isnull=False),
+                name="uniq_assistant_user",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["assistant"],
+                name="lens_aaccess_assistant_idx",
+            ),
+        ]
 
 
 class Skill(TimestampedUUIDModel):

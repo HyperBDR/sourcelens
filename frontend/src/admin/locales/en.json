@@ -711,7 +711,8 @@
       "lastRun": "Last Run",
       "workspaceGuideTag": "Workspace Guide",
       "workspaceGuideHint": "Auto-generated from the assistant's Workspace Context; edit it in that assistant",
-      "shareUrl": "Share Link"
+      "shareUrl": "Share Link",
+      "visibility": "Visibility"
     },
     "tasks": {
       "title": "Default Scheduled Tasks",
@@ -851,7 +852,8 @@
       "recursive": "Recursive Sync",
       "maxDepth": "Max Depth",
       "feishuAppId": "Feishu App ID",
-      "feishuAppSecret": "Feishu App Secret"
+      "feishuAppSecret": "Feishu App Secret",
+      "visibility": "Visibility"
     },
     "placeholders": {
       "selectLensNode": "Select a LensNode",
@@ -1073,10 +1075,10 @@
       "maxConcurrencyHint": "Maximum simultaneous runs for this assistant. Extra requests queue automatically.",
       "step2Title": "Execution",
       "step2Desc": "Select node, task, directories, and retrieval policy",
-      "step3Title": "Prompts",
-      "step3Desc": "Add pre-query context and retrieval instructions — all optional",
-      "step4Title": "Skills & MCP",
-      "step4Desc": "Bind Skills and MCP Servers to this assistant — all optional",
+      "step3Title": "Skills & Workspace",
+      "step3Desc": "Bind Skills and MCP, and add workspace context — all optional",
+      "step4Title": "Access",
+      "step4Desc": "Set visibility and choose which groups or users can access it",
       "contextLabel": "Workspace Context (optional)",
       "contextHint": "Write what the model cannot infer from reading code alone: business background, team conventions, search priorities, and directories to avoid.",
       "contextPlaceholder": "# Information the model can't know just from reading code — write it here.\n\n## Project overview\n# SourceLens is a self-hosted AI code Q&A platform.\n# backend/ is the Django REST API; lensnode/ is a separately deployed execution node\n# that runs Deep Agents and pushes results back to the main service via WebSocket.\n# frontend/ is the Vue 3 admin console; it only talks to backend/ REST APIs.\n\n## Search priorities\n# Business logic lives in backend/lens/. backend/agentcore/ is a git submodule — don't look for business code there.\n# Frontend pages: frontend/src/pages/lens/. Admin components: frontend/src/admin/.\n# Agent behavior: lensnode/lensnode/agent_runtime.py.\n\n## Avoid misreading\n# references/ contains reference documents, not source code — don't analyze it as code.\n# For current field structure, read the latest migration only, not historical ones.",
@@ -1092,7 +1094,8 @@
       "skillsSection": "Skills",
       "mcpSection": "MCP Servers",
       "noSkills": "No Skills available — create one in the Skill Library first",
-      "noMcp": "No MCP Servers available — create one in the MCP Server Library first"
+      "noMcp": "No MCP Servers available — create one in the MCP Server Library first",
+      "visibilityHint": "Admins can always access every assistant."
     },
     "agentRounds": {
       "flash": "Flash",
@@ -1129,6 +1132,19 @@
       "datasourceDisabled": "Data source is disabled; sync cannot start",
       "syncCancelled": "Sync task cancelled",
       "syncCancelFailed": "Failed to cancel sync task"
+    },
+    "visibility": {
+      "public": "Public",
+      "private": "Private",
+      "publicDesc": "Any signed-in user can access this assistant and its Q&A",
+      "privateDesc": "Only authorized users or groups can access this assistant and its Q&A"
+    },
+    "access": {
+      "hint": "Select the groups or users who can access this private assistant; admins always have access.",
+      "groups": "Authorized groups",
+      "users": "Authorized users",
+      "noGroups": "No groups available",
+      "noUsers": "No users available"
     }
   }
 }
