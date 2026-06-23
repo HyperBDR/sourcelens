@@ -267,8 +267,23 @@
                   variant="outline"
                   size="sm"
                   :disabled="page <= 1"
+                  :title="t('common.pagination.previous')"
                   @click="goPrevPage"
-                  >{{ t('common.pagination.previous') }}</BaseButton
+                  ><svg
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 19l-7-7 7-7"
+                    /></svg
+                  ><span class="sr-only">{{
+                    t('common.pagination.previous')
+                  }}</span></BaseButton
                 >
                 <span
                   class="text-sm text-gray-700 font-semibold px-3 py-1.5 bg-gray-50 rounded-md border border-gray-200"
@@ -284,8 +299,23 @@
                   variant="outline"
                   size="sm"
                   :disabled="page >= totalPages"
+                  :title="t('common.pagination.next')"
                   @click="goNextPage"
-                  >{{ t('common.pagination.next') }}</BaseButton
+                  ><svg
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"
+                    /></svg
+                  ><span class="sr-only">{{
+                    t('common.pagination.next')
+                  }}</span></BaseButton
                 >
               </div>
             </div>

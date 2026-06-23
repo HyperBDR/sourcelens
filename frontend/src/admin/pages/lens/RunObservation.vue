@@ -36,11 +36,7 @@
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('lensRuns.assistantAll') }}</option>
-                <option
-                  v-for="a in assistants"
-                  :key="a.slug"
-                  :value="a.slug"
-                >
+                <option v-for="a in assistants" :key="a.slug" :value="a.slug">
                   {{ a.name }}
                 </option>
               </select>
@@ -89,11 +85,7 @@
               >
                 {{ t('common.refresh') }}
               </BaseButton>
-              <BaseButton
-                variant="outline"
-                size="sm"
-                @click="resetFilters"
-              >
+              <BaseButton variant="outline" size="sm" @click="resetFilters">
                 {{ t('lensRuns.resetFilters') }}
               </BaseButton>
             </div>
@@ -190,17 +182,47 @@
                   variant="outline"
                   size="sm"
                   :disabled="page <= 1"
+                  :title="t('common.pagination.previous')"
                   @click="goPrevPage"
                 >
-                  {{ t('common.pagination.previous') }}
+                  <svg
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                  <span class="sr-only">{{
+                    t('common.pagination.previous')
+                  }}</span>
                 </BaseButton>
                 <BaseButton
                   variant="outline"
                   size="sm"
                   :disabled="page >= totalPages"
+                  :title="t('common.pagination.next')"
                   @click="goNextPage"
                 >
-                  {{ t('common.pagination.next') }}
+                  <svg
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                  <span class="sr-only">{{ t('common.pagination.next') }}</span>
                 </BaseButton>
               </div>
             </div>
@@ -272,14 +294,18 @@
               >
                 <button
                   class="detail-tab"
-                  :class="activeDetailTab === 'overview' ? 'detail-tab-active' : ''"
+                  :class="
+                    activeDetailTab === 'overview' ? 'detail-tab-active' : ''
+                  "
                   @click="activeDetailTab = 'overview'"
                 >
                   {{ t('lensRuns.tabOverview') }}
                 </button>
                 <button
                   class="detail-tab"
-                  :class="activeDetailTab === 'trace' ? 'detail-tab-active' : ''"
+                  :class="
+                    activeDetailTab === 'trace' ? 'detail-tab-active' : ''
+                  "
                   @click="activeDetailTab = 'trace'"
                 >
                   {{ t('lensRuns.tabTrace') }}
@@ -314,10 +340,14 @@
                     <dd class="mt-0.5 text-gray-900">{{ detail.username }}</dd>
                   </div>
                   <div>
-                    <dt class="text-gray-500">{{ t('lensRuns.colAssistant') }}</dt>
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.colAssistant') }}
+                    </dt>
                     <dd class="mt-0.5 text-gray-900">
                       {{ detail.assistant_name }}
-                      <span class="text-gray-400">· {{ detail.agent_rounds }}</span>
+                      <span class="text-gray-400"
+                        >· {{ detail.agent_rounds }}</span
+                      >
                     </dd>
                   </div>
                   <div>
@@ -335,7 +365,9 @@
                         class="text-indigo-600"
                       >
                         ·
-                        {{ t('lensRuns.subagents', { n: detail.subagent_count }) }}
+                        {{
+                          t('lensRuns.subagents', { n: detail.subagent_count })
+                        }}
                       </span>
                     </dd>
                   </div>
@@ -359,17 +391,23 @@
                     </dd>
                   </div>
                   <div>
-                    <dt class="text-gray-500">{{ t('lensRuns.submittedAt') }}</dt>
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.submittedAt') }}
+                    </dt>
                     <dd class="mt-0.5 text-gray-900 tabular-nums">
                       {{ formatDateTime(detail.created_at) }}
                     </dd>
                   </div>
                   <div>
                     <dt class="text-gray-500">{{ t('lensRuns.queueTime') }}</dt>
-                    <dd class="mt-0.5 text-gray-900 tabular-nums">{{ queueText }}</dd>
+                    <dd class="mt-0.5 text-gray-900 tabular-nums">
+                      {{ queueText }}
+                    </dd>
                   </div>
                   <div class="col-span-2">
-                    <dt class="text-gray-500">{{ t('lensRuns.execWindow') }}</dt>
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.execWindow') }}
+                    </dt>
                     <dd class="mt-0.5 text-gray-900 tabular-nums">
                       {{ formatDateTime(detail.started_at) }}
                       <span class="text-gray-400">→</span>
@@ -392,12 +430,13 @@
                     <dt class="text-gray-500">{{ t('lensRuns.resources') }}</dt>
                     <dd class="mt-0.5 text-gray-900">
                       {{ (detail.execution.loaded_skills || []).length }} skills
-                      ·
-                      {{ (detail.execution.loaded_mcps || []).length }} mcps
+                      · {{ (detail.execution.loaded_mcps || []).length }} mcps
                     </dd>
                   </div>
                   <div v-if="detail.execution" class="col-span-2">
-                    <dt class="text-gray-500">{{ t('lensRuns.targetDirs') }}</dt>
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.targetDirs') }}
+                    </dt>
                     <dd class="mt-0.5 text-xs text-gray-700 break-all">
                       {{
                         (detail.execution.target_dirs || [])
@@ -434,7 +473,8 @@
                   </h3>
                   <pre
                     class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap"
-                  >{{ detail.error }}</pre>
+                    >{{ detail.error }}</pre
+                  >
                 </section>
               </div>
 
@@ -611,10 +651,13 @@ function parseTimelineEvent(e) {
     if (e.before_tokens != null && e.after_tokens != null) {
       detailParts.push(`${kText(e.before_tokens)} → ${kText(e.after_tokens)}`)
     }
-    if (e.saved_tokens != null) detailParts.push(`saved ${kText(e.saved_tokens)}`)
+    if (e.saved_tokens != null)
+      detailParts.push(`saved ${kText(e.saved_tokens)}`)
   } else if (e.agent_event === 'deepagents.summarization.enabled') {
     if (e.trigger_tokens != null) {
-      detailParts.push(`trigger ${kText(e.trigger_tokens)} · keep ${kText(e.keep_tokens)}`)
+      detailParts.push(
+        `trigger ${kText(e.trigger_tokens)} · keep ${kText(e.keep_tokens)}`
+      )
     }
   } else if (e.summary) detailParts.push(e.summary)
   else if (e.path) detailParts.push(e.path)
