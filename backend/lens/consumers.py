@@ -356,6 +356,10 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             "max_workers",
             "error",
             "summary",
+            "progress_total",
+            "progress_current",
+            "progress_percent",
+            "conversion_summary",
         ]:
             if key in content:
                 step[key] = content.get(key)
@@ -365,8 +369,21 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             "progress_step": step["name"],
             "progress_message": step["message"],
         }
-        if "summary" in content:
+        is_conversion = (
+            content.get("category") == "conversion"
+            or str(content.get("step") or "").startswith("conversion")
+        )
+        if "summary" in content and is_conversion:
+            metadata_update["conversion_summary"] = content.get("summary")
+        elif "summary" in content:
             metadata_update["sync_summary"] = content.get("summary")
+        if "conversion_summary" in content:
+            metadata_update["conversion_summary"] = content.get(
+                "conversion_summary"
+            )
+        for key in ["progress_total", "progress_current", "progress_percent"]:
+            if key in content:
+                metadata_update[key] = content.get(key)
         TaskTracker.update_task_status(
             task_id,
             TaskStatus.STARTED,
@@ -403,6 +420,13 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
                     "files": content.get("files") or 0,
                     "folders": content.get("folders") or 0,
                     "failed": content.get("failed") or 0,
+                    "scanned": content.get("scanned") or 0,
+                    "changed": content.get("changed") or 0,
+                    "skipped": content.get("skipped") or 0,
+                    "deleted": content.get("deleted") or 0,
+                    "documents": content.get("documents") or 0,
+                    "by_extension": content.get("by_extension") or {},
+                    "by_type": content.get("by_type") or {},
                     "target_path": content.get("target_path") or "",
                     "error": content.get("error") or "",
                 },

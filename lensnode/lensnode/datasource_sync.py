@@ -372,6 +372,18 @@ def _sync_git(command, workspace_path, emit):
     _sync_git_submodules(target)
 
     files = _count_files(target)
+    summary = {
+        "scanned": files,
+        "changed": 1,
+        "skipped": 0,
+        "deleted": 0,
+        "failed": 0,
+        "files": files,
+        "folders": 0,
+        "documents": 0,
+        "by_extension": _count_file_extensions(target),
+        "by_type": {"git": 1},
+    }
     _write_manifest(
         target,
         {
@@ -380,10 +392,26 @@ def _sync_git(command, workspace_path, emit):
             "branch": branch,
             "synced_at": utc_timestamp(),
             "files": files,
+            "stats": summary,
         },
     )
-    _emit(emit, "manifest", "done", f"Git sync completed with {files} files.")
-    return {"synced": 1, "files": files, "target_path": str(target)}
+    _emit(
+        emit,
+        "manifest",
+        "done",
+        f"Git sync completed with {files} files.",
+        category="summary",
+        progress_total=1,
+        progress_current=1,
+        progress_percent=100,
+        summary=summary,
+    )
+    return {
+        "synced": 1,
+        "files": files,
+        "target_path": str(target),
+        **summary,
+    }
 
 
 def _sync_git_submodules(target):
@@ -450,6 +478,29 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
     synced = 0
     documents = []
     max_workers = max(1, int(max_workers or 1))
+    stats = {
+        "scanned": len(doc_ids),
+        "changed": len(doc_ids),
+        "skipped": 0,
+        "deleted": 0,
+        "failed": 0,
+        "folders": 0,
+        "documents": 0,
+        "files": 0,
+        "by_extension": {},
+        "by_type": {"docx": len(doc_ids)},
+    }
+    _emit(
+        emit,
+        "sync_plan",
+        "running",
+        f"Prepared {len(doc_ids)} Feishu documents for export.",
+        category="summary",
+        progress_total=len(doc_ids),
+        progress_current=0,
+        progress_percent=100 if not doc_ids else 0,
+        summary=stats,
+    )
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
@@ -462,14 +513,37 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
             for doc_id in doc_ids
         }
         for future in as_completed(futures):
-            documents.append(future.result())
-            synced += 1
+            try:
+                item = future.result()
+                documents.append(item)
+                synced += 1
+                stats["documents"] += 1
+                stats["files"] += 1
+                _increment_counter(
+                    stats["by_extension"],
+                    _manifest_item_extension(item),
+                )
+            except DataSourceSyncError:
+                stats["failed"] += 1
+                raise
+            _emit(
+                emit,
+                "sync_progress",
+                "running",
+                f"Exported {synced}/{len(doc_ids)} Feishu documents.",
+                category="summary",
+                progress_total=len(doc_ids),
+                progress_current=synced,
+                progress_percent=_progress_percent(synced, len(doc_ids)),
+                summary=stats,
+            )
 
     _write_manifest(
         target,
         {
             "source_type": "feishu",
             "synced_at": utc_timestamp(),
+            "stats": stats,
             "documents": documents,
         },
     )
@@ -479,13 +553,17 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
         "done",
         f"Feishu sync completed with {synced} documents.",
         category="summary",
-        summary={
-            "documents": synced,
-            "files": synced,
-            "failed": 0,
-        },
+        progress_total=len(doc_ids),
+        progress_current=synced,
+        progress_percent=100,
+        summary=stats,
     )
-    return {"synced": synced, "files": synced, "target_path": str(target)}
+    return {
+        "synced": synced,
+        "files": synced,
+        "target_path": str(target),
+        **stats,
+    }
 
 
 def _sync_feishu_document_item(doc_id, docs_dir, headers, emit):
@@ -564,23 +642,46 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
     ) is True
     seen_tokens = set()
     manifest_items = []
+    pending_items = []
     stats = {
         "folders": 0,
         "documents": 0,
         "files": 0,
+        "scanned": 0,
         "changed": 0,
         "skipped": 0,
         "deleted": 0,
         "failed": 0,
+        "by_extension": {},
+        "by_type": {},
     }
 
-    def walk(current_token, current_dir, depth, executor):
+    def emit_scan_progress(force=False):
+        if not force and stats["scanned"] % 25 != 0:
+            return
+        _emit(
+            emit,
+            "scan_progress",
+            "running",
+            (
+                f"Scanned {stats['scanned']} Feishu Drive items in "
+                f"{stats['folders']} folders."
+            ),
+            category="summary",
+            progress_current=stats["scanned"],
+            summary=stats,
+        )
+
+    def scan(current_token, current_dir, depth):
         stats["folders"] += 1
         _emit(
             emit,
             "scan_folder",
             "running",
             f"Scanning Feishu folder {current_token}.",
+            category="summary",
+            progress_current=stats["scanned"],
+            summary=stats,
         )
         children = _list_feishu_folder_children(current_token, headers)
         item_futures = {}
@@ -591,12 +692,15 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
             if not token:
                 continue
             seen_tokens.add(token)
+            stats["scanned"] += 1
+            _increment_counter(stats["by_type"], item_type or "unknown")
+            emit_scan_progress()
             if item_type == "folder":
                 if not recursive or depth >= max_depth:
                     continue
                 next_dir = current_dir / _safe_filename(name)
                 next_dir.mkdir(parents=True, exist_ok=True)
-                walk(token, next_dir, depth + 1, executor)
+                scan(token, next_dir, depth + 1)
                 continue
             previous_item = previous_items.get(token)
             if incremental and _feishu_item_unchanged(
@@ -611,6 +715,10 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
                 )
                 manifest_items.append(item)
                 stats["skipped"] += 1
+                _increment_counter(
+                    stats["by_extension"],
+                    _manifest_item_extension(item),
+                )
                 _emit(
                     emit,
                     "item_skipped",
@@ -623,28 +731,56 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
                     file=item.get("file"),
                 )
                 continue
-            item_futures[
-                executor.submit(
-                    _sync_feishu_drive_item,
-                    child,
-                    current_dir,
-                    headers,
-                    emit,
-                )
-            ] = child
+            pending_items.append((child, current_dir))
+
+    scan(folder_token, root_dir, 1)
+    emit_scan_progress(force=True)
+    stats["changed"] = len(pending_items)
+    _emit(
+        emit,
+        "sync_plan",
+        "running",
+        (
+            f"Scanned {stats['scanned']} items; "
+            f"{stats['changed']} need sync, {stats['skipped']} skipped."
+        ),
+        category="summary",
+        progress_total=stats["changed"],
+        progress_current=0,
+        progress_percent=100 if stats["changed"] == 0 else 0,
+        summary=stats,
+    )
+
+    completed = 0
+    max_workers = max(1, int(max_workers or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        item_futures = {
+            executor.submit(
+                _sync_feishu_drive_item,
+                child,
+                current_dir,
+                headers,
+                emit,
+            ): child
+            for child, current_dir in pending_items
+        }
         for future in as_completed(item_futures):
             child = item_futures[future]
             name = _feishu_item_name(child)
             item_type = _feishu_item_type(child)
             token = _feishu_item_token(child)
+            completed += 1
             try:
                 item = future.result()
                 manifest_items.append(item)
-                stats["changed"] += 1
                 if item.get("kind") == "document":
                     stats["documents"] += 1
                 else:
                     stats["files"] += 1
+                _increment_counter(
+                    stats["by_extension"],
+                    _manifest_item_extension(item),
+                )
             except DataSourceSyncError as exc:
                 stats["failed"] += 1
                 _emit(
@@ -666,10 +802,23 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
                         "error": str(exc),
                     }
                 )
+            _emit(
+                emit,
+                "sync_progress",
+                "running",
+                (
+                    f"Synced {completed}/{stats['changed']} changed items."
+                ),
+                category="summary",
+                progress_total=stats["changed"],
+                progress_current=completed,
+                progress_percent=_progress_percent(
+                    completed,
+                    stats["changed"],
+                ),
+                summary=stats,
+            )
 
-    max_workers = max(1, int(max_workers or 1))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        walk(folder_token, root_dir, 1, executor)
     for token, item in previous_items.items():
         if token in seen_tokens:
             continue
@@ -716,9 +865,14 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
         "files": total,
         "target_path": str(target),
         "folders": stats["folders"],
+        "scanned": stats["scanned"],
+        "changed": stats["changed"],
         "skipped": stats["skipped"],
         "deleted": stats["deleted"],
         "failed": stats["failed"],
+        "documents": stats["documents"],
+        "by_extension": stats["by_extension"],
+        "by_type": stats["by_type"],
     }
 
 
@@ -1357,6 +1511,37 @@ def _manifest_items_by_token(manifest):
     return result
 
 
+def _increment_counter(counter, key):
+    """Increment a normalized counter key."""
+
+    key = str(key or "unknown").strip().lower() or "unknown"
+    counter[key] = int(counter.get(key) or 0) + 1
+
+
+def _manifest_item_extension(item):
+    """Return a normalized file extension for a manifest item."""
+
+    extension = str(item.get("file_extension") or "").strip().lower()
+    if extension:
+        return extension.lstrip(".") or "unknown"
+    file_name = str(item.get("file") or item.get("name") or "")
+    suffix = Path(file_name).suffix.lower().lstrip(".")
+    return suffix or str(item.get("type") or "unknown").lower()
+
+
+def _progress_percent(current, total):
+    """Return bounded integer progress percentage."""
+
+    try:
+        current_value = int(current or 0)
+        total_value = int(total or 0)
+    except (TypeError, ValueError):
+        return 0
+    if total_value <= 0:
+        return 100
+    return max(0, min(100, int(current_value * 100 / total_value)))
+
+
 def _delete_manifest_file(target, file_name):
     """Delete a file listed in manifest if it is under target."""
 
@@ -1507,6 +1692,17 @@ def _count_files(path):
         if item.is_file():
             count += 1
     return count
+
+
+def _count_file_extensions(path):
+    """Return non-git file counts grouped by extension."""
+
+    counts = {}
+    for item in path.rglob("*"):
+        if ".git" in item.parts or not item.is_file():
+            continue
+        _increment_counter(counts, item.suffix.lower().lstrip("."))
+    return counts
 
 
 def _emit(emit, step, status, message, **extra):

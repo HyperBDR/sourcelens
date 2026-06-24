@@ -512,6 +512,12 @@ async function refreshProcessingTasks() {
         ...refreshed,
         metadata: selectedTask.value.metadata
       }
+      if (
+        selectedTaskDetailsLoadedId.value === String(selectedTask.value.id) &&
+        isProcessingStatus(selectedTask.value.status)
+      ) {
+        await loadSelectedTaskDetails({ force: true, silent: true })
+      }
     }
   } finally {
     processingRefreshInFlight.value = false
@@ -597,16 +603,18 @@ async function handlePreview(task) {
   }
 }
 
-async function loadSelectedTaskDetails() {
+async function loadSelectedTaskDetails(options = {}) {
   const taskId = selectedTask.value?.id
   if (
     !taskId ||
     selectedTaskDetailsLoading.value ||
-    selectedTaskDetailsLoadedId.value === String(taskId)
+    (!options.force && selectedTaskDetailsLoadedId.value === String(taskId))
   ) {
     return
   }
-  selectedTaskDetailsLoading.value = true
+  if (!options.silent) {
+    selectedTaskDetailsLoading.value = true
+  }
   try {
     const res = await taskManagementApi.getExecution(taskId, {
       include_metadata: true
@@ -621,9 +629,11 @@ async function loadSelectedTaskDetails() {
     }
     selectedTaskDetailsLoadedId.value = String(taskId)
   } catch (e) {
-    showError(extractErrorMessage(e, t('common.error')))
+    if (!options.silent) {
+      showError(extractErrorMessage(e, t('common.error')))
+    }
   } finally {
-    if (String(selectedTask.value?.id) === String(taskId)) {
+    if (!options.silent && String(selectedTask.value?.id) === String(taskId)) {
       selectedTaskDetailsLoading.value = false
     }
   }

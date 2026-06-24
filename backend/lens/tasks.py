@@ -233,9 +233,6 @@ def complete_datasource_sync_task(task_id, result):
     task = TaskExecution.objects.filter(task_id=task_id).first()
     if task is None:
         return None
-    if task.status in TaskStatus.get_completed_statuses():
-        return task
-
     metadata = task.metadata or {}
     datasource_uuid = metadata.get("datasource_uuid")
     datasource = DataSource.objects.filter(uuid=datasource_uuid).first()
@@ -251,9 +248,30 @@ def complete_datasource_sync_task(task_id, result):
         "files": int(result.get("files") or 0),
         "folders": int(result.get("folders") or 0),
         "failed": int(result.get("failed") or 0),
+        "scanned": int(result.get("scanned") or 0),
+        "changed": int(result.get("changed") or result.get("synced") or 0),
+        "skipped": int(result.get("skipped") or 0),
+        "deleted": int(result.get("deleted") or 0),
+        "documents": int(result.get("documents") or 0),
+        "by_extension": result.get("by_extension") or {},
+        "by_type": result.get("by_type") or {},
         "target_path": result.get("target_path")
         or (datasource.target_path if datasource else ""),
     }
+    if task.status in TaskStatus.get_completed_statuses():
+        summary_update = {"sync_summary": metrics}
+        if success and not task.result:
+            return TaskTracker.update_task_status(
+                task_id,
+                task.status,
+                result=metrics,
+                metadata=summary_update,
+            )
+        return TaskTracker.update_task_status(
+            task_id,
+            task.status,
+            metadata=summary_update,
+        )
 
     if datasource is not None:
         if success:
@@ -299,17 +317,19 @@ def complete_datasource_sync_task(task_id, result):
         )
 
     if success:
+        completion_metadata = _datasource_step_metadata(
+            task_id,
+            "completed",
+            "done",
+            "Datasource sync completed.",
+            progress_percent=100,
+        )
+        completion_metadata["sync_summary"] = metrics
         return TaskTracker.update_task_status(
             task_id,
             TaskStatus.SUCCESS,
             result=metrics,
-            metadata=_datasource_step_metadata(
-                task_id,
-                "completed",
-                "done",
-                "Datasource sync completed.",
-                progress_percent=100,
-            ),
+            metadata=completion_metadata,
         )
 
     return TaskTracker.update_task_status(
@@ -350,9 +370,35 @@ def acquire_datasource_lock(datasource_uuid, token, ttl_s=600):
 
     key = f"lens:datasource-sync:{datasource_uuid}"
     acquired = cache.add(key, token, timeout=ttl_s)
+    if not acquired and _release_orphaned_datasource_lock(datasource_uuid):
+        acquired = cache.add(key, token, timeout=ttl_s)
     if not acquired:
         raise SourceSyncBusy("LENS_SOURCE_SYNC_BUSY")
     return token
+
+
+def _release_orphaned_datasource_lock(datasource_uuid):
+    """Release a datasource lock that no running task still owns."""
+
+    from agentcore_task.adapters.django.models import TaskExecution
+    from agentcore_task.constants import TaskStatus
+
+    key = f"lens:datasource-sync:{datasource_uuid}"
+    lock_token = cache.get(key)
+    if not lock_token:
+        return True
+
+    running_statuses = [TaskStatus.PENDING, *TaskStatus.get_running_statuses()]
+    owner_exists = TaskExecution.objects.filter(
+        module="lens_datasource",
+        status__in=running_statuses,
+        metadata__datasource_uuid=str(datasource_uuid),
+        metadata__lock_token=lock_token,
+    ).exists()
+    if owner_exists:
+        return False
+
+    return release_datasource_lock(datasource_uuid, token=lock_token)
 
 
 def release_datasource_lock(datasource_uuid, token=None):

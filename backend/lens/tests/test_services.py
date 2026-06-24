@@ -684,6 +684,44 @@ class LensServiceTests(TransactionTestCase):
         )
         release_datasource_lock(self.datasource.uuid, token="new-sync")
 
+    def test_acquire_datasource_lock_recovers_completed_owner_lock(self):
+        TaskExecution.objects.create(
+            task_id="completed-sync",
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="REVOKED",
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "lock_token": "completed-sync",
+            },
+        )
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="completed-sync",
+            ttl_s=60,
+        )
+
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="new-sync",
+            ttl_s=60,
+        )
+        release_datasource_lock(self.datasource.uuid, token="new-sync")
+
+    def test_acquire_datasource_lock_recovers_ownerless_lock(self):
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="missing-owner",
+            ttl_s=60,
+        )
+
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="new-sync",
+            ttl_s=60,
+        )
+        release_datasource_lock(self.datasource.uuid, token="new-sync")
+
     def test_source_sync_task_dispatches_feishu_datasource(self):
         self.datasource.source_type = DataSource.SourceType.FEISHU
         self.datasource.config = {

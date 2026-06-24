@@ -1,15 +1,70 @@
 <template>
   <div>
     <div
-      v-if="currentProgressText"
+      v-if="progressPanelVisible"
       class="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800"
     >
-      <span class="font-medium"
-        >{{ t('taskManagement.list.currentProgress') }}:</span
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="font-medium">{{ progressTitle }}</div>
+          <div class="mt-1">
+            {{ progressDescription }}
+          </div>
+        </div>
+        <div
+          v-if="progressPercent !== null"
+          class="shrink-0 font-semibold text-blue-900"
+        >
+          {{ progressPercent }}%
+        </div>
+      </div>
+      <div
+        v-if="progressPercent !== null"
+        class="mt-3 h-2 overflow-hidden rounded-full bg-blue-100"
       >
-      {{ currentProgressText }}
+        <div
+          class="h-full rounded-full bg-blue-600 transition-all"
+          :style="{ width: `${progressPercent}%` }"
+        />
+      </div>
+      <div
+        v-else-if="isScanningProgress"
+        class="mt-3 h-2 overflow-hidden rounded-full bg-blue-100"
+      >
+        <div class="h-full w-2/3 rounded-full bg-blue-500 animate-pulse" />
+      </div>
+      <div v-if="progressLabel" class="mt-1 text-xs font-medium text-blue-700">
+        {{ progressLabel }}
+      </div>
+      <div
+        v-if="isScanningProgress"
+        class="mt-1 text-xs font-medium text-blue-700"
+      >
+        {{ t('taskManagement.list.scanTotalUnknown') }}
+      </div>
+      <div
+        v-if="isScanningProgress && scanningStats.length"
+        class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"
+      >
+        <div
+          v-for="item in scanningStats"
+          :key="item.label"
+          class="rounded border border-blue-100 bg-white/70 px-2.5 py-2"
+        >
+          <div class="text-xs text-blue-700">{{ item.label }}</div>
+          <div class="mt-0.5 font-semibold text-blue-950">
+            {{ item.value }}
+          </div>
+        </div>
+      </div>
     </div>
 
+    <h3
+      v-if="isDatasourceTask && syncStats.length"
+      class="mb-3 text-sm font-semibold text-gray-900"
+    >
+      {{ t('taskManagement.list.syncSummary') }}
+    </h3>
     <div
       v-if="isDatasourceTask && syncStats.length"
       class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
@@ -25,6 +80,51 @@
         <div class="mt-1 text-lg font-semibold text-gray-900">
           {{ item.value }}
         </div>
+      </div>
+    </div>
+
+    <h3
+      v-if="isDatasourceTask && conversionStats.length"
+      class="mb-3 text-sm font-semibold text-gray-900"
+    >
+      {{ t('taskManagement.list.conversionSummary') }}
+    </h3>
+    <div
+      v-if="isDatasourceTask && conversionStats.length"
+      class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4"
+    >
+      <div
+        v-for="item in conversionStats"
+        :key="item.label"
+        class="rounded-lg border border-gray-200 bg-white p-3"
+      >
+        <div class="text-xs font-medium text-gray-500">
+          {{ item.label }}
+        </div>
+        <div class="mt-1 text-lg font-semibold text-gray-900">
+          {{ item.value }}
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="isDatasourceTask && extensionStats.length"
+      class="mb-4 rounded-lg border border-gray-200 bg-white p-4"
+    >
+      <h3 class="mb-3 text-sm font-semibold text-gray-900">
+        {{ t('taskManagement.list.fileTypeStats') }}
+      </h3>
+      <div class="flex flex-wrap gap-2">
+        <span
+          v-for="item in extensionStats"
+          :key="item.label"
+          class="inline-flex items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2.5 py-1 text-sm text-gray-700"
+        >
+          <span class="font-mono text-xs uppercase text-gray-500">
+            {{ item.label }}
+          </span>
+          <span class="font-semibold text-gray-900">{{ item.value }}</span>
+        </span>
       </div>
     </div>
 
@@ -202,6 +302,15 @@ const detailSteps = computed(() => {
   return []
 })
 
+const latestStep = computed(() => {
+  if (!detailSteps.value.length) return null
+  return detailSteps.value[detailSteps.value.length - 1]
+})
+
+const latestStepSummary = computed(() => {
+  return latestStep.value?.summary || {}
+})
+
 const currentProgressText = computed(() => {
   const meta = metadata.value
   const percent = meta.progress_percent
@@ -219,38 +328,243 @@ const currentProgressText = computed(() => {
   return ''
 })
 
+const progressPercent = computed(() => {
+  const meta = metadata.value
+  const percent = meta.progress_percent
+  if (percent == null) return null
+  const value = Number(percent)
+  if (!Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, value))
+})
+
+const progressPanelVisible = computed(() => {
+  return (
+    Boolean(currentProgressText.value) ||
+    progressPercent.value !== null ||
+    isScanningProgress.value
+  )
+})
+
+const progressTitle = computed(() => {
+  if (isScanningProgress.value) {
+    return t('taskManagement.list.scanningPhase')
+  }
+  if (progressPercent.value !== null) {
+    return t('taskManagement.list.syncingPhase')
+  }
+  return t('taskManagement.list.currentProgress')
+})
+
+const progressDescription = computed(() => {
+  if (isScanningProgress.value) {
+    const summary = syncSummary.value
+    return t('taskManagement.list.scanningDescription', {
+      scanned: summary.scanned ?? metadata.value.progress_current ?? 0,
+      folders: summary.folders ?? 0,
+      skipped: summary.skipped ?? 0
+    })
+  }
+  return currentProgressText.value || progressLabel.value
+})
+
+const progressLabel = computed(() => {
+  const meta = metadata.value
+  const current = meta.progress_current
+  const total = meta.progress_total
+  if (current == null || total == null) return ''
+  return `${current}/${total} · ${progressPercent.value ?? 0}%`
+})
+
 const isDatasourceTask = computed(() => {
   const meta = metadata.value
   return props.task?.module === 'lens_datasource' || meta.type === 'datasource'
 })
 
+const isTaskActive = computed(() => {
+  const status = String(props.task?.status || '').toUpperCase()
+  return ['PENDING', 'RECEIVED', 'STARTED', 'RETRY'].includes(status)
+})
+
+const isScanningProgress = computed(() => {
+  if (!isDatasourceTask.value || !isTaskActive.value) return false
+  if (progressPercent.value !== null || metadata.value.progress_total != null) {
+    return false
+  }
+  const stepName = latestStep.value?.name || latestStep.value?.step
+  const summary = syncSummary.value
+  return (
+    ['scan_folder', 'scan_progress'].includes(stepName) ||
+    summary.scanned != null
+  )
+})
+
+const scanningStats = computed(() => {
+  if (!isScanningProgress.value) return []
+  const summary = syncSummary.value
+  return [
+    {
+      label: t('taskManagement.list.scannedItems'),
+      value: summary.scanned ?? metadata.value.progress_current ?? 0
+    },
+    { label: t('taskManagement.list.folders'), value: summary.folders ?? 0 },
+    {
+      label: t('taskManagement.list.skippedItems'),
+      value: summary.skipped ?? 0
+    }
+  ]
+})
+
 const itemResults = computed(() => {
   if (!isDatasourceTask.value) return []
   return detailSteps.value.filter((step) =>
-    ['item_done', 'item_failed'].includes(step.name || step.step)
+    ['item_done', 'item_failed', 'item_skipped'].includes(
+      step.name || step.step
+    )
   )
 })
 
 const syncStats = computed(() => {
   if (!isDatasourceTask.value) return []
-  const summary = metadata.value.sync_summary || {}
+  const summary = syncSummary.value
   const done = itemResults.value.filter((item) => item.status === 'done').length
   const failed = itemResults.value.filter(
     (item) => item.status === 'failed'
   ).length
+  const skipped = itemResults.value.filter(
+    (item) => item.name === 'item_skipped' || item.step === 'item_skipped'
+  ).length
   return [
     {
+      label: t('taskManagement.list.scannedItems'),
+      value: summary.scanned ?? totalItemEvents.value
+    },
+    {
+      label: t('taskManagement.list.changedItems'),
+      value: summary.changed ?? summary.synced ?? done
+    },
+    {
+      label: t('taskManagement.list.skippedItems'),
+      value: summary.skipped ?? skipped
+    },
+    {
       label: t('taskManagement.list.successItems'),
-      value: summary.documents ?? done
+      value: successCount(summary, done)
     },
     {
       label: t('taskManagement.list.failedItems'),
       value: summary.failed ?? failed
     },
+    {
+      label: t('taskManagement.list.deletedItems'),
+      value: summary.deleted ?? 0
+    },
     { label: t('taskManagement.list.folders'), value: summary.folders ?? 0 },
+    {
+      label: t('taskManagement.list.documents'),
+      value: summary.documents ?? 0
+    },
     { label: t('taskManagement.list.files'), value: summary.files ?? done }
   ]
 })
+
+const syncSummary = computed(() => {
+  return (
+    metadata.value.sync_summary ||
+    latestStepSummary.value ||
+    props.task?.result ||
+    {}
+  )
+})
+
+const conversionSummary = computed(() => {
+  return (
+    metadata.value.conversion_summary ||
+    metadata.value.markdown_summary ||
+    props.task?.result?.conversion_summary ||
+    {}
+  )
+})
+
+const conversionStats = computed(() => {
+  if (!isDatasourceTask.value) return []
+  const summary = conversionSummary.value
+  if (!Object.keys(summary).length) return []
+  return [
+    {
+      label: t('taskManagement.list.convertedItems'),
+      value: summary.converted ?? summary.total ?? 0
+    },
+    {
+      label: t('taskManagement.list.conversionSuccessItems'),
+      value: summary.success ?? summary.succeeded ?? summary.converted ?? 0
+    },
+    {
+      label: t('taskManagement.list.conversionFailedItems'),
+      value: summary.failed ?? summary.errors ?? 0
+    },
+    {
+      label: t('taskManagement.list.markdownItems'),
+      value: summary.markdown ?? summary.markdown_files ?? 0
+    }
+  ]
+})
+
+const totalItemEvents = computed(() => {
+  return detailSteps.value.filter((step) =>
+    ['item_done', 'item_failed', 'item_skipped', 'item_started'].includes(
+      step.name || step.step
+    )
+  ).length
+})
+
+const extensionStats = computed(() => {
+  if (!isDatasourceTask.value) return []
+  const fromSummary = syncSummary.value.by_extension || {}
+  const counts = { ...fromSummary }
+  if (!Object.keys(counts).length) {
+    itemResults.value.forEach((item) => {
+      const extension = normalizeExtension(
+        item.file_extension || extensionFromPath(item.file)
+      )
+      counts[extension] = Number(counts[extension] || 0) + 1
+    })
+  }
+  return Object.entries(counts)
+    .map(([label, value]) => ({
+      label: normalizeExtension(label),
+      value: Number(value) || 0
+    }))
+    .filter((item) => item.value > 0)
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))
+})
+
+function successCount(summary, fallbackDone) {
+  if (summary.success != null) return summary.success
+  if (
+    summary.documents != null ||
+    summary.files != null ||
+    summary.skipped != null
+  ) {
+    return (
+      Number(summary.documents || 0) +
+      Number(summary.files || 0) +
+      Number(summary.skipped || 0)
+    )
+  }
+  if (summary.synced != null) return summary.synced
+  return fallbackDone
+}
+
+function extensionFromPath(path) {
+  const match = String(path || '').match(/\.([^.\\/]+)$/)
+  return match ? match[1] : ''
+}
+
+function normalizeExtension(value) {
+  return String(value || 'unknown')
+    .replace(/^\./, '')
+    .toLowerCase()
+}
 
 function logLevelClass(level) {
   const map = {
@@ -279,7 +593,8 @@ function mapStepStatus(status) {
   const m = {
     running: 'processing',
     done: 'success',
-    failed: 'failed'
+    failed: 'failed',
+    skipped: 'cancelled'
   }
   return m[status] || status || 'pending'
 }
