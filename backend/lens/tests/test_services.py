@@ -484,6 +484,13 @@ class LensServiceTests(TransactionTestCase):
                 "files": 3,
                 "folders": 0,
                 "failed": 0,
+                "scanned": 0,
+                "changed": 1,
+                "skipped": 0,
+                "deleted": 0,
+                "documents": 0,
+                "by_extension": {},
+                "by_type": {},
                 "target_path": self.datasource.target_path,
             },
         )
@@ -538,8 +545,28 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(task.status, "FAILURE")
 
     def test_source_sync_task_rejects_concurrent_sync(self):
-        with datasource_lock(self.datasource.uuid):
-            synced = source_sync_task(str(self.datasource.uuid))
+        # Simulate a real in-flight sync: a running task owns the lock. The
+        # orphan-reclaim must keep its hands off an owned lock, so a second
+        # sync is rejected as busy. (A bare lock with no owning task is now
+        # treated as orphaned and reclaimable, so it would not be rejected.)
+        owner_token = "owner-sync"
+        acquire_datasource_lock(self.datasource.uuid, token=owner_token)
+        TaskExecution.objects.create(
+            task_id=owner_token,
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="STARTED",
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "lock_token": owner_token,
+            },
+        )
+        try:
+            synced = source_sync_task(
+                str(self.datasource.uuid), task_id="rejected-sync"
+            )
+        finally:
+            release_datasource_lock(self.datasource.uuid, token=owner_token)
 
         self.datasource.refresh_from_db()
         record = ScheduledTask.objects.get(
@@ -547,7 +574,7 @@ class LensServiceTests(TransactionTestCase):
             target_type="datasource",
             target_id=self.datasource.uuid,
         )
-        task = TaskExecution.objects.get(module="lens_datasource")
+        task = TaskExecution.objects.get(task_id="rejected-sync")
         self.assertEqual(synced, 0)
         self.assertEqual(self.datasource.status, "active")
         self.assertEqual(record.last_status, "running")
