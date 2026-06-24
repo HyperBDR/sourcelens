@@ -394,6 +394,7 @@ async function loadTasks() {
     const params = {
       page: currentPage.value,
       page_size: pageSize.value,
+      include_metadata: false,
       my_tasks: 'false'
     }
     if (filterModule.value) {
@@ -449,7 +450,11 @@ async function refreshProcessingTasks() {
   processingRefreshInFlight.value = true
   try {
     const results = await Promise.allSettled(
-      processingTasks.map((task) => taskManagementApi.getExecution(task.id))
+      processingTasks.map((task) =>
+        taskManagementApi.getExecution(task.id, {
+          include_metadata: false
+        })
+      )
     )
     const refreshedById = new Map()
     results.forEach((result) => {
@@ -474,9 +479,11 @@ async function refreshProcessingTasks() {
       selectedTask.value &&
       refreshedById.has(String(selectedTask.value.id))
     ) {
+      const refreshed = refreshedById.get(String(selectedTask.value.id))
       selectedTask.value = {
         ...selectedTask.value,
-        ...refreshedById.get(String(selectedTask.value.id))
+        ...refreshed,
+        metadata: selectedTask.value.metadata
       }
     }
   } finally {

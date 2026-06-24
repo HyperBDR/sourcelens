@@ -318,6 +318,17 @@ const expandedTask = ref(null)
 const expandedTaskDetailLoading = ref(false)
 
 const PROCESSING_STATUSES = new Set(['PENDING', 'STARTED', 'RETRY'])
+const TASK_METADATA_FIELDS = [
+  'datasource_uuid',
+  'trigger',
+  'progress_percent',
+  'progress_step',
+  'progress_message',
+  'sync_summary',
+  'source_type',
+  'target_path',
+  'error'
+].join(',')
 
 const paginationShowing = computed(() => ({
   from: (currentPage.value - 1) * pageSize + 1,
@@ -364,7 +375,8 @@ async function loadTasks() {
   try {
     const params = {
       page: currentPage.value,
-      page_size: pageSize
+      page_size: pageSize,
+      metadata_fields: TASK_METADATA_FIELDS
     }
     const res = await api.get(`/lens/admin/datasources/${uuid}/sync-tasks/`, {
       params
@@ -407,7 +419,11 @@ async function refreshProcessingTasks() {
   processingRefreshInFlight.value = true
   try {
     const results = await Promise.allSettled(
-      processingTasks.map((task) => taskManagementApi.getExecution(task.id))
+      processingTasks.map((task) =>
+        taskManagementApi.getExecution(task.id, {
+          metadata_fields: TASK_METADATA_FIELDS
+        })
+      )
     )
     const refreshedById = new Map()
     results.forEach((result) => {
@@ -471,7 +487,9 @@ async function toggleTaskExpand(task) {
 async function loadExpandedTask(id) {
   expandedTaskDetailLoading.value = true
   try {
-    const res = await taskManagementApi.getExecution(id)
+    const res = await taskManagementApi.getExecution(id, {
+      metadata_fields: TASK_METADATA_FIELDS
+    })
     const data = extractResponseData(res)
     if (expandedTaskId.value === id) {
       expandedTask.value = data
