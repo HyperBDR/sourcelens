@@ -78,11 +78,14 @@ def register_datasource_sync_task(
     task_id,
     trigger,
     created_by=None,
+    metadata=None,
 ):
     """Register a datasource sync execution before Celery starts it."""
 
     from agentcore_task.adapters.django import TaskTracker
 
+    task_metadata = _datasource_task_metadata(datasource, trigger)
+    task_metadata.update(metadata or {})
     return TaskTracker.register_task(
         task_id=task_id,
         task_name=_datasource_sync_task_name(datasource),
@@ -90,7 +93,7 @@ def register_datasource_sync_task(
         task_args=[str(datasource.uuid)],
         task_kwargs={"trigger": trigger},
         created_by=created_by,
-        metadata=_datasource_task_metadata(datasource, trigger),
+        metadata=task_metadata,
     )
 
 
@@ -117,7 +120,7 @@ def _is_global_task_enabled(task_type, default=True):
 
 
 @shared_task(bind=True, name="lens.source_sync", queue="lens")
-def source_sync_task(self, datasource_uuid, trigger="scheduled"):
+def source_sync_task(self, datasource_uuid, trigger="scheduled", task_id=None):
     """Celery entrypoint for dispatching datasource sync to a LensNode."""
 
     from agentcore_task.adapters.django import TaskTracker
@@ -129,7 +132,7 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
     # mark the run complete prematurely. With a standalone id Celery reports
     # PENDING (unknown id) and the LensNode completion callback owns the
     # final status.
-    task_id = uuid.uuid4().hex
+    task_id = task_id or uuid.uuid4().hex
     datasource = DataSource.objects.select_related("lensnode").get(
         uuid=datasource_uuid
     )
@@ -181,22 +184,21 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled"):
             },
         )
     except SourceSyncBusy as exc:
-        record.last_status = ScheduledTask.Status.FAILED
         record.last_error = str(exc)
         record.last_run_at = timezone.now()
-        record.save(update_fields=["last_status", "last_error", "last_run_at"])
+        record.save(update_fields=["last_error", "last_run_at"])
         TaskTracker.update_task_status(
             task_id,
-            TaskStatus.FAILURE,
+            TaskStatus.REVOKED,
             error=str(exc),
             metadata=_datasource_step_metadata(
                 task_id,
                 "lock",
-                "failed",
+                "skipped",
                 str(exc),
             ),
         )
-        raise
+        return 0
     except Exception as exc:
         release_datasource_lock(datasource.uuid, token=task_id)
         datasource.last_error = str(exc)
@@ -366,10 +368,9 @@ def release_datasource_lock(datasource_uuid, token=None):
 def cleanup_stale_datasource_sync_tasks(startup=False):
     """Cancel timed-out datasource syncs and release orphaned sync locks.
 
-    When startup=True, treat every still-running sync as interrupted
-    (cutoff=now) so locks orphaned by a worker restart/crash are released
-    immediately, instead of lingering for the full sync timeout (the lock
-    TTL, default 6h).
+    Datasource sync work is completed by LensNode callback after this Celery
+    task has dispatched it. A worker restart does not mean the external sync
+    was interrupted, so startup cleanup still honors the configured timeout.
     """
 
     from agentcore_task.adapters.django.models import TaskExecution
@@ -379,7 +380,7 @@ def cleanup_stale_datasource_sync_tasks(startup=False):
 
     now = timezone.now()
     timeout_s = get_datasource_sync_timeout_s()
-    cutoff = now if startup else now - timedelta(seconds=timeout_s)
+    cutoff = now - timedelta(seconds=timeout_s)
     running_statuses = [TaskStatus.PENDING, *TaskStatus.get_running_statuses()]
 
     stale = TaskExecution.objects.filter(

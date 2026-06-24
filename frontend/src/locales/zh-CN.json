@@ -63,6 +63,7 @@
       "enabled": "启用",
       "disabled": "禁用",
       "inactive": "禁用",
+      "cancelled": "已取消",
       "online": "在线",
       "offline": "离线",
       "draining": "停止接单",

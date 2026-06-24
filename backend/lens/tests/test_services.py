@@ -44,12 +44,12 @@ from lens.services import (
     rewrite_query,
 )
 from lens.tasks import (
-    SourceSyncBusy,
     acquire_datasource_lock,
     complete_datasource_sync_task,
     cleanup_stale_datasource_sync_tasks,
     datasource_lock,
     lensnode_health_task,
+    register_datasource_sync_task,
     release_datasource_lock,
     source_sync_task,
 )
@@ -402,6 +402,39 @@ class LensServiceTests(TransactionTestCase):
             self.assertEqual(steps[0]["name"], "prepare")
             self.assertEqual(steps[-1]["name"], "dispatch")
 
+    def test_source_sync_task_reuses_registered_task_id(self):
+        task_id = "manual-sync"
+        register_datasource_sync_task(
+            self.datasource,
+            task_id,
+            "manual",
+            created_by=self.user,
+            metadata={"celery_task_id": "celery-sync"},
+        )
+
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
+            synced = source_sync_task(
+                str(self.datasource.uuid),
+                "manual",
+                task_id,
+            )
+
+        self.assertEqual(synced, 0)
+        self.assertEqual(
+            TaskExecution.objects.filter(module="lens_datasource").count(),
+            1,
+        )
+        task = TaskExecution.objects.get(task_id=task_id)
+        self.assertEqual(task.status, "STARTED")
+        self.assertEqual(task.created_by, self.user)
+        self.assertEqual(task.metadata["celery_task_id"], "celery-sync")
+        dispatch.assert_called_once_with(
+            self.datasource,
+            task_id=task_id,
+            trigger="manual",
+        )
+
     def test_datasource_sync_dispatch_includes_max_workers(self):
         GlobalSetting.objects.create(
             key="lens.datasource_sync.workers",
@@ -506,8 +539,7 @@ class LensServiceTests(TransactionTestCase):
 
     def test_source_sync_task_rejects_concurrent_sync(self):
         with datasource_lock(self.datasource.uuid):
-            with self.assertRaises(SourceSyncBusy):
-                source_sync_task(str(self.datasource.uuid))
+            synced = source_sync_task(str(self.datasource.uuid))
 
         self.datasource.refresh_from_db()
         record = ScheduledTask.objects.get(
@@ -515,9 +547,18 @@ class LensServiceTests(TransactionTestCase):
             target_type="datasource",
             target_id=self.datasource.uuid,
         )
+        task = TaskExecution.objects.get(module="lens_datasource")
+        self.assertEqual(synced, 0)
         self.assertEqual(self.datasource.status, "active")
-        self.assertEqual(record.last_status, "failed")
+        self.assertEqual(record.last_status, "running")
         self.assertEqual(record.last_error, "LENS_SOURCE_SYNC_BUSY")
+        self.assertEqual(task.status, "REVOKED")
+        self.assertEqual(task.error, "LENS_SOURCE_SYNC_BUSY")
+        self.assertEqual(task.metadata["progress_step"], "lock")
+        self.assertEqual(
+            task.metadata["progress_message"],
+            "LENS_SOURCE_SYNC_BUSY",
+        )
 
     def test_cleanup_stale_datasource_sync_releases_lock(self):
         GlobalSetting.objects.create(
@@ -565,6 +606,46 @@ class LensServiceTests(TransactionTestCase):
             ttl_s=60,
         )
         release_datasource_lock(self.datasource.uuid, token="new-sync")
+
+    def test_startup_cleanup_keeps_fresh_datasource_sync_running(self):
+        GlobalSetting.objects.create(
+            key="lens.datasource_sync.timeout_s",
+            value="60",
+        )
+        task = TaskExecution.objects.create(
+            task_id="fresh-sync",
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="STARTED",
+            started_at=timezone.now(),
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "lock_token": "fresh-sync",
+                "completion_source": "lensnode_callback",
+            },
+        )
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="fresh-sync",
+            ttl_s=60,
+        )
+
+        with patch(
+            "lens.services.cancel_datasource_sync_on_lensnode"
+        ) as cancel:
+            result = cleanup_stale_datasource_sync_tasks(startup=True)
+
+        task.refresh_from_db()
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(task.status, "STARTED")
+        cancel.assert_not_called()
+        self.assertFalse(
+            release_datasource_lock(
+                self.datasource.uuid,
+                token="other-sync",
+            )
+        )
+        release_datasource_lock(self.datasource.uuid, token="fresh-sync")
 
     def test_cleanup_releases_completed_datasource_sync_lock(self):
         GlobalSetting.objects.create(

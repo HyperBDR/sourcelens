@@ -689,15 +689,20 @@ class DataSourceViewSet(BaseAdminViewSet):
 
         if datasource.status == DataSource.Status.DISABLED:
             raise ValueError("DATASOURCE_DISABLED")
+        celery_task_id = uuid_mod.uuid4().hex
         task_execution = register_datasource_sync_task(
             datasource,
             task_id,
             trigger,
             created_by=user,
         )
+        metadata = dict(task_execution.metadata or {})
+        metadata["celery_task_id"] = celery_task_id
+        task_execution.metadata = metadata
+        task_execution.save(update_fields=["metadata"])
         source_sync_task.apply_async(
-            args=[str(datasource.uuid), trigger],
-            task_id=task_id,
+            args=[str(datasource.uuid), trigger, task_id],
+            task_id=celery_task_id,
         )
         return task_execution
 
@@ -799,10 +804,11 @@ class DataSourceViewSet(BaseAdminViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        app.control.revoke(task.task_id, terminate=True, signal="SIGTERM")
+        metadata = dict(task.metadata or {})
+        celery_task_id = metadata.get("celery_task_id") or task.task_id
+        app.control.revoke(celery_task_id, terminate=True, signal="SIGTERM")
         cancel_datasource_sync_on_lensnode(datasource.lensnode, task.task_id)
 
-        metadata = dict(task.metadata or {})
         lock_token = metadata.get("lock_token") or task.task_id
         release_datasource_lock(datasource.uuid, token=lock_token)
         metadata["manual_revoked_at"] = timezone.now().isoformat()

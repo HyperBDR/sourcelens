@@ -63,6 +63,7 @@
       "enabled": "Enabled",
       "disabled": "Disabled",
       "inactive": "Disabled",
+      "cancelled": "Cancelled",
       "online": "Online",
       "offline": "Offline",
       "draining": "Draining",

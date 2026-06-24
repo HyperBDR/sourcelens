@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
@@ -645,14 +645,17 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         task_id = response.data["initial_sync_task_id"]
         apply_async.assert_called_once_with(
-            args=[response.data["uuid"], "initial"],
-            task_id=task_id,
+            args=[response.data["uuid"], "initial", task_id],
+            task_id=ANY,
         )
+        celery_task_id = apply_async.call_args.kwargs["task_id"]
+        self.assertNotEqual(celery_task_id, task_id)
         task = TaskExecution.objects.get(task_id=task_id)
         self.assertEqual(task.task_name, "datasource_sync:Initial Sync Repo")
         self.assertEqual(task.module, "lens_datasource")
         self.assertEqual(task.status, "PENDING")
         self.assertEqual(task.created_by, self.user)
+        self.assertEqual(task.metadata["celery_task_id"], celery_task_id)
 
     def test_datasource_manual_sync_registers_task(self):
         with patch("lens.views.source_sync_task.apply_async") as apply_async:
@@ -669,14 +672,17 @@ class LensApiTests(TestCase):
             TaskExecution.objects.get(task_id=task_id).id,
         )
         apply_async.assert_called_once_with(
-            args=[str(self.datasource.uuid), "manual"],
-            task_id=task_id,
+            args=[str(self.datasource.uuid), "manual", task_id],
+            task_id=ANY,
         )
+        celery_task_id = apply_async.call_args.kwargs["task_id"]
+        self.assertNotEqual(celery_task_id, task_id)
         task = TaskExecution.objects.get(task_id=task_id)
         self.assertEqual(task.task_name, "datasource_sync:Repo Cache")
         self.assertEqual(task.module, "lens_datasource")
         self.assertEqual(task.status, "PENDING")
         self.assertEqual(task.created_by, self.user)
+        self.assertEqual(task.metadata["celery_task_id"], celery_task_id)
 
     def test_disabled_datasource_rejects_manual_sync(self):
         self.datasource.status = DataSource.Status.DISABLED
@@ -702,6 +708,7 @@ class LensApiTests(TestCase):
             metadata={
                 "datasource_uuid": str(self.datasource.uuid),
                 "lock_token": "running-sync",
+                "celery_task_id": "celery-sync",
             },
         )
         acquire_datasource_lock(
@@ -726,7 +733,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         revoke.assert_called_once_with(
-            "running-sync",
+            "celery-sync",
             terminate=True,
             signal="SIGTERM",
         )

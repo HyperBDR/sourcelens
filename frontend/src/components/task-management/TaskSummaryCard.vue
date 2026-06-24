@@ -78,7 +78,7 @@ const STATUS_MAP = {
   SUCCESS: 'success',
   FAILURE: 'failed',
   RETRY: 'processing',
-  REVOKED: 'failed'
+  REVOKED: 'cancelled'
 }
 
 function readField(obj, path) {

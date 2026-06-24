@@ -65,7 +65,7 @@
               type="button"
               class="detail-tab"
               :class="activeDetailTab === 'basic' ? 'detail-tab-active' : ''"
-              @click="activeDetailTab = 'basic'"
+              @click="selectDetailTab('basic')"
             >
               {{ t('taskManagement.list.basicInfo') }}
             </button>
@@ -73,7 +73,7 @@
               type="button"
               class="detail-tab"
               :class="activeDetailTab === 'details' ? 'detail-tab-active' : ''"
-              @click="activeDetailTab = 'details'"
+              @click="selectDetailTab('details')"
             >
               {{ t('taskManagement.list.taskDetails') }}
             </button>
@@ -235,7 +235,8 @@
               v-show="activeDetailTab === 'details'"
               class="border-t border-gray-200 pt-6"
             >
-              <TaskDetailsContent :task="task" />
+              <BaseLoading v-if="detailsLoading" />
+              <TaskDetailsContent v-else :task="task" />
             </div>
           </div>
         </div>
@@ -245,10 +246,11 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
 import { formatDuration } from '@/utils/formatting'
+import BaseLoading from '@/components/ui/BaseLoading.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import TaskDetailsContent from './TaskDetailsContent.vue'
 
@@ -260,13 +262,35 @@ const props = defineProps({
   task: {
     type: Object,
     default: null
+  },
+  detailsLoading: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'load-details'])
 
 const { t } = useI18n()
 const activeDetailTab = ref('basic')
+
+watch(
+  () => props.show,
+  (visible) => {
+    if (visible) {
+      activeDetailTab.value = 'basic'
+    }
+  }
+)
+
+watch(
+  () => props.task?.id,
+  (id, oldId) => {
+    if (id !== oldId) {
+      activeDetailTab.value = 'basic'
+    }
+  }
+)
 
 const metadata = computed(() => props.task?.metadata || {})
 
@@ -366,13 +390,20 @@ const mapTaskStatus = (status) => {
     SUCCESS: 'success',
     FAILURE: 'failed',
     RETRY: 'processing',
-    REVOKED: 'failed'
+    REVOKED: 'cancelled'
   }
   return m[status] || (status && status.toLowerCase()) || 'pending'
 }
 
 const handleClose = () => {
   emit('close')
+}
+
+function selectDetailTab(tab) {
+  activeDetailTab.value = tab
+  if (tab === 'details') {
+    emit('load-details')
+  }
 }
 </script>
 

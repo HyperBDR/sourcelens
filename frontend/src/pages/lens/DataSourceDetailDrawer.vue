@@ -343,7 +343,7 @@ function mapTaskStatus(status) {
     SUCCESS: 'success',
     FAILURE: 'failed',
     RETRY: 'processing',
-    REVOKED: 'failed'
+    REVOKED: 'cancelled'
   }
   return m[status] || (status && status.toLowerCase()) || 'pending'
 }

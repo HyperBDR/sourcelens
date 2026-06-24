@@ -302,6 +302,8 @@
       <TaskExecutionDetailPanel
         :show="showPreviewModal"
         :task="selectedTask"
+        :details-loading="selectedTaskDetailsLoading"
+        @load-details="loadSelectedTaskDetails"
         @close="showPreviewModal = false"
       />
     </div>
@@ -348,6 +350,8 @@ const filterEndDate = ref(defaultDateRange.endDate)
 const userOptions = ref([])
 const showPreviewModal = ref(false)
 const selectedTask = ref(null)
+const selectedTaskDetailsLoading = ref(false)
+const selectedTaskDetailsLoadedId = ref(null)
 const currentPage = ref(1)
 const totalCount = ref(0)
 const totalPages = ref(1)
@@ -356,6 +360,29 @@ const processingRefreshTimer = ref(null)
 const processingRefreshInFlight = ref(false)
 
 const PROCESSING_STATUSES = new Set(['PENDING', 'STARTED', 'RETRY'])
+const BASIC_METADATA_FIELDS = [
+  'type',
+  'trigger',
+  'datasource_uuid',
+  'datasource_name',
+  'source_type',
+  'repo_url',
+  'branch',
+  'auth_scheme',
+  'document_url',
+  'app_token',
+  'doc_ids',
+  'sync_mode',
+  'folder_url',
+  'folder_token',
+  'recursive',
+  'max_depth',
+  'credential_configured',
+  'lensnode_uuid',
+  'lensnode_name',
+  'target_path',
+  'sync_interval_seconds'
+].join(',')
 
 const paginationShowing = computed(() => ({
   from: (currentPage.value - 1) * pageSize.value + 1,
@@ -370,7 +397,7 @@ function mapStatus(status) {
     SUCCESS: 'success',
     FAILURE: 'failed',
     RETRY: 'processing',
-    REVOKED: 'failed'
+    REVOKED: 'cancelled'
   }
   return m[status] || (status && status.toLowerCase()) || 'pending'
 }
@@ -557,11 +584,48 @@ const debouncedLoad = useDebounceFn(() => {
 
 async function handlePreview(task) {
   try {
-    const res = await taskManagementApi.getExecution(task.id)
+    selectedTaskDetailsLoading.value = false
+    selectedTaskDetailsLoadedId.value = null
+    const res = await taskManagementApi.getExecution(task.id, {
+      include_metadata: true,
+      metadata_fields: BASIC_METADATA_FIELDS
+    })
     selectedTask.value = extractResponseData(res)
     showPreviewModal.value = true
   } catch (e) {
     showError(extractErrorMessage(e, t('common.error')))
+  }
+}
+
+async function loadSelectedTaskDetails() {
+  const taskId = selectedTask.value?.id
+  if (
+    !taskId ||
+    selectedTaskDetailsLoading.value ||
+    selectedTaskDetailsLoadedId.value === String(taskId)
+  ) {
+    return
+  }
+  selectedTaskDetailsLoading.value = true
+  try {
+    const res = await taskManagementApi.getExecution(taskId, {
+      include_metadata: true
+    })
+    const detail = extractResponseData(res)
+    if (String(selectedTask.value?.id) !== String(taskId)) {
+      return
+    }
+    selectedTask.value = {
+      ...selectedTask.value,
+      ...detail
+    }
+    selectedTaskDetailsLoadedId.value = String(taskId)
+  } catch (e) {
+    showError(extractErrorMessage(e, t('common.error')))
+  } finally {
+    if (String(selectedTask.value?.id) === String(taskId)) {
+      selectedTaskDetailsLoading.value = false
+    }
   }
 }
 

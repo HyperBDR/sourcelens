@@ -80,7 +80,7 @@ const getStatusText = (status) => {
     enabled: t('common.status.enabled'),
     disabled: t('common.status.disabled'),
     inactive: t('common.status.disabled'),
-    cancelled: t('common.status.disabled'),
+    cancelled: t('common.status.cancelled'),
     online: t('common.status.online'),
     offline: t('common.status.offline'),
     draining: t('common.status.draining'),
