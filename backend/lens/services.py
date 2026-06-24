@@ -10,8 +10,16 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from .llm import run_completion
-from .models import Message, LensNode, Run, RunExecution, RunStep
+from .attachments import attachment_data_url, bind_attachments_to_message
+from .llm import run_completion, run_completion_multimodal
+from .models import (
+    LensNode,
+    Message,
+    MessageAttachment,
+    Run,
+    RunExecution,
+    RunStep,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +49,21 @@ QUERY_REWRITE_SYSTEM = (
     "domain term. If the question is already clear and self-contained, return "
     "it unchanged. Answer in the SAME language as the question. Output ONLY "
     "the rewritten query text — no quotes, no explanation."
+)
+
+
+MULTIMODAL_INTENT_MAX_CHARS = 600
+MULTIMODAL_INTENT_SYSTEM = (
+    "You analyze a user's troubleshooting question that includes one or "
+    "more screenshots/images plus text. Combine both into ONE concise, "
+    "self-contained query for a code and document knowledge base. "
+    "Transcribe any error messages, stack traces, log lines, identifiers, "
+    "component or file names, and visible UI state from the images into "
+    "text, and merge them with the user's wording. Resolve references "
+    "(\"it\", \"this error\", \"the above\") using the conversation. Keep "
+    "entity, product, feature and command names. Answer in the SAME "
+    "language as the question. Output ONLY the resulting query text — no "
+    "quotes, no explanation."
 )
 
 
@@ -77,7 +100,13 @@ def _next_sequence(session):
 
 
 @transaction.atomic
-def create_execution_run(session, question, idempotency_key="", enqueue=True):
+def create_execution_run(
+    session,
+    question,
+    idempotency_key="",
+    enqueue=True,
+    attachment_uuids=None,
+):
     """Create a queued run for LensNode execution."""
 
     if idempotency_key:
@@ -115,6 +144,7 @@ def create_execution_run(session, question, idempotency_key="", enqueue=True):
     )
     input_message.run = run
     input_message.save(update_fields=["run"])
+    bind_attachments_to_message(session, input_message, attachment_uuids)
 
     if enqueue:
         transaction.on_commit(lambda: _enqueue_answer_run(run.uuid))
@@ -128,6 +158,79 @@ def _enqueue_answer_run(run_uuid):
     from .tasks import execute_answer_run
 
     execute_answer_run.delay(str(run_uuid))
+
+
+def analyze_multimodal_intent(run):
+    """Fold a run's image attachments and text into one search query.
+
+    Calls the assistant's multimodal model with the question, recent
+    history and the attached images, returning a consolidated textual
+    query that drives retrieval and the node answer. Falls back to the
+    original question when no multimodal model is set, no images decode,
+    or the call fails, so dispatch never blocks on this step.
+    """
+
+    assistant = run.session.assistant
+    original = run.input_message.content
+    attachments = list(
+        run.input_message.attachments.filter(
+            kind=MessageAttachment.Kind.IMAGE
+        )
+    )
+    if not attachments or not assistant.multimodal_model_ref:
+        return {"question": original, "rewritten": False, "image_count": 0}
+
+    image_data_urls = []
+    for attachment in attachments:
+        data_url = attachment_data_url(attachment)
+        if data_url:
+            image_data_urls.append(data_url)
+    if not image_data_urls:
+        return {"question": original, "rewritten": False, "image_count": 0}
+
+    context = _recent_history_context(run)
+    user_text = (
+        (f"Conversation so far:\n{context}\n\n" if context else "")
+        + f"User question: {original or '(no text, analyze the image)'}\n\n"
+        + "Combined search query:"
+    )
+    try:
+        result = run_completion_multimodal(
+            model_ref=assistant.multimodal_model_ref,
+            system=MULTIMODAL_INTENT_SYSTEM,
+            user_text=user_text,
+            image_data_urls=image_data_urls,
+            node_name="lens.multimodal_intent",
+            user_id=run.session.user_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "multimodal intent failed for run %s: %s", run.uuid, exc
+        )
+        return {
+            "question": original,
+            "rewritten": False,
+            "image_count": len(image_data_urls),
+            "error": str(exc),
+        }
+
+    text = " ".join((result.content or "").split())[
+        :MULTIMODAL_INTENT_MAX_CHARS
+    ]
+    if not text:
+        return {
+            "question": original,
+            "rewritten": False,
+            "image_count": len(image_data_urls),
+            "usage": result.usage,
+        }
+    return {
+        "question": text,
+        "rewritten": text != (original or "").strip(),
+        "original": original,
+        "image_count": len(image_data_urls),
+        "usage": result.usage,
+    }
 
 
 def build_loaded_skills(assistant):
@@ -290,6 +393,15 @@ def build_run_history(run):
     return history
 
 
+def _recent_history_context(run):
+    """Return the recent turns as a 'role: content' text block."""
+
+    history = build_run_history(run)[-(QUERY_REWRITE_HISTORY_TURNS * 2):]
+    return "\n".join(
+        f"{item['role']}: {item['content']}" for item in history
+    )
+
+
 def rewrite_query(run):
     """Rewrite a run's question into a contextual, search-optimized query.
 
@@ -304,10 +416,7 @@ def rewrite_query(run):
     if not assistant.preprocess_model_ref:
         return {"question": original, "rewritten": False}
 
-    history = build_run_history(run)[-(QUERY_REWRITE_HISTORY_TURNS * 2):]
-    context = "\n".join(
-        f"{item['role']}: {item['content']}" for item in history
-    )
+    context = _recent_history_context(run)
     user = (
         (f"Conversation so far:\n{context}\n\n" if context else "")
         + f"Latest question: {original}\n\nRewritten search query:"
@@ -326,11 +435,16 @@ def rewrite_query(run):
     text = (result.content or "").strip()
     rewritten = " ".join(text.split())[:QUERY_REWRITE_MAX_CHARS]
     if not rewritten:
-        return {"question": original, "rewritten": False}
+        return {
+            "question": original,
+            "rewritten": False,
+            "usage": result.usage,
+        }
     return {
         "question": rewritten,
         "rewritten": rewritten != original.strip(),
         "original": original,
+        "usage": result.usage,
     }
 
 

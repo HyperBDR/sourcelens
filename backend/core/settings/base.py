@@ -384,6 +384,12 @@ LANGUAGE_CODE_MAPPING = {
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATIC_URL = 'static/'
 
+# User-uploaded media (e.g. Lens question image attachments). The
+# storage volume is mounted into both the API and worker containers so
+# uploads (API) and vision preprocessing (worker) share the same path.
+MEDIA_URL = 'media/'
+MEDIA_ROOT = os.environ.get("LENS_MEDIA_ROOT", "/opt/storage/media")
+
 # ============================
 # File Upload Configuration
 # ============================

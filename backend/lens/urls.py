@@ -9,6 +9,7 @@ from .views import (
     DataSourceCredentialViewSet,
     DataSourceViewSet,
     GlobalSettingViewSet,
+    LensAttachmentView,
     MCPServerViewSet,
     LensNodeAIGatewayView,
     LensNodeViewSet,
@@ -107,6 +108,11 @@ urlpatterns = [
             }
         ),
         name="lens-admin-global-settings-detail",
+    ),
+    path(
+        "attachments/<uuid:uuid>/",
+        LensAttachmentView.as_view(),
+        name="lens-attachment",
     ),
     *router.urls,
     path(

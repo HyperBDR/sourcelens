@@ -155,6 +155,17 @@ export async function createRun(sessionUuid, payload) {
   return unwrapResponse(response)
 }
 
+export async function uploadAttachment(sessionUuid, file) {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await api.post(
+    `/lens/sessions/${sessionUuid}/attachments/`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return unwrapResponse(response)
+}
+
 export async function getRun(uuid) {
   const response = await api.get(`/lens/runs/${uuid}/`)
   return unwrapResponse(response)
@@ -227,7 +238,9 @@ export async function setDataSourceEnabled(uuid, enabled) {
 }
 
 export async function cancelDataSourceSync(uuid) {
-  const response = await api.post(`/lens/admin/datasources/${uuid}/cancel-sync/`)
+  const response = await api.post(
+    `/lens/admin/datasources/${uuid}/cancel-sync/`
+  )
   return unwrapResponse(response)
 }
 

@@ -7,6 +7,7 @@ from django.urls import reverse
 
 EXPECTED_MODELS = {
     "Assistant",
+    "AssistantAccess",
     "AssistantSkill",
     "AssistantMCP",
     "DataSource",
@@ -14,12 +15,14 @@ EXPECTED_MODELS = {
     "GlobalSetting",
     "MCPServer",
     "Message",
+    "MessageAttachment",
     "LensNode",
     "Run",
     "RunExecution",
     "RunStep",
     "ScheduledTask",
     "Session",
+    "SharedQA",
     "Skill",
 }
 

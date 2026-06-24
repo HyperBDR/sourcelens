@@ -80,6 +80,20 @@ def _messages(system, user):
     ]
 
 
+def _multimodal_messages(system, user_text, image_data_urls):
+    """Build LangChain messages with text plus image content blocks."""
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    content = [{"type": "text", "text": user_text}]
+    for url in image_data_urls:
+        content.append({"type": "image_url", "image_url": {"url": url}})
+    return [
+        SystemMessage(content=system),
+        HumanMessage(content=content),
+    ]
+
+
 def _message_to_dict(message):
     """Convert a LangChain message to the metering tracker shape."""
 
@@ -121,6 +135,30 @@ def run_completion(*, model_ref, system, user, node_name, user_id=None):
     return _call_metered_model(
         model_ref=model_ref,
         messages=_messages(system, user),
+        node_name=node_name,
+        user_id=user_id,
+    )
+
+
+def run_completion_multimodal(
+    *,
+    model_ref,
+    system,
+    user_text,
+    image_data_urls,
+    node_name,
+    user_id=None,
+):
+    """Run one multimodal (text + images) completion through metering.
+
+    The user message carries OpenAI-style content blocks; the metering
+    tracker forwards them unchanged to litellm, which passes the images
+    to a vision-capable model.
+    """
+
+    return _call_metered_model(
+        model_ref=model_ref,
+        messages=_multimodal_messages(system, user_text, image_data_urls),
         node_name=node_name,
         user_id=user_id,
     )

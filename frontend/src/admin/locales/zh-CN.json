@@ -24,6 +24,8 @@
     "subagents": "{n} 个子代理",
     "detailTitle": "Run 完整追踪",
     "question": "问题",
+    "attachments": "图片附件",
+    "visionQuery": "图片识别结果",
     "answer": "回答",
     "error": "错误",
     "timeline": "步骤时间线",

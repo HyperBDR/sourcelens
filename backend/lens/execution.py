@@ -7,6 +7,7 @@ from django.utils import timezone
 from .models import Run, RunExecution, RunStep
 from .services import (
     LensNodeDispatchError,
+    analyze_multimodal_intent,
     create_run_execution_snapshot,
     dispatch_run_to_lensnode,
     finish_lensnode_run,
@@ -67,8 +68,26 @@ def _lensnode_dispatch(state):
     """LangGraph node for creating a snapshot and dispatching to LensNode."""
 
     run = state["run"]
+    assistant = run.session.assistant
     question = run.input_message.content
-    if run.session.assistant.preprocess_model_ref:
+    has_images = run.input_message.attachments.exists()
+    if has_images and assistant.multimodal_model_ref:
+        with run_step(run, RunStep.StepType.MULTIMODAL, 0) as step:
+            analysis = analyze_multimodal_intent(run)
+            question = analysis["question"]
+            step.detail = {
+                "rewritten": analysis["rewritten"],
+                "original": analysis.get(
+                    "original", run.input_message.content
+                ),
+                "query": question,
+                "image_count": analysis.get("image_count", 0),
+            }
+            if analysis.get("usage"):
+                step.detail["usage"] = analysis["usage"]
+            if analysis.get("error"):
+                step.detail["error"] = analysis["error"]
+    elif assistant.preprocess_model_ref:
         with run_step(run, RunStep.StepType.QUERY_REWRITE, 0) as step:
             rewrite = rewrite_query(run)
             question = rewrite["question"]
@@ -77,8 +96,15 @@ def _lensnode_dispatch(state):
                 "original": rewrite.get("original", run.input_message.content),
                 "query": question,
             }
+            if rewrite.get("usage"):
+                step.detail["usage"] = rewrite["usage"]
             if rewrite.get("error"):
                 step.detail["error"] = rewrite["error"]
+    if has_images and not (question or "").strip():
+        # Image-only question whose vision preprocess yielded nothing
+        # (e.g. the multimodal call failed). Give the node a usable prompt
+        # rather than dispatching an empty query.
+        question = "请分析所附图片中的问题"
     with run_step(run, RunStep.StepType.RETRIEVAL, 1) as step:
         validate_run_dispatch(run)
         execution = create_run_execution_snapshot(run)
