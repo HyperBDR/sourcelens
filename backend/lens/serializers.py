@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.urls import reverse
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
@@ -20,6 +21,7 @@ from .models import (
     GlobalSetting,
     MCPServer,
     Message,
+    MessageAttachment,
     LensNode,
     Run,
     RunExecution,
@@ -29,6 +31,7 @@ from .models import (
     SharedQA,
     Skill,
 )
+from .attachments import ATTACHMENT_MAX_PER_MESSAGE
 from .services import create_execution_run
 from .skill_generation import (
     get_workspace_guide_payload,
@@ -1070,6 +1073,7 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
         positive_integer_keys = {
             "retention.run_days": "run_days",
             "lensnode.defaults.timeout": "timeout",
+            "lensnode.defaults.idle_timeout": "idle_timeout",
             "lensnode.health.offline_threshold_s": "offline_threshold_s",
             "lensnode_cleanup.interval_seconds": "interval_seconds",
             "lensnode_health.interval_seconds": "interval_seconds",
@@ -1098,11 +1102,38 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
         read_only_fields = ["updated_at"]
 
 
+class MessageAttachmentSerializer(serializers.ModelSerializer):
+    """Read serializer for a question image attachment."""
+
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MessageAttachment
+        fields = [
+            "uuid",
+            "url",
+            "kind",
+            "mime_type",
+            "width",
+            "height",
+            "byte_size",
+            "original_name",
+            "order",
+        ]
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        """Return the authenticated fetch path for the image bytes."""
+
+        return reverse("lens-attachment", kwargs={"uuid": obj.uuid})
+
+
 class MessageSerializer(serializers.ModelSerializer):
     """Session message serializer."""
 
     run = serializers.UUIDField(source="run.uuid", read_only=True)
     thinking = serializers.SerializerMethodField()
+    attachments = MessageAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = Message
@@ -1113,6 +1144,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "sequence",
             "run",
             "thinking",
+            "attachments",
             "created_at",
         ]
         read_only_fields = [
@@ -1122,6 +1154,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "sequence",
             "run",
             "thinking",
+            "attachments",
             "created_at",
         ]
 
@@ -1264,19 +1297,47 @@ class SessionCreateSerializer(serializers.Serializer):
 class RunCreateSerializer(serializers.Serializer):
     """Run creation payload."""
 
-    question = serializers.CharField()
+    question = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
     idempotency_key = serializers.CharField(required=False, allow_blank=True)
     enqueue = serializers.BooleanField(required=False, default=True)
     run_inline = serializers.BooleanField(required=False, default=False)
+    attachment_uuids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        default=list,
+    )
+
+    def validate(self, attrs):
+        """Require text or at least one image, and cap attachment count."""
+
+        question = (attrs.get("question") or "").strip()
+        attachments = attrs.get("attachment_uuids") or []
+        if not question and not attachments:
+            raise serializers.ValidationError(
+                "Provide a question or at least one image."
+            )
+        if len(attachments) > ATTACHMENT_MAX_PER_MESSAGE:
+            raise serializers.ValidationError(
+                f"At most {ATTACHMENT_MAX_PER_MESSAGE} images per message."
+            )
+        return attrs
 
     def create(self, validated_data):
         session = self.context["session"]
         run_inline = validated_data.get("run_inline", False)
         run = create_execution_run(
             session=session,
-            question=validated_data["question"],
+            question=validated_data.get("question", ""),
             idempotency_key=validated_data.get("idempotency_key", ""),
             enqueue=validated_data.get("enqueue", True) and not run_inline,
+            attachment_uuids=[
+                str(value)
+                for value in validated_data.get("attachment_uuids", [])
+            ],
         )
         if run_inline:
             from .execution import execute_answer_run

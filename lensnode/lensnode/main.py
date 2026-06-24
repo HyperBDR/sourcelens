@@ -516,6 +516,11 @@ class LensNodeClient:
                 ],
             )
         )
+        active_runs = [
+            key
+            for key in self.running_tasks
+            if not key.startswith("datasource:")
+        ]
         await send_queue.put(
             {
                 "type": "hello",
@@ -525,6 +530,7 @@ class LensNodeClient:
                 "workspace_path": self.config.workspace_path,
                 "available_dirs": dirs,
                 "tasks": TASKS,
+                "active_runs": active_runs,
                 "labels": {
                     "mode": "local",
                 },

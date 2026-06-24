@@ -5,12 +5,14 @@ import uuid as uuid_mod
 from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.db.models import F
-from django.http import HttpResponse, StreamingHttpResponse
+from django.http import FileResponse, HttpResponse, StreamingHttpResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,6 +26,7 @@ from .models import (
     DataSourceCredential,
     GlobalSetting,
     MCPServer,
+    MessageAttachment,
     LensNode,
     Run,
     ScheduledTask,
@@ -50,6 +53,7 @@ from .serializers import (
     DataSourceSerializer,
     GlobalSettingSerializer,
     MCPServerSerializer,
+    MessageAttachmentSerializer,
     MessageSerializer,
     LensNodeSerializer,
     RunCreateSerializer,
@@ -62,6 +66,7 @@ from .serializers import (
     SharedQAPublicSerializer,
     SkillSerializer,
 )
+from .attachments import AttachmentError, store_message_attachment
 from .services import (
     cancel_datasource_sync_on_lensnode,
     cancel_run_on_lensnode,
@@ -502,7 +507,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
 
         session = self.get_object()
         messages = session.message_set.select_related("run").prefetch_related(
-            "run__steps"
+            "run__steps", "attachments"
         )
         serializer = MessageSerializer(messages, many=True)
         return Response(serializer.data)
@@ -536,6 +541,59 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         run = serializer.save()
         run.refresh_from_db()
         return Response(RunSerializer(run).data, status=201)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="attachments",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def attachments(self, request, uuid=None):
+        """Upload one image attachment for a session question."""
+
+        session = self.get_object()
+        if not session.assistant.is_accessible_by(request.user):
+            raise PermissionDenied(
+                "You do not have access to this assistant."
+            )
+        if not session.assistant.multimodal_model_ref:
+            raise ValidationError("This assistant does not accept images.")
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            raise ValidationError("No file provided.")
+        try:
+            attachment = store_message_attachment(
+                session, request.user, uploaded
+            )
+        except AttachmentError as exc:
+            raise ValidationError(str(exc))
+        return Response(
+            MessageAttachmentSerializer(attachment).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LensAttachmentView(APIView):
+    """Serve a question image attachment to its owner or any admin."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, uuid):
+        """Return the image bytes for the session owner or a staff admin."""
+
+        attachment = get_object_or_404(
+            MessageAttachment.objects.select_related("session"),
+            uuid=uuid,
+        )
+        is_owner = attachment.session.user_id == request.user.id
+        if not is_owner and not request.user.is_staff:
+            raise PermissionDenied("You do not have access to this image.")
+        response = FileResponse(
+            attachment.file.open("rb"),
+            content_type=attachment.mime_type or "application/octet-stream",
+        )
+        response["Cache-Control"] = "private, max-age=3600"
+        return response
 
 
 class RunViewSet(BaseAuthenticatedViewSet):
@@ -1256,7 +1314,8 @@ def _admin_run_step_counts(run):
     total_cost = 0.0
     has_cost = False
     for step in run.steps.all():
-        for event in (step.detail or {}).get("events", []):
+        detail = step.detail or {}
+        for event in detail.get("events", []):
             counts["event_count"] += 1
             agent_event = event.get("agent_event")
             if agent_event == "tool.task.invoke":
@@ -1272,6 +1331,18 @@ def _admin_run_step_counts(run):
                 if cost:
                     total_cost += cost
                     has_cost = True
+        # Control-plane preprocess calls (query rewrite, vision intent)
+        # record their usage on the step itself, not as node events.
+        usage = detail.get("usage")
+        if usage:
+            counts["llm_calls"] += 1
+            counts["total_tokens"] += usage.get("total_tokens") or 0
+            counts["prompt_tokens"] += usage.get("prompt_tokens") or 0
+            counts["completion_tokens"] += usage.get("completion_tokens") or 0
+            cost = usage.get("cost")
+            if cost:
+                total_cost += cost
+                has_cost = True
     counts["total_cost"] = round(total_cost, 6) if has_cost else None
     return counts
 
@@ -1317,19 +1388,36 @@ def _admin_run_detail(run):
     execution = run.execution if hasattr(run, "execution") else None
     steps = []
     for step in run.steps.all():
-        steps.append({
+        detail = step.detail or {}
+        item = {
             "step_type": step.step_type,
             "status": step.status,
             "sequence": step.sequence,
-            "events": (step.detail or {}).get("events", []),
+            "events": detail.get("events", []),
+            "usage": detail.get("usage"),
             "updated_at": (
                 step.updated_at.isoformat() if step.updated_at else None
             ),
-        })
+        }
+        if step.step_type == "multimodal":
+            item["multimodal"] = {
+                "query": detail.get("query"),
+                "image_count": detail.get("image_count"),
+                "rewritten": detail.get("rewritten"),
+            }
+        steps.append(item)
+    attachments = (
+        MessageAttachmentSerializer(
+            run.input_message.attachments.all(), many=True
+        ).data
+        if run.input_message
+        else []
+    )
     row.update({
         "question": (
             run.input_message.content if run.input_message else ""
         ) or "",
+        "attachments": attachments,
         "answer": (out.content if out else "") or "",
         "error": run.error or "",
         "agent_rounds": assistant.agent_rounds if assistant else None,

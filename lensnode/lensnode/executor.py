@@ -1,9 +1,13 @@
+import asyncio
 import logging
 
 from .agent_runtime import LensDeepAgentRuntime
 from .logging_utils import elapsed_since, format_duration, task_log, utc_now
 
 LOGGER = logging.getLogger("lensnode")
+
+# How often the inactivity watchdog checks for stalled output.
+WATCHDOG_INTERVAL_S = 5
 
 TASKS = [
     {
@@ -116,7 +120,14 @@ class LensNodeExecutor:
                 }
             )
 
+            idle_timeout_s = getattr(
+                self.agent.config, "run_idle_timeout_s", 180
+            )
+            loop = asyncio.get_running_loop()
+            activity = {"at": loop.time()}
+
             def emit_progress(message, extra_detail=None):
+                activity["at"] = loop.time()
                 detail = {
                     "message": message,
                 }
@@ -133,6 +144,7 @@ class LensNodeExecutor:
                 )
 
             def emit_output(content, reset=False):
+                activity["at"] = loop.time()
                 emit(
                     {
                         "type": "run_output",
@@ -142,11 +154,34 @@ class LensNodeExecutor:
                     }
                 )
 
-            result = await self.agent.answer(
-                command,
-                emit_progress=emit_progress,
-                emit_output=emit_output,
+            # Inactivity watchdog: abort if the agent produces no output or
+            # progress for idle_timeout_s. A live answer streams tokens
+            # continuously so it never trips, however long it runs; a hung
+            # upstream call (which the streaming gateway can mask) does.
+            answer_task = asyncio.create_task(
+                self.agent.answer(
+                    command,
+                    emit_progress=emit_progress,
+                    emit_output=emit_output,
+                )
             )
+            while True:
+                done, _ = await asyncio.wait(
+                    {answer_task}, timeout=WATCHDOG_INTERVAL_S
+                )
+                if answer_task in done:
+                    result = answer_task.result()
+                    break
+                if loop.time() - activity["at"] > idle_timeout_s:
+                    answer_task.cancel()
+                    try:
+                        await answer_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    raise TimeoutError(
+                        "Run produced no output for "
+                        f"{format_duration(idle_timeout_s)}; aborting."
+                    )
             samples = result.get("samples") or []
             sample_paths = [item["path"] for item in samples]
             retrieval_done_message = task_log(

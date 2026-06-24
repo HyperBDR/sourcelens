@@ -24,6 +24,8 @@
     "subagents": "{n} subagents",
     "detailTitle": "Run Trace",
     "question": "Question",
+    "attachments": "Image Attachments",
+    "visionQuery": "Image-derived query",
     "answer": "Answer",
     "error": "Error",
     "timeline": "Step Timeline",

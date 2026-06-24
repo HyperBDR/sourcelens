@@ -493,6 +493,71 @@ class Message(models.Model):
         ordering = ["sequence"]
 
 
+def message_attachment_upload_to(instance, filename):
+    """Return the storage path for a message image attachment."""
+
+    return f"lens/attachments/{instance.uuid}/{filename}"
+
+
+class MessageAttachment(TimestampedUUIDModel):
+    """User-uploaded image attached to a question message.
+
+    Uploaded in a first step bound only to the session, then linked to
+    the USER input message when the run is created. Keeping the link to
+    the message makes the image-question relationship queryable for the
+    lifetime of the run (Run.input_message.attachments), so a later
+    public-share feature can snapshot the right images.
+    """
+
+    class Kind(models.TextChoices):
+        IMAGE = "image", "Image"
+
+    session = models.ForeignKey(
+        Session,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="lens_attachments",
+    )
+    kind = models.CharField(
+        max_length=16,
+        choices=Kind.choices,
+        default=Kind.IMAGE,
+    )
+    file = models.ImageField(upload_to=message_attachment_upload_to)
+    original_name = models.CharField(max_length=255, blank=True, default="")
+    mime_type = models.CharField(max_length=80, blank=True, default="")
+    byte_size = models.PositiveIntegerField(default=0)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "created_at"]
+        indexes = [
+            models.Index(
+                fields=["message", "order"],
+                name="lens_attach_msg_order_idx",
+            ),
+            models.Index(
+                fields=["session"],
+                name="lens_attach_session_idx",
+            ),
+        ]
+
+
 class Run(models.Model):
     """Execution run for a session message."""
 
@@ -535,6 +600,7 @@ class Run(models.Model):
     error = models.TextField(blank=True, default="")
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    last_activity_at = models.DateTimeField(null=True, blank=True)
     idempotency_key = models.CharField(max_length=128, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -562,6 +628,7 @@ class RunStep(models.Model):
 
     class StepType(models.TextChoices):
         QUERY_REWRITE = "query_rewrite", "Query Rewrite"
+        MULTIMODAL = "multimodal", "Multimodal"
         RETRIEVAL = "retrieval", "Retrieval"
         ANSWER = "answer", "Answer"
         STREAM = "stream", "Stream"

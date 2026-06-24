@@ -653,19 +653,34 @@ def lensnode_cleanup_task():
     record.last_run_at = timezone.now()
     record.save(update_fields=["last_status", "last_error", "last_run_at"])
 
+    # Reap runs that went silent (idle), not ones that are simply long but
+    # still streaming: a live run refreshes last_activity_at continuously,
+    # so a long answer survives as long as it keeps producing output. The
+    # absolute timeout is a deliberately generous runaway ceiling that
+    # still bounds a run which never stops emitting; raise it if you expect
+    # single answers to legitimately exceed it.
+    idle_setting = GlobalSetting.objects.filter(
+        key="lensnode.defaults.idle_timeout"
+    ).first()
+    idle_timeout_s = int(idle_setting.value if idle_setting else 300)
     setting = GlobalSetting.objects.filter(key="lensnode.defaults.timeout").first()
-    timeout_s = int(setting.value if setting else 3600)
-    cutoff = timezone.now() - timedelta(seconds=timeout_s)
+    timeout_s = int(setting.value if setting else 14400)
+    now = timezone.now()
+    idle_cutoff = now - timedelta(seconds=idle_timeout_s)
+    abs_cutoff = now - timedelta(seconds=timeout_s)
     stale = Run.objects.filter(
         status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
-        started_at__lt=cutoff,
+    ).filter(
+        Q(last_activity_at__lt=idle_cutoff)
+        | Q(last_activity_at__isnull=True, started_at__lt=idle_cutoff)
+        | Q(started_at__lt=abs_cutoff)
     )
     count = stale.count()
     stale.update(
         status=Run.Status.FAILED,
         error="LENS_RUN_TIMEOUT",
-        finished_at=timezone.now(),
-        updated_at=timezone.now(),
+        finished_at=now,
+        updated_at=now,
     )
     RunExecution.objects.filter(
         run__status=Run.Status.FAILED,
@@ -682,6 +697,7 @@ def lensnode_cleanup_task():
     record.last_status = ScheduledTask.Status.SUCCESS
     record.last_metrics = {
         "failed": count,
+        "idle_timeout_s": idle_timeout_s,
         "timeout_s": timeout_s,
         "datasource_sync": datasource_sync_metrics,
     }

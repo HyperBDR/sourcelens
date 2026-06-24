@@ -458,6 +458,25 @@
                   </div>
                 </section>
 
+                <section v-if="detail.attachments && detail.attachments.length">
+                  <h3 class="text-sm font-semibold text-gray-700 mb-2">
+                    {{ t('lensRuns.attachments') }}
+                  </h3>
+                  <div class="flex flex-wrap gap-3">
+                    <AuthImage
+                      v-for="img in detail.attachments"
+                      :key="img.uuid"
+                      :src="img.url"
+                      :alt="img.original_name || 'image'"
+                      class="run-attachment"
+                      zoomable
+                    />
+                  </div>
+                  <p v-if="visionQuery" class="mt-2 text-xs text-gray-500">
+                    {{ t('lensRuns.visionQuery') }}: {{ visionQuery }}
+                  </p>
+                </section>
+
                 <section v-if="detail.answer">
                   <h3 class="text-sm font-semibold text-gray-700 mb-2">
                     {{ t('lensRuns.answer') }}
@@ -555,6 +574,7 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
+import AuthImage from '@/components/ui/AuthImage.vue'
 
 const { t, locale } = useI18n()
 const { showError } = useToast()
@@ -584,6 +604,13 @@ const filters = ref({
 const totalPages = computed(() =>
   total.value > 0 ? Math.ceil(total.value / pageSize.value) : 1
 )
+
+const visionQuery = computed(() => {
+  const step = (detail.value?.steps || []).find(
+    (item) => item.step_type === 'multimodal'
+  )
+  return step?.multimodal?.query || ''
+})
 
 const TIMELINE_LABELS = {
   'llm.response': 'Model response',
@@ -835,6 +862,12 @@ watch(detailVisible, (visible) => {
 </script>
 
 <style scoped>
+.run-attachment :deep(.auth-image) {
+  max-width: 180px;
+  max-height: 180px;
+  object-fit: cover;
+  border: 1px solid #e5e7eb;
+}
 .th {
   @apply px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider;
 }

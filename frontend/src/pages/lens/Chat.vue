@@ -55,9 +55,7 @@
             class="sidebar-collapse-btn"
             type="button"
             :aria-label="
-              sidebarCollapsedActive
-                ? t('common.expand')
-                : t('common.collapse')
+              sidebarCollapsedActive ? t('common.expand') : t('common.collapse')
             "
             @click="sidebarCollapsed = !sidebarCollapsed"
           >
@@ -115,9 +113,7 @@
           v-if="!sidebarCollapsedActive || isMobile"
           class="sessions-section"
         >
-          <div
-            class="sessions-head"
-          >
+          <div class="sessions-head">
             <h2>{{ t('lens.chat.sessions') }}</h2>
           </div>
           <div class="sessions-list">
@@ -126,7 +122,11 @@
               :key="session.uuid"
               class="session-item"
               :class="[
-                deletingSessionUuid === session.uuid ? 'session-item-deleting' : selectedSessionUuid === session.uuid ? 'session-item-active' : ''
+                deletingSessionUuid === session.uuid
+                  ? 'session-item-deleting'
+                  : selectedSessionUuid === session.uuid
+                    ? 'session-item-active'
+                    : ''
               ]"
             >
               <input
@@ -143,9 +143,17 @@
                 <div
                   class="min-w-0 flex-1 cursor-pointer"
                   :title="session.title || t('lens.chat.untitledSession')"
-                  @click="deletingSessionUuid !== session.uuid && selectSession(session)"
+                  @click="
+                    deletingSessionUuid !== session.uuid &&
+                    selectSession(session)
+                  "
                 >
-                  <div class="session-title" :class="deletingSessionUuid === session.uuid ? 'opacity-40' : ''">
+                  <div
+                    class="session-title"
+                    :class="
+                      deletingSessionUuid === session.uuid ? 'opacity-40' : ''
+                    "
+                  >
                     {{ session.title || t('lens.chat.untitledSession') }}
                   </div>
                 </div>
@@ -158,8 +166,18 @@
                       :aria-label="t('common.confirm')"
                       @click.stop="doDeleteSession(session)"
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                        <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M20 6 9 17l-5-5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
                       </svg>
                     </button>
                     <button
@@ -168,8 +186,18 @@
                       :aria-label="t('common.cancel')"
                       @click.stop="deletingSessionUuid = ''"
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-                        <path d="M18 6 6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M18 6 6 18M6 6l12 12"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
                       </svg>
                     </button>
                   </template>
@@ -180,9 +208,23 @@
                       :aria-label="t('lens.chat.renameSession')"
                       @click.stop="startRename(session)"
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                        <path d="M12 20h9" stroke-linecap="round" stroke-linejoin="round" />
-                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" stroke-linecap="round" stroke-linejoin="round" />
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M12 20h9"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                        <path
+                          d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
                       </svg>
                     </button>
                     <button
@@ -191,8 +233,18 @@
                       :aria-label="t('lens.chat.deleteSession')"
                       @click.stop="deletingSessionUuid = session.uuid"
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                        <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round" />
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
                       </svg>
                     </button>
                   </template>
@@ -275,321 +327,445 @@
       </header>
       <MySharesPanel v-if="mySharesOpen" />
       <template v-else>
-      <div ref="scrollRef" class="thread-scroll">
-        <div v-if="!booted" class="thread-loading">
-          <BaseLoading />
-        </div>
-        <div v-else-if="!hasAssistant" class="thread-loading">
-          <AssistantEmptyState :variant="emptyVariant" />
-        </div>
-        <div v-else class="thread">
-          <div
-            v-for="message in decoratedMessages"
-            :key="message.uuid"
-            class="message-row"
-            :class="message.role === 'user' ? 'message-row-user' : 'message-row-assistant'"
-          >
+        <div ref="scrollRef" class="thread-scroll">
+          <div v-if="!booted" class="thread-loading">
+            <BaseLoading />
+          </div>
+          <div v-else-if="!hasAssistant" class="thread-loading">
+            <AssistantEmptyState :variant="emptyVariant" />
+          </div>
+          <div v-else class="thread">
             <div
-              class="message-avatar"
-              :class="[message.role, message.role === 'user' ? avatarBgColor : '']"
+              v-for="message in decoratedMessages"
+              :key="message.uuid"
+              class="message-row"
+              :class="
+                message.role === 'user'
+                  ? 'message-row-user'
+                  : 'message-row-assistant'
+              "
             >
-              <Smile v-if="message.role === 'user'" :size="17" :stroke-width="2" />
-              <img
-                v-else
-                src="/brand/logo_transparent.png"
-                alt="SourceLens"
-                class="h-[20px] w-[20px] object-contain"
-              />
-            </div>
-
-            <div class="message-body">
               <div
-                v-if="message._thinkingSteps"
-                class="thinking-panel thinking-panel-done"
+                class="message-avatar"
+                :class="[
+                  message.role,
+                  message.role === 'user' ? avatarBgColor : ''
+                ]"
               >
-                <button
-                  type="button"
-                  class="thinking-panel-header"
-                  @click="toggleThinking(message.uuid)"
-                >
-                  <Sparkles :size="13" class="thinking-done-icon" />
-                  <span class="thinking-panel-status">
-                    {{
-                      message.thinking.duration_seconds != null
-                        ? t('lens.chat.thinkingDone', {
-                            duration: formatDuration(
-                              message.thinking.duration_seconds
-                            ),
-                            count: message._thinkingSteps.length
-                          })
-                        : t('lens.chat.thinkingDoneSteps', {
-                            count: message._thinkingSteps.length
-                          })
-                    }}
-                  </span>
-                  <ChevronUp
-                    v-if="expandedThinking.has(message.uuid)"
-                    :size="13"
-                    class="thinking-panel-chevron"
-                  />
-                  <ChevronDown v-else :size="13" class="thinking-panel-chevron" />
-                </button>
+                <Smile
+                  v-if="message.role === 'user'"
+                  :size="17"
+                  :stroke-width="2"
+                />
+                <img
+                  v-else
+                  src="/brand/logo_transparent.png"
+                  alt="SourceLens"
+                  class="h-[20px] w-[20px] object-contain"
+                />
+              </div>
+
+              <div class="message-body">
                 <div
-                  v-if="expandedThinking.has(message.uuid)"
-                  class="thinking-panel-body"
+                  v-if="message._thinkingSteps"
+                  class="thinking-panel thinking-panel-done"
                 >
-                  <div
-                    v-for="step in message._thinkingSteps"
-                    :key="step.id"
-                    class="thinking-step-item"
+                  <button
+                    type="button"
+                    class="thinking-panel-header"
+                    @click="toggleThinking(message.uuid)"
                   >
-                    <span class="thinking-step-bullet">▸</span>
-                    <span class="thinking-step-text">{{ step.message }}</span>
-                    <span v-if="step.count > 1" class="thinking-step-repeat">
-                      ×{{ step.count }}
+                    <Sparkles :size="13" class="thinking-done-icon" />
+                    <span class="thinking-panel-status">
+                      {{
+                        message.thinking.duration_seconds != null
+                          ? t('lens.chat.thinkingDone', {
+                              duration: formatDuration(
+                                message.thinking.duration_seconds
+                              ),
+                              count: message._thinkingSteps.length
+                            })
+                          : t('lens.chat.thinkingDoneSteps', {
+                              count: message._thinkingSteps.length
+                            })
+                      }}
                     </span>
+                    <ChevronUp
+                      v-if="expandedThinking.has(message.uuid)"
+                      :size="13"
+                      class="thinking-panel-chevron"
+                    />
+                    <ChevronDown
+                      v-else
+                      :size="13"
+                      class="thinking-panel-chevron"
+                    />
+                  </button>
+                  <div
+                    v-if="expandedThinking.has(message.uuid)"
+                    class="thinking-panel-body"
+                  >
+                    <div
+                      v-for="step in message._thinkingSteps"
+                      :key="step.id"
+                      class="thinking-step-item"
+                    >
+                      <span class="thinking-step-bullet">▸</span>
+                      <span class="thinking-step-text">{{ step.message }}</span>
+                      <span v-if="step.count > 1" class="thinking-step-repeat">
+                        ×{{ step.count }}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div class="message-card" :class="message.role">
-                <div v-if="message.role === 'assistant'" class="message-markdown">
-                  <MarkdownRenderer :content="message.content || '（空）'" />
+                <div class="message-card" :class="message.role">
+                  <div
+                    v-if="message.role === 'assistant'"
+                    class="message-markdown"
+                  >
+                    <MarkdownRenderer :content="message.content || '（空）'" />
+                  </div>
+                  <template v-else>
+                    <div
+                      v-if="message.attachments && message.attachments.length"
+                      class="message-images"
+                    >
+                      <AuthImage
+                        v-for="img in message.attachments"
+                        :key="img.uuid || img.localUrl"
+                        :src="img.localUrl || img.url"
+                        :alt="img.original_name || 'image'"
+                        zoomable
+                      />
+                    </div>
+                    <div v-if="message.content" class="message-text">
+                      {{ message.content }}
+                    </div>
+                  </template>
                 </div>
-                <div v-else class="message-text">
-                  {{ message.content || '（空）' }}
+
+                <div class="message-time" :class="message.role">
+                  {{ formatTime(message.created_at) }}
                 </div>
-              </div>
 
-              <div class="message-time" :class="message.role">
-                {{ formatTime(message.created_at) }}
-              </div>
-
-              <div
-                v-if="message.role === 'assistant'"
-                class="message-actions"
-              >
-                <button
-                  type="button"
-                  class="icon-btn"
-                  @click="copyMessage(message)"
+                <div
+                  v-if="message.role === 'assistant'"
+                  class="message-actions"
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    @click="copyMessage(message)"
                   >
-                    <rect x="9" y="9" width="13" height="13" rx="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  class="icon-btn"
-                  @click="retryLastQuestion"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M3 12a9 9 0 1 0 3-6.7L3 8"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                    <path
-                      d="M3 3v5h5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </button>
-                <button
-                  v-if="!isAnonymous && message.run"
-                  type="button"
-                  class="icon-btn"
-                  :title="t('lens.qa.shareButton')"
-                  @click="openShare(message)"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
-                  >
-                    <circle cx="18" cy="5" r="3" />
-                    <circle cx="6" cy="12" r="3" />
-                    <circle cx="18" cy="19" r="3" />
-                    <path
-                      d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Empty-answer hint: a finished turn returned no text -->
-          <div
-            v-if="showRetryHint"
-            class="message-row message-row-assistant"
-          >
-            <div class="message-avatar assistant">
-              <img
-                src="/brand/logo_transparent.png"
-                alt="SourceLens"
-                class="h-[20px] w-[20px] object-contain"
-              />
-            </div>
-            <div class="message-body">
-              <div class="retry-hint">
-                <span class="retry-hint-text">
-                  {{ t('lens.chat.emptyAnswerHint') }}
-                </span>
-                <button
-                  type="button"
-                  class="retry-hint-btn"
-                  @click="retryLastQuestion"
-                >
-                  {{ t('lens.chat.retryAction') }}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Live answer: one row / one avatar — thinking panel + streaming markdown -->
-          <div
-            v-if="showLiveAnswer"
-            class="message-row message-row-assistant live-progress-row"
-          >
-            <div class="message-avatar assistant">
-              <img
-                src="/brand/logo_transparent.png"
-                alt="SourceLens"
-                class="h-[20px] w-[20px] object-contain"
-              />
-            </div>
-            <div class="message-body">
-              <div v-if="isRunActive" class="thinking-panel thinking-panel-live">
-                <button
-                  type="button"
-                  class="thinking-panel-header"
-                  @click="thinkingPanelOpen = !thinkingPanelOpen"
-                >
-                  <span class="live-progress-dot" />
-                  <span class="thinking-panel-status">
-                    <span class="thinking-panel-status-text">{{
-                      latestLiveStep || latestActivityMessage || liveStatusText
-                    }}</span>
-                    <span
-                      v-if="!latestLiveStep && !latestActivityMessage"
-                      class="typing-dots"
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
                       aria-hidden="true"
                     >
-                      <span /><span /><span />
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path
+                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    @click="retryLastQuestion"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M3 12a9 9 0 1 0 3-6.7L3 8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M3 3v5h5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    v-if="!isAnonymous && message.run"
+                    type="button"
+                    class="icon-btn"
+                    :title="t('lens.qa.shareButton')"
+                    @click="openShare(message)"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <circle cx="18" cy="5" r="3" />
+                      <circle cx="6" cy="12" r="3" />
+                      <circle cx="18" cy="19" r="3" />
+                      <path
+                        d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Empty-answer hint: a finished turn returned no text -->
+            <div v-if="showRetryHint" class="message-row message-row-assistant">
+              <div class="message-avatar assistant">
+                <img
+                  src="/brand/logo_transparent.png"
+                  alt="SourceLens"
+                  class="h-[20px] w-[20px] object-contain"
+                />
+              </div>
+              <div class="message-body">
+                <div class="retry-hint">
+                  <span class="retry-hint-text">
+                    {{ t('lens.chat.emptyAnswerHint') }}
+                  </span>
+                  <button
+                    type="button"
+                    class="retry-hint-btn"
+                    @click="retryLastQuestion"
+                  >
+                    {{ t('lens.chat.retryAction') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live answer: one row / one avatar — thinking panel + streaming markdown -->
+            <div
+              v-if="showLiveAnswer"
+              class="message-row message-row-assistant live-progress-row"
+            >
+              <div class="message-avatar assistant">
+                <img
+                  src="/brand/logo_transparent.png"
+                  alt="SourceLens"
+                  class="h-[20px] w-[20px] object-contain"
+                />
+              </div>
+              <div class="message-body">
+                <div
+                  v-if="isRunActive"
+                  class="thinking-panel thinking-panel-live"
+                >
+                  <button
+                    type="button"
+                    class="thinking-panel-header"
+                    @click="thinkingPanelOpen = !thinkingPanelOpen"
+                  >
+                    <span class="live-progress-dot" />
+                    <span class="thinking-panel-status">
+                      <span class="thinking-panel-status-text">{{
+                        latestLiveStep ||
+                        latestActivityMessage ||
+                        liveStatusText
+                      }}</span>
+                      <span
+                        v-if="!latestLiveStep && !latestActivityMessage"
+                        class="typing-dots"
+                        aria-hidden="true"
+                      >
+                        <span /><span /><span />
+                      </span>
                     </span>
-                  </span>
-                  <span v-if="elapsedText" class="thinking-elapsed">{{ elapsedText }}</span>
-                  <span v-if="thinkingSteps.length > 0" class="thinking-step-count">
-                    {{ thinkingSteps.length }}
-                  </span>
-                  <ChevronUp v-if="thinkingPanelOpen && (thinkingSteps.length > 0 || thinkingText)" :size="13" class="thinking-panel-chevron" />
-                  <ChevronDown v-else-if="thinkingSteps.length > 0 || thinkingText" :size="13" class="thinking-panel-chevron" />
-                </button>
-                <div
-                  v-if="thinkingPanelOpen && (thinkingSteps.length > 0 || thinkingText)"
-                  ref="thinkingPanelRef"
-                  class="thinking-panel-body"
-                >
-                  <div v-for="step in thinkingSteps" :key="step.id" class="thinking-step-item">
-                    <span class="thinking-step-bullet">▸</span>
-                    <span class="thinking-step-text">{{ step.message }}</span>
-                    <span v-if="step.count > 1" class="thinking-step-repeat">×{{ step.count }}</span>
-                  </div>
-                  <div v-if="thinkingText" class="thinking-reasoning">
-                    {{ thinkingText }}
+                    <span v-if="elapsedText" class="thinking-elapsed">{{
+                      elapsedText
+                    }}</span>
+                    <span
+                      v-if="thinkingSteps.length > 0"
+                      class="thinking-step-count"
+                    >
+                      {{ thinkingSteps.length }}
+                    </span>
+                    <ChevronUp
+                      v-if="
+                        thinkingPanelOpen &&
+                        (thinkingSteps.length > 0 || thinkingText)
+                      "
+                      :size="13"
+                      class="thinking-panel-chevron"
+                    />
+                    <ChevronDown
+                      v-else-if="thinkingSteps.length > 0 || thinkingText"
+                      :size="13"
+                      class="thinking-panel-chevron"
+                    />
+                  </button>
+                  <div
+                    v-if="
+                      thinkingPanelOpen &&
+                      (thinkingSteps.length > 0 || thinkingText)
+                    "
+                    ref="thinkingPanelRef"
+                    class="thinking-panel-body"
+                  >
+                    <div
+                      v-for="step in thinkingSteps"
+                      :key="step.id"
+                      class="thinking-step-item"
+                    >
+                      <span class="thinking-step-bullet">▸</span>
+                      <span class="thinking-step-text">{{ step.message }}</span>
+                      <span v-if="step.count > 1" class="thinking-step-repeat"
+                        >×{{ step.count }}</span
+                      >
+                    </div>
+                    <div v-if="thinkingText" class="thinking-reasoning">
+                      {{ thinkingText }}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div v-if="partialAnswer || streamError" class="message-card assistant">
-                <div v-if="streamError" class="live-text">
-                  {{ streamError }}
-                </div>
                 <div
-                  v-else
-                  class="message-markdown live-markdown"
-                  :class="{ 'is-streaming': showCursor }"
+                  v-if="partialAnswer || streamError"
+                  class="message-card assistant"
                 >
-                  <MarkdownRenderer :content="partialAnswer" />
+                  <div v-if="streamError" class="live-text">
+                    {{ streamError }}
+                  </div>
+                  <div
+                    v-else
+                    class="message-markdown live-markdown"
+                    :class="{ 'is-streaming': showCursor }"
+                  >
+                    <MarkdownRenderer :content="partialAnswer" />
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-if="hasAssistant" class="composer-wrap">
-        <div class="composer-inner">
-          <div class="composer-shell">
-            <div class="composer">
-              <textarea
-                ref="composerRef"
-                v-model="question"
-                class="composer-input"
-                rows="1"
-                :placeholder="t('lens.chat.questionPlaceholder')"
-                @keydown.enter.exact.prevent="insertNewline"
-                @keydown.ctrl.enter.exact.prevent="handlePrimaryAction"
-                @input="autoResizeTextarea"
-              />
-              <button
-                class="composer-action-btn"
-                :class="isRunActive ? 'composer-action-btn-stop' : ''"
-                type="button"
-                :disabled="(!isAnonymous && !selectedSessionUuid) || (!question.trim() && !isRunActive)"
-                :aria-label="isRunActive ? t('common.stop') : t('common.submit')"
-                @click="handlePrimaryAction"
-              >
-                <svg
-                  v-if="!isRunActive"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                  aria-hidden="true"
+        <div v-if="hasAssistant" class="composer-wrap">
+          <div class="composer-inner">
+            <div class="composer-shell">
+              <div v-if="attachments.length" class="composer-attachments">
+                <div
+                  v-for="item in attachments"
+                  :key="item.key"
+                  class="composer-thumb"
+                  :class="{ 'is-uploading': item.status === 'uploading' }"
                 >
-                  <path
-                    d="M12 19V5M5 12l7-7 7 7"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                  <img :src="item.localUrl" :alt="item.name" />
+                  <span
+                    v-if="item.status === 'uploading'"
+                    class="composer-thumb-spinner"
                   />
-                </svg>
-                <svg
-                  v-else
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  aria-hidden="true"
+                  <button
+                    type="button"
+                    class="composer-thumb-remove"
+                    :aria-label="t('lens.chat.removeImage')"
+                    @click="removeAttachment(item)"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div class="composer">
+                <input
+                  ref="fileInput"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                  class="composer-file-input"
+                  @change="onFileInputChange"
+                />
+                <button
+                  v-if="acceptsImages"
+                  class="composer-attach-btn"
+                  type="button"
+                  :disabled="
+                    !selectedSessionUuid || attachments.length >= MAX_IMAGES
+                  "
+                  :aria-label="t('lens.chat.attachImage')"
+                  :title="t('lens.chat.attachImage')"
+                  @click="triggerFilePick"
                 >
-                  <rect x="5" y="5" width="14" height="14" rx="2.5" />
-                </svg>
-              </button>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 5v14M5 12h14" stroke-linecap="round" />
+                  </svg>
+                </button>
+                <textarea
+                  ref="composerRef"
+                  v-model="question"
+                  class="composer-input"
+                  rows="1"
+                  :placeholder="t('lens.chat.questionPlaceholder')"
+                  @keydown.enter.exact.prevent="insertNewline"
+                  @keydown.ctrl.enter.exact.prevent="handlePrimaryAction"
+                  @paste="onComposerPaste"
+                  @input="autoResizeTextarea"
+                />
+                <button
+                  class="composer-action-btn"
+                  :class="isRunActive ? 'composer-action-btn-stop' : ''"
+                  type="button"
+                  :disabled="
+                    (!isAnonymous && !selectedSessionUuid) ||
+                    (!canSubmit && !isRunActive)
+                  "
+                  :aria-label="
+                    isRunActive ? t('common.stop') : t('common.submit')
+                  "
+                  @click="handlePrimaryAction"
+                >
+                  <svg
+                    v-if="!isRunActive"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M12 19V5M5 12l7-7 7 7"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                  <svg
+                    v-else
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <rect x="5" y="5" width="14" height="14" rx="2.5" />
+                  </svg>
+                </button>
+              </div>
             </div>
-          </div>
 
-          <p class="disclaimer">
-            {{ t('lens.chat.disclaimer') || '回答由 AI 生成，请自行核实关键信息。' }}
-          </p>
+            <p class="disclaimer">
+              {{
+                t('lens.chat.disclaimer') ||
+                '回答由 AI 生成，请自行核实关键信息。'
+              }}
+            </p>
+          </div>
         </div>
-      </div>
       </template>
     </main>
 
@@ -610,19 +786,23 @@
 </template>
 
 <script setup>
+import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import {
-  computed,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  watch,
-  nextTick
-} from 'vue'
-import { ArrowLeft, MessagesSquare, PanelLeftClose, PanelLeftOpen, Plus, Smile, ChevronDown, ChevronUp, Sparkles } from '@lucide/vue'
+  ArrowLeft,
+  MessagesSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Smile,
+  ChevronDown,
+  ChevronUp,
+  Sparkles
+} from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
+import AuthImage from '@/components/ui/AuthImage.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import AssistantSwitcher from '@/components/lens/AssistantSwitcher.vue'
@@ -646,13 +826,14 @@ import {
   listAssistants,
   listMessages,
   listSessions,
-  updateSession
+  updateSession,
+  uploadAttachment
 } from '@/api/lens'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-const { showError, showInfo, showSuccess, showWarning } = useToast()
+const { showError, showSuccess, showWarning } = useToast()
 const userStore = useUserStore()
 const lensStore = useLensStore()
 
@@ -662,7 +843,13 @@ const messages = ref([])
 const selectedAssistantUuid = ref('')
 const selectedSessionUuid = ref('')
 const question = ref('')
+const attachments = ref([])
+const fileInput = ref(null)
 const partialAnswer = ref('')
+
+const MAX_IMAGES = 4
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const streamError = ref('')
 const streamEvents = ref([])
 const queuePosition = ref(null)
@@ -705,6 +892,24 @@ const selectedAssistant = computed(
 )
 
 const isAnonymous = computed(() => !userStore.isAuthenticated)
+
+// Image upload requires both a multimodal-capable assistant and login (the
+// upload endpoint is authenticated), so anonymous visitors never see it.
+const acceptsImages = computed(
+  () => !isAnonymous.value && !!selectedAssistant.value?.multimodal_model_ref
+)
+
+const hasUploadingImage = computed(() =>
+  attachments.value.some((item) => item.status === 'uploading')
+)
+
+const canSubmit = computed(() => {
+  if (hasUploadingImage.value) {
+    return false
+  }
+  const hasReadyImage = attachments.value.some((item) => item.status === 'done')
+  return !!question.value.trim() || hasReadyImage
+})
 
 const hasAssistant = computed(() =>
   isAnonymous.value ? !!publicAssistant.value : !!selectedAssistantUuid.value
@@ -822,7 +1027,7 @@ function toolLabel(name) {
     edit_file: t('lens.chat.activity.editingFile'),
     ls: t('lens.chat.activity.listFiles'),
     write_todos: t('lens.chat.activity.planningTasks'),
-    task: t('lens.chat.activity.delegatingTask'),
+    task: t('lens.chat.activity.delegatingTask')
   }
   return map[name] || t('lens.chat.activity.callingTool', { name })
 }
@@ -837,7 +1042,8 @@ function _friendlyActivityMessage(event) {
     return toolLabel(parts[1])
   }
   if (activity === 'thinking') return t('lens.chat.activity.thinking')
-  if (activity === 'loading_resources') return t('lens.chat.activity.loadingResources')
+  if (activity === 'loading_resources')
+    return t('lens.chat.activity.loadingResources')
   return null
 }
 
@@ -966,9 +1172,7 @@ function toggleThinking(uuid) {
 
 const decoratedMessages = computed(() =>
   messages.value
-    .filter(
-      (m) => !(m.role === 'assistant' && !(m.content || '').trim())
-    )
+    .filter((m) => !(m.role === 'assistant' && !(m.content || '').trim()))
     .map((message) => {
       if (message.role === 'assistant' && message.thinking?.steps?.length) {
         const steps = thinkingStepsFor(message.thinking.steps)
@@ -992,7 +1196,9 @@ const showRetryHint = computed(() => {
 watch(isRunActive, (active) => {
   if (active) {
     elapsedSeconds.value = 0
-    elapsedTimer = setInterval(() => { elapsedSeconds.value++ }, 1000)
+    elapsedTimer = setInterval(() => {
+      elapsedSeconds.value++
+    }, 1000)
     revealTimer = setInterval(() => {
       if (revealedCount.value < allLiveSteps.value.length) {
         revealedCount.value++
@@ -1241,12 +1447,92 @@ async function saveRename(session) {
   }
 }
 
+function triggerFilePick() {
+  fileInput.value?.click()
+}
+
+async function onFileInputChange(event) {
+  const files = Array.from(event.target.files || [])
+  event.target.value = ''
+  for (const file of files) {
+    await addImage(file)
+  }
+}
+
+async function onComposerPaste(event) {
+  if (!acceptsImages.value) return
+  const items = Array.from(event.clipboardData?.items || [])
+  const images = items.filter(
+    (item) => item.kind === 'file' && item.type.startsWith('image/')
+  )
+  if (!images.length) return
+  // Only swallow the paste when it actually carries an image, so pasting
+  // text into the composer keeps working normally.
+  event.preventDefault()
+  for (const item of images) {
+    const file = item.getAsFile()
+    if (file) await addImage(file)
+  }
+}
+
+async function addImage(file) {
+  if (!acceptsImages.value) return
+  if (!IMAGE_MIME.includes(file.type)) {
+    showError(t('lens.chat.imageUnsupported'))
+    return
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    showError(t('lens.chat.imageTooLarge'))
+    return
+  }
+  if (attachments.value.length >= MAX_IMAGES) {
+    showError(t('lens.chat.imageTooMany', { max: MAX_IMAGES }))
+    return
+  }
+  const sessionUuid = selectedSessionUuid.value
+  if (!sessionUuid) return
+  const item = {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    uuid: '',
+    name: file.name || 'image',
+    localUrl: URL.createObjectURL(file),
+    status: 'uploading'
+  }
+  attachments.value = [...attachments.value, item]
+  try {
+    const result = await uploadAttachment(sessionUuid, file)
+    if (selectedSessionUuid.value !== sessionUuid) {
+      removeAttachment(item)
+      return
+    }
+    item.uuid = result.uuid
+    item.status = 'done'
+    attachments.value = [...attachments.value]
+  } catch {
+    removeAttachment(item)
+    showError(t('lens.chat.imageUploadFailed'))
+  }
+}
+
+function removeAttachment(item) {
+  if (item.localUrl) URL.revokeObjectURL(item.localUrl)
+  attachments.value = attachments.value.filter((entry) => entry !== item)
+}
+
+function clearAttachments() {
+  attachments.value.forEach(
+    (item) => item.localUrl && URL.revokeObjectURL(item.localUrl)
+  )
+  attachments.value = []
+}
+
 function insertNewline() {
   const el = composerRef.value
   if (!el) return
   const start = el.selectionStart
   const end = el.selectionEnd
-  question.value = question.value.slice(0, start) + '\n' + question.value.slice(end)
+  question.value =
+    question.value.slice(0, start) + '\n' + question.value.slice(end)
   nextTick(() => {
     el.selectionStart = el.selectionEnd = start + 1
     autoResizeTextarea(el)
@@ -1270,6 +1556,7 @@ async function handlePrimaryAction() {
 
 async function selectSession(session, updateRoute = true) {
   mySharesOpen.value = false
+  clearAttachments()
   selectedSessionUuid.value = session.uuid
   messages.value = await listMessages(session.uuid)
   currentRun.value = null
@@ -1351,9 +1638,7 @@ async function readSse(runUuid) {
       const raw = buffer.slice(0, boundary)
       buffer = buffer.slice(boundary + 2)
       boundary = buffer.indexOf('\n\n')
-      const dataLine = raw
-        .split('\n')
-        .find((line) => line.startsWith('data: '))
+      const dataLine = raw.split('\n').find((line) => line.startsWith('data: '))
       if (dataLine) {
         handleEvent(JSON.parse(dataLine.slice(6)))
       }
@@ -1430,9 +1715,7 @@ function handleStepEvent(event, ts) {
     return
   }
 
-  const timelineItems = newEvents.length
-    ? newEvents
-    : [{ message: event.step }]
+  const timelineItems = newEvents.length ? newEvents : [{ message: event.step }]
   timelineItems.forEach((item) => {
     pushStreamEvent({
       label: t('lens.chat.events.step', { step: event.step }),
@@ -1451,6 +1734,9 @@ async function submit() {
     requireLogin()
     return
   }
+  if (!canSubmit.value) {
+    return
+  }
   // Bind this submit to the session it started in. If the user switches
   // assistant/session mid-flight, the stream is aborted on purpose — that is
   // not a failure, so we must not restore the draft, alarm the user, or write
@@ -1461,8 +1747,30 @@ async function submit() {
   resetStreamState()
   const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
   question.value = ''
+  // Snapshot ready images, clear the composer strip, and keep the object
+  // URLs alive for the optimistic bubble until the server reload replaces it.
+  const pendingImages = attachments.value.filter(
+    (item) => item.status === 'done'
+  )
+  const attachmentUuids = pendingImages.map((item) => item.uuid)
+  attachments.value = []
+  // Revoke the optimistic object URLs on every exit path, unless they are
+  // restored to the composer for a retry (set below on real failures).
+  let keepImages = false
   if (composerRef.value) composerRef.value.style.height = 'auto'
-  messages.value = [...messages.value, { role: 'user', content: optimisticText, uuid: '__optimistic__', created_at: new Date().toISOString() }]
+  messages.value = [
+    ...messages.value,
+    {
+      role: 'user',
+      content: optimisticText,
+      uuid: '__optimistic__',
+      created_at: new Date().toISOString(),
+      attachments: pendingImages.map((item) => ({
+        localUrl: item.localUrl,
+        original_name: item.name
+      }))
+    }
+  ]
   await nextTick(scrollToBottom)
 
   // Name a brand-new conversation after its first question (skip if the
@@ -1470,7 +1778,11 @@ async function submit() {
   const sessionAtSubmitObj = sessions.value.find(
     (item) => item.uuid === sessionAtSubmit
   )
-  if (isFirstMessage && optimisticText && !(sessionAtSubmitObj?.title || '').trim()) {
+  if (
+    isFirstMessage &&
+    optimisticText &&
+    !(sessionAtSubmitObj?.title || '').trim()
+  ) {
     const autoTitle = deriveSessionTitle(optimisticText)
     if (autoTitle) {
       setSessionTitle(sessionAtSubmit, autoTitle)
@@ -1481,7 +1793,8 @@ async function submit() {
     const run = await createRun(sessionAtSubmit, {
       question: optimisticText,
       run_inline: false,
-      enqueue: true
+      enqueue: true,
+      attachment_uuids: attachmentUuids
     })
     // switched away between createRun and here — don't bind this run's live
     // state onto the now-current assistant
@@ -1516,13 +1829,27 @@ async function submit() {
   } catch (err) {
     // a deliberate stream abort (switch/navigate) or a switch away is not a
     // submit failure — bail silently without touching the current state
-    if (err?.name === 'AbortError' || selectedSessionUuid.value !== sessionAtSubmit) {
+    if (
+      err?.name === 'AbortError' ||
+      selectedSessionUuid.value !== sessionAtSubmit
+    ) {
       return
     }
-    messages.value = messages.value.filter(m => m.uuid !== '__optimistic__')
+    messages.value = messages.value.filter((m) => m.uuid !== '__optimistic__')
     question.value = optimisticText
+    // Restore the uploaded (still-unbound) images so the user can retry;
+    // keep their object URLs alive for the composer thumbnails.
+    if (pendingImages.length) {
+      attachments.value = [...attachments.value, ...pendingImages]
+      keepImages = true
+    }
     showError(t('lens.chat.submitFailed'))
   } finally {
+    if (!keepImages) {
+      pendingImages.forEach(
+        (item) => item.localUrl && URL.revokeObjectURL(item.localUrl)
+      )
+    }
     if (selectedSessionUuid.value === sessionAtSubmit) {
       loading.value.run = false
     }
@@ -1566,9 +1893,9 @@ function questionForMessage(message) {
 }
 
 function retryLastQuestion() {
-  const lastUserMessage = [...messages.value].reverse().find(
-    (message) => message.role === 'user'
-  )
+  const lastUserMessage = [...messages.value]
+    .reverse()
+    .find((message) => message.role === 'user')
   if (!lastUserMessage) {
     return
   }
@@ -1941,7 +2268,6 @@ onBeforeUnmount(() => {
   @apply text-right;
 }
 
-
 .message-markdown :deep(.markdown-content) {
   @apply max-w-none break-words;
   color: #374151;
@@ -2276,6 +2602,70 @@ onBeforeUnmount(() => {
 
 .composer-action-btn svg {
   @apply h-[17px] w-[17px];
+}
+
+.composer-file-input {
+  display: none;
+}
+
+.composer-attach-btn {
+  @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full
+    border border-line bg-white text-gray-500 transition-colors;
+}
+
+.composer-attach-btn:hover:not(:disabled) {
+  @apply border-primary-300 text-primary-600;
+}
+
+.composer-attach-btn:disabled {
+  @apply text-gray-300 cursor-not-allowed;
+}
+
+.composer-attach-btn svg {
+  @apply h-[18px] w-[18px];
+}
+
+.composer-attachments {
+  @apply mb-2 flex flex-wrap gap-2;
+}
+
+.composer-thumb {
+  @apply relative h-16 w-16 overflow-hidden rounded-lg border border-line;
+}
+
+.composer-thumb img {
+  @apply h-full w-full object-cover;
+}
+
+.composer-thumb.is-uploading img {
+  opacity: 0.5;
+}
+
+.composer-thumb-spinner {
+  @apply absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2
+    rounded-full border-2 border-gray-300 border-t-primary-500;
+  animation: spin 0.7s linear infinite;
+}
+
+.composer-thumb-remove {
+  @apply absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center
+    rounded-full bg-black/55 text-sm leading-none text-white;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.message-images {
+  @apply mb-2 flex flex-wrap justify-end gap-2;
+}
+
+.message-images :deep(.auth-image) {
+  max-width: 220px;
+  max-height: 220px;
+  object-fit: cover;
 }
 
 .disclaimer {
