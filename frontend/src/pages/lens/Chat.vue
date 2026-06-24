@@ -421,10 +421,10 @@
 
                 <div class="message-card" :class="message.role">
                   <div
-                    v-if="message.role === 'assistant'"
+                    v-if="message.role === 'assistant' && message.content"
                     class="message-markdown"
                   >
-                    <MarkdownRenderer :content="message.content || '（空）'" />
+                    <MarkdownRenderer :content="message.content" />
                   </div>
                   <template v-else>
                     <div
@@ -535,7 +535,7 @@
               <div class="message-body">
                 <div class="retry-hint">
                   <span class="retry-hint-text">
-                    {{ t('lens.chat.emptyAnswerHint') }}
+                    {{ retryHintMessage }}
                   </span>
                   <button
                     type="button"
@@ -851,6 +851,7 @@ const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const streamError = ref('')
+const failedRunError = ref(null)
 const streamEvents = ref([])
 const queuePosition = ref(null)
 const currentRun = ref(null)
@@ -1172,7 +1173,14 @@ function toggleThinking(uuid) {
 
 const decoratedMessages = computed(() =>
   messages.value
-    .filter((m) => !(m.role === 'assistant' && !(m.content || '').trim()))
+    .filter(
+      (m) =>
+        !(
+          m.role === 'assistant' &&
+          !(m.content || '').trim() &&
+          !m.thinking?.steps?.length
+        )
+    )
     .map((message) => {
       if (message.role === 'assistant' && message.thinking?.steps?.length) {
         const steps = thinkingStepsFor(message.thinking.steps)
@@ -1192,6 +1200,25 @@ const showRetryHint = computed(() => {
   const last = messages.value[messages.value.length - 1]
   return !!last && last.role === 'assistant' && !(last.content || '').trim()
 })
+
+// Map a backend run error code to a clear, blame-clarifying message: a
+// timeout is the model being slow (after retries), not a platform fault.
+function mapRunError(code) {
+  const c = String(code || '').toUpperCase()
+  if (c.includes('TIMEOUT')) {
+    return t('lens.chat.errorModelTimeout')
+  }
+  if (c.includes('DISCONNECT') || c.includes('ORPHAN')) {
+    return t('lens.chat.errorNodeLost')
+  }
+  return t('lens.chat.emptyAnswerHint')
+}
+
+const retryHintMessage = computed(() =>
+  failedRunError.value
+    ? mapRunError(failedRunError.value)
+    : t('lens.chat.emptyAnswerHint')
+)
 
 watch(isRunActive, (active) => {
   if (active) {
@@ -1232,6 +1259,7 @@ function resetStreamState() {
   streamController.value?.abort()
   partialAnswer.value = ''
   streamError.value = ''
+  failedRunError.value = null
   streamEvents.value = []
   queuePosition.value = null
   thinkingPanelOpen.value = false
@@ -1585,7 +1613,14 @@ async function maybeResumeActiveRun(sessionUuid) {
   } catch {
     return
   }
-  if (!['queued', 'running', 'streaming'].includes(run?.status)) return
+  if (!['queued', 'running', 'streaming'].includes(run?.status)) {
+    // A historically-failed turn keeps its retry hint with the right
+    // (blame-clarifying) message after a reload, not just live.
+    if (run?.status === 'failed') {
+      failedRunError.value = run.error || 'RUN_FAILED'
+    }
+    return
+  }
   if (selectedSessionUuid.value !== sessionUuid) return
   // hand the trailing in-progress assistant placeholder to the live row to
   // avoid showing it twice; the SSE sync replays its content and steps
@@ -1813,14 +1848,12 @@ async function submit() {
     messages.value = await listMessages(sessionAtSubmit)
 
     if (currentRun.value?.status === 'failed') {
-      // Remove the empty pre-created assistant placeholder from the failed run
-      const last = messages.value[messages.value.length - 1]
-      if (last?.role === 'assistant' && !last.content) {
-        messages.value = messages.value.slice(0, -1)
-      }
-      const errMsg = currentRun.value.error || t('lens.chat.events.error')
-      streamError.value = errMsg
-      showError(errMsg)
+      // Clear the live stream row so the failure is shown once — in the
+      // retry hint below the preserved thinking trace — not twice.
+      const errorCode = currentRun.value.error || 'RUN_FAILED'
+      resetStreamState()
+      failedRunError.value = errorCode
+      showError(mapRunError(errorCode))
     } else {
       await nextTick()
       resetStreamState()

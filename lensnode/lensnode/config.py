@@ -62,7 +62,7 @@ def load_config():
         ),
         max_concurrent_runs=int(os.getenv("LENSNODE_MAX_CONCURRENT_RUNS", "1")),
         summary_trigger_tokens=int(
-            os.getenv("LENSNODE_SUMMARY_TRIGGER_TOKENS", "80000")
+            os.getenv("LENSNODE_SUMMARY_TRIGGER_TOKENS", "48000")
         ),
         summary_keep_tokens=int(
             os.getenv("LENSNODE_SUMMARY_KEEP_TOKENS", "16000")

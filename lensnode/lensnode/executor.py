@@ -9,6 +9,21 @@ LOGGER = logging.getLogger("lensnode")
 # How often the inactivity watchdog checks for stalled output.
 WATCHDOG_INTERVAL_S = 5
 
+
+def _failure_error_code(exc):
+    """Map a run failure to a stable, user-facing error code.
+
+    Timeouts (the inactivity watchdog, the gateway httpx read timeout, or
+    a litellm timeout after its retries) all collapse to MODEL_TIMEOUT so
+    the UI can explain that the model was too slow rather than showing a
+    raw exception. Other failures keep their message for debugging.
+    """
+
+    name = type(exc).__name__.lower()
+    if isinstance(exc, TimeoutError) or "timeout" in name:
+        return "MODEL_TIMEOUT"
+    return str(exc)
+
 TASKS = [
     {
         "name": "knowledge_qa",
@@ -234,6 +249,7 @@ class LensNodeExecutor:
                 }
             )
         except Exception as exc:
+            error_code = _failure_error_code(exc)
             failed_message = task_log(
                 (
                     f"Failed running command {task}({run_uuid}). Actual "
@@ -253,7 +269,8 @@ class LensNodeExecutor:
                     "status": "failed",
                     "detail": {
                         "message": failed_message,
-                        "error": str(exc),
+                        "error": error_code,
+                        "exception": str(exc),
                     },
                 }
             )
@@ -262,7 +279,7 @@ class LensNodeExecutor:
                     "type": "run_done",
                     "run_uuid": run_uuid,
                     "status": "failed",
-                    "error": str(exc),
+                    "error": error_code,
                     "detail": {
                         "message": failed_message,
                     },
