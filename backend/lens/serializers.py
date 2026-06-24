@@ -1073,6 +1073,7 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
         positive_integer_keys = {
             "retention.run_days": "run_days",
             "lensnode.defaults.timeout": "timeout",
+            "lensnode.defaults.idle_timeout": "idle_timeout",
             "lensnode.health.offline_threshold_s": "offline_threshold_s",
             "lensnode_cleanup.interval_seconds": "interval_seconds",
             "lensnode_health.interval_seconds": "interval_seconds",

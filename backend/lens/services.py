@@ -2,12 +2,13 @@ import asyncio
 import hashlib
 import json
 import logging
+from datetime import timedelta
 from time import sleep
 
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from .attachments import attachment_data_url, bind_attachments_to_message
@@ -90,6 +91,37 @@ def fail_active_runs_for_lensnode(lensnode_uuid):
         finished_at=now,
         updated_at=now,
     )
+
+
+RECONCILE_GRACE_SECONDS = 60
+
+
+def reconcile_lensnode_active_runs(lensnode_uuid, active_run_uuids):
+    """Fail this node's non-terminal runs that it is no longer running.
+
+    On (re)connect a LensNode reports the runs it is actively executing.
+    Any RUNNING/STREAMING run assigned to the node that the node does not
+    claim was orphaned (e.g. the control plane restarted mid-answer and
+    the terminal frame was lost on the dropped socket); fail it now rather
+    than waiting for the idle reaper. A short grace window avoids racing a
+    run that was just dispatched but not yet started node-side.
+    """
+
+    active = {str(value) for value in (active_run_uuids or [])}
+    now = timezone.now()
+    orphaned = Run.objects.filter(
+        lensnode__uuid=lensnode_uuid,
+        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        started_at__lt=now - timedelta(seconds=RECONCILE_GRACE_SECONDS),
+    ).exclude(uuid__in=active)
+    count = orphaned.count()
+    orphaned.update(
+        status=Run.Status.FAILED,
+        error="LENSNODE_RECONNECT_ORPHANED",
+        finished_at=now,
+        updated_at=now,
+    )
+    return count
 
 
 def _next_sequence(session):
@@ -526,6 +558,27 @@ def cancel_datasource_sync_on_lensnode(lensnode, task_id):
     return None
 
 
+RUN_ACTIVITY_THROTTLE_SECONDS = 15
+
+
+def touch_run_activity(run_pk):
+    """Bump a run's last_activity_at, throttled to avoid per-token writes.
+
+    Streamed output and node events call this on every frame; the
+    conditional update only writes when the stamp is stale, so the idle
+    reaper has a fresh signal without a database write per token.
+    """
+
+    now = timezone.now()
+    Run.objects.filter(pk=run_pk).filter(
+        Q(last_activity_at__isnull=True)
+        | Q(
+            last_activity_at__lt=now
+            - timedelta(seconds=RUN_ACTIVITY_THROTTLE_SECONDS)
+        )
+    ).update(last_activity_at=now)
+
+
 def append_lensnode_output(
     run_uuid, content_delta="", final_content=None, reset=False
 ):
@@ -554,6 +607,7 @@ def append_lensnode_output(
         run.output_message.content = f"{run.output_message.content}{content_delta}"
     run.output_message.run = run
     run.output_message.save(update_fields=["content", "run"])
+    touch_run_activity(run.pk)
     return run
 
 
@@ -578,6 +632,7 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
         "events": [*(step.detail or {}).get("events", []), detail],
     }
     step.save(update_fields=["step_type", "status", "detail", "updated_at"])
+    touch_run_activity(run.pk)
     return step
 
 

@@ -196,7 +196,15 @@ def execute_answer_run(run, dispatch=True):
     try:
         run.status = Run.Status.RUNNING
         run.started_at = run.started_at or timezone.now()
-        run.save(update_fields=["status", "started_at", "updated_at"])
+        run.last_activity_at = timezone.now()
+        run.save(
+            update_fields=[
+                "status",
+                "started_at",
+                "last_activity_at",
+                "updated_at",
+            ]
+        )
 
         graph = _build_execution_graph(dispatch)
         graph.invoke({"run": run})

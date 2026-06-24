@@ -14,6 +14,7 @@ from .services import (
     fail_active_runs_for_lensnode,
     finish_lensnode_run,
     lensnode_group_name,
+    reconcile_lensnode_active_runs,
     record_lensnode_run_event,
 )
 
@@ -150,6 +151,9 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
 
     async def _handle_hello(self, content):
         await self._update_lensnode_report(content, require_versions=True)
+        await database_sync_to_async(reconcile_lensnode_active_runs)(
+            self.lensnode.uuid, content.get("active_runs") or []
+        )
         await self.send_json({"type": "hello_ack"})
 
     async def _handle_heartbeat(self, content):
