@@ -814,6 +814,12 @@
       "conversionSuccessItems": "Conversion success",
       "conversionFailedItems": "Conversion failed",
       "markdownItems": "Markdown",
+      "xlsxItems": "XLSX",
+      "sheetItems": "Sheets",
+      "rowItems": "Rows",
+      "modelCalls": "Model calls",
+      "estimatedTokens": "Estimated tokens",
+      "totalTokens": "Total tokens",
       "resultFile": "Result file",
       "itemName": "Item"
     },

@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import time
@@ -279,4 +280,73 @@ def _content_to_text(content):
 
     if isinstance(content, str):
         return content
+    if isinstance(content, list):
+        return content
     return json.dumps(content, ensure_ascii=False)
+
+
+def describe_image(
+    image_bytes,
+    prompt,
+    mime_type,
+    *,
+    model_ref,
+    ai_gateway_url,
+    token,
+):
+    """Describe one image through the AI gateway."""
+
+    result = describe_image_result(
+        image_bytes,
+        prompt,
+        mime_type,
+        model_ref=model_ref,
+        ai_gateway_url=ai_gateway_url,
+        token=token,
+    )
+    return result.get("content") or ""
+
+
+def describe_image_result(
+    image_bytes,
+    prompt,
+    mime_type,
+    *,
+    model_ref,
+    ai_gateway_url,
+    token,
+):
+    """Describe one image and return content plus usage."""
+
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    payload = {
+        "model_ref": model_ref,
+        "return_message": True,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{encoded}",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    with httpx.Client(timeout=120) as client:
+        response = client.post(
+            ai_gateway_url,
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+    message = data.get("message") or {}
+    return {
+        "content": message.get("content") or "",
+        "usage": data.get("usage") or {},
+    }

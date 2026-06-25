@@ -824,6 +824,12 @@
       "conversionSuccessItems": "转换成功",
       "conversionFailedItems": "转换失败",
       "markdownItems": "Markdown",
+      "xlsxItems": "XLSX",
+      "sheetItems": "Sheet",
+      "rowItems": "行数",
+      "modelCalls": "模型调用",
+      "estimatedTokens": "预估 Token",
+      "totalTokens": "总 Token",
       "resultFile": "结果文件",
       "itemName": "条目"
     },

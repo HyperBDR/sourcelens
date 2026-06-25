@@ -6,29 +6,31 @@
     width="2xl"
     @close="$emit('close')"
   >
-    <div v-if="datasource">
-      <div
-        class="sticky top-0 z-10 -mx-6 flex gap-5 border-b border-line bg-surface px-6"
-      >
-        <button
-          type="button"
-          class="detail-tab"
-          :class="activeTab === 'basic' ? 'detail-tab-active' : ''"
-          @click="activeTab = 'basic'"
-        >
-          {{ t('lensAdmin.datasourceDetail.tabs.basic') }}
-        </button>
-        <button
-          type="button"
-          class="detail-tab"
-          :class="activeTab === 'details' ? 'detail-tab-active' : ''"
-          @click="activeTab = 'details'"
-        >
-          {{ t('lensAdmin.datasourceDetail.tabs.details') }}
-        </button>
+    <template v-if="datasource" #tabs>
+      <div class="border-b border-line bg-surface">
+        <div class="flex gap-5 px-6">
+          <button
+            type="button"
+            class="detail-tab"
+            :class="activeTab === 'basic' ? 'detail-tab-active' : ''"
+            @click="activeTab = 'basic'"
+          >
+            {{ t('lensAdmin.datasourceDetail.tabs.basic') }}
+          </button>
+          <button
+            type="button"
+            class="detail-tab"
+            :class="activeTab === 'details' ? 'detail-tab-active' : ''"
+            @click="activeTab = 'details'"
+          >
+            {{ t('lensAdmin.datasourceDetail.tabs.details') }}
+          </button>
+        </div>
       </div>
+    </template>
 
-      <div v-show="activeTab === 'basic'" class="space-y-6 pt-6">
+    <div v-if="datasource">
+      <div v-show="activeTab === 'basic'" class="space-y-6">
         <section>
           <h3 class="mb-4 text-sm font-semibold text-ink-900">
             {{ t('lensAdmin.datasourceDetail.basicInfo') }}
@@ -110,8 +112,29 @@
             </div>
           </dl>
         </section>
+
+        <section class="border-t border-line pt-6">
+          <h3 class="mb-4 text-sm font-semibold text-ink-900">
+            {{ t('lensAdmin.datasourceDetail.retrieval') }}
+          </h3>
+          <dl class="grid grid-cols-1 gap-4">
+            <div v-for="item in datasourceRetrievalDetails" :key="item.label">
+              <dt
+                class="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-600"
+              >
+                {{ item.label }}
+              </dt>
+              <dd
+                class="break-words text-sm font-medium text-ink-900"
+                :class="item.mono ? 'font-mono text-xs' : ''"
+              >
+                {{ item.value }}
+              </dd>
+            </div>
+          </dl>
+        </section>
       </div>
-      <div v-show="activeTab === 'details'" class="pt-6">
+      <div v-show="activeTab === 'details'" class="space-y-6">
         <div
           class="relative overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
         >
@@ -152,7 +175,7 @@
               <li
                 v-for="task in tasks"
                 :key="task.id"
-                class="border-l-2 transition-colors duration-150"
+                class="transition-colors duration-150"
                 :class="
                   expandedTaskId === task.id
                     ? 'border-primary-500 bg-primary-50'
@@ -279,6 +302,7 @@ import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
 
 import api from '@/api'
+import { llmAdminApi } from '@/admin/api/llmAdmin'
 import { taskManagementApi } from '@/admin/api/taskManagement'
 import { extractErrorMessage, extractResponseData } from '@/utils/api'
 import { formatDuration } from '@/utils/formatting'
@@ -287,7 +311,12 @@ import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import TaskSummaryCard from '@/components/task-management/TaskSummaryCard.vue'
 
-import { EMPTY_VALUE as emptyValue } from './adminHelpers'
+import {
+  EMPTY_VALUE as emptyValue,
+  compactUuid,
+  formatLLMConfigLabel,
+  normalizeList
+} from './adminHelpers'
 import { formatDocIds } from './datasourceHelpers'
 import { useShortDateTime } from './useShortDateTime'
 
@@ -316,6 +345,8 @@ const taskRequestSeq = ref(0)
 const expandedTaskId = ref(null)
 const expandedTask = ref(null)
 const expandedTaskDetailLoading = ref(false)
+const llmConfigOptions = ref([])
+const llmConfigLoaded = ref(false)
 
 const PROCESSING_STATUSES = new Set(['PENDING', 'STARTED', 'RETRY'])
 const TASK_METADATA_FIELDS = [
@@ -546,6 +577,16 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => props.show,
+  (visible) => {
+    if (visible) {
+      loadLLMConfigOptions()
+    }
+  },
+  { immediate: true }
+)
+
 onBeforeUnmount(() => {
   stopProcessingRefresh()
 })
@@ -558,6 +599,19 @@ function formatSourceType(sourceType) {
     return t('lensAdmin.datasourceWizard.feishu')
   }
   return sourceType || emptyValue
+}
+
+async function loadLLMConfigOptions() {
+  if (llmConfigLoaded.value) return
+  llmConfigLoaded.value = true
+  try {
+    const rows = await llmAdminApi
+      .getLLMConfigAll({ scope: 'global' })
+      .catch(() => [])
+    llmConfigOptions.value = normalizeList(rows)
+  } catch {
+    llmConfigOptions.value = []
+  }
 }
 
 function authSchemeLabel(authScheme) {
@@ -599,6 +653,21 @@ function detailItem(label, value, mono = false) {
     value: normalized || emptyValue,
     mono
   }
+}
+
+function booleanLabel(value) {
+  return value ? t('common.status.enabled') : t('common.status.disabled')
+}
+
+function modelLabel(modelRef) {
+  if (!modelRef) return emptyValue
+  const found = llmConfigOptions.value.find(
+    (config) => String(config.uuid || config.id) === String(modelRef)
+  )
+  if (found) return formatLLMConfigLabel(found)
+  return t('lensAdmin.datasourceDetail.unknownModel', {
+    id: compactUuid(modelRef)
+  })
 }
 
 const datasourceConnectionDetails = computed(() => {
@@ -661,6 +730,38 @@ const datasourceSyncDetails = computed(() => {
       t('lensAdmin.datasourceDetail.updatedAt'),
       formatDateTime(row.updated_at)
     )
+  ]
+})
+
+const datasourceRetrievalDetails = computed(() => {
+  const conversion = props.datasource?.sync_policy?.conversion || {}
+  return [
+    detailItem(
+      t('lensAdmin.datasourceWizard.convertDocuments'),
+      booleanLabel(conversion.document)
+    ),
+    detailItem(
+      t('lensAdmin.fields.documentModel'),
+      modelLabel(conversion.document_model_ref)
+    ),
+    detailItem(
+      t('lensAdmin.datasourceWizard.convertImages'),
+      booleanLabel(conversion.image)
+    ),
+    detailItem(
+      t('lensAdmin.fields.visionModel'),
+      modelLabel(conversion.vision_model_ref)
+    ),
+    detailItem(
+      t('lensAdmin.datasourceWizard.convertEmbeddedImages'),
+      booleanLabel(conversion.embedded_image)
+    ),
+    detailItem(
+      t('lensAdmin.fields.maxFileSizeMb'),
+      conversion.max_file_size_mb || 100
+    ),
+    detailItem(t('lensAdmin.fields.maxPages'), conversion.max_pages || 500),
+    detailItem(t('lensAdmin.fields.maxImages'), conversion.max_images || 100)
   ]
 })
 </script>

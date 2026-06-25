@@ -1,3 +1,5 @@
+from pathlib import PurePosixPath
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.urls import reverse
@@ -555,6 +557,11 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 target_path,
                 lensnode.workspace_path,
             )
+            _validate_unique_datasource_target_path(
+                attrs["target_path"],
+                lensnode,
+                self.instance,
+            )
         except (DataSourcePathError, DataSourceDispatchError) as exc:
             raise serializers.ValidationError({"target_path": str(exc)})
 
@@ -912,6 +919,9 @@ def _credential_provider(repo_url):
 
 
 def _validate_sync_policy(sync_policy):
+    """Validate datasource schedule and conversion policy."""
+
+    _validate_conversion_policy(sync_policy.get("conversion") or {})
     mode = sync_policy.get("mode") or "interval"
     if mode not in {"interval", "crontab"}:
         raise serializers.ValidationError(
@@ -932,6 +942,70 @@ def _validate_sync_policy(sync_policy):
         raise serializers.ValidationError(
             {"sync_policy": "interval_seconds must be a positive integer"}
         )
+
+
+def _validate_conversion_policy(conversion):
+    """Validate datasource conversion settings."""
+
+    if not isinstance(conversion, dict):
+        raise serializers.ValidationError(
+            {"sync_policy": "conversion must be an object"}
+        )
+    for key in ["document", "image", "embedded_image"]:
+        value = conversion.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise serializers.ValidationError(
+                {"sync_policy": f"conversion.{key} must be a boolean"}
+            )
+    if conversion.get("embedded_image") and not conversion.get("document"):
+        raise serializers.ValidationError(
+            {
+                "sync_policy": (
+                    "conversion.embedded_image requires "
+                    "conversion.document"
+                )
+            }
+        )
+    for key in ["max_images", "max_file_size_mb", "max_pages"]:
+        value = conversion.get(key)
+        if value is not None and (
+            not isinstance(value, int) or value <= 0
+        ):
+            raise serializers.ValidationError(
+                {"sync_policy": f"conversion.{key} must be positive"}
+            )
+    for key in ["vision_model_ref", "document_model_ref", "queue"]:
+        value = conversion.get(key)
+        if value is not None and not isinstance(value, str):
+            raise serializers.ValidationError(
+                {"sync_policy": f"conversion.{key} must be a string"}
+            )
+
+
+def _validate_unique_datasource_target_path(target_path, lensnode, instance):
+    """Reject an exact target path match on the same LensNode."""
+
+    query = DataSource.objects.filter(lensnode=lensnode)
+    if instance is not None:
+        query = query.exclude(pk=instance.pk)
+    target = PurePosixPath(target_path)
+    for datasource in query.only("target_path"):
+        if not datasource.target_path:
+            continue
+        existing = PurePosixPath(
+            normalize_workspace_target_path(
+                datasource.target_path,
+                lensnode.workspace_path,
+            )
+        )
+        if existing == target:
+            raise serializers.ValidationError(
+                {
+                    "target_path": (
+                        "Another datasource already uses this target path"
+                    )
+                }
+            )
 
 
 def _validate_datasource_credential_type(credential, auth_type):
@@ -1088,10 +1162,19 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
                     {"value": f"{name} must be a positive integer"}
                 )
 
-        if key == "lens.skills.generator_model_ref":
+        model_ref_keys = {
+            "lens.skills.generator_model_ref": "generator_model_ref",
+            "lens.datasource_conversion.vision_model_ref": (
+                "vision_model_ref"
+            ),
+            "lens.datasource_conversion.document_model_ref": (
+                "document_model_ref"
+            ),
+        }
+        if key in model_ref_keys:
             if value not in [None, ""] and not isinstance(value, str):
                 raise serializers.ValidationError(
-                    {"value": "generator_model_ref must be a string or empty"}
+                    {"value": f"{model_ref_keys[key]} must be a string or empty"}
                 )
 
         return attrs

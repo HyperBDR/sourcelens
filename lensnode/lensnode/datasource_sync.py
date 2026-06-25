@@ -7,6 +7,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
 
+from .datasource_adapters import DataSourceAdapterRegistry
+from .datasource_adapters import FunctionDataSourceAdapter
+from . import datasource_manifest as manifest_store
+from .document_convert import post_process_documents
+from .path_rules import normalize_excluded_roots
+from .path_rules import relative_path
+from .path_rules import safe_filename
+from .path_rules import source_sha256
+from .path_rules import unique_child_path
+
 WORKSPACE_ROOT = "/workspace"
 GIT_SHALLOW_DEPTH = "1"
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
@@ -150,11 +160,90 @@ def sync_datasource(command, workspace_path=WORKSPACE_ROOT, emit=None):
     """Synchronize one datasource command and return metrics."""
 
     source_type = command.get("source_type")
-    if source_type == "git":
-        return _sync_git(command, workspace_path, emit)
-    if source_type == "feishu":
-        return _sync_feishu(command, workspace_path, emit)
-    raise DataSourceSyncError("LENS_SOURCE_TYPE_UNSUPPORTED")
+    adapter = datasource_adapter_registry().get(source_type)
+    if adapter is None:
+        raise DataSourceSyncError("LENS_SOURCE_TYPE_UNSUPPORTED")
+    result = adapter.sync(command, workspace_path, emit)
+
+    target = Path(result.get("target_path") or "").resolve()
+    if not target:
+        return result
+    context = _sync_context(command, target)
+    manifest_store.write_datasource_marker(target, context)
+    sync_items = result.pop("_sync_items", [])
+    deleted_paths = result.pop("_deleted_paths", [])
+    sync_result = manifest_store.SyncResult(
+        items=sync_items,
+        changed_paths=result.pop("_changed_paths", []),
+        deleted_paths=deleted_paths,
+        stats=_sync_summary_from_result(result),
+    )
+    if sync_items:
+        manifest_payload = manifest_store.build_manifest(context, sync_result)
+        manifest_payload["synced_at"] = utc_timestamp()
+        manifest_store.write_manifest(target, manifest_payload)
+
+    deleted_sidecars = manifest_store.cleanup_deleted_sidecars(
+        target,
+        deleted_paths,
+        context["excluded_datasource_roots"],
+    )
+    conversion_summary = post_process_documents(context, sync_result, emit)
+    conversion_summary["deleted_sidecars"] = deleted_sidecars
+    result["conversion_summary"] = conversion_summary
+    return result
+
+
+def datasource_adapter_registry():
+    """Return the datasource adapter registry."""
+
+    registry = DataSourceAdapterRegistry()
+    registry.register(FunctionDataSourceAdapter("git", _sync_git))
+    registry.register(FunctionDataSourceAdapter("feishu", _sync_feishu))
+    return registry
+
+
+def _sync_context(command, target):
+    """Return the common datasource sync context."""
+
+    conversion = (command.get("sync_policy") or {}).get("conversion")
+    conversion = command.get("conversion") or conversion or {}
+    return {
+        "datasource_uuid": str(command.get("datasource_uuid") or ""),
+        "name": command.get("name") or "",
+        "source_type": command.get("source_type") or "",
+        "target_path": str(target),
+        "config": command.get("config") or {},
+        "conversion": conversion,
+        "trigger": command.get("trigger") or "",
+        "max_workers": command.get("max_workers") or 0,
+        "excluded_datasource_roots": normalize_excluded_roots(
+            command.get("excluded_datasource_roots") or [],
+            target,
+        ),
+        "ai_gateway_url": command.get("ai_gateway_url") or "",
+        "lensnode_token": command.get("lensnode_token") or "",
+        "vision_model_ref": conversion.get("vision_model_ref") or "",
+    }
+
+
+def _sync_summary_from_result(result):
+    """Return sync summary fields from a datasource result."""
+
+    keys = [
+        "synced",
+        "files",
+        "folders",
+        "failed",
+        "scanned",
+        "changed",
+        "skipped",
+        "deleted",
+        "documents",
+        "by_extension",
+        "by_type",
+    ]
+    return {key: result.get(key) for key in keys if key in result}
 
 
 def datasource_sync_workers(command):
@@ -324,6 +413,10 @@ def _sync_git(command, workspace_path, emit):
     target = normalize_target_path(command.get("target_path"), workspace_path)
     branch = config.get("branch") or "main"
     auth_url = _git_auth_url(repo_url, config)
+    previous_manifest = _read_manifest(target)
+    previous_items = manifest_store.manifest_items_by_source_id(
+        previous_manifest
+    )
     _emit(emit, "check_path", "running", "Checking target directory.")
     inspection = inspect_datasource_path(command, workspace_path)
     if not inspection.get("source_compatible"):
@@ -371,12 +464,17 @@ def _sync_git(command, workspace_path, emit):
 
     _sync_git_submodules(target)
 
-    files = _count_files(target)
+    items = _git_manifest_items(target, repo_url, branch)
+    changed_paths, deleted_paths, skipped = _git_manifest_delta(
+        items,
+        previous_items,
+    )
+    files = len(items)
     summary = {
         "scanned": files,
-        "changed": 1,
-        "skipped": 0,
-        "deleted": 0,
+        "changed": len(changed_paths),
+        "skipped": skipped,
+        "deleted": len(deleted_paths),
         "failed": 0,
         "files": files,
         "folders": 0,
@@ -384,22 +482,14 @@ def _sync_git(command, workspace_path, emit):
         "by_extension": _count_file_extensions(target),
         "by_type": {"git": 1},
     }
-    _write_manifest(
-        target,
-        {
-            "source_type": "git",
-            "repo_url": repo_url,
-            "branch": branch,
-            "synced_at": utc_timestamp(),
-            "files": files,
-            "stats": summary,
-        },
-    )
     _emit(
         emit,
         "manifest",
         "done",
-        f"Git sync completed with {files} files.",
+        (
+            f"Git sync completed with {files} files, "
+            f"{summary['changed']} changed, {skipped} skipped."
+        ),
         category="summary",
         progress_total=1,
         progress_current=1,
@@ -410,6 +500,9 @@ def _sync_git(command, workspace_path, emit):
         "synced": 1,
         "files": files,
         "target_path": str(target),
+        "_sync_items": items,
+        "_changed_paths": changed_paths,
+        "_deleted_paths": deleted_paths,
         **summary,
     }
 
@@ -436,6 +529,85 @@ def _sync_git_submodules(target):
         cwd=target,
         detail_prefix="LENS_SOURCE_GIT_SUBMODULE_UPDATE_FAILED",
     )
+
+
+def _git_manifest_items(target, repo_url, branch):
+    """Return unified manifest items for a Git datasource."""
+
+    items = []
+    commit = _git_output(["rev-parse", "HEAD"], cwd=target)
+    for path in sorted(target.rglob("*")):
+        if not path.is_file():
+            continue
+        if _is_generated_datasource_path(target, path):
+            continue
+        local_path = relative_path(target, path)
+        extension = path.suffix.lower().lstrip(".")
+        source_id = f"git:{repo_url}:{branch}:{local_path}"
+        items.append(
+            manifest_store.SyncItem(
+                source_id=source_id,
+                source_type="git",
+                source_path=local_path,
+                local_path=local_path,
+                name=path.name,
+                kind="file",
+                extension=extension,
+                status="synced",
+                metadata={
+                    "commit": commit,
+                    "size": str(path.stat().st_size),
+                    "sha256": source_sha256(path),
+                },
+                remote={
+                    "repo_url": repo_url,
+                    "branch": branch,
+                    "path": local_path,
+                },
+            )
+        )
+    return items
+
+
+def _git_manifest_delta(items, previous_items):
+    """Return changed and deleted Git paths compared with previous manifest."""
+
+    current_ids = set()
+    changed_paths = []
+    skipped = 0
+    for item in items:
+        source_id = manifest_store.manifest_source_id(item)
+        current_ids.add(source_id)
+        previous_item = previous_items.get(source_id)
+        if previous_item and _git_item_signature(
+            item.to_manifest()
+        ) == _git_item_signature(previous_item):
+            skipped += 1
+            item.status = "skipped"
+            continue
+        changed_paths.append(item.local_path)
+
+    deleted_paths = []
+    for source_id, previous_item in previous_items.items():
+        if source_id in current_ids:
+            continue
+        local_path = _manifest_local_path(previous_item)
+        if local_path:
+            deleted_paths.append(local_path)
+    return changed_paths, deleted_paths, skipped
+
+
+def _git_item_signature(item):
+    """Return comparable Git file metadata."""
+
+    metadata = item.get("metadata") or {}
+    return {
+        "source_type": item.get("source_type") or "git",
+        "local_path": _manifest_local_path(item),
+        "extension": item.get("extension") or item.get("file_extension") or "",
+        "size": str(metadata.get("size") or ""),
+        "sha256": str(metadata.get("sha256") or ""),
+    }
 
 
 def _sync_feishu(command, workspace_path, emit):
@@ -477,6 +649,7 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
 
     synced = 0
     documents = []
+    sync_items = []
     max_workers = max(1, int(max_workers or 1))
     stats = {
         "scanned": len(doc_ids),
@@ -516,6 +689,7 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
             try:
                 item = future.result()
                 documents.append(item)
+                sync_items.append(_manifest_item_to_sync_item(item, target))
                 synced += 1
                 stats["documents"] += 1
                 stats["files"] += 1
@@ -562,6 +736,9 @@ def _sync_feishu_documents(config, target, headers, emit, max_workers=1):
         "synced": synced,
         "files": synced,
         "target_path": str(target),
+        "_sync_items": sync_items,
+        "_changed_paths": [item.local_path for item in sync_items],
+        "_deleted_paths": [],
         **stats,
     }
 
@@ -642,6 +819,7 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
     ) is True
     seen_tokens = set()
     manifest_items = []
+    deleted_paths = []
     pending_items = []
     stats = {
         "folders": 0,
@@ -707,11 +885,13 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
                 child,
                 previous_item,
                 current_dir,
+                root_dir,
             ):
                 item = _feishu_manifest_item_from_previous(
                     child,
                     previous_item,
                     current_dir,
+                    root_dir,
                 )
                 manifest_items.append(item)
                 stats["skipped"] += 1
@@ -731,7 +911,7 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
                     file=item.get("file"),
                 )
                 continue
-            pending_items.append((child, current_dir))
+            pending_items.append((child, current_dir, previous_item))
 
     scan(folder_token, root_dir, 1)
     emit_scan_progress(force=True)
@@ -759,10 +939,12 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
                 _sync_feishu_drive_item,
                 child,
                 current_dir,
+                root_dir,
+                previous_item,
                 headers,
                 emit,
             ): child
-            for child, current_dir in pending_items
+            for child, current_dir, previous_item in pending_items
         }
         for future in as_completed(item_futures):
             child = item_futures[future]
@@ -825,8 +1007,11 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
         deleted_item = {**item, "status": "deleted"}
         manifest_items.append(deleted_item)
         stats["deleted"] += 1
-        if delete_missing and item.get("file"):
-            _delete_manifest_file(target, item.get("file"))
+        local_path = _manifest_local_path(item)
+        if local_path:
+            deleted_paths.append(local_path)
+        if delete_missing and local_path:
+            _delete_manifest_file(target, local_path)
     _write_manifest(
         target,
         {
@@ -873,10 +1058,27 @@ def _sync_feishu_folder(config, target, headers, emit, max_workers=1):
         "documents": stats["documents"],
         "by_extension": stats["by_extension"],
         "by_type": stats["by_type"],
+        "_sync_items": [
+            _manifest_item_to_sync_item(item, target)
+            for item in manifest_items
+        ],
+        "_changed_paths": [
+            _manifest_local_path(item)
+            for item in manifest_items
+            if item.get("status") not in {"deleted", "skipped"}
+        ],
+        "_deleted_paths": deleted_paths,
     }
 
 
-def _sync_feishu_drive_item(item, target_dir, headers, emit):
+def _sync_feishu_drive_item(
+    item,
+    target_dir,
+    root_dir,
+    previous_item,
+    headers,
+    emit,
+):
     """Synchronize one Feishu Drive file item."""
 
     token = _feishu_item_token(item)
@@ -896,28 +1098,40 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
         )
         exported = _export_feishu_document(token, item_type, headers)
         filename = _export_filename(exported, name or token, item_type)
-        (target_dir / filename).write_bytes(exported["content"])
+        path = _feishu_target_file_path(
+            target_dir,
+            root_dir,
+            filename,
+            token,
+            previous_item,
+        )
+        path.write_bytes(exported["content"])
+        local_path = relative_path(root_dir, path)
         _emit(
             emit,
             "item_done",
             "done",
-            f"Exported Feishu {name} to {filename}.",
+            f"Exported Feishu {name} to {local_path}.",
             category="document",
             kind="document",
             token=token,
             item_type=item_type,
             item_name=exported.get("file_name") or name or token,
-            file=str((target_dir / filename).name),
+            file=local_path,
             file_extension=exported.get("file_extension") or "",
         )
         return {
             "kind": "document",
             "token": token,
+            "source_id": f"feishu:token:{token}",
+            "source_path": name or token,
             "name": exported.get("file_name") or name or token,
             "type": item_type,
-            "file": str((target_dir / filename).name),
+            "file": local_path,
+            "local_path": local_path,
             "file_extension": exported.get("file_extension") or "",
             "metadata": _feishu_item_sync_metadata(item),
+            "remote": {"token": token, "type": item_type},
         }
 
     _emit(
@@ -933,26 +1147,38 @@ def _sync_feishu_drive_item(item, target_dir, headers, emit):
     )
     filename = _safe_filename(name or token)
     raw = _download_feishu_file(token, headers)
-    (target_dir / filename).write_bytes(raw)
+    path = _feishu_target_file_path(
+        target_dir,
+        root_dir,
+        filename,
+        token,
+        previous_item,
+    )
+    path.write_bytes(raw)
+    local_path = relative_path(root_dir, path)
     _emit(
         emit,
         "item_done",
         "done",
-        f"Downloaded Feishu {name} to {filename}.",
+        f"Downloaded Feishu {name} to {local_path}.",
         category="file",
         kind="file",
         token=token,
         item_type=item_type,
         item_name=name,
-        file=str((target_dir / filename).name),
+        file=local_path,
     )
     return {
         "kind": "file",
         "token": token,
+        "source_id": f"feishu:token:{token}",
+        "source_path": name or token,
         "name": name,
         "type": item_type,
-        "file": str((target_dir / filename).name),
+        "file": local_path,
+        "local_path": local_path,
         "metadata": _feishu_item_sync_metadata(item),
+        "remote": {"token": token, "type": item_type},
     }
 
 
@@ -1465,7 +1691,7 @@ def _feishu_manifest_signature(item):
     return signature if any(key != "type" for key in signature) else {}
 
 
-def _feishu_item_unchanged(item, previous_item, target_dir):
+def _feishu_item_unchanged(item, previous_item, target_dir, root_dir=None):
     """Return whether a remote Feishu item can be skipped."""
 
     if not previous_item or previous_item.get("status") == "deleted":
@@ -1474,27 +1700,76 @@ def _feishu_item_unchanged(item, previous_item, target_dir):
     previous_signature = _feishu_manifest_signature(previous_item)
     if not signature or signature != previous_signature:
         return False
-    previous_file = previous_item.get("file")
+    previous_file = _manifest_local_path(previous_item)
     if not previous_file:
         return False
-    return (target_dir / previous_file).exists()
+    paths = _feishu_previous_file_paths(previous_file, target_dir, root_dir)
+    return any(path.exists() for path in paths)
 
 
-def _feishu_manifest_item_from_previous(item, previous_item, target_dir):
+def _feishu_previous_file_paths(previous_file, target_dir, root_dir=None):
+    """Return candidate local paths for a previous Feishu manifest item."""
+
+    previous_path = Path(str(previous_file))
+    if previous_path.is_absolute():
+        return [previous_path]
+    paths = []
+    if root_dir is not None:
+        paths.append(Path(root_dir) / previous_path)
+    paths.append(Path(target_dir) / previous_path.name)
+    paths.append(Path(target_dir) / previous_path)
+    return list(dict.fromkeys(paths))
+
+
+def _feishu_target_file_path(
+    target_dir,
+    root_dir,
+    filename,
+    token,
+    previous_item=None,
+):
+    """Return a stable local path for a Feishu file download."""
+
+    previous_file = _manifest_local_path(previous_item or {})
+    if previous_file:
+        for path in _feishu_previous_file_paths(
+            previous_file,
+            target_dir,
+            root_dir,
+        ):
+            try:
+                path.resolve().relative_to(Path(root_dir).resolve())
+            except ValueError:
+                continue
+            if path.exists():
+                return path
+    return unique_child_path(target_dir, filename, token)
+
+
+def _feishu_manifest_item_from_previous(
+    item,
+    previous_item,
+    target_dir,
+    root_dir=None,
+):
     """Return manifest metadata for an unchanged Feishu item."""
 
     token = _feishu_item_token(item)
     name = _feishu_item_name(item)
     item_type = _feishu_item_type(item)
-    previous_file = previous_item.get("file")
+    previous_file = _manifest_local_path(previous_item)
     return {
         **previous_item,
         "kind": previous_item.get("kind") or "document",
         "token": token,
+        "source_id": f"feishu:token:{token}",
+        "source_path": previous_item.get("source_path") or name,
         "name": name,
         "type": item_type,
         "file": previous_file,
+        "local_path": previous_file,
         "metadata": _feishu_item_sync_metadata(item),
+        "remote": {"token": token, "type": item_type},
         "status": "skipped",
     }
 
@@ -1502,13 +1777,38 @@ def _feishu_manifest_item_from_previous(item, previous_item, target_dir):
 def _manifest_items_by_token(manifest):
     """Return manifest items keyed by token."""
 
-    items = manifest.get("items") if isinstance(manifest, dict) else []
-    result = {}
-    for item in items or []:
-        token = item.get("token")
-        if token:
-            result[token] = item
-    return result
+    return manifest_store.manifest_items_by_token(manifest)
+
+
+def _manifest_local_path(item):
+    """Return current or legacy local path for one manifest item."""
+
+    return item.get("local_path") or item.get("file") or ""
+
+
+def _manifest_item_to_sync_item(item, target):
+    """Return a unified sync item from current or legacy manifest data."""
+
+    local_path = _manifest_local_path(item)
+    token = item.get("token") or (item.get("remote") or {}).get("token") or ""
+    source_id = item.get("source_id") or (
+        f"feishu:token:{token}" if token else local_path
+    )
+    path = Path(local_path)
+    extension = item.get("file_extension") or item.get("extension")
+    extension = extension or path.suffix.lower().lstrip(".")
+    return manifest_store.SyncItem(
+        source_id=source_id,
+        source_type=item.get("source_type") or "feishu",
+        source_path=item.get("source_path") or item.get("name") or local_path,
+        local_path=local_path,
+        name=item.get("name") or path.name,
+        kind=item.get("kind") or item.get("type") or "file",
+        extension=extension,
+        status=item.get("status") or "synced",
+        metadata=item.get("metadata") or {},
+        remote=item.get("remote") or {"token": token, "type": item.get("type")},
+    )
 
 
 def _increment_counter(counter, key):
@@ -1521,7 +1821,9 @@ def _increment_counter(counter, key):
 def _manifest_item_extension(item):
     """Return a normalized file extension for a manifest item."""
 
-    extension = str(item.get("file_extension") or "").strip().lower()
+    extension = str(
+        item.get("file_extension") or item.get("extension") or ""
+    ).strip().lower()
     if extension:
         return extension.lstrip(".") or "unknown"
     file_name = str(item.get("file") or item.get("name") or "")
@@ -1642,8 +1944,7 @@ def _raise_feishu_business_error(payload):
 def _safe_filename(value):
     """Return a filesystem-safe filename stem."""
 
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip())
-    return cleaned.strip("-") or "document"
+    return safe_filename(value)
 
 
 def _compact_json(value):
@@ -1661,25 +1962,13 @@ def _compact_json(value):
 def _read_manifest(target):
     """Read datasource sync manifest if it exists."""
 
-    path = target / "manifest.json"
-    if not path.is_file():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return manifest_store.read_manifest(target)
 
 
 def _write_manifest(target, payload):
     """Write datasource sync manifest."""
 
-    manifest_path = target / "manifest.json"
-    tmp_path = target / "manifest.json.tmp"
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    tmp_path.replace(manifest_path)
+    manifest_store.write_manifest(target, payload)
 
 
 def _count_files(path):
@@ -1687,7 +1976,7 @@ def _count_files(path):
 
     count = 0
     for item in path.rglob("*"):
-        if ".git" in item.parts:
+        if _is_generated_datasource_path(path, item):
             continue
         if item.is_file():
             count += 1
@@ -1699,10 +1988,28 @@ def _count_file_extensions(path):
 
     counts = {}
     for item in path.rglob("*"):
-        if ".git" in item.parts or not item.is_file():
+        if _is_generated_datasource_path(path, item) or not item.is_file():
             continue
         _increment_counter(counts, item.suffix.lower().lstrip("."))
     return counts
+
+
+def _is_generated_datasource_path(root, path):
+    """Return whether a path is generated datasource metadata."""
+
+    try:
+        parts = Path(path).relative_to(root).parts
+    except ValueError:
+        parts = Path(path).parts
+    if ".git" in parts:
+        return True
+    if any(part.endswith(".sourcelens") for part in parts):
+        return True
+    return Path(path).name in {
+        "manifest.json",
+        "manifest.json.tmp",
+        ".sourcelens-datasource.json",
+    }
 
 
 def _emit(emit, step, status, message, **extra):

@@ -688,6 +688,150 @@
       </section>
     </div>
 
+    <div v-else-if="wizardStep === 5" class="space-y-5">
+      <p class="text-sm text-ink-500">
+        {{ t('lensAdmin.datasourceWizard.step5Desc') }}
+      </p>
+      <section class="space-y-4 rounded-md border border-line p-3">
+        <div>
+          <h3 class="text-sm font-semibold text-ink-900">
+            {{ t('lensAdmin.datasourceWizard.conversionTitle') }}
+          </h3>
+          <p class="mt-1 text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.conversionHint') }}
+          </p>
+        </div>
+        <label class="flex items-start gap-3 text-sm text-ink-700">
+          <input
+            v-model="form.conversion_document"
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+          />
+          <span>
+            <span class="font-medium">
+              {{ t('lensAdmin.datasourceWizard.convertDocuments') }}
+            </span>
+            <span class="block text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.convertDocumentsHint') }}
+            </span>
+          </span>
+        </label>
+        <FormRow
+          v-if="form.conversion_document"
+          :label="t('lensAdmin.fields.documentModel')"
+        >
+          <select
+            v-model="form.conversion_document_model_ref"
+            class="form-input"
+          >
+            <option value="">
+              {{ t('lensAdmin.placeholders.noModel') }}
+            </option>
+            <option
+              v-for="config in llmConfigOptions"
+              :key="config.uuid || config.id"
+              :value="config.uuid || config.id"
+            >
+              {{ formatLLMConfigLabel(config) }}
+            </option>
+          </select>
+          <p class="mt-1 text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.documentModelHint') }}
+          </p>
+        </FormRow>
+        <label class="flex items-start gap-3 text-sm text-ink-700">
+          <input
+            v-model="form.conversion_image"
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+          />
+          <span>
+            <span class="font-medium">
+              {{ t('lensAdmin.datasourceWizard.convertImages') }}
+            </span>
+            <span class="block text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.convertImagesHint') }}
+            </span>
+          </span>
+        </label>
+        <FormRow
+          v-if="form.conversion_image"
+          :label="t('lensAdmin.fields.visionModel')"
+        >
+          <select v-model="form.conversion_vision_model_ref" class="form-input">
+            <option value="">
+              {{ t('lensAdmin.placeholders.noModel') }}
+            </option>
+            <option
+              v-for="config in llmConfigOptions"
+              :key="config.uuid || config.id"
+              :value="config.uuid || config.id"
+            >
+              {{ formatLLMConfigLabel(config) }}
+            </option>
+          </select>
+          <p class="mt-1 text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.visionModelHint') }}
+          </p>
+        </FormRow>
+        <label
+          class="flex items-start gap-3 text-sm"
+          :class="form.conversion_document ? 'text-ink-700' : 'text-ink-400'"
+        >
+          <input
+            v-model="form.conversion_embedded_image"
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500 disabled:opacity-50"
+            :disabled="!form.conversion_document"
+          />
+          <span>
+            <span class="font-medium">
+              {{ t('lensAdmin.datasourceWizard.convertEmbeddedImages') }}
+            </span>
+            <span class="block text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.convertEmbeddedImagesHint') }}
+            </span>
+          </span>
+        </label>
+      </section>
+      <section class="space-y-4 rounded-md border border-line p-3">
+        <div>
+          <h3 class="text-sm font-semibold text-ink-900">
+            {{ t('lensAdmin.datasourceWizard.conversionLimitsTitle') }}
+          </h3>
+          <p class="mt-1 text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.conversionLimitsHint') }}
+          </p>
+        </div>
+        <div class="grid gap-4 md:grid-cols-3">
+          <FormRow :label="t('lensAdmin.fields.maxFileSizeMb')">
+            <input
+              v-model.number="form.conversion_max_file_size_mb"
+              class="form-input"
+              min="1"
+              type="number"
+            />
+          </FormRow>
+          <FormRow :label="t('lensAdmin.fields.maxPages')">
+            <input
+              v-model.number="form.conversion_max_pages"
+              class="form-input"
+              min="1"
+              type="number"
+            />
+          </FormRow>
+          <FormRow :label="t('lensAdmin.fields.maxImages')">
+            <input
+              v-model.number="form.conversion_max_images"
+              class="form-input"
+              min="1"
+              type="number"
+            />
+          </FormRow>
+        </div>
+      </section>
+    </div>
+
     <p v-if="formError" class="mt-4 text-sm text-danger-700">
       {{ formError }}
     </p>
@@ -769,6 +913,8 @@ import { useI18n } from 'vue-i18n'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 
+import { formatLLMConfigLabel } from './adminHelpers'
+
 const props = defineProps({
   show: Boolean,
   mode: { type: String, default: 'create' },
@@ -776,6 +922,7 @@ const props = defineProps({
   config: { type: Object, required: true },
   lensnodes: { type: Array, default: () => [] },
   credentials: { type: Array, default: () => [] },
+  llmConfigOptions: { type: Array, default: () => [] },
   syncIntervalSeconds: { type: Number, default: 3600 },
   syncPolicyMode: { type: String, default: 'interval' },
   syncCron: { type: String, default: '0 2 * * *' },
@@ -804,7 +951,7 @@ const emit = defineEmits([
 ])
 
 const { t } = useI18n()
-const WIZARD_STEP_COUNT = 4
+const WIZARD_STEP_COUNT = 5
 const wizardStep = ref(1)
 const creatingDirectoryParent = ref(null)
 const expandedDirectories = ref(new Set())
@@ -906,7 +1053,8 @@ const wizardStepsMeta = computed(() => [
   { key: 'basic', title: t('lensAdmin.datasourceWizard.step1Title') },
   { key: 'node', title: t('lensAdmin.datasourceWizard.step2Title') },
   { key: 'connection', title: t('lensAdmin.datasourceWizard.step3Title') },
-  { key: 'sync', title: t('lensAdmin.datasourceWizard.step4Title') }
+  { key: 'sync', title: t('lensAdmin.datasourceWizard.step4Title') },
+  { key: 'conversion', title: t('lensAdmin.datasourceWizard.step5Title') }
 ])
 
 const onlineLensNodes = computed(() =>
@@ -1181,6 +1329,25 @@ watch(
     creatingDirectoryParent.value = null
     expandedDirectories.value = new Set()
     newDirectoryName.value = ''
+  }
+)
+
+watch(
+  () => props.form.conversion_document,
+  (value) => {
+    if (!value) {
+      props.form.conversion_embedded_image = false
+      props.form.conversion_document_model_ref = ''
+    }
+  }
+)
+
+watch(
+  () => props.form.conversion_image,
+  (value) => {
+    if (!value) {
+      props.form.conversion_vision_model_ref = ''
+    }
   }
 )
 

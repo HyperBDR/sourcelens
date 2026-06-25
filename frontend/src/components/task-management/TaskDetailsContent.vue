@@ -489,6 +489,7 @@ const conversionStats = computed(() => {
   if (!isDatasourceTask.value) return []
   const summary = conversionSummary.value
   if (!Object.keys(summary).length) return []
+  const cost = summary.cost || {}
   return [
     {
       label: t('taskManagement.list.convertedItems'),
@@ -505,6 +506,30 @@ const conversionStats = computed(() => {
     {
       label: t('taskManagement.list.markdownItems'),
       value: summary.markdown ?? summary.markdown_files ?? 0
+    },
+    {
+      label: t('taskManagement.list.xlsxItems'),
+      value: summary.xlsx_files ?? 0
+    },
+    {
+      label: t('taskManagement.list.sheetItems'),
+      value: summary.sheets ?? 0
+    },
+    {
+      label: t('taskManagement.list.rowItems'),
+      value: summary.rows ?? 0
+    },
+    {
+      label: t('taskManagement.list.modelCalls'),
+      value: cost.model_calls ?? 0
+    },
+    {
+      label: t('taskManagement.list.estimatedTokens'),
+      value: summary.estimated_tokens ?? cost.estimated_tokens ?? 0
+    },
+    {
+      label: t('taskManagement.list.totalTokens'),
+      value: cost.total_tokens ?? 0
     }
   ]
 })

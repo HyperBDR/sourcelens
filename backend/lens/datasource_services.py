@@ -7,12 +7,18 @@ from channels.layers import get_channel_layer
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import DataSource, DataSourceCredential, LensNode
+from .models import DataSource, DataSourceCredential, GlobalSetting, LensNode
 from .services import lensnode_group_name
 
 WORKSPACE_ROOT = "/workspace"
 DATASOURCE_SYNC_TIMEOUT_SETTING = "lens.datasource_sync.timeout_s"
 DATASOURCE_SYNC_WORKERS_SETTING = "lens.datasource_sync.workers"
+DATASOURCE_CONVERSION_VISION_MODEL_SETTING = (
+    "lens.datasource_conversion.vision_model_ref"
+)
+DATASOURCE_CONVERSION_DOCUMENT_MODEL_SETTING = (
+    "lens.datasource_conversion.document_model_ref"
+)
 DEFAULT_DATASOURCE_SYNC_TIMEOUT_S = 21600
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 DATASOURCE_RESULT_POLL_S = 0.5
@@ -208,6 +214,8 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
     )
     validate_datasource_lensnode(datasource.lensnode)
     config = datasource_runtime_config(datasource)
+    sync_policy = datasource.sync_policy or {}
+    conversion = datasource_conversion_policy(sync_policy)
     request_id = uuid.uuid4().hex
     _send_lensnode_command(
         datasource.lensnode,
@@ -219,9 +227,14 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
             "source_type": datasource.source_type,
             "name": datasource.name,
             "config": config,
+            "conversion": conversion,
+            "sync_policy": sync_policy,
             "target_path": datasource.target_path,
             "trigger": trigger,
             "max_workers": get_datasource_sync_max_workers(),
+            "excluded_datasource_roots": excluded_datasource_roots(
+                datasource
+            ),
         },
     )
     cache.set(
@@ -230,6 +243,71 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
         timeout=get_datasource_sync_timeout_s(),
     )
     return request_id
+
+
+def datasource_conversion_policy(sync_policy):
+    """Return datasource conversion policy with global defaults applied."""
+
+    conversion = dict((sync_policy or {}).get("conversion") or {})
+    defaults = datasource_conversion_defaults()
+    for key, value in defaults.items():
+        if value and not conversion.get(key):
+            conversion[key] = value
+    return conversion
+
+
+def datasource_conversion_defaults():
+    """Return global datasource conversion defaults."""
+
+    keys = [
+        DATASOURCE_CONVERSION_VISION_MODEL_SETTING,
+        DATASOURCE_CONVERSION_DOCUMENT_MODEL_SETTING,
+    ]
+    rows = {
+        row.key: row.value
+        for row in GlobalSetting.objects.filter(key__in=keys)
+    }
+    return {
+        "vision_model_ref": rows.get(
+            DATASOURCE_CONVERSION_VISION_MODEL_SETTING
+        )
+        or "",
+        "document_model_ref": rows.get(
+            DATASOURCE_CONVERSION_DOCUMENT_MODEL_SETTING
+        )
+        or "",
+    }
+
+
+def excluded_datasource_roots(datasource):
+    """Return other datasource roots under this datasource root."""
+
+    root = normalize_workspace_target_path(
+        datasource.target_path,
+        datasource.lensnode.workspace_path,
+    )
+    rows = DataSource.objects.filter(lensnode=datasource.lensnode).exclude(
+        pk=datasource.pk
+    )
+    roots = []
+    root_path = PurePosixPath(root)
+    for other in rows:
+        if not other.target_path:
+            continue
+        other_path = PurePosixPath(
+            normalize_workspace_target_path(
+                other.target_path,
+                datasource.lensnode.workspace_path,
+            )
+        )
+        if other_path == root_path:
+            continue
+        try:
+            other_path.relative_to(root_path)
+        except ValueError:
+            continue
+        roots.append(str(other_path))
+    return roots
 
 
 def datasource_runtime_config(datasource):

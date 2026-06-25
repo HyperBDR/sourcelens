@@ -24,10 +24,16 @@
             :class="widthClass"
             @click.stop
           >
-            <div class="flex flex-shrink-0 items-center justify-between border-b border-line px-6 py-4">
+            <div
+              class="flex flex-shrink-0 items-center justify-between border-b border-line px-6 py-4"
+            >
               <div class="min-w-0 flex-1">
-                <h2 class="truncate text-base font-semibold text-ink-900">{{ title }}</h2>
-                <p v-if="subtitle" class="mt-0.5 truncate text-sm text-ink-500">{{ subtitle }}</p>
+                <h2 class="truncate text-base font-semibold text-ink-900">
+                  {{ title }}
+                </h2>
+                <p v-if="subtitle" class="mt-0.5 truncate text-sm text-ink-500">
+                  {{ subtitle }}
+                </p>
               </div>
               <div
                 v-if="$slots.actions"
@@ -40,10 +46,23 @@
                 class="ml-3 flex-shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-ink-600 focus:outline-none"
                 @click="$emit('close')"
               >
-                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  class="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
+            </div>
+            <div v-if="$slots.tabs" class="flex-shrink-0 bg-surface">
+              <slot name="tabs" />
             </div>
             <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               <slot />
@@ -75,7 +94,13 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const widthClass = computed(() => {
-  const map = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl' }
+  const map = {
+    sm: 'max-w-sm',
+    md: 'max-w-md',
+    lg: 'max-w-lg',
+    xl: 'max-w-xl',
+    '2xl': 'max-w-2xl'
+  }
   return map[props.width] ?? 'max-w-2xl'
 })
 

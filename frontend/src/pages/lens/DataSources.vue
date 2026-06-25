@@ -253,6 +253,7 @@
         :config="datasourceConfig"
         :lensnodes="lensnodes"
         :credentials="credentials"
+        :llm-config-options="llmConfigOptions"
         v-model:sync-interval-seconds="syncIntervalSeconds"
         v-model:sync-policy-mode="syncPolicyMode"
         v-model:sync-cron="syncCron"
@@ -288,6 +289,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { extractErrorMessage } from '@/utils/api'
+import { llmAdminApi } from '@/admin/api/llmAdmin'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   cancelDataSourceSync,
@@ -338,6 +340,7 @@ const showDatasourceDetailDrawer = ref(false)
 const dataSources = ref([])
 const lensnodes = ref([])
 const credentials = ref([])
+const llmConfigOptions = ref([])
 const selectedDataSource = ref(null)
 
 const datasourceConfig = ref({})
@@ -436,14 +439,17 @@ async function load() {
   loading.value = true
   formError.value = ''
   try {
-    const [dataSourceRows, lensnodeRows, credentialRows] = await Promise.all([
-      listDataSources(),
-      listLensNodes(),
-      listCredentials()
-    ])
+    const [dataSourceRows, lensnodeRows, credentialRows, llmConfigRows] =
+      await Promise.all([
+        listDataSources(),
+        listLensNodes(),
+        listCredentials(),
+        llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
+      ])
     dataSources.value = normalizeList(dataSourceRows)
     lensnodes.value = normalizeList(lensnodeRows)
     credentials.value = normalizeList(credentialRows)
+    llmConfigOptions.value = normalizeList(llmConfigRows)
     const existing = dataSources.value.find(
       (row) => row.uuid === selectedDataSource.value?.uuid
     )
@@ -497,6 +503,14 @@ function defaultForm() {
     target_path: '',
     credential_uuid: '',
     credential_configured: false,
+    conversion_document: true,
+    conversion_document_model_ref: '',
+    conversion_image: false,
+    conversion_embedded_image: false,
+    conversion_vision_model_ref: '',
+    conversion_max_images: 100,
+    conversion_max_file_size_mb: 100,
+    conversion_max_pages: 500,
     status: 'active'
   }
   handleDatasourceTypeChange(seed)
@@ -519,6 +533,19 @@ function formFromRow(row) {
     target_path: row.target_path || '',
     credential_uuid: row.credential || '',
     credential_configured: !!row.credential_configured,
+    conversion_document: row.sync_policy?.conversion?.document === true,
+    conversion_document_model_ref:
+      row.sync_policy?.conversion?.document_model_ref || '',
+    conversion_image: row.sync_policy?.conversion?.image === true,
+    conversion_embedded_image:
+      row.sync_policy?.conversion?.embedded_image === true,
+    conversion_vision_model_ref:
+      row.sync_policy?.conversion?.vision_model_ref || '',
+    conversion_max_images:
+      Number(row.sync_policy?.conversion?.max_images) || 100,
+    conversion_max_file_size_mb:
+      Number(row.sync_policy?.conversion?.max_file_size_mb) || 100,
+    conversion_max_pages: Number(row.sync_policy?.conversion?.max_pages) || 500,
     status: row.status || 'active'
   }
 }
@@ -661,16 +688,37 @@ function buildDatasourceConfig() {
 }
 
 function buildDatasourceSyncPolicy() {
+  const conversion = {
+    document: form.value.conversion_document === true,
+    image: form.value.conversion_image === true,
+    embedded_image:
+      form.value.conversion_document === true &&
+      form.value.conversion_embedded_image === true,
+    max_images: Math.max(1, Number(form.value.conversion_max_images) || 100),
+    max_file_size_mb: Math.max(
+      1,
+      Number(form.value.conversion_max_file_size_mb) || 100
+    ),
+    max_pages: Math.max(1, Number(form.value.conversion_max_pages) || 500)
+  }
+  if (conversion.document && form.value.conversion_document_model_ref) {
+    conversion.document_model_ref = form.value.conversion_document_model_ref
+  }
+  if (conversion.image && form.value.conversion_vision_model_ref) {
+    conversion.vision_model_ref = form.value.conversion_vision_model_ref
+  }
   if (syncPolicyMode.value === 'crontab') {
     return {
       mode: 'crontab',
       cron: String(syncCron.value || '').trim(),
-      timezone: String(syncTimezone.value || '').trim() || 'UTC'
+      timezone: String(syncTimezone.value || '').trim() || 'UTC',
+      conversion
     }
   }
   return {
     mode: 'interval',
-    interval_seconds: Math.max(1, Number(syncIntervalSeconds.value) || 3600)
+    interval_seconds: Math.max(1, Number(syncIntervalSeconds.value) || 3600),
+    conversion
   }
 }
 

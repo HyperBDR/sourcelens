@@ -258,8 +258,21 @@ def complete_datasource_sync_task(task_id, result):
         "target_path": result.get("target_path")
         or (datasource.target_path if datasource else ""),
     }
+    conversion_summary = result.get("conversion_summary") or {}
+    warnings = list(result.get("warnings") or [])
+    warnings.extend(conversion_summary.get("warnings") or [])
+    if conversion_summary.get("failed"):
+        warnings.append("CONVERSION_PARTIAL_FAILED")
+    if conversion_summary:
+        metrics["conversion_summary"] = conversion_summary
+    if warnings:
+        metrics["warnings"] = list(dict.fromkeys(warnings))
     if task.status in TaskStatus.get_completed_statuses():
         summary_update = {"sync_summary": metrics}
+        if conversion_summary:
+            summary_update["conversion_summary"] = conversion_summary
+        if warnings:
+            summary_update["warnings"] = list(dict.fromkeys(warnings))
         if success and not task.result:
             return TaskTracker.update_task_status(
                 task_id,
@@ -325,6 +338,10 @@ def complete_datasource_sync_task(task_id, result):
             progress_percent=100,
         )
         completion_metadata["sync_summary"] = metrics
+        if conversion_summary:
+            completion_metadata["conversion_summary"] = conversion_summary
+        if warnings:
+            completion_metadata["warnings"] = list(dict.fromkeys(warnings))
         return TaskTracker.update_task_status(
             task_id,
             TaskStatus.SUCCESS,

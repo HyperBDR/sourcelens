@@ -11,6 +11,8 @@ dependencies = [
     "deepagents>=0.2.0",
     "httpx>=0.28.0",
     "langchain-core==1.4.0",
+    "markitdown[all]>=0.1.2",
+    "openpyxl>=3.1.0",
     "sentry-sdk>=1.40.0",
     "websockets>=15.0",
 ]

@@ -431,6 +431,11 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
                     "documents": content.get("documents") or 0,
                     "by_extension": content.get("by_extension") or {},
                     "by_type": content.get("by_type") or {},
+                    "conversion_summary": content.get(
+                        "conversion_summary"
+                    )
+                    or {},
+                    "warnings": content.get("warnings") or [],
                     "target_path": content.get("target_path") or "",
                     "error": content.get("error") or "",
                 },

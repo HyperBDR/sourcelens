@@ -86,10 +86,34 @@
                       <td class="table-cell">
                         <div class="flex w-full items-center justify-end gap-3">
                           <input
+                            v-if="setting.type === 'number'"
                             v-model.number="settingsForm[setting.key]"
                             type="number"
                             min="1"
                             class="w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                          />
+                          <select
+                            v-else-if="setting.type === 'model_ref'"
+                            v-model="settingsForm[setting.key]"
+                            class="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                          >
+                            <option value="">
+                              {{ t('lensAdmin.placeholders.noModel') }}
+                            </option>
+                            <option
+                              v-for="config in llmConfigOptions"
+                              :key="config.uuid || config.id"
+                              :value="config.uuid || config.id"
+                            >
+                              {{ formatLLMConfigLabel(config) }}
+                            </option>
+                          </select>
+                          <input
+                            v-else
+                            v-model="settingsForm[setting.key]"
+                            type="text"
+                            class="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            :placeholder="setting.placeholder"
                           />
                           <span class="w-16 text-sm text-ink-500">
                             {{ setting.unit }}
@@ -136,6 +160,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { llmAdminApi } from '@/admin/api/llmAdmin'
 import {
   createGlobalSetting,
   listGlobalSettings,
@@ -147,7 +172,7 @@ import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 
-import { normalizeList } from './adminHelpers'
+import { formatLLMConfigLabel, normalizeList } from './adminHelpers'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
@@ -156,10 +181,13 @@ const loading = ref(false)
 const saving = ref(false)
 const formError = ref('')
 const globalSettings = ref([])
+const llmConfigOptions = ref([])
 
 const defaultSettings = {
   'lens.datasource_sync.timeout_s': 360,
-  'lens.datasource_sync.workers': 4
+  'lens.datasource_sync.workers': 4,
+  'lens.datasource_conversion.vision_model_ref': '',
+  'lens.datasource_conversion.document_model_ref': ''
 }
 
 const settingsForm = ref({ ...defaultSettings })
@@ -183,6 +211,22 @@ const settingDefinitions = computed(() => {
       description: t('lensAdmin.resourceSettings.syncWorkersDesc'),
       type: 'number',
       unit: t('lensAdmin.resourceSettings.workersUnit')
+    },
+    {
+      key: 'lens.datasource_conversion.vision_model_ref',
+      group: 'datasource',
+      label: t('lensAdmin.resourceSettings.visionModelTitle'),
+      description: t('lensAdmin.resourceSettings.visionModelDesc'),
+      type: 'model_ref',
+      unit: ''
+    },
+    {
+      key: 'lens.datasource_conversion.document_model_ref',
+      group: 'datasource',
+      label: t('lensAdmin.resourceSettings.documentModelTitle'),
+      description: t('lensAdmin.resourceSettings.documentModelDesc'),
+      type: 'model_ref',
+      unit: ''
     }
   ]
 })
@@ -203,8 +247,12 @@ async function load() {
   loading.value = true
   formError.value = ''
   try {
-    const settingRows = await listGlobalSettings()
+    const [settingRows, llmRows] = await Promise.all([
+      listGlobalSettings(),
+      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
+    ])
     globalSettings.value = normalizeList(settingRows)
+    llmConfigOptions.value = normalizeList(llmRows)
     hydrateSettingsForm()
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
@@ -223,12 +271,15 @@ function hydrateSettingsForm() {
       if (setting.value === null || setting.value === undefined) {
         return
       }
-      const value = Number(setting.value)
-      if (!Number.isFinite(value) || value <= 0) {
+      if (['text', 'model_ref'].includes(definition?.type)) {
+        next[setting.key] = String(setting.value || '')
         return
       }
-      next[setting.key] =
-        definition?.storage === 'seconds' ? Math.ceil(value / 60) : value
+      const value = Number(setting.value)
+      if (Number.isFinite(value) && value > 0) {
+        next[setting.key] =
+          definition?.storage === 'seconds' ? Math.ceil(value / 60) : value
+      }
     }
   })
   settingsForm.value = { ...next }
@@ -245,11 +296,10 @@ async function saveSettings() {
   formError.value = ''
   try {
     for (const setting of settingDefinitions.value) {
-      const formValue = Math.max(
-        1,
-        Math.round(Number(settingsForm.value[setting.key]) || 1)
-      )
-      const value = setting.storage === 'seconds' ? formValue * 60 : formValue
+      const value =
+        setting.type === 'text' || setting.type === 'model_ref'
+          ? String(settingsForm.value[setting.key] || '').trim()
+          : numericSettingValue(setting)
       const payload = {
         key: setting.key,
         value,
@@ -273,6 +323,14 @@ async function saveSettings() {
   } finally {
     saving.value = false
   }
+}
+
+function numericSettingValue(setting) {
+  const formValue = Math.max(
+    1,
+    Math.round(Number(settingsForm.value[setting.key]) || 1)
+  )
+  return setting.storage === 'seconds' ? formValue * 60 : formValue
 }
 
 onMounted(load)

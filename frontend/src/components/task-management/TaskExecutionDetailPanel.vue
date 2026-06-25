@@ -233,7 +233,7 @@
             <!-- Detailed steps / execution logs / traceback -->
             <div
               v-show="activeDetailTab === 'details'"
-              class="border-t border-gray-200 pt-6"
+              class="border-gray-200"
             >
               <BaseLoading v-if="detailsLoading" />
               <TaskDetailsContent v-else :task="task" />

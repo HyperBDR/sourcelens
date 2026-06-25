@@ -408,9 +408,14 @@ class LensNodeClient:
             loop.call_soon_threadsafe(send_queue.put_nowait, payload)
 
         try:
+            command = {
+                **message,
+                "ai_gateway_url": self.config.ai_gateway_url,
+                "lensnode_token": self.config.token,
+            }
             result = await asyncio.to_thread(
                 sync_datasource,
-                message,
+                command,
                 self.config.workspace_path,
                 emit,
             )

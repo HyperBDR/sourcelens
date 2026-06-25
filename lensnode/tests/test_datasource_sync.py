@@ -20,6 +20,7 @@ from lensnode.datasource_sync import (
     _sync_git_submodules,
     _sync_feishu_folder,
 )
+from lensnode.path_rules import source_sha256
 
 
 def test_datasource_sync_workers_defaults_to_four():
@@ -139,6 +140,81 @@ def test_sync_git_update_uses_shallow_fetch(tmp_path, monkeypatch):
     ]
     assert calls[1][0] == ["checkout", "main"]
     assert calls[2][0] == ["reset", "--hard", "origin/main"]
+
+
+def test_sync_git_reports_manifest_delta(tmp_path, monkeypatch):
+    """Git sync reports changed, skipped, and deleted paths from manifest."""
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    unchanged = repo / "unchanged.md"
+    changed = repo / "changed.md"
+    unchanged.write_text("same", encoding="utf-8")
+    changed.write_text("new", encoding="utf-8")
+    (repo / "manifest.json").write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "source_id": (
+                            "git:https://github.com/example/repo.git:"
+                            "main:unchanged.md"
+                        ),
+                        "source_type": "git",
+                        "local_path": "unchanged.md",
+                        "extension": "md",
+                        "metadata": {
+                            "size": str(unchanged.stat().st_size),
+                            "sha256": source_sha256(unchanged),
+                        },
+                    },
+                    {
+                        "source_id": (
+                            "git:https://github.com/example/repo.git:"
+                            "main:deleted.md"
+                        ),
+                        "source_type": "git",
+                        "local_path": "deleted.md",
+                        "extension": "md",
+                        "metadata": {"size": "7", "sha256": "deleted"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def git_output(args, cwd=None):
+        del cwd
+        if args[:3] == ["remote", "get-url", "origin"]:
+            return "https://github.com/example/repo.git"
+        if args == ["rev-parse", "HEAD"]:
+            return "commit1"
+        return ""
+
+    monkeypatch.setattr("lensnode.datasource_sync._git_output", git_output)
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._run_git",
+        lambda *args, **kwargs: None,
+    )
+
+    result = _sync_git(
+        {
+            "config": {
+                "repo_url": "https://github.com/example/repo.git",
+                "branch": "main",
+            },
+            "target_path": str(repo),
+        },
+        str(tmp_path),
+        None,
+    )
+
+    assert result["changed"] == 1
+    assert result["skipped"] == 1
+    assert result["deleted"] == 1
+    assert result["_changed_paths"] == ["changed.md"]
+    assert result["_deleted_paths"] == ["deleted.md"]
 
 
 def test_sync_git_submodules_runs_when_declared(tmp_path, monkeypatch):
@@ -336,6 +412,131 @@ def test_sync_feishu_folder_skips_unchanged_item(tmp_path, monkeypatch):
     assert second["synced"] == 0
     assert second["skipped"] == 1
     assert manifest["items"][0]["status"] == "skipped"
+
+
+def test_sync_feishu_folder_skips_unchanged_nested_item(tmp_path, monkeypatch):
+    """Nested Feishu items use root-relative manifest paths when skipped."""
+
+    exports = []
+
+    def list_children(folder_token, headers):
+        del headers
+        if folder_token == "root":
+            return [
+                {
+                    "token": "child",
+                    "name": "Child Folder",
+                    "type": "folder",
+                }
+            ]
+        if folder_token == "child":
+            return [
+                {
+                    "token": "doc1",
+                    "name": "Nested Doc",
+                    "type": "docx",
+                    "modified_time": "100",
+                }
+            ]
+        return []
+
+    def export_document(doc_id, item_type, headers):
+        del item_type, headers
+        exports.append(doc_id)
+        return {
+            "file_name": "Nested Doc",
+            "file_extension": "docx",
+            "type": "docx",
+            "content": b"content",
+        }
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._list_feishu_folder_children",
+        list_children,
+    )
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._export_feishu_document",
+        export_document,
+    )
+
+    first = _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+    second = _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+
+    assert exports == ["doc1"]
+    assert first["synced"] == 1
+    assert second["synced"] == 0
+    assert second["skipped"] == 1
+
+
+def test_sync_feishu_folder_overwrites_changed_previous_file(
+    tmp_path,
+    monkeypatch,
+):
+    """Changed Feishu items keep the previous local path."""
+
+    modified_times = ["100", "200"]
+
+    def list_children(folder_token, headers):
+        del folder_token, headers
+        return [
+            {
+                "token": "doc1",
+                "name": "Root Doc",
+                "type": "docx",
+                "modified_time": modified_times[0],
+            }
+        ]
+
+    def export_document(doc_id, item_type, headers):
+        del item_type, headers
+        return {
+            "file_name": "Root Doc",
+            "file_extension": "docx",
+            "type": "docx",
+            "content": f"content {modified_times[0]}".encode("utf-8"),
+        }
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._list_feishu_folder_children",
+        list_children,
+    )
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._export_feishu_document",
+        export_document,
+    )
+
+    _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+    modified_times[0] = "200"
+    second = _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+
+    files = list(tmp_path.glob("Root Doc*.docx"))
+    assert second["changed"] == 1
+    assert len(files) == 1
+    assert files[0].read_bytes() == b"content 200"
 
 
 def test_feishu_export_filename_uses_original_extension():
