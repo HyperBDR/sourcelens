@@ -61,6 +61,7 @@ class SharedQAApiTests(TestCase):
             lensnode=self.lensnode,
             selected_task="qa",
             status=Assistant.Status.ACTIVE,
+            visibility=Assistant.Visibility.PUBLIC,
         )
         self.run = self._make_done_run()
 
