@@ -317,7 +317,7 @@ import {
   formatLLMConfigLabel,
   normalizeList
 } from './adminHelpers'
-import { formatDocIds } from './datasourceHelpers'
+import { formatDocIds, isDataSourceSyncing } from './datasourceHelpers'
 import { useShortDateTime } from './useShortDateTime'
 
 const props = defineProps({
@@ -340,7 +340,9 @@ const totalPages = ref(1)
 const pageSize = 10
 const processingRefreshTimer = ref(null)
 const processingRefreshInFlight = ref(false)
+const tasksLoadInFlight = ref(false)
 const taskRequestSeq = ref(0)
+const taskListContextKey = ref('')
 
 const expandedTaskId = ref(null)
 const expandedTask = ref(null)
@@ -392,17 +394,31 @@ function formatDate(val) {
   }
 }
 
-async function loadTasks() {
+function resetTaskList() {
+  tasks.value = []
+  totalCount.value = 0
+  totalPages.value = 1
+  expandedTaskId.value = null
+  expandedTask.value = null
+}
+
+function hasProcessingTasks() {
+  return tasks.value.some((task) => isProcessingStatus(task.status))
+}
+
+async function loadTasks(options = {}) {
+  if (tasksLoadInFlight.value) return false
   const requestSeq = taskRequestSeq.value + 1
   taskRequestSeq.value = requestSeq
   const uuid = props.datasource?.uuid
   if (!uuid) {
-    tasks.value = []
-    totalCount.value = 0
-    totalPages.value = 1
-    return
+    resetTaskList()
+    return false
   }
-  tasksLoading.value = true
+  tasksLoadInFlight.value = true
+  if (!options.silent) {
+    tasksLoading.value = true
+  }
   try {
     const params = {
       page: currentPage.value,
@@ -425,17 +441,20 @@ async function loadTasks() {
     tasks.value = list
     totalCount.value = total
     totalPages.value = total > 0 ? Math.ceil(total / pageSize) : 1
+    return true
   } catch (e) {
     if (requestSeq !== taskRequestSeq.value) {
       return
     }
-    tasks.value = []
-    totalCount.value = 0
-    totalPages.value = 1
+    if (!options.silent) {
+      resetTaskList()
+    }
     // eslint-disable-next-line no-console
     console.error(extractErrorMessage(e, t('common.error')))
+    return false
   } finally {
     if (requestSeq === taskRequestSeq.value) {
+      tasksLoadInFlight.value = false
       tasksLoading.value = false
     }
   }
@@ -446,7 +465,10 @@ async function refreshProcessingTasks() {
   const processingTasks = tasks.value.filter((task) =>
     isProcessingStatus(task.status)
   )
-  if (!processingTasks.length) return
+  if (!processingTasks.length) {
+    stopProcessingRefresh()
+    return
+  }
   processingRefreshInFlight.value = true
   try {
     const results = await Promise.allSettled(
@@ -472,12 +494,17 @@ async function refreshProcessingTasks() {
       }
       return updated
     })
+    if (!hasProcessingTasks()) {
+      stopProcessingRefresh()
+      await loadTasks({ silent: true })
+    }
   } finally {
     processingRefreshInFlight.value = false
   }
 }
 
 function startProcessingRefresh() {
+  if (processingRefreshTimer.value || !hasProcessingTasks()) return
   stopProcessingRefresh()
   processingRefreshTimer.value = window.setInterval(
     refreshProcessingTasks,
@@ -550,24 +577,35 @@ watch(
     if (!visible || !uuid || tab !== 'details') {
       stopProcessingRefresh()
       taskRequestSeq.value += 1
+      taskListContextKey.value = ''
+      tasksLoadInFlight.value = false
       tasksLoading.value = false
-      tasks.value = []
-      totalCount.value = 0
-      totalPages.value = 1
-      expandedTaskId.value = null
-      expandedTask.value = null
+      resetTaskList()
       return
     }
+    const contextKey = `${uuid}:${tab}`
+    if (taskListContextKey.value === contextKey) {
+      if (
+        isDataSourceSyncing(props.datasource) &&
+        !hasProcessingTasks() &&
+        !tasksLoadInFlight.value
+      ) {
+        loadTasks({ silent: true }).then((loaded) => {
+          if (loaded && hasProcessingTasks()) {
+            startProcessingRefresh()
+          }
+        })
+      }
+      return
+    }
+    taskListContextKey.value = contextKey
     stopProcessingRefresh()
     taskRequestSeq.value += 1
     currentPage.value = 1
-    tasks.value = []
-    totalCount.value = 0
-    totalPages.value = 1
-    expandedTaskId.value = null
-    expandedTask.value = null
-    loadTasks().then(() => {
-      if (tasks.value.some((task) => isProcessingStatus(task.status))) {
+    resetTaskList()
+    loadTasks().then((loaded) => {
+      if (!loaded) return
+      if (hasProcessingTasks()) {
         startProcessingRefresh()
       } else {
         stopProcessingRefresh()

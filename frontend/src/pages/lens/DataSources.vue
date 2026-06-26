@@ -285,7 +285,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { extractErrorMessage } from '@/utils/api'
@@ -355,6 +355,10 @@ const syncIntervalSeconds = ref(3600)
 const syncPolicyMode = ref('interval')
 const syncCron = ref('0 2 * * *')
 const syncTimezone = ref('Asia/Shanghai')
+const dynamicRefreshTimer = ref(null)
+const dynamicRefreshInFlight = ref(false)
+
+const DYNAMIC_REFRESH_INTERVAL_MS = 3000
 
 const formatDateTime = useShortDateTime()
 
@@ -446,19 +450,58 @@ async function load() {
         listCredentials(),
         llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
       ])
-    dataSources.value = normalizeList(dataSourceRows)
+    applyDataSourceRows(dataSourceRows, { selectFallback: true })
     lensnodes.value = normalizeList(lensnodeRows)
     credentials.value = normalizeList(credentialRows)
     llmConfigOptions.value = normalizeList(llmConfigRows)
-    const existing = dataSources.value.find(
-      (row) => row.uuid === selectedDataSource.value?.uuid
-    )
-    selectedDataSource.value = existing || dataSources.value[0] || null
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
     loading.value = false
   }
+}
+
+function applyDataSourceRows(rows, options = {}) {
+  dataSources.value = normalizeList(rows)
+  const selectedUuid = selectedDataSource.value?.uuid
+  const existing = dataSources.value.find((row) => row.uuid === selectedUuid)
+  if (existing) {
+    selectedDataSource.value = existing
+    return
+  }
+  if (options.selectFallback) {
+    selectedDataSource.value = dataSources.value[0] || null
+  }
+}
+
+async function refreshDataSourceRows() {
+  if (dynamicRefreshInFlight.value) {
+    return
+  }
+  dynamicRefreshInFlight.value = true
+  try {
+    applyDataSourceRows(await listDataSources())
+  } catch {
+    // Silent refresh should not interrupt the datasource management workflow.
+  } finally {
+    dynamicRefreshInFlight.value = false
+  }
+}
+
+function startDynamicRefresh() {
+  stopDynamicRefresh()
+  dynamicRefreshTimer.value = window.setInterval(
+    refreshDataSourceRows,
+    DYNAMIC_REFRESH_INTERVAL_MS
+  )
+}
+
+function stopDynamicRefresh() {
+  if (!dynamicRefreshTimer.value) {
+    return
+  }
+  window.clearInterval(dynamicRefreshTimer.value)
+  dynamicRefreshTimer.value = null
 }
 
 function startCreate() {
@@ -947,7 +990,14 @@ async function cancelSync(row) {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  startDynamicRefresh()
+})
+
+onBeforeUnmount(() => {
+  stopDynamicRefresh()
+})
 </script>
 
 <style scoped>

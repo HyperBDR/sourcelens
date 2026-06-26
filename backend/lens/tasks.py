@@ -243,18 +243,25 @@ def complete_datasource_sync_task(task_id, result):
     status_value = str(result.get("status") or "failed").lower()
     success = status_value == "success"
     error = result.get("error") or "LENS_SOURCE_SYNC_FAILED"
+    changed = result.get("changed")
+    if changed is None:
+        changed = result.get("synced")
     metrics = {
         "synced": int(result.get("synced") or 0),
         "files": int(result.get("files") or 0),
         "folders": int(result.get("folders") or 0),
         "failed": int(result.get("failed") or 0),
         "scanned": int(result.get("scanned") or 0),
-        "changed": int(result.get("changed") or result.get("synced") or 0),
+        "changed": int(changed or 0),
         "skipped": int(result.get("skipped") or 0),
         "deleted": int(result.get("deleted") or 0),
         "documents": int(result.get("documents") or 0),
         "by_extension": result.get("by_extension") or {},
         "by_type": result.get("by_type") or {},
+        "changed_items": result.get("changed_items") or [],
+        "changed_items_truncated": int(
+            result.get("changed_items_truncated") or 0
+        ),
         "target_path": result.get("target_path")
         or (datasource.target_path if datasource else ""),
     }
@@ -530,6 +537,8 @@ def _datasource_task_metadata(datasource, trigger):
 
     lensnode = datasource.lensnode
     config = datasource.config or {}
+    sync_policy = datasource.sync_policy or {}
+    conversion = sync_policy.get("conversion") or {}
     return {
         "type": "datasource",
         "trigger": trigger,
@@ -551,12 +560,25 @@ def _datasource_task_metadata(datasource, trigger):
         "lensnode_uuid": str(lensnode.uuid) if lensnode else "",
         "lensnode_name": lensnode.name if lensnode else "",
         "target_path": datasource.target_path,
+        "sync_policy": sync_policy,
+        "conversion": conversion,
+        "conversion_enabled": _conversion_enabled(conversion),
         "sync_interval_seconds": (
-            datasource.sync_policy or {}
+            sync_policy
         ).get("interval_seconds"),
         "steps": [],
         "logs": [],
     }
+
+
+def _conversion_enabled(conversion):
+    """Return whether datasource conversion is enabled."""
+
+    return bool(
+        conversion.get("document")
+        or conversion.get("image")
+        or conversion.get("embedded_image")
+    )
 
 
 def _append_datasource_task_step(task_id, name, status, message):

@@ -11,9 +11,12 @@ from lensnode.datasource_sync import (
     _export_filename,
     _feishu_folder_token,
     _feishu_export_extension,
+    _feishu_item_unchanged,
+    _feishu_target_file_path,
     _git_remote_branches,
     _git_auth_url,
     _http_json,
+    _manifest_item_to_sync_item,
     _poll_feishu_export_task,
     _raise_feishu_business_error,
     _sync_git,
@@ -21,6 +24,7 @@ from lensnode.datasource_sync import (
     _sync_feishu_folder,
 )
 from lensnode.path_rules import source_sha256
+from lensnode.path_rules import stable_suffix
 
 
 def test_datasource_sync_workers_defaults_to_four():
@@ -478,6 +482,159 @@ def test_sync_feishu_folder_skips_unchanged_nested_item(tmp_path, monkeypatch):
     assert first["synced"] == 1
     assert second["synced"] == 0
     assert second["skipped"] == 1
+
+
+def test_sync_feishu_folder_skips_raw_file_without_metadata(
+    tmp_path,
+    monkeypatch,
+):
+    """Raw Feishu files without mtime/size still use stable identity."""
+
+    downloads = []
+
+    def list_children(folder_token, headers):
+        del folder_token, headers
+        return [
+            {
+                "token": "file1",
+                "name": "Report.pdf",
+                "type": "pdf",
+            }
+        ]
+
+    def download_file(file_token, headers):
+        del headers
+        downloads.append(file_token)
+        return b"pdf content"
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._list_feishu_folder_children",
+        list_children,
+    )
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._download_feishu_file",
+        download_file,
+    )
+
+    first = _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+    second = _sync_feishu_folder(
+        {"folder_token": "root", "recursive": True, "max_depth": 5},
+        tmp_path,
+        {},
+        None,
+        max_workers=1,
+    )
+
+    assert downloads == ["file1"]
+    assert first["synced"] == 1
+    assert second["synced"] == 0
+    assert second["skipped"] == 1
+
+
+def test_feishu_unchanged_uses_remote_type_from_unified_manifest(tmp_path):
+    """Feishu comparison survives the unified manifest type field."""
+
+    source = tmp_path / "Root Doc.docx"
+    source.write_bytes(b"content")
+    previous = _manifest_item_to_sync_item(
+        {
+            "kind": "document",
+            "token": "doc1",
+            "source_id": "feishu:token:doc1",
+            "source_path": "Root Doc",
+            "name": "Root Doc",
+            "type": "docx",
+            "file": "Root Doc.docx",
+            "local_path": "Root Doc.docx",
+            "file_extension": "docx",
+            "metadata": {"modified_time": "100"},
+            "remote": {"token": "doc1", "type": "docx"},
+        },
+        tmp_path,
+    ).to_manifest()
+
+    assert previous["type"] == "document"
+    assert _feishu_item_unchanged(
+        {
+            "token": "doc1",
+            "name": "Root Doc",
+            "type": "docx",
+            "modified_time": "100",
+        },
+        previous,
+        tmp_path,
+        tmp_path,
+    )
+
+
+def test_feishu_unchanged_matches_raw_file_extension_from_name(tmp_path):
+    """Raw Feishu files compare manifest extension with filename suffix."""
+
+    source = (
+        tmp_path
+        / "个人内容"
+        / "2026年出差"
+        / "4月份-4.13-15-武汉"
+        / "26379166812001512498"
+        / "26379166812001512498.pdf"
+    )
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"pdf content")
+    local_path = source.relative_to(tmp_path).as_posix()
+    previous = {
+        "source_id": "feishu:token:TZGzbnwqPobSdhxv4aIcjnnsnvd",
+        "source_type": "feishu",
+        "source_path": "26379166812001512498.pdf",
+        "local_path": local_path,
+        "file": local_path,
+        "name": "26379166812001512498.pdf",
+        "kind": "file",
+        "type": "file",
+        "extension": "pdf",
+        "file_extension": "pdf",
+        "status": "synced",
+        "metadata": {"modified_time": "1782438856"},
+        "remote": {
+            "token": "TZGzbnwqPobSdhxv4aIcjnnsnvd",
+            "type": "file",
+        },
+        "token": "TZGzbnwqPobSdhxv4aIcjnnsnvd",
+    }
+
+    assert _feishu_item_unchanged(
+        {
+            "token": "TZGzbnwqPobSdhxv4aIcjnnsnvd",
+            "name": "26379166812001512498.pdf",
+            "type": "file",
+            "modified_time": "1782438856",
+        },
+        previous,
+        source.parent,
+        tmp_path,
+    )
+
+
+def test_feishu_target_path_reuses_existing_stable_hash_file(tmp_path):
+    """Repeated raw file sync reuses an existing token-suffixed file."""
+
+    filename = "Report.pdf"
+    hashed = tmp_path / f"Report__{stable_suffix('file1')}.pdf"
+    hashed.write_bytes(b"old")
+    path = _feishu_target_file_path(
+        tmp_path,
+        tmp_path,
+        filename,
+        "file1",
+        None,
+    )
+
+    assert path == hashed
 
 
 def test_sync_feishu_folder_overwrites_changed_previous_file(

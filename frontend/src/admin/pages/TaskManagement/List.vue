@@ -1,7 +1,7 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
-      <div class="mb-4">
+    <div class="flex h-full min-h-0 w-full max-w-full flex-col p-6">
+      <div class="mb-4 flex-shrink-0">
         <h1 class="text-lg font-semibold text-gray-900">
           {{ t('taskManagement.list.title') }}
         </h1>
@@ -10,11 +10,13 @@
         </p>
       </div>
 
-      <div class="bg-white rounded border border-gray-200 shadow-sm">
-        <div class="p-6">
+      <div
+        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white shadow-sm"
+      >
+        <div class="flex min-h-0 flex-1 flex-col p-6">
           <!-- Toolbar -->
           <div
-            class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6"
+            class="mb-6 flex flex-shrink-0 flex-col items-start justify-between gap-4 sm:flex-row sm:items-center"
           >
             <div class="flex items-center gap-3 flex-wrap">
               <label
@@ -134,7 +136,7 @@
 
           <div
             v-else-if="!loading && tasks.length === 0"
-            class="py-16 text-center rounded-lg border border-gray-200 bg-gray-50"
+            class="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center"
           >
             <svg
               class="mx-auto h-12 w-12 text-gray-400 mb-4"
@@ -157,10 +159,12 @@
           <!-- Desktop Table View -->
           <div
             v-else
-            class="overflow-x-auto relative rounded-lg border border-gray-200 bg-white shadow-sm"
+            class="relative min-h-0 flex-1 overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm"
           >
             <table class="min-w-full divide-y divide-gray-200">
-              <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
+              <thead
+                class="sticky top-0 z-10 bg-gradient-to-r from-gray-50 to-gray-100"
+              >
                 <tr>
                   <th
                     class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
@@ -228,7 +232,7 @@
 
           <div
             v-if="totalCount > 0"
-            class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4"
+            class="mt-4 flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4"
           >
             <p class="text-sm text-gray-600">
               {{ t('common.pagination.showing', paginationShowing) }}
@@ -381,6 +385,9 @@ const BASIC_METADATA_FIELDS = [
   'lensnode_uuid',
   'lensnode_name',
   'target_path',
+  'conversion',
+  'conversion_enabled',
+  'sync_policy',
   'sync_interval_seconds'
 ].join(',')
 
@@ -512,10 +519,7 @@ async function refreshProcessingTasks() {
         ...refreshed,
         metadata: selectedTask.value.metadata
       }
-      if (
-        selectedTaskDetailsLoadedId.value === String(selectedTask.value.id) &&
-        isProcessingStatus(selectedTask.value.status)
-      ) {
+      if (selectedTaskDetailsLoadedId.value === String(selectedTask.value.id)) {
         await loadSelectedTaskDetails({ force: true, silent: true })
       }
     }

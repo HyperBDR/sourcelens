@@ -20,6 +20,7 @@ DEFAULT_MAX_IMAGES = 100
 DEFAULT_MAX_FILE_SIZE_MB = 100
 DEFAULT_MAX_PAGES = 500
 DEFAULT_TOKEN_CHARS = 4
+DETAIL_ITEMS_LIMIT = 200
 
 
 class ConversionOutput:
@@ -151,6 +152,8 @@ def post_process_documents(context, sync_result, emit=None):
             "truncated_files": 0,
             "cost": empty_cost_stats(),
             "warnings": [],
+            "items": [],
+            "items_truncated": 0,
         }
 
     target = Path(context["target_path"]).resolve()
@@ -181,6 +184,8 @@ def post_process_documents(context, sync_result, emit=None):
         "truncated_files": 0,
         "cost": empty_cost_stats(),
         "warnings": warnings,
+        "items": [],
+        "items_truncated": 0,
     }
     emit_conversion(
         emit,
@@ -202,6 +207,12 @@ def post_process_documents(context, sync_result, emit=None):
             if image_count > max_images:
                 summary["skipped"] += 1
                 warnings.append("CONVERSION_MAX_IMAGES_EXCEEDED")
+                append_conversion_detail(
+                    summary,
+                    item,
+                    "skipped",
+                    "CONVERSION_MAX_IMAGES_EXCEEDED",
+                )
                 emit_conversion(
                     emit,
                     "conversion_progress",
@@ -238,10 +249,17 @@ def post_process_documents(context, sync_result, emit=None):
                 summary["skipped"] += 1
                 if result.get("warning"):
                     warnings.append(result["warning"])
+                append_conversion_detail(
+                    summary,
+                    item,
+                    "skipped",
+                    result.get("reason") or result.get("warning") or "",
+                )
             else:
                 summary["converted"] += 1
                 summary["success"] += 1
                 summary["markdown"] += 1
+                append_conversion_detail(summary, item, "converted")
                 summary["chars"] += int(result.get("chars") or 0)
                 summary["estimated_tokens"] += int(
                     result.get("estimated_tokens") or 0
@@ -255,6 +273,7 @@ def post_process_documents(context, sync_result, emit=None):
             summary["failed"] += 1
             warnings.append("CONVERSION_FILE_FAILED")
             write_failed_meta(target, path, item, context, str(exc))
+            append_conversion_detail(summary, item, "failed", str(exc))
         emit_conversion(
             emit,
             "conversion_progress",
@@ -277,6 +296,24 @@ def post_process_documents(context, sync_result, emit=None):
         current=total,
     )
     return summary
+
+
+def append_conversion_detail(summary, item, status, reason=""):
+    """Append a compact conversion item detail."""
+
+    if len(summary["items"]) >= DETAIL_ITEMS_LIMIT:
+        summary["items_truncated"] += 1
+        return
+    local_path = manifest_local_path(item)
+    summary["items"].append(
+        {
+            "status": status,
+            "path": local_path,
+            "name": item.get("name") or Path(local_path).name,
+            "extension": Path(local_path).suffix.lower().lstrip("."),
+            "reason": reason,
+        }
+    )
 
 
 def conversion_enabled(conversion):
@@ -355,7 +392,7 @@ def convert_one(target, path, item, context):
     size = path.stat().st_size
     if size > limits["max_file_size"]:
         write_skipped_meta(target, path, item, context, "FILE_TOO_LARGE")
-        return {"skipped": True}
+        return {"skipped": True, "reason": "FILE_TOO_LARGE"}
 
     digest = source_sha256(path)
     fingerprint = conversion_fingerprint(path, digest, context)
@@ -367,18 +404,19 @@ def convert_one(target, path, item, context):
         and meta.get("conversion", {}).get("status") == "success"
         and content_path.is_file()
     ):
-        return {"skipped": True}
+        return {"skipped": True, "reason": "UNCHANGED"}
 
     converter = CONVERTERS.converter_for(path)
     if converter is None:
         write_skipped_meta(target, path, item, context, "UNSUPPORTED_TYPE")
-        return {"skipped": True}
+        return {"skipped": True, "reason": "UNSUPPORTED_TYPE"}
 
     if is_image_path(path):
         if not vision_configured(context):
             write_skipped_meta(target, path, item, context, "VISION_NOT_CONFIGURED")
             return {
                 "skipped": True,
+                "reason": "VISION_NOT_CONFIGURED",
                 "warning": "VISION_NOT_CONFIGURED",
             }
 
@@ -785,13 +823,17 @@ def emit_conversion(
     if emit is None:
         return
     percent = 100 if total <= 0 else int(current * 100 / total)
+    event_summary = dict(summary or {})
+    if step != "conversion_manifest":
+        event_summary.pop("items", None)
+        event_summary.pop("items_truncated", None)
     emit(
         {
             "step": step,
             "status": status,
             "message": message,
             "category": "conversion",
-            "summary": summary,
+            "summary": event_summary,
             "progress_total": total,
             "progress_current": current,
             "progress_percent": max(0, min(100, percent)),

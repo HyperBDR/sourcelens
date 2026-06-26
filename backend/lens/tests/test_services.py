@@ -396,6 +396,12 @@ class LensServiceTests(TransactionTestCase):
                 task.metadata["target_path"],
                 "/workspace/repo-cache",
             )
+            self.assertEqual(task.metadata["conversion"], {})
+            self.assertFalse(task.metadata["conversion_enabled"])
+            self.assertEqual(
+                task.metadata["sync_policy"],
+                {"interval_seconds": 3600},
+            )
             self.assertEqual(task.metadata["sync_interval_seconds"], 3600)
             steps = task.metadata.get("steps") or []
             self.assertGreaterEqual(len(steps), 2)
@@ -433,6 +439,31 @@ class LensServiceTests(TransactionTestCase):
             self.datasource,
             task_id=task_id,
             trigger="manual",
+        )
+
+    def test_datasource_sync_task_metadata_includes_conversion_policy(self):
+        self.datasource.sync_policy = {
+            "interval_seconds": 3600,
+            "conversion": {
+                "document": True,
+                "image": False,
+            },
+        }
+        self.datasource.save(update_fields=["sync_policy"])
+
+        task = register_datasource_sync_task(
+            self.datasource,
+            "conversion-sync",
+            "manual",
+        )
+
+        self.assertTrue(task.metadata["conversion_enabled"])
+        self.assertEqual(
+            task.metadata["conversion"],
+            {
+                "document": True,
+                "image": False,
+            },
         )
 
     def test_datasource_sync_dispatch_includes_max_workers(self):
@@ -491,11 +522,41 @@ class LensServiceTests(TransactionTestCase):
                 "documents": 0,
                 "by_extension": {},
                 "by_type": {},
+                "changed_items": [],
+                "changed_items_truncated": 0,
                 "target_path": self.datasource.target_path,
             },
         )
         self.assertEqual(task.status, "SUCCESS")
         self.assertEqual(task.metadata["progress_percent"], 100)
+
+    def test_complete_datasource_sync_task_preserves_zero_changed(self):
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
+            source_sync_task(str(self.datasource.uuid))
+
+        task = TaskExecution.objects.get(module="lens_datasource")
+        complete_datasource_sync_task(
+            task.task_id,
+            {
+                "status": "success",
+                "synced": 4,
+                "changed": 0,
+                "skipped": 4,
+                "files": 4,
+                "target_path": self.datasource.target_path,
+            },
+        )
+
+        record = ScheduledTask.objects.get(
+            task_type="source_sync",
+            target_type="datasource",
+            target_id=self.datasource.uuid,
+        )
+        task.refresh_from_db()
+        self.assertEqual(record.last_metrics["changed"], 0)
+        self.assertEqual(task.result["changed"], 0)
+        self.assertEqual(task.metadata["sync_summary"]["changed"], 0)
 
     def test_source_sync_task_marks_invalid_source_failed(self):
         with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:

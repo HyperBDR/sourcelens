@@ -15,10 +15,12 @@ from .path_rules import normalize_excluded_roots
 from .path_rules import relative_path
 from .path_rules import safe_filename
 from .path_rules import source_sha256
+from .path_rules import stable_suffix
 from .path_rules import unique_child_path
 
 WORKSPACE_ROOT = "/workspace"
 GIT_SHALLOW_DEPTH = "1"
+DETAIL_ITEMS_LIMIT = 200
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
 FEISHU_EXPORT_SUCCESS_STATUS = 0
@@ -171,13 +173,21 @@ def sync_datasource(command, workspace_path=WORKSPACE_ROOT, emit=None):
     context = _sync_context(command, target)
     manifest_store.write_datasource_marker(target, context)
     sync_items = result.pop("_sync_items", [])
+    changed_paths = result.pop("_changed_paths", [])
     deleted_paths = result.pop("_deleted_paths", [])
     sync_result = manifest_store.SyncResult(
         items=sync_items,
-        changed_paths=result.pop("_changed_paths", []),
+        changed_paths=changed_paths,
         deleted_paths=deleted_paths,
         stats=_sync_summary_from_result(result),
     )
+    sync_details = _sync_item_details(sync_items, changed_paths)
+    if sync_details:
+        result["changed_items"] = sync_details
+        result["changed_items_truncated"] = max(
+            0,
+            len(changed_paths) - len(sync_details),
+        )
     if sync_items:
         manifest_payload = manifest_store.build_manifest(context, sync_result)
         manifest_payload["synced_at"] = utc_timestamp()
@@ -244,6 +254,33 @@ def _sync_summary_from_result(result):
         "by_type",
     ]
     return {key: result.get(key) for key in keys if key in result}
+
+
+def _sync_item_details(items, changed_paths):
+    """Return compact sync item details for task metadata."""
+
+    changed = set(changed_paths or [])
+    details = []
+    for item in items or []:
+        local_path = manifest_store.manifest_local_path(item)
+        if local_path not in changed:
+            continue
+        details.append(
+            {
+                "status": item.get("status") or "synced",
+                "path": local_path,
+                "name": item.get("name") or Path(local_path).name,
+                "extension": (
+                    item.get("extension")
+                    or item.get("file_extension")
+                    or Path(local_path).suffix.lower().lstrip(".")
+                ),
+                "source_type": item.get("source_type") or "",
+            }
+        )
+        if len(details) >= DETAIL_ITEMS_LIMIT:
+            break
+    return details
 
 
 def datasource_sync_workers(command):
@@ -1672,23 +1709,53 @@ def _feishu_item_signature(item):
         signature["type"] = item_type
     if _is_feishu_exportable_type(item_type):
         signature["file_extension"] = _feishu_export_extension(item_type)
-    return signature if any(key != "type" for key in signature) else {}
+    else:
+        file_extension = _feishu_item_file_extension(item)
+        if file_extension:
+            signature["file_extension"] = file_extension
+    if any(key != "type" for key in signature):
+        return signature
+    token = _feishu_item_token(item)
+    name = _feishu_item_name(item)
+    if token:
+        signature["token"] = token
+    if name:
+        signature["name"] = name
+    return signature if token or name else {}
+
+
+def _feishu_item_file_extension(item):
+    """Return a comparable file extension for a Feishu Drive item."""
+
+    name = _feishu_item_name(item)
+    extension = Path(str(name or "")).suffix.lower().lstrip(".")
+    return extension or ""
 
 
 def _feishu_manifest_signature(item):
     """Return comparable metadata from a manifest item."""
 
     metadata = item.get("metadata") or {}
+    remote = item.get("remote") or {}
     signature = {
         key: str(metadata[key])
         for key in ["modified_time", "size", "checksum"]
         if metadata.get(key) not in (None, "")
     }
-    if item.get("type"):
-        signature["type"] = item.get("type")
+    item_type = remote.get("type") or item.get("type")
+    if item_type:
+        signature["type"] = item_type
     if item.get("file_extension"):
         signature["file_extension"] = item.get("file_extension")
-    return signature if any(key != "type" for key in signature) else {}
+    if any(key != "type" for key in signature):
+        return signature
+    token = item.get("token") or remote.get("token")
+    name = item.get("name") or item.get("source_path")
+    if token:
+        signature["token"] = token
+    if name:
+        signature["name"] = name
+    return signature if token or name else {}
 
 
 def _feishu_item_unchanged(item, previous_item, target_dir, root_dir=None):
@@ -1743,7 +1810,20 @@ def _feishu_target_file_path(
                 continue
             if path.exists():
                 return path
-    return unique_child_path(target_dir, filename, token)
+    path = unique_child_path(target_dir, filename, token)
+    stable_path = target_dir / _feishu_stable_filename(filename, token)
+    if stable_path.exists():
+        return stable_path
+    return path
+
+
+def _feishu_stable_filename(filename, token):
+    """Return the stable conflict filename for one Feishu item."""
+
+    path = Path(filename)
+    suffix = stable_suffix(token or filename)
+    stem = path.stem or "document"
+    return f"{stem}__{suffix}{path.suffix}"
 
 
 def _feishu_manifest_item_from_previous(
