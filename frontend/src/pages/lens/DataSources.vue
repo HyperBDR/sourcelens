@@ -554,6 +554,14 @@ function defaultForm() {
     conversion_max_images: 100,
     conversion_max_file_size_mb: 100,
     conversion_max_pages: 500,
+    conversion_pdf_extract_images: true,
+    conversion_pdf_extract_images_on_text_pages: false,
+    conversion_pdf_render_scanned_pages: false,
+    conversion_pdf_max_pages: 30,
+    conversion_pdf_max_images_per_page: 3,
+    conversion_pdf_render_dpi: 144,
+    conversion_pdf_min_text_chars: 30,
+    conversion_pdf_min_image_area_ratio: 0.08,
     status: 'active'
   }
   handleDatasourceTypeChange(seed)
@@ -589,6 +597,22 @@ function formFromRow(row) {
     conversion_max_file_size_mb:
       Number(row.sync_policy?.conversion?.max_file_size_mb) || 100,
     conversion_max_pages: Number(row.sync_policy?.conversion?.max_pages) || 500,
+    conversion_pdf_extract_images:
+      row.sync_policy?.conversion?.pdf_extract_images !== false,
+    conversion_pdf_extract_images_on_text_pages:
+      row.sync_policy?.conversion?.pdf_extract_images_on_text_pages === true,
+    conversion_pdf_render_scanned_pages:
+      row.sync_policy?.conversion?.pdf_render_scanned_pages === true,
+    conversion_pdf_max_pages:
+      Number(row.sync_policy?.conversion?.pdf_max_pages) || 30,
+    conversion_pdf_max_images_per_page:
+      Number(row.sync_policy?.conversion?.pdf_max_images_per_page) || 3,
+    conversion_pdf_render_dpi:
+      Number(row.sync_policy?.conversion?.pdf_render_dpi) || 144,
+    conversion_pdf_min_text_chars:
+      Number(row.sync_policy?.conversion?.pdf_min_text_chars) || 30,
+    conversion_pdf_min_image_area_ratio:
+      Number(row.sync_policy?.conversion?.pdf_min_image_area_ratio) || 0.08,
     status: row.status || 'active'
   }
 }
@@ -742,7 +766,35 @@ function buildDatasourceSyncPolicy() {
       1,
       Number(form.value.conversion_max_file_size_mb) || 100
     ),
-    max_pages: Math.max(1, Number(form.value.conversion_max_pages) || 500)
+    max_pages: Math.max(1, Number(form.value.conversion_max_pages) || 500),
+    pdf_extract_images: form.value.conversion_pdf_extract_images !== false,
+    pdf_extract_images_on_text_pages:
+      form.value.conversion_pdf_extract_images_on_text_pages === true,
+    pdf_render_scanned_pages:
+      form.value.conversion_pdf_render_scanned_pages === true,
+    pdf_max_pages: Math.max(
+      1,
+      Number(form.value.conversion_pdf_max_pages) || 30
+    ),
+    pdf_max_images_per_page: Math.max(
+      1,
+      Number(form.value.conversion_pdf_max_images_per_page) || 3
+    ),
+    pdf_render_dpi: Math.max(
+      1,
+      Number(form.value.conversion_pdf_render_dpi) || 144
+    ),
+    pdf_min_text_chars: Math.max(
+      1,
+      Number(form.value.conversion_pdf_min_text_chars) || 30
+    ),
+    pdf_min_image_area_ratio: Math.max(
+      0.01,
+      Math.min(
+        1,
+        Number(form.value.conversion_pdf_min_image_area_ratio) || 0.08
+      )
+    )
   }
   if (conversion.document && form.value.conversion_document_model_ref) {
     conversion.document_model_ref = form.value.conversion_document_model_ref

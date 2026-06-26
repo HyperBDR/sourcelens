@@ -1,6 +1,8 @@
 import json
 import mimetypes
 import time
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 from .conversion_queue import ConversionJob
@@ -15,10 +17,25 @@ from .path_rules import source_sha256
 
 DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+EMBEDDED_IMAGE_PREFIXES = {
+    ".docx": "word/media/",
+    ".pptx": "ppt/media/",
+    ".xlsx": "xl/media/",
+}
 PROMPT_VERSION = "image-search-v1"
 DEFAULT_MAX_IMAGES = 100
 DEFAULT_MAX_FILE_SIZE_MB = 100
 DEFAULT_MAX_PAGES = 500
+DEFAULT_IMAGE_JPEG_QUALITY = 82
+DEFAULT_IMAGE_MAX_DIMENSION = 1600
+DEFAULT_MIN_IMAGE_BYTES = 5 * 1024
+DEFAULT_MIN_IMAGE_DIMENSION = 64
+DEFAULT_PDF_MAX_IMAGES_PER_PAGE = 3
+DEFAULT_PDF_MAX_PAGES = 30
+DEFAULT_PDF_MIN_TEXT_CHARS = 30
+DEFAULT_PDF_MIN_IMAGE_AREA_RATIO = 0.08
+DEFAULT_PDF_RENDER_DPI = 144
+IMAGE_BLANK_VARIANCE_THRESHOLD = 8.0
 DEFAULT_TOKEN_CHARS = 4
 DETAIL_ITEMS_LIMIT = 200
 
@@ -26,10 +43,19 @@ DETAIL_ITEMS_LIMIT = 200
 class ConversionOutput:
     """One converter output."""
 
-    def __init__(self, text="", stats=None, cost=None):
+    def __init__(
+        self,
+        text="",
+        stats=None,
+        cost=None,
+        skipped=False,
+        reason="",
+    ):
         self.text = text
         self.stats = stats or {}
         self.cost = cost or {}
+        self.skipped = skipped
+        self.reason = reason
 
 
 class BaseConverter:
@@ -66,7 +92,14 @@ class MarkItDownDocumentConverter(BaseConverter):
         result = MarkItDown().convert(str(path))
         text = getattr(result, "text_content", "") or str(result)
         stats = document_stats(path)
-        return ConversionOutput(text=text, stats=stats)
+        cost = empty_cost_stats()
+        image_context = document_image_context(context, path, text)
+        embedded = convert_embedded_images(path, image_context)
+        if embedded["markdown"]:
+            text = f"{text.rstrip()}\n\n{embedded['markdown']}"
+        stats.update(embedded["stats"])
+        merge_cost_stats(cost, embedded["cost"])
+        return ConversionOutput(text=text, stats=stats, cost=cost)
 
     def version(self):
         """Return MarkItDown version metadata."""
@@ -88,13 +121,27 @@ class GatewayImageConverter(BaseConverter):
     def convert(self, path, context):
         """Convert an image file into a searchable description."""
 
-        content, usage = describe_image_file(path, context)
+        prepared = prepare_image_for_model(path, context)
+        if prepared.get("skipped"):
+            return ConversionOutput(
+                stats=prepared.get("stats") or {},
+                skipped=True,
+                reason=prepared.get("reason") or "",
+            )
+
+        content, usage = describe_image_bytes(
+            prepared["bytes"],
+            prepared["mime_type"],
+            context,
+        )
+        stats = {
+            **(prepared.get("stats") or {}),
+            "images_total": 1,
+            "images_recognized": 1 if content else 0,
+        }
         return ConversionOutput(
             text=content,
-            stats={
-                "images_total": 1,
-                "images_recognized": 1 if content else 0,
-            },
+            stats=stats,
             cost=model_cost_stats(usage, content),
         )
 
@@ -146,6 +193,23 @@ def post_process_documents(context, sync_result, emit=None):
             "chars": 0,
             "estimated_tokens": 0,
             "images_recognized": 0,
+            "images_skipped": 0,
+            "images_blank": 0,
+            "images_duplicate": 0,
+            "images_compressed": 0,
+            "embedded_images_total": 0,
+            "embedded_images_recognized": 0,
+            "embedded_images_skipped": 0,
+            "embedded_images_duplicate": 0,
+            "embedded_images_blank": 0,
+            "pdf_pages": 0,
+            "pdf_pages_processed": 0,
+            "pdf_pages_with_text": 0,
+            "pdf_scanned_pages": 0,
+            "pdf_images_total": 0,
+            "pdf_images_recognized": 0,
+            "pdf_images_skipped": 0,
+            "pdf_rendered_pages": 0,
             "xlsx_files": 0,
             "sheets": 0,
             "rows": 0,
@@ -180,6 +244,23 @@ def post_process_documents(context, sync_result, emit=None):
         "chars": 0,
         "estimated_tokens": 0,
         "images_recognized": 0,
+        "images_skipped": 0,
+        "images_blank": 0,
+        "images_duplicate": 0,
+        "images_compressed": 0,
+        "embedded_images_total": 0,
+        "embedded_images_recognized": 0,
+        "embedded_images_skipped": 0,
+        "embedded_images_duplicate": 0,
+        "embedded_images_blank": 0,
+        "pdf_pages": 0,
+        "pdf_pages_processed": 0,
+        "pdf_pages_with_text": 0,
+        "pdf_scanned_pages": 0,
+        "pdf_images_total": 0,
+        "pdf_images_recognized": 0,
+        "pdf_images_skipped": 0,
+        "pdf_rendered_pages": 0,
         "xlsx_files": 0,
         "sheets": 0,
         "rows": 0,
@@ -203,19 +284,23 @@ def post_process_documents(context, sync_result, emit=None):
 
     max_images = int(conversion.get("max_images") or DEFAULT_MAX_IMAGES)
     image_count = 0
+    image_digests = set()
     jobs = []
     for index, item in enumerate(candidates, start=1):
         path = target / manifest_local_path(item)
         if is_image_path(path):
             image_count += 1
             if image_count > max_images:
+                stats = image_skip_stats("CONVERSION_MAX_IMAGES_EXCEEDED")
                 summary["skipped"] += 1
+                summary["images_skipped"] += 1
                 warnings.append("CONVERSION_MAX_IMAGES_EXCEEDED")
                 append_conversion_detail(
                     summary,
                     item,
                     "skipped",
                     "CONVERSION_MAX_IMAGES_EXCEEDED",
+                    stats,
                 )
                 emit_conversion(
                     emit,
@@ -228,8 +313,37 @@ def post_process_documents(context, sync_result, emit=None):
                     current_file=manifest_local_path(item),
                     current_status="skipped",
                     current_reason="CONVERSION_MAX_IMAGES_EXCEEDED",
+                    current_stats=stats,
                 )
                 continue
+            digest = source_sha256(path)
+            if digest in image_digests:
+                stats = image_skip_stats("IMAGE_DUPLICATE")
+                summary["skipped"] += 1
+                summary["images_skipped"] += 1
+                summary["images_duplicate"] += 1
+                append_conversion_detail(
+                    summary,
+                    item,
+                    "skipped",
+                    "IMAGE_DUPLICATE",
+                    stats,
+                )
+                emit_conversion(
+                    emit,
+                    "conversion_progress",
+                    "running",
+                    f"Converted {index}/{total} datasource files.",
+                    summary,
+                    total=total,
+                    current=index,
+                    current_file=manifest_local_path(item),
+                    current_status="skipped",
+                    current_reason="IMAGE_DUPLICATE",
+                    current_stats=stats,
+                )
+                continue
+            image_digests.add(digest)
         jobs.append(
             ConversionJob(
                 index=index,
@@ -270,6 +384,7 @@ def post_process_documents(context, sync_result, emit=None):
                     current_reason,
                     current_stats,
                 )
+                merge_summary_stats(summary, current_stats)
             else:
                 current_stats = {
                     **(result.get("stats") or {}),
@@ -366,6 +481,24 @@ def conversion_details_by_metric(items):
         "model_calls": [],
         "estimated_tokens": [],
         "total_tokens": [],
+        "images_skipped": [],
+        "images_recognized": [],
+        "images_blank": [],
+        "images_duplicate": [],
+        "images_compressed": [],
+        "embedded_images_total": [],
+        "embedded_images_recognized": [],
+        "embedded_images_skipped": [],
+        "embedded_images_duplicate": [],
+        "embedded_images_blank": [],
+        "pdf_pages": [],
+        "pdf_pages_processed": [],
+        "pdf_pages_with_text": [],
+        "pdf_scanned_pages": [],
+        "pdf_images_total": [],
+        "pdf_images_recognized": [],
+        "pdf_images_skipped": [],
+        "pdf_rendered_pages": [],
     }
     truncated = {key: 0 for key in details}
     for item in items or []:
@@ -418,6 +551,34 @@ def conversion_details_by_metric(items):
                 "total_tokens",
                 item,
             )
+        stats = item.get("stats") or {}
+        for key in [
+            "images_skipped",
+            "images_recognized",
+            "images_blank",
+            "images_duplicate",
+            "images_compressed",
+            "embedded_images_total",
+            "embedded_images_recognized",
+            "embedded_images_skipped",
+            "embedded_images_duplicate",
+            "embedded_images_blank",
+            "pdf_pages",
+            "pdf_pages_processed",
+            "pdf_pages_with_text",
+            "pdf_scanned_pages",
+            "pdf_images_total",
+            "pdf_images_recognized",
+            "pdf_images_skipped",
+            "pdf_rendered_pages",
+        ]:
+            if int(stats.get(key) or 0) > 0:
+                _append_conversion_metric_detail(
+                    details,
+                    truncated,
+                    key,
+                    item,
+                )
     return {key: value for key, value in details.items() if value}
 
 
@@ -449,7 +610,13 @@ def conversion_enabled(conversion):
     )
 
 
-def conversion_candidates(target, items, datasource_uuid, excluded_roots, conversion):
+def conversion_candidates(
+    target,
+    items,
+    datasource_uuid,
+    excluded_roots,
+    conversion,
+):
     """Return manifest items eligible for conversion."""
 
     candidates = []
@@ -464,7 +631,12 @@ def conversion_candidates(target, items, datasource_uuid, excluded_roots, conver
             continue
         if not is_convertible(path, conversion):
             continue
-        if has_foreign_marker(path.parent, target, datasource_uuid, excluded_roots):
+        if has_foreign_marker(
+            path.parent,
+            target,
+            datasource_uuid,
+            excluded_roots,
+        ):
             continue
         candidates.append(item)
     return candidates
@@ -536,7 +708,13 @@ def convert_one(target, path, item, context):
 
     if is_image_path(path):
         if not vision_configured(context):
-            write_skipped_meta(target, path, item, context, "VISION_NOT_CONFIGURED")
+            write_skipped_meta(
+                target,
+                path,
+                item,
+                context,
+                "VISION_NOT_CONFIGURED",
+            )
             return {
                 "skipped": True,
                 "reason": "VISION_NOT_CONFIGURED",
@@ -544,6 +722,14 @@ def convert_one(target, path, item, context):
             }
 
     output = converter.convert(path, context)
+    if output.skipped:
+        write_skipped_meta(target, path, item, context, output.reason)
+        return {
+            "skipped": True,
+            "reason": output.reason,
+            "stats": output.stats,
+        }
+
     text = output.text
     stats = output.stats
     cost = output.cost
@@ -575,7 +761,9 @@ def convert_one(target, path, item, context):
 def conversion_limits(conversion):
     """Return conversion limits in bytes/counts."""
 
-    size_mb = int(conversion.get("max_file_size_mb") or DEFAULT_MAX_FILE_SIZE_MB)
+    size_mb = int(
+        conversion.get("max_file_size_mb") or DEFAULT_MAX_FILE_SIZE_MB
+    )
     return {
         "max_file_size": size_mb * 1024 * 1024,
         "max_pages": int(conversion.get("max_pages") or DEFAULT_MAX_PAGES),
@@ -684,6 +872,36 @@ def merge_summary_stats(summary, stats):
     summary["xlsx_files"] += int(stats.get("xlsx_files") or 0)
     summary["sheets"] += int(stats.get("sheets") or 0)
     summary["rows"] += int(stats.get("rows") or 0)
+    summary["images_skipped"] += int(stats.get("images_skipped") or 0)
+    summary["images_blank"] += int(stats.get("images_blank") or 0)
+    summary["images_duplicate"] += int(stats.get("images_duplicate") or 0)
+    summary["images_compressed"] += int(stats.get("images_compressed") or 0)
+    summary["embedded_images_total"] += int(
+        stats.get("embedded_images_total") or 0
+    )
+    summary["embedded_images_recognized"] += int(
+        stats.get("embedded_images_recognized") or 0
+    )
+    summary["embedded_images_skipped"] += int(
+        stats.get("embedded_images_skipped") or 0
+    )
+    summary["embedded_images_duplicate"] += int(
+        stats.get("embedded_images_duplicate") or 0
+    )
+    summary["embedded_images_blank"] += int(
+        stats.get("embedded_images_blank") or 0
+    )
+    for key in [
+        "pdf_pages",
+        "pdf_pages_processed",
+        "pdf_pages_with_text",
+        "pdf_scanned_pages",
+        "pdf_images_total",
+        "pdf_images_recognized",
+        "pdf_images_skipped",
+        "pdf_rendered_pages",
+    ]:
+        summary[key] += int(stats.get(key) or 0)
     if stats.get("truncated"):
         summary["truncated_files"] += 1
 
@@ -699,6 +917,47 @@ def conversion_fingerprint(path, digest, context):
             "image": bool(conversion.get("image")),
             "embedded_image": bool(conversion.get("embedded_image")),
             "document_model_ref": conversion.get("document_model_ref") or "",
+            "image_jpeg_quality": int(
+                conversion.get("image_jpeg_quality")
+                or DEFAULT_IMAGE_JPEG_QUALITY
+            ),
+            "image_max_dimension": int(
+                conversion.get("image_max_dimension")
+                or DEFAULT_IMAGE_MAX_DIMENSION
+            ),
+            "min_image_bytes": int(
+                conversion.get("min_image_bytes") or DEFAULT_MIN_IMAGE_BYTES
+            ),
+            "min_image_dimension": int(
+                conversion.get("min_image_dimension")
+                or DEFAULT_MIN_IMAGE_DIMENSION
+            ),
+            "pdf_extract_images": conversion.get("pdf_extract_images")
+            is not False,
+            "pdf_extract_images_on_text_pages": bool(
+                conversion.get("pdf_extract_images_on_text_pages")
+            ),
+            "pdf_max_images_per_page": int(
+                conversion.get("pdf_max_images_per_page")
+                or DEFAULT_PDF_MAX_IMAGES_PER_PAGE
+            ),
+            "pdf_max_pages": int(
+                conversion.get("pdf_max_pages") or DEFAULT_PDF_MAX_PAGES
+            ),
+            "pdf_min_text_chars": int(
+                conversion.get("pdf_min_text_chars")
+                or DEFAULT_PDF_MIN_TEXT_CHARS
+            ),
+            "pdf_min_image_area_ratio": float(
+                conversion.get("pdf_min_image_area_ratio")
+                or DEFAULT_PDF_MIN_IMAGE_AREA_RATIO
+            ),
+            "pdf_render_dpi": int(
+                conversion.get("pdf_render_dpi") or DEFAULT_PDF_RENDER_DPI
+            ),
+            "pdf_render_scanned_pages": bool(
+                conversion.get("pdf_render_scanned_pages")
+            ),
         },
         "tool": converter_version(path),
         "model_ref": conversion.get("vision_model_ref") or "",
@@ -719,8 +978,714 @@ def converter_version(path):
     return {"name": "none", "version": ""}
 
 
+def convert_embedded_images(path, context):
+    """Recognize embedded document images."""
+
+    conversion = context.get("conversion") or {}
+    if not conversion.get("embedded_image") or not is_document_path(path):
+        return {"markdown": "", "stats": {}, "cost": empty_cost_stats()}
+    if Path(path).suffix.lower() == ".pdf":
+        return convert_pdf_images(path, context)
+
+    prefix = EMBEDDED_IMAGE_PREFIXES.get(Path(path).suffix.lower())
+    if not prefix:
+        return {"markdown": "", "stats": {}, "cost": empty_cost_stats()}
+
+    stats = {
+        "embedded_images_total": 0,
+        "embedded_images_recognized": 0,
+        "embedded_images_skipped": 0,
+        "embedded_images_duplicate": 0,
+        "embedded_images_blank": 0,
+    }
+    cost = empty_cost_stats()
+    descriptions = []
+    if not vision_configured(context):
+        stats["embedded_images_skipped"] = count_embedded_image_entries(
+            path,
+            prefix,
+        )
+        return {"markdown": "", "stats": stats, "cost": cost}
+
+    seen = set()
+    max_images = int(conversion.get("max_images") or DEFAULT_MAX_IMAGES)
+    assets_dir = sidecar_path(path) / "assets"
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entries = embedded_image_entries(archive, prefix)
+            for index, name in enumerate(entries, start=1):
+                stats["embedded_images_total"] += 1
+                if index > max_images:
+                    stats["embedded_images_skipped"] += 1
+                    stats["images_skipped"] = int(
+                        stats.get("images_skipped") or 0
+                    ) + 1
+                    continue
+                raw = archive.read(name)
+                digest = source_bytes_sha256(raw)
+                if digest in seen:
+                    stats["embedded_images_skipped"] += 1
+                    stats["embedded_images_duplicate"] += 1
+                    stats["images_skipped"] = int(
+                        stats.get("images_skipped") or 0
+                    ) + 1
+                    stats["images_duplicate"] = int(
+                        stats.get("images_duplicate") or 0
+                    ) + 1
+                    continue
+                seen.add(digest)
+                result = convert_one_embedded_image(
+                    path,
+                    assets_dir,
+                    name,
+                    raw,
+                    context,
+                )
+                merge_embedded_image_stats(stats, result["stats"])
+                merge_cost_stats(cost, result["cost"])
+                if result["description"]:
+                    descriptions.append(result)
+    except (OSError, zipfile.BadZipFile):
+        return {"markdown": "", "stats": stats, "cost": cost}
+
+    return {
+        "markdown": embedded_images_markdown(descriptions),
+        "stats": stats,
+        "cost": cost,
+    }
+
+
+def embedded_image_entries(archive, prefix):
+    """Return supported embedded image archive entries."""
+
+    entries = []
+    for name in archive.namelist():
+        lower = name.lower()
+        if not lower.startswith(prefix):
+            continue
+        if Path(lower).suffix not in IMAGE_EXTENSIONS:
+            continue
+        entries.append(name)
+    return sorted(entries)
+
+
+def count_embedded_image_entries(path, prefix):
+    """Return the number of supported embedded image entries."""
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return len(embedded_image_entries(archive, prefix))
+    except (OSError, zipfile.BadZipFile):
+        return 0
+
+
+def convert_one_embedded_image(source_path, assets_dir, name, raw, context):
+    """Recognize one embedded image and return markdown data."""
+
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(name).suffix.lower() or ".png"
+    digest = source_bytes_sha256(raw)
+    asset_path = assets_dir / f"embedded_{digest[:12]}{suffix}"
+    asset_path.write_bytes(raw)
+    prepared = prepare_image_for_model(asset_path, context)
+    if prepared.get("skipped"):
+        return {
+            "description": "",
+            "stats": embedded_image_skip_stats(prepared),
+            "cost": empty_cost_stats(),
+        }
+
+    content, usage = describe_image_bytes(
+        prepared["bytes"],
+        prepared["mime_type"],
+        context,
+    )
+    stats = {
+        **(prepared.get("stats") or {}),
+        "embedded_images_recognized": 1 if content else 0,
+        "images_recognized": 1 if content else 0,
+    }
+    return {
+        "source": name,
+        "asset": asset_path.name,
+        "description": content,
+        "stats": stats,
+        "cost": model_cost_stats(usage, content),
+    }
+
+
+def embedded_image_skip_stats(prepared):
+    """Return embedded image skip stats from a preprocessing result."""
+
+    reason = prepared.get("reason") or ""
+    source_stats = prepared.get("stats") or {}
+    stats = {
+        **source_stats,
+        "embedded_images_skipped": 1,
+    }
+    if reason == "IMAGE_BLANK":
+        stats["embedded_images_blank"] = 1
+    if reason == "IMAGE_DUPLICATE":
+        stats["embedded_images_duplicate"] = 1
+    return stats
+
+
+def merge_embedded_image_stats(target, source):
+    """Merge embedded image stats into the document stats bucket."""
+
+    for key in [
+        "embedded_images_recognized",
+        "embedded_images_skipped",
+        "embedded_images_duplicate",
+        "embedded_images_blank",
+        "images_skipped",
+        "images_blank",
+        "images_duplicate",
+        "images_compressed",
+        "images_recognized",
+    ]:
+        target[key] = int(target.get(key) or 0) + int(source.get(key) or 0)
+
+
+def embedded_images_markdown(items):
+    """Return markdown for recognized embedded images."""
+
+    if not items:
+        return ""
+    parts = ["## Embedded Images"]
+    for index, item in enumerate(items, start=1):
+        parts.extend(
+            [
+                "",
+                f"### Embedded Image {index}",
+                "",
+                f"Source: {item['source']}",
+                "",
+                item["description"].strip(),
+            ]
+        )
+    return "\n".join(parts).strip()
+
+
+def source_bytes_sha256(data):
+    """Return a SHA-256 digest for bytes."""
+
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def convert_pdf_images(path, context):
+    """Recognize PDF embedded images and optionally scanned pages."""
+
+    stats = empty_pdf_stats()
+    cost = empty_cost_stats()
+    descriptions = []
+    conversion = context.get("conversion") or {}
+    if not vision_configured(context):
+        return {"markdown": "", "stats": stats, "cost": cost}
+    try:
+        import fitz
+    except Exception:
+        stats["pdf_images_skipped"] += 1
+        return {"markdown": "", "stats": stats, "cost": cost}
+
+    options = pdf_options(conversion)
+    seen = set()
+    assets_dir = sidecar_path(path) / "assets"
+    try:
+        with fitz.open(path) as document:
+            stats["pdf_pages"] = int(document.page_count or 0)
+            page_count = min(stats["pdf_pages"], options["max_pages"])
+            for page_index in range(page_count):
+                page = document.load_page(page_index)
+                stats["pdf_pages_processed"] += 1
+                page_has_text = pdf_page_has_text(
+                    page,
+                    options["min_text_chars"],
+                )
+                if page_has_text:
+                    stats["pdf_pages_with_text"] += 1
+                else:
+                    stats["pdf_scanned_pages"] += 1
+                    if options["render_scanned_pages"]:
+                        if stats["pdf_images_total"] >= options["max_images"]:
+                            result = pdf_skipped_result(
+                                page_index,
+                                "CONVERSION_MAX_IMAGES_EXCEEDED",
+                                meta={"kind": "rendered_page"},
+                            )
+                        else:
+                            result = convert_pdf_rendered_page(
+                                path,
+                                assets_dir,
+                                page,
+                                page_index,
+                                options,
+                                context,
+                            )
+                        merge_pdf_item_stats(stats, result["stats"])
+                        merge_cost_stats(cost, result["cost"])
+                        if result["description"]:
+                            descriptions.append(result)
+                should_extract_images = (
+                    options["extract_images"]
+                    and (
+                        not page_has_text
+                        or options["extract_images_on_text_pages"]
+                    )
+                )
+                if should_extract_images:
+                    results = convert_pdf_page_images(
+                        path,
+                        assets_dir,
+                        document,
+                        page,
+                        page_index,
+                        options,
+                        context,
+                        seen,
+                        max(
+                            0,
+                            options["max_images"] - stats["pdf_images_total"],
+                        ),
+                    )
+                    for result in results:
+                        merge_pdf_item_stats(stats, result["stats"])
+                        merge_cost_stats(cost, result["cost"])
+                        if result["description"]:
+                            descriptions.append(result)
+    except Exception:
+        stats["pdf_images_skipped"] += 1
+
+    return {
+        "markdown": pdf_images_markdown(descriptions),
+        "stats": stats,
+        "cost": cost,
+    }
+
+
+def empty_pdf_stats():
+    """Return empty PDF image recognition stats."""
+
+    return {
+        "pdf_pages": 0,
+        "pdf_pages_processed": 0,
+        "pdf_pages_with_text": 0,
+        "pdf_scanned_pages": 0,
+        "pdf_images_total": 0,
+        "pdf_images_recognized": 0,
+        "pdf_images_skipped": 0,
+        "pdf_rendered_pages": 0,
+    }
+
+
+def pdf_options(conversion):
+    """Return PDF image conversion options."""
+
+    return {
+        "extract_images": conversion.get("pdf_extract_images") is not False,
+        "extract_images_on_text_pages": bool(
+            conversion.get("pdf_extract_images_on_text_pages")
+        ),
+        "max_images": int(conversion.get("max_images") or DEFAULT_MAX_IMAGES),
+        "max_images_per_page": int(
+            conversion.get("pdf_max_images_per_page")
+            or DEFAULT_PDF_MAX_IMAGES_PER_PAGE
+        ),
+        "max_pages": int(
+            conversion.get("pdf_max_pages") or DEFAULT_PDF_MAX_PAGES
+        ),
+        "min_text_chars": int(
+            conversion.get("pdf_min_text_chars")
+            or DEFAULT_PDF_MIN_TEXT_CHARS
+        ),
+        "min_image_area_ratio": float(
+            conversion.get("pdf_min_image_area_ratio")
+            or DEFAULT_PDF_MIN_IMAGE_AREA_RATIO
+        ),
+        "render_dpi": int(
+            conversion.get("pdf_render_dpi") or DEFAULT_PDF_RENDER_DPI
+        ),
+        "render_scanned_pages": bool(
+            conversion.get("pdf_render_scanned_pages")
+        ),
+    }
+
+
+def pdf_page_has_text(page, min_text_chars):
+    """Return whether a PDF page has enough extractable text."""
+
+    try:
+        text = page.get_text("text") or ""
+    except Exception:
+        return False
+    return len(text.strip()) >= min_text_chars
+
+
+def convert_pdf_page_images(
+    source_path,
+    assets_dir,
+    document,
+    page,
+    page_index,
+    options,
+    context,
+    seen,
+    remaining_images,
+):
+    """Recognize embedded images from one PDF page."""
+
+    results = []
+    images = page.get_images(full=True) or []
+    for image_index, image in enumerate(images, start=1):
+        if remaining_images <= 0:
+            results.append(
+                pdf_skipped_result(
+                    page_index,
+                    "CONVERSION_MAX_IMAGES_EXCEEDED",
+                )
+            )
+            continue
+        if image_index > options["max_images_per_page"]:
+            results.append(
+                pdf_skipped_result(page_index, "PDF_PAGE_IMAGE_LIMIT")
+            )
+            continue
+        if not pdf_image_has_enough_page_area(page, image, options):
+            results.append(
+                pdf_skipped_result(page_index, "PDF_IMAGE_TOO_SMALL")
+            )
+            continue
+        xref = int(image[0])
+        try:
+            extracted = document.extract_image(xref)
+        except Exception:
+            results.append(pdf_skipped_result(page_index, "PDF_IMAGE_INVALID"))
+            continue
+        raw = extracted.get("image") or b""
+        if not raw:
+            results.append(pdf_skipped_result(page_index, "PDF_IMAGE_EMPTY"))
+            continue
+        digest = source_bytes_sha256(raw)
+        if digest in seen:
+            results.append(pdf_skipped_result(page_index, "IMAGE_DUPLICATE"))
+            continue
+        seen.add(digest)
+        suffix = f".{extracted.get('ext') or 'png'}"
+        name = f"pdf_p{page_index + 1}_x{xref}{suffix}"
+        results.append(
+            convert_pdf_image_bytes(
+                source_path,
+                assets_dir,
+                name,
+                raw,
+                context,
+                {
+                    "page": page_index + 1,
+                    "kind": "embedded_image",
+                    "source": f"page={page_index + 1}, xref={xref}",
+                },
+            )
+        )
+        remaining_images -= 1
+    return results
+
+
+def pdf_image_has_enough_page_area(page, image, options):
+    """Return whether a PDF image is large enough on the page."""
+
+    page_area = float(page.rect.width * page.rect.height)
+    if page_area <= 0:
+        return False
+    xref = int(image[0])
+    try:
+        rects = page.get_image_rects(xref)
+    except Exception:
+        return True
+    if not rects:
+        return True
+    max_area = max(float(rect.width * rect.height) for rect in rects)
+    return max_area / page_area >= options["min_image_area_ratio"]
+
+
+def convert_pdf_rendered_page(
+    source_path,
+    assets_dir,
+    page,
+    page_index,
+    options,
+    context,
+):
+    """Render and recognize one scanned PDF page."""
+
+    import fitz
+
+    matrix = fitz.Matrix(
+        options["render_dpi"] / 72,
+        options["render_dpi"] / 72,
+    )
+    pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+    raw = pixmap.tobytes("png")
+    name = f"pdf_p{page_index + 1}_rendered.png"
+    return convert_pdf_image_bytes(
+        source_path,
+        assets_dir,
+        name,
+        raw,
+        context,
+        {
+            "page": page_index + 1,
+            "kind": "rendered_page",
+            "source": (
+                f"page={page_index + 1}, "
+                f"render_dpi={options['render_dpi']}"
+            ),
+            "rendered_page": True,
+        },
+    )
+
+
+def convert_pdf_image_bytes(source_path, assets_dir, name, raw, context, meta):
+    """Recognize one PDF image-like asset."""
+
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(name).suffix.lower() or ".png"
+    digest = source_bytes_sha256(raw)
+    asset_path = assets_dir / f"pdf_{digest[:12]}{suffix}"
+    asset_path.write_bytes(raw)
+    prepared = prepare_image_for_model(asset_path, context)
+    if prepared.get("skipped"):
+        return pdf_skipped_result(
+            int(meta.get("page") or 0) - 1,
+            prepared.get("reason") or "IMAGE_SKIPPED",
+            prepared.get("stats") or {},
+            meta,
+        )
+
+    content, usage = describe_image_bytes(
+        prepared["bytes"],
+        prepared["mime_type"],
+        context,
+    )
+    stats = {
+        **(prepared.get("stats") or {}),
+        "images_recognized": 1 if content else 0,
+        "pdf_images_recognized": 1 if content else 0,
+        "pdf_images_total": 1,
+    }
+    if meta.get("rendered_page"):
+        stats["pdf_rendered_pages"] = 1
+    return {
+        "source": meta["source"],
+        "asset": asset_path.name,
+        "page": meta.get("page") or 0,
+        "kind": meta.get("kind") or "embedded_image",
+        "description": content,
+        "stats": stats,
+        "cost": model_cost_stats(usage, content),
+    }
+
+
+def pdf_skipped_result(page_index, reason, stats=None, meta=None):
+    """Return a skipped PDF image result."""
+
+    stats = dict(stats or {})
+    stats["pdf_images_total"] = int(stats.get("pdf_images_total") or 0) + 1
+    stats["pdf_images_skipped"] = max(
+        1,
+        int(stats.get("pdf_images_skipped") or 0),
+    )
+    stats["images_skipped"] = max(1, int(stats.get("images_skipped") or 0))
+    return {
+        "source": (meta or {}).get("source") or f"page={page_index + 1}",
+        "asset": "",
+        "page": page_index + 1,
+        "kind": (meta or {}).get("kind") or "embedded_image",
+        "description": "",
+        "reason": reason,
+        "stats": stats,
+        "cost": empty_cost_stats(),
+    }
+
+
+def merge_pdf_item_stats(target, source):
+    """Merge one PDF image result into aggregate document stats."""
+
+    for key in [
+        "pdf_images_total",
+        "pdf_images_recognized",
+        "pdf_images_skipped",
+        "pdf_rendered_pages",
+        "images_recognized",
+        "images_skipped",
+        "images_blank",
+        "images_duplicate",
+        "images_compressed",
+    ]:
+        target[key] = int(target.get(key) or 0) + int(source.get(key) or 0)
+
+
+def pdf_images_markdown(items):
+    """Return markdown for recognized PDF images."""
+
+    if not items:
+        return ""
+    parts = ["## PDF Images"]
+    for index, item in enumerate(items, start=1):
+        title = "Rendered Page" if item["kind"] == "rendered_page" else "Image"
+        parts.extend(
+            [
+                "",
+                f"### Page {item['page']} · {title} {index}",
+                "",
+                f"Source: {item['source']}",
+                "",
+                item["description"].strip(),
+            ]
+        )
+    return "\n".join(parts).strip()
+
+
+def image_skip_stats(reason):
+    """Return stats for one skipped image."""
+
+    stats = {"images_skipped": 1}
+    if reason == "IMAGE_BLANK":
+        stats["images_blank"] = 1
+    elif reason == "IMAGE_DUPLICATE":
+        stats["images_duplicate"] = 1
+    return stats
+
+
+def prepare_image_for_model(path, context):
+    """Return optimized image bytes for model recognition."""
+
+    conversion = context.get("conversion") or {}
+    min_bytes = int(
+        conversion.get("min_image_bytes") or DEFAULT_MIN_IMAGE_BYTES
+    )
+    if path.stat().st_size < min_bytes:
+        return {
+            "skipped": True,
+            "reason": "IMAGE_TOO_SMALL",
+            "stats": image_skip_stats("IMAGE_TOO_SMALL"),
+        }
+
+    try:
+        from PIL import Image, ImageStat, UnidentifiedImageError
+    except Exception:
+        return {
+            "bytes": path.read_bytes(),
+            "mime_type": mimetypes.guess_type(str(path))[0] or "image/png",
+            "stats": {"images_preprocess_unavailable": 1},
+        }
+
+    try:
+        image = Image.open(path)
+        image.load()
+    except (OSError, UnidentifiedImageError):
+        return {
+            "skipped": True,
+            "reason": "IMAGE_INVALID",
+            "stats": image_skip_stats("IMAGE_INVALID"),
+        }
+
+    min_dimension = int(
+        conversion.get("min_image_dimension") or DEFAULT_MIN_IMAGE_DIMENSION
+    )
+    width, height = image.size
+    if width < min_dimension or height < min_dimension:
+        return {
+            "skipped": True,
+            "reason": "IMAGE_TOO_SMALL",
+            "stats": image_skip_stats("IMAGE_TOO_SMALL"),
+        }
+    if image_is_blank(image, ImageStat):
+        return {
+            "skipped": True,
+            "reason": "IMAGE_BLANK",
+            "stats": image_skip_stats("IMAGE_BLANK"),
+        }
+
+    return optimize_image_for_model(image, context, path)
+
+
+def image_is_blank(image, image_stat):
+    """Return whether an image is effectively blank."""
+
+    if "A" in image.getbands():
+        alpha = image.getchannel("A")
+        if alpha.getextrema() == (0, 0):
+            return True
+    grayscale = image.convert("L")
+    stat = image_stat.Stat(grayscale)
+    return float(stat.var[0] or 0) < IMAGE_BLANK_VARIANCE_THRESHOLD
+
+
+def optimize_image_for_model(image, context, path):
+    """Downscale and re-encode one image before model upload."""
+
+    conversion = context.get("conversion") or {}
+    max_dimension = int(
+        conversion.get("image_max_dimension") or DEFAULT_IMAGE_MAX_DIMENSION
+    )
+    quality = int(
+        conversion.get("image_jpeg_quality") or DEFAULT_IMAGE_JPEG_QUALITY
+    )
+    original_width, original_height = image.size
+    original_data = path.read_bytes()
+    image = image.copy()
+    resized = False
+    if max(original_width, original_height) > max_dimension:
+        image.thumbnail((max_dimension, max_dimension))
+        resized = True
+
+    has_alpha = "A" in image.getbands()
+    buffer = BytesIO()
+    stats = {
+        "image_original_width": original_width,
+        "image_original_height": original_height,
+        "image_width": image.size[0],
+        "image_height": image.size[1],
+    }
+    if has_alpha:
+        image.save(buffer, format="PNG", optimize=True)
+        mime_type = "image/png"
+    else:
+        image.convert("RGB").save(
+            buffer,
+            format="JPEG",
+            optimize=True,
+            quality=max(1, min(95, quality)),
+        )
+        mime_type = "image/jpeg"
+
+    data = buffer.getvalue()
+    if not resized and len(data) >= len(original_data):
+        data = original_data
+        mime_type = mimetypes.guess_type(str(path))[0] or "image/png"
+    elif len(data) < len(original_data) or resized:
+        stats["images_compressed"] = 1
+    stats["image_upload_bytes"] = len(data)
+    return {"bytes": data, "mime_type": mime_type, "stats": stats}
+
+
 def describe_image_file(path, context):
     """Describe an image file through the LensNode gateway."""
+
+    prepared = prepare_image_for_model(path, context)
+    if prepared.get("skipped"):
+        raise RuntimeError(prepared.get("reason") or "IMAGE_SKIPPED")
+    return describe_image_bytes(
+        prepared["bytes"],
+        prepared["mime_type"],
+        context,
+    )
+
+
+def describe_image_bytes(image_bytes, mime_type, context):
+    """Describe image bytes through the LensNode gateway."""
 
     conversion = context.get("conversion") or {}
     model_ref = conversion.get("vision_model_ref") or context.get(
@@ -732,10 +1697,9 @@ def describe_image_file(path, context):
         raise RuntimeError("VISION_MODEL_NOT_CONFIGURED")
     from .gateway_model import describe_image_result
 
-    mime_type = mimetypes.guess_type(str(path))[0] or "image/png"
     prompt = image_prompt()
     result = describe_image_result(
-        path.read_bytes(),
+        image_bytes,
         prompt,
         mime_type,
         model_ref=model_ref,

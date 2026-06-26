@@ -663,9 +663,49 @@ const summaryPanelVisible = computed(() => {
   )
 })
 
+const phaseToneClass = (status) => {
+  const map = {
+    success: 'border-green-200 bg-green-50 text-green-800',
+    failed: 'border-red-200 bg-red-50 text-red-800',
+    processing: 'border-blue-200 bg-blue-50 text-blue-800',
+    cancelled: 'border-gray-200 bg-gray-100 text-gray-700',
+    disabled: 'border-gray-200 bg-gray-100 text-gray-600',
+    pending: 'border-gray-200 bg-white text-gray-600'
+  }
+  return map[status] || map.pending
+}
+
 const datasourcePhases = computed(() => {
   const syncDone = Object.keys(syncSummary.value).length > 0
   const conversionDone = Object.keys(conversionSummary.value).length > 0
+  const terminalStatus = ['failed', 'cancelled'].includes(
+    progressStatusKey.value
+  )
+    ? progressStatusKey.value
+    : ''
+  const syncFailed = Number(syncSummary.value.failed || 0) > 0
+  const conversionFailed = Number(conversionSummary.value.failed || 0) > 0
+  const scanStatus =
+    syncDone || isScanningProgress.value
+      ? 'success'
+      : terminalStatus || 'pending'
+  const syncStatus = isTaskActive.value
+    ? 'processing'
+    : syncFailed
+      ? 'failed'
+      : syncDone
+        ? 'success'
+        : terminalStatus || 'pending'
+  const conversionStatus = conversionDone
+    ? conversionFailed
+      ? 'failed'
+      : 'success'
+    : !conversionEnabled.value
+      ? 'disabled'
+      : isTaskActive.value
+        ? 'processing'
+        : terminalStatus || 'pending'
+
   return [
     {
       key: 'scan',
@@ -673,11 +713,8 @@ const datasourcePhases = computed(() => {
       description: `${t('taskManagement.list.scannedItems')} ${
         syncSummary.value.scanned ?? metadata.value.progress_current ?? 0
       }`,
-      status: syncDone || isScanningProgress.value ? 'success' : 'pending',
-      class:
-        syncDone || isScanningProgress.value
-          ? 'border-blue-200 bg-blue-50 text-blue-800'
-          : 'border-gray-200 bg-white text-gray-600'
+      status: scanStatus,
+      class: phaseToneClass(scanStatus)
     },
     {
       key: 'sync',
@@ -687,16 +724,8 @@ const datasourcePhases = computed(() => {
       } · ${t('taskManagement.list.skippedItems')} ${
         syncSummary.value.skipped ?? 0
       }`,
-      status: isTaskActive.value
-        ? 'processing'
-        : syncDone
-          ? 'success'
-          : 'pending',
-      class: isTaskActive.value
-        ? 'border-blue-200 bg-blue-50 text-blue-800'
-        : syncDone
-          ? 'border-green-200 bg-green-50 text-green-800'
-          : 'border-gray-200 bg-white text-gray-600'
+      status: syncStatus,
+      class: phaseToneClass(syncStatus)
     },
     {
       key: 'conversion',
@@ -706,20 +735,8 @@ const datasourcePhases = computed(() => {
       } · ${t('taskManagement.list.conversionFailedItems')} ${
         conversionSummary.value.failed ?? 0
       }`,
-      status: conversionDone
-        ? conversionSummary.value.failed
-          ? 'failed'
-          : 'success'
-        : isTaskActive.value
-          ? 'processing'
-          : 'pending',
-      class: conversionDone
-        ? conversionSummary.value.failed
-          ? 'border-red-200 bg-red-50 text-red-800'
-          : 'border-green-200 bg-green-50 text-green-800'
-        : isTaskActive.value
-          ? 'border-blue-200 bg-blue-50 text-blue-800'
-          : 'border-gray-200 bg-white text-gray-600'
+      status: conversionStatus,
+      class: phaseToneClass(conversionStatus)
     }
   ]
 })
@@ -951,6 +968,72 @@ const conversionStats = computed(() => {
       details: metricDetails(summary, 'skipped', {
         legacyItems: conversionItemsByStatus.value.skipped
       })
+    },
+    {
+      key: 'images_recognized',
+      label: t('taskManagement.list.imagesRecognized'),
+      value: summary.images_recognized ?? 0,
+      details: metricDetails(summary, 'images_recognized')
+    },
+    {
+      key: 'images_skipped',
+      label: t('taskManagement.list.imagesSkipped'),
+      value: summary.images_skipped ?? 0,
+      details: metricDetails(summary, 'images_skipped')
+    },
+    {
+      key: 'embedded_images_total',
+      label: t('taskManagement.list.embeddedImagesTotal'),
+      value: summary.embedded_images_total ?? 0,
+      details: metricDetails(summary, 'embedded_images_total')
+    },
+    {
+      key: 'embedded_images_recognized',
+      label: t('taskManagement.list.embeddedImagesRecognized'),
+      value: summary.embedded_images_recognized ?? 0,
+      details: metricDetails(summary, 'embedded_images_recognized')
+    },
+    {
+      key: 'embedded_images_skipped',
+      label: t('taskManagement.list.embeddedImagesSkipped'),
+      value: summary.embedded_images_skipped ?? 0,
+      details: metricDetails(summary, 'embedded_images_skipped')
+    },
+    {
+      key: 'images_compressed',
+      label: t('taskManagement.list.imagesCompressed'),
+      value: summary.images_compressed ?? 0,
+      details: metricDetails(summary, 'images_compressed')
+    },
+    {
+      key: 'pdf_pages',
+      label: t('taskManagement.list.pdfPages'),
+      value: summary.pdf_pages ?? 0,
+      details: metricDetails(summary, 'pdf_pages')
+    },
+    {
+      key: 'pdf_scanned_pages',
+      label: t('taskManagement.list.pdfScannedPages'),
+      value: summary.pdf_scanned_pages ?? 0,
+      details: metricDetails(summary, 'pdf_scanned_pages')
+    },
+    {
+      key: 'pdf_images_recognized',
+      label: t('taskManagement.list.pdfImagesRecognized'),
+      value: summary.pdf_images_recognized ?? 0,
+      details: metricDetails(summary, 'pdf_images_recognized')
+    },
+    {
+      key: 'pdf_images_skipped',
+      label: t('taskManagement.list.pdfImagesSkipped'),
+      value: summary.pdf_images_skipped ?? 0,
+      details: metricDetails(summary, 'pdf_images_skipped')
+    },
+    {
+      key: 'pdf_rendered_pages',
+      label: t('taskManagement.list.pdfRenderedPages'),
+      value: summary.pdf_rendered_pages ?? 0,
+      details: metricDetails(summary, 'pdf_rendered_pages')
     },
     {
       key: 'xlsx',

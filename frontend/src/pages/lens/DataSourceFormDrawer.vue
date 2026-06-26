@@ -793,6 +793,129 @@
             </span>
           </span>
         </label>
+        <section
+          v-if="form.conversion_document && form.conversion_embedded_image"
+          class="rounded-md border border-line bg-ink-50/50"
+        >
+          <button
+            type="button"
+            class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium text-ink-800"
+            @click="pdfAdvancedOpen = !pdfAdvancedOpen"
+          >
+            <span>
+              {{ t('lensAdmin.datasourceWizard.pdfAdvancedTitle') }}
+            </span>
+            <component
+              :is="pdfAdvancedOpen ? ChevronDownIcon : ChevronRightIcon"
+              class="h-4 w-4 text-ink-500"
+            />
+          </button>
+          <div
+            v-if="pdfAdvancedOpen"
+            class="space-y-4 border-t border-line p-3"
+          >
+            <p class="text-xs leading-5 text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.pdfAdvancedHint') }}
+            </p>
+            <label class="flex items-start gap-3 text-sm text-ink-700">
+              <input
+                v-model="form.conversion_pdf_extract_images"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+              />
+              <span>
+                <span class="font-medium">
+                  {{ t('lensAdmin.datasourceWizard.pdfExtractImages') }}
+                </span>
+                <span class="block text-xs text-ink-500">
+                  {{ t('lensAdmin.datasourceWizard.pdfExtractImagesHint') }}
+                </span>
+              </span>
+            </label>
+            <label class="flex items-start gap-3 text-sm text-ink-700">
+              <input
+                v-model="form.conversion_pdf_render_scanned_pages"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+              />
+              <span>
+                <span class="font-medium">
+                  {{ t('lensAdmin.datasourceWizard.pdfRenderScannedPages') }}
+                </span>
+                <span class="block text-xs text-amber-700">
+                  {{
+                    t('lensAdmin.datasourceWizard.pdfRenderScannedPagesHint')
+                  }}
+                </span>
+              </span>
+            </label>
+            <label class="flex items-start gap-3 text-sm text-ink-700">
+              <input
+                v-model="form.conversion_pdf_extract_images_on_text_pages"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+              />
+              <span>
+                <span class="font-medium">
+                  {{
+                    t('lensAdmin.datasourceWizard.pdfExtractImagesOnTextPages')
+                  }}
+                </span>
+                <span class="block text-xs text-amber-700">
+                  {{
+                    t(
+                      'lensAdmin.datasourceWizard.pdfExtractImagesOnTextPagesHint'
+                    )
+                  }}
+                </span>
+              </span>
+            </label>
+            <div class="grid gap-4 md:grid-cols-2">
+              <FormRow :label="t('lensAdmin.fields.pdfMaxPages')">
+                <input
+                  v-model.number="form.conversion_pdf_max_pages"
+                  class="form-input"
+                  min="1"
+                  type="number"
+                />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.pdfMaxImagesPerPage')">
+                <input
+                  v-model.number="form.conversion_pdf_max_images_per_page"
+                  class="form-input"
+                  min="1"
+                  type="number"
+                />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.pdfRenderDpi')">
+                <input
+                  v-model.number="form.conversion_pdf_render_dpi"
+                  class="form-input"
+                  min="1"
+                  type="number"
+                />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.pdfMinTextChars')">
+                <input
+                  v-model.number="form.conversion_pdf_min_text_chars"
+                  class="form-input"
+                  min="1"
+                  type="number"
+                />
+              </FormRow>
+              <FormRow :label="t('lensAdmin.fields.pdfMinImageAreaRatio')">
+                <input
+                  v-model.number="form.conversion_pdf_min_image_area_ratio"
+                  class="form-input"
+                  max="1"
+                  min="0.01"
+                  step="0.01"
+                  type="number"
+                />
+              </FormRow>
+            </div>
+          </div>
+        </section>
       </section>
       <section class="space-y-4 rounded-md border border-line p-3">
         <div>
@@ -957,6 +1080,7 @@ const creatingDirectoryParent = ref(null)
 const expandedDirectories = ref(new Set())
 const newDirectoryName = ref('')
 const feishuAdvancedOpen = ref(false)
+const pdfAdvancedOpen = ref(false)
 
 const syncIntervalSeconds = computed({
   get() {
@@ -1319,6 +1443,7 @@ watch(
       expandedDirectories.value = new Set()
       newDirectoryName.value = ''
       feishuAdvancedOpen.value = false
+      pdfAdvancedOpen.value = false
     }
   }
 )
@@ -1338,6 +1463,16 @@ watch(
     if (!value) {
       props.form.conversion_embedded_image = false
       props.form.conversion_document_model_ref = ''
+      pdfAdvancedOpen.value = false
+    }
+  }
+)
+
+watch(
+  () => props.form.conversion_embedded_image,
+  (value) => {
+    if (!value) {
+      pdfAdvancedOpen.value = false
     }
   }
 )

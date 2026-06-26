@@ -799,7 +799,39 @@ const datasourceRetrievalDetails = computed(() => {
       conversion.max_file_size_mb || 100
     ),
     detailItem(t('lensAdmin.fields.maxPages'), conversion.max_pages || 500),
-    detailItem(t('lensAdmin.fields.maxImages'), conversion.max_images || 100)
+    detailItem(t('lensAdmin.fields.maxImages'), conversion.max_images || 100),
+    detailItem(
+      t('lensAdmin.datasourceWizard.pdfExtractImages'),
+      booleanLabel(conversion.pdf_extract_images !== false)
+    ),
+    detailItem(
+      t('lensAdmin.datasourceWizard.pdfExtractImagesOnTextPages'),
+      booleanLabel(conversion.pdf_extract_images_on_text_pages)
+    ),
+    detailItem(
+      t('lensAdmin.datasourceWizard.pdfRenderScannedPages'),
+      booleanLabel(conversion.pdf_render_scanned_pages)
+    ),
+    detailItem(
+      t('lensAdmin.fields.pdfMaxPages'),
+      conversion.pdf_max_pages || 30
+    ),
+    detailItem(
+      t('lensAdmin.fields.pdfMaxImagesPerPage'),
+      conversion.pdf_max_images_per_page || 3
+    ),
+    detailItem(
+      t('lensAdmin.fields.pdfRenderDpi'),
+      conversion.pdf_render_dpi || 144
+    ),
+    detailItem(
+      t('lensAdmin.fields.pdfMinTextChars'),
+      conversion.pdf_min_text_chars || 30
+    ),
+    detailItem(
+      t('lensAdmin.fields.pdfMinImageAreaRatio'),
+      conversion.pdf_min_image_area_ratio || 0.08
+    )
   ]
 })
 </script>

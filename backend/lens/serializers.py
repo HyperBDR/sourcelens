@@ -951,7 +951,14 @@ def _validate_conversion_policy(conversion):
         raise serializers.ValidationError(
             {"sync_policy": "conversion must be an object"}
         )
-    for key in ["document", "image", "embedded_image"]:
+    for key in [
+        "document",
+        "image",
+        "embedded_image",
+        "pdf_extract_images",
+        "pdf_extract_images_on_text_pages",
+        "pdf_render_scanned_pages",
+    ]:
         value = conversion.get(key)
         if value is not None and not isinstance(value, bool):
             raise serializers.ValidationError(
@@ -966,7 +973,15 @@ def _validate_conversion_policy(conversion):
                 )
             }
         )
-    for key in ["max_images", "max_file_size_mb", "max_pages"]:
+    for key in [
+        "max_images",
+        "max_file_size_mb",
+        "max_pages",
+        "pdf_max_images_per_page",
+        "pdf_max_pages",
+        "pdf_min_text_chars",
+        "pdf_render_dpi",
+    ]:
         value = conversion.get(key)
         if value is not None and (
             not isinstance(value, int) or value <= 0
@@ -974,6 +989,18 @@ def _validate_conversion_policy(conversion):
             raise serializers.ValidationError(
                 {"sync_policy": f"conversion.{key} must be positive"}
             )
+    ratio = conversion.get("pdf_min_image_area_ratio")
+    if ratio is not None and (
+        not isinstance(ratio, (int, float)) or ratio <= 0 or ratio > 1
+    ):
+        raise serializers.ValidationError(
+            {
+                "sync_policy": (
+                    "conversion.pdf_min_image_area_ratio must be "
+                    "between 0 and 1"
+                )
+            }
+        )
     for key in ["vision_model_ref", "document_model_ref", "queue"]:
         value = conversion.get(key)
         if value is not None and not isinstance(value, str):
