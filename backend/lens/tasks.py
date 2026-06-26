@@ -258,10 +258,8 @@ def complete_datasource_sync_task(task_id, result):
         "documents": int(result.get("documents") or 0),
         "by_extension": result.get("by_extension") or {},
         "by_type": result.get("by_type") or {},
-        "changed_items": result.get("changed_items") or [],
-        "changed_items_truncated": int(
-            result.get("changed_items_truncated") or 0
-        ),
+        "details": result.get("details") or {},
+        "details_truncated": result.get("details_truncated") or {},
         "target_path": result.get("target_path")
         or (datasource.target_path if datasource else ""),
     }
@@ -270,10 +268,13 @@ def complete_datasource_sync_task(task_id, result):
     warnings.extend(conversion_summary.get("warnings") or [])
     if conversion_summary.get("failed"):
         warnings.append("CONVERSION_PARTIAL_FAILED")
-    if conversion_summary:
-        metrics["conversion_summary"] = conversion_summary
     if warnings:
         metrics["warnings"] = list(dict.fromkeys(warnings))
+    result_metrics = {
+        key: value
+        for key, value in metrics.items()
+        if key not in {"details", "details_truncated"}
+    }
     if task.status in TaskStatus.get_completed_statuses():
         summary_update = {"sync_summary": metrics}
         if conversion_summary:
@@ -284,7 +285,7 @@ def complete_datasource_sync_task(task_id, result):
             return TaskTracker.update_task_status(
                 task_id,
                 task.status,
-                result=metrics,
+                result=result_metrics,
                 metadata=summary_update,
             )
         return TaskTracker.update_task_status(
@@ -319,7 +320,7 @@ def complete_datasource_sync_task(task_id, result):
         )
         record.last_error = "" if success else error
         record.last_run_at = timezone.now()
-        record.last_metrics = metrics if success else {}
+        record.last_metrics = result_metrics if success else {}
         record.save(
             update_fields=[
                 "last_status",
@@ -352,7 +353,7 @@ def complete_datasource_sync_task(task_id, result):
         return TaskTracker.update_task_status(
             task_id,
             TaskStatus.SUCCESS,
-            result=metrics,
+            result=result_metrics,
             metadata=completion_metadata,
         )
 

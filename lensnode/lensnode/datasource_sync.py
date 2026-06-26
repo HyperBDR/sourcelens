@@ -181,13 +181,20 @@ def sync_datasource(command, workspace_path=WORKSPACE_ROOT, emit=None):
         deleted_paths=deleted_paths,
         stats=_sync_summary_from_result(result),
     )
-    sync_details = _sync_item_details(sync_items, changed_paths)
-    if sync_details:
-        result["changed_items"] = sync_details
-        result["changed_items_truncated"] = max(
-            0,
-            len(changed_paths) - len(sync_details),
-        )
+    sync_details = _sync_details_by_metric(
+        sync_items,
+        changed_paths,
+        deleted_paths,
+    )
+    if sync_details["details"]:
+        result["details"] = sync_details["details"]
+        result["details_truncated"] = sync_details["details_truncated"]
+    changed_details = sync_details["details"].get("changed") or []
+    if changed_details:
+        result["changed_items"] = changed_details
+        result["changed_items_truncated"] = sync_details[
+            "details_truncated"
+        ].get("changed", 0)
     if sync_items:
         manifest_payload = manifest_store.build_manifest(context, sync_result)
         manifest_payload["synced_at"] = utc_timestamp()
@@ -256,31 +263,91 @@ def _sync_summary_from_result(result):
     return {key: result.get(key) for key in keys if key in result}
 
 
-def _sync_item_details(items, changed_paths):
-    """Return compact sync item details for task metadata."""
+def _sync_details_by_metric(items, changed_paths, deleted_paths):
+    """Return compact sync details grouped by summary metric."""
 
     changed = set(changed_paths or [])
-    details = []
+    deleted = set(deleted_paths or [])
+    details = {
+        "scanned": [],
+        "changed": [],
+        "skipped": [],
+        "success": [],
+        "failed": [],
+        "deleted": [],
+        "documents": [],
+        "files": [],
+    }
+    truncated = {key: 0 for key in details}
     for item in items or []:
         local_path = manifest_store.manifest_local_path(item)
+        status = item.get("status") or "synced"
+        detail = _sync_detail_item(item, local_path)
+        if status != "deleted":
+            _append_limited_detail(details, truncated, "scanned", detail)
         if local_path not in changed:
+            if status == "skipped":
+                _append_limited_detail(details, truncated, "skipped", detail)
+            elif status == "deleted":
+                _append_limited_detail(details, truncated, "deleted", detail)
+            elif status == "failed" or item.get("error"):
+                _append_limited_detail(details, truncated, "failed", detail)
+        else:
+            _append_limited_detail(details, truncated, "changed", detail)
+            if status == "failed" or item.get("error"):
+                _append_limited_detail(details, truncated, "failed", detail)
+            else:
+                _append_limited_detail(details, truncated, "success", detail)
+        kind = item.get("kind") or item.get("type") or ""
+        if kind == "document":
+            _append_limited_detail(details, truncated, "documents", detail)
+        elif kind == "file":
+            _append_limited_detail(details, truncated, "files", detail)
+
+    for path in deleted:
+        if any(item.get("path") == path for item in details["deleted"]):
             continue
-        details.append(
-            {
-                "status": item.get("status") or "synced",
-                "path": local_path,
-                "name": item.get("name") or Path(local_path).name,
-                "extension": (
-                    item.get("extension")
-                    or item.get("file_extension")
-                    or Path(local_path).suffix.lower().lstrip(".")
-                ),
-                "source_type": item.get("source_type") or "",
-            }
-        )
-        if len(details) >= DETAIL_ITEMS_LIMIT:
-            break
-    return details
+        detail = {
+            "status": "deleted",
+            "path": path,
+            "name": Path(path).name,
+            "extension": Path(path).suffix.lower().lstrip("."),
+            "source_type": "",
+        }
+        _append_limited_detail(details, truncated, "deleted", detail)
+
+    return {
+        "details": {key: value for key, value in details.items() if value},
+        "details_truncated": {
+            key: value for key, value in truncated.items() if value
+        },
+    }
+
+
+def _sync_detail_item(item, local_path):
+    """Return one compact sync detail item."""
+
+    return {
+        "status": item.get("status") or "synced",
+        "path": local_path,
+        "name": item.get("name") or Path(local_path).name,
+        "extension": (
+            item.get("extension")
+            or item.get("file_extension")
+            or Path(local_path).suffix.lower().lstrip(".")
+        ),
+        "source_type": item.get("source_type") or "",
+        "reason": item.get("error") or "",
+    }
+
+
+def _append_limited_detail(details, truncated, key, item):
+    """Append a detail item with a per-metric limit."""
+
+    if len(details[key]) >= DETAIL_ITEMS_LIMIT:
+        truncated[key] += 1
+        return
+    details[key].append(item)
 
 
 def datasource_sync_workers(command):

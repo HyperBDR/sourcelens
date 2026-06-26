@@ -89,8 +89,9 @@
                     v-for="item in syncPrimaryStats"
                     :key="item.label"
                     class="min-h-14 rounded-md border px-3 py-2"
-                    :class="statToneClass(item.tone)"
+                    :class="[statToneClass(item.tone), statDetailClass(item)]"
                     :title="statDetailsTitle(item.details)"
+                    @click="selectMetricDetail('sync', item)"
                   >
                     <div class="text-xs font-medium leading-4 opacity-75">
                       {{ item.label }}
@@ -110,7 +111,9 @@
                     v-for="item in syncSecondaryStats"
                     :key="item.label"
                     class="min-h-12 rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+                    :class="statDetailClass(item)"
                     :title="statDetailsTitle(item.details)"
+                    @click="selectMetricDetail('sync', item)"
                   >
                     <div class="text-xs leading-4 text-gray-500">
                       {{ item.label }}
@@ -150,8 +153,9 @@
                     v-for="item in conversionPrimaryStats"
                     :key="item.label"
                     class="min-h-14 rounded-md border px-3 py-2"
-                    :class="statToneClass(item.tone)"
+                    :class="[statToneClass(item.tone), statDetailClass(item)]"
                     :title="statDetailsTitle(item.details)"
+                    @click="selectMetricDetail('conversion', item)"
                   >
                     <div class="text-xs font-medium leading-4 opacity-75">
                       {{ item.label }}
@@ -171,7 +175,9 @@
                     v-for="item in conversionSecondaryStats"
                     :key="item.label"
                     class="min-h-12 rounded-md border border-gray-200 bg-gray-50 px-3 py-2"
+                    :class="statDetailClass(item)"
                     :title="statDetailsTitle(item.details)"
+                    @click="selectMetricDetail('conversion', item)"
                   >
                     <div class="text-xs leading-4 text-gray-500">
                       {{ item.label }}
@@ -182,6 +188,74 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section
+            v-if="selectedMetricDetail"
+            class="rounded-md border border-gray-200 bg-gray-50"
+          >
+            <div
+              class="flex items-center justify-between gap-3 border-b border-gray-200 px-3 py-2"
+            >
+              <div>
+                <h3 class="text-sm font-semibold text-gray-900">
+                  {{ selectedMetricDetail.label }}
+                </h3>
+                <p class="mt-0.5 text-xs text-gray-500">
+                  {{
+                    t('taskManagement.list.metricDetailsCount', {
+                      count: selectedMetricDetail.items.length
+                    })
+                  }}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="text-xs font-medium text-gray-500 hover:text-gray-900"
+                @click="selectedMetric = null"
+              >
+                {{ t('common.close') }}
+              </button>
+            </div>
+            <div class="max-h-64 overflow-auto">
+              <table class="min-w-full divide-y divide-gray-200 text-xs">
+                <thead class="sticky top-0 bg-gray-100 text-gray-600">
+                  <tr>
+                    <th class="px-3 py-2 text-left font-semibold">
+                      {{ t('taskManagement.list.itemName') }}
+                    </th>
+                    <th class="px-3 py-2 text-left font-semibold">
+                      {{ t('taskManagement.list.resultFile') }}
+                    </th>
+                    <th class="px-3 py-2 text-left font-semibold">
+                      {{ t('taskManagement.list.status') }}
+                    </th>
+                    <th class="px-3 py-2 text-left font-semibold">
+                      {{ t('taskManagement.list.reason') }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 bg-white">
+                  <tr
+                    v-for="item in selectedMetricDetail.items"
+                    :key="`${item.status}-${item.path}-${item.reason}`"
+                  >
+                    <td class="px-3 py-2 font-medium text-gray-900">
+                      {{ item.name || '-' }}
+                    </td>
+                    <td class="px-3 py-2 font-mono text-gray-600">
+                      {{ item.path || '-' }}
+                    </td>
+                    <td class="px-3 py-2 text-gray-600">
+                      {{ item.status || '-' }}
+                    </td>
+                    <td class="px-3 py-2 text-gray-600">
+                      {{ item.reason || detailStatsText(item.stats) || '-' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
@@ -405,6 +479,7 @@ const { t } = useI18n()
 
 const changedItemsExpanded = ref(false)
 const detailStepsExpanded = ref(false)
+const selectedMetric = ref(null)
 
 const metadata = computed(() => props.task?.metadata || {})
 
@@ -476,7 +551,7 @@ const progressPercent = computed(() => {
 const progressDescription = computed(() => {
   if (isScanningProgress.value) {
     const summary = syncSummary.value
-    return t('taskManagement.list.scanningDescription', {
+    return t(scanningDescriptionKey.value, {
       scanned: summary.scanned ?? metadata.value.progress_current ?? 0,
       folders: summary.folders ?? 0,
       skipped: summary.skipped ?? 0
@@ -522,6 +597,46 @@ const isDatasourceTask = computed(() => {
   return props.task?.module === 'lens_datasource' || meta.type === 'datasource'
 })
 
+const datasourceSourceType = computed(() => {
+  const meta = metadata.value
+  const result = props.task?.result || {}
+  if (meta.source_type) return String(meta.source_type).toLowerCase()
+  const byType = syncSummary.value.by_type || result.by_type || {}
+  if (byType.git != null) return 'git'
+  if (byType.feishu != null) return 'feishu'
+  return ''
+})
+
+const scanningPhaseLabel = computed(() => {
+  if (datasourceSourceType.value === 'git') {
+    return t('taskManagement.list.gitScanningPhase')
+  }
+  if (datasourceSourceType.value === 'feishu') {
+    return t('taskManagement.list.feishuScanningPhase')
+  }
+  return t('taskManagement.list.scanningPhase')
+})
+
+const syncingPhaseLabel = computed(() => {
+  if (datasourceSourceType.value === 'git') {
+    return t('taskManagement.list.gitSyncingPhase')
+  }
+  if (datasourceSourceType.value === 'feishu') {
+    return t('taskManagement.list.feishuSyncingPhase')
+  }
+  return t('taskManagement.list.syncSummary')
+})
+
+const scanningDescriptionKey = computed(() => {
+  if (datasourceSourceType.value === 'git') {
+    return 'taskManagement.list.gitScanningDescription'
+  }
+  if (datasourceSourceType.value === 'feishu') {
+    return 'taskManagement.list.feishuScanningDescription'
+  }
+  return 'taskManagement.list.scanningDescription'
+})
+
 const isTaskActive = computed(() => {
   const status = String(props.task?.status || '').toUpperCase()
   return ['PENDING', 'RECEIVED', 'STARTED', 'RETRY'].includes(status)
@@ -554,7 +669,7 @@ const datasourcePhases = computed(() => {
   return [
     {
       key: 'scan',
-      label: t('taskManagement.list.scanningPhase'),
+      label: scanningPhaseLabel.value,
       description: `${t('taskManagement.list.scannedItems')} ${
         syncSummary.value.scanned ?? metadata.value.progress_current ?? 0
       }`,
@@ -566,7 +681,7 @@ const datasourcePhases = computed(() => {
     },
     {
       key: 'sync',
-      label: t('taskManagement.list.syncSummary'),
+      label: syncingPhaseLabel.value,
       description: `${t('taskManagement.list.changedItems')} ${
         syncSummary.value.changed ?? syncSummary.value.synced ?? 0
       } · ${t('taskManagement.list.skippedItems')} ${
@@ -620,9 +735,9 @@ const itemResults = computed(() => {
 })
 
 const syncChangedItems = computed(() => {
-  const items = syncSummary.value.changed_items
-  if (!Array.isArray(items)) return []
-  return items.map((item) => ({
+  return metricDetails(syncSummary.value, 'changed', {
+    legacyItems: syncSummary.value.changed_items
+  }).map((item) => ({
     status: item.status === 'synced' ? 'done' : item.status || 'done',
     item_name: item.name || item.path || '-',
     item_type: item.extension || item.source_type || '-',
@@ -633,7 +748,9 @@ const syncChangedItems = computed(() => {
 })
 
 const syncChangedItemDetails = computed(() => {
-  return detailItemsFromArray(syncSummary.value.changed_items)
+  return metricDetails(syncSummary.value, 'changed', {
+    legacyItems: syncSummary.value.changed_items
+  })
 })
 
 const syncStats = computed(() => {
@@ -650,7 +767,8 @@ const syncStats = computed(() => {
     {
       key: 'scanned',
       label: t('taskManagement.list.scannedItems'),
-      value: summary.scanned ?? totalItemEvents.value
+      value: summary.scanned ?? totalItemEvents.value,
+      details: metricDetails(summary, 'scanned')
     },
     {
       key: 'changed',
@@ -661,37 +779,44 @@ const syncStats = computed(() => {
     {
       key: 'skipped',
       label: t('taskManagement.list.skippedItems'),
-      value: summary.skipped ?? skipped
+      value: summary.skipped ?? skipped,
+      details: metricDetails(summary, 'skipped')
     },
     {
       key: 'success',
       label: t('taskManagement.list.successItems'),
-      value: successCount(summary, done)
+      value: successCount(summary, done),
+      details: metricDetails(summary, 'success')
     },
     {
       key: 'failed',
       label: t('taskManagement.list.failedItems'),
-      value: summary.failed ?? failed
+      value: summary.failed ?? failed,
+      details: metricDetails(summary, 'failed')
     },
     {
       key: 'deleted',
       label: t('taskManagement.list.deletedItems'),
-      value: summary.deleted ?? 0
+      value: summary.deleted ?? 0,
+      details: metricDetails(summary, 'deleted')
     },
     {
       key: 'folders',
       label: t('taskManagement.list.folders'),
-      value: summary.folders ?? 0
+      value: summary.folders ?? 0,
+      details: metricDetails(summary, 'folders')
     },
     {
       key: 'documents',
       label: t('taskManagement.list.documents'),
-      value: summary.documents ?? 0
+      value: summary.documents ?? 0,
+      details: metricDetails(summary, 'documents')
     },
     {
       key: 'files',
       label: t('taskManagement.list.files'),
-      value: summary.files ?? done
+      value: summary.files ?? done,
+      details: metricDetails(summary, 'files')
     }
   ]
 })
@@ -724,7 +849,9 @@ const conversionSummary = computed(() => {
 })
 
 const conversionItemDetails = computed(() => {
-  return detailItemsFromArray(conversionSummary.value.items)
+  return metricDetails(conversionSummary.value, 'candidates', {
+    legacyItems: conversionSummary.value.items
+  })
 })
 
 const conversionItemsByStatus = computed(() => {
@@ -789,63 +916,93 @@ const conversionStats = computed(() => {
       key: 'converted',
       label: t('taskManagement.list.convertedItems'),
       value: summary.converted ?? summary.total ?? 0,
-      details: conversionItemsByStatus.value.converted
+      details: metricDetails(summary, 'converted', {
+        legacyItems: conversionItemsByStatus.value.converted
+      })
     },
     {
       key: 'success',
       label: t('taskManagement.list.conversionSuccessItems'),
       value: summary.success ?? summary.succeeded ?? summary.converted ?? 0,
-      details: conversionItemsByStatus.value.converted
+      details: metricDetails(summary, 'success', {
+        legacyItems: conversionItemsByStatus.value.converted
+      })
     },
     {
       key: 'failed',
       label: t('taskManagement.list.conversionFailedItems'),
       value: summary.failed ?? summary.errors ?? 0,
-      details: conversionItemsByStatus.value.failed
+      details: metricDetails(summary, 'failed', {
+        legacyItems: conversionItemsByStatus.value.failed
+      })
     },
     {
       key: 'markdown',
       label: t('taskManagement.list.markdownItems'),
       value: summary.markdown ?? summary.markdown_files ?? 0,
-      details: conversionItemsByStatus.value.converted
+      details: metricDetails(summary, 'markdown', {
+        legacyItems: conversionItemsByStatus.value.converted
+      })
     },
     {
       key: 'skipped',
       label: t('taskManagement.list.conversionUnchangedSkippedItems'),
       value: summary.skipped ?? 0,
-      details: conversionItemsByStatus.value.skipped
+      details: metricDetails(summary, 'skipped', {
+        legacyItems: conversionItemsByStatus.value.skipped
+      })
     },
     {
       key: 'xlsx',
       label: t('taskManagement.list.xlsxItems'),
-      value: summary.xlsx_files ?? 0
+      value: summary.xlsx_files ?? 0,
+      details: metricDetails(summary, 'xlsx_files')
     },
     {
       key: 'sheets',
       label: t('taskManagement.list.sheetItems'),
-      value: summary.sheets ?? 0
+      value: summary.sheets ?? 0,
+      details: metricDetails(summary, 'sheets')
     },
     {
       key: 'rows',
       label: t('taskManagement.list.rowItems'),
-      value: summary.rows ?? 0
+      value: summary.rows ?? 0,
+      details: metricDetails(summary, 'rows')
     },
     {
       key: 'model_calls',
       label: t('taskManagement.list.modelCalls'),
-      value: cost.model_calls ?? 0
+      value: cost.model_calls ?? 0,
+      details: metricDetails(summary, 'model_calls')
     },
     {
       key: 'estimated_tokens',
       label: t('taskManagement.list.estimatedTokens'),
-      value: summary.estimated_tokens ?? cost.estimated_tokens ?? 0
+      value: summary.estimated_tokens ?? cost.estimated_tokens ?? 0,
+      details: metricDetails(summary, 'estimated_tokens')
     },
     {
       key: 'total_tokens',
       label: t('taskManagement.list.totalTokens'),
-      value: cost.total_tokens ?? 0
+      value: cost.total_tokens ?? 0,
+      details: metricDetails(summary, 'total_tokens')
     }
   ]
+})
+
+const selectedMetricDetail = computed(() => {
+  if (!selectedMetric.value) return null
+  const stats =
+    selectedMetric.value.group === 'sync'
+      ? syncStats.value
+      : conversionStats.value
+  const item = stats.find((entry) => entry.key === selectedMetric.value.key)
+  if (!item || !hasStatDetails(item)) return null
+  return {
+    label: item.label,
+    items: item.details
+  }
 })
 
 const conversionPrimaryStats = computed(() => {
@@ -955,6 +1112,36 @@ function statToneClass(tone) {
   return map[tone] || map.default
 }
 
+function hasStatDetails(item) {
+  return Array.isArray(item?.details) && item.details.length > 0
+}
+
+function statDetailClass(item) {
+  if (!hasStatDetails(item)) return ''
+  return 'cursor-pointer transition hover:border-blue-300 hover:ring-1 hover:ring-blue-100'
+}
+
+function selectMetricDetail(group, item) {
+  if (!hasStatDetails(item)) return
+  const next = { group, key: item.key }
+  if (
+    selectedMetric.value?.group === next.group &&
+    selectedMetric.value?.key === next.key
+  ) {
+    selectedMetric.value = null
+    return
+  }
+  selectedMetric.value = next
+}
+
+function metricDetails(summary, key, options = {}) {
+  const grouped = summary?.details?.[key]
+  if (Array.isArray(grouped) && grouped.length > 0) {
+    return detailItemsFromArray(grouped)
+  }
+  return detailItemsFromArray(options.legacyItems)
+}
+
 function detailItemsFromArray(items) {
   if (!Array.isArray(items)) return []
   return items
@@ -963,7 +1150,8 @@ function detailItemsFromArray(items) {
       path: item.path || item.file || '',
       name: item.name || item.path || item.file || '',
       reason: item.reason || '',
-      extension: item.extension || extensionFromPath(item.path || item.file)
+      extension: item.extension || extensionFromPath(item.path || item.file),
+      stats: item.stats || {}
     }))
     .filter((item) => item.path || item.name)
 }
@@ -978,6 +1166,21 @@ function statDetailsTitle(details) {
     lines.push(`... ${details.length - lines.length} more`)
   }
   return lines.join('\n')
+}
+
+function detailStatsText(stats) {
+  if (!stats || typeof stats !== 'object') return ''
+  const parts = []
+  if (stats.rows != null) parts.push(`rows: ${stats.rows}`)
+  if (stats.sheets != null) parts.push(`sheets: ${stats.sheets}`)
+  if (stats.chars != null) parts.push(`chars: ${stats.chars}`)
+  if (stats.images_recognized != null) {
+    parts.push(`images: ${stats.images_recognized}`)
+  }
+  const cost = stats.cost || {}
+  if (cost.model_calls != null) parts.push(`calls: ${cost.model_calls}`)
+  if (cost.total_tokens != null) parts.push(`tokens: ${cost.total_tokens}`)
+  return parts.join(' · ')
 }
 
 function logLevelClass(level) {

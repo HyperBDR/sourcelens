@@ -19,6 +19,7 @@ from .services import (
 )
 
 LOGGER = logging.getLogger(__name__)
+DETAIL_ITEMS_LIMIT = 200
 
 
 class LensNodeConsumer(AsyncJsonWebsocketConsumer):
@@ -364,9 +365,16 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             "progress_current",
             "progress_percent",
             "conversion_summary",
+            "current_file",
+            "current_status",
+            "current_reason",
+            "current_stats",
         ]:
             if key in content:
-                step[key] = content.get(key)
+                value = content.get(key)
+                if key in {"summary", "conversion_summary"}:
+                    value = LensNodeConsumer._compact_step_summary(value)
+                step[key] = value
         steps.append(step)
         metadata_update = {
             "steps": steps,
@@ -377,10 +385,25 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             content.get("category") == "conversion"
             or str(content.get("step") or "").startswith("conversion")
         )
-        if "summary" in content and is_conversion:
-            metadata_update["conversion_summary"] = content.get("summary")
-        elif "summary" in content:
-            metadata_update["sync_summary"] = content.get("summary")
+        if is_conversion:
+            summary = LensNodeConsumer._merge_realtime_summary(
+                metadata.get("conversion_summary") or {},
+                content.get("summary") or {},
+            )
+            LensNodeConsumer._append_conversion_realtime_detail(
+                summary,
+                content,
+            )
+            if summary:
+                metadata_update["conversion_summary"] = summary
+        else:
+            summary = LensNodeConsumer._merge_realtime_summary(
+                metadata.get("sync_summary") or {},
+                content.get("summary") or {},
+            )
+            LensNodeConsumer._append_sync_realtime_detail(summary, content)
+            if summary:
+                metadata_update["sync_summary"] = summary
         if "conversion_summary" in content:
             metadata_update["conversion_summary"] = content.get(
                 "conversion_summary"
@@ -393,6 +416,176 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             TaskStatus.STARTED,
             metadata=metadata_update,
         )
+
+    @staticmethod
+    def _merge_realtime_summary(current, incoming):
+        """Merge realtime summary counts without losing accumulated details."""
+
+        summary = dict(incoming or current or {})
+        current_details = (current or {}).get("details") or {}
+        current_truncated = (current or {}).get("details_truncated") or {}
+        incoming_details = (incoming or {}).get("details") or {}
+        incoming_truncated = (incoming or {}).get("details_truncated") or {}
+        details = LensNodeConsumer._merge_detail_groups(
+            current_details,
+            incoming_details,
+        )
+        truncated = {
+            **current_truncated,
+            **incoming_truncated,
+        }
+        if details:
+            summary["details"] = details
+        if truncated:
+            summary["details_truncated"] = truncated
+        return summary
+
+    @staticmethod
+    def _compact_step_summary(summary):
+        """Return a step-safe summary without duplicated detail payloads."""
+
+        if not isinstance(summary, dict):
+            return summary
+        compact = dict(summary)
+        for key in [
+            "details",
+            "details_truncated",
+            "items",
+            "items_truncated",
+            "changed_items",
+            "changed_items_truncated",
+            "conversion_summary",
+        ]:
+            compact.pop(key, None)
+        return compact
+
+    @staticmethod
+    def _merge_detail_groups(current, incoming):
+        """Merge grouped detail lists with de-duplication."""
+
+        details = {}
+        for key in set((current or {}).keys()) | set((incoming or {}).keys()):
+            merged = []
+            for item in list((current or {}).get(key) or []) + list(
+                (incoming or {}).get(key) or []
+            ):
+                LensNodeConsumer._append_detail_item(merged, item)
+            if merged:
+                details[key] = merged
+        return details
+
+    @staticmethod
+    def _append_sync_realtime_detail(summary, content):
+        """Append one datasource sync item detail to the live summary."""
+
+        step = content.get("step") or ""
+        if step not in {"item_done", "item_skipped", "item_failed"}:
+            return
+        path = content.get("file") or ""
+        name = content.get("item_name") or path.rsplit("/", 1)[-1]
+        if not path and not name:
+            return
+        status = {
+            "item_done": "synced",
+            "item_skipped": "skipped",
+            "item_failed": "failed",
+        }[step]
+        detail = {
+            "status": status,
+            "path": path,
+            "name": name,
+            "extension": content.get("file_extension") or "",
+            "source_type": "feishu",
+            "reason": content.get("error") or "",
+        }
+        groups = ["scanned"]
+        if step == "item_done":
+            groups.extend(["changed", "success"])
+            if content.get("kind") == "document":
+                groups.append("documents")
+            else:
+                groups.append("files")
+        elif step == "item_skipped":
+            groups.append("skipped")
+        elif step == "item_failed":
+            groups.extend(["changed", "failed"])
+        LensNodeConsumer._append_summary_detail(summary, groups, detail)
+
+    @staticmethod
+    def _append_conversion_realtime_detail(summary, content):
+        """Append one conversion item detail to the live summary."""
+
+        path = content.get("current_file") or ""
+        status = content.get("current_status") or ""
+        if not path or status not in {"converted", "skipped", "failed"}:
+            return
+        detail = {
+            "status": status,
+            "path": path,
+            "name": path.rsplit("/", 1)[-1],
+            "extension": path.rsplit(".", 1)[-1].lower()
+            if "." in path
+            else "",
+            "reason": content.get("current_reason") or "",
+            "stats": content.get("current_stats") or {},
+        }
+        groups = ["candidates"]
+        if status == "converted":
+            groups.extend(["converted", "success", "markdown"])
+        elif status == "skipped":
+            groups.append("skipped")
+        elif status == "failed":
+            groups.append("failed")
+        if detail["extension"] == "xlsx":
+            groups.extend(["xlsx_files", "sheets", "rows"])
+        cost = detail["stats"].get("cost") or {}
+        if int(cost.get("model_calls") or 0) > 0:
+            groups.append("model_calls")
+        if int(cost.get("estimated_tokens") or 0) > 0:
+            groups.append("estimated_tokens")
+        if int(cost.get("total_tokens") or 0) > 0:
+            groups.append("total_tokens")
+        LensNodeConsumer._append_summary_detail(summary, groups, detail)
+
+    @staticmethod
+    def _append_summary_detail(summary, groups, detail):
+        """Append one detail item into multiple summary groups."""
+
+        details = dict(summary.get("details") or {})
+        truncated = dict(summary.get("details_truncated") or {})
+        for group in groups:
+            items = list(details.get(group) or [])
+            if len(items) >= DETAIL_ITEMS_LIMIT:
+                truncated[group] = int(truncated.get(group) or 0) + 1
+                continue
+            if LensNodeConsumer._append_detail_item(items, detail):
+                details[group] = items
+        if details:
+            summary["details"] = details
+        if truncated:
+            summary["details_truncated"] = truncated
+
+    @staticmethod
+    def _append_detail_item(items, detail):
+        """Append one detail item when it is not already present."""
+
+        key = (
+            detail.get("status") or "",
+            detail.get("path") or "",
+            detail.get("name") or "",
+            detail.get("reason") or "",
+        )
+        for item in items:
+            existing = (
+                item.get("status") or "",
+                item.get("path") or "",
+                item.get("name") or "",
+                item.get("reason") or "",
+            )
+            if existing == key:
+                return False
+        items.append(detail)
+        return True
 
     async def _handle_datasource_sync_done(self, content):
         """Complete datasource sync after LensNode reports final status."""

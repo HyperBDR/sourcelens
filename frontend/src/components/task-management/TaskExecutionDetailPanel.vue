@@ -211,17 +211,15 @@
               <h3 class="text-sm font-semibold text-gray-900 mb-4">
                 {{ t('taskManagement.list.datasourceInfo') }}
               </h3>
-              <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div
-                  v-for="item in datasourceDetailRows"
-                  :key="item.label"
-                  class="rounded-lg border border-gray-200 bg-gray-50 p-3"
-                >
-                  <dt class="text-xs font-semibold text-gray-600 mb-1">
+              <dl class="grid grid-cols-1 gap-4">
+                <div v-for="item in datasourceDetailRows" :key="item.label">
+                  <dt
+                    class="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wider"
+                  >
                     {{ item.label }}
                   </dt>
                   <dd
-                    class="break-words text-sm text-gray-900"
+                    class="break-words text-sm font-medium text-gray-900"
                     :class="item.mono ? 'font-mono text-xs' : ''"
                   >
                     {{ item.value }}
@@ -233,7 +231,7 @@
             <!-- Detailed steps / execution logs / traceback -->
             <div
               v-show="activeDetailTab === 'details'"
-              class="border-gray-200"
+              class="!mt-0 border-gray-200"
             >
               <BaseLoading v-if="detailsLoading" />
               <TaskDetailsContent v-else :task="task" />

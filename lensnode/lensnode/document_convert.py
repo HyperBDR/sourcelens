@@ -154,6 +154,8 @@ def post_process_documents(context, sync_result, emit=None):
             "warnings": [],
             "items": [],
             "items_truncated": 0,
+            "details": {},
+            "details_truncated": {},
         }
 
     target = Path(context["target_path"]).resolve()
@@ -186,6 +188,8 @@ def post_process_documents(context, sync_result, emit=None):
         "warnings": warnings,
         "items": [],
         "items_truncated": 0,
+        "details": {},
+        "details_truncated": {},
     }
     emit_conversion(
         emit,
@@ -222,6 +226,8 @@ def post_process_documents(context, sync_result, emit=None):
                     total=total,
                     current=index,
                     current_file=manifest_local_path(item),
+                    current_status="skipped",
+                    current_reason="CONVERSION_MAX_IMAGES_EXCEEDED",
                 )
                 continue
         jobs.append(
@@ -241,11 +247,19 @@ def post_process_documents(context, sync_result, emit=None):
         path = job.path
         item = job.item
         index = job.index
+        current_status = "converted"
+        current_reason = ""
+        current_stats = {}
         try:
             if isinstance(output, Exception):
                 raise output
             result = output
             if result.get("skipped"):
+                current_status = "skipped"
+                current_reason = (
+                    result.get("reason") or result.get("warning") or ""
+                )
+                current_stats = result.get("stats") or {}
                 summary["skipped"] += 1
                 if result.get("warning"):
                     warnings.append(result["warning"])
@@ -253,13 +267,24 @@ def post_process_documents(context, sync_result, emit=None):
                     summary,
                     item,
                     "skipped",
-                    result.get("reason") or result.get("warning") or "",
+                    current_reason,
+                    current_stats,
                 )
             else:
+                current_stats = {
+                    **(result.get("stats") or {}),
+                    "cost": result.get("cost") or {},
+                }
                 summary["converted"] += 1
                 summary["success"] += 1
                 summary["markdown"] += 1
-                append_conversion_detail(summary, item, "converted")
+                append_conversion_detail(
+                    summary,
+                    item,
+                    "converted",
+                    "",
+                    current_stats,
+                )
                 summary["chars"] += int(result.get("chars") or 0)
                 summary["estimated_tokens"] += int(
                     result.get("estimated_tokens") or 0
@@ -270,6 +295,8 @@ def post_process_documents(context, sync_result, emit=None):
                 merge_summary_stats(summary, result.get("stats") or {})
                 merge_cost_stats(summary["cost"], result.get("cost") or {})
         except Exception as exc:
+            current_status = "failed"
+            current_reason = str(exc)
             summary["failed"] += 1
             warnings.append("CONVERSION_FILE_FAILED")
             write_failed_meta(target, path, item, context, str(exc))
@@ -283,8 +310,13 @@ def post_process_documents(context, sync_result, emit=None):
             total=total,
             current=index,
             current_file=manifest_local_path(item),
+            current_status=current_status,
+            current_reason=current_reason,
+            current_stats=current_stats,
         )
 
+    summary["details"] = conversion_details_by_metric(summary["items"])
+    summary["details_truncated"] = conversion_details_truncated(summary)
     summary["warnings"] = list(dict.fromkeys(warnings))
     emit_conversion(
         emit,
@@ -298,13 +330,14 @@ def post_process_documents(context, sync_result, emit=None):
     return summary
 
 
-def append_conversion_detail(summary, item, status, reason=""):
+def append_conversion_detail(summary, item, status, reason="", stats=None):
     """Append a compact conversion item detail."""
 
     if len(summary["items"]) >= DETAIL_ITEMS_LIMIT:
         summary["items_truncated"] += 1
         return
     local_path = manifest_local_path(item)
+    stats = dict(stats or {})
     summary["items"].append(
         {
             "status": status,
@@ -312,8 +345,98 @@ def append_conversion_detail(summary, item, status, reason=""):
             "name": item.get("name") or Path(local_path).name,
             "extension": Path(local_path).suffix.lower().lstrip("."),
             "reason": reason,
+            "stats": stats,
         }
     )
+
+
+def conversion_details_by_metric(items):
+    """Return conversion details grouped by summary metric."""
+
+    details = {
+        "candidates": [],
+        "converted": [],
+        "success": [],
+        "failed": [],
+        "markdown": [],
+        "skipped": [],
+        "xlsx_files": [],
+        "sheets": [],
+        "rows": [],
+        "model_calls": [],
+        "estimated_tokens": [],
+        "total_tokens": [],
+    }
+    truncated = {key: 0 for key in details}
+    for item in items or []:
+        status = item.get("status")
+        _append_conversion_metric_detail(
+            details,
+            truncated,
+            "candidates",
+            item,
+        )
+        if status == "converted":
+            for key in ["converted", "success", "markdown"]:
+                _append_conversion_metric_detail(details, truncated, key, item)
+        elif status == "skipped":
+            _append_conversion_metric_detail(
+                details,
+                truncated,
+                "skipped",
+                item,
+            )
+        elif status == "failed":
+            _append_conversion_metric_detail(
+                details,
+                truncated,
+                "failed",
+                item,
+            )
+        if item.get("extension") == "xlsx":
+            for key in ["xlsx_files", "sheets", "rows"]:
+                _append_conversion_metric_detail(details, truncated, key, item)
+        cost = (item.get("stats") or {}).get("cost") or {}
+        if int(cost.get("model_calls") or 0) > 0:
+            _append_conversion_metric_detail(
+                details,
+                truncated,
+                "model_calls",
+                item,
+            )
+        if int(cost.get("estimated_tokens") or 0) > 0:
+            _append_conversion_metric_detail(
+                details,
+                truncated,
+                "estimated_tokens",
+                item,
+            )
+        if int(cost.get("total_tokens") or 0) > 0:
+            _append_conversion_metric_detail(
+                details,
+                truncated,
+                "total_tokens",
+                item,
+            )
+    return {key: value for key, value in details.items() if value}
+
+
+def conversion_details_truncated(summary):
+    """Return conversion detail truncation counts grouped by metric."""
+
+    truncated = {}
+    if summary.get("items_truncated"):
+        truncated["candidates"] = int(summary["items_truncated"])
+    return truncated
+
+
+def _append_conversion_metric_detail(details, truncated, key, item):
+    """Append one conversion detail to a metric group."""
+
+    if len(details[key]) >= DETAIL_ITEMS_LIMIT:
+        truncated[key] += 1
+        return
+    details[key].append(item)
 
 
 def conversion_enabled(conversion):
@@ -817,6 +940,9 @@ def emit_conversion(
     total=0,
     current=0,
     current_file="",
+    current_status="",
+    current_reason="",
+    current_stats=None,
 ):
     """Emit one conversion progress event."""
 
@@ -838,5 +964,8 @@ def emit_conversion(
             "progress_current": current,
             "progress_percent": max(0, min(100, percent)),
             "current_file": current_file,
+            "current_status": current_status,
+            "current_reason": current_reason,
+            "current_stats": current_stats or {},
         }
     )

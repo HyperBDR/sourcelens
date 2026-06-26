@@ -18,6 +18,7 @@ from core.management.commands.register_periodic_tasks import (
     discover_and_register,
 )
 from core.periodic_registry import TASK_REGISTRY
+from lens.consumers import LensNodeConsumer
 from lens.datasource_services import dispatch_datasource_sync_async
 from lens.execution import execute_answer_run
 from lens.lensnode_auth import issue_lensnode_token
@@ -522,8 +523,6 @@ class LensServiceTests(TransactionTestCase):
                 "documents": 0,
                 "by_extension": {},
                 "by_type": {},
-                "changed_items": [],
-                "changed_items_truncated": 0,
                 "target_path": self.datasource.target_path,
             },
         )
@@ -557,6 +556,129 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(record.last_metrics["changed"], 0)
         self.assertEqual(task.result["changed"], 0)
         self.assertEqual(task.metadata["sync_summary"]["changed"], 0)
+
+    def test_complete_datasource_sync_task_keeps_summaries_separate(self):
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            dispatch.return_value = "request-1"
+            source_sync_task(str(self.datasource.uuid))
+
+        task = TaskExecution.objects.get(module="lens_datasource")
+        complete_datasource_sync_task(
+            task.task_id,
+            {
+                "status": "success",
+                "synced": 1,
+                "changed": 1,
+                "files": 1,
+                "details": {
+                    "changed": [
+                        {
+                            "path": "README.md",
+                            "name": "README.md",
+                            "status": "synced",
+                        }
+                    ]
+                },
+                "changed_items": [
+                    {
+                        "path": "README.md",
+                        "name": "README.md",
+                        "status": "synced",
+                    }
+                ],
+                "conversion_summary": {
+                    "candidates": 1,
+                    "converted": 1,
+                    "items": [
+                        {
+                            "path": "README.md",
+                            "name": "README.md",
+                            "status": "converted",
+                        }
+                    ],
+                },
+                "target_path": self.datasource.target_path,
+            },
+        )
+
+        task.refresh_from_db()
+        self.assertIn("conversion_summary", task.metadata)
+        self.assertNotIn(
+            "conversion_summary",
+            task.metadata["sync_summary"],
+        )
+        self.assertNotIn("conversion_summary", task.result)
+        self.assertNotIn("details", task.result)
+        self.assertNotIn("changed_items", task.metadata["sync_summary"])
+        self.assertNotIn("changed_items", task.result)
+        self.assertEqual(
+            task.metadata["sync_summary"]["details"]["changed"][0]["path"],
+            "README.md",
+        )
+
+    def test_datasource_sync_event_updates_realtime_sync_details(self):
+        TaskExecution.objects.create(
+            task_id="live-sync",
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="STARTED",
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "sync_summary": {"changed": 1},
+            },
+        )
+
+        LensNodeConsumer._record_datasource_sync_event(
+            "live-sync",
+            {
+                "step": "item_done",
+                "status": "done",
+                "message": "Downloaded README.md.",
+                "kind": "file",
+                "item_name": "README.md",
+                "file": "README.md",
+                "file_extension": "md",
+            },
+        )
+
+        task = TaskExecution.objects.get(task_id="live-sync")
+        details = task.metadata["sync_summary"]["details"]
+        self.assertEqual(details["changed"][0]["path"], "README.md")
+        self.assertEqual(details["success"][0]["name"], "README.md")
+
+    def test_datasource_sync_event_updates_realtime_conversion_details(self):
+        TaskExecution.objects.create(
+            task_id="live-conversion",
+            task_name="datasource_sync:Repo Cache",
+            module="lens_datasource",
+            status="STARTED",
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "conversion_summary": {"converted": 1},
+            },
+        )
+
+        LensNodeConsumer._record_datasource_sync_event(
+            "live-conversion",
+            {
+                "step": "conversion_progress",
+                "status": "running",
+                "category": "conversion",
+                "message": "Converted 1/1 datasource files.",
+                "summary": {"converted": 1, "success": 1},
+                "current_file": "README.md",
+                "current_status": "converted",
+                "current_stats": {
+                    "chars": 120,
+                    "cost": {"model_calls": 1, "total_tokens": 30},
+                },
+            },
+        )
+
+        task = TaskExecution.objects.get(task_id="live-conversion")
+        details = task.metadata["conversion_summary"]["details"]
+        self.assertEqual(details["converted"][0]["path"], "README.md")
+        self.assertEqual(details["model_calls"][0]["stats"]["chars"], 120)
 
     def test_source_sync_task_marks_invalid_source_failed(self):
         with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
