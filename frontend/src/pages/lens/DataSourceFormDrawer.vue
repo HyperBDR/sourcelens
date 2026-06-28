@@ -695,10 +695,10 @@
       <section class="space-y-4 rounded-md border border-line p-3">
         <div>
           <h3 class="text-sm font-semibold text-ink-900">
-            {{ t('lensAdmin.datasourceWizard.conversionTitle') }}
+            {{ t('lensAdmin.datasourceWizard.documentContentTitle') }}
           </h3>
           <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.conversionHint') }}
+            {{ t('lensAdmin.datasourceWizard.documentContentHint') }}
           </p>
         </div>
         <label class="flex items-start gap-3 text-sm text-ink-700">
@@ -719,6 +719,7 @@
         <FormRow
           v-if="form.conversion_document"
           :label="t('lensAdmin.fields.documentModel')"
+          :hint="t('lensAdmin.datasourceWizard.documentModelTooltip')"
         >
           <select
             v-model="form.conversion_document_model_ref"
@@ -737,41 +738,6 @@
           </select>
           <p class="mt-1 text-xs text-ink-500">
             {{ t('lensAdmin.datasourceWizard.documentModelHint') }}
-          </p>
-        </FormRow>
-        <label class="flex items-start gap-3 text-sm text-ink-700">
-          <input
-            v-model="form.conversion_image"
-            type="checkbox"
-            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-          />
-          <span>
-            <span class="font-medium">
-              {{ t('lensAdmin.datasourceWizard.convertImages') }}
-            </span>
-            <span class="block text-xs text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.convertImagesHint') }}
-            </span>
-          </span>
-        </label>
-        <FormRow
-          v-if="form.conversion_image"
-          :label="t('lensAdmin.fields.visionModel')"
-        >
-          <select v-model="form.conversion_vision_model_ref" class="form-input">
-            <option value="">
-              {{ t('lensAdmin.placeholders.noModel') }}
-            </option>
-            <option
-              v-for="config in llmConfigOptions"
-              :key="config.uuid || config.id"
-              :value="config.uuid || config.id"
-            >
-              {{ formatLLMConfigLabel(config) }}
-            </option>
-          </select>
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.visionModelHint') }}
           </p>
         </FormRow>
         <label
@@ -871,7 +837,10 @@
               </span>
             </label>
             <div class="grid gap-4 md:grid-cols-2">
-              <FormRow :label="t('lensAdmin.fields.pdfMaxPages')">
+              <FormRow
+                :label="t('lensAdmin.fields.pdfMaxPages')"
+                :hint="t('lensAdmin.datasourceWizard.pdfMaxPagesTooltip')"
+              >
                 <input
                   v-model.number="form.conversion_pdf_max_pages"
                   class="form-input"
@@ -879,7 +848,12 @@
                   type="number"
                 />
               </FormRow>
-              <FormRow :label="t('lensAdmin.fields.pdfMaxImagesPerPage')">
+              <FormRow
+                :label="t('lensAdmin.fields.pdfMaxImagesPerPage')"
+                :hint="
+                  t('lensAdmin.datasourceWizard.pdfMaxImagesPerPageTooltip')
+                "
+              >
                 <input
                   v-model.number="form.conversion_pdf_max_images_per_page"
                   class="form-input"
@@ -887,7 +861,10 @@
                   type="number"
                 />
               </FormRow>
-              <FormRow :label="t('lensAdmin.fields.pdfRenderDpi')">
+              <FormRow
+                :label="t('lensAdmin.fields.pdfRenderDpi')"
+                :hint="t('lensAdmin.datasourceWizard.pdfRenderDpiTooltip')"
+              >
                 <input
                   v-model.number="form.conversion_pdf_render_dpi"
                   class="form-input"
@@ -895,7 +872,10 @@
                   type="number"
                 />
               </FormRow>
-              <FormRow :label="t('lensAdmin.fields.pdfMinTextChars')">
+              <FormRow
+                :label="t('lensAdmin.fields.pdfMinTextChars')"
+                :hint="t('lensAdmin.datasourceWizard.pdfMinTextCharsTooltip')"
+              >
                 <input
                   v-model.number="form.conversion_pdf_min_text_chars"
                   class="form-input"
@@ -903,7 +883,12 @@
                   type="number"
                 />
               </FormRow>
-              <FormRow :label="t('lensAdmin.fields.pdfMinImageAreaRatio')">
+              <FormRow
+                :label="t('lensAdmin.fields.pdfMinImageAreaRatio')"
+                :hint="
+                  t('lensAdmin.datasourceWizard.pdfMinImageAreaRatioTooltip')
+                "
+              >
                 <input
                   v-model.number="form.conversion_pdf_min_image_area_ratio"
                   class="form-input"
@@ -920,14 +905,63 @@
       <section class="space-y-4 rounded-md border border-line p-3">
         <div>
           <h3 class="text-sm font-semibold text-ink-900">
-            {{ t('lensAdmin.datasourceWizard.conversionLimitsTitle') }}
+            {{ t('lensAdmin.datasourceWizard.standaloneImagesTitle') }}
           </h3>
           <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.conversionLimitsHint') }}
+            {{ t('lensAdmin.datasourceWizard.standaloneImagesHint') }}
           </p>
         </div>
-        <div class="grid gap-4 md:grid-cols-3">
-          <FormRow :label="t('lensAdmin.fields.maxFileSizeMb')">
+        <label class="flex items-start gap-3 text-sm text-ink-700">
+          <input
+            v-model="form.conversion_image"
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+          />
+          <span>
+            <span class="font-medium">
+              {{ t('lensAdmin.datasourceWizard.convertImages') }}
+            </span>
+            <span class="block text-xs text-ink-500">
+              {{ t('lensAdmin.datasourceWizard.convertImagesHint') }}
+            </span>
+          </span>
+        </label>
+        <FormRow
+          v-if="form.conversion_image"
+          :label="t('lensAdmin.fields.visionModel')"
+          :hint="t('lensAdmin.datasourceWizard.visionModelTooltip')"
+        >
+          <select v-model="form.conversion_vision_model_ref" class="form-input">
+            <option value="">
+              {{ t('lensAdmin.placeholders.noModel') }}
+            </option>
+            <option
+              v-for="config in llmConfigOptions"
+              :key="config.uuid || config.id"
+              :value="config.uuid || config.id"
+            >
+              {{ formatLLMConfigLabel(config) }}
+            </option>
+          </select>
+          <p class="mt-1 text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.visionModelHint') }}
+          </p>
+        </FormRow>
+      </section>
+      <section class="space-y-4 rounded-md border border-line p-3">
+        <div>
+          <h3 class="text-sm font-semibold text-ink-900">
+            {{ t('lensAdmin.datasourceWizard.globalConversionLimitsTitle') }}
+          </h3>
+          <p class="mt-1 text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.globalConversionLimitsHint') }}
+          </p>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <FormRow
+            :label="t('lensAdmin.fields.maxFileSizeMb')"
+            :hint="t('lensAdmin.datasourceWizard.maxFileSizeTooltip')"
+          >
             <input
               v-model.number="form.conversion_max_file_size_mb"
               class="form-input"
@@ -935,15 +969,10 @@
               type="number"
             />
           </FormRow>
-          <FormRow :label="t('lensAdmin.fields.maxPages')">
-            <input
-              v-model.number="form.conversion_max_pages"
-              class="form-input"
-              min="1"
-              type="number"
-            />
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.maxImages')">
+          <FormRow
+            :label="t('lensAdmin.fields.maxImages')"
+            :hint="t('lensAdmin.datasourceWizard.maxImagesTooltip')"
+          >
             <input
               v-model.number="form.conversion_max_images"
               class="form-input"
@@ -1024,6 +1053,7 @@ import {
   ChevronRight as ChevronRightIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
+  HelpCircle as HelpCircleIcon,
   LoaderCircle as LoaderCircleIcon,
   Plus as PlusIcon,
   RefreshCw as RefreshCwIcon,
@@ -1120,6 +1150,10 @@ const syncTimezone = computed({
 
 const FormRow = defineComponent({
   props: {
+    hint: {
+      type: String,
+      default: ''
+    },
     label: {
       type: String,
       required: true
@@ -1130,14 +1164,79 @@ const FormRow = defineComponent({
     }
   },
   setup(rowProps, { slots }) {
+    const hintVisible = ref(false)
+    const hintTrigger = ref(null)
+    const hintStyle = ref({})
+
+    function showHint() {
+      const rect = hintTrigger.value?.getBoundingClientRect()
+      if (!rect) return
+      const width = 288
+      const margin = 12
+      const left = Math.min(
+        window.innerWidth - width - margin,
+        Math.max(margin, rect.left)
+      )
+      hintStyle.value = {
+        left: `${left}px`,
+        top: `${rect.bottom + 8}px`,
+        width: `${width}px`
+      }
+      hintVisible.value = true
+    }
+
+    function hideHint() {
+      hintVisible.value = false
+    }
+
     return () =>
       h('div', [
-        h('label', { class: 'mb-1 block text-sm font-medium text-ink-700' }, [
-          rowProps.label,
-          rowProps.required
-            ? h('span', { class: 'ml-0.5 text-danger-600' }, '*')
-            : null
-        ]),
+        h(
+          'label',
+          {
+            class:
+              'mb-1 flex items-center gap-1 text-sm font-medium text-ink-700'
+          },
+          [
+            h('span', rowProps.label),
+            rowProps.required
+              ? h('span', { class: 'text-danger-600' }, '*')
+              : null,
+            rowProps.hint
+              ? h(
+                  'span',
+                  {
+                    ref: hintTrigger,
+                    class:
+                      'relative inline-flex h-4 w-4 items-center ' +
+                      'justify-center text-ink-400',
+                    onBlur: hideHint,
+                    onFocus: showHint,
+                    onMouseenter: showHint,
+                    onMouseleave: hideHint,
+                    tabindex: 0
+                  },
+                  [
+                    h(HelpCircleIcon, { class: 'h-3.5 w-3.5' }),
+                    h(
+                      'span',
+                      {
+                        'aria-hidden': !hintVisible.value,
+                        class:
+                          'pointer-events-none fixed z-[60] rounded-md ' +
+                          'border border-line bg-surface p-2 text-xs ' +
+                          'font-normal leading-5 text-ink-600 shadow-lg ' +
+                          'transition-opacity ' +
+                          (hintVisible.value ? 'opacity-100' : 'opacity-0'),
+                        style: hintStyle.value
+                      },
+                      rowProps.hint
+                    )
+                  ]
+                )
+              : null
+          ]
+        ),
         slots.default?.()
       ])
   }
@@ -1430,6 +1529,21 @@ function cancelCreateTargetDirectory() {
   creatingDirectoryParent.value = null
 }
 
+function checkCurrentPathIfNeeded() {
+  if (!props.show || wizardStep.value !== 4) {
+    return
+  }
+  if (
+    props.checkingPath ||
+    props.pathResult ||
+    !props.form.lensnode_uuid ||
+    !props.form.workspace_relative_path?.trim()
+  ) {
+    return
+  }
+  emit('check-path')
+}
+
 function hasFeishuCredential() {
   return !!props.form.credential_uuid
 }
@@ -1455,6 +1569,19 @@ watch(
     expandedDirectories.value = new Set()
     newDirectoryName.value = ''
   }
+)
+
+watch(
+  () => [
+    props.show,
+    wizardStep.value,
+    props.form.lensnode_uuid,
+    props.form.workspace_relative_path,
+    props.pathResult,
+    props.checkingPath
+  ],
+  checkCurrentPathIfNeeded,
+  { flush: 'post' }
 )
 
 watch(

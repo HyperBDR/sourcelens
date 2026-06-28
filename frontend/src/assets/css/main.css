@@ -40,8 +40,13 @@
     -moz-appearance: none !important;
     appearance: none !important;
     background-color: #ffffff !important;
+    background-image: none !important;
     border: 1px solid #ded7ca !important;
+    box-sizing: border-box !important;
+    display: inline-block !important;
+    flex-shrink: 0 !important;
     position: relative;
+    vertical-align: middle !important;
     accent-color: #2b4ee6 !important;
   }
 
@@ -56,6 +61,7 @@
   input[type='checkbox']:checked,
   input[type='radio']:checked {
     background-color: #2b4ee6 !important;
+    background-image: none !important;
     border-color: #2b4ee6 !important;
   }
 
@@ -64,11 +70,12 @@
     position: absolute !important;
     left: 50% !important;
     top: 50% !important;
-    width: 4px !important;
-    height: 8px !important;
+    box-sizing: border-box !important;
+    width: 5px !important;
+    height: 9px !important;
     border: solid #ffffff !important;
     border-width: 0 2px 2px 0 !important;
-    transform: translate(-50%, -60%) rotate(45deg) !important;
+    transform: translate(-50%, -58%) rotate(45deg) !important;
     display: block !important;
   }
 

@@ -121,6 +121,7 @@ class GatewayImageConverter(BaseConverter):
     def convert(self, path, context):
         """Convert an image file into a searchable description."""
 
+        context = standalone_image_context(context, path)
         prepared = prepare_image_for_model(path, context)
         if prepared.get("skipped"):
             return ConversionOutput(
@@ -1697,7 +1698,7 @@ def describe_image_bytes(image_bytes, mime_type, context):
         raise RuntimeError("VISION_MODEL_NOT_CONFIGURED")
     from .gateway_model import describe_image_result
 
-    prompt = image_prompt()
+    prompt = image_prompt(context)
     result = describe_image_result(
         image_bytes,
         prompt,
@@ -1720,12 +1721,84 @@ def vision_configured(context):
     )
 
 
-def image_prompt():
+def document_image_context(context, path, text):
+    """Return a context enriched with document language and text snippet."""
+
+    snippet = compact_text(text, 2000)
+    return {
+        **context,
+        "document_title": Path(path).name,
+        "document_context": snippet,
+        "document_language": detect_text_language(snippet, Path(path).name),
+    }
+
+
+def standalone_image_context(context, path):
+    """Return a context for standalone image files."""
+
+    path_text = str(path)
+    return {
+        **context,
+        "document_title": Path(path).name,
+        "document_context": path_text,
+        "document_language": detect_text_language("", path_text),
+    }
+
+
+def compact_text(text, limit):
+    """Return compact text limited to the given number of characters."""
+
+    value = " ".join(str(text or "").split())
+    return value[:limit]
+
+
+def detect_text_language(text="", fallback=""):
+    """Return zh or en based on visible text."""
+
+    sample = f"{text or ''} {fallback or ''}"
+    zh_count = 0
+    latin_count = 0
+    for char in sample:
+        if "\u4e00" <= char <= "\u9fff":
+            zh_count += 1
+        elif ("a" <= char.lower() <= "z"):
+            latin_count += 1
+    if zh_count >= 2 and zh_count >= latin_count * 0.05:
+        return "zh"
+    if latin_count > 0:
+        return "en"
+    return "zh"
+
+
+def image_prompt(context=None):
     """Return the image description prompt."""
 
-    return (
-        "请为知识库检索生成图片描述。包含图片中的文字、图表数据、"
-        "关键对象、场景和业务含义。避免泛泛描述。"
+    context = context or {}
+    language = context.get("document_language") or "zh"
+    title = context.get("document_title") or ""
+    snippet = context.get("document_context") or ""
+    if language == "en":
+        return "\n".join(
+            [
+                "Describe this image in English for knowledge-base retrieval.",
+                "Extract visible text, chart/table data, key objects, and "
+                "business meaning. Be specific and avoid generic wording.",
+                "If the image is only a logo, icon, watermark, decoration, "
+                "or other low-value visual, say so briefly.",
+                f"Document title: {title}",
+                f"Document context: {snippet}",
+            ]
+        )
+    return "\n".join(
+        [
+            "请使用简体中文为知识库检索生成图片描述。",
+            "请提取图片中的文字、图表/表格数据、关键对象和业务含义，"
+            "避免泛泛描述。",
+            "如果图片只是 logo、图标、水印、装饰图等低价值视觉元素，"
+            "请简短说明即可。",
+            f"文档标题：{title}",
+            f"文档上下文：{snippet}",
+        ]
     )
 
 

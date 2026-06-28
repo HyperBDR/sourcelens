@@ -847,6 +847,7 @@ async function checkDatasourcePath() {
     datasourcePathResult.value = await checkLensNodeDataSourcePath(
       form.value.lensnode_uuid,
       {
+        datasource_uuid: form.value.uuid || null,
         target_path: datasourceTargetPath(),
         source_type: form.value.source_type,
         config: buildDatasourceConfig()

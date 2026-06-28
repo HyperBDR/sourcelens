@@ -7,8 +7,11 @@ from io import BytesIO
 import pytest
 
 from lensnode.datasource_manifest import SyncResult
+from lensnode.document_convert import document_image_context
+from lensnode.document_convert import image_prompt
 from lensnode.document_convert import post_process_documents
 from lensnode.document_convert import prepare_image_for_model
+from lensnode.document_convert import standalone_image_context
 
 Image = pytest.importorskip("PIL.Image")
 fitz = pytest.importorskip("fitz")
@@ -127,6 +130,35 @@ def test_prepare_image_downscales_and_reencodes(tmp_path):
     )
     assert result["stats"]["images_compressed"] == 1
     assert result["stats"]["image_upload_bytes"] < path.stat().st_size
+
+
+def test_image_prompt_uses_document_language(tmp_path):
+    """Image prompts follow the source document language."""
+
+    chinese = document_image_context(
+        {},
+        tmp_path / "行程单.pdf",
+        "申请时间 行程时间 共计一单行程 合计金额",
+    )
+    english = document_image_context(
+        {},
+        tmp_path / "runbook.pdf",
+        "This architecture diagram shows the recovery workflow.",
+    )
+
+    assert chinese["document_language"] == "zh"
+    assert "请使用简体中文" in image_prompt(chinese)
+    assert english["document_language"] == "en"
+    assert "Describe this image in English" in image_prompt(english)
+
+
+def test_standalone_image_context_uses_filename_language(tmp_path):
+    """Standalone images infer language from the file path."""
+
+    context = standalone_image_context({}, tmp_path / "网络拓扑图.png")
+
+    assert context["document_language"] == "zh"
+    assert "网络拓扑图.png" in image_prompt(context)
 
 
 def test_post_process_images_skips_duplicate_before_model_call(

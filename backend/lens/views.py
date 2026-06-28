@@ -367,6 +367,23 @@ class LensNodeViewSet(BaseAdminViewSet):
                 request.data.get("target_path") or "",
                 lensnode.workspace_path,
             )
+            conflict = _datasource_target_path_conflict(
+                lensnode,
+                target_path,
+                request.data.get("datasource_uuid") or None,
+            )
+            if conflict is not None:
+                return Response(
+                    {
+                        "status": "blocked",
+                        "message_code": "datasource_path_in_use",
+                        "message": (
+                            "Another datasource already uses this target path"
+                        ),
+                        "datasource_uuid": str(conflict.uuid),
+                        "datasource_name": conflict.name,
+                    }
+                )
             result = check_datasource_path(
                 lensnode,
                 target_path,
@@ -404,6 +421,31 @@ class LensNodeViewSet(BaseAdminViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response(result)
+
+
+def _datasource_target_path_conflict(lensnode, target_path, datasource_uuid):
+    """Return another datasource using the same target path on this LensNode."""
+
+    query = DataSource.objects.filter(lensnode=lensnode)
+    if datasource_uuid:
+        query = query.exclude(uuid=datasource_uuid)
+    normalized_target = normalize_workspace_target_path(
+        target_path,
+        lensnode.workspace_path,
+    )
+    for datasource in query.only("uuid", "name", "target_path"):
+        if not datasource.target_path:
+            continue
+        try:
+            existing = normalize_workspace_target_path(
+                datasource.target_path,
+                lensnode.workspace_path,
+            )
+        except DataSourcePathError:
+            continue
+        if existing == normalized_target:
+            return datasource
+    return None
 
 
 class AssistantViewSet(BaseAuthenticatedViewSet):

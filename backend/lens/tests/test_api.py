@@ -625,6 +625,55 @@ class LensApiTests(TestCase):
             "/workspace/scheduled",
         )
 
+    def test_check_datasource_path_blocks_existing_datasource_path(self):
+        response = self.client.post(
+            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/"
+            "check-datasource-path/",
+            {
+                "target_path": "/workspace/repo-cache",
+                "source_type": "git",
+                "config": {"repo_url": "https://example.com/other.git"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "blocked")
+        self.assertEqual(
+            response.data["message_code"],
+            "datasource_path_in_use",
+        )
+        self.assertEqual(
+            response.data["datasource_uuid"],
+            str(self.datasource.uuid),
+        )
+
+    @patch("lens.views.check_datasource_path")
+    def test_check_datasource_path_allows_current_datasource_path(
+        self,
+        check_path,
+    ):
+        check_path.return_value = {
+            "status": "available",
+            "message_code": "git_update",
+        }
+
+        response = self.client.post(
+            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/"
+            "check-datasource-path/",
+            {
+                "datasource_uuid": str(self.datasource.uuid),
+                "target_path": "/workspace/repo-cache",
+                "source_type": "git",
+                "config": {"repo_url": "https://example.com/repo.git"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "available")
+        check_path.assert_called_once()
+
     def test_datasource_create_enqueues_initial_sync(self):
         payload = {
             "name": "Initial Sync Repo",
