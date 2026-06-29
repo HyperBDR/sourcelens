@@ -84,7 +84,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in lensnodes"
+                  v-for="row in pagedLensNodes"
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
@@ -180,6 +180,15 @@
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="lensnodes.length"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </section>
 
@@ -289,6 +298,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import LensNodeComposePanel from './LensNodeComposePanel.vue'
@@ -308,6 +318,8 @@ const { showSuccess, showError } = useToast()
 const formatDateTime = useShortDateTime()
 
 const lensnodes = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const globalSettings = ref([])
 const loading = ref(false)
 const mode = ref('create')
@@ -333,6 +345,28 @@ const columns = computed(() =>
     'actions'
   ].map((column) => t(`lensAdmin.columns.${column}`))
 )
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(lensnodes.value.length / pageSize.value))
+)
+const pagedLensNodes = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return lensnodes.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 const composeConfig = computed(() =>
   lensNodeComposeSettings(globalSettings.value)

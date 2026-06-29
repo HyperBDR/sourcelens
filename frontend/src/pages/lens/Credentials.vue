@@ -84,7 +84,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in credentials"
+                  v-for="row in pagedCredentials"
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
@@ -129,6 +129,15 @@
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="credentials.length"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </section>
 
@@ -287,6 +296,7 @@ import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 import FormRow from './components/FormRow.vue'
 import RowActions from './components/RowActions.vue'
@@ -306,6 +316,8 @@ const formError = ref('')
 const showModal = ref(false)
 
 const credentials = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const credentialSecretRevealed = ref(false)
 const revealingCredential = ref(false)
 const credentialBindingTooltip = ref({
@@ -326,6 +338,28 @@ const activeColumns = computed(() =>
     'actions'
   ].map((column) => t(`lensAdmin.columns.${column}`))
 )
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(credentials.value.length / pageSize.value))
+)
+const pagedCredentials = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return credentials.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 const modalTitle = computed(() => {
   const action =

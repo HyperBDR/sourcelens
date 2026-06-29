@@ -105,7 +105,7 @@
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-100">
                   <tr
-                    v-for="row in list"
+                    v-for="row in pagedList"
                     :key="row.uuid"
                     class="hover:bg-gray-50"
                   >
@@ -227,6 +227,14 @@
                 </tbody>
               </table>
             </div>
+            <PaginationBar
+              v-model:page-size="pageSize"
+              :current-page="currentPage"
+              :total="list.length"
+              @page-size-change="handlePageSizeChange"
+              @prev="goPrevPage"
+              @next="goNextPage"
+            />
           </template>
         </div>
       </div>
@@ -772,12 +780,15 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const loading = ref(false)
 const list = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const showModal = ref(false)
 const showDeleteConfirm = ref(false)
 const editingId = ref(null)
@@ -851,6 +862,29 @@ function normalizeConfig(rawConfig) {
 const submitDisabled = computed(() => {
   return !validationSuccess.value
 })
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(list.value.length / pageSize.value))
+)
+
+const pagedList = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return list.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 watch(
   () => [form.channel_type, form.config?.url, form.config?.sign_secret],

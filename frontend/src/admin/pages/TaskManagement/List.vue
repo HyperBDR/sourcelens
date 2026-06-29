@@ -11,9 +11,9 @@
       </div>
 
       <div
-        class="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-gray-200 bg-white shadow-sm"
+        class="flex min-h-0 flex-col overflow-hidden rounded border border-gray-200 bg-white shadow-sm"
       >
-        <div class="flex min-h-0 flex-1 flex-col p-6">
+        <div class="flex min-h-0 flex-col p-6">
           <!-- Toolbar -->
           <div
             class="mb-6 flex flex-shrink-0 flex-col items-start justify-between gap-4 sm:flex-row sm:items-center"
@@ -159,7 +159,7 @@
           <!-- Desktop Table View -->
           <div
             v-else
-            class="relative min-h-0 flex-1 overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm"
+            class="relative max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm"
           >
             <table class="min-w-full divide-y divide-gray-200">
               <thead
@@ -230,75 +230,14 @@
             </table>
           </div>
 
-          <div
-            v-if="totalCount > 0"
-            class="mt-4 flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4"
-          >
-            <p class="text-sm text-gray-600">
-              {{ t('common.pagination.showing', paginationShowing) }}
-            </p>
-            <div class="flex items-center gap-2">
-              <label class="text-sm text-gray-600"
-                >{{ t('common.pagination.itemsPerPage') }}:</label
-              >
-              <select
-                v-model.number="pageSize"
-                class="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                @change="handlePageSizeChange"
-              >
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
-                <option :value="100">100</option>
-              </select>
-              <BaseButton
-                variant="outline"
-                size="sm"
-                :disabled="currentPage <= 1"
-                :title="t('common.pagination.previous')"
-                @click="goPrevPage"
-              >
-                <svg
-                  class="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-                <span class="sr-only">{{
-                  t('common.pagination.previous')
-                }}</span>
-              </BaseButton>
-              <BaseButton
-                variant="outline"
-                size="sm"
-                :disabled="currentPage >= totalPages"
-                :title="t('common.pagination.next')"
-                @click="goNextPage"
-              >
-                <svg
-                  class="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-                <span class="sr-only">{{ t('common.pagination.next') }}</span>
-              </BaseButton>
-            </div>
-          </div>
+          <PaginationBar
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="totalCount"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </div>
 
@@ -315,7 +254,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
+import { ref, onBeforeUnmount, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
@@ -328,6 +267,7 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import TaskExecutionDetailPanel from '@/components/task-management/TaskExecutionDetailPanel.vue'
 
@@ -390,12 +330,6 @@ const BASIC_METADATA_FIELDS = [
   'sync_policy',
   'sync_interval_seconds'
 ].join(',')
-
-const paginationShowing = computed(() => ({
-  from: (currentPage.value - 1) * pageSize.value + 1,
-  to: Math.min(currentPage.value * pageSize.value, totalCount.value),
-  total: totalCount.value
-}))
 
 function mapStatus(status) {
   const m = {

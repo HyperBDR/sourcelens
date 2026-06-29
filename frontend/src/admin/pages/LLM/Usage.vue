@@ -1,7 +1,7 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
-      <div class="mb-4">
+    <div class="flex h-full min-h-0 w-full max-w-full flex-col p-6">
+      <div class="mb-4 flex-shrink-0">
         <h1 class="text-lg font-semibold text-gray-900">
           {{ t('llm.usage.title') }}
         </h1>
@@ -10,9 +10,13 @@
         </p>
       </div>
 
-      <div class="bg-white rounded-lg border border-gray-200 shadow-sm">
-        <div class="p-6">
-          <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <div
+        class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+      >
+        <div class="flex min-h-0 flex-col p-6">
+          <div
+            class="mb-6 flex flex-shrink-0 flex-wrap items-center justify-between gap-3"
+          >
             <div class="flex flex-wrap items-center gap-3">
               <span class="text-sm text-gray-600 whitespace-nowrap">{{
                 t('llm.usage.filterByUser')
@@ -92,19 +96,24 @@
 
           <div
             v-if="!loading && !items.length"
-            class="py-16 text-center rounded-lg border border-gray-200 bg-gray-50"
+            class="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center"
           >
             <p class="text-sm font-medium text-gray-600">
               {{ t('common.noData') }}
             </p>
           </div>
 
-          <template v-if="!loading && items.length > 0">
+          <div
+            v-if="!loading && items.length > 0"
+            class="flex min-h-0 flex-col"
+          >
             <div
-              class="overflow-x-auto relative rounded-lg border border-gray-200 bg-white shadow-sm"
+              class="relative max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm"
             >
               <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
+                <thead
+                  class="sticky top-0 z-10 bg-gradient-to-r from-gray-50 to-gray-100"
+                >
                   <tr>
                     <th
                       class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
@@ -236,90 +245,15 @@
               </table>
             </div>
 
-            <div
-              v-if="total > 0"
-              class="mt-6 pt-4 border-t border-gray-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-            >
-              <div class="text-sm text-gray-700 font-medium">
-                {{
-                  t('common.pagination.showing', {
-                    from: formatNum((page - 1) * pageSize + 1),
-                    to: formatNum(Math.min(page * pageSize, total)),
-                    total: formatNum(total)
-                  })
-                }}
-              </div>
-              <div class="flex items-center gap-3 flex-wrap">
-                <label class="text-sm text-gray-600"
-                  >{{ t('common.pagination.itemsPerPage') }}:</label
-                >
-                <select
-                  v-model.number="pageSize"
-                  class="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
-                  @change="handlePageSizeChange"
-                >
-                  <option :value="10">10</option>
-                  <option :value="20">20</option>
-                  <option :value="50">50</option>
-                  <option :value="100">100</option>
-                </select>
-                <BaseButton
-                  variant="outline"
-                  size="sm"
-                  :disabled="page <= 1"
-                  :title="t('common.pagination.previous')"
-                  @click="goPrevPage"
-                  ><svg
-                    class="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M15 19l-7-7 7-7"
-                    /></svg
-                  ><span class="sr-only">{{
-                    t('common.pagination.previous')
-                  }}</span></BaseButton
-                >
-                <span
-                  class="text-sm text-gray-700 font-semibold px-3 py-1.5 bg-gray-50 rounded-md border border-gray-200"
-                >
-                  {{
-                    t('common.pagination.page', {
-                      current: page,
-                      total: totalPages
-                    })
-                  }}
-                </span>
-                <BaseButton
-                  variant="outline"
-                  size="sm"
-                  :disabled="page >= totalPages"
-                  :title="t('common.pagination.next')"
-                  @click="goNextPage"
-                  ><svg
-                    class="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"
-                    /></svg
-                  ><span class="sr-only">{{
-                    t('common.pagination.next')
-                  }}</span></BaseButton
-                >
-              </div>
-            </div>
-          </template>
+            <PaginationBar
+              v-model:page-size="pageSize"
+              :current-page="page"
+              :total="total"
+              @page-size-change="handlePageSizeChange"
+              @prev="goPrevPage"
+              @next="goNextPage"
+            />
+          </div>
         </div>
       </div>
 
@@ -597,6 +531,7 @@ import { llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t, locale } = useI18n()
 const { showError } = useToast()

@@ -244,83 +244,14 @@
               </table>
             </div>
 
-            <div
-              v-if="total > pageSize"
-              class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4"
-            >
-              <p class="text-sm text-gray-600">
-                {{
-                  t('common.pagination.showing', {
-                    from: (page - 1) * pageSize + 1,
-                    to: Math.min(page * pageSize, total),
-                    total
-                  })
-                }}
-              </p>
-              <div class="flex items-center gap-2">
-                <select
-                  v-model.number="pageSize"
-                  class="rounded-md border border-gray-300 px-2 py-1 text-sm"
-                  @change="handlePageSizeChange"
-                >
-                  <option :value="10">10</option>
-                  <option :value="20">20</option>
-                  <option :value="50">50</option>
-                  <option :value="100">100</option>
-                </select>
-                <span class="text-sm text-gray-500">{{
-                  t('notificationManagement.records.pageSize')
-                }}</span>
-                <BaseButton
-                  variant="outline"
-                  size="sm"
-                  :disabled="page <= 1"
-                  :title="t('common.pagination.previous')"
-                  class="flex items-center gap-1"
-                  @click="goPrevPage"
-                >
-                  <svg
-                    class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M15 19l-7-7 7-7"
-                    />
-                  </svg>
-                  <span class="sr-only">{{
-                    t('common.pagination.previous')
-                  }}</span>
-                </BaseButton>
-                <BaseButton
-                  variant="outline"
-                  size="sm"
-                  :disabled="page >= totalPages"
-                  :title="t('common.pagination.next')"
-                  class="flex items-center gap-1"
-                  @click="goNextPage"
-                >
-                  <svg
-                    class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                  <span class="sr-only">{{ t('common.pagination.next') }}</span>
-                </BaseButton>
-              </div>
-            </div>
+            <PaginationBar
+              v-model:page-size="pageSize"
+              :current-page="page"
+              :total="total"
+              @page-size-change="handlePageSizeChange"
+              @prev="goPrevPage"
+              @next="goNextPage"
+            />
           </template>
         </div>
       </div>
@@ -550,6 +481,7 @@ import { notificationsAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t, locale } = useI18n()
 const { showError } = useToast()

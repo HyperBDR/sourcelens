@@ -98,7 +98,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in dataSources"
+                  v-for="row in pagedDataSources"
                   :key="row.uuid"
                   class="cursor-pointer transition-colors hover:bg-line-soft"
                   :class="
@@ -243,6 +243,15 @@
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="dataSources.length"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </section>
 
@@ -307,6 +316,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 import DataSourceDetailDrawer from './DataSourceDetailDrawer.vue'
 import DataSourceFormDrawer from './DataSourceFormDrawer.vue'
@@ -338,6 +348,8 @@ const showDrawer = ref(false)
 const showDatasourceDetailDrawer = ref(false)
 
 const dataSources = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const lensnodes = ref([])
 const credentials = ref([])
 const llmConfigOptions = ref([])
@@ -357,6 +369,28 @@ const syncCron = ref('0 2 * * *')
 const syncTimezone = ref('Asia/Shanghai')
 const dynamicRefreshTimer = ref(null)
 const dynamicRefreshInFlight = ref(false)
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(dataSources.value.length / pageSize.value))
+)
+const pagedDataSources = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return dataSources.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 const DYNAMIC_REFRESH_INTERVAL_MS = 3000
 

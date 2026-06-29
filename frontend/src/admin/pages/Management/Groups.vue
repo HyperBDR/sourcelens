@@ -115,75 +115,15 @@
             </table>
           </div>
 
-          <div
-            v-if="!loading && totalCount > 0"
-            class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4"
-          >
-            <p class="text-sm text-ink-500">
-              {{ t('common.pagination.showing', paginationShowing) }}
-            </p>
-            <div class="flex items-center gap-2">
-              <label class="whitespace-nowrap text-sm text-ink-500"
-                >{{ t('common.pagination.itemsPerPage') }}:</label
-              >
-              <select
-                v-model.number="pageSize"
-                class="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-                @change="handlePageSizeChange"
-              >
-                <option :value="10">10</option>
-                <option :value="20">20</option>
-                <option :value="50">50</option>
-                <option :value="100">100</option>
-              </select>
-              <BaseButton
-                variant="outline"
-                size="sm"
-                :disabled="currentPage <= 1"
-                :title="t('common.pagination.previous')"
-                @click="goPrevPage"
-              >
-                <svg
-                  class="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-                <span class="sr-only">{{
-                  t('common.pagination.previous')
-                }}</span>
-              </BaseButton>
-              <BaseButton
-                variant="outline"
-                size="sm"
-                :disabled="currentPage >= totalPages"
-                :title="t('common.pagination.next')"
-                @click="goNextPage"
-              >
-                <svg
-                  class="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-                <span class="sr-only">{{ t('common.pagination.next') }}</span>
-              </BaseButton>
-            </div>
-          </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="totalCount"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </section>
 
@@ -293,6 +233,7 @@ import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import { useToast } from '@/composables/useToast'
@@ -321,13 +262,6 @@ const form = ref({ name: '', user_ids: [] })
 const totalPages = computed(() =>
   totalCount.value > 0 ? Math.ceil(totalCount.value / pageSize.value) : 1
 )
-
-const paginationShowing = computed(() => ({
-  from:
-    totalCount.value === 0 ? 0 : (currentPage.value - 1) * pageSize.value + 1,
-  to: Math.min(currentPage.value * pageSize.value, totalCount.value),
-  total: totalCount.value
-}))
 
 const modalTitle = computed(() =>
   mode.value === 'create'

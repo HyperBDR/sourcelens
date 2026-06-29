@@ -84,7 +84,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in mcps"
+                  v-for="row in pagedMcps"
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
@@ -109,6 +109,15 @@
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="mcps.length"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </section>
 
@@ -171,6 +180,7 @@ import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { extractErrorMessage } from '@/utils/api'
 
@@ -189,6 +199,8 @@ const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const mcps = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const loading = ref(false)
 const saving = ref(false)
 const showModal = ref(false)
@@ -201,6 +213,28 @@ const columns = computed(() =>
     t(`lensAdmin.columns.${column}`)
   )
 )
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(mcps.value.length / pageSize.value))
+)
+const pagedMcps = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return mcps.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 const modalTitle = computed(() => {
   const action =

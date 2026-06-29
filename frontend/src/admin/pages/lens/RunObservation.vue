@@ -1,7 +1,7 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
-      <div class="mb-4">
+    <div class="flex h-full min-h-0 w-full max-w-full flex-col p-6">
+      <div class="mb-4 flex-shrink-0">
         <h1 class="text-lg font-semibold text-gray-900">
           {{ t('lensRuns.title') }}
         </h1>
@@ -11,10 +11,12 @@
       </div>
 
       <div
-        class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden"
+        class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
       >
-        <div class="p-6">
-          <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div class="flex min-h-0 flex-col p-6">
+          <div
+            class="mb-6 flex flex-shrink-0 flex-wrap items-center justify-between gap-3"
+          >
             <div class="flex flex-wrap items-center gap-3">
               <input
                 v-model="filters.q"
@@ -95,17 +97,19 @@
 
           <div
             v-else-if="!loading && runs.length === 0"
-            class="py-16 text-center rounded-lg border border-gray-200 bg-gray-50"
+            class="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center"
           >
             <p class="text-sm font-medium text-gray-600">
               {{ t('lensRuns.noRuns') }}
             </p>
           </div>
 
-          <template v-else>
-            <div class="overflow-x-auto rounded-lg border border-gray-200">
+          <div v-else class="flex min-h-0 flex-col">
+            <div
+              class="relative max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm"
+            >
               <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
+                <thead class="sticky top-0 z-10 bg-gray-50">
                   <tr>
                     <th class="th">{{ t('lensRuns.colTime') }}</th>
                     <th class="th">{{ t('lensRuns.colUser') }}</th>
@@ -155,78 +159,15 @@
               </table>
             </div>
 
-            <div
-              v-if="total > pageSize"
-              class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-4"
-            >
-              <p class="text-sm text-gray-600">
-                {{
-                  t('common.pagination.showing', {
-                    from: (page - 1) * pageSize + 1,
-                    to: Math.min(page * pageSize, total),
-                    total
-                  })
-                }}
-              </p>
-              <div class="flex items-center gap-2">
-                <select
-                  v-model.number="pageSize"
-                  class="rounded-md border border-gray-300 px-2 py-1 text-sm"
-                  @change="handlePageSizeChange"
-                >
-                  <option :value="20">20</option>
-                  <option :value="50">50</option>
-                  <option :value="100">100</option>
-                </select>
-                <BaseButton
-                  variant="outline"
-                  size="sm"
-                  :disabled="page <= 1"
-                  :title="t('common.pagination.previous')"
-                  @click="goPrevPage"
-                >
-                  <svg
-                    class="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M15 19l-7-7 7-7"
-                    />
-                  </svg>
-                  <span class="sr-only">{{
-                    t('common.pagination.previous')
-                  }}</span>
-                </BaseButton>
-                <BaseButton
-                  variant="outline"
-                  size="sm"
-                  :disabled="page >= totalPages"
-                  :title="t('common.pagination.next')"
-                  @click="goNextPage"
-                >
-                  <svg
-                    class="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                  <span class="sr-only">{{ t('common.pagination.next') }}</span>
-                </BaseButton>
-              </div>
-            </div>
-          </template>
+            <PaginationBar
+              v-model:page-size="pageSize"
+              :current-page="page"
+              :total="total"
+              @page-size-change="handlePageSizeChange"
+              @prev="goPrevPage"
+              @next="goNextPage"
+            />
+          </div>
         </div>
       </div>
 
@@ -573,6 +514,7 @@ import { getAdminRuns, getAdminRun, listAssistants } from '@/api/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
 

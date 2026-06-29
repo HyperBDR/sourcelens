@@ -127,7 +127,7 @@
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-100">
                   <tr
-                    v-for="row in configList"
+                    v-for="row in pagedConfigList"
                     :key="row.uuid || row.id"
                     class="hover:bg-gray-50 transition-colors duration-150"
                   >
@@ -373,15 +373,28 @@
                             />
                           </svg>
                         </button>
-                        <template v-if="pendingDeleteId === (row.uuid || row.id)">
+                        <template
+                          v-if="pendingDeleteId === (row.uuid || row.id)"
+                        >
                           <button
                             type="button"
                             :title="t('common.confirm')"
                             class="inline-flex items-center justify-center rounded p-1.5 text-red-600 hover:bg-red-50"
-                            @click="pendingDeleteId = null; deleteConfig(row)"
+                            @click="confirmDeleteConfig(row)"
                           >
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            <svg
+                              class="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M5 13l4 4L19 7"
+                              />
                             </svg>
                           </button>
                           <button
@@ -390,8 +403,19 @@
                             class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-gray-100"
                             @click="pendingDeleteId = null"
                           >
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            <svg
+                              class="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12"
+                              />
                             </svg>
                           </button>
                         </template>
@@ -423,6 +447,14 @@
                 </tbody>
               </table>
             </div>
+            <PaginationBar
+              v-model:page-size="pageSize"
+              :current-page="currentPage"
+              :total="configList.length"
+              @page-size-change="handlePageSizeChange"
+              @prev="goPrevPage"
+              @next="goNextPage"
+            />
           </template>
         </div>
       </div>
@@ -987,6 +1019,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const PROVIDER_LABELS = {
   openai: 'OpenAI',
@@ -1021,6 +1054,8 @@ const { t } = useI18n()
 
 const loading = ref(true)
 const configList = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const pendingDeleteId = ref(null)
 const userList = ref([])
 const modelsData = ref({ providers: [], capability_labels: {} })
@@ -1137,6 +1172,29 @@ const testCallOk = computed(() => testCallResult.value?.ok === true)
 const testCallContent = computed(() => testCallResult.value?.content ?? '')
 const testCallDetail = computed(() => testCallResult.value?.detail ?? '')
 const testCallUsage = computed(() => testCallResult.value?.usage ?? null)
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(configList.value.length / pageSize.value))
+)
+
+const pagedConfigList = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return configList.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 function unwrapMarkdownIfCodeBlock(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return raw
@@ -1614,6 +1672,11 @@ async function deleteConfig(row) {
   } catch (e) {
     console.error(e)
   }
+}
+
+function confirmDeleteConfig(row) {
+  pendingDeleteId.value = null
+  deleteConfig(row)
 }
 
 onMounted(() => {

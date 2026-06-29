@@ -71,7 +71,7 @@
               </thead>
               <tbody class="divide-y divide-gray-200 bg-white">
                 <tr
-                  v-for="row in rows"
+                  v-for="row in pagedRows"
                   :key="row.uuid"
                   class="transition-colors hover:bg-gray-50"
                 >
@@ -147,6 +147,15 @@
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="rows.length"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </div>
     </div>
@@ -160,6 +169,7 @@ import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { listAdminShares, updateAdminShare } from '@/api/lens'
 import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
@@ -171,12 +181,36 @@ const { showSuccess, showError } = useToast()
 const rows = ref([])
 const loading = ref(true)
 const activeTab = ref('pending')
+const currentPage = ref(1)
+const pageSize = ref(20)
 
 const tabs = computed(() => [
   { key: 'pending', label: t('lens.qa.tabPending') },
   { key: 'listed', label: t('lens.qa.tabListed') },
   { key: 'hidden', label: t('lens.qa.tabHidden') }
 ])
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(rows.value.length / pageSize.value))
+)
+const pagedRows = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 const TAB_PARAMS = {
   pending: { listed: 'false', status: 'published' },
@@ -205,6 +239,7 @@ async function load() {
 
 function setTab(key) {
   activeTab.value = key
+  currentPage.value = 1
   load()
 }
 

@@ -84,7 +84,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in assistants"
+                  v-for="row in pagedAssistants"
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
@@ -173,6 +173,15 @@
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="assistants.length"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </section>
 
@@ -222,6 +231,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import AssistantFormDrawer from './AssistantFormDrawer.vue'
@@ -246,6 +256,8 @@ const form = ref({})
 const formError = ref('')
 
 const assistants = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const lensnodes = ref([])
 const skills = ref([])
 const mcps = ref([])
@@ -267,6 +279,28 @@ const activeColumns = computed(() =>
     'actions'
   ].map((column) => t(`lensAdmin.columns.${column}`))
 )
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(assistants.value.length / pageSize.value))
+)
+const pagedAssistants = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return assistants.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 function lensNodeName(value) {
   const uuid = typeof value === 'object' ? value?.uuid : value

@@ -84,7 +84,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in skills"
+                  v-for="row in pagedSkills"
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
@@ -130,6 +130,15 @@
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            v-if="!loading"
+            v-model:page-size="pageSize"
+            :current-page="currentPage"
+            :total="skills.length"
+            @page-size-change="handlePageSizeChange"
+            @prev="goPrevPage"
+            @next="goNextPage"
+          />
         </div>
       </section>
 
@@ -279,6 +288,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { extractErrorMessage } from '@/utils/api'
 
@@ -291,6 +301,8 @@ const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const skills = ref([])
+const currentPage = ref(1)
+const pageSize = ref(20)
 const loading = ref(false)
 const saving = ref(false)
 const beautifying = ref(false)
@@ -306,6 +318,28 @@ const columns = computed(() =>
     t(`lensAdmin.columns.${column}`)
   )
 )
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(skills.value.length / pageSize.value))
+)
+const pagedSkills = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return skills.value.slice(start, start + pageSize.value)
+})
+
+function handlePageSizeChange() {
+  currentPage.value = 1
+}
+
+function goPrevPage() {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+}
+
+function goNextPage() {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+}
 
 const modalTitle = computed(() => {
   const action =
