@@ -260,11 +260,16 @@ def complete_datasource_sync_task(task_id, result):
         "by_type": result.get("by_type") or {},
         "details": result.get("details") or {},
         "details_truncated": result.get("details_truncated") or {},
+        "repository_summaries": result.get("repository_summaries") or [],
+        "failed_repositories": result.get("failed_repositories") or [],
+        "partial_success": bool(result.get("partial_success")),
         "target_path": result.get("target_path")
         or (datasource.target_path if datasource else ""),
     }
     conversion_summary = result.get("conversion_summary") or {}
     warnings = list(result.get("warnings") or [])
+    if result.get("partial_success"):
+        warnings.append("DATASOURCE_SYNC_PARTIAL_SUCCESS")
     warnings.extend(conversion_summary.get("warnings") or [])
     if conversion_summary.get("failed"):
         warnings.append("CONVERSION_PARTIAL_FAILED")

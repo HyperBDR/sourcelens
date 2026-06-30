@@ -92,7 +92,8 @@ export async function checkLensNodeDataSourcePath(uuid, payload) {
 export async function testLensNodeDataSourceConnection(uuid, payload) {
   const response = await api.post(
     `/lens/admin/lensnodes/${uuid}/test-datasource-connection/`,
-    payload
+    payload,
+    { timeout: 120000 }
   )
   return unwrapResponse(response)
 }
@@ -176,9 +177,10 @@ export async function cancelRun(runUuid) {
   return unwrapResponse(response)
 }
 
-export async function listDataSources() {
-  const response = await api.get('/lens/admin/datasources/')
-  return unwrapList(unwrapResponse(response))
+export async function listDataSources(params = {}) {
+  const response = await api.get('/lens/admin/datasources/', { params })
+  const payload = unwrapResponse(response)
+  return Object.keys(params || {}).length ? payload : unwrapList(payload)
 }
 
 export async function createDataSource(payload) {
@@ -213,6 +215,11 @@ export async function updateCredential(uuid, payload) {
 
 export async function revealCredential(uuid) {
   const response = await api.post(`/lens/admin/credentials/${uuid}/reveal/`)
+  return unwrapResponse(response)
+}
+
+export async function validateCredential(uuid) {
+  const response = await api.post(`/lens/admin/credentials/${uuid}/validate/`)
   return unwrapResponse(response)
 }
 

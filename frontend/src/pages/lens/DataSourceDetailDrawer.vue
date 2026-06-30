@@ -90,6 +90,46 @@
               </dd>
             </div>
           </dl>
+          <div v-if="organizationRepositories.length" class="mt-5">
+            <h4
+              class="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-600"
+            >
+              {{ t('lensAdmin.datasourceDetail.repositories') }}
+            </h4>
+            <div class="space-y-2">
+              <div
+                v-for="repo in organizationRepositories"
+                :key="repo.repo_url || repo.name || repo.path"
+                class="rounded-md border border-line bg-surface-sunken px-3 py-2"
+              >
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span
+                    class="inline-flex max-w-full items-center rounded-md border border-primary-200 bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700"
+                    :title="repo.name || repo.path || repo.repo_url"
+                  >
+                    <span class="max-w-56 truncate">
+                      {{ repo.name || repo.path || repo.repo_url }}
+                    </span>
+                  </span>
+                  <span
+                    v-if="repo.branch"
+                    class="rounded border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-ink-500"
+                  >
+                    {{ repo.branch || emptyValue }}
+                  </span>
+                </div>
+                <a
+                  v-if="repo.repo_url"
+                  class="mt-1.5 block break-all font-mono text-xs text-brand-600 hover:text-brand-700"
+                  :href="repo.repo_url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ repo.repo_url }}
+                </a>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="border-t border-line pt-6">
@@ -317,7 +357,11 @@ import {
   formatLLMConfigLabel,
   normalizeList
 } from './adminHelpers'
-import { formatDocIds, isDataSourceSyncing } from './datasourceHelpers'
+import {
+  dataSourceRepositories,
+  formatDocIds,
+  isDataSourceSyncing
+} from './datasourceHelpers'
 import { useShortDateTime } from './useShortDateTime'
 
 const props = defineProps({
@@ -659,11 +703,8 @@ function authSchemeLabel(authScheme) {
   return t('lensAdmin.datasourceWizard.authNone')
 }
 
-function feishuScopeLabel(syncMode) {
-  if (syncMode === 'drive_folder') {
-    return t('lensAdmin.datasourceWizard.feishuScopeDriveFolder')
-  }
-  return t('lensAdmin.datasourceWizard.feishuScopeDocuments')
+function feishuScopeLabel() {
+  return t('lensAdmin.datasourceWizard.feishuScopeDriveFolder')
 }
 
 function formatSyncPolicy(syncPolicy) {
@@ -713,10 +754,14 @@ const datasourceConnectionDetails = computed(() => {
   if (!row) return []
   const config = row.config || {}
   if (row.source_type === 'git') {
-    return [
+    const repositories = dataSourceRepositories(row)
+    const items = [
       detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
-      detailItem(t('lensAdmin.fields.repoUrl'), config.repo_url, true),
-      detailItem(t('lensAdmin.fields.branch'), config.branch || 'main', true),
+      detailItem(
+        t('lensAdmin.fields.repoUrl'),
+        config.organization_url || config.repo_url,
+        true
+      ),
       detailItem(
         t('lensAdmin.fields.authScheme'),
         authSchemeLabel(config.auth_scheme)
@@ -728,19 +773,28 @@ const datasourceConnectionDetails = computed(() => {
           : t('common.status.disabled')
       )
     ]
+    if (!repositories.length) {
+      items.splice(
+        2,
+        0,
+        detailItem(t('lensAdmin.fields.branch'), config.branch || 'main', true)
+      )
+    }
+    return items
   }
   return [
     detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
-    detailItem(
-      t('lensAdmin.fields.syncScope'),
-      feishuScopeLabel(config.sync_mode)
-    ),
+    detailItem(t('lensAdmin.fields.syncScope'), feishuScopeLabel()),
     detailItem(t('lensAdmin.fields.folderUrl'), config.folder_url, true),
     detailItem(t('lensAdmin.fields.folderToken'), config.folder_token, true),
     detailItem(t('lensAdmin.fields.documentUrl'), config.document_url, true),
     detailItem(t('lensAdmin.fields.docIds'), formatDocIds(config.doc_ids), true)
   ].filter((item) => item.value !== emptyValue)
 })
+
+const organizationRepositories = computed(() =>
+  dataSourceRepositories(props.datasource)
+)
 
 const datasourceSyncDetails = computed(() => {
   const row = props.datasource

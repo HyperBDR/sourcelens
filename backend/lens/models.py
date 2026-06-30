@@ -363,6 +363,12 @@ class DataSourceCredential(TimestampedUUIDModel):
         default=AuthType.HTTPS_TOKEN,
     )
     encrypted_secret = models.TextField(blank=True, default="")
+    endpoint_url = models.CharField(max_length=500, blank=True, default="")
+    sync_scope = models.CharField(max_length=64, blank=True, default="")
+    scope_config = models.JSONField(default=dict, blank=True)
+    validation_status = models.CharField(max_length=32, blank=True, default="")
+    validation_message = models.TextField(blank=True, default="")
+    validated_at = models.DateTimeField(null=True, blank=True)
     last_used_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

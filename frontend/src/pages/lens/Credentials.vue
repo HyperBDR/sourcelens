@@ -107,6 +107,32 @@
                     {{ credentialAuthTypeLabel(row.auth_type) }}
                   </td>
                   <td class="table-cell text-ink-600">
+                    <div class="max-w-xs truncate">
+                      {{ credentialUrl(row) }}
+                    </div>
+                  </td>
+                  <td class="table-cell">
+                    <div class="max-w-xs">
+                      <span
+                        class="rounded-md border px-2 py-1 text-xs font-medium"
+                        :class="credentialValidationClass(row)"
+                        :title="row.validation_message || ''"
+                      >
+                        {{ credentialValidationLabel(row) }}
+                      </span>
+                      <div
+                        v-if="
+                          row.validation_status === 'failed' &&
+                          row.validation_message
+                        "
+                        class="mt-1 max-w-xs truncate text-xs text-danger-700"
+                        :title="row.validation_message"
+                      >
+                        {{ row.validation_message }}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="table-cell text-ink-600">
                     <div
                       class="inline-flex"
                       @mouseenter="showCredentialBindings($event, row)"
@@ -123,7 +149,21 @@
                     {{ formatDateTime(row.last_used_at) }}
                   </td>
                   <td class="table-cell">
-                    <RowActions :row="row" @edit="startEdit" @delete="remove" />
+                    <div class="flex flex-wrap items-center gap-2">
+                      <BaseButton
+                        size="sm"
+                        variant="outline"
+                        :loading="validatingCredentialUuid === row.uuid"
+                        @click="validateRow(row)"
+                      >
+                        {{ t('lensAdmin.credentials.validate') }}
+                      </BaseButton>
+                      <RowActions
+                        :row="row"
+                        @edit="startEdit"
+                        @delete="remove"
+                      />
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -182,14 +222,55 @@
           </FormRow>
           <FormRow :label="t('lensAdmin.fields.type')" required>
             <select v-model="form.provider" class="form-input" required>
-              <option value="generic">Git</option>
+              <option value="github">GitHub</option>
+              <option value="gitlab">GitLab</option>
               <option value="feishu">Feishu</option>
             </select>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.credentials.providerHint') }}
+            </p>
           </FormRow>
+          <template v-if="credentialFormAuthType === 'https_token'">
+            <FormRow :label="t('lensAdmin.fields.url')" required>
+              <input
+                v-model="form.organization_url"
+                class="form-input"
+                placeholder="https://gitlab.example.com/group or https://github.com/org/repo"
+                required
+              />
+              <p class="mt-1 text-xs text-ink-500">
+                {{ t('lensAdmin.credentials.gitScopeHint') }}
+              </p>
+            </FormRow>
+          </template>
+          <template v-else>
+            <FormRow :label="t('lensAdmin.fields.url')" required>
+              <input
+                v-model="form.folder_url"
+                class="form-input"
+                placeholder="https://xxx.feishu.cn/drive/folder/..."
+                required
+              />
+              <p class="mt-1 text-xs text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.feishuFolderHint') }}
+              </p>
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.syncScope')">
+              <div class="form-input bg-surface-sunken text-ink-500">
+                {{ t('lensAdmin.datasourceWizard.feishuScopeDriveFolder') }}
+              </div>
+              <p class="mt-1 text-xs text-ink-500">
+                {{ t('lensAdmin.credentials.syncScopeHint') }}
+              </p>
+            </FormRow>
+          </template>
           <FormRow :label="t('lensAdmin.fields.authScheme')">
             <div class="form-input bg-surface-sunken text-ink-500">
               {{ credentialAuthTypeLabel(credentialFormAuthType) }}
             </div>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ credentialAuthTypeHint }}
+            </p>
           </FormRow>
           <template v-if="credentialFormAuthType === 'feishu_app'">
             <FormRow :label="t('lensAdmin.fields.feishuAppId')" required>
@@ -200,6 +281,9 @@
                 :placeholder="t('lensAdmin.credentials.appIdPlaceholder')"
                 :required="mode === 'create'"
               />
+              <p class="mt-1 text-xs text-ink-500">
+                {{ t('lensAdmin.credentials.appIdHint') }}
+              </p>
             </FormRow>
             <FormRow :label="t('lensAdmin.fields.feishuAppSecret')" required>
               <div class="flex gap-2">
@@ -224,6 +308,9 @@
                   />
                 </button>
               </div>
+              <p class="mt-1 text-xs text-ink-500">
+                {{ t('lensAdmin.credentials.appSecretHint') }}
+              </p>
             </FormRow>
           </template>
           <FormRow v-else :label="t('lensAdmin.fields.accessToken')" required>
@@ -249,6 +336,9 @@
                 />
               </button>
             </div>
+            <p class="mt-1 text-xs text-ink-500">
+              {{ t('lensAdmin.credentials.accessTokenHint') }}
+            </p>
           </FormRow>
           <p v-if="mode === 'edit'" class="-mt-2 text-xs text-ink-500">
             {{ t('lensAdmin.credentials.replaceHint') }}
@@ -280,7 +370,7 @@
 
 <script setup>
 import { Eye as EyeIcon, EyeOff as EyeOffIcon } from '@lucide/vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { extractErrorMessage } from '@/utils/api'
@@ -290,7 +380,8 @@ import {
   deleteCredential,
   listCredentials,
   revealCredential,
-  updateCredential
+  updateCredential,
+  validateCredential
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -320,6 +411,7 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const credentialSecretRevealed = ref(false)
 const revealingCredential = ref(false)
+const validatingCredentialUuid = ref('')
 const credentialBindingTooltip = ref({
   row: null,
   left: 0,
@@ -333,6 +425,8 @@ const activeColumns = computed(() =>
     'credential',
     'type',
     'authScheme',
+    'url',
+    'validation',
     'datasources',
     'lastUsedAt',
     'actions'
@@ -383,12 +477,24 @@ const revealButtonTitle = computed(() =>
     : t('lensAdmin.credentials.revealSecret')
 )
 
+const credentialAuthTypeHint = computed(() =>
+  credentialFormAuthType.value === 'feishu_app'
+    ? t('lensAdmin.credentials.feishuAuthHint')
+    : t('lensAdmin.credentials.gitAuthHint')
+)
+
 const credentialBindingTooltipStyle = computed(() => ({
   left: `${credentialBindingTooltip.value.left}px`,
   top: `${credentialBindingTooltip.value.top}px`
 }))
 
 function credentialProviderLabel(provider) {
+  if (provider === 'github') {
+    return 'GitHub'
+  }
+  if (provider === 'gitlab') {
+    return 'GitLab'
+  }
   if (provider === 'feishu') {
     return 'Feishu'
   }
@@ -404,6 +510,73 @@ function credentialAuthTypeLabel(authType) {
     feishu_app: 'Feishu App'
   }
   return labels[authType] || authType || emptyValue
+}
+
+function credentialUrl(row) {
+  const summary = row?.scope_summary || {}
+  return (
+    summary.organization_url ||
+    summary.folder_url ||
+    summary.folder_token ||
+    row?.endpoint_url ||
+    emptyValue
+  )
+}
+
+function credentialValidationLabel(row) {
+  if (validatingCredentialUuid.value === row?.uuid) {
+    return t('lensAdmin.credentials.validationRunning')
+  }
+  if (row?.validation_status === 'success') {
+    return t('lensAdmin.credentials.validationSuccess')
+  }
+  if (row?.validation_status === 'failed') {
+    return t('lensAdmin.credentials.validationFailed')
+  }
+  return t('lensAdmin.credentials.validationUnchecked')
+}
+
+function credentialValidationClass(row) {
+  if (row?.validation_status === 'success') {
+    return 'border-success-200 bg-success-50 text-success-700'
+  }
+  if (row?.validation_status === 'failed') {
+    return 'border-danger-200 bg-danger-50 text-danger-700'
+  }
+  return 'border-line bg-surface-sunken text-ink-500'
+}
+
+function defaultEndpoint(provider) {
+  if (provider === 'gitlab') {
+    return 'https://gitlab.com'
+  }
+  if (provider === 'feishu') {
+    return 'https://open.feishu.cn'
+  }
+  return 'https://github.com'
+}
+
+function endpointFromCredentialUrl(provider, url) {
+  if (provider === 'feishu') {
+    return 'https://open.feishu.cn'
+  }
+  const parsed = parseUrl(url)
+  if (parsed?.origin) {
+    return parsed.origin
+  }
+  return defaultEndpoint(provider)
+}
+
+function parseUrl(value) {
+  try {
+    return new URL(String(value || '').trim())
+  } catch {
+    return null
+  }
+}
+
+function defaultSyncScope(provider) {
+  return provider === 'feishu' ? 'feishu_folder' : 'service'
 }
 
 function formatSourceType(sourceType) {
@@ -523,7 +696,11 @@ function closeModal() {
 function defaultForm() {
   return {
     name: '',
-    provider: 'generic',
+    provider: 'github',
+    sync_scope: 'service',
+    organization_url: '',
+    folder_url: '',
+    folder_token: '',
     secret: '',
     app_id: '',
     app_secret: ''
@@ -534,7 +711,16 @@ function formFromRow(row) {
   return {
     uuid: row.uuid,
     name: row.name || '',
-    provider: row.auth_type === 'feishu_app' ? 'feishu' : 'generic',
+    provider:
+      row.auth_type === 'feishu_app'
+        ? 'feishu'
+        : row.provider === 'gitlab'
+          ? 'gitlab'
+          : 'github',
+    sync_scope: row.sync_scope || defaultSyncScope(row.provider),
+    organization_url: row.scope_summary?.organization_url || '',
+    folder_url: row.scope_summary?.folder_url || '',
+    folder_token: row.scope_summary?.folder_token || '',
     secret: row.masked_secret || '',
     app_id: row.masked_app_id || '',
     app_secret: row.masked_secret || ''
@@ -547,10 +733,18 @@ async function save() {
   try {
     const payload = buildPayload()
     const uuid = form.value.uuid
+    let saved = null
     if (mode.value === 'create') {
-      await createCredential(payload)
+      saved = await createCredential(payload)
     } else {
-      await updateCredential(uuid, payload)
+      saved = await updateCredential(uuid, payload)
+    }
+    if (saved?.uuid) {
+      try {
+        await validateCredential(saved.uuid)
+      } catch (validationError) {
+        showError(credentialValidationErrorMessage(validationError))
+      }
     }
     showSuccess(t('lensAdmin.messages.saveSuccess'))
     closeModal()
@@ -566,13 +760,68 @@ async function save() {
   }
 }
 
+async function validateRow(row) {
+  if (!row?.uuid || validatingCredentialUuid.value) {
+    return
+  }
+  validatingCredentialUuid.value = row.uuid
+  try {
+    const result = await validateCredential(row.uuid)
+    showSuccess(result?.message || t('lensAdmin.credentials.validationSuccess'))
+    await load()
+  } catch (error) {
+    showError(credentialValidationErrorMessage(error))
+    await load()
+  } finally {
+    validatingCredentialUuid.value = ''
+  }
+}
+
+function credentialValidationErrorMessage(error) {
+  const message =
+    error?.response?.data?.data?.message ||
+    error?.response?.data?.message ||
+    extractErrorMessage(error, t('lensAdmin.messages.saveFailed'))
+  const parsed = parseEmbeddedJson(message)
+  if (parsed?.error === 'insufficient_scope') {
+    return t('lensAdmin.credentials.insufficientScope', {
+      scope: parsed.scope || '-'
+    })
+  }
+  return message
+}
+
+function parseEmbeddedJson(value) {
+  const text = String(value || '')
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) {
+    return null
+  }
+  try {
+    return JSON.parse(text.slice(start, end + 1))
+  } catch {
+    return null
+  }
+}
+
 function buildPayload() {
   const payload = {
     name: form.value.name,
     provider: form.value.provider,
-    auth_type: credentialFormAuthType.value
+    auth_type: credentialFormAuthType.value,
+    sync_scope: form.value.sync_scope || defaultSyncScope(form.value.provider)
   }
   if (credentialFormAuthType.value === 'feishu_app') {
+    if (!isFeishuDriveFolderUrl(form.value.folder_url)) {
+      throw new Error(t('lensAdmin.credentials.feishuFolderUrlInvalid'))
+    }
+    payload.folder_url = form.value.folder_url?.trim()
+    payload.folder_token = form.value.folder_token?.trim()
+    payload.endpoint_url = endpointFromCredentialUrl(
+      form.value.provider,
+      form.value.folder_url
+    )
     if (form.value.app_id?.trim() && form.value.app_id !== CREDENTIAL_MASK) {
       payload.app_id = form.value.app_id.trim()
     }
@@ -588,8 +837,41 @@ function buildPayload() {
   ) {
     payload.secret = form.value.secret.trim()
   }
+  if (credentialFormAuthType.value === 'https_token') {
+    payload.organization_url = form.value.organization_url?.trim()
+    payload.endpoint_url = endpointFromCredentialUrl(
+      form.value.provider,
+      form.value.organization_url
+    )
+  }
   return payload
 }
+
+function isFeishuDriveFolderUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim())
+    const parts = url.pathname.split('/').filter(Boolean)
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      url.hostname.endsWith('.feishu.cn') &&
+      parts.length >= 3 &&
+      parts[0] === 'drive' &&
+      parts[1] === 'folder'
+    )
+  } catch {
+    return false
+  }
+}
+
+watch(
+  () => form.value.provider,
+  (provider, previous) => {
+    if (!provider || provider === previous) {
+      return
+    }
+    form.value.sync_scope = defaultSyncScope(provider)
+  }
+)
 
 async function remove(row) {
   try {

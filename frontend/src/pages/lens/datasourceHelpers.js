@@ -18,7 +18,7 @@ export function formatDocIds(docIds) {
 export function dataSourceRepository(row) {
   const config = row.config || {}
   if (row.source_type === 'git') {
-    return config.repo_url || EMPTY_VALUE
+    return config.organization_url || config.repo_url || EMPTY_VALUE
   }
   return (
     config.folder_url ||
@@ -26,6 +26,15 @@ export function dataSourceRepository(row) {
     config.document_url ||
     EMPTY_VALUE
   )
+}
+
+export function dataSourceRepositories(row) {
+  const repositories = row?.config?.repositories
+  return Array.isArray(repositories) ? repositories : []
+}
+
+export function isOrganizationDataSource(row) {
+  return dataSourceRepositories(row).length > 0
 }
 
 export function dataSourceBranch(row) {

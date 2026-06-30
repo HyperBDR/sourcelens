@@ -117,6 +117,11 @@ def inspect_datasource_path(command, workspace_path=WORKSPACE_ROOT):
         result["message"] = "Directory is empty and can be used."
         return result
 
+    if source_type == "git" and config.get("git_organization_parent"):
+        result["message_code"] = "merge"
+        result["message"] = "Directory exists; repositories will be stored in child directories."
+        return result
+
     if source_type == "git":
         return _inspect_git_path(target, config, result)
 
@@ -388,6 +393,9 @@ def _test_git_connection(config):
             detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
         )
     except DataSourceSyncError:
+        organization_result = _discover_git_organization(config)
+        if organization_result is not None:
+            return organization_result
         return {
             "status": "failed",
             "message_code": "git_unreachable",
@@ -416,6 +424,295 @@ def _test_git_connection(config):
         "message": "Git repository is reachable and branch exists.",
         "details": {"branch": selected_branch, "branches": branches},
     }
+
+
+def _discover_git_organization(config):
+    """Return repositories under a Git organization URL when supported."""
+
+    repo_url = config.get("repo_url")
+    parsed = parse.urlsplit(str(repo_url or "").rstrip("/"))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    group_path = parsed.path.strip("/")
+    if not group_path:
+        return None
+
+    projects, attempts = _discover_git_projects(parsed, group_path, config)
+    if not projects:
+        if not str(parsed.path or "").rstrip("/").endswith(".git"):
+            return {
+                "status": "failed",
+                "message_code": "git_organization_unreachable",
+                "message": "Git organization is not reachable.",
+                "details": {
+                    "scope": "organization",
+                    "organization_url": repo_url,
+                    "attempts": attempts,
+                },
+            }
+        return None
+
+    repositories = _git_project_repositories(projects, config)
+    if not repositories:
+        return None
+    return {
+        "status": "success",
+        "message_code": "git_organization_available",
+        "message": "Git organization is reachable.",
+        "details": {
+            "scope": "organization",
+            "organization_url": repo_url,
+            "repositories": repositories,
+        },
+    }
+
+
+def _git_project_repositories(projects, config):
+    """Return repository entries with branch details."""
+
+    repositories = []
+    max_workers = min(12, max(1, len(projects)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(_git_project_repository, project, config)
+            for project in projects
+        ]
+        for future in as_completed(futures):
+            repository = future.result()
+            if repository is not None:
+                repositories.append(repository)
+    repositories.sort(key=lambda item: item.get("name") or "")
+    return repositories
+
+
+def _git_project_repository(project, config):
+    """Return one repository entry with branches."""
+
+    clone_url = project.get("repo_url") or ""
+    if not clone_url:
+        return None
+    branches = _git_project_branches(project, config)
+    selected_branch = (
+        project.get("default_branch")
+        if project.get("default_branch") in branches
+        else _default_git_branch(branches)
+    )
+    return {
+        "name": project.get("name") or _repo_name_from_url(clone_url),
+        "path": project.get("path") or project.get("name") or "",
+        "repo_url": clone_url,
+        "default_branch": selected_branch,
+        "branches": branches,
+    }
+
+
+def _git_project_branches(project, config):
+    """Return branches for a discovered Git project."""
+
+    if project.get("service") == "gitlab" and project.get("api_id") is not None:
+        branches = _gitlab_project_branches(project, config)
+        if branches:
+            return branches
+    clone_url = project.get("repo_url") or ""
+    return _git_repo_branches(clone_url, config)
+
+
+def _gitlab_project_branches(project, config):
+    """Return GitLab project branches through the GitLab API."""
+
+    api_base_url = project.get("api_base_url") or ""
+    api_id = project.get("api_id")
+    if not api_base_url or api_id is None:
+        return []
+    branches = []
+    for page in range(1, 11):
+        url = (
+            f"{api_base_url}/api/v4/projects/{parse.quote(str(api_id), safe='')}"
+            f"/repository/branches?per_page=100&page={page}"
+        )
+        payload, _error_detail = _git_api_json(
+            url,
+            config,
+            auth_style="gitlab",
+            timeout=10,
+        )
+        if not isinstance(payload, list):
+            return branches
+        if not payload:
+            break
+        branches.extend(
+            item.get("name")
+            for item in payload
+            if item.get("name")
+        )
+        if len(payload) < 100:
+            break
+    return branches
+
+
+def _discover_git_projects(parsed, group_path, config):
+    """Discover projects from supported Git organization APIs."""
+
+    attempts = []
+    projects, attempt = _discover_gitlab_projects(parsed, group_path, config)
+    attempts.append(attempt)
+    if projects:
+        return projects, attempts
+    projects, attempt = _discover_gitea_projects(parsed, group_path, config)
+    attempts.append(attempt)
+    return projects, attempts
+
+
+def _discover_gitlab_projects(parsed, group_path, config):
+    """Discover projects from a GitLab group URL."""
+
+    encoded_group = parse.quote(group_path, safe="")
+    base_url = parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    projects = []
+    last_error = ""
+    for page in range(1, 11):
+        url = (
+            f"{base_url}/api/v4/groups/{encoded_group}/projects"
+            f"?include_subgroups=true&simple=true&per_page=100&page={page}"
+        )
+        payload, error_detail = _git_api_json(
+            url,
+            config,
+            auth_style="gitlab",
+        )
+        if not isinstance(payload, list):
+            last_error = error_detail
+            return (
+                None if page == 1 else projects,
+                _git_api_attempt("gitlab", url, last_error),
+            )
+        if not payload:
+            break
+        projects.extend(
+            {
+                "service": "gitlab",
+                "api_base_url": base_url,
+                "api_id": item.get("id"),
+                "name": item.get("name") or item.get("path"),
+                "path": item.get("path") or item.get("name"),
+                "repo_url": (
+                    item.get("http_url_to_repo")
+                    or item.get("web_url")
+                    or ""
+                ),
+                "default_branch": item.get("default_branch") or "",
+            }
+            for item in payload
+        )
+        if len(payload) < 100:
+            break
+    return projects, _git_api_attempt("gitlab", url, last_error)
+
+
+def _discover_gitea_projects(parsed, group_path, config):
+    """Discover repositories from a Gitea organization URL."""
+
+    org = group_path.split("/", 1)[0]
+    base_url = parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    projects = []
+    last_error = ""
+    for page in range(1, 11):
+        url = (
+            f"{base_url}/api/v1/orgs/{parse.quote(org)}/repos"
+            f"?limit=100&page={page}"
+        )
+        payload, error_detail = _git_api_json(
+            url,
+            config,
+            auth_style="gitea",
+        )
+        if not isinstance(payload, list):
+            last_error = error_detail
+            return (
+                None if page == 1 else projects,
+                _git_api_attempt("gitea", url, last_error),
+            )
+        if not payload:
+            break
+        projects.extend(
+            {
+                "service": "gitea",
+                "name": item.get("name") or item.get("full_name"),
+                "path": item.get("name") or item.get("full_name"),
+                "repo_url": (
+                    item.get("clone_url")
+                    or item.get("html_url")
+                    or ""
+                ),
+                "default_branch": item.get("default_branch") or "",
+            }
+            for item in payload
+        )
+        if len(payload) < 100:
+            break
+    return projects, _git_api_attempt("gitea", url, last_error)
+
+
+def _git_api_attempt(service, url, error_detail):
+    """Return a compact Git API discovery attempt detail."""
+
+    return {
+        "service": service,
+        "url": url,
+        "error": error_detail or "",
+    }
+
+
+def _git_api_json(url, config, auth_style, timeout=30):
+    """Fetch JSON from a Git service API."""
+
+    headers = {"Accept": "application/json"}
+    credentials = _load_credentials(config)
+    token = credentials.get("token") or credentials.get("password")
+    if token and auth_style == "gitlab":
+        headers["PRIVATE-TOKEN"] = token
+    elif token and auth_style == "gitea":
+        headers["Authorization"] = f"token {token}"
+    req = request.Request(url, headers=headers)
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8")), ""
+    except error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8")[:500]
+        except Exception:
+            body = ""
+        return None, f"HTTP {exc.code}: {body}"
+    except error.URLError as exc:
+        return None, str(exc.reason)
+    except TimeoutError:
+        return None, "request timed out"
+    except json.JSONDecodeError as exc:
+        return None, f"invalid json: {exc}"
+
+
+def _git_repo_branches(repo_url, config):
+    """Return remote branches for one repository URL."""
+
+    try:
+        auth_url = _git_auth_url(repo_url, config)
+        result = _run_git(
+            ["ls-remote", "--heads", auth_url],
+            timeout=60,
+            detail_prefix="LENS_SOURCE_GIT_LS_REMOTE_FAILED",
+        )
+    except DataSourceSyncError:
+        return []
+    return _git_remote_branches(result.stdout)
+
+
+def _repo_name_from_url(repo_url):
+    """Return a displayable repository name from a clone URL."""
+
+    path = parse.urlsplit(repo_url or "").path.rstrip("/")
+    name = path.rsplit("/", 1)[-1] if path else ""
+    return name[:-4] if name.endswith(".git") else name
 
 
 def _test_feishu_connection(config):
@@ -510,6 +807,9 @@ def _sync_git(command, workspace_path, emit):
     """Clone or update a Git repository into the target path."""
 
     config = command.get("config") or {}
+    if config.get("scope_type") == "organization" or config.get("repositories"):
+        return _sync_git_organization(command, workspace_path, emit)
+
     repo_url = config.get("repo_url")
     if not repo_url:
         raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
@@ -528,7 +828,7 @@ def _sync_git(command, workspace_path, emit):
 
     target.parent.mkdir(parents=True, exist_ok=True)
     _emit(emit, "sync_content", "running", "Synchronizing Git repository.")
-    if not target.exists():
+    if not (target / ".git").exists():
         _run_git(
             [
                 "clone",
@@ -608,6 +908,233 @@ def _sync_git(command, workspace_path, emit):
         "_changed_paths": changed_paths,
         "_deleted_paths": deleted_paths,
         **summary,
+    }
+
+
+def _sync_git_organization(command, workspace_path, emit):
+    """Synchronize multiple Git repositories under one datasource root."""
+
+    config = command.get("config") or {}
+    repositories = [
+        item for item in config.get("repositories") or []
+        if item.get("enabled", True)
+    ]
+    if not repositories:
+        raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+
+    root = normalize_target_path(command.get("target_path"), workspace_path)
+    root.mkdir(parents=True, exist_ok=True)
+    totals = {
+        "synced": 0,
+        "files": 0,
+        "folders": 0,
+        "documents": 0,
+        "scanned": 0,
+        "changed": 0,
+        "skipped": 0,
+        "deleted": 0,
+        "failed": 0,
+        "by_extension": {},
+        "by_type": {"git": len(repositories)},
+    }
+    sync_items = []
+    changed_paths = []
+    deleted_paths = []
+    repository_summaries = []
+    failed_repositories = []
+    total = len(repositories)
+    _emit(
+        emit,
+        "sync_plan",
+        "running",
+        f"Prepared {total} Git repositories for synchronization.",
+        category="summary",
+        progress_total=total,
+        progress_current=0,
+        progress_percent=0,
+        summary=totals,
+    )
+    for index, repository in enumerate(repositories, start=1):
+        name = repo_target_subdir(repository)
+        repo_target = root / name
+        repo_command = {
+            **command,
+            "target_path": str(repo_target),
+            "config": {
+                **config,
+                "repo_url": repository.get("repo_url") or "",
+                "branch": repository.get("branch") or config.get("branch") or "main",
+            },
+        }
+        repo_command["config"].pop("repositories", None)
+        repo_command["config"]["scope_type"] = "repository"
+        _emit(
+            emit,
+            "repository_started",
+            "running",
+            f"Synchronizing Git repository {name}.",
+            category="repository",
+            progress_total=total,
+            progress_current=index - 1,
+            progress_percent=int(((index - 1) / total) * 100),
+            current_file=name,
+        )
+        repository_event_status = "done"
+        repository_event_message = f"Finished Git repository {name}."
+        repository_event_error = ""
+        try:
+            result = _sync_git(repo_command, workspace_path, emit)
+            repo_items = result.pop("_sync_items", [])
+            repo_changed = result.pop("_changed_paths", [])
+            repo_deleted = result.pop("_deleted_paths", [])
+            _write_git_repository_manifest(
+                repo_command,
+                repo_target,
+                result,
+                repo_items,
+                repo_changed,
+                repo_deleted,
+            )
+            prefixed_items = _prefix_sync_items(repo_items, name)
+            sync_items.extend(prefixed_items)
+            changed_paths.extend(_prefix_paths(repo_changed, name))
+            deleted_paths.extend(_prefix_paths(repo_deleted, name))
+            _merge_git_summary(totals, result)
+            totals["synced"] += 1
+            repository_summaries.append(
+                _repository_summary(name, repository, "success", result)
+            )
+        except Exception as exc:
+            totals["failed"] += 1
+            repository_event_status = "failed"
+            repository_event_error = str(exc)
+            repository_event_message = (
+                f"Failed Git repository {name}: {repository_event_error}"
+            )
+            failure = _repository_summary(
+                name,
+                repository,
+                "failed",
+                {"error": str(exc)},
+            )
+            failed_repositories.append(failure)
+            repository_summaries.append(failure)
+        _emit(
+            emit,
+            "repository_done",
+            repository_event_status,
+            repository_event_message,
+            category="repository",
+            progress_total=total,
+            progress_current=index,
+            progress_percent=int((index / total) * 100),
+            summary=totals,
+            current_file=name,
+            error=repository_event_error,
+        )
+
+    return {
+        **totals,
+        "status": (
+            "failed" if failed_repositories and not totals["synced"] else "success"
+        ),
+        "target_path": str(root),
+        "repository_summaries": repository_summaries,
+        "failed_repositories": failed_repositories,
+        "partial_success": bool(failed_repositories and totals["synced"]),
+        "_sync_items": sync_items,
+        "_changed_paths": changed_paths,
+        "_deleted_paths": deleted_paths,
+    }
+
+
+def repo_target_subdir(repository):
+    """Return a stable target subdirectory for a repository item."""
+
+    raw = (
+        repository.get("target_subdir")
+        or repository.get("name")
+        or repository.get("path")
+        or _repo_name_from_url(repository.get("repo_url") or "")
+        or "repository"
+    )
+    return safe_filename(str(raw).strip()) or "repository"
+
+
+def _write_git_repository_manifest(
+    command,
+    target,
+    result,
+    items,
+    changed_paths,
+    deleted_paths,
+):
+    context = _sync_context(command, target)
+    sync_result = manifest_store.SyncResult(
+        items=items,
+        changed_paths=changed_paths,
+        deleted_paths=deleted_paths,
+        stats=_sync_summary_from_result(result),
+    )
+    payload = manifest_store.build_manifest(context, sync_result)
+    payload["synced_at"] = utc_timestamp()
+    manifest_store.write_datasource_marker(target, context)
+    manifest_store.write_manifest(target, payload)
+
+
+def _prefix_sync_items(items, prefix):
+    result = []
+    for item in items or []:
+        local_path = f"{prefix}/{item.local_path}"
+        source_path = f"{prefix}/{item.source_path}"
+        result.append(
+            manifest_store.SyncItem(
+                source_id=item.source_id,
+                source_type=item.source_type,
+                source_path=source_path,
+                local_path=local_path,
+                name=item.name,
+                kind=item.kind,
+                extension=item.extension,
+                status=item.status,
+                metadata=item.metadata,
+                remote=item.remote,
+            )
+        )
+    return result
+
+
+def _prefix_paths(paths, prefix):
+    return [f"{prefix}/{path}" for path in paths or []]
+
+
+def _merge_git_summary(target, source):
+    for key in [
+        "files",
+        "folders",
+        "documents",
+        "scanned",
+        "changed",
+        "skipped",
+        "deleted",
+    ]:
+        target[key] += int(source.get(key) or 0)
+    for extension, count in (source.get("by_extension") or {}).items():
+        for _ in range(int(count or 0)):
+            _increment_counter(target["by_extension"], extension)
+
+
+def _repository_summary(name, repository, status, result):
+    return {
+        "name": name,
+        "repo_url": repository.get("repo_url") or "",
+        "branch": repository.get("branch") or "",
+        "status": status,
+        "files": result.get("files") or 0,
+        "changed": result.get("changed") or 0,
+        "skipped": result.get("skipped") or 0,
+        "deleted": result.get("deleted") or 0,
+        "error": result.get("error") or "",
     }
 
 

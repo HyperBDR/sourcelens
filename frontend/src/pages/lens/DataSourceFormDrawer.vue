@@ -105,55 +105,15 @@
       <p class="text-sm text-ink-500">
         {{ t('lensAdmin.datasourceWizard.step3Desc') }}
       </p>
-      <template v-if="form.source_type === 'git'">
-        <FormRow :label="t('lensAdmin.fields.repoUrl')" required>
-          <input
-            v-model="config.repo_url"
-            class="form-input"
-            placeholder="https://github.com/org/repo.git"
-          />
-          <p class="mt-1 text-xs text-ink-500">
-            {{ t('lensAdmin.datasourceWizard.gitRepoHint') }}
-          </p>
-        </FormRow>
-        <div class="grid gap-4 md:grid-cols-2">
-          <FormRow :label="t('lensAdmin.fields.branch')">
-            <select
-              v-model="config.branch"
-              class="form-input"
-              :disabled="!gitBranchOptions.length"
-            >
-              <option value="">
-                {{ t('lensAdmin.datasourceWizard.branchPlaceholder') }}
-              </option>
-              <option
-                v-for="branch in gitBranchOptions"
-                :key="branch"
-                :value="branch"
-              >
-                {{ branch }}
-              </option>
-            </select>
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.authScheme')" required>
-            <select v-model="config.auth_scheme" class="form-input">
-              <option value="none">
-                {{ t('lensAdmin.datasourceWizard.authNone') }}
-              </option>
-              <option value="token">
-                {{ t('lensAdmin.datasourceWizard.authToken') }}
-              </option>
-            </select>
-          </FormRow>
-        </div>
-        <FormRow
-          v-if="config.auth_scheme === 'token'"
-          :label="t('lensAdmin.fields.credential')"
-          required
-        >
+      <template v-if="isGitSourceType(form.source_type)">
+        <FormRow :label="t('lensAdmin.fields.credential')" required>
           <div class="flex flex-col gap-2">
             <div class="flex gap-2">
-              <select v-model="form.credential_uuid" class="form-input">
+              <select
+                :value="form.credential_uuid"
+                class="form-input"
+                @change="handleCredentialChange"
+              >
                 <option value="">
                   {{ t('lensAdmin.datasourceWizard.selectCredential') }}
                 </option>
@@ -162,7 +122,7 @@
                   :key="credential.uuid"
                   :value="credential.uuid"
                 >
-                  {{ credential.name }}
+                  {{ credentialOptionLabel(credential) }}
                 </option>
               </select>
               <BaseButton
@@ -193,23 +153,56 @@
             </p>
           </div>
         </FormRow>
-      </template>
-      <template v-else>
-        <FormRow :label="t('lensAdmin.fields.syncScope')" required>
-          <select v-model="config.sync_mode" class="form-input">
-            <option value="document_list">
-              {{ t('lensAdmin.datasourceWizard.feishuScopeDocuments') }}
+        <div
+          v-if="selectedCredential"
+          class="grid gap-2 rounded-md border border-line bg-surface-sunken p-3 text-xs text-ink-600"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-medium text-ink-900">
+              {{ selectedCredential.name }}
+            </span>
+            <span class="rounded border border-line bg-surface px-1.5 py-0.5">
+              {{ credentialProviderText(selectedCredential) }}
+            </span>
+            <span
+              class="rounded border px-1.5 py-0.5"
+              :class="credentialValidationClass(selectedCredential)"
+            >
+              {{ credentialValidationText(selectedCredential) }}
+            </span>
+          </div>
+          <div class="break-all font-mono">
+            {{ credentialScopeText(selectedCredential) }}
+          </div>
+        </div>
+        <FormRow
+          v-if="!testingConnection && gitBranchOptions.length"
+          :label="t('lensAdmin.fields.branch')"
+          required
+        >
+          <select v-model="config.branch" class="form-input">
+            <option value="">
+              {{ t('lensAdmin.datasourceWizard.branchPlaceholder') }}
             </option>
-            <option value="drive_folder">
-              {{ t('lensAdmin.datasourceWizard.feishuScopeDriveFolder') }}
+            <option
+              v-for="branch in gitBranchOptions"
+              :key="branch"
+              :value="branch"
+            >
+              {{ branch }}
             </option>
           </select>
         </FormRow>
-
+      </template>
+      <template v-else>
         <FormRow :label="t('lensAdmin.fields.credential')" required>
           <div class="flex flex-col gap-2">
             <div class="flex gap-2">
-              <select v-model="form.credential_uuid" class="form-input">
+              <select
+                :value="form.credential_uuid"
+                class="form-input"
+                @change="handleCredentialChange"
+              >
                 <option value="">
                   {{ t('lensAdmin.datasourceWizard.selectFeishuCredential') }}
                 </option>
@@ -218,7 +211,7 @@
                   :key="credential.uuid"
                   :value="credential.uuid"
                 >
-                  {{ credential.name }}
+                  {{ credentialOptionLabel(credential) }}
                 </option>
               </select>
               <BaseButton
@@ -249,70 +242,65 @@
             </p>
           </div>
         </FormRow>
-
-        <template v-if="config.sync_mode === 'drive_folder'">
-          <FormRow :label="t('lensAdmin.fields.folderUrl')" required>
-            <input
-              v-model="config.folder_url"
-              class="form-input"
-              placeholder="https://xxx.feishu.cn/drive/folder/..."
-            />
-            <p class="mt-1 text-xs text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.feishuFolderHint') }}
-            </p>
-          </FormRow>
-          <div class="grid gap-4 md:grid-cols-2">
-            <FormRow :label="t('lensAdmin.fields.recursive')">
-              <label
-                class="inline-flex items-center gap-2 text-sm text-ink-600"
-              >
-                <input
-                  v-model="config.recursive"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-                />
-                {{ t('lensAdmin.datasourceWizard.recursiveHint') }}
-              </label>
-            </FormRow>
-            <FormRow
-              v-if="config.recursive"
-              :label="t('lensAdmin.fields.maxDepth')"
+        <div
+          v-if="selectedCredential"
+          class="grid gap-2 rounded-md border border-line bg-surface-sunken p-3 text-xs text-ink-600"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-medium text-ink-900">
+              {{ selectedCredential.name }}
+            </span>
+            <span class="rounded border border-line bg-surface px-1.5 py-0.5">
+              {{ credentialProviderText(selectedCredential) }}
+            </span>
+            <span
+              class="rounded border px-1.5 py-0.5"
+              :class="credentialValidationClass(selectedCredential)"
             >
-              <input
-                v-model.number="config.max_depth"
-                class="form-input"
-                min="1"
-                type="number"
-              />
-            </FormRow>
+              {{ credentialValidationText(selectedCredential) }}
+            </span>
           </div>
-        </template>
-
-        <template v-else>
-          <FormRow :label="t('lensAdmin.fields.documentUrl')">
-            <input
-              v-model="config.document_url"
-              class="form-input"
-              placeholder="https://xxx.feishu.cn/docx/..."
-            />
-            <p class="mt-1 text-xs text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.feishuUrlHint') }}
-            </p>
+          <div class="break-all font-mono">
+            {{ credentialScopeText(selectedCredential) }}
+          </div>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <FormRow :label="t('lensAdmin.fields.recursive')">
+            <label class="inline-flex items-center gap-2 text-sm text-ink-600">
+              <input
+                v-model="config.recursive"
+                type="checkbox"
+                class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+              />
+              {{ t('lensAdmin.datasourceWizard.recursiveHint') }}
+            </label>
           </FormRow>
-          <FormRow :label="t('lensAdmin.fields.docIds')">
+          <FormRow
+            v-if="config.recursive"
+            :label="t('lensAdmin.fields.maxDepth')"
+          >
             <input
-              v-model="config.doc_ids_text"
+              v-model.number="config.max_depth"
               class="form-input"
-              :placeholder="t('lensAdmin.placeholders.docIds')"
+              min="1"
+              type="number"
             />
-            <p class="mt-1 text-xs text-ink-500">
-              {{ t('lensAdmin.datasourceWizard.feishuDocHint') }}
-            </p>
           </FormRow>
-        </template>
+        </div>
       </template>
       <div
-        v-if="form.source_type === 'git' && gitBranchOptions.length"
+        v-if="isGitSourceType(form.source_type) && testingConnection"
+        class="flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
+      >
+        <LoaderCircleIcon class="h-4 w-4 animate-spin" />
+        <span>{{ t('lensAdmin.datasourceWizard.loadingGitScope') }}</span>
+      </div>
+      <div
+        v-if="
+          isGitSourceType(form.source_type) &&
+          !testingConnection &&
+          gitBranchOptions.length
+        "
         class="text-xs text-ink-500"
       >
         {{
@@ -323,14 +311,113 @@
       </div>
       <div class="flex items-center gap-2">
         <span
-          v-if="form.source_type === 'git' && !gitBranchOptions.length"
+          v-if="
+            isGitSourceType(form.source_type) &&
+            !testingConnection &&
+            !gitBranchOptions.length &&
+            !gitOrganizationRepositories.length
+          "
           class="text-xs text-ink-500"
         >
           {{ t('lensAdmin.datasourceWizard.branchTestHint') }}
         </span>
       </div>
+      <section
+        v-if="!testingConnection && gitOrganizationRepositories.length"
+        class="space-y-3 rounded-md border border-line bg-surface p-3"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-ink-900">
+              {{ t('lensAdmin.datasourceWizard.gitOrganizationReposTitle') }}
+            </h3>
+            <p class="mt-1 text-xs text-ink-500">
+              {{
+                t('lensAdmin.datasourceWizard.gitOrganizationReposHint', {
+                  count: gitOrganizationRepositories.length
+                })
+              }}
+            </p>
+          </div>
+          <label class="flex shrink-0 items-center gap-2 text-xs text-ink-600">
+            <input
+              type="checkbox"
+              class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+              :checked="allGitOrganizationRepositoriesSelected"
+              @change="toggleAllGitOrganizationRepositories"
+            />
+            {{ t('common.selectAll') }}
+          </label>
+        </div>
+        <div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_220px_auto]">
+          <input
+            v-model="gitRepositorySearch"
+            class="form-input h-9"
+            :placeholder="t('common.search')"
+          />
+          <input
+            v-model="gitBulkBranch"
+            class="form-input h-9"
+            :placeholder="t('lensAdmin.fields.branch')"
+          />
+          <BaseButton
+            size="sm"
+            variant="outline"
+            :disabled="!gitBulkBranch.trim()"
+            @click="applyGitBulkBranch"
+          >
+            {{ t('common.apply') }}
+          </BaseButton>
+        </div>
+        <div class="max-h-72 overflow-y-auto rounded-md border border-line">
+          <div
+            v-for="repo in filteredGitOrganizationRepositories"
+            :key="repo.repo_url"
+            class="grid gap-3 border-b border-line px-3 py-2 last:border-b-0 md:grid-cols-[minmax(0,1fr)_180px]"
+          >
+            <label class="flex min-w-0 items-start gap-3">
+              <input
+                v-model="repo.selected"
+                type="checkbox"
+                class="mt-1 h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+              />
+              <span class="min-w-0">
+                <span class="block truncate text-sm font-medium text-ink-900">
+                  {{ repo.name || repo.path }}
+                </span>
+                <span class="block truncate font-mono text-xs text-ink-500">
+                  {{ repo.repo_url }}
+                </span>
+              </span>
+            </label>
+            <select
+              v-model="repo.branch"
+              class="form-input h-9"
+              :disabled="!repo.selected || !repo.branches?.length"
+            >
+              <option value="">
+                {{ t('lensAdmin.datasourceWizard.branchPlaceholder') }}
+              </option>
+              <option
+                v-for="branch in repo.branches || []"
+                :key="branch"
+                :value="branch"
+              >
+                {{ branch }}
+              </option>
+            </select>
+          </div>
+        </div>
+        <p class="text-xs text-ink-500">
+          {{
+            t('lensAdmin.datasourceWizard.gitOrganizationSelectedHint', {
+              count: selectedGitOrganizationRepositories.length
+            })
+          }}
+        </p>
+      </section>
       <div
-        v-if="connectionResult"
+        v-if="connectionResult && !testingConnection"
         class="rounded-md border p-3 text-sm"
         :class="
           connectionResult.status === 'success'
@@ -595,7 +682,11 @@
           </div>
         </div>
         <p class="mt-1 text-xs text-ink-500">
-          {{ t('lensAdmin.datasourceWizard.pathHint') }}
+          {{
+            isGitOrganizationMode
+              ? t('lensAdmin.datasourceWizard.gitOrganizationPathHint')
+              : t('lensAdmin.datasourceWizard.pathHint')
+          }}
         </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.syncPolicy')" required>
@@ -999,16 +1090,6 @@
               wizardStep > 1 ? t('lensAdmin.wizard.back') : t('common.cancel')
             }}
           </BaseButton>
-          <BaseButton
-            v-if="wizardStep === 3"
-            variant="outline"
-            class="!border-primary-200 !bg-primary-50 !text-primary-700 hover:!border-primary-300 hover:!bg-primary-100"
-            :disabled="!canTestConnection"
-            :loading="testingConnection"
-            @click="$emit('test-connection')"
-          >
-            {{ t('lensAdmin.datasourceWizard.testConnection') }}
-          </BaseButton>
         </div>
         <div class="flex items-center gap-3">
           <span class="text-xs text-ink-400">
@@ -1060,7 +1141,7 @@ import {
   X as XIcon,
   XCircle as XCircleIcon
 } from '@lucide/vue'
-import { computed, defineComponent, h, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -1111,6 +1192,9 @@ const expandedDirectories = ref(new Set())
 const newDirectoryName = ref('')
 const feishuAdvancedOpen = ref(false)
 const pdfAdvancedOpen = ref(false)
+const gitRepositorySearch = ref('')
+const gitBulkBranch = ref('')
+const acceptedCredentialUuid = ref('')
 
 const syncIntervalSeconds = computed({
   get() {
@@ -1254,9 +1338,14 @@ const drawerSubtitle = computed(() =>
 
 const sourceTypes = computed(() => [
   {
-    value: 'git',
-    label: 'Git',
-    description: t('lensAdmin.datasourceWizard.gitDesc')
+    value: 'github',
+    label: 'GitHub',
+    description: t('lensAdmin.datasourceWizard.githubDesc')
+  },
+  {
+    value: 'gitlab',
+    label: 'GitLab',
+    description: t('lensAdmin.datasourceWizard.gitlabDesc')
   },
   {
     value: 'feishu',
@@ -1318,30 +1407,21 @@ const targetPath = computed(() => {
     : workspacePrefix.value
 })
 
-const canCreateTargetDirectory = computed(() =>
-  isValidRelativeName(newDirectoryName.value)
+const canCreateTargetDirectory = computed(
+  () => !!normalizeRelativePathInput(newDirectoryName.value)
 )
 
 const canTestConnection = computed(() => {
   if (!props.form.lensnode_uuid) {
     return false
   }
-  if (props.form.source_type === 'git') {
-    if (!props.config.repo_url?.trim()) {
-      return false
-    }
-    return props.config.auth_scheme !== 'token' || !!props.form.credential_uuid
-  }
-  if (!hasFeishuCredential()) {
-    return false
-  }
-  if (props.config.sync_mode === 'drive_folder') {
+  if (isGitSourceType(props.form.source_type)) {
     return !!(
-      props.config.folder_url?.trim() || props.config.folder_token?.trim()
+      props.form.credential_uuid && credentialScopeUrl(selectedCredential.value)
     )
   }
   return !!(
-    props.config.document_url?.trim() || props.config.doc_ids_text?.trim()
+    hasFeishuCredential() && credentialScopeUrl(selectedCredential.value)
   )
 })
 
@@ -1370,6 +1450,15 @@ const connectionResultMessage = computed(() => {
     const translated = t(key)
     if (translated !== key) {
       const error = props.connectionResult.details?.error
+      const attempts = props.connectionResult.details?.attempts
+      if (Array.isArray(attempts) && attempts.length) {
+        const detail = attempts
+          .map((item) =>
+            [item.service, item.error || item.url].filter(Boolean).join(': ')
+          )
+          .join('；')
+        return detail ? `${translated} ${detail}` : translated
+      }
       return error ? `${translated} ${error}` : translated
     }
   }
@@ -1387,7 +1476,10 @@ const canProceedWizard = computed(() => {
     if (props.connectionResult?.status !== 'success') {
       return false
     }
-    if (props.form.source_type === 'git') {
+    if (isGitSourceType(props.form.source_type)) {
+      if (isGitOrganizationMode.value) {
+        return selectedGitOrganizationRepositories.value.length > 0
+      }
       return (
         gitBranchOptions.value.length > 0 &&
         gitBranchOptions.value.includes(props.config.branch)
@@ -1412,23 +1504,130 @@ const canProceedWizard = computed(() => {
 })
 
 const gitBranchOptions = computed(() => {
-  if (props.form.source_type !== 'git') {
+  if (!isGitSourceType(props.form.source_type)) {
     return []
   }
   const branches = props.connectionResult?.details?.branches
   return Array.isArray(branches) ? branches : []
 })
 
+const isGitOrganizationMode = computed(
+  () =>
+    isGitSourceType(props.form.source_type) &&
+    !gitBranchOptions.value.length &&
+    (Array.isArray(props.config.git_repositories) ||
+      Array.isArray(props.connectionResult?.details?.repositories))
+)
+
+const gitOrganizationRepositories = computed(() => {
+  if (!isGitOrganizationMode.value) {
+    return []
+  }
+  return Array.isArray(props.config.git_repositories)
+    ? props.config.git_repositories
+    : []
+})
+
+const selectedGitOrganizationRepositories = computed(() =>
+  gitOrganizationRepositories.value.filter(
+    (repo) => repo.selected && repo.branch
+  )
+)
+
+const filteredGitOrganizationRepositories = computed(() => {
+  const keyword = gitRepositorySearch.value.trim().toLowerCase()
+  if (!keyword) {
+    return gitOrganizationRepositories.value
+  }
+  return gitOrganizationRepositories.value.filter((repo) =>
+    [repo.name, repo.path, repo.repo_url]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword))
+  )
+})
+
+const allGitOrganizationRepositoriesSelected = computed(
+  () =>
+    filteredGitOrganizationRepositories.value.length > 0 &&
+    filteredGitOrganizationRepositories.value.every((repo) => repo.selected)
+)
+
+const selectedCredential = computed(() =>
+  props.credentials.find(
+    (credential) => credential.uuid === props.form.credential_uuid
+  )
+)
+
 const filteredCredentials = computed(() => {
+  const selectedUuid = props.form.credential_uuid
   if (props.form.source_type === 'feishu') {
     return props.credentials.filter(
-      (credential) => credential.auth_type === 'feishu_app'
+      (credential) =>
+        credential.uuid === selectedUuid ||
+        credential.auth_type === 'feishu_app'
     )
   }
   return props.credentials.filter(
-    (credential) => credential.auth_type === 'https_token'
+    (credential) =>
+      credential.uuid === selectedUuid ||
+      (credential.auth_type === 'https_token' &&
+        [props.form.source_type, 'generic'].includes(credential.provider))
   )
 })
+
+function isGitSourceType(sourceType) {
+  return ['git', 'github', 'gitlab'].includes(sourceType)
+}
+
+function credentialOptionLabel(credential) {
+  const provider = credentialProviderText(credential)
+  const scope = credentialScopeUrl(credential)
+  return [credential.name || scope, provider].filter(Boolean).join(' · ')
+}
+
+function credentialProviderText(credential) {
+  if (credential?.provider === 'gitlab') {
+    return 'GitLab'
+  }
+  if (credential?.provider === 'github') {
+    return 'GitHub'
+  }
+  if (credential?.provider === 'feishu') {
+    return t('lensAdmin.datasourceWizard.feishu')
+  }
+  return 'Git'
+}
+
+function credentialValidationText(credential) {
+  if (credential?.validation_status === 'success') {
+    return t('lensAdmin.credentials.validationSuccess')
+  }
+  if (credential?.validation_status === 'failed') {
+    return t('lensAdmin.credentials.validationFailed')
+  }
+  return t('lensAdmin.credentials.validationUnchecked')
+}
+
+function credentialValidationClass(credential) {
+  if (credential?.validation_status === 'success') {
+    return 'border-success-200 bg-success-50 text-success-700'
+  }
+  if (credential?.validation_status === 'failed') {
+    return 'border-danger-200 bg-danger-50 text-danger-700'
+  }
+  return 'border-line bg-surface text-ink-500'
+}
+
+function credentialScopeText(credential) {
+  return credentialScopeUrl(credential) || '-'
+}
+
+function credentialScopeUrl(credential) {
+  const summary = credential?.scope_summary || {}
+  return (
+    summary.organization_url || summary.folder_url || summary.folder_token || ''
+  )
+}
 
 function nextWizardStep() {
   if (wizardStep.value < WIZARD_STEP_COUNT) wizardStep.value++
@@ -1496,9 +1695,18 @@ function selectTargetDirectory(relative) {
   emit('check-path')
 }
 
-function isValidRelativeName(value) {
-  const name = String(value || '').trim()
-  return !!name && !name.includes('/') && !['.', '..'].includes(name)
+function normalizeRelativePathInput(value) {
+  const path = String(value || '')
+    .trim()
+    .replace(/\/+$/, '')
+  if (!path || path.startsWith('/')) {
+    return ''
+  }
+  const parts = path.split('/')
+  if (parts.some((part) => !part || part === '.' || part === '..')) {
+    return ''
+  }
+  return parts.join('/')
 }
 
 function startCreateTargetDirectory(parent) {
@@ -1517,11 +1725,30 @@ function selectNewTargetDirectory() {
     return
   }
   const parent = String(creatingDirectoryParent.value || '').replace(/\/+$/, '')
-  const name = String(newDirectoryName.value || '').trim()
+  const name = normalizeRelativePathInput(newDirectoryName.value)
   props.form.workspace_relative_path = parent ? `${parent}/${name}` : name
   newDirectoryName.value = ''
   creatingDirectoryParent.value = null
   emit('check-path')
+}
+
+function toggleAllGitOrganizationRepositories(event) {
+  const checked = event.target.checked
+  filteredGitOrganizationRepositories.value.forEach((repo) => {
+    repo.selected = checked
+  })
+}
+
+function applyGitBulkBranch() {
+  const branch = gitBulkBranch.value.trim()
+  if (!branch) {
+    return
+  }
+  filteredGitOrganizationRepositories.value.forEach((repo) => {
+    if (repo.selected) {
+      repo.branch = branch
+    }
+  })
 }
 
 function cancelCreateTargetDirectory() {
@@ -1548,6 +1775,91 @@ function hasFeishuCredential() {
   return !!props.form.credential_uuid
 }
 
+function applySelectedCredentialToConfig(options = {}) {
+  const credential = selectedCredential.value
+  if (!credential) {
+    return
+  }
+  const scopeUrl = credentialScopeUrl(credential)
+  if (isGitSourceType(props.form.source_type)) {
+    if (options.clearGitSelection) {
+      clearGitSelectionConfig()
+    }
+    props.config.auth_scheme = 'token'
+    props.config.repo_url = scopeUrl
+    props.config.organization_url = scopeUrl
+    return
+  }
+  props.config.sync_mode = 'drive_folder'
+  props.config.folder_url = scopeUrl
+  props.config.recursive = props.config.recursive !== false
+  props.config.max_depth = Number(props.config.max_depth) || 10
+}
+
+function clearGitSelectionConfig() {
+  delete props.config.git_repositories
+  delete props.config.repositories
+  delete props.config.scope_type
+  delete props.config.branch
+}
+
+function hasGitSelectionConfig() {
+  return Boolean(
+    props.config.branch ||
+      props.config.scope_type ||
+      (Array.isArray(props.config.git_repositories) &&
+        props.config.git_repositories.length) ||
+      (Array.isArray(props.config.repositories) &&
+        props.config.repositories.length)
+  )
+}
+
+function shouldConfirmCredentialChange(nextUuid, previousUuid) {
+  return Boolean(
+    props.mode === 'edit' &&
+      props.show &&
+      previousUuid &&
+      nextUuid &&
+      nextUuid !== previousUuid &&
+      isGitSourceType(props.form.source_type) &&
+      hasGitSelectionConfig()
+  )
+}
+
+function testConnectionIfVisible() {
+  if (props.show && wizardStep.value === 3 && canTestConnection.value) {
+    emit('test-connection')
+  }
+}
+
+async function handleCredentialChange(event) {
+  const nextUuid = event.target.value
+  const previousUuid =
+    acceptedCredentialUuid.value || props.form.credential_uuid
+  if (nextUuid === props.form.credential_uuid) {
+    return
+  }
+  if (shouldConfirmCredentialChange(nextUuid, previousUuid)) {
+    const confirmed = window.confirm(
+      t('lensAdmin.datasourceWizard.credentialChangeWarning')
+    )
+    if (!confirmed) {
+      props.form.credential_uuid = previousUuid
+      event.target.value = previousUuid
+      return
+    }
+  }
+  props.form.credential_uuid = nextUuid
+  const clearGitSelection = Boolean(
+    previousUuid && nextUuid && nextUuid !== previousUuid
+  )
+  await nextTick()
+  applySelectedCredentialToConfig({ clearGitSelection })
+  acceptedCredentialUuid.value = nextUuid || ''
+  await nextTick()
+  testConnectionIfVisible()
+}
+
 watch(
   () => props.show,
   (show) => {
@@ -1558,6 +1870,9 @@ watch(
       newDirectoryName.value = ''
       feishuAdvancedOpen.value = false
       pdfAdvancedOpen.value = false
+      gitRepositorySearch.value = ''
+      gitBulkBranch.value = ''
+      acceptedCredentialUuid.value = props.form.credential_uuid || ''
     }
   }
 )
@@ -1618,12 +1933,27 @@ watch(
     props.form.lensnode_uuid,
     props.form.source_type,
     props.form.credential_uuid,
-    JSON.stringify(props.config || {})
+    datasourceConnectionConfigSignature()
   ],
   () => {
     emit('connection-change')
   }
 )
+
+watch(
+  () => wizardStep.value,
+  () => {
+    testConnectionIfVisible()
+  },
+  { flush: 'post' }
+)
+
+function datasourceConnectionConfigSignature() {
+  const config = { ...(props.config || {}) }
+  delete config.git_repositories
+  delete config.organization_url
+  return JSON.stringify(config)
+}
 </script>
 
 <style scoped>

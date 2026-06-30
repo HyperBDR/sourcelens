@@ -364,8 +364,11 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             "progress_total",
             "progress_current",
             "progress_percent",
-            "conversion_summary",
-            "current_file",
+                    "conversion_summary",
+                    "repository_summaries",
+                    "failed_repositories",
+                    "partial_success",
+                    "current_file",
             "current_status",
             "current_reason",
             "current_stats",
@@ -629,6 +632,15 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
                     )
                     or {},
                     "warnings": content.get("warnings") or [],
+                    "repository_summaries": content.get(
+                        "repository_summaries"
+                    )
+                    or [],
+                    "failed_repositories": content.get(
+                        "failed_repositories"
+                    )
+                    or [],
+                    "partial_success": bool(content.get("partial_success")),
                     "target_path": content.get("target_path") or "",
                     "error": content.get("error") or "",
                 },

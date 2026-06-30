@@ -1,4 +1,5 @@
 from pathlib import PurePosixPath
+from urllib import parse
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -772,11 +773,27 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
     )
+    folder_url = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+    )
+    folder_token = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+    )
+    organization_url = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+    )
     has_secret = serializers.BooleanField(read_only=True)
     datasource_count = serializers.SerializerMethodField()
     datasource_bindings = serializers.SerializerMethodField()
     masked_app_id = serializers.SerializerMethodField()
     masked_secret = serializers.SerializerMethodField()
+    scope_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = DataSourceCredential
@@ -785,14 +802,24 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
             "name",
             "provider",
             "auth_type",
+            "endpoint_url",
+            "sync_scope",
+            "scope_config",
             "secret",
             "app_id",
             "app_secret",
+            "folder_url",
+            "folder_token",
+            "organization_url",
             "has_secret",
             "datasource_count",
             "datasource_bindings",
             "masked_app_id",
             "masked_secret",
+            "scope_summary",
+            "validation_status",
+            "validation_message",
+            "validated_at",
             "last_used_at",
             "created_at",
             "updated_at",
@@ -804,6 +831,10 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
             "datasource_bindings",
             "masked_app_id",
             "masked_secret",
+            "scope_summary",
+            "validation_status",
+            "validation_message",
+            "validated_at",
             "last_used_at",
             "created_at",
             "updated_at",
@@ -843,6 +874,18 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
 
         return "********" if credential.has_secret else ""
 
+    def get_scope_summary(self, credential):
+        """Return a compact credential scope summary."""
+
+        config = credential.scope_config or {}
+        return {
+            "endpoint_url": credential.endpoint_url,
+            "sync_scope": credential.sync_scope,
+            "folder_url": config.get("folder_url") or "",
+            "folder_token": config.get("folder_token") or "",
+            "organization_url": config.get("organization_url") or "",
+        }
+
     def validate(self, attrs):
         """Validate secret inputs by credential auth type."""
 
@@ -850,6 +893,45 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
             "auth_type",
             getattr(self.instance, "auth_type", ""),
         )
+        provider = attrs.get(
+            "provider",
+            getattr(self.instance, "provider", ""),
+        )
+        endpoint_url = str(
+            attrs.get(
+                "endpoint_url",
+                getattr(self.instance, "endpoint_url", ""),
+            )
+            or ""
+        ).strip()
+        scope_config = dict(
+            attrs.get(
+                "scope_config",
+                getattr(self.instance, "scope_config", {}),
+            )
+            or {}
+        )
+        folder_url = str(attrs.pop("folder_url", "") or "").strip()
+        folder_token = str(attrs.pop("folder_token", "") or "").strip()
+        organization_url = str(
+            attrs.pop("organization_url", "") or ""
+        ).strip()
+        if folder_url:
+            scope_config["folder_url"] = folder_url
+        if folder_token:
+            scope_config["folder_token"] = folder_token
+        if organization_url:
+            scope_config["organization_url"] = organization_url
+        attrs["scope_config"] = scope_config
+        if provider == DataSourceCredential.Provider.GITHUB and not endpoint_url:
+            attrs["endpoint_url"] = "https://github.com"
+        elif provider == DataSourceCredential.Provider.GITLAB and not endpoint_url:
+            attrs["endpoint_url"] = "https://gitlab.com"
+        elif provider == DataSourceCredential.Provider.FEISHU and not endpoint_url:
+            attrs["endpoint_url"] = "https://open.feishu.cn"
+        elif endpoint_url:
+            attrs["endpoint_url"] = endpoint_url
+
         has_existing = bool(self.instance and self.instance.has_secret)
         has_secret = bool(str(attrs.get("secret") or "").strip())
         has_app_id = bool(str(attrs.get("app_id") or "").strip())
@@ -861,6 +943,23 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
             self.instance and auth_type != self.instance.auth_type
         )
         if auth_type == DataSourceCredential.AuthType.FEISHU_APP:
+            if provider != DataSourceCredential.Provider.FEISHU:
+                raise serializers.ValidationError(
+                    {"provider": "feishu app credential requires feishu provider"}
+                )
+            folder_url_value = scope_config.get("folder_url") or ""
+            if folder_url_value and not _is_feishu_drive_folder_url(
+                folder_url_value
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "folder_url": (
+                            "Feishu URL must be a Drive folder URL, for "
+                            "example https://xxx.feishu.cn/drive/folder/..."
+                        )
+                    }
+                )
+            attrs["sync_scope"] = attrs.get("sync_scope") or "feishu_folder"
             if has_app_id != has_app_secret:
                 raise serializers.ValidationError(
                     {"app_secret": "app_id and app_secret must be submitted together"}
@@ -869,10 +968,24 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"app_secret": "app_id and app_secret are required"}
                 )
+        elif auth_type != DataSourceCredential.AuthType.HTTPS_TOKEN:
+            raise serializers.ValidationError(
+                {"auth_type": "credential auth_type is not supported"}
+            )
+        elif provider not in {
+            DataSourceCredential.Provider.GITHUB,
+            DataSourceCredential.Provider.GITLAB,
+            DataSourceCredential.Provider.GENERIC,
+        }:
+            raise serializers.ValidationError(
+                {"provider": "git credential provider must be github or gitlab"}
+            )
         elif not has_secret and (not has_existing or auth_type_changed):
             raise serializers.ValidationError(
                 {"secret": "secret is required"}
             )
+        if auth_type == DataSourceCredential.AuthType.HTTPS_TOKEN:
+            attrs["sync_scope"] = attrs.get("sync_scope") or "service"
         return attrs
 
     def create(self, validated_data):
@@ -905,6 +1018,18 @@ def _credential_secret_from_validated_data(validated_data):
     if app_id or app_secret:
         return f"{app_id}:{app_secret}"
     return secret
+
+
+def _is_feishu_drive_folder_url(value):
+    """Return whether a URL points to a Feishu Drive folder."""
+
+    parsed = parse.urlsplit(str(value or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if not parsed.netloc.endswith(".feishu.cn"):
+        return False
+    parts = [part for part in parsed.path.split("/") if part]
+    return len(parts) >= 3 and parts[0] == "drive" and parts[1] == "folder"
 
 
 def _credential_provider(repo_url):
@@ -1062,7 +1187,49 @@ def _validate_cron_expression(value):
 
 
 def _validate_git_config(config, instance=None, credential=None):
-    if not config.get("repo_url"):
+    scope_type = config.get("scope_type") or (
+        "organization" if config.get("repositories") else "repository"
+    )
+    if scope_type not in {"repository", "organization"}:
+        raise serializers.ValidationError(
+            {"config": "git scope_type must be repository or organization"}
+        )
+    if scope_type == "organization":
+        repositories = config.get("repositories") or []
+        if not isinstance(repositories, list) or not repositories:
+            raise serializers.ValidationError(
+                {"config": "git organization repositories are required"}
+            )
+        seen_targets = set()
+        for repository in repositories:
+            if not isinstance(repository, dict):
+                raise serializers.ValidationError(
+                    {"config": "git repository item must be an object"}
+                )
+            if not repository.get("repo_url"):
+                raise serializers.ValidationError(
+                    {"config": "git repository repo_url is required"}
+                )
+            if not repository.get("branch"):
+                raise serializers.ValidationError(
+                    {"config": "git repository branch is required"}
+                )
+            target_subdir = str(
+                repository.get("target_subdir")
+                or repository.get("name")
+                or repository.get("path")
+                or ""
+            ).strip()
+            if not target_subdir:
+                raise serializers.ValidationError(
+                    {"config": "git repository target_subdir is required"}
+                )
+            if target_subdir in seen_targets:
+                raise serializers.ValidationError(
+                    {"config": "git repository target_subdir must be unique"}
+                )
+            seen_targets.add(target_subdir)
+    elif not config.get("repo_url"):
         raise serializers.ValidationError(
             {"config": "git config.repo_url is required"}
         )
@@ -1092,7 +1259,13 @@ def _validate_feishu_config(config, instance=None, credential=None):
             {"config": "feishu sync_mode must be document_list or drive_folder"}
         )
     if sync_mode == "drive_folder":
-        if not (config.get("folder_url") or config.get("folder_token")):
+        scope_config = credential.scope_config or {}
+        if not (
+            config.get("folder_url")
+            or config.get("folder_token")
+            or scope_config.get("folder_url")
+            or scope_config.get("folder_token")
+        ):
             raise serializers.ValidationError(
                 {
                     "config": (

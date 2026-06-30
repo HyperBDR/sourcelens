@@ -1,10 +1,12 @@
 import json
 import secrets
 import uuid as uuid_mod
+from urllib import error as urlerror
+from urllib import parse, request
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -136,6 +138,225 @@ class DataSourceCredentialViewSet(BaseAuthenticatedViewSet):
                 }
             )
         return Response({"secret": secret})
+
+    @action(detail=True, methods=["post"], url_path="validate")
+    def validate_credential(self, request, uuid=None):
+        """Validate a stored datasource credential endpoint and scope."""
+
+        credential = self.get_object()
+        result = _validate_datasource_credential_connectivity(credential)
+        credential.validation_status = result["status"]
+        credential.validation_message = result.get("message", "")
+        credential.validated_at = timezone.now()
+        if credential.provider == DataSourceCredential.Provider.FEISHU:
+            credential.endpoint_url = "https://open.feishu.cn"
+        credential.save(
+            update_fields=[
+                "endpoint_url",
+                "validation_status",
+                "validation_message",
+                "validated_at",
+                "updated_at",
+            ]
+        )
+        response_status = (
+            status.HTTP_200_OK
+            if result.get("status") == "success"
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return Response(result, status=response_status)
+
+
+def _validate_datasource_credential_connectivity(credential):
+    """Validate datasource credential connectivity from the backend."""
+
+    if credential.auth_type == DataSourceCredential.AuthType.FEISHU_APP:
+        return _validate_feishu_credential_connectivity(credential)
+    if credential.provider == DataSourceCredential.Provider.GITHUB:
+        return _validate_github_credential_connectivity(credential)
+    if credential.provider == DataSourceCredential.Provider.GITLAB:
+        return _validate_gitlab_credential_connectivity(credential)
+    return {
+        "status": "failed",
+        "message_code": "credential_provider_unsupported",
+        "message": "Credential provider is not supported for validation.",
+    }
+
+
+def _validate_github_credential_connectivity(credential):
+    endpoint = (credential.endpoint_url or "https://github.com").rstrip("/")
+    api_base = "https://api.github.com"
+    if endpoint and endpoint != "https://github.com":
+        api_base = f"{endpoint}/api/v3"
+    headers = {"Authorization": f"Bearer {credential.get_secret()}"}
+    api_url = f"{api_base}/user"
+    payload, message = _credential_api_json(
+        api_url,
+        headers,
+    )
+    if payload is None:
+        return {
+            "status": "failed",
+            "message_code": "github_credential_invalid",
+            "message": message or "GitHub credential validation failed.",
+        }
+    scope_url = (credential.scope_config or {}).get("organization_url")
+    if scope_url:
+        scope_path = _credential_scope_path(scope_url)
+        parts = [part for part in scope_path.split("/") if part]
+        scope_api_url = ""
+        if len(parts) >= 2:
+            scope_api_url = f"{api_base}/repos/{parts[0]}/{parts[1]}"
+        elif len(parts) == 1:
+            scope_api_url = f"{api_base}/orgs/{parts[0]}/repos?per_page=1"
+        if not scope_api_url:
+            return {
+                "status": "failed",
+                "message_code": "github_scope_invalid",
+                "message": "GitHub scope URL is invalid.",
+            }
+        scope_payload, scope_message = _credential_api_json(
+            scope_api_url,
+            headers,
+        )
+        if scope_api_url and scope_payload is None and len(parts) == 1:
+            scope_payload, scope_message = _credential_api_json(
+                f"{api_base}/users/{parts[0]}/repos?per_page=1",
+                headers,
+            )
+        if scope_api_url and scope_payload is None:
+            return {
+                "status": "failed",
+                "message_code": "github_scope_invalid",
+                "message": scope_message or "GitHub scope validation failed.",
+            }
+    return {
+        "status": "success",
+        "message_code": "github_credential_valid",
+        "message": "GitHub credential is valid.",
+        "details": {"login": payload.get("login") or ""},
+    }
+
+
+def _validate_gitlab_credential_connectivity(credential):
+    endpoint = (credential.endpoint_url or "https://gitlab.com").rstrip("/")
+    headers = {"PRIVATE-TOKEN": credential.get_secret()}
+    payload, message = _credential_api_json(
+        f"{endpoint}/api/v4/user",
+        headers,
+    )
+    if payload is None:
+        return {
+            "status": "failed",
+            "message_code": "gitlab_credential_invalid",
+            "message": message or "GitLab credential validation failed.",
+        }
+    scope_url = (credential.scope_config or {}).get("organization_url")
+    if scope_url:
+        scope_path = parse.quote(_credential_scope_path(scope_url), safe="")
+        scope_payload, scope_message = _credential_api_json(
+            (
+                f"{endpoint}/api/v4/groups/{scope_path}/projects"
+                "?include_subgroups=true&simple=true&per_page=1"
+            ),
+            headers,
+        )
+        if scope_payload is None:
+            scope_payload, scope_message = _credential_api_json(
+                f"{endpoint}/api/v4/projects/{scope_path}",
+                headers,
+            )
+        if scope_payload is None:
+            return {
+                "status": "failed",
+                "message_code": "gitlab_scope_invalid",
+                "message": scope_message or "GitLab scope validation failed.",
+            }
+    return {
+        "status": "success",
+        "message_code": "gitlab_credential_valid",
+        "message": "GitLab credential is valid.",
+        "details": {"username": payload.get("username") or ""},
+    }
+
+
+def _validate_feishu_credential_connectivity(credential):
+    app_id, _, app_secret = credential.get_secret().partition(":")
+    endpoint = "https://open.feishu.cn"
+    payload, message = _credential_api_json(
+        f"{endpoint}/open-apis/auth/v3/tenant_access_token/internal",
+        {"Content-Type": "application/json"},
+        data=json.dumps(
+            {"app_id": app_id, "app_secret": app_secret}
+        ).encode("utf-8"),
+    )
+    token = (payload or {}).get("tenant_access_token")
+    if not token:
+        return {
+            "status": "failed",
+            "message_code": "feishu_credential_invalid",
+            "message": message or "Feishu app credential validation failed.",
+        }
+    scope_config = credential.scope_config or {}
+    folder_token = scope_config.get("folder_token") or _feishu_folder_token(
+        scope_config.get("folder_url")
+    )
+    if folder_token:
+        query = parse.urlencode(
+            {
+                "folder_token": folder_token,
+                "page_size": "1",
+            }
+        )
+        folder_payload, folder_message = _credential_api_json(
+            f"{endpoint}/open-apis/drive/v1/files?{query}",
+            {"Authorization": f"Bearer {token}"},
+        )
+        if folder_payload is None:
+            return {
+                "status": "failed",
+                "message_code": "feishu_folder_invalid",
+                "message": folder_message or "Feishu folder validation failed.",
+            }
+    return {
+        "status": "success",
+        "message_code": "feishu_credential_valid",
+        "message": "Feishu credential is valid.",
+    }
+
+
+def _credential_api_json(url, headers, data=None, timeout=15):
+    req = request.Request(url, headers=headers, data=data)
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8")), ""
+    except urlerror.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8")[:500]
+        except Exception:
+            body = ""
+        return None, f"HTTP {exc.code}: {body}"
+    except urlerror.URLError as exc:
+        return None, str(exc.reason)
+    except (TimeoutError, json.JSONDecodeError) as exc:
+        return None, str(exc)
+
+
+def _feishu_folder_token(value):
+    parsed = parse.urlsplit(str(value or ""))
+    parts = [part for part in parsed.path.split("/") if part]
+    if "folder" in parts:
+        index = parts.index("folder")
+        if index + 1 < len(parts):
+            return parts[index + 1]
+    return str(value or "").strip()
+
+
+def _credential_scope_path(value):
+    parsed = parse.urlsplit(str(value or "").strip())
+    path = parsed.path if parsed.scheme or parsed.netloc else str(value or "")
+    return path.strip("/").removesuffix(".git")
 
 
 class EventStreamRenderer(BaseRenderer):
@@ -747,6 +968,100 @@ class DataSourceViewSet(BaseAdminViewSet):
 
     queryset = DataSource.objects.all()
     serializer_class = DataSourceSerializer
+
+    def get_queryset(self):
+        """Return datasources filtered by optional search query."""
+
+        queryset = super().get_queryset().select_related(
+            "lensnode",
+            "credential",
+        )
+        filters = self._datasource_search_filters(
+            self.request.query_params.get("filters")
+        )
+        for item in filters:
+            queryset = queryset.filter(
+                self._datasource_search_query(
+                    item.get("value", ""),
+                    item.get("key", ""),
+                )
+            )
+        if filters:
+            return queryset
+        search = str(self.request.query_params.get("search") or "").strip()
+        if not search:
+            return queryset
+        search_key = str(
+            self.request.query_params.get("search_key") or ""
+        ).strip()
+        return queryset.filter(
+            self._datasource_search_query(search, search_key)
+        )
+
+    @staticmethod
+    def _datasource_search_filters(value):
+        """Parse datasource search filters from query params."""
+
+        if not value:
+            return []
+        try:
+            raw_filters = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(raw_filters, list):
+            return []
+        filters = []
+        for item in raw_filters:
+            if not isinstance(item, dict):
+                continue
+            keyword = str(item.get("value") or "").strip()
+            if not keyword:
+                continue
+            filters.append(
+                {
+                    "key": str(item.get("key") or "").strip(),
+                    "value": keyword,
+                }
+            )
+        return filters
+
+    @staticmethod
+    def _datasource_search_query(search, search_key):
+        """Build a whitelisted datasource search query."""
+
+        sync_status_datasource_ids = ScheduledTask.objects.filter(
+            task_type=ScheduledTask.TaskType.SOURCE_SYNC,
+            target_type="datasource",
+            last_status__icontains=search,
+        ).values("target_id")
+        queries = {
+            "name": Q(name__icontains=search),
+            "source_type": Q(source_type__icontains=search),
+            "repository": (
+                Q(config__repo_url__icontains=search)
+                | Q(config__document_url__icontains=search)
+                | Q(config__folder_url__icontains=search)
+                | Q(config__app_token__icontains=search)
+            ),
+            "lensnode": Q(lensnode__name__icontains=search),
+            "target_path": Q(target_path__icontains=search),
+            "status": (
+                Q(status__icontains=search)
+                | Q(last_error__icontains=search)
+                | Q(uuid__in=sync_status_datasource_ids)
+            ),
+            "sync_policy": (
+                Q(sync_policy__mode__icontains=search)
+                | Q(sync_policy__cron__icontains=search)
+                | Q(sync_policy__timezone__icontains=search)
+            ),
+        }
+        if search_key in queries:
+            return queries[search_key]
+        query = Q()
+        for item in queries.values():
+            query |= item
+        return query
 
     def create(self, request, *args, **kwargs):
         """Create datasource and return the initial sync task id."""

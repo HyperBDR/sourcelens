@@ -1,11 +1,11 @@
 <template>
   <AdminLayout>
-    <div class="flex max-w-full flex-col gap-4 py-4">
+    <div class="flex h-full min-h-0 max-w-full flex-col gap-4 py-4">
       <section
-        class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
+        class="flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
       >
         <div
-          class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
+          class="flex flex-shrink-0 flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
         >
           <div class="min-w-0 space-y-2">
             <div class="flex flex-wrap items-center gap-2">
@@ -28,7 +28,7 @@
                 {{
                   t('lensAdmin.total', {
                     label: t('lensAdmin.pages.datasources.label'),
-                    count: dataSources.length
+                    count: totalDataSources
                   })
                 }}
               </span>
@@ -54,7 +54,118 @@
           </div>
         </div>
 
-        <div class="px-5 py-4">
+        <div class="flex min-h-0 flex-col px-5 py-4">
+          <div
+            class="mb-4 flex flex-shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div
+              ref="searchBoxRef"
+              class="relative min-w-0 flex-1 sm:max-w-2xl"
+              @focusin="openSearchPicker"
+              @focusout="handleSearchFocusOut"
+            >
+              <div
+                class="flex max-h-20 min-w-0 flex-wrap items-center gap-2 overflow-y-auto rounded-md border border-line bg-surface px-3 py-1 shadow-sm transition focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20"
+              >
+                <SearchIcon class="h-4 w-4 shrink-0 text-ink-400" />
+                <span
+                  v-for="(filter, index) in searchFilters"
+                  :key="`${filter.key}:${filter.value}:${index}`"
+                  class="inline-flex max-w-56 shrink-0 items-center gap-1 rounded-md border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700"
+                >
+                  <span class="truncate">
+                    {{ searchFilterLabel(filter) }}: {{ filter.value }}
+                  </span>
+                  <button
+                    type="button"
+                    class="text-brand-500 hover:text-brand-700"
+                    :title="t('lensAdmin.datasourceSearch.removeFilter')"
+                    @click.stop="removeSearchFilter(index)"
+                  >
+                    <XIcon class="h-3 w-3" />
+                  </button>
+                </span>
+                <span
+                  v-if="searchKey"
+                  class="inline-flex max-w-md shrink-0 items-center gap-1 rounded-md border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700"
+                >
+                  <span class="shrink-0"
+                    >{{ selectedSearchOption.label }}:</span
+                  >
+                  <input
+                    ref="searchValueInputRef"
+                    v-model="searchQuery"
+                    class="min-w-20 flex-1 border-0 bg-transparent p-0 text-xs font-medium text-brand-800 placeholder:text-brand-400 focus:outline-none focus:ring-0"
+                    :placeholder="
+                      t('lensAdmin.datasourceSearch.valuePlaceholder')
+                    "
+                    @keyup.enter.prevent="addSearchFilter"
+                  />
+                  <button
+                    type="button"
+                    class="shrink-0 text-brand-500 hover:text-brand-700"
+                    :title="t('lensAdmin.datasourceSearch.clearField')"
+                    @click.stop="clearSearchKey"
+                  >
+                    <XIcon class="h-3 w-3" />
+                  </button>
+                </span>
+                <input
+                  v-if="!searchKey"
+                  ref="searchInputRef"
+                  v-model="searchQuery"
+                  class="min-w-0 flex-1 border-0 bg-transparent py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:outline-none focus:ring-0"
+                  :placeholder="searchInputPlaceholder"
+                  type="search"
+                  @keyup.enter.prevent="handleSearchEnter"
+                />
+                <button
+                  v-if="searchQuery || searchKey"
+                  type="button"
+                  class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-400 hover:bg-surface-sunken hover:text-ink-700"
+                  :title="t('lensAdmin.datasourceSearch.clear')"
+                  @click="clearSearch"
+                >
+                  <XIcon class="h-4 w-4" />
+                </button>
+              </div>
+              <div
+                v-if="searchPickerOpen"
+                class="absolute left-0 right-0 top-full z-20 mt-2 rounded-lg border border-line bg-surface p-2 shadow-lg"
+              >
+                <div class="px-2 pb-2 text-xs font-medium text-ink-500">
+                  {{ t('lensAdmin.datasourceSearch.fieldHint') }}
+                </div>
+                <div v-if="!searchKey" class="flex flex-wrap gap-2">
+                  <button
+                    v-for="option in filteredSearchOptions"
+                    :key="option.value"
+                    type="button"
+                    class="rounded-md border px-2.5 py-1.5 text-xs font-medium transition"
+                    :class="
+                      searchKey === option.value
+                        ? 'border-brand-200 bg-brand-50 text-brand-700'
+                        : 'border-line bg-surface-sunken text-ink-600 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700'
+                    "
+                    @click="selectSearchKey(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+                <div v-else class="px-2 py-2 text-sm text-ink-500">
+                  {{ t('lensAdmin.datasourceSearch.valueHint') }}
+                </div>
+              </div>
+            </div>
+            <div v-if="searchFilters.length" class="text-xs text-ink-500">
+              {{
+                t('lensAdmin.datasourceSearch.filterCount', {
+                  count: searchFilters.length
+                })
+              }}
+            </div>
+          </div>
+
           <BaseLoading v-if="loading && dataSources.length === 0" />
 
           <div
@@ -68,10 +179,10 @@
 
           <div
             v-else
-            class="relative overflow-x-auto rounded-lg border border-line bg-surface"
+            class="datasource-table-scroll relative min-h-0 overflow-auto rounded-lg border border-line bg-surface"
           >
             <table class="min-w-full divide-y divide-line">
-              <thead class="bg-surface-sunken">
+              <thead class="sticky top-0 z-10 bg-surface-sunken">
                 <tr>
                   <th class="table-head">
                     {{ t('lensAdmin.columns.datasource') }}
@@ -98,7 +209,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in pagedDataSources"
+                  v-for="row in dataSources"
                   :key="row.uuid"
                   class="cursor-pointer transition-colors hover:bg-line-soft"
                   :class="
@@ -136,7 +247,29 @@
                       {{ dataSourceRepository(row) }}
                     </div>
                     <div
-                      v-if="row.source_type === 'git'"
+                      v-if="isOrganizationDataSource(row)"
+                      class="mt-2 flex max-w-xs flex-wrap gap-1"
+                    >
+                      <span
+                        v-for="repo in visibleRepositoryTags(row)"
+                        :key="repo.repo_url || repo.name || repo.path"
+                        class="max-w-28 truncate rounded border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
+                        :title="repo.repo_url || repo.name || repo.path"
+                      >
+                        {{ repo.name || repo.path || repo.repo_url }}
+                      </span>
+                      <span
+                        v-if="hiddenRepositoryTagCount(row) > 0"
+                        class="rounded border border-line bg-surface-sunken px-1.5 py-0.5 text-xs text-ink-500"
+                      >
+                        +{{ hiddenRepositoryTagCount(row) }}
+                      </span>
+                    </div>
+                    <div
+                      v-if="
+                        row.source_type === 'git' &&
+                        !isOrganizationDataSource(row)
+                      "
                       class="mt-1 font-mono text-xs text-ink-500"
                     >
                       {{ dataSourceBranch(row) }}
@@ -247,7 +380,7 @@
             v-if="!loading"
             v-model:page-size="pageSize"
             :current-page="currentPage"
-            :total="dataSources.length"
+            :total="totalDataSources"
             @page-size-change="handlePageSizeChange"
             @prev="goPrevPage"
             @next="goNextPage"
@@ -294,8 +427,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Search as SearchIcon, X as XIcon } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 
 import { extractErrorMessage } from '@/utils/api'
 import { llmAdminApi } from '@/admin/api/llmAdmin'
@@ -328,9 +463,11 @@ import {
 } from './adminHelpers'
 import {
   dataSourceBranch,
+  dataSourceRepositories,
   dataSourceRepository,
   formatDataSourcePolicyLine,
   isDataSourceEnabled,
+  isOrganizationDataSource,
   isDataSourceSyncing,
   syncTagClass
 } from './datasourceHelpers'
@@ -338,6 +475,7 @@ import { useShortDateTime } from './useShortDateTime'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
+const route = useRoute()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -348,8 +486,16 @@ const showDrawer = ref(false)
 const showDatasourceDetailDrawer = ref(false)
 
 const dataSources = ref([])
+const totalDataSources = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
+const searchKey = ref('')
+const searchQuery = ref('')
+const searchFilters = ref([])
+const searchPickerOpen = ref(false)
+const searchBoxRef = ref(null)
+const searchInputRef = ref(null)
+const searchValueInputRef = ref(null)
 const lensnodes = ref([])
 const credentials = ref([])
 const llmConfigOptions = ref([])
@@ -371,25 +517,174 @@ const dynamicRefreshTimer = ref(null)
 const dynamicRefreshInFlight = ref(false)
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(dataSources.value.length / pageSize.value))
+  Math.max(1, Math.ceil(totalDataSources.value / pageSize.value))
 )
-const pagedDataSources = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  return dataSources.value.slice(start, start + pageSize.value)
+
+const datasourceSearchOptions = computed(() => [
+  {
+    value: '_all',
+    label: t('lensAdmin.datasourceSearch.all')
+  },
+  {
+    value: 'name',
+    label: t('lensAdmin.columns.datasource')
+  },
+  {
+    value: 'source_type',
+    label: t('lensAdmin.datasourceSearch.sourceType')
+  },
+  {
+    value: 'repository',
+    label: t('lensAdmin.columns.repository')
+  },
+  {
+    value: 'lensnode',
+    label: t('lensAdmin.columns.lensnode')
+  },
+  {
+    value: 'target_path',
+    label: t('lensAdmin.columns.targetPath')
+  },
+  {
+    value: 'status',
+    label: t('lensAdmin.columns.status')
+  },
+  {
+    value: 'sync_policy',
+    label: t('lensAdmin.columns.policy')
+  }
+])
+
+const selectedSearchOption = computed(
+  () =>
+    datasourceSearchOptions.value.find(
+      (item) => item.value === searchKey.value
+    ) || datasourceSearchOptions.value[0]
+)
+
+const filteredSearchOptions = computed(() => {
+  const keyword = searchQuery.value.trim()
+  if (!keyword) {
+    return datasourceSearchOptions.value
+  }
+  const normalized = keyword.toLowerCase()
+  return datasourceSearchOptions.value.filter((option) =>
+    option.label.toLowerCase().includes(normalized)
+  )
+})
+
+const searchInputPlaceholder = computed(() => {
+  if (searchKey.value) {
+    return t('lensAdmin.datasourceSearch.valuePlaceholder')
+  }
+  return t('lensAdmin.datasourceSearch.placeholder')
 })
 
 function handlePageSizeChange() {
   currentPage.value = 1
+  load()
 }
 
 function goPrevPage() {
   if (currentPage.value <= 1) return
   currentPage.value -= 1
+  load()
 }
 
 function goNextPage() {
   if (currentPage.value >= totalPages.value) return
   currentPage.value += 1
+  load()
+}
+
+function datasourceListParams() {
+  const params = {
+    page: currentPage.value,
+    page_size: pageSize.value
+  }
+  if (searchFilters.value.length) {
+    params.filters = JSON.stringify(searchFilters.value)
+  }
+  return params
+}
+
+function applySearch() {
+  currentPage.value = 1
+  load()
+}
+
+function openSearchPicker() {
+  searchPickerOpen.value = true
+}
+
+function handleSearchFocusOut(event) {
+  const nextTarget = event.relatedTarget
+  if (nextTarget && searchBoxRef.value?.contains(nextTarget)) {
+    return
+  }
+  searchPickerOpen.value = false
+}
+
+function selectSearchKey(value) {
+  searchKey.value = value
+  searchQuery.value = ''
+  searchPickerOpen.value = false
+  nextTick(() => {
+    searchValueInputRef.value?.focus()
+  })
+}
+
+function clearSearchKey() {
+  searchKey.value = ''
+  searchPickerOpen.value = true
+}
+
+function clearSearch() {
+  searchQuery.value = ''
+  searchKey.value = ''
+  searchPickerOpen.value = true
+}
+
+function handleSearchEnter() {
+  if (!searchKey.value) {
+    if (filteredSearchOptions.value.length === 1) {
+      selectSearchKey(filteredSearchOptions.value[0].value)
+    }
+    return
+  }
+  addSearchFilter()
+}
+
+function addSearchFilter() {
+  const value = searchQuery.value.trim()
+  if (!searchKey.value || !value) {
+    return
+  }
+  searchFilters.value = [
+    ...searchFilters.value,
+    {
+      key: searchKey.value,
+      value
+    }
+  ]
+  searchKey.value = ''
+  searchQuery.value = ''
+  searchPickerOpen.value = false
+  applySearch()
+}
+
+function removeSearchFilter(index) {
+  searchFilters.value = searchFilters.value.filter(
+    (_, itemIndex) => itemIndex !== index
+  )
+  applySearch()
+}
+
+function searchFilterLabel(filter) {
+  const option = datasourceSearchOptions.value.find(
+    (item) => item.value === filter.key
+  )
+  return option?.label || t('lensAdmin.datasourceSearch.all')
 }
 
 const DYNAMIC_REFRESH_INTERVAL_MS = 3000
@@ -458,7 +753,9 @@ function closeDataSourceDetail() {
 }
 
 function formatSourceType(sourceType) {
-  if (sourceType === 'git') {
+  if (isGitSourceType(sourceType)) {
+    if (sourceType === 'github') return 'GitHub'
+    if (sourceType === 'gitlab') return 'GitLab'
     return 'Git'
   }
   if (sourceType === 'feishu') {
@@ -467,10 +764,53 @@ function formatSourceType(sourceType) {
   return sourceType || emptyValue
 }
 
+function isGitSourceType(sourceType) {
+  return ['git', 'github', 'gitlab'].includes(sourceType)
+}
+
+function normalizedSourceType(sourceType) {
+  return isGitSourceType(sourceType) ? 'git' : sourceType
+}
+
+function uiSourceTypeFromRow(row) {
+  if (row?.source_type !== 'git') {
+    return row?.source_type || 'feishu'
+  }
+  const credentialUuid = row?.credential || ''
+  const credential = credentials.value.find(
+    (item) => item.uuid === credentialUuid
+  )
+  const provider =
+    credential?.provider ||
+    row?.credential_provider ||
+    row?.credential_detail?.provider
+  if (provider === 'gitlab' || provider === 'github') {
+    return provider
+  }
+  const repoUrl = String(
+    row?.config?.organization_url || row?.config?.repo_url || ''
+  )
+  if (repoUrl.includes('github.com')) {
+    return 'github'
+  }
+  if (repoUrl.includes('gitlab')) {
+    return 'gitlab'
+  }
+  return 'github'
+}
+
 function lensNodeName(value) {
   const uuid = typeof value === 'object' ? value?.uuid : value
   const found = lensnodes.value.find((lensnode) => lensnode.uuid === uuid)
   return found?.name || uuid || emptyValue
+}
+
+function visibleRepositoryTags(row) {
+  return dataSourceRepositories(row).slice(0, 4)
+}
+
+function hiddenRepositoryTagCount(row) {
+  return Math.max(0, dataSourceRepositories(row).length - 4)
 }
 
 async function load() {
@@ -479,7 +819,7 @@ async function load() {
   try {
     const [dataSourceRows, lensnodeRows, credentialRows, llmConfigRows] =
       await Promise.all([
-        listDataSources(),
+        listDataSources(datasourceListParams()),
         listLensNodes(),
         listCredentials(),
         llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
@@ -488,6 +828,7 @@ async function load() {
     lensnodes.value = normalizeList(lensnodeRows)
     credentials.value = normalizeList(credentialRows)
     llmConfigOptions.value = normalizeList(llmConfigRows)
+    updateDynamicRefresh()
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
@@ -496,7 +837,12 @@ async function load() {
 }
 
 function applyDataSourceRows(rows, options = {}) {
-  dataSources.value = normalizeList(rows)
+  const payload = rows && typeof rows === 'object' ? rows : {}
+  dataSources.value = Array.isArray(payload.results)
+    ? payload.results
+    : normalizeList(rows)
+  totalDataSources.value =
+    typeof payload.count === 'number' ? payload.count : dataSources.value.length
   const selectedUuid = selectedDataSource.value?.uuid
   const existing = dataSources.value.find((row) => row.uuid === selectedUuid)
   if (existing) {
@@ -509,12 +855,16 @@ function applyDataSourceRows(rows, options = {}) {
 }
 
 async function refreshDataSourceRows() {
-  if (dynamicRefreshInFlight.value) {
+  if (!shouldRefreshDataSources() || dynamicRefreshInFlight.value) {
+    if (!shouldRefreshDataSources()) {
+      stopDynamicRefresh()
+    }
     return
   }
   dynamicRefreshInFlight.value = true
   try {
-    applyDataSourceRows(await listDataSources())
+    applyDataSourceRows(await listDataSources(datasourceListParams()))
+    updateDynamicRefresh()
   } catch {
     // Silent refresh should not interrupt the datasource management workflow.
   } finally {
@@ -523,6 +873,13 @@ async function refreshDataSourceRows() {
 }
 
 function startDynamicRefresh() {
+  if (!shouldRefreshDataSources()) {
+    stopDynamicRefresh()
+    return
+  }
+  if (dynamicRefreshTimer.value) {
+    return
+  }
   stopDynamicRefresh()
   dynamicRefreshTimer.value = window.setInterval(
     refreshDataSourceRows,
@@ -536,6 +893,26 @@ function stopDynamicRefresh() {
   }
   window.clearInterval(dynamicRefreshTimer.value)
   dynamicRefreshTimer.value = null
+}
+
+function hasRunningDataSourceSync() {
+  return dataSources.value.some((row) => isDataSourceSyncing(row))
+}
+
+function isCurrentDataSourcePage() {
+  return route.name === 'LensDataSources'
+}
+
+function shouldRefreshDataSources() {
+  return isCurrentDataSourcePage() && hasRunningDataSourceSync()
+}
+
+function updateDynamicRefresh() {
+  if (shouldRefreshDataSources()) {
+    startDynamicRefresh()
+  } else {
+    stopDynamicRefresh()
+  }
 }
 
 function startCreate() {
@@ -556,9 +933,9 @@ function startEdit(row) {
   formError.value = ''
   datasourceConfig.value = { ...(row.config || {}) }
   datasourcePathResult.value = null
-  datasourceConnectionResult.value = null
   syncIntervalSeconds.value = row.sync_policy?.interval_seconds || 3600
   form.value = formFromRow(row)
+  datasourceConnectionResult.value = cachedDatasourceConnectionResult(row)
   showDrawer.value = true
 }
 
@@ -574,7 +951,7 @@ function closeDrawer() {
 function defaultForm() {
   const seed = {
     name: '',
-    source_type: 'git',
+    source_type: 'github',
     lensnode_uuid: '',
     workspace_relative_path: '',
     target_path: '',
@@ -609,7 +986,7 @@ function formFromRow(row) {
   return {
     uuid: row.uuid,
     name: row.name || '',
-    source_type: row.source_type || 'git',
+    source_type: uiSourceTypeFromRow(row),
     lensnode_uuid: lensnodeUuid,
     workspace_relative_path: workspaceRelativePath(
       row.target_path || '',
@@ -655,7 +1032,7 @@ function datasourceConfigFromRow(row) {
   if (row.source_type === 'feishu') {
     return {
       ...(row.config || {}),
-      sync_mode: row.config?.sync_mode || 'document_list',
+      sync_mode: row.config?.sync_mode || 'drive_folder',
       doc_ids_text: (row.config?.doc_ids || []).join(','),
       recursive: row.config?.recursive !== false,
       max_depth: row.config?.max_depth || 10,
@@ -665,7 +1042,51 @@ function datasourceConfigFromRow(row) {
   }
   const config = { ...(row.config || {}) }
   delete config.access_token
+  if (Array.isArray(config.repositories)) {
+    config.git_repositories = config.repositories.map((repo) => ({
+      ...repo,
+      branches: repo.branch ? [repo.branch] : [],
+      branch: repo.branch || '',
+      selected: true
+    }))
+  }
   return config
+}
+
+function cachedDatasourceConnectionResult(row) {
+  const config = datasourceConfig.value || {}
+  if (row.source_type === 'git' && Array.isArray(config.git_repositories)) {
+    return {
+      status: 'success',
+      message_code: 'git_organization_available',
+      message: 'Git organization configuration is cached.',
+      details: {
+        scope: 'organization',
+        organization_url: config.organization_url || config.repo_url || '',
+        repositories: config.git_repositories
+      }
+    }
+  }
+  if (row.source_type === 'git' && config.branch) {
+    return {
+      status: 'success',
+      message_code: 'git_branch_available',
+      message: 'Git repository configuration is cached.',
+      details: {
+        branch: config.branch,
+        branches: [config.branch]
+      }
+    }
+  }
+  if (row.source_type === 'feishu') {
+    return {
+      status: 'success',
+      message_code: 'feishu_folder_available',
+      message: 'Feishu configuration is cached.',
+      details: {}
+    }
+  }
+  return null
 }
 
 function handleDatasourceTypeChange(seed = null) {
@@ -676,15 +1097,15 @@ function handleDatasourceTypeChange(seed = null) {
     form.value.credential_uuid = ''
   }
   const sourceType = seed?.source_type || form.value.source_type
-  if (sourceType === 'git') {
+  if (isGitSourceType(sourceType)) {
     datasourceConfig.value = {
       repo_url: '',
       branch: '',
-      auth_scheme: 'none'
+      auth_scheme: 'token'
     }
   } else if (sourceType === 'feishu') {
     datasourceConfig.value = {
-      sync_mode: 'document_list',
+      sync_mode: 'drive_folder',
       document_url: '',
       doc_ids_text: '',
       folder_url: '',
@@ -724,11 +1145,14 @@ async function save() {
     if (!canSaveDatasource()) {
       throw new Error(t('lensAdmin.datasourceWizard.connectionRequired'))
     }
-    const payload = buildPayload()
     const uuid = form.value.uuid
     if (mode.value === 'create') {
-      await createDataSource(payload)
+      const payloads = await buildCreatePayloads()
+      for (const payload of payloads) {
+        await createDataSource(payload)
+      }
     } else {
+      const payload = buildPayload()
       await updateDataSource(uuid, payload)
     }
     showSuccess(t('lensAdmin.messages.saveSuccess'))
@@ -748,7 +1172,7 @@ async function save() {
 function buildPayload() {
   return {
     name: form.value.name,
-    source_type: form.value.source_type,
+    source_type: normalizedSourceType(form.value.source_type),
     lensnode_uuid: form.value.lensnode_uuid,
     target_path: datasourceTargetPath(),
     config: buildDatasourceConfig(),
@@ -760,8 +1184,43 @@ function buildPayload() {
   }
 }
 
+async function buildCreatePayloads() {
+  if (!isGitOrganizationCreateMode()) {
+    return [buildPayload()]
+  }
+  const repositories = buildSelectedGitRepositoryPayloads()
+  if (!repositories.length) {
+    throw new Error(t('lensAdmin.datasourceWizard.gitRepositoryRequired'))
+  }
+  return [
+    {
+      ...buildPayload(),
+      config: {
+        ...buildDatasourceConfig(),
+        scope_type: 'organization',
+        organization_url:
+          datasourceConfig.value.organization_url ||
+          datasourceConfig.value.repo_url,
+        repositories
+      }
+    }
+  ]
+}
+
 function buildDatasourceConfig() {
   const config = { ...datasourceConfig.value }
+  if (isGitSourceType(form.value.source_type)) {
+    if (Array.isArray(config.git_repositories)) {
+      config.scope_type = 'organization'
+      config.organization_url = config.organization_url || config.repo_url
+      config.repositories = buildSelectedGitRepositoryPayloads()
+      delete config.git_repositories
+      delete config.branch
+    } else if (!Array.isArray(config.repositories)) {
+      delete config.git_repositories
+      delete config.organization_url
+    }
+  }
   if (form.value.source_type === 'feishu') {
     config.doc_ids = String(config.doc_ids_text || '')
       .split(',')
@@ -883,8 +1342,8 @@ async function checkDatasourcePath() {
       {
         datasource_uuid: form.value.uuid || null,
         target_path: datasourceTargetPath(),
-        source_type: form.value.source_type,
-        config: buildDatasourceConfig()
+        source_type: normalizedSourceType(form.value.source_type),
+        config: buildDatasourcePathCheckConfig()
       }
     )
   } catch (error) {
@@ -897,8 +1356,22 @@ async function checkDatasourcePath() {
   }
 }
 
+function buildDatasourcePathCheckConfig() {
+  const config = buildDatasourceConfig()
+  if (isGitOrganizationSelectionMode()) {
+    config.git_organization_parent = true
+  }
+  return config
+}
+
 function canSaveDatasource() {
-  return datasourceConnectionResult.value?.status === 'success'
+  if (datasourceConnectionResult.value?.status !== 'success') {
+    return false
+  }
+  if (isGitOrganizationSelectionMode()) {
+    return selectedGitOrganizationRepositories().length > 0
+  }
+  return true
 }
 
 function resetDatasourceConnectionResult() {
@@ -932,7 +1405,7 @@ async function testDatasourceConnection() {
         credential_uuid: shouldUseDatasourceCredential()
           ? form.value.credential_uuid
           : null,
-        source_type: form.value.source_type,
+        source_type: normalizedSourceType(form.value.source_type),
         config: buildDatasourceConfig()
       }
     )
@@ -954,7 +1427,7 @@ function shouldUseDatasourceCredential() {
   if (!form.value.credential_uuid) {
     return false
   }
-  if (form.value.source_type === 'git') {
+  if (isGitSourceType(form.value.source_type)) {
     return datasourceConfig.value.auth_scheme === 'token'
   }
   return form.value.source_type === 'feishu'
@@ -972,11 +1445,32 @@ async function refreshCredentials() {
 }
 
 function applyDatasourceConnectionResult(result) {
-  if (form.value.source_type !== 'git' || result?.status !== 'success') {
+  if (
+    !isGitSourceType(form.value.source_type) ||
+    result?.status !== 'success'
+  ) {
     return
   }
+  const repositories = result?.details?.repositories
+  if (Array.isArray(repositories) && repositories.length) {
+    suppressDatasourceConnectionReset.value = true
+    datasourceConfig.value.git_repositories =
+      mergeDiscoveredGitRepositories(repositories)
+    datasourceConfig.value.organization_url =
+      result?.details?.organization_url || datasourceConfig.value.repo_url
+    datasourceConfig.value.branch = ''
+    return
+  }
+  suppressDatasourceConnectionReset.value = true
+  delete datasourceConfig.value.git_repositories
+  delete datasourceConfig.value.organization_url
+  delete datasourceConfig.value.repositories
+  delete datasourceConfig.value.scope_type
   const branches = result?.details?.branches
   if (!Array.isArray(branches) || branches.length !== 1) {
+    if (result?.details?.branch && !datasourceConfig.value.branch) {
+      datasourceConfig.value.branch = result.details.branch
+    }
     return
   }
   const branch = branches[0]
@@ -988,7 +1482,7 @@ function applyDatasourceConnectionResult(result) {
 
 function shouldKeepGitBranchConnectionResult() {
   if (
-    form.value.source_type !== 'git' ||
+    !isGitSourceType(form.value.source_type) ||
     datasourceConnectionResult.value?.status !== 'success'
   ) {
     return false
@@ -1012,9 +1506,147 @@ function datasourceConnectionSignature(ignoreBranch = false) {
   }
   return JSON.stringify({
     lensnode_uuid: form.value.lensnode_uuid || '',
-    source_type: form.value.source_type || '',
+    source_type: normalizedSourceType(form.value.source_type) || '',
     config
   })
+}
+
+function isGitOrganizationCreateMode() {
+  return (
+    mode.value === 'create' &&
+    isGitSourceType(form.value.source_type) &&
+    Array.isArray(datasourceConnectionResult.value?.details?.repositories) &&
+    datasourceConnectionResult.value.details.repositories.length > 0
+  )
+}
+
+function selectedGitOrganizationRepositories() {
+  if (!isGitOrganizationSelectionMode()) {
+    return []
+  }
+  return (datasourceConfig.value.git_repositories || []).filter(
+    (repo) => repo.selected && repo.branch && repo.repo_url
+  )
+}
+
+function isGitOrganizationSelectionMode() {
+  return (
+    isGitSourceType(form.value.source_type) &&
+    Array.isArray(datasourceConfig.value.git_repositories)
+  )
+}
+
+function buildSelectedGitRepositoryPayloads() {
+  const usedSegments = new Set()
+  return selectedGitOrganizationRepositories().map((repo) => {
+    const repoName = repoDatasourceName(repo)
+    const segment = uniquePathSegment(
+      safePathSegment(repo.target_subdir || repoName),
+      usedSegments
+    )
+    return {
+      name: repoName,
+      path: repo.path || repoName,
+      repo_url: repo.repo_url,
+      branch: repo.branch,
+      target_subdir: segment,
+      enabled: repo.enabled !== false
+    }
+  })
+}
+
+function mergeDiscoveredGitRepositories(discoveredRepositories) {
+  const existingRepositories = Array.isArray(
+    datasourceConfig.value.git_repositories
+  )
+    ? datasourceConfig.value.git_repositories
+    : Array.isArray(datasourceConfig.value.repositories)
+      ? datasourceConfig.value.repositories.map((repo) => ({
+          ...repo,
+          selected: true
+        }))
+      : []
+  const existingByKey = new Map()
+  existingRepositories.forEach((repo) => {
+    repositoryMatchKeys(repo).forEach((key) => {
+      existingByKey.set(key, repo)
+    })
+  })
+  const merged = discoveredRepositories.map((repo) => {
+    const existing = repositoryMatchKeys(repo)
+      .map((key) => existingByKey.get(key))
+      .find(Boolean)
+    const branches = normalizeRepositoryBranches(repo, existing)
+    return {
+      ...existing,
+      name:
+        repo.name || existing?.name || repo.path || repoDatasourceName(repo),
+      path: repo.path || existing?.path || repo.name || '',
+      repo_url: repo.repo_url || existing?.repo_url || '',
+      branches,
+      branch: existing?.branch || repo.default_branch || branches[0] || '',
+      selected: existing ? existing.selected !== false : mode.value === 'create'
+    }
+  })
+  const discoveredKeys = new Set(
+    discoveredRepositories.flatMap((repo) => repositoryMatchKeys(repo))
+  )
+  existingRepositories.forEach((repo) => {
+    const stillVisible = repositoryMatchKeys(repo).some((key) =>
+      discoveredKeys.has(key)
+    )
+    if (!stillVisible) {
+      merged.push({
+        ...repo,
+        branches: normalizeRepositoryBranches(null, repo),
+        selected: repo.selected !== false
+      })
+    }
+  })
+  return merged
+}
+
+function normalizeRepositoryBranches(repo, existing) {
+  const branches = Array.isArray(repo?.branches) ? [...repo.branches] : []
+  const branch = existing?.branch || repo?.default_branch || ''
+  if (branch && !branches.includes(branch)) {
+    branches.unshift(branch)
+  }
+  return branches
+}
+
+function repositoryMatchKeys(repo) {
+  return [repo?.repo_url, repo?.path, repo?.name]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+}
+
+function repoDatasourceName(repo) {
+  const raw = repo.name || repo.path || repo.repo_url || ''
+  const cleaned = String(raw)
+    .replace(/\.git$/, '')
+    .split('/')
+    .filter(Boolean)
+  return cleaned[cleaned.length - 1] || 'repository'
+}
+
+function safePathSegment(value) {
+  return String(value || 'repository')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/^\.+$/, 'repository')
+}
+
+function uniquePathSegment(value, usedSegments) {
+  const base = value || 'repository'
+  let candidate = base
+  let index = 2
+  while (usedSegments.has(candidate)) {
+    candidate = `${base}-${index}`
+    index += 1
+  }
+  usedSegments.add(candidate)
+  return candidate
 }
 
 async function remove(row) {
@@ -1025,6 +1657,9 @@ async function remove(row) {
       showDatasourceDetailDrawer.value = false
     }
     showSuccess(t('lensAdmin.messages.deleteSuccess'))
+    if (dataSources.value.length === 1 && currentPage.value > 1) {
+      currentPage.value -= 1
+    }
     await load()
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.deleteFailed')))
@@ -1079,7 +1714,10 @@ async function cancelSync(row) {
 
 onMounted(async () => {
   await load()
-  startDynamicRefresh()
+})
+
+onBeforeRouteLeave(() => {
+  stopDynamicRefresh()
 })
 
 onBeforeUnmount(() => {
@@ -1088,6 +1726,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.datasource-table-scroll {
+  max-height: calc(100vh - 20rem);
+}
+
 .table-head {
   @apply border-b border-line px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
 }

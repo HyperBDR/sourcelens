@@ -424,7 +424,7 @@ class LensNodeClient:
                     "type": "datasource_sync_done",
                     "request_id": request_id,
                     "task_id": task_id,
-                    "status": "success",
+                    "status": result.get("status") or "success",
                     **result,
                 }
             )

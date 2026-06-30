@@ -11,7 +11,7 @@
       <div
         v-if="state.show"
         :class="[
-          'fixed top-4 right-4 left-4 sm:left-auto max-w-sm',
+          'fixed top-4 right-4 left-4 sm:left-auto max-w-sm overflow-hidden',
           'rounded-md border p-3 shadow-lg',
           typeClasses[state.type]
         ]"
@@ -23,7 +23,12 @@
             <component :is="iconComponent" :class="iconClasses[state.type]" />
           </div>
           <div class="flex-1 min-w-0">
-            <p :class="['text-sm font-medium', textClasses[state.type]]">
+            <p
+              :class="[
+                'break-words text-sm font-medium leading-5',
+                textClasses[state.type]
+              ]"
+            >
               {{ state.message }}
             </p>
           </div>
@@ -88,7 +93,7 @@ const closeButtonClasses = {
   info: 'text-blue-400 hover:text-blue-600'
 }
 
-const SuccessIcon = (props) =>
+const SuccessIcon = () =>
   h('svg', { viewBox: '0 0 20 20', fill: 'currentColor' }, [
     h('path', {
       'fill-rule': 'evenodd',
@@ -97,7 +102,7 @@ const SuccessIcon = (props) =>
     })
   ])
 
-const ErrorIcon = (props) =>
+const ErrorIcon = () =>
   h('svg', { viewBox: '0 0 20 20', fill: 'currentColor' }, [
     h('path', {
       'fill-rule': 'evenodd',
@@ -106,7 +111,7 @@ const ErrorIcon = (props) =>
     })
   ])
 
-const WarningIcon = (props) =>
+const WarningIcon = () =>
   h('svg', { viewBox: '0 0 20 20', fill: 'currentColor' }, [
     h('path', {
       'fill-rule': 'evenodd',
@@ -115,7 +120,7 @@ const WarningIcon = (props) =>
     })
   ])
 
-const InfoIcon = (props) =>
+const InfoIcon = () =>
   h('svg', { viewBox: '0 0 20 20', fill: 'currentColor' }, [
     h('path', {
       'fill-rule': 'evenodd',

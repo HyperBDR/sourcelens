@@ -185,7 +185,7 @@ def test_datasource_connection(
     )
     return _wait_cache_result(
         f"lens:datasource_connection:{request_id}",
-        timeout_s=30,
+        timeout_s=120,
     )
 
 
@@ -316,12 +316,27 @@ def datasource_runtime_config(datasource):
     config = dict(datasource.config or {})
     credential = getattr(datasource, "credential", None)
     if datasource.source_type == DataSource.SourceType.GIT and credential:
+        if credential.endpoint_url:
+            config.setdefault("endpoint_url", credential.endpoint_url)
+        if credential.provider:
+            config.setdefault("provider", credential.provider)
+        if credential.sync_scope:
+            config.setdefault("credential_sync_scope", credential.sync_scope)
+        if credential.scope_config:
+            config.setdefault("credential_scope", credential.scope_config)
         secret = credential.get_secret()
         if secret:
             config["access_token"] = secret
             credential.last_used_at = timezone.now()
             credential.save(update_fields=["last_used_at", "updated_at"])
     if datasource.source_type == DataSource.SourceType.FEISHU and credential:
+        if credential.endpoint_url:
+            config.setdefault("endpoint_url", credential.endpoint_url)
+        if credential.sync_scope:
+            config.setdefault("credential_sync_scope", credential.sync_scope)
+        if credential.scope_config:
+            for key, value in credential.scope_config.items():
+                config.setdefault(key, value)
         secret = credential.get_secret()
         if secret:
             app_id, _, app_secret = secret.partition(":")
@@ -351,10 +366,19 @@ def _inject_existing_datasource_credential(
     if (
         source_type_from_credential(credential) == DataSource.SourceType.FEISHU
     ):
+        if credential.scope_config:
+            for key, value in credential.scope_config.items():
+                config.setdefault(key, value)
         app_id, _, app_secret = secret.partition(":")
         config["app_id"] = app_id
         config["app_secret"] = app_secret
     else:
+        if credential.endpoint_url:
+            config.setdefault("endpoint_url", credential.endpoint_url)
+        if credential.provider:
+            config.setdefault("provider", credential.provider)
+        if credential.scope_config:
+            config.setdefault("credential_scope", credential.scope_config)
         config["access_token"] = secret
 
 
