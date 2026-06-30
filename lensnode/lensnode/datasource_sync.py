@@ -1542,6 +1542,8 @@ def _is_feishu_exportable_type(item_type):
         "docx",
         "docs",
         "sheet",
+        "slide",
+        "slides",
         "bitable",
         "base",
     }
@@ -1554,6 +1556,8 @@ def _feishu_export_type(item_type):
         return "docx"
     if item_type == "sheet":
         return "sheet"
+    if item_type in {"slide", "slides"}:
+        return "slides"
     if item_type in {"bitable", "base"}:
         return "bitable"
     return item_type or "docx"
@@ -1566,6 +1570,7 @@ def _feishu_export_extension(item_type):
     mapping = {
         "docx": "docx",
         "sheet": "xlsx",
+        "slides": "pptx",
         "bitable": "xlsx",
     }
     return mapping.get(export_type, "docx")

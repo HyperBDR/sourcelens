@@ -11,6 +11,8 @@ from lensnode.datasource_sync import (
     _export_filename,
     _feishu_folder_token,
     _feishu_export_extension,
+    _feishu_export_type,
+    _is_feishu_exportable_type,
     _feishu_item_unchanged,
     _feishu_target_file_path,
     _git_remote_branches,
@@ -704,6 +706,12 @@ def test_feishu_export_filename_uses_original_extension():
 
     assert _export_filename(exported, "fallback", "docx") == "Example-Doc.docx"
     assert _feishu_export_extension("bitable") == "xlsx"
+    assert _is_feishu_exportable_type("slides")
+    assert _is_feishu_exportable_type("slide")
+    assert _feishu_export_type("slides") == "slides"
+    assert _feishu_export_type("slide") == "slides"
+    assert _feishu_export_extension("slides") == "pptx"
+    assert _feishu_export_extension("slide") == "pptx"
 
 
 def test_poll_feishu_export_task_waits_while_processing(monkeypatch):
