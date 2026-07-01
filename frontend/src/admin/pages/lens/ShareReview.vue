@@ -90,7 +90,38 @@
                     </div>
                   </td>
                   <td class="table-cell text-gray-600">
-                    {{ row.assistant_name }}
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span
+                        class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold"
+                        :class="
+                          row.assistant_visibility === 'private'
+                            ? 'border-amber-300 bg-amber-100 text-amber-800'
+                            : 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                        "
+                        :title="
+                          t(
+                            `lensAdmin.visibility.${row.assistant_visibility === 'private' ? 'private' : 'public'}Desc`
+                          )
+                        "
+                      >
+                        <component
+                          :is="
+                            row.assistant_visibility === 'private'
+                              ? LockIcon
+                              : GlobeIcon
+                          "
+                          class="h-3.5 w-3.5"
+                        />
+                        {{
+                          t(
+                            `lensAdmin.visibility.${row.assistant_visibility === 'private' ? 'private' : 'public'}`
+                          )
+                        }}
+                      </span>
+                      <span class="min-w-0 truncate">
+                        {{ row.assistant_name }}
+                      </span>
+                    </div>
                   </td>
                   <td class="table-cell text-gray-600">
                     {{ row.published_by }}
@@ -163,6 +194,7 @@
 </template>
 
 <script setup>
+import { Globe as GlobeIcon, Lock as LockIcon } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 

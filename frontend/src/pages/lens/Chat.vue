@@ -499,7 +499,12 @@
                     v-if="!isAnonymous && message.run"
                     type="button"
                     class="icon-btn"
-                    :title="t('lens.qa.shareButton')"
+                    :class="{ 'icon-btn-shared': isMessageShared(message) }"
+                    :title="
+                      isMessageShared(message)
+                        ? t('lens.qa.sharedButton')
+                        : t('lens.qa.shareButton')
+                    "
                     @click="openShare(message)"
                   >
                     <svg
@@ -778,9 +783,12 @@
     <QaShareModal
       :open="shareOpen"
       :run-uuid="shareRunUuid"
+      :existing-share="shareExisting"
       :question="shareQuestion"
       :answer-preview="shareAnswer"
       @close="shareOpen = false"
+      @shared="handleShareUpdated"
+      @unshared="handleShareRemoved"
     />
   </div>
 </template>
@@ -823,6 +831,7 @@ import {
   deleteSession,
   getPublicAssistant,
   getRun,
+  listMyShares,
   listAssistants,
   listMessages,
   listSessions,
@@ -880,6 +889,8 @@ const shareOpen = ref(false)
 const shareRunUuid = ref('')
 const shareAnswer = ref('')
 const shareQuestion = ref('')
+const shareExisting = ref(null)
+const sharesByRun = ref({})
 const mySharesOpen = ref(false)
 // False until the current bootstrap settles, so the view can distinguish
 // "still loading" from "loaded, but no assistant to show".
@@ -1353,6 +1364,7 @@ async function bootstrap() {
     }
 
     selectedAssistantUuid.value = current.uuid
+    await loadMyShareState()
     await loadSessions()
     booted.value = true
   } catch {
@@ -1379,6 +1391,19 @@ async function onLoginSuccess() {
   await bootstrap()
 }
 
+async function loadMyShareState() {
+  try {
+    const shares = await listMyShares()
+    sharesByRun.value = Object.fromEntries(
+      shares
+        .filter((share) => share.run_uuid)
+        .map((share) => [share.run_uuid, share])
+    )
+  } catch {
+    sharesByRun.value = {}
+  }
+}
+
 async function loadSessions(selectUuid = '') {
   if (!selectedAssistant.value) {
     return
@@ -1386,7 +1411,21 @@ async function loadSessions(selectUuid = '') {
 
   sessions.value = await listSessions(selectedAssistant.value.slug)
 
-  let targetUuid = selectUuid || route.query.session || sessions.value[0]?.uuid
+  const requestedUuid = selectUuid || route.query.session || ''
+  let targetUuid = requestedUuid || sessions.value[0]?.uuid
+  if (
+    requestedUuid &&
+    !sessions.value.some((session) => session.uuid === requestedUuid)
+  ) {
+    showError(t('lens.chat.sessionAccessDenied'))
+    targetUuid = sessions.value[0]?.uuid
+    if (targetUuid) {
+      router.replace({
+        path: route.path,
+        query: { session: targetUuid }
+      })
+    }
+  }
   if (!targetUuid) {
     const created = await createNewSession(false)
     targetUuid = created?.uuid
@@ -1586,7 +1625,15 @@ async function selectSession(session, updateRoute = true) {
   mySharesOpen.value = false
   clearAttachments()
   selectedSessionUuid.value = session.uuid
-  messages.value = await listMessages(session.uuid)
+  try {
+    messages.value = await listMessages(session.uuid)
+  } catch (error) {
+    if ([403, 404].includes(error?.response?.status)) {
+      showError(t('lens.chat.sessionAccessDenied'))
+      return
+    }
+    throw error
+  }
   currentRun.value = null
   resetStreamState()
   if (updateRoute) {
@@ -1909,9 +1956,35 @@ async function copyMessage(message) {
 
 function openShare(message) {
   shareRunUuid.value = message.run || ''
+  shareExisting.value = sharesByRun.value[shareRunUuid.value] || null
   shareAnswer.value = message.content || ''
   shareQuestion.value = questionForMessage(message)
   shareOpen.value = true
+}
+
+function isMessageShared(message) {
+  return Boolean(message.run && sharesByRun.value[message.run])
+}
+
+function handleShareUpdated(share) {
+  if (!share?.run_uuid) {
+    return
+  }
+  sharesByRun.value = {
+    ...sharesByRun.value,
+    [share.run_uuid]: share
+  }
+  shareExisting.value = share
+}
+
+function handleShareRemoved(share) {
+  if (!share?.run_uuid) {
+    return
+  }
+  const next = { ...sharesByRun.value }
+  delete next[share.run_uuid]
+  sharesByRun.value = next
+  shareExisting.value = null
 }
 
 function questionForMessage(message) {
@@ -2350,6 +2423,16 @@ onBeforeUnmount(() => {
 .icon-btn:hover {
   background: #f3f4f6;
   color: #374151;
+}
+
+.icon-btn-shared {
+  background: rgba(34, 197, 94, 0.1);
+  color: #15803d;
+}
+
+.icon-btn-shared:hover {
+  background: rgba(34, 197, 94, 0.16);
+  color: #166534;
 }
 
 .icon-btn svg {

@@ -1,9 +1,5 @@
 <template>
-  <BaseModal
-    :show="open"
-    :title="t('lens.qa.shareTitle')"
-    @close="emitClose"
-  >
+  <BaseModal :show="open" :title="t('lens.qa.shareTitle')" @close="emitClose">
     <div class="space-y-4">
       <p class="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
         {{ t('lens.qa.shareWarning') }}
@@ -60,12 +56,7 @@
 
     <template #footer>
       <div class="flex justify-end gap-2">
-        <BaseButton
-          v-if="share"
-          variant="danger"
-          size="sm"
-          @click="unshare"
-        >
+        <BaseButton v-if="share" variant="danger" size="sm" @click="unshare">
           {{ t('lens.qa.unshare') }}
         </BaseButton>
         <BaseButton
@@ -96,10 +87,11 @@ import { useToast } from '@/composables/useToast'
 const props = defineProps({
   open: { type: Boolean, default: false },
   runUuid: { type: String, default: '' },
+  existingShare: { type: Object, default: null },
   question: { type: String, default: '' },
   answerPreview: { type: String, default: '' }
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'shared', 'unshared'])
 
 function defaultTitle(question) {
   return (question || '').replace(/\s+/g, ' ').trim().slice(0, 80)
@@ -132,8 +124,8 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      title.value = defaultTitle(props.question)
-      share.value = null
+      share.value = props.existingShare || null
+      title.value = share.value?.title || defaultTitle(props.question)
       creating.value = false
       saving.value = false
     }
@@ -162,6 +154,7 @@ async function create() {
   try {
     share.value = await shareRun(props.runUuid, { title: title.value.trim() })
     title.value = share.value.title || ''
+    emit('shared', share.value)
     showSuccess(t('lens.qa.shared'))
   } catch {
     showError(t('lens.qa.shareFailed'))
@@ -203,6 +196,7 @@ async function unshare() {
   try {
     await deleteShare(share.value.uuid)
     showSuccess(t('lens.qa.unshared'))
+    emit('unshared', share.value)
     share.value = null
     emitClose()
   } catch {

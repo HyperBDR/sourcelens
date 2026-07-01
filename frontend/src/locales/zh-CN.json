@@ -96,8 +96,9 @@
     },
     "qa": {
       "shareButton": "分享",
+      "sharedButton": "已分享",
       "shareTitle": "分享这条问答",
-      "shareWarning": "公开后任何人可凭链接查看此问答内容，请确认不含敏感信息。",
+      "shareWarning": "分享后仅你和同组用户可凭链接查看；管理员审核上榜后将公开可见，请确认不含敏感信息。",
       "shareTitleLabel": "标题",
       "previewLabel": "预览",
       "createLink": "创建链接",
@@ -191,6 +192,7 @@
       "retryAction": "重试",
       "loadFailed": "加载 Lens chat 失败。",
       "assistantNotFound": "你访问的助手不存在，请联系管理员获取有效的助手链接。",
+      "sessionAccessDenied": "你无权访问该会话，或该会话已不存在。请从自己的最近会话中选择，或新建会话。",
       "sessionTitle": "{name} 查询",
       "sessionCreated": "已创建会话。",
       "messageCopied": "已复制消息。",

@@ -96,8 +96,9 @@
     },
     "qa": {
       "shareButton": "Share",
+      "sharedButton": "Shared",
       "shareTitle": "Share this Q&A",
-      "shareWarning": "Anyone with the link can view this Q&A. Make sure it contains no sensitive information.",
+      "shareWarning": "After sharing, only you and users in your groups can view this link. If an admin lists it, it becomes publicly visible. Make sure it contains no sensitive information.",
       "shareTitleLabel": "Title",
       "previewLabel": "Preview",
       "createLink": "Create link",
@@ -191,6 +192,7 @@
       "retryAction": "Retry",
       "loadFailed": "Failed to load Lens chat.",
       "assistantNotFound": "The assistant you're trying to access doesn't exist. Please contact your administrator for a valid link.",
+      "sessionAccessDenied": "You don't have access to this session, or it no longer exists. Select one of your recent sessions or start a new one.",
       "sessionTitle": "{name} query",
       "sessionCreated": "Session created.",
       "messageCopied": "Message copied.",

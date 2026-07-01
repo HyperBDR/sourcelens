@@ -1683,11 +1683,14 @@ class SharedQAListSerializer(serializers.ModelSerializer):
 class SharedQAMineSerializer(serializers.ModelSerializer):
     """A user's own shared Q&A with publish/list state and content."""
 
+    run_uuid = serializers.UUIDField(source="run.uuid", read_only=True)
+
     class Meta:
         model = SharedQA
         fields = [
             "uuid",
             "token",
+            "run_uuid",
             "title",
             "question",
             "answer",
@@ -1704,6 +1707,11 @@ class SharedQAMineSerializer(serializers.ModelSerializer):
 class SharedQAAdminSerializer(serializers.ModelSerializer):
     """Admin moderation view of a shared Q&A."""
 
+    assistant_visibility = serializers.CharField(
+        source="assistant.visibility",
+        read_only=True,
+        default="",
+    )
     published_by = serializers.SerializerMethodField()
     answer_snippet = serializers.SerializerMethodField()
 
@@ -1716,6 +1724,7 @@ class SharedQAAdminSerializer(serializers.ModelSerializer):
             "answer_snippet",
             "assistant_name",
             "assistant_slug",
+            "assistant_visibility",
             "is_listed",
             "status",
             "published_by",
@@ -1730,6 +1739,7 @@ class SharedQAAdminSerializer(serializers.ModelSerializer):
             "answer_snippet",
             "assistant_name",
             "assistant_slug",
+            "assistant_visibility",
             "published_by",
             "view_count",
             "published_at",

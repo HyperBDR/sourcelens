@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -44,12 +45,20 @@ class SharedQAApiTests(TestCase):
             email="other@example.com",
             password="pass12345",
         )
+        self.group_peer = User.objects.create_user(
+            username="qa-peer",
+            email="peer@example.com",
+            password="pass12345",
+        )
         self.admin = User.objects.create_user(
             username="qa-admin",
             email="admin@example.com",
             password="pass12345",
             is_staff=True,
         )
+        self.group = Group.objects.create(name="qa-group")
+        self.owner.groups.add(self.group)
+        self.group_peer.groups.add(self.group)
         self.lensnode = LensNode.objects.create(
             name="Node",
             status=LensNode.Status.ONLINE,
@@ -65,11 +74,11 @@ class SharedQAApiTests(TestCase):
         )
         self.run = self._make_done_run()
 
-    def _make_done_run(self):
+    def _make_done_run(self, assistant=None):
         """Create a completed run with a question and an answer message."""
 
         session = Session.objects.create(
-            assistant=self.assistant,
+            assistant=assistant or self.assistant,
             user=self.owner,
             title="t",
         )
@@ -95,21 +104,36 @@ class SharedQAApiTests(TestCase):
         run.save(update_fields=["output_message"])
         return run
 
-    def _share(self, user=None, payload=None):
+    def _share(self, user=None, payload=None, run=None):
         """POST the run share action as the given (default owner) user."""
 
         self.client.force_authenticate(user or self.owner)
         return self.client.post(
-            f"/api/lens/runs/{self.run.uuid}/share/",
+            f"/api/lens/runs/{(run or self.run).uuid}/share/",
             payload or {},
             format="json",
         )
+
+    def _private_share_token(self):
+        """Create a share token from a private assistant run."""
+
+        private_assistant = Assistant.objects.create(
+            name="Private Helper",
+            slug="private-helper",
+            lensnode=self.lensnode,
+            selected_task="qa",
+            status=Assistant.Status.ACTIVE,
+            visibility=Assistant.Visibility.PRIVATE,
+        )
+        run = self._make_done_run(private_assistant)
+        return self._share(run=run).data["token"]
 
     def test_share_creates_snapshot(self):
         resp = self._share()
         self.assertEqual(resp.status_code, 201)
         self.assertFalse(resp.data["is_listed"])
         self.assertEqual(resp.data["status"], "published")
+        self.assertEqual(resp.data["run_uuid"], str(self.run.uuid))
         share = SharedQA.objects.get(token=resp.data["token"])
         self.assertEqual(share.question, "What is X?")
         self.assertEqual(share.answer, "X is a thing.")
@@ -137,8 +161,46 @@ class SharedQAApiTests(TestCase):
         resp = self._share(user=self.other)
         self.assertEqual(resp.status_code, 404)
 
-    def test_public_single_is_anonymous_and_counts_views(self):
+    def test_unlisted_single_requires_login_and_same_publisher_group(self):
         token = self._share().data["token"]
+        self.client.force_authenticate(user=None)
+        anonymous = self.client.get(f"/api/lens/public/qa/{token}/")
+        self.assertEqual(anonymous.status_code, 404)
+
+        self.client.force_authenticate(self.other)
+        other = self.client.get(f"/api/lens/public/qa/{token}/")
+        self.assertEqual(other.status_code, 404)
+
+        self.client.force_authenticate(self.group_peer)
+        peer = self.client.get(f"/api/lens/public/qa/{token}/")
+        self.assertEqual(peer.status_code, 200)
+        self.assertEqual(peer.data["question"], "What is X?")
+        self.assertEqual(peer.data["view_count"], 1)
+
+    def test_unlisted_single_allows_same_group_session_user(self):
+        token = self._share().data["token"]
+        self.client.force_authenticate(user=None)
+        self.assertTrue(
+            self.client.login(username="qa-peer", password="pass12345")
+        )
+
+        resp = self.client.get(f"/api/lens/public/qa/{token}/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["question"], "What is X?")
+
+    def test_unlisted_single_is_visible_to_owner(self):
+        token = self._share().data["token"]
+        self.client.force_authenticate(self.owner)
+        resp = self.client.get(f"/api/lens/public/qa/{token}/")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_listed_single_is_anonymous_and_counts_views(self):
+        token = self._private_share_token()
+        share = SharedQA.objects.get(token=token)
+        share.is_listed = True
+        share.save(update_fields=["is_listed"])
+
         self.client.force_authenticate(user=None)
         resp = self.client.get(f"/api/lens/public/qa/{token}/")
         self.assertEqual(resp.status_code, 200)
@@ -180,6 +242,18 @@ class SharedQAApiTests(TestCase):
         self.assertEqual(after.data["total"], 1)
         self.assertEqual(after.data["results"][0]["token"], token)
         self.assertIn("answer_snippet", after.data["results"][0])
+
+    def test_public_list_can_show_listed_private_assistant_share(self):
+        token = self._private_share_token()
+        share = SharedQA.objects.get(token=token)
+        share.is_listed = True
+        share.save(update_fields=["is_listed"])
+
+        self.client.force_authenticate(user=None)
+        resp = self.client.get("/api/lens/public/assistants/private-helper/qa/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["total"], 1)
+        self.assertEqual(resp.data["results"][0]["token"], token)
 
     def test_my_shares_list_and_revoke(self):
         token = self._share().data["token"]

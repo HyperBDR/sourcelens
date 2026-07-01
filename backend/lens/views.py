@@ -1932,22 +1932,21 @@ class AdminSharedQAViewSet(BaseAdminViewSet):
 
 
 class PublicSharedQAView(APIView):
-    """Public single shared Q&A by token (anonymous, read-only)."""
+    """Single shared Q&A by token with assistant visibility rules."""
 
-    authentication_classes = []
-    permission_classes = []
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request, token):
         """Return one published shared Q&A and bump its view count."""
 
         share = (
-            SharedQA.objects.select_related("assistant")
+            SharedQA.objects.select_related("assistant", "published_by")
             .filter(token=token, status=SharedQA.Status.PUBLISHED)
             .first()
         )
-        if share is None or (
-            share.assistant_id
-            and share.assistant.visibility != Assistant.Visibility.PUBLIC
+        if share is None or not _shared_qa_visible_to_user(
+            share,
+            request.user,
         ):
             return Response(
                 {"detail": "Shared Q&A not found."},
@@ -1958,6 +1957,23 @@ class PublicSharedQAView(APIView):
         )
         share.refresh_from_db(fields=["view_count"])
         return Response(SharedQAPublicSerializer(share).data)
+
+
+def _shared_qa_visible_to_user(share, user):
+    """Return whether a shared Q&A may be read through its token."""
+
+    if share.is_listed:
+        return True
+    if not (user and user.is_authenticated):
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+    if share.published_by_id == user.id:
+        return True
+    publisher = share.published_by
+    if publisher is None:
+        return False
+    return publisher.groups.filter(pk__in=user.groups.values("pk")).exists()
 
 
 class PublicSharedQAListView(APIView):
@@ -1972,7 +1988,6 @@ class PublicSharedQAListView(APIView):
         assistant = Assistant.objects.filter(
             slug=slug,
             status=Assistant.Status.ACTIVE,
-            visibility=Assistant.Visibility.PUBLIC,
         ).first()
         if assistant is None:
             return Response(
