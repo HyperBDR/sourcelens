@@ -264,7 +264,14 @@
             {{ credentialScopeText(selectedCredential) }}
           </div>
         </div>
-        <div class="grid gap-4 md:grid-cols-2">
+        <div
+          v-if="testingConnection"
+          class="flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
+        >
+          <LoaderCircleIcon class="h-4 w-4 animate-spin" />
+          <span>{{ t('lensAdmin.datasourceWizard.loadingFeishuScope') }}</span>
+        </div>
+        <div v-else class="grid gap-4 md:grid-cols-2">
           <FormRow :label="t('lensAdmin.fields.recursive')">
             <label class="inline-flex items-center gap-2 text-sm text-ink-600">
               <input
@@ -1570,7 +1577,7 @@ const filteredCredentials = computed(() => {
   return props.credentials.filter(
     (credential) =>
       credential.uuid === selectedUuid ||
-      (credential.auth_type === 'https_token' &&
+      (['https_token', 'none'].includes(credential.auth_type) &&
         [props.form.source_type, 'generic'].includes(credential.provider))
   )
 })
@@ -1785,7 +1792,8 @@ function applySelectedCredentialToConfig(options = {}) {
     if (options.clearGitSelection) {
       clearGitSelectionConfig()
     }
-    props.config.auth_scheme = 'token'
+    props.config.auth_scheme =
+      credential.auth_type === 'none' ? 'none' : 'token'
     props.config.repo_url = scopeUrl
     props.config.organization_url = scopeUrl
     return

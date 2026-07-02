@@ -574,7 +574,10 @@ class DataSourceSerializer(serializers.ModelSerializer):
         if source_type == DataSource.SourceType.GIT:
             _validate_datasource_credential_type(
                 credential,
-                DataSourceCredential.AuthType.HTTPS_TOKEN,
+                {
+                    DataSourceCredential.AuthType.HTTPS_TOKEN,
+                    DataSourceCredential.AuthType.NONE,
+                },
             )
             _validate_git_config(
                 config,
@@ -968,7 +971,10 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"app_secret": "app_id and app_secret are required"}
                 )
-        elif auth_type != DataSourceCredential.AuthType.HTTPS_TOKEN:
+        elif auth_type not in {
+            DataSourceCredential.AuthType.HTTPS_TOKEN,
+            DataSourceCredential.AuthType.NONE,
+        }:
             raise serializers.ValidationError(
                 {"auth_type": "credential auth_type is not supported"}
             )
@@ -980,11 +986,18 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"provider": "git credential provider must be github or gitlab"}
             )
-        elif not has_secret and (not has_existing or auth_type_changed):
+        elif (
+            auth_type == DataSourceCredential.AuthType.HTTPS_TOKEN
+            and not has_secret
+            and (not has_existing or auth_type_changed)
+        ):
             raise serializers.ValidationError(
                 {"secret": "secret is required"}
             )
-        if auth_type == DataSourceCredential.AuthType.HTTPS_TOKEN:
+        if auth_type in {
+            DataSourceCredential.AuthType.HTTPS_TOKEN,
+            DataSourceCredential.AuthType.NONE,
+        }:
             attrs["sync_scope"] = attrs.get("sync_scope") or "service"
         return attrs
 
@@ -993,7 +1006,8 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
 
         secret = _credential_secret_from_validated_data(validated_data)
         credential = DataSourceCredential(**validated_data)
-        credential.set_secret(secret)
+        if secret:
+            credential.set_secret(secret)
         credential.save()
         return credential
 
@@ -1003,6 +1017,11 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
         secret = _credential_secret_from_validated_data(validated_data)
         for field, value in validated_data.items():
             setattr(instance, field, value)
+        if (
+            instance.auth_type == DataSourceCredential.AuthType.NONE
+            and instance.encrypted_secret
+        ):
+            instance.encrypted_secret = ""
         if secret:
             instance.set_secret(secret)
         instance.save()
@@ -1165,7 +1184,12 @@ def _validate_datasource_credential_type(credential, auth_type):
 
     if credential is None:
         return
-    if credential.auth_type != auth_type:
+    allowed_types = (
+        set(auth_type)
+        if isinstance(auth_type, (list, tuple, set))
+        else {auth_type}
+    )
+    if credential.auth_type not in allowed_types:
         raise serializers.ValidationError(
             {"credential_uuid": "Credential type does not match datasource"}
         )
@@ -1239,10 +1263,23 @@ def _validate_git_config(config, instance=None, credential=None):
             {"config": "git auth_scheme must be none or token"}
         )
     if auth_scheme == "none" and credential:
-        raise serializers.ValidationError(
-            {"credential_uuid": "Git credential must not be set without auth"}
-        )
+        if credential.auth_type != DataSourceCredential.AuthType.NONE:
+            raise serializers.ValidationError(
+                {
+                    "credential_uuid": (
+                        "Git credential must not be set without auth"
+                    )
+                }
+            )
     if auth_scheme == "token" and not credential:
+        raise serializers.ValidationError(
+            {"credential_uuid": "Git HTTPS Token credential is required"}
+        )
+    if (
+        auth_scheme == "token"
+        and credential
+        and credential.auth_type != DataSourceCredential.AuthType.HTTPS_TOKEN
+    ):
         raise serializers.ValidationError(
             {"credential_uuid": "Git HTTPS Token credential is required"}
         )

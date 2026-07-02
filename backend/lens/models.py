@@ -348,6 +348,7 @@ class DataSourceCredential(TimestampedUUIDModel):
         GENERIC = "generic", "Generic"
 
     class AuthType(models.TextChoices):
+        NONE = "none", "No Authentication"
         HTTPS_TOKEN = "https_token", "HTTPS Token"
         FEISHU_APP = "feishu_app", "Feishu App"
 

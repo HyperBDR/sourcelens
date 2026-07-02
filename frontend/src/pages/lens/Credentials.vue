@@ -230,7 +230,7 @@
               {{ t('lensAdmin.credentials.providerHint') }}
             </p>
           </FormRow>
-          <template v-if="credentialFormAuthType === 'https_token'">
+          <template v-if="form.provider !== 'feishu'">
             <FormRow :label="t('lensAdmin.fields.url')" required>
               <input
                 v-model="form.organization_url"
@@ -265,7 +265,20 @@
             </FormRow>
           </template>
           <FormRow :label="t('lensAdmin.fields.authScheme')">
-            <div class="form-input bg-surface-sunken text-ink-500">
+            <select
+              v-if="form.provider !== 'feishu'"
+              v-model="form.auth_type"
+              class="form-input"
+              required
+            >
+              <option value="https_token">
+                {{ credentialAuthTypeLabel('https_token') }}
+              </option>
+              <option value="none">
+                {{ credentialAuthTypeLabel('none') }}
+              </option>
+            </select>
+            <div v-else class="form-input bg-surface-sunken text-ink-500">
               {{ credentialAuthTypeLabel(credentialFormAuthType) }}
             </div>
             <p class="mt-1 text-xs text-ink-500">
@@ -313,7 +326,11 @@
               </p>
             </FormRow>
           </template>
-          <FormRow v-else :label="t('lensAdmin.fields.accessToken')" required>
+          <FormRow
+            v-else-if="credentialFormAuthType === 'https_token'"
+            :label="t('lensAdmin.fields.accessToken')"
+            required
+          >
             <div class="flex gap-2">
               <input
                 v-model="form.secret"
@@ -340,7 +357,10 @@
               {{ t('lensAdmin.credentials.accessTokenHint') }}
             </p>
           </FormRow>
-          <p v-if="mode === 'edit'" class="-mt-2 text-xs text-ink-500">
+          <p
+            v-if="mode === 'edit' && credentialFormAuthType !== 'none'"
+            class="-mt-2 text-xs text-ink-500"
+          >
             {{ t('lensAdmin.credentials.replaceHint') }}
           </p>
 
@@ -464,7 +484,9 @@ const modalTitle = computed(() => {
 })
 
 const credentialFormAuthType = computed(() =>
-  form.value.provider === 'feishu' ? 'feishu_app' : 'https_token'
+  form.value.provider === 'feishu'
+    ? 'feishu_app'
+    : form.value.auth_type || 'https_token'
 )
 
 const canRevealCredential = computed(
@@ -480,7 +502,9 @@ const revealButtonTitle = computed(() =>
 const credentialAuthTypeHint = computed(() =>
   credentialFormAuthType.value === 'feishu_app'
     ? t('lensAdmin.credentials.feishuAuthHint')
-    : t('lensAdmin.credentials.gitAuthHint')
+    : credentialFormAuthType.value === 'none'
+      ? t('lensAdmin.credentials.gitNoAuthHint')
+      : t('lensAdmin.credentials.gitAuthHint')
 )
 
 const credentialBindingTooltipStyle = computed(() => ({
@@ -506,6 +530,7 @@ function credentialProviderLabel(provider) {
 
 function credentialAuthTypeLabel(authType) {
   const labels = {
+    none: t('lensAdmin.credentials.noAuth'),
     https_token: 'HTTPS Token',
     feishu_app: 'Feishu App'
   }
@@ -697,6 +722,7 @@ function defaultForm() {
   return {
     name: '',
     provider: 'github',
+    auth_type: 'https_token',
     sync_scope: 'service',
     organization_url: '',
     folder_url: '',
@@ -717,6 +743,7 @@ function formFromRow(row) {
         : row.provider === 'gitlab'
           ? 'gitlab'
           : 'github',
+    auth_type: row.auth_type || 'https_token',
     sync_scope: row.sync_scope || defaultSyncScope(row.provider),
     organization_url: row.scope_summary?.organization_url || '',
     folder_url: row.scope_summary?.folder_url || '',
@@ -837,7 +864,7 @@ function buildPayload() {
   ) {
     payload.secret = form.value.secret.trim()
   }
-  if (credentialFormAuthType.value === 'https_token') {
+  if (['https_token', 'none'].includes(credentialFormAuthType.value)) {
     payload.organization_url = form.value.organization_url?.trim()
     payload.endpoint_url = endpointFromCredentialUrl(
       form.value.provider,
@@ -870,6 +897,23 @@ watch(
       return
     }
     form.value.sync_scope = defaultSyncScope(provider)
+    if (provider === 'feishu') {
+      form.value.auth_type = 'feishu_app'
+      return
+    }
+    if (!['https_token', 'none'].includes(form.value.auth_type)) {
+      form.value.auth_type = 'https_token'
+    }
+  }
+)
+
+watch(
+  () => form.value.auth_type,
+  (authType) => {
+    if (authType === 'none') {
+      form.value.secret = ''
+      credentialSecretRevealed.value = false
+    }
   }
 )
 

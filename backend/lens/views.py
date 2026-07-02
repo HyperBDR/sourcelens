@@ -188,18 +188,23 @@ def _validate_github_credential_connectivity(credential):
     api_base = "https://api.github.com"
     if endpoint and endpoint != "https://github.com":
         api_base = f"{endpoint}/api/v3"
-    headers = {"Authorization": f"Bearer {credential.get_secret()}"}
-    api_url = f"{api_base}/user"
-    payload, message = _credential_api_json(
-        api_url,
-        headers,
+    headers = {}
+    is_anonymous = (
+        credential.auth_type == DataSourceCredential.AuthType.NONE
     )
-    if payload is None:
-        return {
-            "status": "failed",
-            "message_code": "github_credential_invalid",
-            "message": message or "GitHub credential validation failed.",
-        }
+    if not is_anonymous:
+        headers = {"Authorization": f"Bearer {credential.get_secret()}"}
+        api_url = f"{api_base}/user"
+        payload, message = _credential_api_json(
+            api_url,
+            headers,
+        )
+        if payload is None:
+            return {
+                "status": "failed",
+                "message_code": "github_credential_invalid",
+                "message": message or "GitHub credential validation failed.",
+            }
     scope_url = (credential.scope_config or {}).get("organization_url")
     if scope_url:
         scope_path = _credential_scope_path(scope_url)
@@ -234,23 +239,30 @@ def _validate_github_credential_connectivity(credential):
         "status": "success",
         "message_code": "github_credential_valid",
         "message": "GitHub credential is valid.",
-        "details": {"login": payload.get("login") or ""},
+        "details": {
+            "login": "" if is_anonymous else payload.get("login") or ""
+        },
     }
 
 
 def _validate_gitlab_credential_connectivity(credential):
     endpoint = (credential.endpoint_url or "https://gitlab.com").rstrip("/")
-    headers = {"PRIVATE-TOKEN": credential.get_secret()}
-    payload, message = _credential_api_json(
-        f"{endpoint}/api/v4/user",
-        headers,
+    headers = {}
+    is_anonymous = (
+        credential.auth_type == DataSourceCredential.AuthType.NONE
     )
-    if payload is None:
-        return {
-            "status": "failed",
-            "message_code": "gitlab_credential_invalid",
-            "message": message or "GitLab credential validation failed.",
-        }
+    if not is_anonymous:
+        headers = {"PRIVATE-TOKEN": credential.get_secret()}
+        payload, message = _credential_api_json(
+            f"{endpoint}/api/v4/user",
+            headers,
+        )
+        if payload is None:
+            return {
+                "status": "failed",
+                "message_code": "gitlab_credential_invalid",
+                "message": message or "GitLab credential validation failed.",
+            }
     scope_url = (credential.scope_config or {}).get("organization_url")
     if scope_url:
         scope_path = parse.quote(_credential_scope_path(scope_url), safe="")
@@ -276,7 +288,9 @@ def _validate_gitlab_credential_connectivity(credential):
         "status": "success",
         "message_code": "gitlab_credential_valid",
         "message": "GitLab credential is valid.",
-        "details": {"username": payload.get("username") or ""},
+        "details": {
+            "username": "" if is_anonymous else payload.get("username") or ""
+        },
     }
 
 

@@ -894,6 +894,40 @@ class LensApiTests(TestCase):
         self.assertNotIn("access_token", datasource.config)
         self.assertEqual(datasource.credential, credential)
 
+    def test_datasource_allows_git_no_auth_credential_binding(self):
+        credential = DataSourceCredential.objects.create(
+            name="Public GitHub repo",
+            provider=DataSourceCredential.Provider.GITHUB,
+            auth_type=DataSourceCredential.AuthType.NONE,
+            endpoint_url="https://github.com",
+            scope_config={
+                "organization_url": "https://github.com/example/repo"
+            },
+        )
+        payload = {
+            "name": "Public Repo",
+            "source_type": "git",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "credential_uuid": str(credential.uuid),
+            "config": {
+                "repo_url": "https://github.com/example/repo.git",
+                "auth_scheme": "none",
+            },
+            "target_path": "/workspace/public-repo",
+        }
+
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(credential.has_secret)
+        datasource = DataSource.objects.get(uuid=response.data["uuid"])
+        self.assertEqual(datasource.credential, credential)
+        self.assertNotIn("access_token", datasource.config)
+
     def test_datasource_allows_feishu_drive_folder_credential_binding(self):
         credential = DataSourceCredential.objects.create(
             name="Feishu app",
