@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from langchain_core.tools import tool
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from .workspace import (
     DEFAULT_EXCLUDED_DIRS,
@@ -26,6 +27,26 @@ SELF_REPORTING_TOOLS = {
     "git_diff",
     "summarize_recent_changes",
 }
+
+
+class _ReadWorkspaceFileArgs(BaseModel):
+    """Args schema for read_workspace_file.
+
+    Accepts both ``file_path`` (the name LLMs most often emit, matching the
+    common read-file convention) and ``path``. The field has a default so
+    LangChain still binds it when the value arrives via the alias, which it
+    would otherwise drop for a required field.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    path: str = Field(
+        default="",
+        validation_alias=AliasChoices("file_path", "path"),
+        description="Workspace file path to read.",
+    )
+    offset: int = Field(default=1, description="1-based start line.")
+    limit: int = Field(default=250, description="Max lines to read.")
 
 
 def build_agent_tools(command, emit_event=None):
@@ -112,7 +133,7 @@ def build_agent_tools(command, emit_event=None):
         )
         return _json(result)
 
-    @tool("read_workspace_file")
+    @tool("read_workspace_file", args_schema=_ReadWorkspaceFileArgs)
     def read_workspace_file(path: str, offset: int = 1, limit: int = 250) -> str:
         """Read a window of a workspace file: limit lines from offset (1-based).
 
