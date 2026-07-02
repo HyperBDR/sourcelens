@@ -151,6 +151,7 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def _handle_hello(self, content):
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self._update_lensnode_report(content, require_versions=True)
         await database_sync_to_async(reconcile_lensnode_active_runs)(
             self.lensnode.uuid, content.get("active_runs") or []
@@ -158,6 +159,7 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json({"type": "hello_ack"})
 
     async def _handle_heartbeat(self, content):
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self._update_lensnode_report(content, require_versions=False)
         await self.send_json(
             {
