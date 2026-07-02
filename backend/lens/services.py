@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import hashlib
 import json
 import logging
 from datetime import timedelta
+from pathlib import Path
 from time import sleep
 
 from asgiref.sync import async_to_sync, sync_to_async
@@ -272,18 +274,49 @@ def build_loaded_skills(assistant):
     for binding in assistant.skill_bindings.select_related("skill").filter(
         enabled=True
     ):
+        skill = binding.skill
+        content_hash = skill.package_hash or _content_hash(skill.definition)
+        package_files = _skill_package_files(skill)
         loaded.append(
             {
-                "skill_uuid": str(binding.skill.uuid),
-                "skill_slug": binding.skill.slug,
-                "skill_name": binding.skill.name,
-                "version": binding.skill.version,
-                "content_hash": _content_hash(binding.skill.definition),
-                "definition": binding.skill.definition,
+                "skill_uuid": str(skill.uuid),
+                "skill_slug": skill.slug,
+                "skill_name": skill.name,
+                "version": skill.version,
+                "content_hash": content_hash,
+                "definition": skill.definition,
+                "package_hash": skill.package_hash,
+                "package_files": package_files,
                 "load_config": binding.load_config,
             }
         )
     return loaded
+
+
+def _skill_package_files(skill):
+    """Return packaged Skill files for LensNode runtime materialization."""
+
+    if not skill.package_hash or not skill.package_path:
+        return []
+
+    package_path = Path(skill.package_path)
+    if not package_path.is_dir():
+        return []
+
+    files = []
+    for path in sorted(package_path.rglob("*")):
+        if not path.is_file():
+            continue
+        relative_path = path.relative_to(package_path).as_posix()
+        files.append(
+            {
+                "path": relative_path,
+                "content_b64": base64.b64encode(path.read_bytes()).decode(
+                    "ascii"
+                ),
+            }
+        )
+    return files
 
 
 def build_loaded_mcps(assistant):

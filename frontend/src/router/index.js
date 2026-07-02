@@ -83,7 +83,7 @@ const routes = [
   },
   {
     path: '/lens/assistants/:slug',
-    redirect: (to) => `/lens/assistants/${to.params.slug}/chat`,
+    redirect: (to) => `/lens/assistants/${to.params.slug}/chat`
   },
   {
     path: '/lens/assistants/:slug/chat',

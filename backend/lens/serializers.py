@@ -1347,10 +1347,24 @@ class SkillSerializer(serializers.ModelSerializer):
             "definition",
             "version",
             "enabled",
+            "package_hash",
+            "package_size",
+            "package_manifest",
+            "source_type",
+            "source_url",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["uuid", "created_at", "updated_at"]
+        read_only_fields = [
+            "uuid",
+            "package_hash",
+            "package_size",
+            "package_manifest",
+            "source_type",
+            "source_url",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class MCPServerSerializer(serializers.ModelSerializer):

@@ -78,6 +78,12 @@ from .skill_generation import (
     SkillGeneratorNotConfigured,
     beautify_skill_content,
 )
+from .skill_packages import (
+    SkillPackageError,
+    import_skill_from_github,
+    import_skill_zip,
+    package_zip_bytes,
+)
 from .tasks import (
     register_datasource_sync_task,
     release_datasource_lock,
@@ -1278,6 +1284,64 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
         return super().destroy(request, *args, **kwargs)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        parser_classes=[MultiPartParser, FormParser],
+        url_path="upload",
+    )
+    def upload(self, request):
+        """Upload and validate a Skill zip package."""
+
+        file_obj = request.FILES.get("file")
+        if file_obj is None:
+            return Response(
+                {"detail": "Skill package file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = import_skill_zip(
+                file_obj=file_obj,
+                original_name=getattr(file_obj, "name", ""),
+            )
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=False, methods=["post"], url_path="import-github")
+    def import_github(self, request):
+        """Import a public Skill zip package from GitHub."""
+
+        url = str(request.data.get("url") or "").strip()
+        if not url:
+            return Response(
+                {"detail": "GitHub URL is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = import_skill_from_github(url)
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, *args, **kwargs):
+        """Download the current Skill package as a zip archive."""
+
+        skill = self.get_object()
+        archive = package_zip_bytes(skill)
+        return FileResponse(
+            archive,
+            as_attachment=True,
+            filename=f"{skill.slug}.zip",
+        )
 
     @action(detail=False, methods=["post"])
     def beautify(self, request):

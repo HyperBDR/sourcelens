@@ -1,0 +1,376 @@
+"""Skill package import, validation, and export helpers."""
+
+import hashlib
+import io
+import re
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path, PurePosixPath
+from urllib import error as urlerror
+from urllib import parse, request
+
+from django.conf import settings
+from django.db import transaction
+
+from .models import Skill
+
+MAX_ZIP_SIZE = 20 * 1024 * 1024
+MAX_UNPACKED_SIZE = 50 * 1024 * 1024
+MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_SKILL_MD_SIZE = 256 * 1024
+MAX_FILE_COUNT = 300
+MAX_GITHUB_DOWNLOAD_SIZE = MAX_ZIP_SIZE
+GITHUB_TIMEOUT_SECONDS = 30
+BLOCKED_PARTS = {".git", ".ssh", "__pycache__", "node_modules", ".venv"}
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,179}$")
+
+
+class SkillPackageError(ValueError):
+    """Raised when a skill package is invalid or unsafe."""
+
+
+def import_skill_zip(
+    *,
+    file_obj,
+    original_name="",
+    source_type="upload",
+    source_url="",
+):
+    """Validate and persist a Skill zip package."""
+
+    data = _read_limited(file_obj, MAX_ZIP_SIZE + 1)
+    if len(data) > MAX_ZIP_SIZE:
+        raise SkillPackageError("Skill package exceeds 20 MB.")
+    if original_name and not str(original_name).lower().endswith(".zip"):
+        raise SkillPackageError("Skill package must be a .zip file.")
+    if not zipfile.is_zipfile(io.BytesIO(data)):
+        raise SkillPackageError("Skill package must be a valid zip archive.")
+
+    digest = hashlib.sha256(data).hexdigest()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        extract_root = Path(temp_dir) / "extract"
+        extract_root.mkdir()
+        _safe_extract_zip(data, extract_root)
+        skill_root = _find_skill_root(extract_root)
+        skill_md = skill_root / "SKILL.md"
+        metadata = _parse_skill_md(skill_md)
+        slug = _slug_from_metadata(metadata)
+        manifest = _package_manifest(skill_root)
+        package_root = skill_package_root(slug, digest)
+        staged_root = package_root.with_name(f".{digest}.tmp")
+        if staged_root.exists():
+            shutil.rmtree(staged_root)
+        staged_root.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(skill_root, staged_root)
+        created_package_root = False
+        try:
+            if package_root.exists():
+                shutil.rmtree(staged_root)
+            else:
+                staged_root.rename(package_root)
+                created_package_root = True
+            with transaction.atomic():
+                skill, _created = Skill.objects.update_or_create(
+                    slug=slug,
+                    defaults={
+                        "name": metadata["name"],
+                        "definition": {
+                            "description": metadata["description"],
+                            "content": metadata["content"],
+                            "skill_md": metadata["skill_md"],
+                        },
+                        "version": digest[:12],
+                        "enabled": True,
+                        "package_path": str(package_root),
+                        "package_hash": digest,
+                        "package_size": len(data),
+                        "package_manifest": manifest,
+                        "source_type": source_type,
+                        "source_url": source_url,
+                    },
+                )
+        except Exception:
+            shutil.rmtree(staged_root, ignore_errors=True)
+            if created_package_root:
+                shutil.rmtree(package_root, ignore_errors=True)
+            raise
+    return skill
+
+
+def import_skill_from_github(url):
+    """Download a public GitHub Skill zip and import it."""
+
+    zip_url = _github_zip_url(url)
+    req = request.Request(
+        zip_url,
+        headers={
+            "Accept": "application/zip",
+            "User-Agent": "SourceLens Skill Importer",
+        },
+    )
+    try:
+        with request.urlopen(req, timeout=GITHUB_TIMEOUT_SECONDS) as response:
+            final_url = response.geturl()
+            _validate_github_download_url(final_url)
+            data = response.read(MAX_GITHUB_DOWNLOAD_SIZE + 1)
+    except urlerror.HTTPError as exc:
+        raise SkillPackageError(f"GitHub download failed: HTTP {exc.code}")
+    except urlerror.URLError as exc:
+        raise SkillPackageError(f"GitHub download failed: {exc.reason}")
+    if len(data) > MAX_GITHUB_DOWNLOAD_SIZE:
+        raise SkillPackageError("GitHub skill package exceeds 20 MB.")
+    return import_skill_zip(
+        file_obj=io.BytesIO(data),
+        original_name="github-skill.zip",
+        source_type="github",
+        source_url=url,
+    )
+
+
+def skill_package_root(slug, package_hash):
+    """Return persistent storage path for one Skill package snapshot."""
+
+    return (
+        Path(settings.STORAGE_ROOT)
+        / "lens"
+        / "skills"
+        / slug
+        / package_hash
+    )
+
+
+def package_zip_bytes(skill):
+    """Return a downloadable zip archive for a Skill."""
+
+    buffer = io.BytesIO()
+    package_path = Path(skill.package_path) if skill.package_path else None
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        if (
+            package_path is not None
+            and package_path.exists()
+            and package_path.is_dir()
+        ):
+            for path in sorted(package_path.rglob("*")):
+                if path.is_file():
+                    archive.write(
+                        path,
+                        str(
+                            PurePosixPath(skill.slug)
+                            / path.relative_to(package_path)
+                        ),
+                    )
+        else:
+            archive.writestr(
+                f"{skill.slug}/SKILL.md",
+                _skill_md_from_definition(skill),
+            )
+    buffer.seek(0)
+    return buffer
+
+
+def _read_limited(file_obj, limit):
+    """Read at most limit bytes from an upload or stream."""
+
+    if hasattr(file_obj, "chunks"):
+        chunks = []
+        total = 0
+        for chunk in file_obj.chunks():
+            total += len(chunk)
+            if total > limit:
+                chunks.append(chunk[: max(0, limit - (total - len(chunk)))])
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    return file_obj.read(limit)
+
+
+def _safe_extract_zip(data, destination):
+    """Extract a zip after checking file count, size, and paths."""
+
+    total_size = 0
+    files = 0
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            files += 1
+            if files > MAX_FILE_COUNT:
+                raise SkillPackageError(
+                    "Skill package contains too many files."
+                )
+            if info.file_size > MAX_FILE_SIZE:
+                raise SkillPackageError(
+                    "Skill package contains an oversized file."
+                )
+            total_size += info.file_size
+            if total_size > MAX_UNPACKED_SIZE:
+                raise SkillPackageError("Skill package unpacks over 50 MB.")
+            _validate_zip_member(info)
+        archive.extractall(destination)
+
+
+def _validate_zip_member(info):
+    """Reject unsafe zip member names or unsupported entries."""
+
+    name = info.filename.replace("\\", "/")
+    path = PurePosixPath(name)
+    if name.startswith("/") or not name.strip() or ".." in path.parts:
+        raise SkillPackageError("Skill package contains unsafe paths.")
+    if any(part in BLOCKED_PARTS for part in path.parts):
+        raise SkillPackageError("Skill package contains blocked directories.")
+    mode = (info.external_attr >> 16) & 0o170000
+    if mode in {0o120000, 0o020000, 0o060000}:
+        raise SkillPackageError(
+            "Skill package contains unsupported file types."
+        )
+
+
+def _find_skill_root(extract_root):
+    """Return the directory containing SKILL.md."""
+
+    if (extract_root / "SKILL.md").is_file():
+        return extract_root
+    candidates = [
+        path
+        for path in extract_root.iterdir()
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    ]
+    if len(candidates) != 1:
+        raise SkillPackageError(
+            "Skill package must contain one SKILL.md root."
+        )
+    return candidates[0]
+
+
+def _parse_skill_md(path):
+    """Parse required frontmatter and body from SKILL.md."""
+
+    data = path.read_bytes()
+    if len(data) > MAX_SKILL_MD_SIZE:
+        raise SkillPackageError("SKILL.md exceeds 256 KB.")
+    text = data.decode("utf-8")
+    if not text.startswith("---\n"):
+        raise SkillPackageError("SKILL.md must start with YAML frontmatter.")
+    end = text.find("\n---", 4)
+    if end < 0:
+        raise SkillPackageError("SKILL.md frontmatter is not closed.")
+    frontmatter = text[4:end].strip()
+    body = text[text.find("\n", end + 4) + 1 :].strip()
+    fields = _parse_simple_frontmatter(frontmatter)
+    name = str(fields.get("name") or "").strip()
+    description = str(fields.get("description") or "").strip()
+    if not name or not description:
+        raise SkillPackageError("SKILL.md requires name and description.")
+    return {
+        "name": name,
+        "description": description,
+        "content": body,
+        "skill_md": text.strip() + "\n",
+    }
+
+
+def _parse_simple_frontmatter(frontmatter):
+    """Parse simple key-value YAML frontmatter."""
+
+    fields = {}
+    for line in frontmatter.splitlines():
+        if ":" not in line or line.startswith((" ", "\t", "-")):
+            continue
+        key, value = line.split(":", 1)
+        fields[key.strip()] = value.strip().strip("'\"")
+    return fields
+
+
+def _slug_from_metadata(metadata):
+    """Return validated slug from Skill metadata name."""
+
+    slug = str(metadata["name"]).strip()
+    if not SLUG_RE.match(slug):
+        raise SkillPackageError(
+            "Skill name must use lowercase letters, numbers, '-' or '_'."
+        )
+    return slug
+
+
+def _package_manifest(skill_root):
+    """Return compact package metadata for persisted Skill files."""
+
+    files = []
+    total_size = 0
+    for path in sorted(skill_root.rglob("*")):
+        if not path.is_file():
+            continue
+        size = path.stat().st_size
+        total_size += size
+        files.append(
+            {
+                "path": str(PurePosixPath(path.relative_to(skill_root))),
+                "size": size,
+            }
+        )
+    return {
+        "files": files,
+        "file_count": len(files),
+        "total_size": total_size,
+    }
+
+
+def _github_zip_url(value):
+    """Return a codeload GitHub zip URL from supported GitHub inputs."""
+
+    parsed = parse.urlsplit(str(value or "").strip())
+    github_hosts = {"github.com", "www.github.com", "codeload.github.com"}
+    if parsed.netloc not in github_hosts:
+        raise SkillPackageError("Only public GitHub URLs are supported.")
+    if parsed.netloc == "codeload.github.com":
+        return parse.urlunsplit(parsed)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        raise SkillPackageError(
+            "GitHub URL must include owner and repository."
+        )
+    owner, repo = parts[0], parts[1]
+    ref = "main"
+    if len(parts) >= 4 and parts[2] in {"tree", "blob"}:
+        ref = parts[3]
+    elif len(parts) >= 4 and parts[2] == "archive":
+        return parse.urlunsplit(parsed)
+    return f"https://codeload.github.com/{owner}/{repo}/zip/{ref}"
+
+
+def _validate_github_download_url(value):
+    """Reject redirects away from GitHub download hosts."""
+
+    parsed = parse.urlsplit(str(value or ""))
+    if parsed.netloc not in {"github.com", "codeload.github.com"}:
+        raise SkillPackageError(
+            "GitHub download redirected to an unsafe host."
+        )
+
+
+def _skill_md_from_definition(skill):
+    """Build a basic SKILL.md for legacy database-only skills."""
+
+    definition = skill.definition or {}
+    content = (
+        definition.get("skill_md")
+        or definition.get("content")
+        or definition.get("markdown")
+        or definition.get("summary")
+        or ""
+    )
+    if str(content).lstrip().startswith("---"):
+        return str(content).strip() + "\n"
+    description = (
+        definition.get("description")
+        or definition.get("summary")
+        or skill.name
+    )
+    return (
+        "---\n"
+        f"name: {skill.slug}\n"
+        f"description: {description}\n"
+        "---\n\n"
+        f"{str(content).strip()}\n"
+    )

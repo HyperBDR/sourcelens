@@ -257,6 +257,12 @@ class Skill(TimestampedUUIDModel):
     definition = models.JSONField(default=dict, blank=True)
     version = models.CharField(max_length=64, blank=True, default="1")
     enabled = models.BooleanField(default=True)
+    package_path = models.CharField(max_length=700, blank=True, default="")
+    package_hash = models.CharField(max_length=128, blank=True, default="")
+    package_size = models.PositiveIntegerField(default=0)
+    package_manifest = models.JSONField(default=dict, blank=True)
+    source_type = models.CharField(max_length=32, blank=True, default="manual")
+    source_url = models.CharField(max_length=1000, blank=True, default="")
 
     class Meta:
         ordering = ["name"]

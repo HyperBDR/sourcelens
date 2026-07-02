@@ -124,7 +124,20 @@
                     />
                   </td>
                   <td class="table-cell">
-                    <RowActions :row="row" @edit="startEdit" @delete="remove" />
+                    <div class="flex flex-wrap items-center gap-2">
+                      <BaseButton
+                        size="sm"
+                        variant="outline"
+                        @click="download(row)"
+                      >
+                        {{ t('lensAdmin.skills.download') }}
+                      </BaseButton>
+                      <RowActions
+                        :row="row"
+                        @edit="startEdit"
+                        @delete="remove"
+                      />
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -149,41 +162,135 @@
         @close="closeModal"
       >
         <form id="skill-form" class="space-y-4" @submit.prevent="save">
-          <FormRow :label="t('lensAdmin.fields.name')" required>
-            <input v-model="form.name" class="form-input" required />
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.slug')" required>
-            <input v-model="form.slug" class="form-input" required />
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.description')">
-            <input
-              v-model="form.description"
-              class="form-input"
-              :placeholder="t('lensAdmin.placeholders.skillDescription')"
-            />
-          </FormRow>
-          <FormRow :label="t('lensAdmin.fields.content')">
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <span class="text-xs text-ink-400">
-                {{ t('lensAdmin.skills.beautifyHint') }}
-              </span>
-              <BaseButton
-                size="sm"
-                variant="outline"
-                :loading="beautifying"
-                :disabled="beautifying"
-                @click="beautify"
+          <FormRow
+            v-if="mode === 'create'"
+            :label="t('lensAdmin.skills.createMethod')"
+            required
+          >
+            <select v-model="createMethod" class="form-input">
+              <option
+                v-for="option in createMethodOptions"
+                :key="option.value"
+                :value="option.value"
               >
-                {{ t('lensAdmin.skills.beautify') }}
-              </BaseButton>
-            </div>
-            <textarea
-              v-model="form.content"
-              class="form-input min-h-96"
-              :placeholder="t('lensAdmin.placeholders.skillContent')"
-            />
+                {{ option.label }}
+              </option>
+            </select>
+            <p class="mt-1 text-xs leading-5 text-ink-500">
+              {{ createMethodDescription }}
+            </p>
           </FormRow>
-          <BooleanRow v-model="form.enabled" />
+
+          <template v-if="createMethod === 'manual' || mode === 'edit'">
+            <FormRow :label="t('lensAdmin.fields.name')" required>
+              <input v-model="form.name" class="form-input" required />
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.slug')" required>
+              <input v-model="form.slug" class="form-input" required />
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.description')">
+              <input
+                v-model="form.description"
+                class="form-input"
+                :placeholder="t('lensAdmin.placeholders.skillDescription')"
+              />
+            </FormRow>
+            <FormRow :label="t('lensAdmin.fields.content')">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <span class="text-xs text-ink-400">
+                  {{ t('lensAdmin.skills.beautifyHint') }}
+                </span>
+                <BaseButton
+                  size="sm"
+                  variant="outline"
+                  :loading="beautifying"
+                  :disabled="beautifying"
+                  @click="beautify"
+                >
+                  {{ t('lensAdmin.skills.beautify') }}
+                </BaseButton>
+              </div>
+              <textarea
+                v-model="form.content"
+                class="form-input min-h-96"
+                :placeholder="t('lensAdmin.placeholders.skillContent')"
+              />
+            </FormRow>
+            <BooleanRow v-model="form.enabled" />
+          </template>
+
+          <template v-else-if="createMethod === 'upload'">
+            <FormRow :label="t('lensAdmin.skills.packageFile')" required>
+              <input
+                ref="packageInput"
+                class="hidden"
+                type="file"
+                accept=".zip,application/zip"
+                @change="handlePackageFileChange"
+              />
+              <button
+                type="button"
+                class="upload-dropzone"
+                :class="{ 'upload-dropzone-active': packageDragging }"
+                @click="triggerPackagePick"
+                @dragover.prevent="packageDragging = true"
+                @dragleave.prevent="packageDragging = false"
+                @drop.prevent="handlePackageDrop"
+              >
+                <UploadCloudIcon class="h-8 w-8 text-brand-500" />
+                <span class="text-sm font-medium text-ink-800">
+                  {{
+                    packageFileName || t('lensAdmin.skills.packageDropTitle')
+                  }}
+                </span>
+                <span class="text-xs leading-5 text-ink-500">
+                  {{
+                    packageFileName
+                      ? packageFileSize
+                      : t('lensAdmin.skills.packageDropSubtitle')
+                  }}
+                </span>
+              </button>
+              <div
+                v-if="packageFile"
+                class="mt-2 flex items-center justify-between gap-3 rounded-md border border-line bg-surface-sunken px-3 py-2"
+              >
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-medium text-ink-800">
+                    {{ packageFileName }}
+                  </div>
+                  <div class="text-xs text-ink-500">
+                    {{ packageFileSize }}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="rounded-md p-1 text-ink-400 hover:bg-line-soft hover:text-ink-700"
+                  :aria-label="t('common.delete')"
+                  @click="clearPackageFile"
+                >
+                  <XIcon class="h-4 w-4" />
+                </button>
+              </div>
+              <p class="mt-1 text-xs leading-5 text-ink-500">
+                {{ t('lensAdmin.skills.packageFileHelp') }}
+              </p>
+            </FormRow>
+          </template>
+
+          <template v-else-if="createMethod === 'github'">
+            <FormRow :label="t('lensAdmin.skills.githubUrl')" required>
+              <input
+                v-model="githubUrl"
+                class="form-input"
+                required
+                placeholder="https://github.com/owner/repository"
+              />
+              <p class="mt-1 text-xs leading-5 text-ink-500">
+                {{ t('lensAdmin.skills.githubUrlHelp') }}
+              </p>
+            </FormRow>
+          </template>
 
           <p v-if="formError" class="text-sm text-danger-700">
             {{ formError }}
@@ -197,7 +304,7 @@
               type="submit"
               form="skill-form"
             >
-              {{ t('common.save') }}
+              {{ saveButtonLabel }}
             </BaseButton>
             <BaseButton variant="outline" @click="closeModal">
               {{ t('common.cancel') }}
@@ -212,6 +319,9 @@
         @close="closeDetail"
       >
         <template #actions>
+          <BaseButton size="sm" variant="outline" @click="download(detailRow)">
+            {{ t('lensAdmin.skills.download') }}
+          </BaseButton>
           <BaseButton size="sm" variant="outline" @click="editFromDetail">
             {{ t('common.edit') }}
           </BaseButton>
@@ -251,6 +361,25 @@
             </p>
           </div>
 
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="rounded-lg border border-line bg-surface-sunken p-3">
+              <div class="text-xs font-medium text-ink-400">
+                {{ t('lensAdmin.skills.sourceType') }}
+              </div>
+              <div class="mt-1 text-sm text-ink-700">
+                {{ skillSourceType(detailRow) }}
+              </div>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-sunken p-3">
+              <div class="text-xs font-medium text-ink-400">
+                {{ t('lensAdmin.skills.files') }}
+              </div>
+              <div class="mt-1 text-sm text-ink-700">
+                {{ skillFileCount(detailRow) }}
+              </div>
+            </div>
+          </div>
+
           <div>
             <div class="mb-2 text-sm font-medium text-ink-700">
               {{ t('lensAdmin.fields.content') }}
@@ -274,14 +403,18 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { UploadCloud as UploadCloudIcon, X as XIcon } from '@lucide/vue'
 
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   beautifySkill,
   createSkill,
   deleteSkill,
+  downloadSkill,
+  importSkillFromGithub,
   listSkills,
-  updateSkill
+  updateSkill,
+  uploadSkill
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -300,6 +433,8 @@ import { normalizeList } from './adminHelpers'
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
+const MAX_SKILL_PACKAGE_BYTES = 20 * 1024 * 1024
+
 const skills = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -312,6 +447,30 @@ const detailRow = ref(null)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
+const githubUrl = ref('')
+const packageFile = ref(null)
+const packageInput = ref(null)
+const packageDragging = ref(false)
+
+const createMethodOptions = computed(() => [
+  {
+    value: 'manual',
+    label: t('lensAdmin.skills.manualCreate'),
+    description: t('lensAdmin.skills.manualCreateHelp')
+  },
+  {
+    value: 'upload',
+    label: t('lensAdmin.skills.upload'),
+    description: t('lensAdmin.skills.uploadHelp')
+  },
+  {
+    value: 'github',
+    label: t('lensAdmin.skills.importGithub'),
+    description: t('lensAdmin.skills.importGithubHelp')
+  }
+])
+
+const createMethod = ref('manual')
 
 const columns = computed(() =>
   ['skill', 'slug', 'type', 'status', 'actions'].map((column) =>
@@ -349,6 +508,37 @@ const modalTitle = computed(() => {
   return `${action} ${t('lensAdmin.pages.skills.label')}`
 })
 
+const saveButtonLabel = computed(() => {
+  if (mode.value === 'edit' || createMethod.value === 'manual') {
+    return t('common.save')
+  }
+  if (createMethod.value === 'upload') {
+    return t('lensAdmin.skills.upload')
+  }
+  return t('lensAdmin.skills.importGithub')
+})
+
+const createMethodDescription = computed(() => {
+  return (
+    createMethodOptions.value.find(
+      (option) => option.value === createMethod.value
+    )?.description || ''
+  )
+})
+
+const packageFileName = computed(() => packageFile.value?.name || '')
+
+const packageFileSize = computed(() => {
+  if (!packageFile.value) {
+    return ''
+  }
+  const size = packageFile.value.size || 0
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+})
+
 function isWorkspaceGuideSkill(row) {
   return typeof row?.slug === 'string' && row.slug.endsWith('-workspace-guide')
 }
@@ -372,6 +562,14 @@ function skillContent(row) {
     )
   }
   return ''
+}
+
+function skillSourceType(row) {
+  return row?.source_type || 'manual'
+}
+
+function skillFileCount(row) {
+  return row?.package_manifest?.file_count || 0
 }
 
 function defaultForm() {
@@ -421,17 +619,65 @@ async function load() {
   }
 }
 
+function handlePackageFileChange(event) {
+  setPackageFile(event.target.files?.[0])
+}
+
+function triggerPackagePick() {
+  packageInput.value?.click()
+}
+
+function handlePackageDrop(event) {
+  packageDragging.value = false
+  setPackageFile(event.dataTransfer?.files?.[0])
+}
+
+function setPackageFile(file) {
+  if (!file) {
+    return
+  }
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    const message = t('lensAdmin.skills.packageFileInvalidType')
+    formError.value = message
+    showError(message)
+    clearPackageFile()
+    return
+  }
+  if (file.size > MAX_SKILL_PACKAGE_BYTES) {
+    const message = t('lensAdmin.skills.packageFileTooLarge')
+    formError.value = message
+    showError(message)
+    clearPackageFile()
+    return
+  }
+  packageFile.value = file
+  formError.value = ''
+}
+
+function clearPackageFile() {
+  packageFile.value = null
+  if (packageInput.value) {
+    packageInput.value.value = ''
+  }
+}
+
 function startCreate() {
   mode.value = 'create'
+  createMethod.value = 'manual'
   formError.value = ''
   form.value = defaultForm()
+  githubUrl.value = ''
+  packageFile.value = null
   showModal.value = true
 }
 
 function startEdit(row) {
   mode.value = 'edit'
+  createMethod.value = 'manual'
   formError.value = ''
   form.value = formFromRow(row)
+  githubUrl.value = ''
+  packageFile.value = null
   showModal.value = true
 }
 
@@ -439,6 +685,8 @@ function closeModal() {
   showModal.value = false
   form.value = {}
   formError.value = ''
+  githubUrl.value = ''
+  packageFile.value = null
 }
 
 function openDetail(row) {
@@ -489,8 +737,19 @@ async function save() {
   saving.value = true
   formError.value = ''
   try {
-    await saveByMode(form.value.uuid, buildPayload())
-    showSuccess(t('lensAdmin.messages.saveSuccess'))
+    if (mode.value === 'create' && createMethod.value === 'upload') {
+      if (!packageFile.value) {
+        throw new Error(t('lensAdmin.skills.packageFileRequired'))
+      }
+      await uploadSkill(packageFile.value)
+      showSuccess(t('lensAdmin.skills.uploadSuccess'))
+    } else if (mode.value === 'create' && createMethod.value === 'github') {
+      await importSkillFromGithub(githubUrl.value)
+      showSuccess(t('lensAdmin.skills.importSuccess'))
+    } else {
+      await saveByMode(form.value.uuid, buildPayload())
+      showSuccess(t('lensAdmin.messages.saveSuccess'))
+    }
     closeModal()
     await load()
   } catch (error) {
@@ -514,12 +773,38 @@ async function remove(row) {
   }
 }
 
+async function download(row) {
+  if (!row?.uuid) return
+  try {
+    const response = await downloadSkill(row.uuid)
+    const blob = new Blob([response.data], {
+      type: response.headers?.['content-type'] || 'application/zip'
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${row.slug || 'skill'}.zip`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    showError(extractErrorMessage(error, t('lensAdmin.skills.downloadFailed')))
+  }
+}
+
 onMounted(load)
 </script>
 
 <style scoped>
 .form-input {
   @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
+.upload-dropzone {
+  @apply flex w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line bg-surface-sunken px-4 py-8 text-center transition-colors hover:border-brand-200 hover:bg-brand-50/40 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
+.upload-dropzone-active {
+  @apply border-brand-200 bg-brand-50;
 }
 
 .table-head {

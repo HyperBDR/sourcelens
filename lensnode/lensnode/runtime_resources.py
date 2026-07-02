@@ -1,7 +1,8 @@
+import base64
 import json
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,12 @@ def _materialize_skill(cache_root, skills_root, skill):
 
     cache_dir = cache_root / "skills" / skill_uuid / content_hash
     skill_file = cache_dir / "SKILL.md"
-    if not skill_file.exists():
+    package_files = skill.get("package_files") or []
+    if package_files and not skill_file.exists():
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        _write_skill_package(cache_dir, package_files)
+        _write_json(cache_dir / "metadata.json", _skill_metadata(skill))
+    elif not skill_file.exists():
         cache_dir.mkdir(parents=True, exist_ok=True)
         skill_file.write_text(_skill_markdown(skill), encoding="utf-8")
         _write_json(cache_dir / "metadata.json", _skill_metadata(skill))
@@ -89,6 +95,29 @@ def _materialize_skill(cache_root, skills_root, skill):
     runtime_dir = skills_root / slug
     _copy_dir(cache_dir, runtime_dir)
     return Path("skills") / slug
+
+
+def _write_skill_package(cache_dir, package_files):
+    """Write a packaged Skill snapshot into the cache directory."""
+
+    for item in package_files:
+        relative_path = _safe_relative_package_path(item.get("path"))
+        if relative_path is None:
+            continue
+        content = base64.b64decode(str(item.get("content_b64") or ""))
+        target = cache_dir / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+
+
+def _safe_relative_package_path(value):
+    """Return a safe package-relative path or None."""
+
+    text = str(value or "").replace("\\", "/").strip()
+    path = PurePosixPath(text)
+    if not text or text.startswith("/") or ".." in path.parts:
+        return None
+    return Path(*path.parts)
 
 
 def _materialize_mcp(cache_root, mcp_root, mcp):
