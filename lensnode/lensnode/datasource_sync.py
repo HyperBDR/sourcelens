@@ -455,12 +455,20 @@ def _discover_git_organization(config):
     repositories = _git_project_repositories(projects, config)
     if not repositories:
         return None
+    owner_types = sorted(
+        {
+            project.get("owner_type")
+            for project in projects
+            if project.get("owner_type")
+        }
+    )
     return {
         "status": "success",
         "message_code": "git_organization_available",
         "message": "Git organization is reachable.",
         "details": {
             "scope": "organization",
+            "owner_type": owner_types[0] if len(owner_types) == 1 else "",
             "organization_url": repo_url,
             "repositories": repositories,
         },
@@ -554,6 +562,24 @@ def _discover_git_projects(parsed, group_path, config):
     """Discover projects from supported Git organization APIs."""
 
     attempts = []
+    provider = str(config.get("provider") or "").lower()
+    hostname = str(parsed.hostname or "").lower()
+    if provider == "github" or hostname == "github.com":
+        projects, github_attempts = _discover_github_projects(
+            parsed,
+            group_path,
+            config,
+        )
+        attempts.extend(github_attempts)
+        return projects, attempts
+    if provider == "gitlab":
+        projects, attempt = _discover_gitlab_projects(
+            parsed,
+            group_path,
+            config,
+        )
+        attempts.append(attempt)
+        return projects, attempts
     projects, attempt = _discover_gitlab_projects(parsed, group_path, config)
     attempts.append(attempt)
     if projects:
@@ -561,6 +587,113 @@ def _discover_git_projects(parsed, group_path, config):
     projects, attempt = _discover_gitea_projects(parsed, group_path, config)
     attempts.append(attempt)
     return projects, attempts
+
+
+def _discover_github_projects(parsed, group_path, config):
+    """Discover repositories from a GitHub owner or repository URL."""
+
+    api_base = _github_api_base(parsed, config)
+    parts = [part for part in group_path.split("/") if part]
+    if not parts:
+        return None, []
+    if len(parts) >= 2:
+        owner, repo = parts[0], parts[1]
+        url = (
+            f"{api_base}/repos/{parse.quote(owner, safe='')}"
+            f"/{parse.quote(repo, safe='')}"
+        )
+        payload, error_detail = _git_api_json(
+            url,
+            config,
+            auth_style="github",
+        )
+        if not isinstance(payload, dict):
+            return None, [_git_api_attempt("github", url, error_detail)]
+        return (
+            [_github_project(payload, api_base, "repo")],
+            [_git_api_attempt("github", url, error_detail)],
+        )
+
+    owner = parts[0]
+    projects, attempts = _discover_github_owner_projects(
+        api_base,
+        owner,
+        "org",
+        config,
+    )
+    if projects:
+        return projects, attempts
+    user_projects, user_attempts = _discover_github_owner_projects(
+        api_base,
+        owner,
+        "user",
+        config,
+    )
+    attempts.extend(user_attempts)
+    return user_projects, attempts
+
+
+def _github_api_base(parsed, config):
+    """Return the GitHub API base URL for public or enterprise GitHub."""
+
+    endpoint = str(config.get("endpoint_url") or "").rstrip("/")
+    if endpoint:
+        endpoint_parsed = parse.urlsplit(endpoint)
+        if endpoint_parsed.netloc == "github.com":
+            return "https://api.github.com"
+        return f"{endpoint}/api/v3"
+    if parsed.netloc == "github.com":
+        return "https://api.github.com"
+    base_url = parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    return f"{base_url}/api/v3"
+
+
+def _discover_github_owner_projects(api_base, owner, owner_type, config):
+    """Discover GitHub repositories for an organization or user owner."""
+
+    projects = []
+    attempts = []
+    last_error = ""
+    owner_path = "orgs" if owner_type == "org" else "users"
+    for page in range(1, 11):
+        url = (
+            f"{api_base}/{owner_path}/{parse.quote(owner, safe='')}/repos"
+            f"?per_page=100&page={page}"
+        )
+        payload, error_detail = _git_api_json(
+            url,
+            config,
+            auth_style="github",
+        )
+        attempts.append(_git_api_attempt("github", url, error_detail))
+        if not isinstance(payload, list):
+            last_error = error_detail
+            return None if page == 1 else projects, attempts
+        if not payload:
+            break
+        projects.extend(
+            _github_project(item, api_base, owner_type)
+            for item in payload
+        )
+        if len(payload) < 100:
+            break
+    if last_error and not projects:
+        return None, attempts
+    return projects, attempts
+
+
+def _github_project(item, api_base, owner_type):
+    """Return a normalized GitHub repository project entry."""
+
+    return {
+        "service": "github",
+        "api_base_url": api_base,
+        "owner_type": owner_type,
+        "name": item.get("name") or item.get("full_name"),
+        "path": item.get("full_name") or item.get("name"),
+        "repo_url": item.get("clone_url") or item.get("html_url") or "",
+        "default_branch": item.get("default_branch") or "",
+    }
 
 
 def _discover_gitlab_projects(parsed, group_path, config):
@@ -671,6 +804,8 @@ def _git_api_json(url, config, auth_style, timeout=30):
     token = credentials.get("token") or credentials.get("password")
     if token and auth_style == "gitlab":
         headers["PRIVATE-TOKEN"] = token
+    elif token and auth_style == "github":
+        headers["Authorization"] = f"Bearer {token}"
     elif token and auth_style == "gitea":
         headers["Authorization"] = f"token {token}"
     req = request.Request(url, headers=headers)

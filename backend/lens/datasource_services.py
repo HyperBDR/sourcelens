@@ -360,15 +360,15 @@ def _inject_existing_datasource_credential(
     ).first()
     if credential is None:
         return
-    secret = credential.get_secret()
-    if not secret:
-        return
     if (
         source_type_from_credential(credential) == DataSource.SourceType.FEISHU
     ):
         if credential.scope_config:
             for key, value in credential.scope_config.items():
                 config.setdefault(key, value)
+        secret = credential.get_secret()
+        if not secret:
+            return
         app_id, _, app_secret = secret.partition(":")
         config["app_id"] = app_id
         config["app_secret"] = app_secret
@@ -377,8 +377,13 @@ def _inject_existing_datasource_credential(
             config.setdefault("endpoint_url", credential.endpoint_url)
         if credential.provider:
             config.setdefault("provider", credential.provider)
+        if credential.sync_scope:
+            config.setdefault("credential_sync_scope", credential.sync_scope)
         if credential.scope_config:
             config.setdefault("credential_scope", credential.scope_config)
+        secret = credential.get_secret()
+        if not secret:
+            return
         config["access_token"] = secret
 
 

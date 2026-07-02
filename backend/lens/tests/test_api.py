@@ -24,6 +24,7 @@ from lens.models import (
     SharedQA,
     Skill,
 )
+from lens.datasource_services import test_datasource_connection
 from lens.tasks import acquire_datasource_lock, release_datasource_lock
 
 User = get_user_model()
@@ -991,6 +992,53 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["message_code"], "git_branch_available")
         test_connection.assert_called_once()
+
+    def test_git_connection_test_injects_github_token_credential(self):
+        credential = DataSourceCredential.objects.create(
+            name="GitHub token",
+            provider=DataSourceCredential.Provider.GITHUB,
+            auth_type=DataSourceCredential.AuthType.HTTPS_TOKEN,
+            endpoint_url="https://github.com",
+            sync_scope="service",
+            scope_config={
+                "organization_url": "https://github.com/CarltonXu/"
+            },
+        )
+        credential.set_secret("ghp_example")
+        credential.save()
+        sent_payloads = []
+
+        def capture_command(_lensnode, payload):
+            sent_payloads.append(payload)
+
+        with (
+            patch(
+                "lens.datasource_services._send_lensnode_command",
+                side_effect=capture_command,
+            ),
+            patch(
+                "lens.datasource_services._wait_cache_result",
+                return_value={"status": "success"},
+            ),
+        ):
+            test_datasource_connection(
+                self.lensnode,
+                "git",
+                config={
+                    "repo_url": "https://github.com/CarltonXu/",
+                    "auth_scheme": "token",
+                },
+                credential_uuid=str(credential.uuid),
+            )
+
+        config = sent_payloads[0]["config"]
+        self.assertEqual(config["provider"], "github")
+        self.assertEqual(config["endpoint_url"], "https://github.com")
+        self.assertEqual(config["access_token"], "ghp_example")
+        self.assertEqual(
+            config["credential_scope"]["organization_url"],
+            "https://github.com/CarltonXu/",
+        )
 
     def test_system_health_returns_node_and_retention_tasks(self):
         ScheduledTask.objects.create(

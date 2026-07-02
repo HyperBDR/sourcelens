@@ -12,6 +12,7 @@ from lensnode.datasource_sync import (
     _feishu_folder_token,
     _feishu_export_extension,
     _feishu_export_type,
+    _discover_git_organization,
     _is_feishu_exportable_type,
     _feishu_item_unchanged,
     _feishu_target_file_path,
@@ -69,6 +70,134 @@ def test_default_git_branch_prefers_main():
     assert _default_git_branch(["dev", "main"]) == "main"
     assert _default_git_branch(["dev", "master"]) == "master"
     assert _default_git_branch(["release"]) == "release"
+
+
+def test_discover_github_org_repositories(monkeypatch):
+    """GitHub organization URLs use the GitHub organization API."""
+
+    calls = []
+
+    def fake_api(url, config, auth_style, timeout=30):
+        del config, timeout
+        calls.append((url, auth_style))
+        return [
+            {
+                "name": "repo",
+                "full_name": "Acme/repo",
+                "clone_url": "https://github.com/Acme/repo.git",
+                "default_branch": "main",
+            }
+        ], ""
+
+    monkeypatch.setattr("lensnode.datasource_sync._git_api_json", fake_api)
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._git_repo_branches",
+        lambda repo_url, config: ["main"],
+    )
+
+    result = _discover_git_organization(
+        {
+            "repo_url": "https://github.com/Acme",
+            "provider": "github",
+            "auth_scheme": "token",
+            "access_token": "ghp_example",
+        }
+    )
+
+    assert result["status"] == "success"
+    assert result["details"]["owner_type"] == "org"
+    assert result["details"]["repositories"][0]["repo_url"].endswith(
+        "/repo.git"
+    )
+    assert calls[0] == (
+        "https://api.github.com/orgs/Acme/repos?per_page=100&page=1",
+        "github",
+    )
+
+
+def test_discover_github_user_repositories_after_org_404(monkeypatch):
+    """GitHub user namespace URLs fall back from orgs to users."""
+
+    calls = []
+
+    def fake_api(url, config, auth_style, timeout=30):
+        del config, timeout
+        calls.append((url, auth_style))
+        if "/orgs/" in url:
+            return None, 'HTTP 404: {"message":"Not Found"}'
+        return [
+            {
+                "name": "dotfiles",
+                "full_name": "CarltonXu/dotfiles",
+                "clone_url": "https://github.com/CarltonXu/dotfiles.git",
+                "default_branch": "main",
+            }
+        ], ""
+
+    monkeypatch.setattr("lensnode.datasource_sync._git_api_json", fake_api)
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._git_repo_branches",
+        lambda repo_url, config: ["main"],
+    )
+
+    result = _discover_git_organization(
+        {
+            "repo_url": "https://github.com/CarltonXu/",
+            "provider": "github",
+            "auth_scheme": "token",
+            "access_token": "ghp_example",
+        }
+    )
+
+    assert result["status"] == "success"
+    assert result["details"]["owner_type"] == "user"
+    assert result["details"]["repositories"][0]["path"] == (
+        "CarltonXu/dotfiles"
+    )
+    assert calls[0][0] == (
+        "https://api.github.com/orgs/CarltonXu/repos?per_page=100&page=1"
+    )
+    assert calls[1][0] == (
+        "https://api.github.com/users/CarltonXu/repos?per_page=100&page=1"
+    )
+
+
+def test_discover_github_repository_url(monkeypatch):
+    """GitHub owner/repo URLs use the repository API."""
+
+    calls = []
+
+    def fake_api(url, config, auth_style, timeout=30):
+        del config, timeout
+        calls.append((url, auth_style))
+        return {
+            "name": "repo",
+            "full_name": "Acme/repo",
+            "clone_url": "https://github.com/Acme/repo.git",
+            "default_branch": "main",
+        }, ""
+
+    monkeypatch.setattr("lensnode.datasource_sync._git_api_json", fake_api)
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._git_repo_branches",
+        lambda repo_url, config: ["main"],
+    )
+
+    result = _discover_git_organization(
+        {
+            "repo_url": "https://github.com/Acme/repo",
+            "provider": "github",
+            "auth_scheme": "token",
+            "access_token": "ghp_example",
+        }
+    )
+
+    assert result["status"] == "success"
+    assert result["details"]["owner_type"] == "repo"
+    assert result["details"]["repositories"][0]["name"] == "repo"
+    assert calls == [
+        ("https://api.github.com/repos/Acme/repo", "github"),
+    ]
 
 
 def test_sync_git_uses_shallow_clone(tmp_path, monkeypatch):

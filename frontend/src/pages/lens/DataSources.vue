@@ -1428,7 +1428,7 @@ function shouldUseDatasourceCredential() {
     return false
   }
   if (isGitSourceType(form.value.source_type)) {
-    return ['token', 'none'].includes(datasourceConfig.value.auth_scheme)
+    return true
   }
   return form.value.source_type === 'feishu'
 }
