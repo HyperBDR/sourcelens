@@ -386,7 +386,28 @@ class AssistantSerializer(serializers.ModelSerializer):
             "selected_dirs",
             getattr(self.instance, "selected_dirs", []),
         )
-        validate_selected_dirs(selected_dirs, lensnode)
+        if selected_task == "general_chat":
+            attrs["selected_dirs"] = []
+            skill_bindings = attrs.get("skill_bindings")
+            if skill_bindings is None and self.instance is not None:
+                has_enabled_skill = self.instance.skill_bindings.filter(
+                    enabled=True
+                ).exists()
+            else:
+                has_enabled_skill = any(
+                    binding.get("enabled", True)
+                    for binding in (skill_bindings or [])
+                )
+            if not has_enabled_skill:
+                raise serializers.ValidationError(
+                    {
+                        "skill_bindings": (
+                            "general_chat requires at least one enabled skill"
+                        )
+                    }
+                )
+        else:
+            validate_selected_dirs(selected_dirs, lensnode)
         return attrs
 
     def _sync_bindings(self, assistant, validated_data):

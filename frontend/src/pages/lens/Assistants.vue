@@ -518,14 +518,15 @@ function buildPayload() {
     slug: form.value.slug,
     lensnode_uuid: form.value.lensnode_uuid,
     selected_task: form.value.selected_task,
-    selected_dirs: buildSelectedDirs(),
+    selected_dirs:
+      form.value.selected_task === 'general_chat' ? [] : buildSelectedDirs(),
     agent_model_ref: form.value.agent_model_ref || null,
     agent_rounds: form.value.agent_rounds || 'balanced',
     max_concurrency: Number(form.value.max_concurrency) || 5,
     multimodal_model_ref: form.value.multimodal_model_ref || null,
     settings: buildAssistantSettings(),
     workspace_guide: {
-      enabled: !!guideContent,
+      enabled: form.value.selected_task !== 'general_chat' && !!guideContent,
       content: guideContent
     },
     skill_bindings: (form.value.skill_uuids || []).map((uuid) => ({

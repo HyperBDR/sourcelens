@@ -153,7 +153,7 @@
           </select>
         </FormRow>
       </div>
-      <div>
+      <div v-if="!isGeneralChatTask">
         <div class="mb-1 flex items-center justify-between">
           <span class="text-sm font-medium text-ink-700">{{
             t('lensAdmin.fields.selectedDirs')
@@ -214,7 +214,16 @@
           />
         </div>
       </div>
-      <FormRow :label="t('lensAdmin.fields.retrievalPolicy')">
+      <div
+        v-else
+        class="rounded-md border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
+      >
+        {{ t('lensAdmin.wizard.generalChatExecutionHint') }}
+      </div>
+      <FormRow
+        v-if="!isGeneralChatTask"
+        :label="t('lensAdmin.fields.retrievalPolicy')"
+      >
         <div
           class="grid gap-3 rounded-md border border-line bg-surface-sunken p-3"
         >
@@ -241,7 +250,7 @@
     <!-- Wizard Step 3 — Workspace, Skills & MCP -->
     <div v-else-if="wizardStep === 3" class="space-y-5">
       <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step3Desc') }}</p>
-      <div>
+      <div v-if="!isGeneralChatTask">
         <span class="text-sm font-medium text-ink-700">{{
           t('lensAdmin.wizard.contextLabel')
         }}</span>
@@ -256,30 +265,76 @@
       </div>
       <div>
         <div class="mb-2 text-sm font-medium text-ink-700">
-          {{ t('lensAdmin.wizard.skillsSection') }}
+          {{
+            isGeneralChatTask
+              ? t('lensAdmin.wizard.skillsSectionRequired')
+              : t('lensAdmin.wizard.skillsSection')
+          }}
         </div>
+        <p v-if="isGeneralChatTask" class="mb-2 text-xs text-ink-500">
+          {{ t('lensAdmin.wizard.generalChatSkillsHint') }}
+        </p>
         <div
           v-if="selectableSkills.length"
-          class="space-y-1 rounded-md border border-line bg-surface-sunken p-2"
+          class="space-y-2 rounded-md border border-line bg-surface-sunken p-2"
         >
           <label
             v-for="skill in selectableSkills"
             :key="skill.uuid"
-            class="flex cursor-pointer items-center gap-3 rounded px-2 py-2 transition-colors hover:bg-surface"
+            class="group flex cursor-pointer items-start gap-3 rounded-md border bg-surface px-3 py-2.5 transition-colors hover:border-primary-200 hover:bg-primary-50/40"
+            :class="
+              isSkillSelected(skill.uuid)
+                ? 'border-primary-300 bg-primary-50'
+                : 'border-line'
+            "
           >
             <input
               type="checkbox"
               :value="skill.uuid"
               v-model="form.skill_uuids"
-              class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+              class="sr-only"
             />
-            <div class="min-w-0 flex-1">
-              <div class="text-sm font-medium text-ink-900">
-                {{ skill.name }}
+            <span
+              class="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border transition-colors"
+              :class="
+                isSkillSelected(skill.uuid)
+                  ? 'border-primary-600 bg-primary-600 text-white'
+                  : 'border-line bg-surface text-transparent group-hover:border-primary-300'
+              "
+            >
+              <svg
+                class="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="3"
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            </span>
+            <div class="min-w-0 flex-1 space-y-1">
+              <div class="flex min-w-0 items-start justify-between gap-2">
+                <div
+                  class="min-w-0 truncate text-sm font-semibold text-ink-900"
+                >
+                  {{ skill.name }}
+                </div>
+                <StatusBadge :status="skill.enabled ? 'enabled' : 'disabled'" />
               </div>
-              <div class="font-mono text-xs text-ink-400">{{ skill.slug }}</div>
+              <div class="truncate font-mono text-xs text-ink-400">
+                {{ skill.slug }}
+              </div>
+              <p
+                v-if="skillDescription(skill)"
+                class="line-clamp-2 text-xs leading-5 text-ink-500"
+              >
+                {{ skillDescription(skill) }}
+              </p>
             </div>
-            <StatusBadge :status="skill.enabled ? 'enabled' : 'disabled'" />
           </label>
         </div>
         <div
@@ -654,14 +709,24 @@ const canProceedWizard = computed(() => {
     )
   }
   if (wizardStep.value === 2) {
+    if (isGeneralChatTask.value) {
+      return !!props.form.lensnode_uuid && !!props.form.selected_task
+    }
     return (
       !!props.form.lensnode_uuid &&
       !!props.form.selected_task &&
       selectedDirs().length > 0
     )
   }
+  if (wizardStep.value === 3 && isGeneralChatTask.value) {
+    return (props.form.skill_uuids || []).length > 0
+  }
   return true
 })
+
+const isGeneralChatTask = computed(
+  () => props.form.selected_task === 'general_chat'
+)
 
 const selectedLensNodeTasks = computed(() => {
   const selected = props.lensnodes.find(
@@ -717,6 +782,21 @@ const selectableSkills = computed(() =>
   )
 )
 
+function isSkillSelected(uuid) {
+  return (props.form.skill_uuids || []).includes(uuid)
+}
+
+function skillDescription(skill) {
+  const definition = skill?.definition || {}
+  return (
+    skill?.description ||
+    definition.description ||
+    definition.summary ||
+    skill?.package_manifest?.description ||
+    ''
+  )
+}
+
 function selectedDirs() {
   return Array.isArray(props.form.selected_dirs) ? props.form.selected_dirs : []
 }
@@ -757,8 +837,25 @@ watch(
     ) {
       props.form.selected_task = ''
     }
+    ensureSelectedTask()
   }
 )
+
+watch(
+  () => props.form.selected_task,
+  () => {
+    if (isGeneralChatTask.value) {
+      props.form.selected_dirs = []
+    }
+  }
+)
+
+function ensureSelectedTask() {
+  if (!props.show || props.form.selected_task) {
+    return
+  }
+  props.form.selected_task = selectedLensNodeTasks.value[0]?.name || ''
+}
 </script>
 
 <style scoped>

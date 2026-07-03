@@ -643,6 +643,7 @@ class RunStep(models.Model):
         QUERY_REWRITE = "query_rewrite", "Query Rewrite"
         MULTIMODAL = "multimodal", "Multimodal"
         RETRIEVAL = "retrieval", "Retrieval"
+        GENERAL_CHAT = "general_chat", "General Chat"
         ANSWER = "answer", "Answer"
         STREAM = "stream", "Stream"
 

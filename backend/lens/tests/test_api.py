@@ -96,7 +96,11 @@ class LensApiTests(TestCase):
                 {
                     "name": "knowledge_qa",
                     "description": "Answer code questions",
-                }
+                },
+                {
+                    "name": "general_chat",
+                    "description": "Chat with bound Skills",
+                },
             ],
         )
         self.assistant = Assistant.objects.create(
@@ -331,6 +335,47 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("selected_dirs", str(response.data))
+
+    def test_general_chat_create_allows_empty_dirs_with_skill(self):
+        payload = {
+            "name": "Skill Runner",
+            "slug": "skill-runner",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "selected_task": "general_chat",
+            "selected_dirs": [],
+            "skill_bindings": [{"skill_uuid": str(self.skill.uuid)}],
+        }
+
+        response = self.client.post(
+            "/api/lens/assistants/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        assistant = Assistant.objects.get(slug="skill-runner")
+        self.assertEqual(assistant.selected_task, "general_chat")
+        self.assertEqual(assistant.selected_dirs, [])
+        self.assertEqual(assistant.skill_bindings.count(), 1)
+
+    def test_general_chat_create_requires_enabled_skill(self):
+        payload = {
+            "name": "Skill Runner",
+            "slug": "skill-runner-empty",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "selected_task": "general_chat",
+            "selected_dirs": [],
+            "skill_bindings": [],
+        }
+
+        response = self.client.post(
+            "/api/lens/assistants/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("skill_bindings", response.data)
 
     def test_assistant_model_check_uses_agent_model_ref(self):
         config = LLMConfig.objects.create(

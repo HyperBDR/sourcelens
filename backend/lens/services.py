@@ -392,10 +392,14 @@ def validate_run_dispatch(run):
     if assistant.selected_task not in task_names(lensnode):
         raise LensNodeDispatchError("LENSNODE_TASK_UNAVAILABLE")
 
-    available = available_dir_paths(lensnode)
-    for item in assistant.selected_dirs or []:
-        if item.get("path") not in available:
-            raise LensNodeDispatchError("LENSNODE_DIR_UNAVAILABLE")
+    if assistant.selected_task == "general_chat":
+        if not assistant.skill_bindings.filter(enabled=True).exists():
+            raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
+    else:
+        available = available_dir_paths(lensnode)
+        for item in assistant.selected_dirs or []:
+            if item.get("path") not in available:
+                raise LensNodeDispatchError("LENSNODE_DIR_UNAVAILABLE")
 
 
 @transaction.atomic
@@ -410,7 +414,11 @@ def create_run_execution_snapshot(run):
             "task": assistant.selected_task,
             "loaded_skills": build_loaded_skills(assistant),
             "loaded_mcps": build_loaded_mcps(assistant),
-            "target_dirs": assistant.selected_dirs,
+            "target_dirs": (
+                []
+                if assistant.selected_task == "general_chat"
+                else assistant.selected_dirs
+            ),
             "status": RunExecution.Status.DISPATCHED,
         },
     )

@@ -30,11 +30,16 @@ def prepare_runtime_resources(config, command, emit_event=None):
 
     skill_paths = []
     context_skill_contents = []
+    general_chat_mode = command.get("task") == "general_chat"
     for skill in command.get("loaded_skills") or []:
         skill_path = _materialize_skill(cache_root, skills_root, skill)
         if skill_path is not None:
             skill_paths.append(str(skill_path))
-        context_content = _context_skill_content(skill)
+        context_content = _context_skill_content(
+            skill,
+            skill_path=skill_path,
+            force=general_chat_mode,
+        )
         if context_content:
             context_skill_contents.append(context_content)
 
@@ -52,6 +57,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
             "resources.materialized",
             {
                 "skill_count": len(skill_paths),
+                "skill_paths": skill_paths,
                 "mcp_count": len(mcp_configs),
                 "runtime_root": str(runtime_root),
             },
@@ -189,17 +195,19 @@ def _skill_body(definition):
     )
 
 
-def _context_skill_content(skill):
+def _context_skill_content(skill, skill_path=None, force=False):
     """Return prompt-injected content for context skills."""
 
     load_config = skill.get("load_config") or {}
-    if not load_config.get("inject"):
+    if not force and not load_config.get("inject"):
         return ""
     body = _skill_body(skill.get("definition") or {}).strip()
     if not body:
         return ""
     name = skill.get("skill_name") or skill.get("skill_slug") or "Skill"
-    return f"## {name}\n\n{body[:4000]}"
+    slug = skill.get("skill_slug") or name
+    path_line = f"\nRuntime path: `{skill_path}`\n" if skill_path else ""
+    return f"## {name}\n\nSlug: `{slug}`{path_line}\n{body[:4000]}"
 
 
 def _skill_metadata(skill):

@@ -1,6 +1,8 @@
 import json
 import os
+import shlex
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -26,6 +28,7 @@ SELF_REPORTING_TOOLS = {
     "git_log",
     "git_diff",
     "summarize_recent_changes",
+    "run_skill_script",
 }
 
 
@@ -409,6 +412,225 @@ def build_agent_tools(command, emit_event=None):
         git_log,
         git_diff,
     ]
+
+
+class _RunSkillScriptArgs(BaseModel):
+    """Args schema for running a script bundled with a Skill."""
+
+    skill: str = Field(description="Loaded Skill slug or name.")
+    script: str = Field(
+        description="Script path under the Skill's scripts directory."
+    )
+    args: list[str] = Field(default_factory=list, description="Arguments.")
+    stdin: str = Field(default="", description="Optional standard input.")
+
+
+def build_general_chat_tools(command, resources, emit_event=None):
+    """Build tools for General Chat without workspace retrieval tools."""
+
+    settings = command.get("settings") or {}
+    tool_policy = settings.get("tool_policy") or {}
+    timeout_s = min(
+        _positive_int(
+            tool_policy.get("skill_script_timeout_s"),
+            default=60,
+        ),
+        300,
+    )
+    stdout_limit = min(
+        _positive_int(tool_policy.get("skill_script_stdout_limit"), 20000),
+        100000,
+    )
+    stderr_limit = min(
+        _positive_int(tool_policy.get("skill_script_stderr_limit"), 8000),
+        50000,
+    )
+    skills_root = resources.root / "skills"
+
+    def emit(name, detail=None):
+        if emit_event is not None:
+            emit_event(name, detail or {})
+
+    @tool("run_skill_script", args_schema=_RunSkillScriptArgs)
+    def run_skill_script(
+        skill: str,
+        script: str,
+        args: list[str] | None = None,
+        stdin: str = "",
+    ) -> str:
+        """Run a script bundled in a loaded Skill's scripts/ directory.
+
+        Use this only when the Skill instructions tell you to run a bundled
+        script. The script path must be relative to that Skill's scripts
+        directory, for example "rotate_pdf.py" or "build/report.sh".
+        """
+
+        started = time.monotonic()
+        args = [str(item) for item in (args or [])]
+        skill_dir = _resolve_skill_dir(skills_root, skill)
+        if skill_dir is None:
+            emit("tool.run_skill_script.denied", {"skill": skill})
+            return _json({"ok": False, "error": "SKILL_NOT_LOADED"})
+        script_path = _resolve_skill_script(skill_dir, script)
+        if script_path is None:
+            emit(
+                "tool.run_skill_script.denied",
+                {"skill": skill, "script": script},
+            )
+            return _json({"ok": False, "error": "SCRIPT_NOT_ALLOWED"})
+        command_args = _skill_script_command(script_path)
+        if command_args is None:
+            emit(
+                "tool.run_skill_script.denied",
+                {"skill": skill, "script": str(script_path)},
+            )
+            return _json({"ok": False, "error": "SCRIPT_NOT_EXECUTABLE"})
+        display_name = f"{skill}/{script}"
+        emit(
+            "tool.run_skill_script.start",
+            {
+                "skill": skill,
+                "script": script,
+                "arg_count": len(args),
+                "summary": display_name,
+            },
+        )
+        try:
+            completed = subprocess.run(
+                [*command_args, *args],
+                cwd=str(skill_dir),
+                input=stdin,
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            emit(
+                "tool.run_skill_script.timeout",
+                {
+                    "skill": skill,
+                    "script": script,
+                    "timeout_s": timeout_s,
+                },
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "SCRIPT_TIMEOUT",
+                    "timeout_s": timeout_s,
+                    "stdout": _clip(exc.stdout or "", stdout_limit),
+                    "stderr": _clip(exc.stderr or "", stderr_limit),
+                }
+            )
+        except OSError as exc:
+            emit(
+                "tool.run_skill_script.failed",
+                {"skill": skill, "script": script, "error": str(exc)},
+            )
+            return _json({"ok": False, "error": str(exc)})
+        duration_ms = int((time.monotonic() - started) * 1000)
+        payload = {
+            "ok": completed.returncode == 0,
+            "returncode": completed.returncode,
+            "stdout": completed.stdout[:stdout_limit],
+            "stderr": completed.stderr[:stderr_limit],
+            "duration_ms": duration_ms,
+            "script": str(script_path.relative_to(skill_dir)),
+        }
+        emit(
+            "tool.run_skill_script.done",
+            {
+                "skill": skill,
+                "script": script,
+                "ok": payload["ok"],
+                "returncode": completed.returncode,
+                "duration_ms": duration_ms,
+                "summary": f"{display_name} · rc={completed.returncode}",
+            },
+        )
+        return _json(payload)
+
+    return [run_skill_script]
+
+
+def _resolve_skill_dir(skills_root, value):
+    """Resolve a loaded Skill directory by slug/name."""
+
+    name = _safe_resource_name(value)
+    if not name:
+        return None
+    candidate = (skills_root / name).resolve()
+    try:
+        candidate.relative_to(skills_root.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_dir() else None
+
+
+def _resolve_skill_script(skill_dir, script):
+    """Resolve a script under a Skill's scripts directory."""
+
+    relative = _safe_relative_path(script)
+    if relative is None:
+        return None
+    scripts_root = (skill_dir / "scripts").resolve()
+    candidate = (scripts_root / relative).resolve()
+    try:
+        candidate.relative_to(scripts_root)
+    except ValueError:
+        return None
+    if not candidate.is_file() or candidate.is_symlink():
+        return None
+    return candidate
+
+
+def _skill_script_command(script_path):
+    """Return the command used to execute a Skill script."""
+
+    try:
+        first_line = script_path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        ).splitlines()[0]
+    except IndexError:
+        first_line = ""
+    if first_line.startswith("#!"):
+        command = shlex.split(first_line[2:].strip())
+        return [*command, str(script_path)] if command else None
+    suffix = script_path.suffix.lower()
+    if suffix == ".py":
+        return [sys.executable, str(script_path)]
+    if suffix == ".sh":
+        return ["bash", str(script_path)]
+    if os.access(script_path, os.X_OK):
+        return [str(script_path)]
+    return None
+
+
+def _safe_relative_path(value):
+    """Return a safe relative Path or None."""
+
+    text = str(value or "").replace("\\", "/").strip()
+    if not text or text.startswith("/"):
+        return None
+    path = Path(text)
+    if any(part in {"", ".", ".."} for part in path.parts):
+        return None
+    return path
+
+
+def _safe_resource_name(value):
+    """Normalize a Skill resource name."""
+
+    text = str(value or "").strip().lower()
+    output = []
+    for char in text:
+        if char.isalnum() or char in {"-", "_"}:
+            output.append(char)
+        elif char.isspace():
+            output.append("-")
+    return "".join(output).strip("-_")
 
 
 def _resolve_allowed_path(path, target_dirs):
