@@ -25,6 +25,7 @@ from lens.models import (
     Skill,
 )
 from lens.datasource_services import test_datasource_connection
+from lens.services import build_loaded_skills
 from lens.tasks import acquire_datasource_lock, release_datasource_lock
 
 User = get_user_model()
@@ -376,6 +377,46 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("skill_bindings", response.data)
+
+    def test_general_chat_create_rejects_globally_disabled_skill(self):
+        self.skill.enabled = False
+        self.skill.save(update_fields=["enabled"])
+        payload = {
+            "name": "Skill Runner",
+            "slug": "skill-runner-disabled",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "selected_task": "general_chat",
+            "selected_dirs": [],
+            "skill_bindings": [{"skill_uuid": str(self.skill.uuid)}],
+        }
+
+        response = self.client.post(
+            "/api/lens/assistants/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("skill_bindings", response.data)
+
+    def test_loaded_skills_snapshot_excludes_package_file_bytes(self):
+        assistant = Assistant.objects.create(
+            name="Skill Snapshot",
+            slug="skill-snapshot",
+            lensnode=self.lensnode,
+            selected_task="general_chat",
+            selected_dirs=[],
+        )
+        AssistantSkill.objects.create(
+            assistant=assistant,
+            skill=self.skill,
+            enabled=True,
+        )
+
+        loaded = build_loaded_skills(assistant)
+
+        self.assertEqual(len(loaded), 1)
+        self.assertNotIn("package_files", loaded[0])
 
     def test_assistant_model_check_uses_agent_model_ref(self):
         config = LLMConfig.objects.create(

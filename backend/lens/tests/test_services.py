@@ -38,6 +38,7 @@ from lens.periodic_tasks import (
     register_periodic_tasks,
 )
 from lens.services import (
+    _step_sequence,
     append_lensnode_output,
     build_run_history,
     create_execution_run,
@@ -106,6 +107,20 @@ class LensServiceTests(TransactionTestCase):
             user=self.user,
             title="",
         )
+
+    def test_run_step_sequences_are_distinct_for_structured_steps(self):
+        step_types = [
+            RunStep.StepType.QUERY_REWRITE,
+            RunStep.StepType.MULTIMODAL,
+            RunStep.StepType.RETRIEVAL,
+            RunStep.StepType.GENERAL_CHAT,
+            RunStep.StepType.ANSWER,
+            RunStep.StepType.STREAM,
+        ]
+
+        sequences = [_step_sequence(step_type) for step_type in step_types]
+
+        self.assertEqual(len(sequences), len(set(sequences)))
 
     def test_create_execution_run_creates_queued_run_with_lensnode(self):
         run = create_execution_run(

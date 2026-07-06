@@ -519,8 +519,8 @@ def build_general_chat_tools(command, resources, emit_event=None):
                     "ok": False,
                     "error": "SCRIPT_TIMEOUT",
                     "timeout_s": timeout_s,
-                    "stdout": _clip(exc.stdout or "", stdout_limit),
-                    "stderr": _clip(exc.stderr or "", stderr_limit),
+                    "stdout": _clip(_decode_output(exc.stdout), stdout_limit),
+                    "stderr": _clip(_decode_output(exc.stderr), stderr_limit),
                 }
             )
         except OSError as exc:
@@ -606,6 +606,16 @@ def _skill_script_command(script_path):
     if os.access(script_path, os.X_OK):
         return [str(script_path)]
     return None
+
+
+def _decode_output(value):
+    """Return subprocess output as text."""
+
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return str(value)
 
 
 def _safe_relative_path(value):

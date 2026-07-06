@@ -1714,6 +1714,54 @@ class LensNodeAIGatewayView(APIView):
         return None
 
 
+class LensNodeSkillPackageView(APIView):
+    """Skill package endpoint authenticated by the LensNode token."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, uuid):
+        """Return a packaged Skill archive for LensNode cache fill."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        skill = get_object_or_404(Skill, uuid=uuid, enabled=True)
+        package_hash = request.query_params.get("hash") or ""
+        if package_hash and package_hash != skill.package_hash:
+            return Response(
+                {"detail": "Skill package hash mismatch."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        archive = package_zip_bytes(skill)
+        response = FileResponse(
+            archive,
+            as_attachment=True,
+            filename=f"{skill.slug or skill.uuid}.zip",
+            content_type="application/zip",
+        )
+        response["X-Skill-Package-Hash"] = skill.package_hash
+        return response
+
+    def _authenticate_lensnode(self, request):
+        """Authenticate bearer token against approved LensNodes."""
+
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return None
+        token = header.removeprefix("Bearer ").strip()
+        for lensnode in LensNode.objects.filter(
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            token_revoked=False,
+        ).exclude(auth_token_hash=""):
+            if token_matches(lensnode, token):
+                return lensnode
+        return None
+
+
 def _admin_safe_int(value, default, *, minimum=1, maximum=None):
     """Return a clamped positive int parsed from a query value."""
 

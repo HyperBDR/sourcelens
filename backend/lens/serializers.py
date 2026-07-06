@@ -391,13 +391,19 @@ class AssistantSerializer(serializers.ModelSerializer):
             skill_bindings = attrs.get("skill_bindings")
             if skill_bindings is None and self.instance is not None:
                 has_enabled_skill = self.instance.skill_bindings.filter(
-                    enabled=True
+                    enabled=True,
+                    skill__enabled=True,
                 ).exists()
             else:
-                has_enabled_skill = any(
-                    binding.get("enabled", True)
+                enabled_skill_uuids = [
+                    binding.get("skill_uuid")
                     for binding in (skill_bindings or [])
-                )
+                    if binding.get("enabled", True)
+                ]
+                has_enabled_skill = Skill.objects.filter(
+                    uuid__in=enabled_skill_uuids,
+                    enabled=True,
+                ).exists()
             if not has_enabled_skill:
                 raise serializers.ValidationError(
                     {

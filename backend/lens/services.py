@@ -1,10 +1,8 @@
 import asyncio
-import base64
 import hashlib
 import json
 import logging
 from datetime import timedelta
-from pathlib import Path
 from time import sleep
 
 from asgiref.sync import async_to_sync, sync_to_async
@@ -272,11 +270,11 @@ def build_loaded_skills(assistant):
 
     loaded = []
     for binding in assistant.skill_bindings.select_related("skill").filter(
-        enabled=True
+        enabled=True,
+        skill__enabled=True,
     ):
         skill = binding.skill
         content_hash = skill.package_hash or _content_hash(skill.definition)
-        package_files = _skill_package_files(skill)
         loaded.append(
             {
                 "skill_uuid": str(skill.uuid),
@@ -286,37 +284,12 @@ def build_loaded_skills(assistant):
                 "content_hash": content_hash,
                 "definition": skill.definition,
                 "package_hash": skill.package_hash,
-                "package_files": package_files,
+                "package_size": skill.package_size,
+                "package_manifest": skill.package_manifest,
                 "load_config": binding.load_config,
             }
         )
     return loaded
-
-
-def _skill_package_files(skill):
-    """Return packaged Skill files for LensNode runtime materialization."""
-
-    if not skill.package_hash or not skill.package_path:
-        return []
-
-    package_path = Path(skill.package_path)
-    if not package_path.is_dir():
-        return []
-
-    files = []
-    for path in sorted(package_path.rglob("*")):
-        if not path.is_file():
-            continue
-        relative_path = path.relative_to(package_path).as_posix()
-        files.append(
-            {
-                "path": relative_path,
-                "content_b64": base64.b64encode(path.read_bytes()).decode(
-                    "ascii"
-                ),
-            }
-        )
-    return files
 
 
 def build_loaded_mcps(assistant):
@@ -393,7 +366,10 @@ def validate_run_dispatch(run):
         raise LensNodeDispatchError("LENSNODE_TASK_UNAVAILABLE")
 
     if assistant.selected_task == "general_chat":
-        if not assistant.skill_bindings.filter(enabled=True).exists():
+        if not assistant.skill_bindings.filter(
+            enabled=True,
+            skill__enabled=True,
+        ).exists():
             raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
     else:
         available = available_dir_paths(lensnode)
@@ -771,11 +747,13 @@ def _step_sequence(step_type):
 
     mapping = {
         RunStep.StepType.QUERY_REWRITE: 0,
-        RunStep.StepType.RETRIEVAL: 1,
-        RunStep.StepType.ANSWER: 2,
-        RunStep.StepType.STREAM: 3,
+        RunStep.StepType.MULTIMODAL: 1,
+        RunStep.StepType.RETRIEVAL: 2,
+        RunStep.StepType.GENERAL_CHAT: 3,
+        RunStep.StepType.ANSWER: 4,
+        RunStep.StepType.STREAM: 5,
     }
-    return mapping.get(step_type, 2)
+    return mapping.get(step_type, 4)
 
 
 def stream_run_events(run):

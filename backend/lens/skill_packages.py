@@ -58,6 +58,15 @@ def import_skill_zip(
         slug = _slug_from_metadata(metadata)
         manifest = _package_manifest(skill_root)
         package_root = skill_package_root(slug, digest)
+        existing = Skill.objects.filter(slug=slug).first()
+        if existing and (
+            existing.package_hash != digest
+            or existing.source_type != source_type
+        ):
+            raise SkillPackageError(
+                f"Skill slug '{slug}' already exists. "
+                "Use a different name or update it explicitly."
+            )
         staged_root = package_root.with_name(f".{digest}.tmp")
         if staged_root.exists():
             shutil.rmtree(staged_root)
@@ -102,6 +111,7 @@ def import_skill_from_github(url):
     """Download a public GitHub Skill zip and import it."""
 
     zip_url = _github_zip_url(url)
+    opener = request.build_opener(_GitHubRedirectHandler)
     req = request.Request(
         zip_url,
         headers={
@@ -110,9 +120,7 @@ def import_skill_from_github(url):
         },
     )
     try:
-        with request.urlopen(req, timeout=GITHUB_TIMEOUT_SECONDS) as response:
-            final_url = response.geturl()
-            _validate_github_download_url(final_url)
+        with opener.open(req, timeout=GITHUB_TIMEOUT_SECONDS) as response:
             data = response.read(MAX_GITHUB_DOWNLOAD_SIZE + 1)
     except urlerror.HTTPError as exc:
         raise SkillPackageError(f"GitHub download failed: HTTP {exc.code}")
@@ -126,6 +134,14 @@ def import_skill_from_github(url):
         source_type="github",
         source_url=url,
     )
+
+
+class _GitHubRedirectHandler(request.HTTPRedirectHandler):
+    """Validate each GitHub package redirect target before following it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_github_download_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def skill_package_root(slug, package_hash):
