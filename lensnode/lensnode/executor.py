@@ -24,6 +24,15 @@ def _failure_error_code(exc):
         return "MODEL_TIMEOUT"
     return str(exc)
 
+
+def _execution_step_type(command):
+    """Return the run step type for progress events."""
+
+    if command.get("task") == "general_chat":
+        return "general_chat"
+    return "retrieval"
+
+
 TASKS = [
     {
         "name": "knowledge_qa",
@@ -67,6 +76,26 @@ TASKS = [
             "required": ["question", "target_dirs"],
         },
     },
+    {
+        "name": "general_chat",
+        "title": "General Chat",
+        "description": (
+            "Chat and complete tasks with bound Skills and bundled scripts "
+            "without searching workspace directories."
+        ),
+        "recommended_questions": [
+            "Use the available capabilities to complete this task.",
+            "Follow the configured workflow for this request.",
+            "Help me complete this request without workspace retrieval.",
+        ],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string"},
+            },
+            "required": ["question"],
+        },
+    },
 ]
 
 
@@ -82,6 +111,7 @@ class LensNodeExecutor:
         started_at = utc_now()
         run_uuid = command["run_uuid"]
         task = command.get("task") or "unknown"
+        step_type = _execution_step_type(command)
         target_dirs = command.get("target_dirs") or []
         timeout_s = getattr(self.agent.config, "request_timeout_s", 120)
         target_dir_names = ", ".join(
@@ -94,6 +124,7 @@ class LensNodeExecutor:
             ),
             started_at,
             [
+                f"Task: {task}",
                 f"TargetDirs: {target_dir_names}",
                 f"AgentModelRef: {command.get('agent_model_ref') or 'none'}",
             ],
@@ -103,7 +134,7 @@ class LensNodeExecutor:
             {
                 "type": "run_event",
                 "run_uuid": run_uuid,
-                "step_type": "retrieval",
+                "step_type": step_type,
                 "status": "running",
                 "detail": {
                     "message": start_message,
@@ -127,7 +158,7 @@ class LensNodeExecutor:
                 {
                     "type": "run_event",
                     "run_uuid": run_uuid,
-                    "step_type": "retrieval",
+                    "step_type": step_type,
                     "status": "running",
                     "detail": {
                         "message": progress_message,
@@ -152,7 +183,7 @@ class LensNodeExecutor:
                     {
                         "type": "run_event",
                         "run_uuid": run_uuid,
-                        "step_type": "retrieval",
+                        "step_type": step_type,
                         "status": "running",
                         "detail": detail,
                     }
@@ -215,7 +246,7 @@ class LensNodeExecutor:
                 {
                     "type": "run_event",
                     "run_uuid": run_uuid,
-                    "step_type": "retrieval",
+                    "step_type": step_type,
                     "status": "done",
                     "detail": {
                         "message": retrieval_done_message,
@@ -265,7 +296,7 @@ class LensNodeExecutor:
                 {
                     "type": "run_event",
                     "run_uuid": run_uuid,
-                    "step_type": "retrieval",
+                    "step_type": step_type,
                     "status": "failed",
                     "detail": {
                         "message": failed_message,

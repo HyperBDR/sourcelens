@@ -7,7 +7,11 @@ from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import RemoveMessage
 
-from .agent_tools import build_agent_tools, SELF_REPORTING_TOOLS
+from .agent_tools import (
+    SELF_REPORTING_TOOLS,
+    build_agent_tools,
+    build_general_chat_tools,
+)
 from .gateway_model import LensGatewayChatModel
 from .logging_utils import elapsed_since, task_log, utc_now
 from .runtime_resources import cleanup_runtime_resources
@@ -217,7 +221,14 @@ class LensDeepAgentRuntime:
                 request_timeout_s=self.config.request_timeout_s,
                 emit_output=emit_output,
             )
-            tools = build_agent_tools(command, emit_event=emit_agent_event)
+            if _is_general_chat(command):
+                tools = build_general_chat_tools(
+                    command,
+                    resources,
+                    emit_event=emit_agent_event,
+                )
+            else:
+                tools = build_agent_tools(command, emit_event=emit_agent_event)
             kwargs = {
                 "model": model,
                 "tools": tools,
@@ -233,7 +244,7 @@ class LensDeepAgentRuntime:
                 "subagents": [_fast_subagent()],
                 "name": f"lensnode-{command.get('task') or 'agent'}",
             }
-            if resources.skill_paths:
+            if resources.skill_paths and not _is_general_chat(command):
                 kwargs["skills"] = resources.skill_paths
 
             summarizer = _build_summarization_middleware(
@@ -332,6 +343,20 @@ def _detect_answer_language(question):
 def _system_prompt(scenario, command, context_skill_contents=None):
     """Build the per-task Deep Agents system prompt."""
 
+    if _is_general_chat(command):
+        return _general_chat_system_prompt(command, context_skill_contents)
+    return _knowledge_system_prompt(scenario, command, context_skill_contents)
+
+
+def _is_general_chat(command):
+    """Return whether this command should run as General Chat."""
+
+    return command.get("task") == "general_chat"
+
+
+def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
+    """Build the workspace-grounded system prompt."""
+
     target_dirs = command.get("target_dirs") or []
     dirs = "\n".join(f"- {item.get('path')}" for item in target_dirs)
     answer_language = _detect_answer_language(command.get("question", ""))
@@ -417,6 +442,36 @@ def _system_prompt(scenario, command, context_skill_contents=None):
     )
 
 
+def _general_chat_system_prompt(command, context_skill_contents=None):
+    """Build the General Chat system prompt."""
+
+    answer_language = _detect_answer_language(command.get("question", ""))
+    skill_guidance = _general_chat_guidance(context_skill_contents or [])
+    return (
+        "You are running inside SourceLens LensNode as General Chat.\n\n"
+        "The bound Skills are your primary behavior contract. Follow their "
+        "SKILL.md instructions and use bundled resources only when the Skill "
+        "indicates they are relevant. Do not search or inspect local "
+        "workspace source directories; this mode is not a knowledge-base "
+        "retrieval assistant. If loaded Skill instructions are listed below, "
+        "you MUST treat them as available Skills even if another framework "
+        "message says no Skills are available.\n\n"
+        "You have a private writable scratch directory via the built-in "
+        "filesystem tools. Put generated artifacts there. You may use "
+        "run_skill_script to execute scripts bundled inside loaded Skills' "
+        "scripts/ directories. Only run scripts that the Skill instructions "
+        "directly call for, pass focused arguments, and inspect stdout/stderr "
+        "before deciding what to do next.\n\n"
+        "If required user inputs are missing, ask a concise clarification "
+        "question instead of guessing. If a Skill cannot perform the task, "
+        "say so plainly and explain what capability or input is missing."
+        f"{skill_guidance}"
+        f"\n\nFINAL REMINDER ON LANGUAGE: The user's question is written "
+        f"in {answer_language}. You MUST write your ENTIRE final answer "
+        f"in {answer_language}."
+    )
+
+
 def _fast_subagent():
     """General-purpose subagent that parallelizes its own tool calls.
 
@@ -485,6 +540,31 @@ def _context_guidance(contents):
         "guidance wins. If it defines how links or paths should be "
         "presented, apply that transformation in the final answer instead "
         f"of emitting raw or relative paths.\n\n{joined}"
+    )
+
+
+def _general_chat_guidance(contents):
+    """Build the injected General Chat prompt block."""
+
+    if not contents:
+        return (
+            "\n\nLoaded Skills:\n"
+            "- None were received in this run. Report this as a SourceLens "
+            "assistant configuration issue instead of suggesting that the "
+            "user create a new Skill inside the runtime directory."
+        )
+    joined = "\n\n".join(contents)[:16000]
+    return (
+        "\n\nLoaded Skills:\n"
+        "The following SKILL.md instructions were loaded from the assistant's "
+        "bound Skills. They are authoritative for this run. Use these Skills "
+        "to answer or perform the task. Do not claim that no Skills are "
+        "available.\n\n"
+        "When multiple Skills are loaded, select the smallest relevant "
+        "subset for the user's request. Do not run every Skill automatically. "
+        "If multiple Skills conflict, follow the Skill that best matches the "
+        "current request and briefly explain that choice when it matters.\n\n"
+        f"{joined}"
     )
 
 

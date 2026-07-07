@@ -564,7 +564,7 @@ const TIMELINE_LABELS = {
   'deepagents.agent.truncated': 'Reached turn limit',
   'deepagents.summarization.enabled': 'Context compaction on',
   'deepagents.summarization.compacted': 'Context compacted',
-  'resources.materialized': 'Workspace resources loaded'
+  'resources.materialized': 'Runtime resources loaded'
 }
 
 function timelineDot(e) {

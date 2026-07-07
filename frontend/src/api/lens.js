@@ -271,6 +271,29 @@ export async function deleteSkill(uuid) {
   return unwrapResponse(response)
 }
 
+export async function uploadSkill(file) {
+  const payload = new FormData()
+  payload.append('file', file)
+  const response = await api.post('/lens/admin/skills/upload/', payload, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+  return unwrapResponse(response)
+}
+
+export async function importSkillFromGithub(url) {
+  const response = await api.post('/lens/admin/skills/import-github/', {
+    url
+  })
+  return unwrapResponse(response)
+}
+
+export async function downloadSkill(uuid) {
+  const response = await api.get(`/lens/admin/skills/${uuid}/download/`, {
+    responseType: 'blob'
+  })
+  return response
+}
+
 export async function beautifySkill(payload) {
   const response = await api.post('/lens/admin/skills/beautify/', payload)
   return unwrapResponse(response)

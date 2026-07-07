@@ -386,7 +386,34 @@ class AssistantSerializer(serializers.ModelSerializer):
             "selected_dirs",
             getattr(self.instance, "selected_dirs", []),
         )
-        validate_selected_dirs(selected_dirs, lensnode)
+        if selected_task == "general_chat":
+            attrs["selected_dirs"] = []
+            skill_bindings = attrs.get("skill_bindings")
+            if skill_bindings is None and self.instance is not None:
+                has_enabled_skill = self.instance.skill_bindings.filter(
+                    enabled=True,
+                    skill__enabled=True,
+                ).exists()
+            else:
+                enabled_skill_uuids = [
+                    binding.get("skill_uuid")
+                    for binding in (skill_bindings or [])
+                    if binding.get("enabled", True)
+                ]
+                has_enabled_skill = Skill.objects.filter(
+                    uuid__in=enabled_skill_uuids,
+                    enabled=True,
+                ).exists()
+            if not has_enabled_skill:
+                raise serializers.ValidationError(
+                    {
+                        "skill_bindings": (
+                            "general_chat requires at least one enabled skill"
+                        )
+                    }
+                )
+        else:
+            validate_selected_dirs(selected_dirs, lensnode)
         return attrs
 
     def _sync_bindings(self, assistant, validated_data):
@@ -1347,10 +1374,24 @@ class SkillSerializer(serializers.ModelSerializer):
             "definition",
             "version",
             "enabled",
+            "package_hash",
+            "package_size",
+            "package_manifest",
+            "source_type",
+            "source_url",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["uuid", "created_at", "updated_at"]
+        read_only_fields = [
+            "uuid",
+            "package_hash",
+            "package_size",
+            "package_manifest",
+            "source_type",
+            "source_url",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class MCPServerSerializer(serializers.ModelSerializer):

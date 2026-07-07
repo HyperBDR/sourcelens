@@ -78,6 +78,12 @@ from .skill_generation import (
     SkillGeneratorNotConfigured,
     beautify_skill_content,
 )
+from .skill_packages import (
+    SkillPackageError,
+    import_skill_from_github,
+    import_skill_zip,
+    package_zip_bytes,
+)
 from .tasks import (
     register_datasource_sync_task,
     release_datasource_lock,
@@ -1279,6 +1285,64 @@ class SkillViewSet(BaseAdminViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
+    @action(
+        detail=False,
+        methods=["post"],
+        parser_classes=[MultiPartParser, FormParser],
+        url_path="upload",
+    )
+    def upload(self, request):
+        """Upload and validate a Skill zip package."""
+
+        file_obj = request.FILES.get("file")
+        if file_obj is None:
+            return Response(
+                {"detail": "Skill package file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = import_skill_zip(
+                file_obj=file_obj,
+                original_name=getattr(file_obj, "name", ""),
+            )
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=False, methods=["post"], url_path="import-github")
+    def import_github(self, request):
+        """Import a public Skill zip package from GitHub."""
+
+        url = str(request.data.get("url") or "").strip()
+        if not url:
+            return Response(
+                {"detail": "GitHub URL is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = import_skill_from_github(url)
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, *args, **kwargs):
+        """Download the current Skill package as a zip archive."""
+
+        skill = self.get_object()
+        archive = package_zip_bytes(skill)
+        return FileResponse(
+            archive,
+            as_attachment=True,
+            filename=f"{skill.slug}.zip",
+        )
+
     @action(detail=False, methods=["post"])
     def beautify(self, request):
         """Polish a draft SKILL.md via the configured generator model."""
@@ -1633,6 +1697,54 @@ class LensNodeAIGatewayView(APIView):
         """Serialize one SSE event."""
 
         return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    def _authenticate_lensnode(self, request):
+        """Authenticate bearer token against approved LensNodes."""
+
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return None
+        token = header.removeprefix("Bearer ").strip()
+        for lensnode in LensNode.objects.filter(
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            token_revoked=False,
+        ).exclude(auth_token_hash=""):
+            if token_matches(lensnode, token):
+                return lensnode
+        return None
+
+
+class LensNodeSkillPackageView(APIView):
+    """Skill package endpoint authenticated by the LensNode token."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, uuid):
+        """Return a packaged Skill archive for LensNode cache fill."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        skill = get_object_or_404(Skill, uuid=uuid, enabled=True)
+        package_hash = request.query_params.get("hash") or ""
+        if package_hash and package_hash != skill.package_hash:
+            return Response(
+                {"detail": "Skill package hash mismatch."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        archive = package_zip_bytes(skill)
+        response = FileResponse(
+            archive,
+            as_attachment=True,
+            filename=f"{skill.slug or skill.uuid}.zip",
+            content_type="application/zip",
+        )
+        response["X-Skill-Package-Hash"] = skill.package_hash
+        return response
 
     def _authenticate_lensnode(self, request):
         """Authenticate bearer token against approved LensNodes."""

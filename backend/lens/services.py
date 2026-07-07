@@ -270,16 +270,22 @@ def build_loaded_skills(assistant):
 
     loaded = []
     for binding in assistant.skill_bindings.select_related("skill").filter(
-        enabled=True
+        enabled=True,
+        skill__enabled=True,
     ):
+        skill = binding.skill
+        content_hash = skill.package_hash or _content_hash(skill.definition)
         loaded.append(
             {
-                "skill_uuid": str(binding.skill.uuid),
-                "skill_slug": binding.skill.slug,
-                "skill_name": binding.skill.name,
-                "version": binding.skill.version,
-                "content_hash": _content_hash(binding.skill.definition),
-                "definition": binding.skill.definition,
+                "skill_uuid": str(skill.uuid),
+                "skill_slug": skill.slug,
+                "skill_name": skill.name,
+                "version": skill.version,
+                "content_hash": content_hash,
+                "definition": skill.definition,
+                "package_hash": skill.package_hash,
+                "package_size": skill.package_size,
+                "package_manifest": skill.package_manifest,
                 "load_config": binding.load_config,
             }
         )
@@ -359,10 +365,17 @@ def validate_run_dispatch(run):
     if assistant.selected_task not in task_names(lensnode):
         raise LensNodeDispatchError("LENSNODE_TASK_UNAVAILABLE")
 
-    available = available_dir_paths(lensnode)
-    for item in assistant.selected_dirs or []:
-        if item.get("path") not in available:
-            raise LensNodeDispatchError("LENSNODE_DIR_UNAVAILABLE")
+    if assistant.selected_task == "general_chat":
+        if not assistant.skill_bindings.filter(
+            enabled=True,
+            skill__enabled=True,
+        ).exists():
+            raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
+    else:
+        available = available_dir_paths(lensnode)
+        for item in assistant.selected_dirs or []:
+            if item.get("path") not in available:
+                raise LensNodeDispatchError("LENSNODE_DIR_UNAVAILABLE")
 
 
 @transaction.atomic
@@ -377,7 +390,11 @@ def create_run_execution_snapshot(run):
             "task": assistant.selected_task,
             "loaded_skills": build_loaded_skills(assistant),
             "loaded_mcps": build_loaded_mcps(assistant),
-            "target_dirs": assistant.selected_dirs,
+            "target_dirs": (
+                []
+                if assistant.selected_task == "general_chat"
+                else assistant.selected_dirs
+            ),
             "status": RunExecution.Status.DISPATCHED,
         },
     )
@@ -730,11 +747,13 @@ def _step_sequence(step_type):
 
     mapping = {
         RunStep.StepType.QUERY_REWRITE: 0,
-        RunStep.StepType.RETRIEVAL: 1,
-        RunStep.StepType.ANSWER: 2,
-        RunStep.StepType.STREAM: 3,
+        RunStep.StepType.MULTIMODAL: 1,
+        RunStep.StepType.RETRIEVAL: 2,
+        RunStep.StepType.GENERAL_CHAT: 3,
+        RunStep.StepType.ANSWER: 4,
+        RunStep.StepType.STREAM: 5,
     }
-    return mapping.get(step_type, 2)
+    return mapping.get(step_type, 4)
 
 
 def stream_run_events(run):
