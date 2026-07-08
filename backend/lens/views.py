@@ -1774,6 +1774,7 @@ class LensNodeAIGatewayView(APIView):
                             )
                             return
                         except Exception as exc:
+                            error_code = self._gateway_stream_error_code(exc)
                             _log.error(
                                 "gateway stream exception: type=%s error=%s "
                                 "token_count=%d",
@@ -1782,7 +1783,17 @@ class LensNodeAIGatewayView(APIView):
                                 token_count,
                             )
                             loop.call_soon_threadsafe(
-                                queue.put_nowait, ("error", exc)
+                                queue.put_nowait,
+                                (
+                                    "event",
+                                    {
+                                        "type": "error",
+                                        "error": {
+                                            "code": error_code,
+                                            "message": str(exc),
+                                        },
+                                    },
+                                ),
                             )
                             return
                         token_count += 1
@@ -1796,7 +1807,17 @@ class LensNodeAIGatewayView(APIView):
                         )
                 except Exception as exc:
                     loop.call_soon_threadsafe(
-                        queue.put_nowait, ("error", exc)
+                        queue.put_nowait,
+                        (
+                            "event",
+                            {
+                                "type": "error",
+                                "error": {
+                                    "code": self._gateway_stream_error_code(exc),
+                                    "message": str(exc),
+                                },
+                            },
+                        ),
                     )
 
             future = loop.run_in_executor(None, run_in_thread)
@@ -1805,6 +1826,8 @@ class LensNodeAIGatewayView(APIView):
                     item = await queue.get()
                     if item[0] == "event":
                         yield self._sse(item[1])
+                        if item[1].get("type") == "error":
+                            return
                     elif item[0] == "done":
                         yield self._sse(item[1])
                         return
@@ -1825,6 +1848,25 @@ class LensNodeAIGatewayView(APIView):
         """Serialize one SSE event."""
 
         return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    def _gateway_stream_error_code(self, exc):
+        """Return a stable error code for a gateway stream exception."""
+
+        name = type(exc).__name__.upper()
+        message = str(exc).upper()
+        if "TIMEOUT" in name or "TIMEOUT" in message or "TIMED OUT" in message:
+            return "MODEL_TIMEOUT"
+        stream_markers = [
+            "CHUNKED",
+            "INCOMPLETE",
+            "PEER CLOSED",
+            "REMOTE PROTOCOL",
+            "CONNECTION RESET",
+            "CONNECTION CLOSED",
+        ]
+        if any(marker in name or marker in message for marker in stream_markers):
+            return "MODEL_STREAM_ERROR"
+        return "MODEL_STREAM_ERROR"
 
     def _authenticate_lensnode(self, request):
         """Authenticate bearer token against approved LensNodes."""

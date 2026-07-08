@@ -19,9 +19,23 @@ def _failure_error_code(exc):
     raw exception. Other failures keep their message for debugging.
     """
 
+    code = getattr(exc, "code", "")
+    if code:
+        return str(code)
     name = type(exc).__name__.lower()
-    if isinstance(exc, TimeoutError) or "timeout" in name:
+    message = str(exc).lower()
+    if isinstance(exc, TimeoutError) or "timeout" in name or "timeout" in message:
         return "MODEL_TIMEOUT"
+    stream_error_markers = [
+        "chunked",
+        "incomplete",
+        "peer closed",
+        "remote protocol",
+        "connection reset",
+        "connection closed",
+    ]
+    if any(marker in name or marker in message for marker in stream_error_markers):
+        return "MODEL_STREAM_ERROR"
     return str(exc)
 
 

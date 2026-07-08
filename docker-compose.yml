@@ -126,6 +126,7 @@ services:
       LENSNODE_AI_GATEWAY_URL: http://backend-api:8000/api/lens/lensnode/ai-gateway/
       LENSNODE_WORKSPACE_PATH: /workspace
       LENSNODE_HEARTBEAT_INTERVAL_S: 15
+      LENSNODE_REQUEST_TIMEOUT_S: ${LENSNODE_REQUEST_TIMEOUT_S:-240}
       # Max concurrent runs per node. Each run holds a slot for the full
       # answer duration; without this it falls back to 1 and questions queue.
       LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-8}

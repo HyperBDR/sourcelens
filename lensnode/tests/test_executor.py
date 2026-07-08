@@ -14,7 +14,7 @@ class FakeAgent:
     """Fake agent that emits one streamed content delta."""
 
     class Config:
-        request_timeout_s = 120
+        request_timeout_s = 240
 
     config = Config()
 
@@ -204,7 +204,7 @@ def test_lensnode_run_cancel_cancels_running_task():
             (),
             {
                 "name": "test-node",
-                "request_timeout_s": 120,
+                "request_timeout_s": 240,
                 "max_concurrent_runs": 1,
             },
         )()

@@ -56,7 +56,7 @@ def load_config():
         heartbeat_interval_s=int(
             os.getenv("LENSNODE_HEARTBEAT_INTERVAL_S", "15")
         ),
-        request_timeout_s=int(os.getenv("LENSNODE_REQUEST_TIMEOUT_S", "120")),
+        request_timeout_s=int(os.getenv("LENSNODE_REQUEST_TIMEOUT_S", "240")),
         run_idle_timeout_s=int(
             os.getenv("LENSNODE_RUN_IDLE_TIMEOUT_S", "180")
         ),

@@ -14,6 +14,14 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 LOGGER = logging.getLogger("lensnode")
 
 
+class GatewayStreamError(RuntimeError):
+    """Raised when the AI gateway stream returns an error event."""
+
+    def __init__(self, code, message):
+        self.code = code or "MODEL_STREAM_ERROR"
+        super().__init__(message or self.code)
+
+
 def _in_subagent_context():
     """Return True if the current LLM call originates from a subagent.
 
@@ -133,6 +141,7 @@ class LensGatewayChatModel(BaseChatModel):
         silent = _in_subagent_context()
 
         start = time.monotonic()
+        done_received = False
         with httpx.Client(timeout=self.request_timeout_s) as client:
             with client.stream(
                 "POST",
@@ -161,8 +170,21 @@ class LensGatewayChatModel(BaseChatModel):
                                     if not silent:
                                         self.emit_output(text)
                             elif data.get("type") == "done":
+                                done_received = True
                                 usage = data.get("usage") or {}
                                 tool_calls = data.get("tool_calls") or []
+                            elif data.get("type") == "error":
+                                error = data.get("error") or {}
+                                raise GatewayStreamError(
+                                    error.get("code"),
+                                    error.get("message"),
+                                )
+
+        if not done_received:
+            raise GatewayStreamError(
+                "MODEL_STREAM_ERROR",
+                "AI gateway stream ended before completion.",
+            )
 
         content = "".join(content_parts)
 
