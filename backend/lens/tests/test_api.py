@@ -1,8 +1,12 @@
+import io
+import tempfile
+import zipfile
 from unittest.mock import ANY, patch
 
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
@@ -74,6 +78,27 @@ def bearer_header(user):
     """Return an Authorization header for native Django streaming views."""
 
     return f"Bearer {AccessToken.for_user(user)}"
+
+
+def skill_zip_upload(name, body):
+    """Return an uploaded zip containing one SKILL.md."""
+
+    buffer = io.BytesIO()
+    skill_md = (
+        "---\n"
+        f"name: {name}\n"
+        f"description: {name} description\n"
+        "---\n"
+        f"{body}\n"
+    )
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(f"{name}/SKILL.md", skill_md)
+    buffer.seek(0)
+    return SimpleUploadedFile(
+        f"{name}.zip",
+        buffer.read(),
+        content_type="application/zip",
+    )
 
 
 @override_settings(CACHES=TEST_CACHES, CHANNEL_LAYERS=TEST_CHANNEL_LAYERS)
@@ -300,6 +325,69 @@ class LensApiTests(TestCase):
             "016d5cf7-2245-4015-b242-d6323e795b58",
         )
         self.assertEqual(kwargs["node_name"], "lens.skill_beautify")
+
+    def test_skill_delete_impact_and_force_delete_bound_skill(self):
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=self.skill,
+            enabled=True,
+        )
+
+        impact_response = self.client.get(
+            f"/api/lens/admin/skills/{self.skill.uuid}/delete-impact/",
+        )
+
+        self.assertEqual(impact_response.status_code, 200)
+        self.assertEqual(impact_response.data["bound_count"], 1)
+        self.assertEqual(
+            impact_response.data["bound_assistants"][0]["name"],
+            self.assistant.name,
+        )
+
+        delete_response = self.client.post(
+            f"/api/lens/admin/skills/{self.skill.uuid}/force-delete/",
+            {"confirmation_name": self.skill.name},
+            format="json",
+        )
+
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(Skill.objects.filter(pk=self.skill.pk).exists())
+        self.assertFalse(
+            AssistantSkill.objects.filter(assistant=self.assistant).exists()
+        )
+
+    def test_uploaded_skill_update_preserves_assistant_binding(self):
+        skill = Skill.objects.create(
+            name="package-skill",
+            slug="package-skill",
+            definition={"content": "old"},
+            source_type="upload",
+        )
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=skill,
+            enabled=True,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    f"/api/lens/admin/skills/{skill.uuid}/update-upload/",
+                    {"file": skill_zip_upload("package-skill", "new body")},
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        skill.refresh_from_db()
+        self.assertEqual(skill.definition["content"], "new body")
+        self.assertEqual(skill.source_type, "upload")
+        self.assertTrue(skill.package_hash)
+        self.assertTrue(
+            AssistantSkill.objects.filter(
+                assistant=self.assistant,
+                skill=skill,
+            ).exists()
+        )
 
     def test_assistant_create_rejects_unreported_task(self):
         payload = {

@@ -1,11 +1,11 @@
 <template>
   <AdminLayout>
-    <div class="flex max-w-full flex-col gap-4 py-4">
+    <div class="flex h-full min-h-0 max-w-full flex-col gap-4 py-4">
       <section
-        class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
+        class="flex max-h-full min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
       >
         <div
-          class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
+          class="flex flex-shrink-0 flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
         >
           <div class="min-w-0 space-y-2">
             <h1 class="text-xl font-semibold text-ink-900">
@@ -37,19 +37,19 @@
           </div>
         </div>
 
-        <div class="px-5 py-4">
+        <div class="flex min-h-0 flex-1 flex-col px-5 py-4">
           <BaseLoading v-if="loading && !users.length" />
 
           <div
             v-else-if="error"
-            class="rounded-lg border border-line bg-surface-sunken py-16 text-center"
+            class="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-line bg-surface-sunken py-16 text-center"
           >
             <p class="text-sm font-medium text-danger-700">{{ error }}</p>
           </div>
 
           <div
             v-else-if="!users.length"
-            class="rounded-lg border border-line bg-surface-sunken py-16 text-center"
+            class="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-line bg-surface-sunken py-16 text-center"
           >
             <p class="text-sm font-medium text-ink-500">
               {{ t('common.noData') }}
@@ -58,10 +58,10 @@
 
           <div
             v-else
-            class="relative overflow-x-auto rounded-lg border border-line bg-surface"
+            class="relative min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-surface"
           >
             <table class="min-w-full divide-y divide-line">
-              <thead class="bg-surface-sunken">
+              <thead class="sticky top-0 z-10 bg-surface-sunken">
                 <tr>
                   <th class="table-head">ID</th>
                   <th class="table-head">{{ t('dashboard.username') }}</th>
@@ -148,6 +148,7 @@
 
           <PaginationBar
             v-if="!loading"
+            class="flex-shrink-0"
             v-model:page-size="pageSize"
             :current-page="currentPage"
             :total="totalCount"

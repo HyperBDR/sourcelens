@@ -1,4 +1,5 @@
 import json
+import shutil
 import secrets
 import uuid as uuid_mod
 from urllib import error as urlerror
@@ -24,6 +25,7 @@ from accounts.permissions import HasRequiredFeature
 
 from .models import (
     Assistant,
+    AssistantSkill,
     DataSource,
     DataSourceCredential,
     GlobalSetting,
@@ -83,6 +85,8 @@ from .skill_packages import (
     import_skill_from_github,
     import_skill_zip,
     package_zip_bytes,
+    update_skill_from_github,
+    update_skill_zip,
 )
 from .tasks import (
     register_datasource_sync_task,
@@ -1284,6 +1288,130 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
         return super().destroy(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        """Delete an unbound Skill and remove its package files."""
+
+        package_path = instance.package_path
+        instance.delete()
+        transaction.on_commit(
+            lambda: self._remove_skill_package_path(package_path)
+        )
+
+    @action(detail=True, methods=["get"], url_path="delete-impact")
+    def delete_impact(self, request, *args, **kwargs):
+        """Return assistants that currently bind this Skill."""
+
+        skill = self.get_object()
+        assistants = self._bound_assistants(skill)
+        return Response(
+            {
+                "skill": {
+                    "uuid": str(skill.uuid),
+                    "name": skill.name,
+                    "slug": skill.slug,
+                },
+                "bound_count": len(assistants),
+                "bound_assistants": assistants,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="force-delete")
+    def force_delete(self, request, *args, **kwargs):
+        """Delete a Skill after explicit name confirmation."""
+
+        skill = self.get_object()
+        confirmation = str(request.data.get("confirmation_name") or "")
+        if confirmation != skill.name:
+            return Response(
+                {"detail": "Skill name confirmation does not match."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        package_path = skill.package_path
+        with transaction.atomic():
+            AssistantSkill.objects.filter(skill=skill).delete()
+            skill.delete()
+            transaction.on_commit(
+                lambda: self._remove_skill_package_path(package_path)
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        parser_classes=[MultiPartParser, FormParser],
+        url_path="update-upload",
+    )
+    def update_upload(self, request, *args, **kwargs):
+        """Replace an uploaded Skill package while preserving bindings."""
+
+        skill = self.get_object()
+        file_obj = request.FILES.get("file")
+        if file_obj is None:
+            return Response(
+                {"detail": "Skill package file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = update_skill_zip(
+                skill,
+                file_obj=file_obj,
+                original_name=getattr(file_obj, "name", ""),
+            )
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=True, methods=["post"], url_path="update-github")
+    def update_github(self, request, *args, **kwargs):
+        """Re-import a GitHub Skill while preserving bindings."""
+
+        skill = self.get_object()
+        url = str(request.data.get("url") or "").strip()
+        if not url:
+            return Response(
+                {"detail": "GitHub URL is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = update_skill_from_github(skill, url)
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    def _bound_assistants(self, skill):
+        """Return compact assistant data for delete confirmation."""
+
+        bindings = (
+            AssistantSkill.objects.filter(skill=skill)
+            .select_related("assistant", "assistant__lensnode")
+            .order_by("assistant__name")
+        )
+        return [
+            {
+                "uuid": str(binding.assistant.uuid),
+                "name": binding.assistant.name,
+                "slug": binding.assistant.slug,
+                "status": binding.assistant.status,
+                "visibility": binding.assistant.visibility,
+                "lensnode": binding.assistant.lensnode.name,
+            }
+            for binding in bindings
+        ]
+
+    def _remove_skill_package_path(self, package_path):
+        """Remove package files for a deleted Skill."""
+
+        if not package_path:
+            return
+
+        shutil.rmtree(package_path, ignore_errors=True)
 
     @action(
         detail=False,

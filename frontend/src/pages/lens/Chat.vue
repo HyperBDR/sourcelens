@@ -859,6 +859,8 @@ const partialAnswer = ref('')
 const MAX_IMAGES = 4
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const RUN_POLL_INTERVAL_MS = 3000
+const RUN_POLL_MAX_ATTEMPTS = 160
 const streamError = ref('')
 const failedRunError = ref(null)
 const streamEvents = ref([])
@@ -1225,6 +1227,10 @@ function mapRunError(code) {
   return t('lens.chat.emptyAnswerHint')
 }
 
+function isTerminalRunStatus(status) {
+  return ['done', 'failed', 'cancelled'].includes(status)
+}
+
 const retryHintMessage = computed(() =>
   failedRunError.value
     ? mapRunError(failedRunError.value)
@@ -1279,6 +1285,38 @@ function resetStreamState() {
   revealedCount.value = 0
   seenActivityKeys.clear()
   seenStepEventCounts.clear()
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitForRunTerminal(runUuid) {
+  let run = await getRun(runUuid)
+  for (let attempt = 0; attempt < RUN_POLL_MAX_ATTEMPTS; attempt += 1) {
+    if (isTerminalRunStatus(run?.status)) {
+      return run
+    }
+    await sleep(RUN_POLL_INTERVAL_MS)
+    run = await getRun(runUuid)
+  }
+  return run
+}
+
+async function finishSubmittedRun(runUuid, sessionUuid) {
+  currentRun.value = await getRun(runUuid)
+  messages.value = await listMessages(sessionUuid)
+
+  if (currentRun.value?.status === 'failed') {
+    const errorCode = currentRun.value.error || 'RUN_FAILED'
+    resetStreamState()
+    failedRunError.value = errorCode
+    showError(mapRunError(errorCode))
+  } else {
+    await nextTick()
+    resetStreamState()
+  }
+  await nextTick(scrollToBottom)
 }
 
 function pushAgentActivity(item, fallbackTs, fallbackStatus) {
@@ -1771,8 +1809,9 @@ function handleEvent(event) {
     }
   }
   if (event.type === 'error') {
-    streamError.value =
-      event.error?.message || event.error || t('lens.chat.events.error')
+    streamError.value = event.error?.code
+      ? mapRunError(event.error.code)
+      : event.error?.message || event.error || t('lens.chat.events.error')
     pushStreamEvent({
       label: t('lens.chat.events.error'),
       status: 'failed',
@@ -1891,21 +1930,7 @@ async function submit() {
     await readSse(run.uuid)
     // switched away while streaming — leave the new assistant untouched
     if (selectedSessionUuid.value !== sessionAtSubmit) return
-    currentRun.value = await getRun(run.uuid)
-    messages.value = await listMessages(sessionAtSubmit)
-
-    if (currentRun.value?.status === 'failed') {
-      // Clear the live stream row so the failure is shown once — in the
-      // retry hint below the preserved thinking trace — not twice.
-      const errorCode = currentRun.value.error || 'RUN_FAILED'
-      resetStreamState()
-      failedRunError.value = errorCode
-      showError(mapRunError(errorCode))
-    } else {
-      await nextTick()
-      resetStreamState()
-    }
-    await nextTick(scrollToBottom)
+    await finishSubmittedRun(run.uuid, sessionAtSubmit)
   } catch (err) {
     // a deliberate stream abort (switch/navigate) or a switch away is not a
     // submit failure — bail silently without touching the current state
@@ -1914,6 +1939,24 @@ async function submit() {
       selectedSessionUuid.value !== sessionAtSubmit
     ) {
       return
+    }
+    const runUuid = currentRun.value?.uuid
+    if (runUuid) {
+      try {
+        pushStreamEvent({
+          label: t('lens.chat.events.error'),
+          status: currentRun.value?.status || 'running',
+          message: t('lens.chat.waitingForResult'),
+          ts: new Date().toISOString()
+        })
+        const run = await waitForRunTerminal(runUuid)
+        if (selectedSessionUuid.value !== sessionAtSubmit) return
+        currentRun.value = run
+        await finishSubmittedRun(runUuid, sessionAtSubmit)
+        return
+      } catch {
+        // Fall through to the true submit-failure recovery path.
+      }
     }
     messages.value = messages.value.filter((m) => m.uuid !== '__optimistic__')
     question.value = optimisticText

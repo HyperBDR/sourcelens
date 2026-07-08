@@ -683,6 +683,7 @@
       "uploadHelp": "Skill name, description, and content will be read from the package SKILL.md.",
       "uploadSuccess": "Skill uploaded",
       "uploadFailed": "Skill upload failed",
+      "updateUploadHelp": "Upload a new .zip package to replace this Skill while keeping assistant bindings.",
       "packageFile": "Skill package",
       "packageFileHelp": "Upload a .zip file with one Skill root and a SKILL.md file.",
       "packageFileRequired": "Select a Skill zip package first.",
@@ -694,12 +695,18 @@
       "importGithubHelp": "Skill name, description, and content will be read from the repository SKILL.md.",
       "githubUrl": "GitHub URL",
       "githubUrlHelp": "Use a public GitHub repository URL that contains a standard SKILL.md package.",
+      "updateGithubHelp": "Re-import this Skill from the same source type while keeping assistant bindings.",
       "importSuccess": "Skill imported",
       "importFailed": "Skill import failed",
       "download": "Download",
       "downloadFailed": "Skill download failed",
       "sourceType": "Source",
-      "files": "Files"
+      "files": "Files",
+      "deleteTitle": "Delete Skill",
+      "deleteRiskMessage": "The Skill \"{name}\" is currently used by assistants. Deleting it will remove those bindings and may cause related assistant workflows or tools to stop working.",
+      "boundAssistants": "Bound assistants ({count})",
+      "confirmSkillName": "Confirm Skill name",
+      "confirmSkillNameHelp": "Type \"{name}\" to permanently delete this Skill."
     },
     "skillDetail": {
       "title": "Skill Detail"

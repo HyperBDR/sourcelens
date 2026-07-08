@@ -107,8 +107,114 @@ def import_skill_zip(
     return skill
 
 
+def update_skill_zip(
+    skill,
+    *,
+    file_obj,
+    original_name="",
+    source_type="upload",
+    source_url="",
+):
+    """Validate a Skill zip package and replace an existing Skill snapshot."""
+
+    if skill.source_type != source_type:
+        raise SkillPackageError(
+            "Skill source type cannot be changed during update."
+        )
+    data = _read_limited(file_obj, MAX_ZIP_SIZE + 1)
+    if len(data) > MAX_ZIP_SIZE:
+        raise SkillPackageError("Skill package exceeds 20 MB.")
+    if original_name and not str(original_name).lower().endswith(".zip"):
+        raise SkillPackageError("Skill package must be a .zip file.")
+    if not zipfile.is_zipfile(io.BytesIO(data)):
+        raise SkillPackageError("Skill package must be a valid zip archive.")
+
+    digest = hashlib.sha256(data).hexdigest()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        extract_root = Path(temp_dir) / "extract"
+        extract_root.mkdir()
+        _safe_extract_zip(data, extract_root)
+        skill_root = _find_skill_root(extract_root)
+        metadata = _parse_skill_md(skill_root / "SKILL.md")
+        slug = _slug_from_metadata(metadata)
+        if slug != skill.slug:
+            raise SkillPackageError(
+                "Updated package Skill name must match the existing Skill."
+            )
+        manifest = _package_manifest(skill_root)
+        package_root = skill_package_root(slug, digest)
+        staged_root = package_root.with_name(f".{digest}.tmp")
+        if staged_root.exists():
+            shutil.rmtree(staged_root)
+        staged_root.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(skill_root, staged_root)
+        old_package_path = skill.package_path
+        created_package_root = False
+        try:
+            if package_root.exists():
+                shutil.rmtree(staged_root)
+            else:
+                staged_root.rename(package_root)
+                created_package_root = True
+            with transaction.atomic():
+                skill.name = metadata["name"]
+                skill.definition = {
+                    "description": metadata["description"],
+                    "content": metadata["content"],
+                    "skill_md": metadata["skill_md"],
+                }
+                skill.version = digest[:12]
+                skill.enabled = True
+                skill.package_path = str(package_root)
+                skill.package_hash = digest
+                skill.package_size = len(data)
+                skill.package_manifest = manifest
+                skill.source_url = source_url
+                skill.save(
+                    update_fields=[
+                        "name",
+                        "definition",
+                        "version",
+                        "enabled",
+                        "package_path",
+                        "package_hash",
+                        "package_size",
+                        "package_manifest",
+                        "source_url",
+                        "updated_at",
+                    ]
+                )
+                transaction.on_commit(
+                    lambda: _remove_old_package_path(
+                        old_package_path,
+                        str(package_root),
+                    )
+                )
+        except Exception:
+            shutil.rmtree(staged_root, ignore_errors=True)
+            if created_package_root:
+                shutil.rmtree(package_root, ignore_errors=True)
+            raise
+    return skill
+
+
 def import_skill_from_github(url):
     """Download a public GitHub Skill zip and import it."""
+
+    return _github_skill_zip(url, import_skill_zip)
+
+
+def update_skill_from_github(skill, url):
+    """Download a public GitHub Skill zip and update an existing Skill."""
+
+    return _github_skill_zip(
+        url,
+        lambda **kwargs: update_skill_zip(skill, **kwargs),
+    )
+
+
+def _github_skill_zip(url, importer):
+    """Download a public GitHub Skill zip and pass it to an importer."""
 
     zip_url = _github_zip_url(url)
     opener = request.build_opener(_GitHubRedirectHandler)
@@ -128,7 +234,7 @@ def import_skill_from_github(url):
         raise SkillPackageError(f"GitHub download failed: {exc.reason}")
     if len(data) > MAX_GITHUB_DOWNLOAD_SIZE:
         raise SkillPackageError("GitHub skill package exceeds 20 MB.")
-    return import_skill_zip(
+    return importer(
         file_obj=io.BytesIO(data),
         original_name="github-skill.zip",
         source_type="github",
@@ -363,6 +469,14 @@ def _validate_github_download_url(value):
         raise SkillPackageError(
             "GitHub download redirected to an unsafe host."
         )
+
+
+def _remove_old_package_path(old_path, new_path):
+    """Remove the previous package snapshot after a successful update."""
+
+    if not old_path or old_path == new_path:
+        return
+    shutil.rmtree(old_path, ignore_errors=True)
 
 
 def _skill_md_from_definition(skill):

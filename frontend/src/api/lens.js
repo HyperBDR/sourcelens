@@ -271,6 +271,18 @@ export async function deleteSkill(uuid) {
   return unwrapResponse(response)
 }
 
+export async function getSkillDeleteImpact(uuid) {
+  const response = await api.get(`/lens/admin/skills/${uuid}/delete-impact/`)
+  return unwrapResponse(response)
+}
+
+export async function forceDeleteSkill(uuid, confirmationName) {
+  const response = await api.post(`/lens/admin/skills/${uuid}/force-delete/`, {
+    confirmation_name: confirmationName
+  })
+  return unwrapResponse(response)
+}
+
 export async function uploadSkill(file) {
   const payload = new FormData()
   payload.append('file', file)
@@ -280,8 +292,26 @@ export async function uploadSkill(file) {
   return unwrapResponse(response)
 }
 
+export async function updateUploadedSkill(uuid, file) {
+  const payload = new FormData()
+  payload.append('file', file)
+  const response = await api.post(
+    `/lens/admin/skills/${uuid}/update-upload/`,
+    payload,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return unwrapResponse(response)
+}
+
 export async function importSkillFromGithub(url) {
   const response = await api.post('/lens/admin/skills/import-github/', {
+    url
+  })
+  return unwrapResponse(response)
+}
+
+export async function updateGithubSkill(uuid, url) {
+  const response = await api.post(`/lens/admin/skills/${uuid}/update-github/`, {
     url
   })
   return unwrapResponse(response)

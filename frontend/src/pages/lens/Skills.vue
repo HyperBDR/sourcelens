@@ -163,11 +163,18 @@
       >
         <form id="skill-form" class="space-y-4" @submit.prevent="save">
           <FormRow
-            v-if="mode === 'create'"
-            :label="t('lensAdmin.skills.createMethod')"
+            :label="
+              mode === 'create'
+                ? t('lensAdmin.skills.createMethod')
+                : t('lensAdmin.skills.sourceType')
+            "
             required
           >
-            <select v-model="createMethod" class="form-input">
+            <select
+              v-if="mode === 'create'"
+              v-model="createMethod"
+              class="form-input"
+            >
               <option
                 v-for="option in createMethodOptions"
                 :key="option.value"
@@ -176,12 +183,18 @@
                 {{ option.label }}
               </option>
             </select>
+            <div
+              v-else
+              class="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm text-ink-700"
+            >
+              {{ activeMethodLabel }}
+            </div>
             <p class="mt-1 text-xs leading-5 text-ink-500">
-              {{ createMethodDescription }}
+              {{ activeMethodDescription }}
             </p>
           </FormRow>
 
-          <template v-if="createMethod === 'manual' || mode === 'edit'">
+          <template v-if="activeMethod === 'manual'">
             <FormRow :label="t('lensAdmin.fields.name')" required>
               <input v-model="form.name" class="form-input" required />
             </FormRow>
@@ -219,7 +232,7 @@
             <BooleanRow v-model="form.enabled" />
           </template>
 
-          <template v-else-if="createMethod === 'upload'">
+          <template v-else-if="activeMethod === 'upload'">
             <FormRow :label="t('lensAdmin.skills.packageFile')" required>
               <input
                 ref="packageInput"
@@ -278,7 +291,7 @@
             </FormRow>
           </template>
 
-          <template v-else-if="createMethod === 'github'">
+          <template v-else-if="activeMethod === 'github'">
             <FormRow :label="t('lensAdmin.skills.githubUrl')" required>
               <input
                 v-model="githubUrl"
@@ -396,6 +409,79 @@
           </div>
         </div>
       </BaseDrawer>
+
+      <BaseModal
+        :show="showDeleteModal"
+        :title="t('lensAdmin.skills.deleteTitle')"
+        icon-type="error"
+        @close="closeDeleteModal"
+      >
+        <div v-if="deleteTarget" class="space-y-4">
+          <p class="text-sm leading-6 text-ink-600">
+            {{
+              t('lensAdmin.skills.deleteRiskMessage', {
+                name: deleteTarget.name
+              })
+            }}
+          </p>
+          <div
+            v-if="deleteImpact.bound_assistants?.length"
+            class="rounded-lg border border-danger-200 bg-danger-50 p-3"
+          >
+            <div class="text-sm font-medium text-danger-800">
+              {{
+                t('lensAdmin.skills.boundAssistants', {
+                  count: deleteImpact.bound_count || 0
+                })
+              }}
+            </div>
+            <div class="mt-2 max-h-48 space-y-2 overflow-y-auto">
+              <div
+                v-for="assistant in deleteImpact.bound_assistants"
+                :key="assistant.uuid"
+                class="rounded-md border border-danger-100 bg-surface px-3 py-2"
+              >
+                <div class="text-sm font-medium text-ink-800">
+                  {{ assistant.name }}
+                </div>
+                <div class="mt-1 text-xs text-ink-500">
+                  {{ assistant.visibility }} · {{ assistant.status }} ·
+                  {{ assistant.lensnode }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <FormRow :label="t('lensAdmin.skills.confirmSkillName')" required>
+            <input
+              v-model="deleteConfirmation"
+              class="form-input"
+              :placeholder="deleteTarget.name"
+            />
+            <p class="mt-1 text-xs leading-5 text-ink-500">
+              {{
+                t('lensAdmin.skills.confirmSkillNameHelp', {
+                  name: deleteTarget.name
+                })
+              }}
+            </p>
+          </FormRow>
+        </div>
+        <template #footer>
+          <div class="flex flex-row-reverse gap-2">
+            <BaseButton
+              variant="danger"
+              :loading="deleting"
+              :disabled="deleteConfirmation !== deleteTarget?.name"
+              @click="confirmForceDelete"
+            >
+              {{ t('common.delete') }}
+            </BaseButton>
+            <BaseButton variant="outline" @click="closeDeleteModal">
+              {{ t('common.cancel') }}
+            </BaseButton>
+          </div>
+        </template>
+      </BaseModal>
     </div>
   </AdminLayout>
 </template>
@@ -411,15 +497,20 @@ import {
   createSkill,
   deleteSkill,
   downloadSkill,
+  forceDeleteSkill,
+  getSkillDeleteImpact,
   importSkillFromGithub,
   listSkills,
+  updateGithubSkill,
   updateSkill,
+  updateUploadedSkill,
   uploadSkill
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseModal from '@/components/ui/BaseModal.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
@@ -443,14 +534,20 @@ const saving = ref(false)
 const beautifying = ref(false)
 const showModal = ref(false)
 const showDetail = ref(false)
+const showDeleteModal = ref(false)
 const detailRow = ref(null)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
 const githubUrl = ref('')
+const editSourceType = ref('manual')
 const packageFile = ref(null)
 const packageInput = ref(null)
 const packageDragging = ref(false)
+const deleteTarget = ref(null)
+const deleteImpact = ref({})
+const deleteConfirmation = ref('')
+const deleting = ref(false)
 
 const createMethodOptions = computed(() => [
   {
@@ -524,6 +621,31 @@ const createMethodDescription = computed(() => {
       (option) => option.value === createMethod.value
     )?.description || ''
   )
+})
+
+const activeMethod = computed(() =>
+  mode.value === 'edit' ? editSourceType.value : createMethod.value
+)
+
+const activeMethodOption = computed(() =>
+  createMethodOptions.value.find(
+    (option) => option.value === activeMethod.value
+  )
+)
+
+const activeMethodLabel = computed(() => activeMethodOption.value?.label || '')
+
+const activeMethodDescription = computed(() => {
+  if (mode.value === 'create') {
+    return createMethodDescription.value
+  }
+  if (activeMethod.value === 'upload') {
+    return t('lensAdmin.skills.updateUploadHelp')
+  }
+  if (activeMethod.value === 'github') {
+    return t('lensAdmin.skills.updateGithubHelp')
+  }
+  return activeMethodOption.value?.description || ''
 })
 
 const packageFileName = computed(() => packageFile.value?.name || '')
@@ -664,6 +786,7 @@ function clearPackageFile() {
 function startCreate() {
   mode.value = 'create'
   createMethod.value = 'manual'
+  editSourceType.value = 'manual'
   formError.value = ''
   form.value = defaultForm()
   githubUrl.value = ''
@@ -673,10 +796,11 @@ function startCreate() {
 
 function startEdit(row) {
   mode.value = 'edit'
-  createMethod.value = 'manual'
+  editSourceType.value = row?.source_type || 'manual'
+  createMethod.value = editSourceType.value
   formError.value = ''
   form.value = formFromRow(row)
-  githubUrl.value = ''
+  githubUrl.value = row?.source_url || ''
   packageFile.value = null
   showModal.value = true
 }
@@ -686,6 +810,7 @@ function closeModal() {
   form.value = {}
   formError.value = ''
   githubUrl.value = ''
+  editSourceType.value = 'manual'
   packageFile.value = null
 }
 
@@ -746,6 +871,15 @@ async function save() {
     } else if (mode.value === 'create' && createMethod.value === 'github') {
       await importSkillFromGithub(githubUrl.value)
       showSuccess(t('lensAdmin.skills.importSuccess'))
+    } else if (mode.value === 'edit' && activeMethod.value === 'upload') {
+      if (!packageFile.value) {
+        throw new Error(t('lensAdmin.skills.packageFileRequired'))
+      }
+      await updateUploadedSkill(form.value.uuid, packageFile.value)
+      showSuccess(t('lensAdmin.messages.saveSuccess'))
+    } else if (mode.value === 'edit' && activeMethod.value === 'github') {
+      await updateGithubSkill(form.value.uuid, githubUrl.value)
+      showSuccess(t('lensAdmin.messages.saveSuccess'))
     } else {
       await saveByMode(form.value.uuid, buildPayload())
       showSuccess(t('lensAdmin.messages.saveSuccess'))
@@ -765,11 +899,43 @@ async function save() {
 
 async function remove(row) {
   try {
+    const impact = await getSkillDeleteImpact(row.uuid)
+    if ((impact?.bound_count || 0) > 0) {
+      deleteTarget.value = row
+      deleteImpact.value = impact || {}
+      deleteConfirmation.value = ''
+      showDeleteModal.value = true
+      return
+    }
     await deleteSkill(row.uuid)
     showSuccess(t('lensAdmin.messages.deleteSuccess'))
     await load()
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.deleteFailed')))
+  }
+}
+
+function closeDeleteModal() {
+  if (deleting.value) return
+  showDeleteModal.value = false
+  deleteTarget.value = null
+  deleteImpact.value = {}
+  deleteConfirmation.value = ''
+}
+
+async function confirmForceDelete() {
+  if (!deleteTarget.value) return
+  deleting.value = true
+  try {
+    await forceDeleteSkill(deleteTarget.value.uuid, deleteConfirmation.value)
+    showSuccess(t('lensAdmin.messages.deleteSuccess'))
+    deleting.value = false
+    closeDeleteModal()
+    await load()
+  } catch (error) {
+    showError(extractErrorMessage(error, t('lensAdmin.messages.deleteFailed')))
+  } finally {
+    deleting.value = false
   }
 }
 
