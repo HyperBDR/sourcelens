@@ -629,9 +629,23 @@ def append_lensnode_output(
 
 
 def record_lensnode_run_event(run_uuid, step_type, status, detail):
-    """Persist a structured LensNode event into a RunStep row."""
+    """Persist a structured LensNode event into a RunStep row.
+
+    Events for a run that already reached a terminal state are dropped:
+    a cancelled agent thread can keep emitting for a while, and those
+    late events must not rewrite the trace of a settled run. The warning
+    makes orphan-thread activity observable.
+    """
 
     run = Run.objects.get(uuid=run_uuid)
+    if run.status in TERMINAL_RUN_STATUSES:
+        logger.warning(
+            "run %s: dropping late %s event (run already %s)",
+            run_uuid,
+            step_type,
+            run.status,
+        )
+        return None
     sequence = _step_sequence(step_type)
     step, _ = RunStep.objects.get_or_create(
         run=run,

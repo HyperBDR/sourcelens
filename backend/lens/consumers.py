@@ -196,12 +196,14 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         if run_uuid is None:
             await self._send_bad_frame("run_uuid is invalid")
             return
-        await database_sync_to_async(record_lensnode_run_event)(
+        step = await database_sync_to_async(record_lensnode_run_event)(
             run_uuid,
             content.get("step_type") or "retrieval",
             content.get("status") or "running",
             content.get("detail") or {},
         )
+        if step is None:
+            return
         LOGGER.info(
             "Recorded LensNode run event run_uuid=%s step_type=%s status=%s",
             run_uuid,

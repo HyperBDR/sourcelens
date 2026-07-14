@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 
 from .agent_runtime import LensDeepAgentRuntime
 from .logging_utils import elapsed_since, format_duration, task_log, utc_now
@@ -8,6 +9,18 @@ LOGGER = logging.getLogger("lensnode")
 
 # How often the inactivity watchdog checks for stalled output.
 WATCHDOG_INTERVAL_S = 5
+
+
+class RunStalledError(TimeoutError):
+    """No transport activity at all for the whole idle window.
+
+    The gateway heartbeats every few seconds while a model call is in
+    flight, so tripping this means the pipe to the gateway is dead or
+    the agent is wedged between calls — distinct from MODEL_TIMEOUT,
+    which the gateway reports when the provider itself times out.
+    """
+
+    code = "NO_ACTIVITY_TIMEOUT"
 
 
 def _failure_error_code(exc):
@@ -128,13 +141,17 @@ class LensNodeExecutor:
         step_type = _execution_step_type(command)
         target_dirs = command.get("target_dirs") or []
         timeout_s = getattr(self.agent.config, "request_timeout_s", 120)
+        idle_timeout_s = getattr(
+            self.agent.config, "run_idle_timeout_s", 180
+        )
         target_dir_names = ", ".join(
             item.get("path", "") for item in target_dirs
         ) or "none"
         start_message = task_log(
             (
                 f"Starting to run command: {task}({run_uuid}). "
-                f"The timeout is set to {format_duration(timeout_s)}."
+                f"Request timeout {format_duration(timeout_s)}, "
+                f"idle timeout {format_duration(idle_timeout_s)}."
             ),
             started_at,
             [
@@ -180,14 +197,17 @@ class LensNodeExecutor:
                 }
             )
 
-            idle_timeout_s = getattr(
-                self.agent.config, "run_idle_timeout_s", 180
-            )
             loop = asyncio.get_running_loop()
             activity = {"at": loop.time()}
+            cancel_event = threading.Event()
+
+            def touch_activity():
+                activity["at"] = loop.time()
 
             def emit_progress(message, extra_detail=None):
-                activity["at"] = loop.time()
+                if cancel_event.is_set():
+                    return
+                touch_activity()
                 detail = {
                     "message": message,
                 }
@@ -204,7 +224,9 @@ class LensNodeExecutor:
                 )
 
             def emit_output(content, reset=False):
-                activity["at"] = loop.time()
+                if cancel_event.is_set():
+                    return
+                touch_activity()
                 emit(
                     {
                         "type": "run_output",
@@ -214,34 +236,50 @@ class LensNodeExecutor:
                     }
                 )
 
-            # Inactivity watchdog: abort if the agent produces no output or
-            # progress for idle_timeout_s. A live answer streams tokens
-            # continuously so it never trips, however long it runs; a hung
-            # upstream call (which the streaming gateway can mask) does.
+            # Inactivity watchdog on TRANSPORT activity, not user-visible
+            # output: any gateway SSE event (heartbeats, reasoning and
+            # tool-call tokens) refreshes the clock via on_activity, so a
+            # silent long model call never trips it. Provider stalls are
+            # the gateway's call to make (litellm read timeout -> error
+            # event); this watchdog only fires when the pipe itself dies.
+            # Cancelling the asyncio task cannot stop the agent worker
+            # thread, so cancel_event tells the thread to unwind at its
+            # next chunk or model-call boundary and mutes its late emits.
             answer_task = asyncio.create_task(
                 self.agent.answer(
                     command,
                     emit_progress=emit_progress,
                     emit_output=emit_output,
+                    on_activity=touch_activity,
+                    cancel_event=cancel_event,
                 )
             )
-            while True:
-                done, _ = await asyncio.wait(
-                    {answer_task}, timeout=WATCHDOG_INTERVAL_S
-                )
-                if answer_task in done:
-                    result = answer_task.result()
-                    break
-                if loop.time() - activity["at"] > idle_timeout_s:
-                    answer_task.cancel()
-                    try:
-                        await answer_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                    raise TimeoutError(
-                        "Run produced no output for "
-                        f"{format_duration(idle_timeout_s)}; aborting."
+            try:
+                while True:
+                    done, _ = await asyncio.wait(
+                        {answer_task}, timeout=WATCHDOG_INTERVAL_S
                     )
+                    if answer_task in done:
+                        result = answer_task.result()
+                        break
+                    if loop.time() - activity["at"] > idle_timeout_s:
+                        cancel_event.set()
+                        answer_task.cancel()
+                        try:
+                            await answer_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                        raise RunStalledError(
+                            "Run saw no gateway activity for "
+                            f"{format_duration(idle_timeout_s)}; aborting."
+                        )
+            except asyncio.CancelledError:
+                # run_cancel cancels this coroutine, which does not cancel
+                # answer_task or its worker thread on its own. Signal both
+                # so the agent stops issuing model calls for a dead run.
+                cancel_event.set()
+                answer_task.cancel()
+                raise
             samples = result.get("samples") or []
             sample_paths = [item["path"] for item in samples]
             retrieval_done_message = task_log(
