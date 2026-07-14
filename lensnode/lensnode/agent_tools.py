@@ -227,6 +227,25 @@ def build_agent_tools(command, emit_event=None):
             max_results=max_results,
             policy=retrieval_policy,
         )
+        note = None
+        if not files and pattern and "**" not in pattern:
+            # A non-recursive glob (e.g. "*") only matches the top level,
+            # which is empty when the workspace root holds only
+            # subdirectories. Retry recursively so a shallow pattern never
+            # reads as "the workspace has no files".
+            recursive = "**/" + pattern.lstrip("/")
+            files = glob_files(
+                target_dirs,
+                recursive,
+                max_results=max_results,
+                policy=retrieval_policy,
+            )
+            if files:
+                note = (
+                    f"pattern '{pattern}' is non-recursive and matched "
+                    f"nothing at the top level; showing recursive "
+                    f"'{recursive}' results instead."
+                )
         emit(
             "tool.find_files.done",
             {
@@ -238,7 +257,10 @@ def build_agent_tools(command, emit_event=None):
                 "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
-        return _json({"files": files})
+        payload = {"files": files}
+        if note:
+            payload["note"] = note
+        return _json(payload)
 
     @tool("git_log")
     def git_log(path: str = "", max_count: int = 10) -> str:
