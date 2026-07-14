@@ -12,7 +12,7 @@ from .agent_tools import (
     build_agent_tools,
     build_general_chat_tools,
 )
-from .gateway_model import LensGatewayChatModel
+from .gateway_model import LensGatewayChatModel, RunCancelledError
 from .logging_utils import elapsed_since, task_log, utc_now
 from .runtime_resources import cleanup_runtime_resources
 from .runtime_resources import prepare_runtime_resources
@@ -126,7 +126,9 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
         return result
 
 
-def _build_summarization_middleware(config, model_ref, emit_event):
+def _build_summarization_middleware(
+    config, model_ref, emit_event, cancel_event=None
+):
     """Build context-compaction middleware, or None when disabled.
 
     The summary is produced by a non-streaming gateway model so its tokens
@@ -148,6 +150,7 @@ def _build_summarization_middleware(config, model_ref, emit_event):
         ai_gateway_url=config.ai_gateway_url,
         token=config.token,
         request_timeout_s=config.request_timeout_s,
+        cancel_event=cancel_event,
     )
     middleware = LensSummarizationMiddleware(
         model=summary_model,
@@ -166,7 +169,14 @@ class LensDeepAgentRuntime:
     def __init__(self, config):
         self.config = config
 
-    async def answer(self, command, emit_progress=None, emit_output=None):
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+    ):
         """Execute a run_start command with create_deep_agent."""
 
         return await asyncio.to_thread(
@@ -174,9 +184,18 @@ class LensDeepAgentRuntime:
             command,
             emit_progress,
             emit_output,
+            on_activity,
+            cancel_event,
         )
 
-    def _answer_sync(self, command, emit_progress=None, emit_output=None):
+    def _answer_sync(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+    ):
         """Synchronous Deep Agents invocation run in a worker thread."""
 
         started_at = utc_now()
@@ -220,6 +239,9 @@ class LensDeepAgentRuntime:
                 token=self.config.token,
                 request_timeout_s=self.config.request_timeout_s,
                 emit_output=emit_output,
+                on_activity=on_activity,
+                cancel_event=cancel_event,
+                run_uuid=str(command.get("run_uuid") or ""),
             )
             if _is_general_chat(command):
                 tools = build_general_chat_tools(
@@ -248,7 +270,7 @@ class LensDeepAgentRuntime:
                 kwargs["skills"] = resources.skill_paths
 
             summarizer = _build_summarization_middleware(
-                self.config, model_ref, emit_agent_event
+                self.config, model_ref, emit_agent_event, cancel_event
             )
             if summarizer is not None:
                 kwargs["middleware"] = [summarizer]
@@ -283,6 +305,7 @@ class LensDeepAgentRuntime:
                 max_turns,
                 emit_event=emit_agent_event,
                 answer_language=_detect_answer_language(question),
+                cancel_event=cancel_event,
             )
             if not (answer or "").strip():
                 # the model finished a turn without emitting answer text (e.g.
@@ -638,7 +661,12 @@ def _build_initial_messages(history, question):
 
 
 def _run_agent_with_turn_limit(
-    agent, messages, max_turns, emit_event=None, answer_language="English"
+    agent,
+    messages,
+    max_turns,
+    emit_event=None,
+    answer_language="English",
+    cancel_event=None,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -662,6 +690,10 @@ def _run_agent_with_turn_limit(
         stream_mode="values",
         config={"recursion_limit": 500},
     ):
+        if cancel_event is not None and cancel_event.is_set():
+            raise RunCancelledError(
+                "Run was cancelled; stopping the agent loop."
+            )
         last_state = state
         current = state.get("messages", [])
         if not seeded_baseline:

@@ -22,6 +22,18 @@ class GatewayStreamError(RuntimeError):
         super().__init__(message or self.code)
 
 
+class RunCancelledError(RuntimeError):
+    """Raised inside a worker thread once its run has been cancelled.
+
+    Cancelling the asyncio task cannot interrupt the synchronous agent
+    thread, so the thread checks a shared cancel event at every stream
+    chunk and before every model call, and unwinds itself with this
+    error instead of issuing further model calls for a dead run.
+    """
+
+    code = "RUN_CANCELLED"
+
+
 def _in_subagent_context():
     """Return True if the current LLM call originates from a subagent.
 
@@ -48,6 +60,12 @@ class LensGatewayChatModel(BaseChatModel):
     token: str
     request_timeout_s: int = 120
     emit_output: Optional[Any] = None
+    # Called on EVERY gateway SSE event (reasoning/tool-call tokens,
+    # heartbeats, done) to prove transport liveness to the run watchdog.
+    # emit_output stays content-only for the user-facing stream.
+    on_activity: Optional[Any] = None
+    cancel_event: Optional[Any] = None
+    run_uuid: str = ""
 
     @property
     def _llm_type(self):
@@ -80,6 +98,14 @@ class LensGatewayChatModel(BaseChatModel):
             **kwargs,
         )
 
+    def _check_cancelled(self):
+        """Abort the current call when the run has been cancelled."""
+
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise RunCancelledError(
+                "Run was cancelled; aborting in-flight model call."
+            )
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -90,10 +116,14 @@ class LensGatewayChatModel(BaseChatModel):
         """Generate a response through the LensNode AI gateway."""
 
         del stop, run_manager
+        self._check_cancelled()
         payload = {
             "model_ref": self.model_ref,
             "messages": [_message_to_gateway(message) for message in messages],
         }
+        if self.run_uuid:
+            payload["run_uuid"] = self.run_uuid
+            payload["is_subagent"] = _in_subagent_context()
         if kwargs.get("tools") is not None:
             payload["tools"] = kwargs["tools"]
         if kwargs.get("tool_choice") is not None:
@@ -152,6 +182,7 @@ class LensGatewayChatModel(BaseChatModel):
                 response.raise_for_status()
                 buffer = ""
                 for chunk in response.iter_text():
+                    self._check_cancelled()
                     buffer += chunk
                     while "\n\n" in buffer:
                         event_str, buffer = buffer.split("\n\n", 1)
@@ -162,6 +193,12 @@ class LensGatewayChatModel(BaseChatModel):
                                 data = json.loads(line[6:])
                             except ValueError:
                                 continue
+                            # Any decoded event — heartbeat, reasoning or
+                            # tool-call token, done — proves the gateway
+                            # stream is alive, even when nothing is
+                            # user-visible.
+                            if self.on_activity is not None:
+                                self.on_activity()
                             if data.get("type") == "token":
                                 kind = data.get("kind") or "content"
                                 text = data.get("content") or ""

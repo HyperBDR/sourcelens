@@ -18,8 +18,15 @@ class FakeAgent:
 
     config = Config()
 
-    async def answer(self, command, emit_progress=None, emit_output=None):
-        del command, emit_progress
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+    ):
+        del command, emit_progress, on_activity, cancel_event
         emit_output("streamed")
         return {
             "answer": "streamed final",
@@ -53,6 +60,114 @@ def test_executor_emits_streamed_output_delta():
         "run_uuid": "00000000-0000-0000-0000-000000000001",
         "final_content": "streamed final",
     } in events
+
+
+class StallingAgent:
+    """Fake agent that never produces output until cancelled."""
+
+    class Config:
+        request_timeout_s = 240
+        run_idle_timeout_s = 0.1
+
+    config = Config()
+
+    def __init__(self):
+        self.cancel_event = None
+
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+    ):
+        del command, emit_progress, on_activity
+        self.cancel_event = cancel_event
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            # A cancelled worker thread may still try to emit; the
+            # executor must mute it so a settled run stays untouched.
+            emit_output("late output")
+
+
+def test_executor_watchdog_fails_stalled_run_and_mutes_late_emits(
+    monkeypatch,
+):
+    monkeypatch.setattr("lensnode.executor.WATCHDOG_INTERVAL_S", 0.02)
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    agent = StallingAgent()
+    executor.agent = agent
+    events = []
+
+    asyncio.run(
+        executor.execute(
+            {
+                "run_uuid": "00000000-0000-0000-0000-000000000004",
+                "task": "knowledge_qa",
+                "target_dirs": [],
+            },
+            events.append,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"]
+    assert done[-1]["status"] == "failed"
+    assert done[-1]["error"] == "NO_ACTIVITY_TIMEOUT"
+    assert agent.cancel_event is not None
+    assert agent.cancel_event.is_set()
+    assert not any(
+        event.get("content_delta") == "late output" for event in events
+    )
+
+
+class HeartbeatOnlyAgent:
+    """Fake agent alive through on_activity only, with no output."""
+
+    class Config:
+        request_timeout_s = 240
+        run_idle_timeout_s = 0.15
+
+    config = Config()
+
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+    ):
+        del command, emit_progress, emit_output, cancel_event
+        for _ in range(10):
+            await asyncio.sleep(0.05)
+            on_activity()
+        return {
+            "answer": "quiet but alive",
+            "samples": [],
+        }
+
+
+def test_executor_watchdog_survives_on_transport_activity(monkeypatch):
+    monkeypatch.setattr("lensnode.executor.WATCHDOG_INTERVAL_S", 0.02)
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    executor.agent = HeartbeatOnlyAgent()
+    events = []
+
+    asyncio.run(
+        executor.execute(
+            {
+                "run_uuid": "00000000-0000-0000-0000-000000000005",
+                "task": "knowledge_qa",
+                "target_dirs": [],
+            },
+            events.append,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"]
+    assert done[-1]["status"] == "done"
 
 
 def test_runtime_resources_collect_context_skill_content(tmp_path):

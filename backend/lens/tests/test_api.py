@@ -629,6 +629,34 @@ class LensApiTests(TestCase):
         )
         self.assertTrue(call_and_track.call_args.kwargs["return_message"])
 
+    def test_lensnode_ai_gateway_forwards_run_correlation(self):
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        client = APIClient()
+        run_uuid = "3a2b7d54-9c1e-4f7a-8f27-0a4c1d2e3f45"
+
+        with patch(
+            "agentcore_metering.adapters.django.LLMTracker.call_and_track",
+            return_value=("ok", {"total_tokens": 1}),
+        ) as call_and_track:
+            response = client.post(
+                "/api/lens/lensnode/ai-gateway/",
+                {
+                    "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "run_uuid": run_uuid,
+                    "is_subagent": True,
+                },
+                format="json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        state = call_and_track.call_args.kwargs["state"]
+        self.assertEqual(state["metadata"]["run_uuid"], run_uuid)
+        self.assertTrue(state["metadata"]["is_subagent"])
+
     def test_session_run_flow_returns_completed_run_with_execution(self):
         session_response = self.client.post(
             "/api/lens/sessions/",

@@ -9,6 +9,7 @@ from lens.models import Assistant, LensNode, Run, Session
 from lens.services import (
     create_execution_run,
     reconcile_lensnode_active_runs,
+    record_lensnode_run_event,
     touch_run_activity,
 )
 from lens.tasks import lensnode_cleanup_task
@@ -75,6 +76,34 @@ class RunLifecycleTests(TestCase):
         self.assertLess(
             (timezone.now() - run.last_activity_at).total_seconds(), 5
         )
+
+    def test_record_run_event_drops_late_event_for_terminal_run(self):
+        run = self._run(
+            Run.Status.FAILED,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+
+        step = record_lensnode_run_event(
+            run.uuid, "retrieval", "running", {"message": "late"}
+        )
+
+        self.assertIsNone(step)
+        self.assertEqual(run.steps.count(), 0)
+
+    def test_record_run_event_persists_for_active_run(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+
+        step = record_lensnode_run_event(
+            run.uuid, "retrieval", "running", {"message": "progress"}
+        )
+
+        self.assertIsNotNone(step)
+        self.assertEqual(run.steps.count(), 1)
 
     def test_idle_reaper_fails_silent_run(self):
         run = self._run(

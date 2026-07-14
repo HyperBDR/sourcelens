@@ -1649,6 +1649,13 @@ class GlobalSettingViewSet(BaseAdminViewSet):
         )
 
 
+# While a provider call is thinking (reasoning, composing a tool call)
+# the SSE stream can carry no tokens for minutes. Periodic heartbeats
+# prove transport liveness to the LensNode watchdog so it only aborts
+# on a genuinely dead pipe, never on a quiet-but-alive model call.
+GATEWAY_STREAM_HEARTBEAT_S = 10
+
+
 class LensNodeAIGatewayView(APIView):
     """AI gateway endpoint authenticated by the LensNode token."""
 
@@ -1680,6 +1687,14 @@ class LensNodeAIGatewayView(APIView):
             "source_type": "lensnode_gateway",
             "lensnode_uuid": str(lensnode.uuid),
         }
+        correlation = {}
+        if request.data.get("run_uuid"):
+            correlation["run_uuid"] = str(request.data["run_uuid"])
+            correlation["is_subagent"] = bool(
+                request.data.get("is_subagent")
+            )
+        if correlation:
+            tracker_state["metadata"] = correlation
         if request.data.get("stream"):
             return self._stream_response(
                 lensnode,
@@ -1823,7 +1838,13 @@ class LensNodeAIGatewayView(APIView):
             future = loop.run_in_executor(None, run_in_thread)
             try:
                 while True:
-                    item = await queue.get()
+                    try:
+                        item = await asyncio.wait_for(
+                            queue.get(), timeout=GATEWAY_STREAM_HEARTBEAT_S
+                        )
+                    except asyncio.TimeoutError:
+                        yield self._sse({"type": "heartbeat"})
+                        continue
                     if item[0] == "event":
                         yield self._sse(item[1])
                         if item[1].get("type") == "error":
