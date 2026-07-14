@@ -212,6 +212,9 @@ agentcore 是独立维护的包，通过 git submodule 引入。子模块被当�
 ## 编码规范（来自 Cursor rules）
 
 - **响应语言**：所有解释用中文，代码注释用英文
+- **GitHub 内容一律英文**：所有会出现在 GitHub 上的内容——commit message、
+  PR 标题与正文、issue、PR/code review 评论等——**必须使用英文**；与用户的
+  对话问答仍用中文。二者边界即"是否进入 GitHub"：进 GitHub 用英文，聊天用中文。
 - **注释规则**：无行内注释，注释写在代码块上方；类和函数使用 docstring（triple quotes）
 - **行宽**：每行最多 79 字符
 - **Import 结构**：三段式（stdlib → third-party → local app），段内按字母排序，不混用
