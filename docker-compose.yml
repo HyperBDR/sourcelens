@@ -23,7 +23,6 @@ services:
       - ./data/logs/api:/var/log/gunicorn
       - ./data/storage:/opt/storage
       - ./data/deliverables:/opt/deliverables
-      - ./data/workspace:/workspace
       - ./docker/nginx/certs:/opt/certs
     networks:
       - backend_network
@@ -51,7 +50,6 @@ services:
       - ./data/logs/worker:/var/log/celery
       - ./data/storage:/opt/storage
       - ./data/deliverables:/opt/deliverables
-      - ./data/workspace:/workspace
     networks:
       - backend_network
     depends_on:
