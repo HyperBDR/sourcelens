@@ -443,6 +443,24 @@
                       {{ message.content }}
                     </div>
                   </template>
+                  <div
+                    v-if="message.output_files && message.output_files.length"
+                    class="message-deliverables"
+                  >
+                    <button
+                      v-for="file in message.output_files"
+                      :key="file.uuid"
+                      type="button"
+                      class="deliverable-chip"
+                      @click="downloadOutputFile(file)"
+                    >
+                      <Download :size="14" class="deliverable-icon" />
+                      <span class="deliverable-name">{{ file.filename }}</span>
+                      <span v-if="file.byte_size" class="deliverable-size">{{
+                        formatBytes(file.byte_size)
+                      }}</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div class="message-time" :class="message.role">
@@ -804,11 +822,13 @@ import {
   Smile,
   ChevronDown,
   ChevronUp,
+  Download,
   Sparkles
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
+import api from '@/api'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -1997,6 +2017,40 @@ async function copyMessage(message) {
   }
 }
 
+async function downloadOutputFile(file) {
+  if (!file?.url) {
+    return
+  }
+  try {
+    // api baseURL already ends with /api; drop the leading prefix.
+    const path = file.url.replace(/^\/api/, '')
+    const response = await api.get(path, { responseType: 'blob' })
+    const objectUrl = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = file.filename || 'download'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+  } catch {
+    showWarning(t('lens.chat.downloadFailed'))
+  }
+}
+
+function formatBytes(size) {
+  if (!size) {
+    return ''
+  }
+  if (size < 1024) {
+    return `${size} B`
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function openShare(message) {
   shareRunUuid.value = message.run || ''
   shareExisting.value = sharesByRun.value[shareRunUuid.value] || null
@@ -2825,6 +2879,32 @@ onBeforeUnmount(() => {
   max-width: 220px;
   max-height: 220px;
   object-fit: cover;
+}
+
+.message-deliverables {
+  @apply mt-2 flex flex-wrap gap-2;
+}
+
+.deliverable-chip {
+  @apply inline-flex items-center gap-1.5 rounded-lg border
+    border-line bg-white px-2.5 py-1.5 text-xs text-gray-600
+    transition-colors;
+}
+
+.deliverable-chip:hover {
+  @apply border-primary-300 text-primary-600;
+}
+
+.deliverable-icon {
+  @apply shrink-0 text-primary-600;
+}
+
+.deliverable-name {
+  @apply max-w-[220px] truncate font-medium;
+}
+
+.deliverable-size {
+  @apply text-gray-400;
 }
 
 .disclaimer {
