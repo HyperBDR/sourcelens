@@ -17,6 +17,7 @@ def _config():
         control_ws_url="ws://backend/ws/",
         ai_gateway_url="http://b/api/lens/lensnode/ai-gateway/",
         deliverable_upload_url="http://b/api/lens/lensnode/deliverables/",
+        deliverable_max_bytes=50 * 1024 * 1024,
         workspace_path="/workspace",
         protocol_version="v1",
         agent_version="0.1.0",
@@ -100,6 +101,28 @@ def test_save_deliverable_rejects_escape(monkeypatch, tmp_path):
 
     assert payload["ok"] is False
     assert payload["error"] == "PATH_NOT_ALLOWED"
+
+
+def test_save_deliverable_rejects_oversized(monkeypatch, tmp_path):
+    (tmp_path / "big.html").write_text("x" * 100, encoding="utf-8")
+
+    def handler(request):
+        raise AssertionError("upload must not be attempted")
+
+    _install_transport(monkeypatch, handler)
+    cfg = _config()
+    object.__setattr__(cfg, "deliverable_max_bytes", 10)
+    tool = _build_save_deliverable_tool(
+        {"run_uuid": "run-123"},
+        _resources(tmp_path),
+        cfg,
+        None,
+    )
+
+    payload = json.loads(tool.invoke({"path": "big.html"}))
+
+    assert payload["ok"] is False
+    assert payload["error"] == "FILE_TOO_LARGE"
 
 
 def test_save_deliverable_missing_file(monkeypatch, tmp_path):

@@ -416,6 +416,14 @@ STORAGES = {
     },
 }
 
+# Hard ceiling on a single uploaded deliverable. The upload path is a
+# node-to-control-plane POST that does not pass through nginx, so it has
+# no client_max_body_size backstop; this bounds one file to keep a buggy
+# or compromised node from filling the deliverables volume.
+DELIVERABLE_MAX_BYTES = int(
+    os.getenv("DELIVERABLE_MAX_BYTES", str(50 * 1024 * 1024))
+)
+
 # ============================
 # File Upload Configuration
 # ============================

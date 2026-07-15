@@ -719,6 +719,67 @@ class LensApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    @override_settings(DELIVERABLE_MAX_BYTES=8)
+    def test_lensnode_deliverable_upload_rejects_oversized(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from lens.models import RunOutputFile, Session
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        response = APIClient().post(
+            "/api/lens/lensnode/deliverables/",
+            {
+                "run_uuid": str(run.uuid),
+                "file": SimpleUploadedFile("big.html", b"way too many bytes"),
+            },
+            format="multipart",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertFalse(RunOutputFile.objects.filter(run=run).exists())
+
+    def test_lensnode_deliverable_upload_strips_path_from_filename(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from lens.models import RunOutputFile, Session
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        response = APIClient().post(
+            "/api/lens/lensnode/deliverables/",
+            {
+                "run_uuid": str(run.uuid),
+                "file": SimpleUploadedFile("x.html", b"<html></html>"),
+                "filename": "../../../etc/passwd",
+            },
+            format="multipart",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        self.assertEqual(response.status_code, 201)
+        output = RunOutputFile.objects.get(run=run)
+        self.assertEqual(output.filename, "passwd")
+        self.assertNotIn("..", output.file.name)
+        self.assertTrue(
+            output.file.name.endswith("passwd")
+            or "passwd" in output.file.name
+        )
+        output.file.delete(save=False)
+
     def _make_output_file(self):
         """Create a delivered output file linked to a fresh run."""
 

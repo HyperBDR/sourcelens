@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import shutil
 import secrets
 import uuid as uuid_mod
@@ -7,6 +8,7 @@ from urllib import error as urlerror
 from urllib import parse, request
 
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Q
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
@@ -2022,6 +2024,16 @@ class LensNodeDeliverableUploadView(APIView):
                 {"detail": "run_uuid and file are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if upload.size > settings.DELIVERABLE_MAX_BYTES:
+            return Response(
+                {
+                    "detail": (
+                        "Deliverable exceeds the "
+                        f"{settings.DELIVERABLE_MAX_BYTES}-byte limit."
+                    )
+                },
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
         try:
             run = Run.objects.select_related(
                 "output_message", "session", "session__assistant"
@@ -2043,7 +2055,9 @@ class LensNodeDeliverableUploadView(APIView):
         upload.seek(0)
 
         filename = request.data.get("filename") or upload.name or "file"
-        filename = filename[:255]
+        # Strip any path components so a node cannot influence the stored
+        # path beyond the <assistant>/<session>/ prefix built by upload_to.
+        filename = os.path.basename(filename)[:255] or "file"
         content_type = (
             request.data.get("content_type")
             or getattr(upload, "content_type", "")
@@ -2064,7 +2078,13 @@ class LensNodeDeliverableUploadView(APIView):
         # upload_to builds <assistant>/<session>/<filename> in the
         # 'deliverables' storage; save=False defers the row write.
         output.file.save(filename, upload, save=False)
-        output.save()
+        try:
+            output.save()
+        except Exception:
+            # Roll back the just-written bytes so a failed row does not
+            # leave orphaned files the purge signal can never reach.
+            output.file.delete(save=False)
+            raise
         return Response(
             {
                 "uuid": str(output.uuid),

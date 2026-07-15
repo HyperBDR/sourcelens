@@ -503,6 +503,22 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
                     ),
                 }
             )
+        byte_size = resolved.stat().st_size
+        if byte_size > config.deliverable_max_bytes:
+            emit(
+                "tool.save_deliverable.failed",
+                {"path": path, "error": "TOO_LARGE"},
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "FILE_TOO_LARGE",
+                    "message": (
+                        f"File is {byte_size} bytes, over the "
+                        f"{config.deliverable_max_bytes}-byte limit."
+                    ),
+                }
+            )
         data = resolved.read_bytes()
         filename = resolved.name
         content_type = (
