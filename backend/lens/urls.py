@@ -18,6 +18,7 @@ from .views import (
     PublicAssistantView,
     PublicSharedQAListView,
     PublicSharedQAView,
+    RunOutputFileDownloadView,
     RunViewSet,
     SessionViewSet,
     SharedQAViewSet,
@@ -115,6 +116,11 @@ urlpatterns = [
         "attachments/<uuid:uuid>/",
         LensAttachmentView.as_view(),
         name="lens-attachment",
+    ),
+    path(
+        "output-files/<uuid:uuid>/",
+        RunOutputFileDownloadView.as_view(),
+        name="lens-output-file",
     ),
     *router.urls,
     path(

@@ -719,6 +719,85 @@ class LensApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def _make_output_file(self):
+        """Create a delivered output file linked to a fresh run."""
+
+        from django.core.files.base import ContentFile
+        from lens.models import RunOutputFile, Session
+        from lens.services import create_execution_run
+
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        output = RunOutputFile(
+            run=run,
+            message=run.output_message,
+            session=session,
+            assistant=self.assistant,
+            filename="brief.html",
+            content_type="text/html",
+            byte_size=18,
+        )
+        output.file.save(
+            "brief.html", ContentFile(b"<html>brief</html>"), save=False
+        )
+        output.save()
+        return session, run, output
+
+    def test_output_file_download_returns_attachment_to_owner(self):
+        session, run, output = self._make_output_file()
+
+        response = self.client.get(
+            f"/api/lens/output-files/{output.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertIn("brief.html", response["Content-Disposition"])
+        self.assertEqual(
+            b"".join(response.streaming_content), b"<html>brief</html>"
+        )
+        output.file.delete(save=False)
+
+    def test_output_file_download_forbidden_for_other_user(self):
+        session, run, output = self._make_output_file()
+        other = User.objects.create_user(
+            username="intruder",
+            email="intruder@example.com",
+            password="pass12345",
+        )
+        client = APIClient()
+        client.force_authenticate(other)
+
+        response = client.get(
+            f"/api/lens/output-files/{output.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        output.file.delete(save=False)
+
+    def test_session_messages_include_output_files(self):
+        session, run, output = self._make_output_file()
+
+        response = self.client.get(
+            f"/api/lens/sessions/{session.uuid}/messages/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        answer = next(
+            m for m in response.data if m["role"] == "assistant"
+        )
+        self.assertEqual(len(answer["output_files"]), 1)
+        chip = answer["output_files"][0]
+        self.assertEqual(chip["filename"], "brief.html")
+        self.assertIn(
+            f"/api/lens/output-files/{output.uuid}/", chip["url"]
+        )
+        output.file.delete(save=False)
+
     def test_session_run_flow_returns_completed_run_with_execution(self):
         session_response = self.client.post(
             "/api/lens/sessions/",

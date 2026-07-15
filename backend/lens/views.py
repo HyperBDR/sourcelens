@@ -796,7 +796,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
 
         session = self.get_object()
         messages = session.message_set.select_related("run").prefetch_related(
-            "run__steps", "attachments"
+            "run__steps", "attachments", "output_files"
         )
         serializer = MessageSerializer(messages, many=True)
         return Response(serializer.data)
@@ -880,6 +880,36 @@ class LensAttachmentView(APIView):
         response = FileResponse(
             attachment.file.open("rb"),
             content_type=attachment.mime_type or "application/octet-stream",
+        )
+        response["Cache-Control"] = "private, max-age=3600"
+        return response
+
+
+class RunOutputFileDownloadView(APIView):
+    """Serve a delivered run output file to its owner or any admin.
+
+    Always sent as an attachment (Content-Disposition: attachment) so
+    untrusted agent-produced content is downloaded rather than rendered
+    inline in the app origin; preview is handled separately later.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, uuid):
+        """Return the file bytes for the session owner or a staff admin."""
+
+        output = get_object_or_404(
+            RunOutputFile.objects.select_related("session"),
+            uuid=uuid,
+        )
+        is_owner = output.session.user_id == request.user.id
+        if not is_owner and not request.user.is_staff:
+            raise PermissionDenied("You do not have access to this file.")
+        response = FileResponse(
+            output.file.open("rb"),
+            as_attachment=True,
+            filename=output.filename,
+            content_type=output.content_type or "application/octet-stream",
         )
         response["Cache-Control"] = "private, max-age=3600"
         return response
