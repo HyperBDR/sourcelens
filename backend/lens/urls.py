@@ -12,6 +12,7 @@ from .views import (
     LensAttachmentView,
     MCPServerViewSet,
     LensNodeAIGatewayView,
+    LensNodeDeliverableUploadView,
     LensNodeSkillPackageView,
     LensNodeViewSet,
     PublicAssistantView,
@@ -125,5 +126,10 @@ urlpatterns = [
         "lensnode/skills/<uuid:uuid>/package/",
         LensNodeSkillPackageView.as_view(),
         name="lens-lensnode-skill-package",
+    ),
+    path(
+        "lensnode/deliverables/",
+        LensNodeDeliverableUploadView.as_view(),
+        name="lens-lensnode-deliverable-upload",
     ),
 ]
