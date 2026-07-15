@@ -798,6 +798,19 @@ class LensApiTests(TestCase):
         )
         output.file.delete(save=False)
 
+    def test_deleting_session_purges_output_file_bytes(self):
+        session, run, output = self._make_output_file()
+        storage = output.file.storage
+        name = output.file.name
+        self.assertTrue(storage.exists(name))
+
+        response = self.client.delete(
+            f"/api/lens/sessions/{session.uuid}/"
+        )
+
+        self.assertIn(response.status_code, (200, 204))
+        self.assertFalse(storage.exists(name))
+
     def test_session_run_flow_returns_completed_run_with_execution(self):
         session_response = self.client.post(
             "/api/lens/sessions/",
