@@ -10,6 +10,8 @@ class LensNodeConfig:
     token: str
     control_ws_url: str
     ai_gateway_url: str
+    deliverable_upload_url: str
+    deliverable_max_bytes: int
     workspace_path: str
     protocol_version: str
     agent_version: str
@@ -50,6 +52,11 @@ def load_config():
         or _derive_ws_url(server_url),
         ai_gateway_url=os.getenv("LENSNODE_AI_GATEWAY_URL")
         or f"{server_url}/api/lens/lensnode/ai-gateway/",
+        deliverable_upload_url=os.getenv("LENSNODE_DELIVERABLE_UPLOAD_URL")
+        or f"{server_url}/api/lens/lensnode/deliverables/",
+        deliverable_max_bytes=int(
+            os.getenv("LENSNODE_DELIVERABLE_MAX_BYTES", str(50 * 1024 * 1024))
+        ),
         workspace_path=os.getenv("LENSNODE_WORKSPACE_PATH", "/workspace"),
         protocol_version=os.getenv("LENSNODE_PROTOCOL_VERSION", "v1"),
         agent_version=os.getenv("LENSNODE_AGENT_VERSION", "0.1.0"),

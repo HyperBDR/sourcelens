@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 import shutil
 import secrets
 import uuid as uuid_mod
@@ -6,6 +8,7 @@ from urllib import error as urlerror
 from urllib import parse, request
 
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Q
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
@@ -33,6 +36,7 @@ from .models import (
     MessageAttachment,
     LensNode,
     Run,
+    RunOutputFile,
     ScheduledTask,
     Session,
     SharedQA,
@@ -794,7 +798,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
 
         session = self.get_object()
         messages = session.message_set.select_related("run").prefetch_related(
-            "run__steps", "attachments"
+            "run__steps", "attachments", "output_files"
         )
         serializer = MessageSerializer(messages, many=True)
         return Response(serializer.data)
@@ -878,6 +882,43 @@ class LensAttachmentView(APIView):
         response = FileResponse(
             attachment.file.open("rb"),
             content_type=attachment.mime_type or "application/octet-stream",
+        )
+        response["Cache-Control"] = "private, max-age=3600"
+        return response
+
+
+class RunOutputFileDownloadView(APIView):
+    """Serve a delivered run output file to its owner or any admin.
+
+    Always sent as an attachment (Content-Disposition: attachment) so
+    untrusted agent-produced content is downloaded rather than rendered
+    inline in the app origin; preview is handled separately later.
+
+    Authorization is DELIBERATELY private: only the session owner (or a
+    staff admin) may download. Sharing a run (SharedQA) copies the Q&A
+    text only and does NOT expose output files or this URL, so shared
+    viewers cannot reach deliverables. If public sharing of a deliverable
+    is ever wanted, do NOT relax this owner check -- add a separate
+    token-scoped download that validates the SharedQA token instead.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, uuid):
+        """Return the file bytes for the session owner or a staff admin."""
+
+        output = get_object_or_404(
+            RunOutputFile.objects.select_related("session"),
+            uuid=uuid,
+        )
+        is_owner = output.session.user_id == request.user.id
+        if not is_owner and not request.user.is_staff:
+            raise PermissionDenied("You do not have access to this file.")
+        response = FileResponse(
+            output.file.open("rb"),
+            as_attachment=True,
+            filename=output.filename,
+            content_type=output.content_type or "application/octet-stream",
         )
         response["Cache-Control"] = "private, max-age=3600"
         return response
@@ -1936,6 +1977,122 @@ class LensNodeSkillPackageView(APIView):
         )
         response["X-Skill-Package-Hash"] = skill.package_hash
         return response
+
+    def _authenticate_lensnode(self, request):
+        """Authenticate bearer token against approved LensNodes."""
+
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return None
+        token = header.removeprefix("Bearer ").strip()
+        for lensnode in LensNode.objects.filter(
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            token_revoked=False,
+        ).exclude(auth_token_hash=""):
+            if token_matches(lensnode, token):
+                return lensnode
+        return None
+
+
+class LensNodeDeliverableUploadView(APIView):
+    """Receive a run deliverable file produced by a LensNode.
+
+    The node POSTs the file at produce time (same direction and token
+    auth as the AI gateway), so the bytes live on control-plane storage
+    and the node's volume stays private. The file is saved to the
+    'deliverables' storage and recorded as a RunOutputFile linked to the
+    run's answer message so the frontend can offer it for download.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        """Store an uploaded deliverable and record it against the run."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        run_uuid = request.data.get("run_uuid")
+        upload = request.FILES.get("file")
+        if not run_uuid or upload is None:
+            return Response(
+                {"detail": "run_uuid and file are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if upload.size > settings.DELIVERABLE_MAX_BYTES:
+            return Response(
+                {
+                    "detail": (
+                        "Deliverable exceeds the "
+                        f"{settings.DELIVERABLE_MAX_BYTES}-byte limit."
+                    )
+                },
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        try:
+            run = Run.objects.select_related(
+                "output_message", "session", "session__assistant"
+            ).get(uuid=run_uuid)
+        except Run.DoesNotExist:
+            return Response(
+                {"detail": "Run not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if run.lensnode_id != lensnode.id:
+            return Response(
+                {"detail": "Run does not belong to this LensNode."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        digest = hashlib.sha256()
+        for chunk in upload.chunks():
+            digest.update(chunk)
+        upload.seek(0)
+
+        filename = request.data.get("filename") or upload.name or "file"
+        # Strip any path components so a node cannot influence the stored
+        # path beyond the <assistant>/<session>/ prefix built by upload_to.
+        filename = os.path.basename(filename)[:255] or "file"
+        content_type = (
+            request.data.get("content_type")
+            or getattr(upload, "content_type", "")
+            or ""
+        )
+        content_type = content_type[:120]
+
+        output = RunOutputFile(
+            run=run,
+            message=run.output_message,
+            session=run.session,
+            assistant=run.session.assistant,
+            filename=filename,
+            content_type=content_type,
+            byte_size=upload.size,
+            content_hash=digest.hexdigest(),
+        )
+        # upload_to builds <assistant>/<session>/<filename> in the
+        # 'deliverables' storage; save=False defers the row write.
+        output.file.save(filename, upload, save=False)
+        try:
+            output.save()
+        except Exception:
+            # Roll back the just-written bytes so a failed row does not
+            # leave orphaned files the purge signal can never reach.
+            output.file.delete(save=False)
+            raise
+        return Response(
+            {
+                "uuid": str(output.uuid),
+                "filename": output.filename,
+                "byte_size": output.byte_size,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     def _authenticate_lensnode(self, request):
         """Authenticate bearer token against approved LensNodes."""

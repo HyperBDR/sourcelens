@@ -12,11 +12,13 @@ from .views import (
     LensAttachmentView,
     MCPServerViewSet,
     LensNodeAIGatewayView,
+    LensNodeDeliverableUploadView,
     LensNodeSkillPackageView,
     LensNodeViewSet,
     PublicAssistantView,
     PublicSharedQAListView,
     PublicSharedQAView,
+    RunOutputFileDownloadView,
     RunViewSet,
     SessionViewSet,
     SharedQAViewSet,
@@ -115,6 +117,11 @@ urlpatterns = [
         LensAttachmentView.as_view(),
         name="lens-attachment",
     ),
+    path(
+        "output-files/<uuid:uuid>/",
+        RunOutputFileDownloadView.as_view(),
+        name="lens-output-file",
+    ),
     *router.urls,
     path(
         "lensnode/ai-gateway/",
@@ -125,5 +132,10 @@ urlpatterns = [
         "lensnode/skills/<uuid:uuid>/package/",
         LensNodeSkillPackageView.as_view(),
         name="lens-lensnode-skill-package",
+    ),
+    path(
+        "lensnode/deliverables/",
+        LensNodeDeliverableUploadView.as_view(),
+        name="lens-lensnode-deliverable-upload",
     ),
 ]

@@ -443,6 +443,33 @@
                       {{ message.content }}
                     </div>
                   </template>
+                  <div
+                    v-if="message.output_files && message.output_files.length"
+                    class="message-deliverables"
+                  >
+                    <button
+                      v-for="file in message.output_files"
+                      :key="file.uuid"
+                      type="button"
+                      class="deliverable-card"
+                      @click="downloadOutputFile(file)"
+                    >
+                      <span class="deliverable-thumb">
+                        <FileText :size="20" />
+                      </span>
+                      <span class="deliverable-meta">
+                        <span class="deliverable-name">{{
+                          file.filename
+                        }}</span>
+                        <span class="deliverable-sub">{{
+                          fileTypeLabel(file)
+                        }}</span>
+                      </span>
+                      <span class="deliverable-action">
+                        <Download :size="18" />
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 <div class="message-time" :class="message.role">
@@ -804,11 +831,14 @@ import {
   Smile,
   ChevronDown,
   ChevronUp,
+  Download,
+  FileText,
   Sparkles
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
+import api from '@/api'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -1997,6 +2027,48 @@ async function copyMessage(message) {
   }
 }
 
+async function downloadOutputFile(file) {
+  if (!file?.url) {
+    return
+  }
+  try {
+    // api baseURL already ends with /api; drop the leading prefix.
+    const path = file.url.replace(/^\/api/, '')
+    const response = await api.get(path, { responseType: 'blob' })
+    const objectUrl = URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = file.filename || 'download'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+  } catch {
+    showWarning(t('lens.chat.downloadFailed'))
+  }
+}
+
+function formatBytes(size) {
+  if (!size) {
+    return ''
+  }
+  if (size < 1024) {
+    return `${size} B`
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function fileTypeLabel(file) {
+  const name = file.filename || ''
+  const dot = name.lastIndexOf('.')
+  const ext = dot > -1 ? name.slice(dot + 1).toUpperCase() : ''
+  const size = formatBytes(file.byte_size)
+  return [ext, size].filter(Boolean).join(' · ')
+}
+
 function openShare(message) {
   shareRunUuid.value = message.run || ''
   shareExisting.value = sharesByRun.value[shareRunUuid.value] || null
@@ -2825,6 +2897,45 @@ onBeforeUnmount(() => {
   max-width: 220px;
   max-height: 220px;
   object-fit: cover;
+}
+
+.message-deliverables {
+  @apply mt-3 flex flex-col gap-2;
+}
+
+.deliverable-card {
+  @apply flex w-full max-w-sm items-center gap-3 rounded-xl border
+    border-line bg-white px-3 py-2.5 text-left transition-all;
+}
+
+.deliverable-card:hover {
+  @apply border-primary-300 shadow-soft;
+}
+
+.deliverable-thumb {
+  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
+    bg-primary-50 text-primary-600;
+}
+
+.deliverable-meta {
+  @apply flex min-w-0 flex-1 flex-col;
+}
+
+.deliverable-name {
+  @apply truncate text-sm font-medium text-gray-800;
+}
+
+.deliverable-sub {
+  @apply mt-0.5 text-xs uppercase tracking-wide text-gray-400;
+}
+
+.deliverable-action {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg
+    text-gray-400 transition-colors;
+}
+
+.deliverable-card:hover .deliverable-action {
+  @apply bg-primary-50 text-primary-600;
 }
 
 .disclaimer {

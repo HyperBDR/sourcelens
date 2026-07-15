@@ -197,6 +197,7 @@
       "sessionCreated": "Session created.",
       "messageCopied": "Message copied.",
       "copyFailed": "Copy failed.",
+      "downloadFailed": "Download failed, please try again.",
       "runInline": "Run inline",
       "cancelRun": "Cancel",
       "stop": "Stop",

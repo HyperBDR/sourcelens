@@ -28,6 +28,7 @@ from .models import (
     LensNode,
     Run,
     RunExecution,
+    RunOutputFile,
     RunStep,
     ScheduledTask,
     Session,
@@ -1489,12 +1490,37 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
         return reverse("lens-attachment", kwargs={"uuid": obj.uuid})
 
 
+class RunOutputFileSerializer(serializers.ModelSerializer):
+    """Read serializer for a delivered run output file."""
+
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RunOutputFile
+        fields = [
+            "uuid",
+            "url",
+            "filename",
+            "content_type",
+            "byte_size",
+        ]
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        """Return the authenticated download path for the file bytes."""
+
+        return reverse(
+            "lens-output-file", kwargs={"uuid": obj.uuid}
+        )
+
+
 class MessageSerializer(serializers.ModelSerializer):
     """Session message serializer."""
 
     run = serializers.UUIDField(source="run.uuid", read_only=True)
     thinking = serializers.SerializerMethodField()
     attachments = MessageAttachmentSerializer(many=True, read_only=True)
+    output_files = RunOutputFileSerializer(many=True, read_only=True)
 
     class Meta:
         model = Message
@@ -1506,6 +1532,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "run",
             "thinking",
             "attachments",
+            "output_files",
             "created_at",
         ]
         read_only_fields = [
@@ -1516,6 +1543,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "run",
             "thinking",
             "attachments",
+            "output_files",
             "created_at",
         ]
 
@@ -1719,7 +1747,13 @@ def _answer_snippet(text, limit=160):
 
 
 class SharedQAPublicSerializer(serializers.ModelSerializer):
-    """Public single shared Q&A (anonymous, read-only)."""
+    """Public single shared Q&A (anonymous, read-only).
+
+    Intentionally a text-only snapshot: it must NOT include output_files
+    or any deliverable download URL. Deliverables are owner/staff-only
+    (see RunOutputFileDownloadView); exposing them here would leak
+    private files to anyone holding the public share token.
+    """
 
     class Meta:
         model = SharedQA

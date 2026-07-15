@@ -657,6 +657,221 @@ class LensApiTests(TestCase):
         self.assertEqual(state["metadata"]["run_uuid"], run_uuid)
         self.assertTrue(state["metadata"]["is_subagent"])
 
+    def test_lensnode_deliverable_upload_records_output_file(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from lens.models import RunOutputFile, Session
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+
+        client = APIClient()
+        upload = SimpleUploadedFile(
+            "brief.html", b"<html>brief</html>", content_type="text/html"
+        )
+        response = client.post(
+            "/api/lens/lensnode/deliverables/",
+            {
+                "run_uuid": str(run.uuid),
+                "file": upload,
+                "filename": "brief.html",
+                "content_type": "text/html",
+            },
+            format="multipart",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        output = RunOutputFile.objects.get(run=run)
+        self.assertEqual(output.filename, "brief.html")
+        self.assertEqual(output.message_id, run.output_message_id)
+        self.assertEqual(output.session_id, session.id)
+        self.assertEqual(output.assistant_id, self.assistant.id)
+        self.assertTrue(output.file.storage.exists(output.file.name))
+        output.file.delete(save=False)
+
+    def test_lensnode_deliverable_upload_rejects_bad_token(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from lens.models import Session
+        from lens.services import create_execution_run
+
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        response = APIClient().post(
+            "/api/lens/lensnode/deliverables/",
+            {
+                "run_uuid": str(run.uuid),
+                "file": SimpleUploadedFile("x.txt", b"x"),
+            },
+            format="multipart",
+            HTTP_AUTHORIZATION="Bearer wrong-token",
+        )
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(DELIVERABLE_MAX_BYTES=8)
+    def test_lensnode_deliverable_upload_rejects_oversized(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from lens.models import RunOutputFile, Session
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        response = APIClient().post(
+            "/api/lens/lensnode/deliverables/",
+            {
+                "run_uuid": str(run.uuid),
+                "file": SimpleUploadedFile("big.html", b"way too many bytes"),
+            },
+            format="multipart",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertFalse(RunOutputFile.objects.filter(run=run).exists())
+
+    def test_lensnode_deliverable_upload_strips_path_from_filename(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from lens.models import RunOutputFile, Session
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        response = APIClient().post(
+            "/api/lens/lensnode/deliverables/",
+            {
+                "run_uuid": str(run.uuid),
+                "file": SimpleUploadedFile("x.html", b"<html></html>"),
+                "filename": "../../../etc/passwd",
+            },
+            format="multipart",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        self.assertEqual(response.status_code, 201)
+        output = RunOutputFile.objects.get(run=run)
+        self.assertEqual(output.filename, "passwd")
+        self.assertNotIn("..", output.file.name)
+        self.assertTrue(
+            output.file.name.endswith("passwd")
+            or "passwd" in output.file.name
+        )
+        output.file.delete(save=False)
+
+    def _make_output_file(self):
+        """Create a delivered output file linked to a fresh run."""
+
+        from django.core.files.base import ContentFile
+        from lens.models import RunOutputFile, Session
+        from lens.services import create_execution_run
+
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        output = RunOutputFile(
+            run=run,
+            message=run.output_message,
+            session=session,
+            assistant=self.assistant,
+            filename="brief.html",
+            content_type="text/html",
+            byte_size=18,
+        )
+        output.file.save(
+            "brief.html", ContentFile(b"<html>brief</html>"), save=False
+        )
+        output.save()
+        return session, run, output
+
+    def test_output_file_download_returns_attachment_to_owner(self):
+        session, run, output = self._make_output_file()
+
+        response = self.client.get(
+            f"/api/lens/output-files/{output.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertIn("brief.html", response["Content-Disposition"])
+        self.assertEqual(
+            b"".join(response.streaming_content), b"<html>brief</html>"
+        )
+        output.file.delete(save=False)
+
+    def test_output_file_download_forbidden_for_other_user(self):
+        session, run, output = self._make_output_file()
+        other = User.objects.create_user(
+            username="intruder",
+            email="intruder@example.com",
+            password="pass12345",
+        )
+        client = APIClient()
+        client.force_authenticate(other)
+
+        response = client.get(
+            f"/api/lens/output-files/{output.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        output.file.delete(save=False)
+
+    def test_session_messages_include_output_files(self):
+        session, run, output = self._make_output_file()
+
+        response = self.client.get(
+            f"/api/lens/sessions/{session.uuid}/messages/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        answer = next(
+            m for m in response.data if m["role"] == "assistant"
+        )
+        self.assertEqual(len(answer["output_files"]), 1)
+        chip = answer["output_files"][0]
+        self.assertEqual(chip["filename"], "brief.html")
+        self.assertIn(
+            f"/api/lens/output-files/{output.uuid}/", chip["url"]
+        )
+        output.file.delete(save=False)
+
+    def test_deleting_session_purges_output_file_bytes(self):
+        session, run, output = self._make_output_file()
+        storage = output.file.storage
+        name = output.file.name
+        self.assertTrue(storage.exists(name))
+
+        response = self.client.delete(
+            f"/api/lens/sessions/{session.uuid}/"
+        )
+
+        self.assertIn(response.status_code, (200, 204))
+        self.assertFalse(storage.exists(name))
+
     def test_session_run_flow_returns_completed_run_with_execution(self):
         session_response = self.client.post(
             "/api/lens/sessions/",

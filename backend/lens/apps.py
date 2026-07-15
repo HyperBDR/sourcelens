@@ -6,3 +6,8 @@ class LensConfig(AppConfig):
 
     default_auto_field = "django.db.models.BigAutoField"
     name = "lens"
+
+    def ready(self):
+        """Register model signal handlers."""
+
+        from . import signals  # noqa: F401

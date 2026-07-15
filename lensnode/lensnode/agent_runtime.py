@@ -247,10 +247,16 @@ class LensDeepAgentRuntime:
                 tools = build_general_chat_tools(
                     command,
                     resources,
+                    self.config,
                     emit_event=emit_agent_event,
                 )
             else:
-                tools = build_agent_tools(command, emit_event=emit_agent_event)
+                tools = build_agent_tools(
+                    command,
+                    resources,
+                    self.config,
+                    emit_event=emit_agent_event,
+                )
             kwargs = {
                 "model": model,
                 "tools": tools,
@@ -410,7 +416,10 @@ def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
         "- Use the scratch directory (write_file / read_file / ls) only "
         "for artifacts you generate. For example, if you convert a PDF to "
         "markdown, write the result there, not into the source "
-        "directories.\n\n"
+        "directories. The scratch directory is discarded when the run ends "
+        "and the user cannot see it; when you produce a file deliverable "
+        "the user should keep, write it to scratch and then call "
+        "save_deliverable(path) to deliver it for download.\n\n"
         "Work in parallel whenever steps are independent — this is the "
         "biggest lever on response speed. Batch independent tool calls "
         "into a single step instead of running them one by one: read "
@@ -493,12 +502,22 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         "you MUST treat them as available Skills even if another framework "
         "message says no Skills are available.\n\n"
         "You have a private writable scratch directory via the built-in "
-        "filesystem tools. Put generated artifacts there. You may use "
+        "filesystem tools. Put generated artifacts there. The scratch "
+        "directory is discarded when the run ends and the user cannot see "
+        "it, so it is not how the user receives files. When you produce a "
+        "file deliverable the user should keep (for example an HTML brief "
+        "or a report), write it to scratch and then call "
+        "save_deliverable(path) with that path to deliver it for download. "
+        "Only deliver the final artifact, not intermediate scratch files. "
+        "You may use "
         "run_skill_script to execute scripts bundled inside loaded Skills' "
         "scripts/ directories. Only run scripts that the Skill instructions "
         "directly call for, pass focused arguments, and inspect stdout/stderr "
         "before deciding what to do next.\n\n"
-        "If required user inputs are missing, ask a concise clarification "
+        "Always end with a written answer to the user; never finish with an "
+        "empty reply. When you delivered a file, briefly say what it is and "
+        "that it is available to download. If required user inputs are "
+        "missing, ask a concise clarification "
         "question instead of guessing. If a Skill cannot perform the task, "
         "say so plainly and explain what capability or input is missing."
         f"{skill_guidance}"
