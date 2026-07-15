@@ -1066,7 +1066,7 @@ class LensApiTests(TestCase):
             str(self.datasource.uuid),
         )
 
-    @patch("lens.views.check_datasource_path")
+    @patch("lens.views.lensnodes.check_datasource_path")
     def test_check_datasource_path_allows_current_datasource_path(
         self,
         check_path,
@@ -1101,7 +1101,9 @@ class LensApiTests(TestCase):
             "target_path": "/workspace/initial-sync",
         }
 
-        with patch("lens.views.source_sync_task.apply_async") as apply_async:
+        with patch(
+            "lens.views.datasources.source_sync_task.apply_async"
+        ) as apply_async:
             with self.captureOnCommitCallbacks(execute=True):
                 response = self.client.post(
                     "/api/lens/admin/datasources/",
@@ -1125,7 +1127,9 @@ class LensApiTests(TestCase):
         self.assertEqual(task.metadata["celery_task_id"], celery_task_id)
 
     def test_datasource_manual_sync_registers_task(self):
-        with patch("lens.views.source_sync_task.apply_async") as apply_async:
+        with patch(
+            "lens.views.datasources.source_sync_task.apply_async"
+        ) as apply_async:
             response = self.client.post(
                 f"/api/lens/admin/datasources/{self.datasource.uuid}/sync/",
                 {},
@@ -1155,7 +1159,9 @@ class LensApiTests(TestCase):
         self.datasource.status = DataSource.Status.DISABLED
         self.datasource.save(update_fields=["status", "updated_at"])
 
-        with patch("lens.views.source_sync_task.apply_async") as apply_async:
+        with patch(
+            "lens.views.datasources.source_sync_task.apply_async"
+        ) as apply_async:
             response = self.client.post(
                 f"/api/lens/admin/datasources/{self.datasource.uuid}/sync/",
                 {},
@@ -1186,7 +1192,9 @@ class LensApiTests(TestCase):
 
         with (
             patch("core.celery.app.control.revoke") as revoke,
-            patch("lens.views.cancel_datasource_sync_on_lensnode") as cancel,
+            patch(
+                "lens.views.datasources.cancel_datasource_sync_on_lensnode"
+            ) as cancel,
         ):
             url = (
                 f"/api/lens/admin/datasources/{self.datasource.uuid}"
@@ -1385,7 +1393,7 @@ class LensApiTests(TestCase):
 
     def test_lensnode_tests_datasource_connection(self):
         with patch(
-            "lens.views.test_datasource_connection",
+            "lens.views.lensnodes.test_datasource_connection",
             return_value={
                 "status": "success",
                 "message_code": "git_branch_available",
