@@ -1,0 +1,400 @@
+"""LensNode-authenticated AI gateway, skill package, and upload views."""
+
+import hashlib
+import json
+import os
+
+from django.conf import settings
+from django.http import FileResponse, StreamingHttpResponse
+from django.shortcuts import get_object_or_404
+from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.renderers import JSONRenderer
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from lens.models import Run, RunOutputFile, Skill
+from lens.skill_packages import package_zip_bytes
+from .base import EventStreamRenderer, LensNodeAuthMixin
+
+
+# While a provider call is thinking (reasoning, composing a tool call)
+# the SSE stream can carry no tokens for minutes. Periodic heartbeats
+# prove transport liveness to the LensNode watchdog so it only aborts
+# on a genuinely dead pipe, never on a quiet-but-alive model call.
+GATEWAY_STREAM_HEARTBEAT_S = 10
+
+
+class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
+    """AI gateway endpoint authenticated by the LensNode token."""
+
+    authentication_classes = []
+    permission_classes = []
+    renderer_classes = [JSONRenderer, EventStreamRenderer]
+
+    def post(self, request):
+        """Proxy one metered LLM call on behalf of a LensNode."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        model_ref = request.data.get("model_ref")
+        messages = request.data.get("messages")
+        if not model_ref or not isinstance(messages, list):
+            return Response(
+                {"detail": "model_ref and messages are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from agentcore_metering.adapters.django import LLMTracker
+
+        tracker_state = {
+            "source_type": "lensnode_gateway",
+            "lensnode_uuid": str(lensnode.uuid),
+        }
+        correlation = {}
+        if request.data.get("run_uuid"):
+            correlation["run_uuid"] = str(request.data["run_uuid"])
+            correlation["is_subagent"] = bool(
+                request.data.get("is_subagent")
+            )
+        if correlation:
+            tracker_state["metadata"] = correlation
+        if request.data.get("stream"):
+            return self._stream_response(
+                lensnode,
+                model_ref,
+                messages,
+                tracker_state,
+                request.data,
+            )
+
+        content, usage = LLMTracker.call_and_track(
+            messages=messages,
+            model_uuid=model_ref,
+            node_name=f"lensnode:{lensnode.uuid}",
+            state=tracker_state,
+            tools=request.data.get("tools"),
+            tool_choice=request.data.get("tool_choice"),
+            temperature=request.data.get("temperature"),
+            max_tokens=request.data.get("max_tokens"),
+            return_message=bool(request.data.get("return_message")),
+        )
+        data = {
+            "usage": usage,
+            "lensnode_uuid": str(lensnode.uuid),
+        }
+        if request.data.get("return_message"):
+            data["message"] = content
+            data["content"] = content.get("content", "")
+        else:
+            data["content"] = content
+        return Response(data)
+
+    def _stream_response(
+        self,
+        lensnode,
+        model_ref,
+        messages,
+        tracker_state,
+        payload,
+    ):
+        """Stream a metered LLM call as SSE chunks.
+
+        Runs the sync LLMTracker generator in a thread and yields events via
+        an async generator so Daphne (ASGI) flushes each token immediately
+        instead of buffering the full response.
+        """
+
+        from agentcore_metering.adapters.django import LLMTracker
+        import asyncio
+        import logging as _logging
+
+        _log = _logging.getLogger("lens.gateway_stream")
+        lensnode_uuid_str = str(lensnode.uuid)
+
+        async def event_stream():
+            loop = asyncio.get_running_loop()
+            queue = asyncio.Queue()
+
+            def run_in_thread():
+                try:
+                    generator = LLMTracker.call_and_track(
+                        messages=messages,
+                        model_uuid=model_ref,
+                        node_name=f"lensnode:{lensnode_uuid_str}",
+                        state=tracker_state,
+                        stream=True,
+                        tools=payload.get("tools"),
+                        tool_choice=payload.get("tool_choice"),
+                        temperature=payload.get("temperature"),
+                        max_tokens=payload.get("max_tokens"),
+                    )
+                    token_count = 0
+                    while True:
+                        try:
+                            kind, text = next(generator)
+                        except StopIteration as exc:
+                            result = exc.value or {}
+                            tool_calls = result.pop("_tool_calls", None) or []
+                            _log.debug(
+                                "gateway stream done: token_count=%d "
+                                "tool_calls=%d",
+                                token_count,
+                                len(tool_calls),
+                            )
+                            loop.call_soon_threadsafe(
+                                queue.put_nowait,
+                                ("done", {
+                                    "type": "done",
+                                    "usage": result,
+                                    "lensnode_uuid": lensnode_uuid_str,
+                                    "tool_calls": tool_calls,
+                                }),
+                            )
+                            return
+                        except Exception as exc:
+                            error_code = self._gateway_stream_error_code(exc)
+                            _log.error(
+                                "gateway stream exception: type=%s error=%s "
+                                "token_count=%d",
+                                type(exc).__name__,
+                                exc,
+                                token_count,
+                            )
+                            loop.call_soon_threadsafe(
+                                queue.put_nowait,
+                                (
+                                    "event",
+                                    {
+                                        "type": "error",
+                                        "error": {
+                                            "code": error_code,
+                                            "message": str(exc),
+                                        },
+                                    },
+                                ),
+                            )
+                            return
+                        token_count += 1
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            ("event", {
+                                "type": "token",
+                                "kind": kind,
+                                "content": text,
+                            }),
+                        )
+                except Exception as exc:
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        (
+                            "event",
+                            {
+                                "type": "error",
+                                "error": {
+                                    "code": (
+                                        self._gateway_stream_error_code(
+                                            exc
+                                        )
+                                    ),
+                                    "message": str(exc),
+                                },
+                            },
+                        ),
+                    )
+
+            future = loop.run_in_executor(None, run_in_thread)
+            try:
+                while True:
+                    try:
+                        item = await asyncio.wait_for(
+                            queue.get(), timeout=GATEWAY_STREAM_HEARTBEAT_S
+                        )
+                    except asyncio.TimeoutError:
+                        yield self._sse({"type": "heartbeat"})
+                        continue
+                    if item[0] == "event":
+                        yield self._sse(item[1])
+                        if item[1].get("type") == "error":
+                            return
+                    elif item[0] == "done":
+                        yield self._sse(item[1])
+                        return
+                    elif item[0] == "error":
+                        raise item[1]
+            finally:
+                await future
+
+        response = StreamingHttpResponse(
+            event_stream(),
+            content_type="text/event-stream",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+    def _sse(self, event):
+        """Serialize one SSE event."""
+
+        return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    def _gateway_stream_error_code(self, exc):
+        """Return a stable error code for a gateway stream exception."""
+
+        name = type(exc).__name__.upper()
+        message = str(exc).upper()
+        if "TIMEOUT" in name or "TIMEOUT" in message or "TIMED OUT" in message:
+            return "MODEL_TIMEOUT"
+        stream_markers = [
+            "CHUNKED",
+            "INCOMPLETE",
+            "PEER CLOSED",
+            "REMOTE PROTOCOL",
+            "CONNECTION RESET",
+            "CONNECTION CLOSED",
+        ]
+        if any(
+            marker in name or marker in message
+            for marker in stream_markers
+        ):
+            return "MODEL_STREAM_ERROR"
+        return "MODEL_STREAM_ERROR"
+
+
+class LensNodeSkillPackageView(LensNodeAuthMixin, APIView):
+    """Skill package endpoint authenticated by the LensNode token."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, uuid):
+        """Return a packaged Skill archive for LensNode cache fill."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        skill = get_object_or_404(Skill, uuid=uuid, enabled=True)
+        package_hash = request.query_params.get("hash") or ""
+        if package_hash and package_hash != skill.package_hash:
+            return Response(
+                {"detail": "Skill package hash mismatch."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        archive = package_zip_bytes(skill)
+        response = FileResponse(
+            archive,
+            as_attachment=True,
+            filename=f"{skill.slug or skill.uuid}.zip",
+            content_type="application/zip",
+        )
+        response["X-Skill-Package-Hash"] = skill.package_hash
+        return response
+
+
+class LensNodeDeliverableUploadView(LensNodeAuthMixin, APIView):
+    """Receive a run deliverable file produced by a LensNode.
+
+    The node POSTs the file at produce time (same direction and token
+    auth as the AI gateway), so the bytes live on control-plane storage
+    and the node's volume stays private. The file is saved to the
+    'deliverables' storage and recorded as a RunOutputFile linked to the
+    run's answer message so the frontend can offer it for download.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        """Store an uploaded deliverable and record it against the run."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        run_uuid = request.data.get("run_uuid")
+        upload = request.FILES.get("file")
+        if not run_uuid or upload is None:
+            return Response(
+                {"detail": "run_uuid and file are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if upload.size > settings.DELIVERABLE_MAX_BYTES:
+            return Response(
+                {
+                    "detail": (
+                        "Deliverable exceeds the "
+                        f"{settings.DELIVERABLE_MAX_BYTES}-byte limit."
+                    )
+                },
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        try:
+            run = Run.objects.select_related(
+                "output_message", "session", "session__assistant"
+            ).get(uuid=run_uuid)
+        except Run.DoesNotExist:
+            return Response(
+                {"detail": "Run not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if run.lensnode_id != lensnode.id:
+            return Response(
+                {"detail": "Run does not belong to this LensNode."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        digest = hashlib.sha256()
+        for chunk in upload.chunks():
+            digest.update(chunk)
+        upload.seek(0)
+
+        filename = request.data.get("filename") or upload.name or "file"
+        # Strip any path components so a node cannot influence the stored
+        # path beyond the <assistant>/<session>/ prefix built by upload_to.
+        filename = os.path.basename(filename)[:255] or "file"
+        content_type = (
+            request.data.get("content_type")
+            or getattr(upload, "content_type", "")
+            or ""
+        )
+        content_type = content_type[:120]
+
+        output = RunOutputFile(
+            run=run,
+            message=run.output_message,
+            session=run.session,
+            assistant=run.session.assistant,
+            filename=filename,
+            content_type=content_type,
+            byte_size=upload.size,
+            content_hash=digest.hexdigest(),
+        )
+        # upload_to builds <assistant>/<session>/<filename> in the
+        # 'deliverables' storage; save=False defers the row write.
+        output.file.save(filename, upload, save=False)
+        try:
+            output.save()
+        except Exception:
+            # Roll back the just-written bytes so a failed row does not
+            # leave orphaned files the purge signal can never reach.
+            output.file.delete(save=False)
+            raise
+        return Response(
+            {
+                "uuid": str(output.uuid),
+                "filename": output.filename,
+                "byte_size": output.byte_size,
+            },
+            status=status.HTTP_201_CREATED,
+        )

@@ -1,0 +1,262 @@
+"""Skill and MCP server management views."""
+
+import shutil
+
+from django.db import transaction
+from django.http import FileResponse
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.response import Response
+
+from lens.models import AssistantSkill, MCPServer, Skill
+from lens.serializers import MCPServerSerializer, SkillSerializer
+from lens.skill_generation import (
+    SkillGeneratorNotConfigured,
+    beautify_skill_content,
+)
+from lens.skill_packages import (
+    SkillPackageError,
+    import_skill_from_github,
+    import_skill_zip,
+    package_zip_bytes,
+    update_skill_from_github,
+    update_skill_zip,
+)
+from .base import BaseAdminViewSet
+
+
+class SkillViewSet(BaseAdminViewSet):
+    """CRUD for skills."""
+
+    queryset = Skill.objects.all()
+    serializer_class = SkillSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        skill = self.get_object()
+        if skill.assistantskill_set.exists():
+            return Response(
+                {"detail": "Skill is still bound to assistants."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        """Delete an unbound Skill and remove its package files."""
+
+        package_path = instance.package_path
+        instance.delete()
+        transaction.on_commit(
+            lambda: self._remove_skill_package_path(package_path)
+        )
+
+    @action(detail=True, methods=["get"], url_path="delete-impact")
+    def delete_impact(self, request, *args, **kwargs):
+        """Return assistants that currently bind this Skill."""
+
+        skill = self.get_object()
+        assistants = self._bound_assistants(skill)
+        return Response(
+            {
+                "skill": {
+                    "uuid": str(skill.uuid),
+                    "name": skill.name,
+                    "slug": skill.slug,
+                },
+                "bound_count": len(assistants),
+                "bound_assistants": assistants,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="force-delete")
+    def force_delete(self, request, *args, **kwargs):
+        """Delete a Skill after explicit name confirmation."""
+
+        skill = self.get_object()
+        confirmation = str(request.data.get("confirmation_name") or "")
+        if confirmation != skill.name:
+            return Response(
+                {"detail": "Skill name confirmation does not match."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        package_path = skill.package_path
+        with transaction.atomic():
+            AssistantSkill.objects.filter(skill=skill).delete()
+            skill.delete()
+            transaction.on_commit(
+                lambda: self._remove_skill_package_path(package_path)
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        parser_classes=[MultiPartParser, FormParser],
+        url_path="update-upload",
+    )
+    def update_upload(self, request, *args, **kwargs):
+        """Replace an uploaded Skill package while preserving bindings."""
+
+        skill = self.get_object()
+        file_obj = request.FILES.get("file")
+        if file_obj is None:
+            return Response(
+                {"detail": "Skill package file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = update_skill_zip(
+                skill,
+                file_obj=file_obj,
+                original_name=getattr(file_obj, "name", ""),
+            )
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=True, methods=["post"], url_path="update-github")
+    def update_github(self, request, *args, **kwargs):
+        """Re-import a GitHub Skill while preserving bindings."""
+
+        skill = self.get_object()
+        url = str(request.data.get("url") or "").strip()
+        if not url:
+            return Response(
+                {"detail": "GitHub URL is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = update_skill_from_github(skill, url)
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    def _bound_assistants(self, skill):
+        """Return compact assistant data for delete confirmation."""
+
+        bindings = (
+            AssistantSkill.objects.filter(skill=skill)
+            .select_related("assistant", "assistant__lensnode")
+            .order_by("assistant__name")
+        )
+        return [
+            {
+                "uuid": str(binding.assistant.uuid),
+                "name": binding.assistant.name,
+                "slug": binding.assistant.slug,
+                "status": binding.assistant.status,
+                "visibility": binding.assistant.visibility,
+                "lensnode": binding.assistant.lensnode.name,
+            }
+            for binding in bindings
+        ]
+
+    def _remove_skill_package_path(self, package_path):
+        """Remove package files for a deleted Skill."""
+
+        if not package_path:
+            return
+
+        shutil.rmtree(package_path, ignore_errors=True)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        parser_classes=[MultiPartParser, FormParser],
+        url_path="upload",
+    )
+    def upload(self, request):
+        """Upload and validate a Skill zip package."""
+
+        file_obj = request.FILES.get("file")
+        if file_obj is None:
+            return Response(
+                {"detail": "Skill package file is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = import_skill_zip(
+                file_obj=file_obj,
+                original_name=getattr(file_obj, "name", ""),
+            )
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=False, methods=["post"], url_path="import-github")
+    def import_github(self, request):
+        """Import a public Skill zip package from GitHub."""
+
+        url = str(request.data.get("url") or "").strip()
+        if not url:
+            return Response(
+                {"detail": "GitHub URL is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            skill = import_skill_from_github(url)
+        except SkillPackageError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(skill).data)
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, *args, **kwargs):
+        """Download the current Skill package as a zip archive."""
+
+        skill = self.get_object()
+        archive = package_zip_bytes(skill)
+        return FileResponse(
+            archive,
+            as_attachment=True,
+            filename=f"{skill.slug}.zip",
+        )
+
+    @action(detail=False, methods=["post"])
+    def beautify(self, request):
+        """Polish a draft SKILL.md via the configured generator model."""
+
+        try:
+            content = beautify_skill_content(
+                content=request.data.get("content", ""),
+                name=request.data.get("name", ""),
+                user_id=request.user.id,
+            )
+        except SkillGeneratorNotConfigured:
+            return Response(
+                {"detail": "Skill generator model is not configured."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response({"content": content})
+
+
+class MCPServerViewSet(BaseAdminViewSet):
+    """CRUD for MCP servers."""
+
+    queryset = MCPServer.objects.all()
+    serializer_class = MCPServerSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        mcp = self.get_object()
+        if mcp.assistantmcp_set.exists():
+            return Response(
+                {"detail": "MCP server is still bound to assistants."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
