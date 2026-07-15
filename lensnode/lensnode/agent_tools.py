@@ -1,4 +1,5 @@
 import json
+import mimetypes
 import os
 import shlex
 import subprocess
@@ -6,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+import httpx
 from langchain_core.tools import tool
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -52,7 +54,7 @@ class _ReadWorkspaceFileArgs(BaseModel):
     limit: int = Field(default=250, description="Max lines to read.")
 
 
-def build_agent_tools(command, emit_event=None):
+def build_agent_tools(command, resources=None, config=None, emit_event=None):
     """Build read-only tools scoped to the selected workspace dirs."""
 
     target_dirs = command.get("target_dirs") or []
@@ -426,7 +428,7 @@ def build_agent_tools(command, emit_event=None):
         )
         return _json({"repositories": summaries})
 
-    return [
+    tools = [
         search_workspace,
         read_workspace_file,
         find_files,
@@ -434,6 +436,13 @@ def build_agent_tools(command, emit_event=None):
         git_log,
         git_diff,
     ]
+    if resources is not None and config is not None:
+        tools.append(
+            _build_save_deliverable_tool(
+                command, resources, config, emit_event
+            )
+        )
+    return tools
 
 
 class _RunSkillScriptArgs(BaseModel):
@@ -447,7 +456,102 @@ class _RunSkillScriptArgs(BaseModel):
     stdin: str = Field(default="", description="Optional standard input.")
 
 
-def build_general_chat_tools(command, resources, emit_event=None):
+def _build_save_deliverable_tool(command, resources, config, emit_event):
+    """Build the save_deliverable tool bound to this run.
+
+    Uploads a file the agent produced to the control plane at produce
+    time (same token/URL family as the AI gateway), so it reaches the
+    user as a download and survives the run's scratch cleanup. The
+    control plane never reads the node's volume — the node pushes it.
+    """
+
+    def emit(name, detail=None):
+        if emit_event is not None:
+            emit_event(name, detail or {})
+
+    @tool("save_deliverable")
+    def save_deliverable(path: str) -> str:
+        """Deliver a file you produced to the user for download.
+
+        Write the finished artifact first (e.g. with write_file), then
+        call this with its path. Only files passed here reach the user;
+        the private scratch directory is discarded when the run ends, so
+        it is NOT a delivery target. Use this for the final deliverable
+        (e.g. an HTML report), not for intermediate scratch files.
+        """
+
+        emit("tool.save_deliverable.start", {"path": path, "summary": path})
+        root = resources.root.resolve()
+        resolved = (resources.root / path.lstrip("/")).resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            emit("tool.save_deliverable.denied", {"path": path})
+            return _json({"ok": False, "error": "PATH_NOT_ALLOWED"})
+        if not resolved.is_file():
+            emit(
+                "tool.save_deliverable.done",
+                {"path": path, "summary": "not found"},
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "FILE_NOT_FOUND",
+                    "message": (
+                        "No file at that path. Write it first, then call "
+                        "save_deliverable(path)."
+                    ),
+                }
+            )
+        data = resolved.read_bytes()
+        filename = resolved.name
+        content_type = (
+            mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        )
+        try:
+            with httpx.Client(timeout=config.request_timeout_s) as client:
+                response = client.post(
+                    config.deliverable_upload_url,
+                    headers={"Authorization": f"Bearer {config.token}"},
+                    data={
+                        "run_uuid": command.get("run_uuid") or "",
+                        "filename": filename,
+                        "content_type": content_type,
+                    },
+                    files={"file": (filename, data, content_type)},
+                )
+                response.raise_for_status()
+        except Exception as exc:
+            emit(
+                "tool.save_deliverable.failed",
+                {"path": path, "error": str(exc)},
+            )
+            return _json(
+                {"ok": False, "error": "DELIVERY_FAILED", "message": str(exc)}
+            )
+        emit(
+            "tool.save_deliverable.done",
+            {
+                "filename": filename,
+                "byte_size": len(data),
+                "summary": f"{filename} ({len(data)} bytes)",
+            },
+        )
+        return _json(
+            {
+                "ok": True,
+                "filename": filename,
+                "byte_size": len(data),
+                "message": (
+                    f"Delivered '{filename}' to the user for download."
+                ),
+            }
+        )
+
+    return save_deliverable
+
+
+def build_general_chat_tools(command, resources, config=None, emit_event=None):
     """Build tools for General Chat without workspace retrieval tools."""
 
     settings = command.get("settings") or {}
@@ -573,7 +677,14 @@ def build_general_chat_tools(command, resources, emit_event=None):
         )
         return _json(payload)
 
-    return [run_skill_script]
+    tools = [run_skill_script]
+    if config is not None:
+        tools.append(
+            _build_save_deliverable_tool(
+                command, resources, config, emit_event
+            )
+        )
+    return tools
 
 
 def _resolve_skill_dir(skills_root, value):

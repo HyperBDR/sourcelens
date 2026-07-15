@@ -247,10 +247,16 @@ class LensDeepAgentRuntime:
                 tools = build_general_chat_tools(
                     command,
                     resources,
+                    self.config,
                     emit_event=emit_agent_event,
                 )
             else:
-                tools = build_agent_tools(command, emit_event=emit_agent_event)
+                tools = build_agent_tools(
+                    command,
+                    resources,
+                    self.config,
+                    emit_event=emit_agent_event,
+                )
             kwargs = {
                 "model": model,
                 "tools": tools,
