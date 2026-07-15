@@ -22,7 +22,6 @@ services:
       - ./data/django/staticfiles:/opt/backend/core/staticfiles
       - ./data/logs/api:/var/log/gunicorn
       - ./data/storage:/opt/storage
-      - ./data/workspace:/workspace
       - ./docker/nginx/certs:/opt/certs
     networks:
       - backend_network
@@ -49,7 +48,6 @@ services:
     volumes:
       - ./data/logs/worker:/var/log/celery
       - ./data/storage:/opt/storage
-      - ./data/workspace:/workspace
     networks:
       - backend_network
     depends_on:

@@ -24,7 +24,6 @@ services:
       - ./backend:/opt/backend
       - ./docker/nginx/certs:/opt/certs
       - ./data.dev/storage:/opt/storage
-      - ./data.dev/workspace:/workspace
     networks:
       - backend_network
     depends_on:
@@ -51,7 +50,6 @@ services:
     volumes:
       - ./data.dev/logs/worker:/var/log/celery
       - ./data.dev/storage:/opt/storage
-      - ./data.dev/workspace:/workspace
       - ./backend:/opt/backend
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     networks:
