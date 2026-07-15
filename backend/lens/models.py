@@ -817,3 +817,77 @@ class SharedQA(TimestampedUUIDModel):
 
     def __str__(self):
         return self.title or str(self.token)
+
+
+def deliverable_storage():
+    """Return the named 'deliverables' storage backend.
+
+    Resolved lazily so swapping it from local disk to object storage
+    (django-storages S3/OSS) is a settings change only — see issue #14.
+    """
+
+    from django.core.files.storage import storages
+
+    return storages["deliverables"]
+
+
+def run_output_file_upload_to(instance, filename):
+    """Return the deliverables path: <assistant>/<session>/<filename>.
+
+    Grouping by assistant then session keeps one conversation's files
+    together and gives session-scoped cleanup a natural unit.
+    """
+
+    return f"{instance.assistant.uuid}/{instance.session.uuid}/{filename}"
+
+
+class RunOutputFile(TimestampedUUIDModel):
+    """A file a LensNode run produced and delivered for user download.
+
+    The bytes are uploaded to the control plane at produce time and held
+    in the 'deliverables' storage; the control plane never reads the
+    node's volume. Grouped by assistant/session for isolation and
+    session-scoped cleanup, and linked to the assistant message so the
+    frontend can offer the download under that answer.
+    """
+
+    run = models.ForeignKey(
+        Run,
+        on_delete=models.CASCADE,
+        related_name="output_files",
+    )
+    message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="output_files",
+    )
+    session = models.ForeignKey(
+        Session,
+        on_delete=models.CASCADE,
+        related_name="output_files",
+    )
+    assistant = models.ForeignKey(
+        Assistant,
+        on_delete=models.CASCADE,
+        related_name="output_files",
+    )
+    file = models.FileField(
+        storage=deliverable_storage,
+        upload_to=run_output_file_upload_to,
+    )
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=120, blank=True, default="")
+    byte_size = models.PositiveIntegerField(default=0)
+    content_hash = models.CharField(max_length=64, blank=True, default="")
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["message"], name="lens_outfile_msg_idx"),
+            models.Index(fields=["session"], name="lens_outfile_sess_idx"),
+        ]
+
+    def __str__(self):
+        return self.filename or str(self.uuid)
