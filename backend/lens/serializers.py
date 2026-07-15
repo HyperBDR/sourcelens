@@ -1747,7 +1747,13 @@ def _answer_snippet(text, limit=160):
 
 
 class SharedQAPublicSerializer(serializers.ModelSerializer):
-    """Public single shared Q&A (anonymous, read-only)."""
+    """Public single shared Q&A (anonymous, read-only).
+
+    Intentionally a text-only snapshot: it must NOT include output_files
+    or any deliverable download URL. Deliverables are owner/staff-only
+    (see RunOutputFileDownloadView); exposing them here would leak
+    private files to anyone holding the public share token.
+    """
 
     class Meta:
         model = SharedQA

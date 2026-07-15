@@ -891,6 +891,13 @@ class RunOutputFileDownloadView(APIView):
     Always sent as an attachment (Content-Disposition: attachment) so
     untrusted agent-produced content is downloaded rather than rendered
     inline in the app origin; preview is handled separately later.
+
+    Authorization is DELIBERATELY private: only the session owner (or a
+    staff admin) may download. Sharing a run (SharedQA) copies the Q&A
+    text only and does NOT expose output files or this URL, so shared
+    viewers cannot reach deliverables. If public sharing of a deliverable
+    is ever wanted, do NOT relax this owner check -- add a separate
+    token-scoped download that validates the SharedQA token instead.
     """
 
     permission_classes = [permissions.IsAuthenticated]
