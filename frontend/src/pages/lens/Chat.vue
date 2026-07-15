@@ -451,14 +451,23 @@
                       v-for="file in message.output_files"
                       :key="file.uuid"
                       type="button"
-                      class="deliverable-chip"
+                      class="deliverable-card"
                       @click="downloadOutputFile(file)"
                     >
-                      <Download :size="14" class="deliverable-icon" />
-                      <span class="deliverable-name">{{ file.filename }}</span>
-                      <span v-if="file.byte_size" class="deliverable-size">{{
-                        formatBytes(file.byte_size)
-                      }}</span>
+                      <span class="deliverable-thumb">
+                        <FileText :size="20" />
+                      </span>
+                      <span class="deliverable-meta">
+                        <span class="deliverable-name">{{
+                          file.filename
+                        }}</span>
+                        <span class="deliverable-sub">{{
+                          fileTypeLabel(file)
+                        }}</span>
+                      </span>
+                      <span class="deliverable-action">
+                        <Download :size="18" />
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -823,6 +832,7 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  FileText,
   Sparkles
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
@@ -2051,6 +2061,14 @@ function formatBytes(size) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function fileTypeLabel(file) {
+  const name = file.filename || ''
+  const dot = name.lastIndexOf('.')
+  const ext = dot > -1 ? name.slice(dot + 1).toUpperCase() : ''
+  const size = formatBytes(file.byte_size)
+  return [ext, size].filter(Boolean).join(' · ')
+}
+
 function openShare(message) {
   shareRunUuid.value = message.run || ''
   shareExisting.value = sharesByRun.value[shareRunUuid.value] || null
@@ -2882,29 +2900,42 @@ onBeforeUnmount(() => {
 }
 
 .message-deliverables {
-  @apply mt-2 flex flex-wrap gap-2;
+  @apply mt-3 flex flex-col gap-2;
 }
 
-.deliverable-chip {
-  @apply inline-flex items-center gap-1.5 rounded-lg border
-    border-line bg-white px-2.5 py-1.5 text-xs text-gray-600
-    transition-colors;
+.deliverable-card {
+  @apply flex w-full max-w-sm items-center gap-3 rounded-xl border
+    border-line bg-white px-3 py-2.5 text-left transition-all;
 }
 
-.deliverable-chip:hover {
-  @apply border-primary-300 text-primary-600;
+.deliverable-card:hover {
+  @apply border-primary-300 shadow-soft;
 }
 
-.deliverable-icon {
-  @apply shrink-0 text-primary-600;
+.deliverable-thumb {
+  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
+    bg-primary-50 text-primary-600;
+}
+
+.deliverable-meta {
+  @apply flex min-w-0 flex-1 flex-col;
 }
 
 .deliverable-name {
-  @apply max-w-[220px] truncate font-medium;
+  @apply truncate text-sm font-medium text-gray-800;
 }
 
-.deliverable-size {
-  @apply text-gray-400;
+.deliverable-sub {
+  @apply mt-0.5 text-xs uppercase tracking-wide text-gray-400;
+}
+
+.deliverable-action {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg
+    text-gray-400 transition-colors;
+}
+
+.deliverable-card:hover .deliverable-action {
+  @apply bg-primary-50 text-primary-600;
 }
 
 .disclaimer {
