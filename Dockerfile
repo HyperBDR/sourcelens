@@ -8,12 +8,6 @@ ARG APT_MIRROR_URL=http://archive.ubuntu.com/ubuntu
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG PIP_TRUSTED_HOST=pypi.org
 
-# Stamp the release version onto the image so scripts/install.sh can read it
-# (docker inspect Config.Labels) to skip redeploying a color that already runs
-# this version. Absent/default => 0.0.0, which install.sh treats as "never skip".
-ARG APP_VERSION=0.0.0
-LABEL com.oneprocloud.sourcelens.version=$APP_VERSION
-
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -125,6 +119,14 @@ RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/sourcelens
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Stamp the release version onto the image so scripts/install.sh can read it
+# (docker inspect Config.Labels) to skip redeploying a color that already runs
+# this version. Absent/default => 0.0.0, which install.sh treats as "never skip".
+# Kept as the last layer so a version bump never invalidates the expensive
+# apt/pip build layers above it.
+ARG APP_VERSION=0.0.0
+LABEL com.oneprocloud.sourcelens.version=$APP_VERSION
 
 # Set default command
 ENTRYPOINT ["/entrypoint.sh"]
