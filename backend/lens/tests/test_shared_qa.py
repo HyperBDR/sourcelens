@@ -161,7 +161,7 @@ class SharedQAApiTests(TestCase):
         resp = self._share(user=self.other)
         self.assertEqual(resp.status_code, 404)
 
-    def test_unlisted_single_requires_login_and_same_publisher_group(self):
+    def test_unlisted_single_requires_login_then_allows_authenticated_user(self):
         token = self._share().data["token"]
         self.client.force_authenticate(user=None)
         anonymous = self.client.get(f"/api/lens/public/qa/{token}/")
@@ -169,13 +169,14 @@ class SharedQAApiTests(TestCase):
 
         self.client.force_authenticate(self.other)
         other = self.client.get(f"/api/lens/public/qa/{token}/")
-        self.assertEqual(other.status_code, 404)
+        self.assertEqual(other.status_code, 200)
+        self.assertEqual(other.data["question"], "What is X?")
 
         self.client.force_authenticate(self.group_peer)
         peer = self.client.get(f"/api/lens/public/qa/{token}/")
         self.assertEqual(peer.status_code, 200)
         self.assertEqual(peer.data["question"], "What is X?")
-        self.assertEqual(peer.data["view_count"], 1)
+        self.assertEqual(peer.data["view_count"], 2)
 
     def test_unlisted_single_allows_same_group_session_user(self):
         token = self._share().data["token"]

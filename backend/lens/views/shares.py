@@ -114,16 +114,7 @@ def _shared_qa_visible_to_user(share, user):
 
     if share.is_listed:
         return True
-    if not (user and user.is_authenticated):
-        return False
-    if user.is_staff or user.is_superuser:
-        return True
-    if share.published_by_id == user.id:
-        return True
-    publisher = share.published_by
-    if publisher is None:
-        return False
-    return publisher.groups.filter(pk__in=user.groups.values("pk")).exists()
+    return bool(user and user.is_authenticated)
 
 
 class PublicSharedQAListView(APIView):

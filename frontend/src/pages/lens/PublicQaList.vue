@@ -8,12 +8,11 @@
       <BaseLoading v-if="loading && !items.length" />
 
       <div
-        v-else-if="notFound"
-        class="rounded-lg border border-line bg-surface py-16 text-center"
+        v-else-if="accessState"
       >
-        <p class="text-sm font-medium text-ink-500">
-          {{ t('lens.qa.notFound') }}
-        </p>
+        <PublicQaAccessState
+          :type="accessState"
+        />
       </div>
 
       <template v-else>
@@ -60,6 +59,7 @@ import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
+import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
 import SharedQaCard from '@/components/lens/SharedQaCard.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -76,13 +76,15 @@ const total = ref(0)
 const nextOffset = ref(0)
 const loading = ref(true)
 const loadingMore = ref(false)
-const notFound = ref(false)
+const accessState = ref(null)
 
 async function load() {
   loading.value = true
-  notFound.value = false
+  accessState.value = null
   items.value = []
   nextOffset.value = 0
+  total.value = 0
+
   try {
     const data = await getPublicAssistantQa(props.slug, {
       limit: PAGE_SIZE,
@@ -93,7 +95,7 @@ async function load() {
     total.value = data?.total || 0
     nextOffset.value = data?.next_offset ?? null
   } catch {
-    notFound.value = true
+    accessState.value = 'not-found'
   } finally {
     loading.value = false
   }

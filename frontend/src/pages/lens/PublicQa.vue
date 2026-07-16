@@ -9,12 +9,13 @@
       <BaseLoading v-if="loading" />
 
       <div
-        v-else-if="notFound"
-        class="rounded-lg border border-line bg-surface py-16 text-center"
+        v-else-if="accessState"
       >
-        <p class="text-sm font-medium text-ink-500">
-          {{ t('lens.qa.notFound') }}
-        </p>
+        <PublicQaAccessState
+          :type="accessState"
+          @login="goLogin"
+          @home="goHome"
+        />
       </div>
 
       <article v-else-if="qa">
@@ -73,11 +74,13 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { Copy } from '@lucide/vue'
 
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
+import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { getPublicQa } from '@/api/lens'
@@ -85,19 +88,30 @@ import { copyToClipboard } from '@/utils/clipboard'
 import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
 import { useToast } from '@/composables/useToast'
+import { useUserStore } from '@/store/user'
 
 const props = defineProps({ token: { type: String, required: true } })
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const { showSuccess, showError } = useToast()
+const userStore = useUserStore()
 
 const qa = ref(null)
 const loading = ref(true)
-const notFound = ref(false)
+const accessState = ref(null)
+const isAuthenticated = computed(() => userStore.isAuthenticated)
+
+function setAccessStateAfterError() {
+  accessState.value = isAuthenticated.value ? 'not-found' : 'login-required'
+}
 
 async function load() {
   loading.value = true
-  notFound.value = false
+  accessState.value = null
+  qa.value = null
+
   try {
     qa.value = await getPublicQa(props.token)
     const title = qa.value?.title || qa.value?.question
@@ -105,8 +119,7 @@ async function load() {
       document.title = title
     }
   } catch {
-    qa.value = null
-    notFound.value = true
+    setAccessStateAfterError()
   } finally {
     loading.value = false
   }
@@ -120,6 +133,14 @@ async function copyLink() {
   }
 }
 
+function goLogin() {
+  router.push({ path: '/login', query: { next: route.fullPath } })
+}
+
+function goHome() {
+  router.push('/')
+}
+
 onMounted(load)
-watch(() => props.token, load)
+watch(() => [props.token, isAuthenticated.value], load)
 </script>
