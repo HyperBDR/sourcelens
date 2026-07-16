@@ -14,6 +14,7 @@ from django.utils import timezone
 from .attachments import attachment_data_url, bind_attachments_to_message
 from .llm import run_completion, run_completion_multimodal
 from .models import (
+    GlobalSetting,
     LensNode,
     Message,
     MessageAttachment,
@@ -78,8 +79,44 @@ def lensnode_group_name(lensnode_uuid):
     return f"lens.lensnode.{lensnode_uuid}"
 
 
+LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT = 180
+
+
+def get_lensnode_disconnect_grace_seconds():
+    """Return how long a disconnected node keeps its runs before they fail.
+
+    A blue/green API deploy recycles the container a node is connected to, so
+    a WebSocket drop is not proof the node's in-flight runs failed — the node
+    reconnects on an interval. Only a node still gone after this window has its
+    RUNNING/STREAMING runs marked failed (see
+    lens.tasks.check_lensnode_disconnect_grace_period). Admin-tunable via the
+    GlobalSetting key ``lensnode.disconnect_grace_s``.
+    """
+
+    setting = GlobalSetting.objects.filter(
+        key="lensnode.disconnect_grace_s"
+    ).first()
+    try:
+        value = int(
+            setting.value
+            if setting
+            else LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT
+        )
+    except (TypeError, ValueError):
+        return LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT
+    return max(1, value)
+
+
 def fail_active_runs_for_lensnode(lensnode_uuid):
-    """Mark all non-terminal runs for a lensnode as failed on disconnect."""
+    """Mark all non-terminal runs for a lensnode as failed.
+
+    Called from the grace-period check once a node is confirmed still gone
+    (see lens.tasks.check_lensnode_disconnect_grace_period), NOT directly on
+    every disconnect — a brief drop during a blue/green switch must not fail
+    runs the node is still executing and will report on reconnect. The
+    status=RUNNING/STREAMING filter is itself the guard against a run that
+    finished (left those states) while the node was reconnecting.
+    """
 
     now = timezone.now()
     Run.objects.filter(

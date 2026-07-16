@@ -11,8 +11,8 @@ from .lensnode_auth import hash_lensnode_token
 from .models import LensNode, Run
 from .services import (
     append_lensnode_output,
-    fail_active_runs_for_lensnode,
     finish_lensnode_run,
+    get_lensnode_disconnect_grace_seconds,
     lensnode_group_name,
     reconcile_lensnode_active_runs,
     record_lensnode_run_event,
@@ -52,10 +52,17 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         if getattr(self, "lensnode", None) is None:
             return
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
-        await self._mark_disconnected(self.lensnode.uuid, self.channel_name)
-        await database_sync_to_async(fail_active_runs_for_lensnode)(
-            self.lensnode.uuid
+        disconnected_at = await self._mark_disconnected(
+            self.lensnode.uuid, self.channel_name
         )
+        # Do not fail the node's runs here: the node reconnects on an interval
+        # (e.g. across a blue/green API recycle) and re-declares its active
+        # runs in the hello frame. Only a node still gone after the grace
+        # window has its runs failed — schedule that deferred check now.
+        if disconnected_at is not None:
+            await self._schedule_disconnect_grace_check(
+                self.lensnode.uuid, disconnected_at
+            )
 
     async def receive_json(self, content, **kwargs):
         """Route inbound LensNode protocol frames."""
@@ -126,12 +133,16 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         lensnode.connection_id = self.channel_name
         lensnode.last_authenticated_at = now
         lensnode.last_heartbeat_at = now
+        # Reconnected — clear disconnected_at so a still-pending grace check
+        # scheduled by the previous disconnect no-ops when it fires.
+        lensnode.disconnected_at = None
         lensnode.save(
             update_fields=[
                 "status",
                 "connection_id",
                 "last_authenticated_at",
                 "last_heartbeat_at",
+                "disconnected_at",
                 "updated_at",
             ]
         )
@@ -139,15 +150,44 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _mark_disconnected(self, lensnode_uuid, connection_id):
-        """Mark a LensNode offline if the current connection owns it."""
+        """Mark a LensNode offline if the current connection still owns it.
 
-        LensNode.objects.filter(
+        Returns the disconnect timestamp when this connection was the live
+        one, or None when a newer connection already replaced it — in which
+        case this stale disconnect must neither flip the node offline nor
+        schedule a grace check that could fail the new connection's runs.
+        """
+
+        now = timezone.now()
+        updated = LensNode.objects.filter(
             uuid=lensnode_uuid,
             connection_id=connection_id,
         ).update(
             status=LensNode.Status.OFFLINE,
             connection_id="",
-            updated_at=timezone.now(),
+            disconnected_at=now,
+            updated_at=now,
+        )
+        return now if updated else None
+
+    @database_sync_to_async
+    def _schedule_disconnect_grace_check(self, lensnode_uuid, disconnected_at):
+        """Schedule the one-shot check that fails this node's runs if it
+        stays gone past the grace window.
+
+        Uses a Celery countdown task, not an in-process timer: the API
+        process itself is what gets recycled on a blue/green switch, so an
+        asyncio timer would die with it. The Celery worker is a separate
+        process and fires the check on schedule regardless. disconnected_at
+        pins the check to this specific disconnect episode.
+        """
+
+        from .tasks import check_lensnode_disconnect_grace_period
+
+        grace_s = get_lensnode_disconnect_grace_seconds()
+        check_lensnode_disconnect_grace_period.apply_async(
+            args=[str(lensnode_uuid), disconnected_at.isoformat()],
+            countdown=grace_s,
         )
 
     async def _handle_hello(self, content):
@@ -176,6 +216,9 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         lensnode.status = LensNode.Status.ONLINE
         lensnode.connection_id = self.channel_name
         lensnode.last_heartbeat_at = timezone.now()
+        # A hello/heartbeat proves the node is back — clear any disconnect
+        # stamp so a pending grace check no-ops.
+        lensnode.disconnected_at = None
         if content.get("workspace_path") is not None:
             lensnode.workspace_path = content.get("workspace_path", "")
         if content.get("available_dirs") is not None:

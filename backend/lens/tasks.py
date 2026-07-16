@@ -648,6 +648,67 @@ def datasource_lock(datasource_uuid, ttl_s=600):
         release_datasource_lock(datasource_uuid, token=token)
 
 
+@shared_task(
+    name="lens.check_lensnode_disconnect_grace_period",
+    queue="lens",
+    ignore_result=True,
+)
+def check_lensnode_disconnect_grace_period(lensnode_uuid, disconnected_at_iso):
+    """Fail a node's runs only if it stays disconnected past the grace window.
+
+    Scheduled once (with a countdown) by LensNodeConsumer.disconnect(). A brief
+    WebSocket drop — e.g. a blue/green API recycle — must not fail runs the
+    node is still executing, so failure is deferred to here. disconnected_at_iso
+    pins this to the disconnect episode that scheduled it: if the node
+    reconnected (and maybe dropped again) since, disconnected_at will have moved
+    on and this stale check no-ops, leaving the newer disconnect's own check to
+    handle it.
+
+    This is deliberately separate from the periodic idle reaper
+    (lensnode_cleanup_task): that backstops genuinely stuck runs on live nodes,
+    this handles a confirmed-gone node — different purposes, not merged.
+    """
+
+    try:
+        node = LensNode.objects.get(uuid=lensnode_uuid)
+    except LensNode.DoesNotExist:
+        return
+
+    if node.status == LensNode.Status.ONLINE:
+        logger.info(
+            "LensNode %s reconnected within the grace period; nothing to do",
+            lensnode_uuid,
+        )
+        return
+
+    current = node.disconnected_at.isoformat() if node.disconnected_at else None
+    if current != disconnected_at_iso:
+        logger.info(
+            "LensNode %s disconnected again since this check was scheduled; "
+            "deferring to that episode's own check",
+            lensnode_uuid,
+        )
+        return
+
+    # Re-read right before acting to narrow (not eliminate) the race where the
+    # node reconnects between the check above and failing its runs.
+    node.refresh_from_db()
+    if node.status == LensNode.Status.ONLINE:
+        return
+    current = node.disconnected_at.isoformat() if node.disconnected_at else None
+    if current != disconnected_at_iso:
+        return
+
+    from .services import fail_active_runs_for_lensnode
+
+    logger.warning(
+        "LensNode %s still disconnected after the grace period; failing its "
+        "RUNNING/STREAMING runs",
+        lensnode_uuid,
+    )
+    fail_active_runs_for_lensnode(lensnode_uuid)
+
+
 @shared_task(name="lens.lensnode_health", queue="lens")
 def lensnode_health_task():
     """Mark stale online LensNodes offline based on heartbeat age."""

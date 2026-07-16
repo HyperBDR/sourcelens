@@ -1,0 +1,170 @@
+from unittest.mock import patch
+
+from asgiref.sync import async_to_sync
+from django.contrib.auth import get_user_model
+from django.test import TransactionTestCase
+from django.utils import timezone
+
+from core.asgi import application
+from lens.lensnode_auth import issue_lensnode_token
+from lens.models import (
+    Assistant,
+    GlobalSetting,
+    LensNode,
+    Run,
+    Session,
+)
+from lens.services import (
+    LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT,
+    create_execution_run,
+    get_lensnode_disconnect_grace_seconds,
+)
+from lens.tasks import check_lensnode_disconnect_grace_period
+
+User = get_user_model()
+
+
+class LensNodeDisconnectGraceTests(TransactionTestCase):
+    """Grace-period handling for LensNode WebSocket disconnects.
+
+    A disconnect (e.g. a blue/green API recycle) must not fail the node's
+    in-flight runs immediately; only a node still gone after the grace window
+    does.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="grace-user",
+            email="grace-user@example.com",
+            password="pass12345",
+        )
+        self.lensnode = LensNode.objects.create(
+            name="Grace LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            workspace_path="/workspace",
+            available_dirs=[{"path": "/workspace/repo"}],
+            tasks=[{"name": "knowledge_qa"}],
+        )
+        self.assistant = Assistant.objects.create(
+            name="Advisor",
+            slug="advisor",
+            lensnode=self.lensnode,
+            selected_task="knowledge_qa",
+            selected_dirs=[{"path": "/workspace/repo"}],
+        )
+        self.session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title="",
+        )
+
+    def _make_running_run(self):
+        run = create_execution_run(
+            session=self.session, question="q", enqueue=False
+        )
+        run.status = Run.Status.RUNNING
+        run.started_at = timezone.now()
+        run.save(update_fields=["status", "started_at"])
+        return run
+
+    def test_grace_seconds_default_and_override(self):
+        self.assertEqual(
+            get_lensnode_disconnect_grace_seconds(),
+            LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT,
+        )
+        GlobalSetting.objects.create(
+            key="lensnode.disconnect_grace_s", value=42
+        )
+        self.assertEqual(get_lensnode_disconnect_grace_seconds(), 42)
+
+    def test_check_fails_runs_when_still_offline(self):
+        run = self._make_running_run()
+        stamp = timezone.now()
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.disconnected_at = stamp
+        self.lensnode.save(update_fields=["status", "disconnected_at"])
+
+        check_lensnode_disconnect_grace_period(
+            str(self.lensnode.uuid), stamp.isoformat()
+        )
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.error, "LENSNODE_DISCONNECTED")
+
+    def test_check_noops_when_node_reconnected(self):
+        run = self._make_running_run()
+        stamp = timezone.now()
+        # Still ONLINE (reconnected within the window) with disconnected_at
+        # cleared — the check must leave the run running.
+        self.lensnode.status = LensNode.Status.ONLINE
+        self.lensnode.disconnected_at = None
+        self.lensnode.save(update_fields=["status", "disconnected_at"])
+
+        check_lensnode_disconnect_grace_period(
+            str(self.lensnode.uuid), stamp.isoformat()
+        )
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+
+    def test_check_noops_on_stale_episode(self):
+        run = self._make_running_run()
+        scheduled_stamp = timezone.now()
+        # A newer disconnect moved disconnected_at on; this stale check, pinned
+        # to the earlier episode, must defer to the newer one and no-op.
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.disconnected_at = scheduled_stamp + timezone.timedelta(
+            seconds=5
+        )
+        self.lensnode.save(update_fields=["status", "disconnected_at"])
+
+        check_lensnode_disconnect_grace_period(
+            str(self.lensnode.uuid), scheduled_stamp.isoformat()
+        )
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+
+    def test_check_noops_for_unknown_node(self):
+        import uuid
+
+        # Must not raise for a node that no longer exists.
+        check_lensnode_disconnect_grace_period(
+            str(uuid.uuid4()), timezone.now().isoformat()
+        )
+
+    def test_disconnect_defers_instead_of_failing_runs(self):
+        token = issue_lensnode_token(self.lensnode)
+        run = self._make_running_run()
+
+        with patch(
+            "lens.tasks.check_lensnode_disconnect_grace_period.apply_async"
+        ) as apply_async:
+            async_to_sync(self._connect_then_disconnect)(token)
+
+        # Run is NOT failed on disconnect; instead a grace check was scheduled.
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.lensnode.refresh_from_db()
+        self.assertEqual(self.lensnode.status, LensNode.Status.OFFLINE)
+        self.assertIsNotNone(self.lensnode.disconnected_at)
+        self.assertTrue(apply_async.called)
+        kwargs = apply_async.call_args.kwargs
+        self.assertEqual(
+            kwargs["args"][0], str(self.lensnode.uuid)
+        )
+        self.assertIn("countdown", kwargs)
+
+    async def _connect_then_disconnect(self, token):
+        from channels.testing import WebsocketCommunicator
+
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/lens/lensnodes/?token={token}",
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.receive_json_from()
+        await communicator.disconnect()
