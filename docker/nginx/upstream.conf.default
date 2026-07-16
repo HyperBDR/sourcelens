@@ -1,0 +1,15 @@
+# Bootstrap template for docker/nginx/conf.d/upstream.conf — copied into place
+# by scripts/install.sh on first run only, if upstream.conf doesn't already
+# exist. From then on this file is runtime state (which color is live) and is
+# rewritten in place by install.sh's blue/green switch (switch_traffic); it is
+# never synced from the repo again and must never be committed (see .gitignore).
+# It lives inside conf.d/ specifically so nginx's directory bind mount (not a
+# single-file mount) sees in-place rewrites — see docker-compose.yml's nginx
+# volumes comment for why that distinction matters here.
+upstream sourcelens_api_active {
+    server sourcelens-api-blue:8000;
+}
+
+upstream sourcelens_ui_active {
+    server sourcelens-ui-blue:80;
+}

@@ -123,10 +123,16 @@ docker restart sourcelens-scheduler-dev
 > 速记：**改普通代码** → api 自动生效、worker 手动重启；
 > **加 migration** → 额外重启 api。
 
-### Docker 生产构建
+### Docker 生产构建（蓝绿零停机）
+
+生产使用 `scripts/install.sh` 做蓝绿部署，**不要**直接 `docker compose up -d`
+（API/UI 是 blue/green profiled 服务，裸 `up` 不会启动任何一个颜色）。详见下方
+「零停机部署 (Blue/Green)」章节。
+
 ```bash
-cp env.sample .env
-docker-compose up -d
+# 首次安装 / 每次升级，同一条命令幂等：
+curl -fsSL https://raw.githubusercontent.com/HyperBDR/sourcelens/<tag>/scripts/install.sh \
+    -o install.sh && chmod +x install.sh && ./install.sh <tag>
 # 默认端口: HTTP 10080, HTTPS 10443
 ```
 
@@ -221,6 +227,43 @@ agentcore 是独立维护的包，通过 git submodule 引入。子模块被当�
 - **业务逻辑位置**：放在 models、serializers、services 中，views 只处理请求
 - **Django/DRF**：优先使用 CBV（复杂逻辑）和 DRF 内置功能，不手写原始 SQL
 - **调试用 print**：避免使用，用 logging 代替
+
+## 零停机部署 (Blue/Green)
+
+单生产主机、无 k8s/Swarm。API/UI 各有 blue、green 两份，同一时刻只有一个颜色在
+nginx 流量路径上。升级时先起空闲色、健康门控、原子切换 nginx（`nginx -s reload`，
+不断连），观察一段时间后再退役旧色；回滚就是切回另一色。
+
+### 命令
+
+- **安装 / 升级**：`scripts/install.sh <tag>`（或 `--local [tag]` 用本地工作树
+  构建、跳过远程拉取，便于对未提交改动做整链路测试）。一条命令幂等，首装与每次
+  升级同路径。CI（`.github/workflows/build_and_deploy.yml`）在服务器上引导并运行
+  它。
+- **日常运维**：`scripts/sourcelensctl.sh {status|restart-workers|rollback}`。与
+  install.sh 共享单飞锁与 `deploy-common.sh` 助手，但独立入口——"装新版本"和"操作
+  已在跑的东西"风险面不同。`rollback` 不做 pull/build/migrate，只在目标色镜像仍在
+  本地时可用。
+
+### 关键约束
+
+- **nginx 按整目录挂载**：`docker/nginx/conf.d/` 整个目录 bind-mount，**不是**单
+  文件。切流用 `sed -i`/rename 原子改写 `upstream.conf`（换 inode）；单文件挂载会
+  钉死在旧 inode，导致持续 502、旧色退役后变成 `host not found in upstream`。
+- **运行时状态不提交**：`.active_color` 与 `docker/nginx/conf.d/upstream.conf` 由
+  install.sh 首次从 `upstream.conf.default` 引导后即为运行时状态，`.gitignore` 已
+  忽略，切勿提交或被 install 覆盖。
+- **install.sh 是唯一支持的起停入口**：blue/green 服务之间不写 `depends_on`（
+  profiled 服务被非 profiled 服务引用会破坏所有不带 `--profile` 的 compose 命令
+  校验），起停顺序由脚本命令式掌控。裸 `docker compose up -d` 不受支持。
+- **lensnode 经 nginx 寻址**：`LENSNODE_SERVER_URL=http://nginx:80`，始终打到
+  active 色，切换时靠重连过渡（PR2 增加断连宽限期后，在途 run 不会被误判失败）。
+
+### 迁移必须 expand/contract 安全
+
+观察窗内，**旧色仍在对切换后的库表结构提供服务**。因此**同一发布**里既删/改列或
+收紧约束、又上线不再使用它的代码，会在窗口内打挂旧色。此类变更必须拆成两个发布：
+先加、双写/兼容，下个版本再删。
 
 ## 安全与配置
 

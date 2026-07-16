@@ -37,6 +37,12 @@ RUN npm run build
 # Production stage
 FROM nginx:alpine
 
+# Stamp the release version onto the runtime image so scripts/install.sh can
+# read it (docker inspect Config.Labels) for its version-skip check. Absent =>
+# 0.0.0, which install.sh treats as "never skip".
+ARG APP_VERSION=0.0.0
+LABEL com.oneprocloud.sourcelens.version=$APP_VERSION
+
 # Copy built files from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
