@@ -169,6 +169,7 @@ jobs:
             jq -cn \
               --arg template "${CARD_TEMPLATE}" \
               --arg content "${CONTENT}" \
+              --arg pr_number "${PR_NUMBER}" \
               --arg pr_url "${PR_URL}" \
               '{
                 msg_type: "interactive",
@@ -181,7 +182,8 @@ jobs:
                     title: {
                       tag: "plain_text",
                       content: (
-                        "[AI Review] SourceLens PR Review"
+                        "[代码审查] SourceLens PR #"
+                        + $pr_number
                       )
                     },
                     template: $template
