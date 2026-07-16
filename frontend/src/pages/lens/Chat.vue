@@ -447,28 +447,48 @@
                     v-if="message.output_files && message.output_files.length"
                     class="message-deliverables"
                   >
-                    <button
+                    <div
                       v-for="file in message.output_files"
                       :key="file.uuid"
-                      type="button"
                       class="deliverable-card"
-                      @click="downloadOutputFile(file)"
                     >
-                      <span class="deliverable-thumb">
-                        <FileText :size="20" />
+                      <button
+                        type="button"
+                        class="deliverable-open"
+                        @click="handleCardClick(file)"
+                      >
+                        <span class="deliverable-thumb">
+                          <FileText :size="20" />
+                        </span>
+                        <span class="deliverable-meta">
+                          <span class="deliverable-name">{{
+                            file.filename
+                          }}</span>
+                          <span class="deliverable-sub">{{
+                            fileTypeLabel(file)
+                          }}</span>
+                        </span>
+                      </button>
+                      <span class="deliverable-actions">
+                        <button
+                          v-if="isPreviewable(file)"
+                          type="button"
+                          class="deliverable-action"
+                          :title="t('lens.chat.preview')"
+                          @click="openPreview(file)"
+                        >
+                          <Eye :size="18" />
+                        </button>
+                        <button
+                          type="button"
+                          class="deliverable-action"
+                          :title="t('lens.chat.download')"
+                          @click="downloadOutputFile(file)"
+                        >
+                          <Download :size="18" />
+                        </button>
                       </span>
-                      <span class="deliverable-meta">
-                        <span class="deliverable-name">{{
-                          file.filename
-                        }}</span>
-                        <span class="deliverable-sub">{{
-                          fileTypeLabel(file)
-                        }}</span>
-                      </span>
-                      <span class="deliverable-action">
-                        <Download :size="18" />
-                      </span>
-                    </button>
+                    </div>
                   </div>
                 </div>
 
@@ -817,6 +837,12 @@
       @shared="handleShareUpdated"
       @unshared="handleShareRemoved"
     />
+
+    <FilePreviewModal
+      :file="previewFile"
+      @close="closePreview"
+      @download="downloadOutputFile"
+    />
   </div>
 </template>
 
@@ -832,13 +858,13 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  Eye,
   FileText,
   Sparkles
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
-import api from '@/api'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -849,6 +875,12 @@ import MySharesPanel from '@/components/lens/MySharesPanel.vue'
 import AssistantEmptyState from '@/components/lens/AssistantEmptyState.vue'
 import LoginModal from '@/components/auth/LoginModal.vue'
 import QaShareModal from '@/components/lens/QaShareModal.vue'
+import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
+import {
+  extensionOf,
+  fetchDeliverableBlob,
+  isPreviewable
+} from '@/utils/filePreview'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
@@ -2027,15 +2059,31 @@ async function copyMessage(message) {
   }
 }
 
+const previewFile = ref(null)
+
+function openPreview(file) {
+  previewFile.value = file
+}
+
+function closePreview() {
+  previewFile.value = null
+}
+
+function handleCardClick(file) {
+  if (isPreviewable(file)) {
+    openPreview(file)
+  } else {
+    downloadOutputFile(file)
+  }
+}
+
 async function downloadOutputFile(file) {
   if (!file?.url) {
     return
   }
   try {
-    // api baseURL already ends with /api; drop the leading prefix.
-    const path = file.url.replace(/^\/api/, '')
-    const response = await api.get(path, { responseType: 'blob' })
-    const objectUrl = URL.createObjectURL(response.data)
+    const blob = await fetchDeliverableBlob(file)
+    const objectUrl = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = objectUrl
     link.download = file.filename || 'download'
@@ -2062,9 +2110,7 @@ function formatBytes(size) {
 }
 
 function fileTypeLabel(file) {
-  const name = file.filename || ''
-  const dot = name.lastIndexOf('.')
-  const ext = dot > -1 ? name.slice(dot + 1).toUpperCase() : ''
+  const ext = extensionOf(file.filename).toUpperCase()
   const size = formatBytes(file.byte_size)
   return [ext, size].filter(Boolean).join(' · ')
 }
@@ -2912,6 +2958,10 @@ onBeforeUnmount(() => {
   @apply border-primary-300 shadow-soft;
 }
 
+.deliverable-open {
+  @apply flex min-w-0 flex-1 items-center gap-3 text-left;
+}
+
 .deliverable-thumb {
   @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
     bg-primary-50 text-primary-600;
@@ -2929,12 +2979,16 @@ onBeforeUnmount(() => {
   @apply mt-0.5 text-xs uppercase tracking-wide text-gray-400;
 }
 
+.deliverable-actions {
+  @apply flex shrink-0 items-center gap-1;
+}
+
 .deliverable-action {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg
     text-gray-400 transition-colors;
 }
 
-.deliverable-card:hover .deliverable-action {
+.deliverable-action:hover {
   @apply bg-primary-50 text-primary-600;
 }
 
