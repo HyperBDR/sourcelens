@@ -228,6 +228,25 @@ agentcore 是独立维护的包，通过 git submodule 引入。子模块被当�
 - **Django/DRF**：优先使用 CBV（复杂逻辑）和 DRF 内置功能，不手写原始 SQL
 - **调试用 print**：避免使用，用 logging 代替
 
+## 部署编排选择（三选一）
+
+三份 compose 各司其职，**同一主机/目录只跑其中一个**（它们共享默认 project 名与
+`postgresql`/`redis` 服务名，同目录并起会互相顶掉容器）：
+
+| 文件 | 场景 | 起停方式 | 镜像 | 零停机 |
+|---|---|---|---|---|
+| `docker-compose.dev.yml` | 开发 | 裸 `docker compose -f … up -d` | 源码构建 + 热挂载 | 否 |
+| `docker-compose.standalone.yml` | 生产 · 简单单实例 | 裸 `docker compose -f … up -d` | 拉发布镜像（无源码挂载） | 否 |
+| `docker-compose.yml` | 生产 · 零停机 | `scripts/install.sh`（蓝绿） | 拉发布镜像 | 是 |
+
+- **只想 `docker compose up` 一把起、不要零停机** → `docker-compose.standalone.yml`
+  （单 `backend-api` + 单文件 `docker/nginx/default.standalone.conf` 直连，无
+  profiles、无 upstream 运行时状态）。部署就是 `pull` + `up -d`，会短暂重建
+  backend-api（在途请求会断）。
+- **要零停机** → 走下方蓝绿方案。注意 `docker-compose.yml` **不能**用裸
+  `docker compose up -d` 起（API/UI 是 profiled 服务，且 nginx 依赖运行时
+  `upstream.conf`），必须用 `install.sh`。
+
 ## 零停机部署 (Blue/Green)
 
 单生产主机、无 k8s/Swarm。API/UI 各有 blue、green 两份，同一时刻只有一个颜色在
