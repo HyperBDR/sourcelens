@@ -105,6 +105,10 @@ const isAuthenticated = computed(() => userStore.isAuthenticated)
 
 function setAccessStateAfterError() {
   accessState.value = isAuthenticated.value ? 'not-found' : 'login-required'
+  document.title =
+    accessState.value === 'login-required'
+      ? t('lens.qa.loginRequiredTitle')
+      : t('lens.qa.notFound')
 }
 
 async function load() {

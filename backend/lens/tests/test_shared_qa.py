@@ -178,7 +178,7 @@ class SharedQAApiTests(TestCase):
         self.assertEqual(peer.data["question"], "What is X?")
         self.assertEqual(peer.data["view_count"], 2)
 
-    def test_unlisted_single_allows_same_group_session_user(self):
+    def test_unlisted_single_allows_authenticated_session_user(self):
         token = self._share().data["token"]
         self.client.force_authenticate(user=None)
         self.assertTrue(
