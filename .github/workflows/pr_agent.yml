@@ -1,0 +1,227 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.sender.type != 'Bot' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Validate required LLM configuration
+        shell: bash
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LLM_API_KEY}" ] || [ -z "${LLM_BASE_URL}" ]; then
+            echo "::error::LLM_API_KEY and LLM_BASE_URL must be"
+            echo "::error::configured as repository secrets."
+            exit 1
+          fi
+
+      - name: Review and describe pull request in English
+        id: pr_agent
+        # v0.39.0
+        uses: >-
+          The-PR-Agent/pr-agent@8e4d32e5497defd43c023a404f73560c62728961
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.LLM_API_KEY }}
+          OPENAI.API_BASE: ${{ secrets.LLM_BASE_URL }}
+          CONFIG.MODEL: ${{ vars.LLM_MODEL || 'openai/deepseek-v3' }}
+          CONFIG.FALLBACK_MODELS: >-
+            ["${{ vars.LLM_MODEL || 'openai/deepseek-v3' }}"]
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: >-
+            ${{ vars.LLM_MODEL_MAX_TOKENS || '64000' }}
+          CONFIG.RESPONSE_LANGUAGE: en-US
+          CONFIG.REPO_CONTEXT_FILES: >-
+            ["PR_WORKFLOW.md"]
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
+            Every review summary, finding, inline comment, test note,
+            merge recommendation, and no-issue conclusion published to
+            GitHub must be written in English only. Do not produce
+            mixed-language review prose.
+          PR_DESCRIPTION.EXTRA_INSTRUCTIONS: >-
+            Every generated PR title, description, summary, walkthrough,
+            and diagram label published to GitHub must be written in
+            English only.
+          PR_CODE_SUGGESTIONS.EXTRA_INSTRUCTIONS: >-
+            Every code suggestion explanation and suggested-change
+            comment published to GitHub must be written in English only.
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "true"
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
+          GITHUB_ACTION_CONFIG.PUSH_COMMANDS: >-
+            ["/describe", "/review"]
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: >-
+            ["opened", "reopened", "ready_for_review"]
+
+      - name: Notify Feishu
+        if: always()
+        shell: bash
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_AGENT_OUTCOME: ${{ steps.pr_agent.outcome }}
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${FEISHU_WEBHOOK}" ]; then
+            echo "::warning::FEISHU_WEBHOOK is not configured."
+            exit 0
+          fi
+
+          REVIEW_FOUND="false"
+          if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
+            COMMENTS_URL="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+            COMMENTS_URL="${COMMENTS_URL}/issues/${PR_NUMBER}/comments"
+            COMMENTS_URL="${COMMENTS_URL}?per_page=100"
+            if COMMENTS="$(
+              curl --fail --silent --show-error \
+                --retry 3 \
+                --max-time 20 \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "${COMMENTS_URL}"
+            )"; then
+              REVIEW_FOUND="$(
+                jq -r '
+                  any(
+                    .[];
+                    .user.login == "github-actions[bot]"
+                    and (
+                      .body
+                      | test("PR Reviewer Guide|PR Review"; "i")
+                    )
+                  )
+                ' <<< "${COMMENTS}"
+              )"
+            fi
+          fi
+
+          if [ "${PR_AGENT_OUTCOME}" != "success" ]; then
+            CARD_TEMPLATE="red"
+            STATUS="❌ Review failed"
+            DETAIL="Check the GitHub Actions logs before merging."
+          elif [ "${REVIEW_FOUND}" != "true" ]; then
+            CARD_TEMPLATE="orange"
+            STATUS="⚠️ Review needs attention"
+            DETAIL="No PR-Agent review comment was found."
+          else
+            CARD_TEMPLATE="green"
+            STATUS="✅ Review completed"
+            DETAIL="Human approval is still required before merge."
+          fi
+
+          REPORT_DATE="$(date -u +%Y-%m-%d)"
+          PR_STATE_UPPER="$(
+            printf '%s' "${PR_STATE}" | tr '[:lower:]' '[:upper:]'
+          )"
+          CONTENT="$(
+            printf '**%s**\n%s\n\n' "${STATUS}" "${DETAIL}"
+            printf '**Repository**: %s\n' "${GITHUB_REPOSITORY}"
+            printf '**Date (UTC)**: %s\n' "${REPORT_DATE}"
+            printf '**PR**: #%s — %s\n' "${PR_NUMBER}" "${PR_TITLE}"
+            printf '**Author**: %s\n' "${PR_AUTHOR}"
+            printf '**Status**: %s\n' "${PR_STATE_UPPER}"
+            printf '**Branch**: %s → %s\n' \
+              "${PR_HEAD_REF}" "${PR_BASE_REF}"
+            printf '**Files**: %s | +%s / -%s' \
+              "${PR_CHANGED_FILES}" \
+              "${PR_ADDITIONS}" \
+              "${PR_DELETIONS}"
+          )"
+
+          PAYLOAD="$(
+            jq -cn \
+              --arg template "${CARD_TEMPLATE}" \
+              --arg content "${CONTENT}" \
+              --arg pr_url "${PR_URL}" \
+              '{
+                msg_type: "interactive",
+                card: {
+                  schema: "2.0",
+                  config: {
+                    wide_screen_mode: true
+                  },
+                  header: {
+                    title: {
+                      tag: "plain_text",
+                      content: (
+                        "[AI Review] SourceLens PR Review"
+                      )
+                    },
+                    template: $template
+                  },
+                  body: {
+                    elements: [
+                      {
+                        tag: "markdown",
+                        content: $content
+                      },
+                      {
+                        tag: "hr"
+                      },
+                      {
+                        tag: "markdown",
+                        content: (
+                          "🔗 [Open the full review]("
+                          + $pr_url
+                          + ")"
+                        )
+                      }
+                    ]
+                  }
+                }
+              }'
+          )"
+
+          RESPONSE="$(
+            curl --fail --silent --show-error \
+              --retry 3 \
+              --max-time 20 \
+              -X POST \
+              -H "Content-Type: application/json" \
+              --data "${PAYLOAD}" \
+              "${FEISHU_WEBHOOK}"
+          )"
+
+          if ! jq -e \
+            '(.code? == 0) or (.StatusCode? == 0)' \
+            <<< "${RESPONSE}" > /dev/null; then
+            echo "::error::Feishu rejected the notification payload."
+            exit 1
+          fi
