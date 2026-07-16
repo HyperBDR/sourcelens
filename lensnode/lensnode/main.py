@@ -43,19 +43,47 @@ class LensNodeClient:
         # emits run_event/run_output/run_done frames while the socket is down;
         # buffering them here (instead of on a per-connection queue that is
         # discarded on disconnect) means the next connection's send loop
-        # flushes them rather than losing them. Frames are peeked and only
-        # removed once sent, so a drop mid-send preserves the frame and its
-        # order for the next connection.
+        # flushes them rather than losing them. The send loop pops a frame
+        # before sending and re-queues it at the front on a mid-send failure,
+        # so an outage preserves frames and their order.
+        #
+        # Bounded so a prolonged outage (run threads keep emitting with no
+        # consumer draining) can't grow it without limit and OOM-kill the node
+        # — better to drop the oldest frames of one run than to lose every run.
         self._outbox = collections.deque()
         self._outbox_ready = asyncio.Event()
+        self._outbox_max = int(
+            os.getenv("LENSNODE_OUTBOX_MAX_FRAMES", "10000")
+        )
+        self._outbox_dropped = 0
 
     def _enqueue(self, payload):
         """Append an outbound frame to the durable outbox.
 
         Not coroutine-safe with respect to threads; background run threads
         must schedule it via loop.call_soon_threadsafe(self._enqueue, payload).
+        Drops the oldest frame when the buffer is full (see __init__). Safe
+        against the send loop: that loop pops its in-flight frame out before
+        awaiting, so a drop here never races the frame being sent.
         """
 
+        while len(self._outbox) >= self._outbox_max:
+            self._outbox.popleft()
+            self._outbox_dropped += 1
+            if self._outbox_dropped == 1 or self._outbox_dropped % 1000 == 0:
+                LOGGER.warning(
+                    task_log(
+                        (
+                            "Dropping buffered frames for LensNode "
+                            f"{self.config.name}. Current status is "
+                            "outbox_full."
+                        ),
+                        details=[
+                            f"MaxFrames: {self._outbox_max}",
+                            f"TotalDropped: {self._outbox_dropped}",
+                        ],
+                    )
+                )
         self._outbox.append(payload)
         self._outbox_ready.set()
 
@@ -521,7 +549,15 @@ class LensNodeClient:
             return
 
     async def _send_hello(self):
-        """Send initial LensNode capabilities."""
+        """Send initial LensNode capabilities.
+
+        Sent directly on the socket (not via the durable outbox) and only from
+        _on_connected, before the send loop starts — so it is always this
+        connection's first frame and never persists across a reconnect. A hello
+        left buffered in the durable outbox would otherwise be replayed on the
+        next connection carrying a stale active_runs snapshot, triggering a
+        spurious reconcile pass server-side.
+        """
 
         dirs = available_dirs(self.config.workspace_path)
         LOGGER.info(
@@ -542,20 +578,23 @@ class LensNodeClient:
             for key in self.running_tasks
             if not key.startswith("datasource:")
         ]
-        self._enqueue(
-            {
-                "type": "hello",
-                "lensnode_name": self.config.name,
-                "protocol_version": self.config.protocol_version,
-                "agent_version": self.config.agent_version,
-                "workspace_path": self.config.workspace_path,
-                "available_dirs": dirs,
-                "tasks": TASKS,
-                "active_runs": active_runs,
-                "labels": {
-                    "mode": "local",
+        await self.websocket.send(
+            json.dumps(
+                {
+                    "type": "hello",
+                    "lensnode_name": self.config.name,
+                    "protocol_version": self.config.protocol_version,
+                    "agent_version": self.config.agent_version,
+                    "workspace_path": self.config.workspace_path,
+                    "available_dirs": dirs,
+                    "tasks": TASKS,
+                    "active_runs": active_runs,
+                    "labels": {
+                        "mode": "local",
+                    },
                 },
-            }
+                ensure_ascii=False,
+            )
         )
 
     async def _heartbeat_loop(self):
@@ -600,19 +639,29 @@ class LensNodeClient:
     async def _send_loop(self, websocket):
         """Drain the durable outbox to the control plane over one connection.
 
-        Peeks each frame and only removes it once the send succeeds, so a
-        failure mid-send (the socket dropping) leaves the frame — and every
-        frame behind it, in order — buffered for the next connection's send
-        loop. Waits on _outbox_ready when the outbox is empty.
+        Pops a frame BEFORE awaiting the send (so a concurrent _enqueue that
+        drops the oldest frame when the buffer is full can never touch the
+        in-flight one), and on a mid-send failure re-queues it at the FRONT so
+        the frame and its order survive for the next connection's send loop.
+        Waits on _outbox_ready when the outbox is empty.
+
+        Re-delivery is at-least-once: a frame whose bytes reached the server
+        before the send raised is re-sent on reconnect. The backend tolerates
+        this — a run's final_content frame reconciles the accumulated output —
+        matching the reference ws_client design.
         """
 
         while not self.stopping.is_set():
             while self._outbox:
-                payload = self._outbox[0]
-                await websocket.send(
-                    json.dumps(payload, ensure_ascii=False)
-                )
-                self._outbox.popleft()
+                payload = self._outbox.popleft()
+                try:
+                    await websocket.send(
+                        json.dumps(payload, ensure_ascii=False)
+                    )
+                except Exception:
+                    self._outbox.appendleft(payload)
+                    self._outbox_ready.set()
+                    raise
             self._outbox_ready.clear()
             if self._outbox:
                 continue

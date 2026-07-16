@@ -157,6 +157,25 @@ class LensNodeDisconnectGraceTests(TransactionTestCase):
         )
         self.assertIn("countdown", kwargs)
 
+    def test_disconnect_schedules_check_when_health_task_cleared_owner(self):
+        # If lensnode_health_task marked the node OFFLINE and cleared
+        # connection_id before the socket finally closes, disconnect()'s CAS on
+        # connection_id misses — but it must still schedule the grace check so
+        # a genuinely-dead node's runs are failed, not left RUNNING.
+        token = issue_lensnode_token(self.lensnode)
+        run = self._make_running_run()
+
+        with patch(
+            "lens.tasks.check_lensnode_disconnect_grace_period.apply_async"
+        ) as apply_async:
+            async_to_sync(self._connect_clear_owner_then_disconnect)(token)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.lensnode.refresh_from_db()
+        self.assertIsNotNone(self.lensnode.disconnected_at)
+        self.assertTrue(apply_async.called)
+
     async def _connect_then_disconnect(self, token):
         from channels.testing import WebsocketCommunicator
 
@@ -167,4 +186,21 @@ class LensNodeDisconnectGraceTests(TransactionTestCase):
         connected, _ = await communicator.connect()
         self.assertTrue(connected)
         await communicator.receive_json_from()
+        await communicator.disconnect()
+
+    async def _connect_clear_owner_then_disconnect(self, token):
+        from channels.db import database_sync_to_async
+        from channels.testing import WebsocketCommunicator
+
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/lens/lensnodes/?token={token}",
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.receive_json_from()
+        # Simulate lensnode_health_task getting there first.
+        await database_sync_to_async(
+            LensNode.objects.filter(uuid=self.lensnode.uuid).update
+        )(status=LensNode.Status.OFFLINE, connection_id="")
         await communicator.disconnect()

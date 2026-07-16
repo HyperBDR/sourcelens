@@ -12,10 +12,10 @@ from .models import LensNode, Run
 from .services import (
     append_lensnode_output,
     finish_lensnode_run,
-    get_lensnode_disconnect_grace_seconds,
     lensnode_group_name,
     reconcile_lensnode_active_runs,
     record_lensnode_run_event,
+    schedule_lensnode_disconnect_grace_check,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -168,26 +168,28 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             disconnected_at=now,
             updated_at=now,
         )
-        return now if updated else None
+        if updated:
+            return now
+        # CAS missed. If a newer connection took over, connection_id is now
+        # that channel — leave it alone (a stale disconnect must not fail the
+        # new connection's runs). But if the node was already flipped OFFLINE
+        # with no owner (lensnode_health_task beat us to it after the node went
+        # silent), stamp a disconnect episode now so the grace check still runs
+        # and fails a genuinely-dead node's runs — otherwise dropping the old
+        # unconditional fail call would leave them RUNNING until the much
+        # slower idle reaper.
+        stamped = LensNode.objects.filter(
+            uuid=lensnode_uuid,
+            connection_id="",
+        ).update(disconnected_at=now, updated_at=now)
+        return now if stamped else None
 
     @database_sync_to_async
     def _schedule_disconnect_grace_check(self, lensnode_uuid, disconnected_at):
-        """Schedule the one-shot check that fails this node's runs if it
-        stays gone past the grace window.
+        """Schedule the deferred grace check (delegates to the service)."""
 
-        Uses a Celery countdown task, not an in-process timer: the API
-        process itself is what gets recycled on a blue/green switch, so an
-        asyncio timer would die with it. The Celery worker is a separate
-        process and fires the check on schedule regardless. disconnected_at
-        pins the check to this specific disconnect episode.
-        """
-
-        from .tasks import check_lensnode_disconnect_grace_period
-
-        grace_s = get_lensnode_disconnect_grace_seconds()
-        check_lensnode_disconnect_grace_period.apply_async(
-            args=[str(lensnode_uuid), disconnected_at.isoformat()],
-            countdown=grace_s,
+        schedule_lensnode_disconnect_grace_check(
+            lensnode_uuid, disconnected_at
         )
 
     async def _handle_hello(self, content):

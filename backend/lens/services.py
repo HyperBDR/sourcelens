@@ -107,6 +107,38 @@ def get_lensnode_disconnect_grace_seconds():
     return max(1, value)
 
 
+def schedule_lensnode_disconnect_grace_check(lensnode_uuid, disconnected_at):
+    """Schedule the one-shot check that fails a node's runs if it stays gone
+    past the grace window.
+
+    Kept here (not in the consumer) so the scheduling policy is a service, not
+    transport logic. Uses a Celery countdown task, not an in-process timer: the
+    API process itself is what gets recycled on a blue/green switch, so an
+    asyncio timer would die with it — the Celery worker is a separate process.
+    disconnected_at pins the check to this disconnect episode.
+
+    apply_async talks to the broker; wrap it so a broker hiccup at disconnect
+    time can't raise out of the consumer's disconnect() — the periodic idle
+    reaper (lens.lensnode_cleanup) remains the backstop for a genuinely dead
+    node whose check never got scheduled.
+    """
+
+    from .tasks import check_lensnode_disconnect_grace_period
+
+    grace_s = get_lensnode_disconnect_grace_seconds()
+    try:
+        check_lensnode_disconnect_grace_period.apply_async(
+            args=[str(lensnode_uuid), disconnected_at.isoformat()],
+            countdown=grace_s,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to schedule disconnect grace check for lensnode %s; "
+            "its runs will be reaped by the idle sweep instead",
+            lensnode_uuid,
+        )
+
+
 def fail_active_runs_for_lensnode(lensnode_uuid):
     """Mark all non-terminal runs for a lensnode as failed.
 

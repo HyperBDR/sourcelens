@@ -7,6 +7,7 @@ from celery import shared_task
 from django.core.cache import cache
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from .datasource_services import (
     dispatch_datasource_sync_async,
@@ -657,17 +658,27 @@ def check_lensnode_disconnect_grace_period(lensnode_uuid, disconnected_at_iso):
     """Fail a node's runs only if it stays disconnected past the grace window.
 
     Scheduled once (with a countdown) by LensNodeConsumer.disconnect(). A brief
-    WebSocket drop — e.g. a blue/green API recycle — must not fail runs the
-    node is still executing, so failure is deferred to here. disconnected_at_iso
-    pins this to the disconnect episode that scheduled it: if the node
-    reconnected (and maybe dropped again) since, disconnected_at will have moved
-    on and this stale check no-ops, leaving the newer disconnect's own check to
-    handle it.
+    WebSocket drop (e.g. a blue/green API recycle) must not fail runs the node
+    is still executing, so failure is deferred here. disconnected_at_iso pins
+    this to the disconnect episode that scheduled it: if the node reconnected
+    (and maybe dropped again) since, disconnected_at has moved on and this
+    stale check no-ops, leaving the newer disconnect's own check to handle it.
 
-    This is deliberately separate from the periodic idle reaper
-    (lensnode_cleanup_task): that backstops genuinely stuck runs on live nodes,
-    this handles a confirmed-gone node — different purposes, not merged.
+    Separate from the periodic idle reaper (lensnode_cleanup_task): that
+    backstops genuinely stuck runs on live nodes, this handles a confirmed-gone
+    node — different purposes, not merged.
     """
+
+    scheduled_at = parse_datetime(disconnected_at_iso)
+
+    def is_same_episode():
+        # Tolerant compare: a DB that truncates sub-second precision (or any
+        # round-trip skew) must not make the episode pin spuriously mismatch.
+        # Real disconnects are always seconds apart (reconnect backoff), so a
+        # 1s window identifies the episode unambiguously.
+        if node.disconnected_at is None or scheduled_at is None:
+            return False
+        return abs((node.disconnected_at - scheduled_at).total_seconds()) <= 1
 
     try:
         node = LensNode.objects.get(uuid=lensnode_uuid)
@@ -681,8 +692,7 @@ def check_lensnode_disconnect_grace_period(lensnode_uuid, disconnected_at_iso):
         )
         return
 
-    current = node.disconnected_at.isoformat() if node.disconnected_at else None
-    if current != disconnected_at_iso:
+    if not is_same_episode():
         logger.info(
             "LensNode %s disconnected again since this check was scheduled; "
             "deferring to that episode's own check",
@@ -693,10 +703,7 @@ def check_lensnode_disconnect_grace_period(lensnode_uuid, disconnected_at_iso):
     # Re-read right before acting to narrow (not eliminate) the race where the
     # node reconnects between the check above and failing its runs.
     node.refresh_from_db()
-    if node.status == LensNode.Status.ONLINE:
-        return
-    current = node.disconnected_at.isoformat() if node.disconnected_at else None
-    if current != disconnected_at_iso:
+    if node.status == LensNode.Status.ONLINE or not is_same_episode():
         return
 
     from .services import fail_active_runs_for_lensnode
