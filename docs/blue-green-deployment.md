@@ -24,6 +24,28 @@ Do **not** reach for it when you have k8s/Swarm (use their rolling updates), or
 when a brief blip on deploy is acceptable — then the simpler *standalone* topology
 below is enough.
 
+### Scope: single host only — NOT multi-node
+
+This pattern is **single-node by construction** and does **not** extend to a
+multi-host fleet. Everything that makes the switch work is local to one machine:
+
+- `.active_color` / `.rollback_version` / `upstream.conf` are **local files** on
+  one host — there is no shared or coordinated "current color" across machines.
+- `install.sh` runs on **one** host and drives that host's `docker compose`.
+- nginx runs on the **same** host and proxies to colors by container name over
+  the **local** Docker network; the switch is `docker exec <that-nginx> nginx -s
+  reload`. There is no cross-host load balancer.
+
+Multi-node zero-downtime is a **different architecture**, not an extension of
+this one: it needs a fronting cross-host load balancer (or DNS/anycast), the
+active color promoted to **shared/coordinated cluster state**, and something to
+**orchestrate the switch across the whole fleet** (including that hosts briefly
+serve mixed colors/versions during the roll — the same expand/contract
+constraint, now fleet-wide). At that point you are rebuilding a slice of an
+orchestrator — use k8s/Swarm/a service mesh instead. Running this playbook
+independently per host behind an external LB is possible but is *N independent
+single-node deploys*, not a coordinated fleet switch; don't mistake it for one.
+
 ---
 
 ## 2. Topology model — three compose files, pick one per host
