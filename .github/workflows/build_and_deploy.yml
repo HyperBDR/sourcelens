@@ -45,7 +45,13 @@ jobs:
             VERSION="${{ inputs.version }}"
             REF="v${{ inputs.version }}"
           else
-            VERSION="${GITHUB_SHA::7}"
+            # No tag, no manual version: build/deploy the pushed commit. Use the
+            # FULL SHA for both — install.sh derives the image tag from the ref
+            # it fetches (${ref#v}), so a 7-char VERSION with a 40-char REF would
+            # tag images :<short> but make install.sh pull :<full> (a nonexistent
+            # tag). raw.githubusercontent.com resolves a full SHA but not a short
+            # one, so the full SHA is the value that works for both.
+            VERSION="${GITHUB_SHA}"
             REF="${GITHUB_SHA}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

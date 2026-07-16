@@ -124,6 +124,7 @@ celerybeat.pid
 
 # Blue/green deploy runtime state (bootstrapped by scripts/install.sh, never committed)
 /.active_color
+/.rollback_version
 /docker/nginx/conf.d/upstream.conf
 
 # Environments

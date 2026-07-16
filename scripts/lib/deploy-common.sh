@@ -14,6 +14,19 @@
 GRACE_HEALTH_RETRIES="${GRACE_HEALTH_RETRIES:-40}"
 GRACE_HEALTH_INTERVAL="${GRACE_HEALTH_INTERVAL:-3}"
 
+# Image LABEL (stamped by the Dockerfiles from the APP_VERSION build arg) used
+# by install.sh's version-skip check and by sourcelensctl.sh's rollback to
+# recreate a color from the right image version.
+VERSION_LABEL="com.oneprocloud.sourcelens.version"
+
+# Read the release version stamped on a color's running API container, or empty
+# if the container/label is absent.
+color_image_version() {
+    docker inspect \
+        --format="{{index .Config.Labels \"${VERSION_LABEL}\"}}" \
+        "sourcelens-api-$1" 2>/dev/null || echo ""
+}
+
 current_color() {
     cat "$DEPLOY_PATH/.active_color" 2>/dev/null || echo "blue"
 }

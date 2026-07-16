@@ -49,8 +49,8 @@ REPO="HyperBDR/sourcelens"
 # version tags after a remote deploy (see prune_old_image_tags below).
 API_IMAGE_REPO="oneprocloud/sourcelens-backend"
 UI_IMAGE_REPO="oneprocloud/sourcelens-frontend"
-# Image LABEL used for the "already on this version, skip" check (see below).
-VERSION_LABEL="com.oneprocloud.sourcelens.version"
+# VERSION_LABEL / color_image_version() come from scripts/lib/deploy-common.sh
+# (sourced below, before either is used).
 
 LOCAL_MODE=false
 if [ "${1:-}" = "--local" ]; then
@@ -76,13 +76,23 @@ die() { echo -e "\033[1;31m[install] ERROR:\033[0m $*" >&2; exit 1; }
 cd "$DEPLOY_PATH"
 
 # --- Single-flight lock: refuses to run two deploys at once on one host ---
+# Acquire atomically with `set -o noclobber` (the redirect fails instead of
+# truncating when the file already exists), so two installs starting at the same
+# instant can't both pass a `[ -f ]` check and proceed — a real TOCTOU race
+# given the CI concurrency group isn't the only caller (manual runs, ops
+# commands). After MAX_WAIT we take the lock over anyway (a crashed run may have
+# left a stale file).
 LOCK_FILE="/tmp/sourcelens-install.lock"
 MAX_WAIT=300; WAITED=0
-while [ -f "$LOCK_FILE" ] && [ "$WAITED" -lt "$MAX_WAIT" ]; do
+while ! (set -o noclobber; echo "$$ $(date)" > "$LOCK_FILE") 2>/dev/null; do
+    if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+        log "Lock $LOCK_FILE still held after ${MAX_WAIT}s — taking it over"
+        echo "$$ $(date)" > "$LOCK_FILE"
+        break
+    fi
     log "Another install is running (lock: $LOCK_FILE), waiting... (${WAITED}s)"
     sleep 5; WAITED=$((WAITED + 5))
 done
-echo "$$ $(date)" > "$LOCK_FILE"
 trap 'rm -f "$LOCK_FILE"' EXIT
 
 # --- Load host secrets if present (never fetched, never committed) ---
@@ -230,11 +240,15 @@ fi
 # install (nothing to compare against yet). Best-effort: if the image carries no
 # version LABEL the reading falls back to 0.0.0 and never skips.
 if [ "$LOCAL_MODE" != "true" ] && [ "$FIRST_INSTALL" != "true" ]; then
-    CURRENT_VERSION=$(docker inspect \
-        --format="{{index .Config.Labels \"${VERSION_LABEL}\"}}" \
-        "sourcelens-api-${CURRENT_COLOR}" 2>/dev/null || echo "0.0.0")
+    CURRENT_VERSION=$(color_image_version "$CURRENT_COLOR")
     [ -z "$CURRENT_VERSION" ] && CURRENT_VERSION="0.0.0"
-    if [ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "$IMAGE_TAG" | sort -V | tail -1)" != "$IMAGE_TAG" ]; then
+    # Skip when the live version is already >= target: equal (idempotent
+    # re-deploy of the same tag) OR strictly newer (current is the max and
+    # differs from target). The equal case needs the explicit first clause —
+    # `sort -V | tail -1` returns target when they're equal, so the `!=` guard
+    # alone would never no-op an equal re-deploy despite the ">=" wording.
+    if [ "$CURRENT_VERSION" = "$IMAGE_TAG" ] || \
+        [ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "$IMAGE_TAG" | sort -V | tail -1)" != "$IMAGE_TAG" ]; then
         log "SKIP: sourcelens-api-${CURRENT_COLOR} already running $CURRENT_VERSION >= target $IMAGE_TAG"
         exit 0
     fi
@@ -294,9 +308,24 @@ if [ "$FIRST_INSTALL" = "true" ]; then
     # here), so nginx starts straight into serving it — no switch, nothing to
     # retire.
     log "First install: nginx started serving sourcelens-api-${DEPLOY_COLOR} directly"
+    echo "$DEPLOY_COLOR" > "$DEPLOY_PATH/.active_color"
 else
     # --- Switch traffic: rewrite upstream.conf, validate, reload ---------
     switch_traffic "$CURRENT_COLOR" "$DEPLOY_COLOR"
+
+    # Record the now-live color immediately — BEFORE the observe/retire window.
+    # If the run is interrupted after the switch but before this write,
+    # .active_color must already match what nginx serves, or a later
+    # sourcelensctl.sh rollback would compute the wrong target.
+    echo "$DEPLOY_COLOR" > "$DEPLOY_PATH/.active_color"
+
+    # Record the outgoing color's version so rollback can recreate it from the
+    # RIGHT image (its container is about to be removed; the version-tagged
+    # image is still in the local cache). Read while it's still running.
+    OUTGOING_VERSION="$(color_image_version "$CURRENT_COLOR")"
+    if [ -n "$OUTGOING_VERSION" ]; then
+        echo "$OUTGOING_VERSION" > "$DEPLOY_PATH/.rollback_version"
+    fi
 
     log "Observing for ${POST_SWITCH_OBSERVE_SECONDS}s before retiring ${CURRENT_COLOR}..."
     sleep "$POST_SWITCH_OBSERVE_SECONDS"
@@ -308,8 +337,6 @@ else
     docker compose --profile "$CURRENT_COLOR" rm -f \
         "sourcelens-api-${CURRENT_COLOR}" "sourcelens-ui-${CURRENT_COLOR}"
 fi
-
-echo "$DEPLOY_COLOR" > "$DEPLOY_PATH/.active_color"
 
 # --- Worker/scheduler/lensnode: no blue/green, just a rolling restart ----
 # CELERY_TASK_ACKS_LATE + prefetch + stop_grace_period already make `up -d` here
@@ -327,12 +354,15 @@ docker compose up -d backend-worker backend-scheduler lensnode
 # tags (current + one rollback target) plus `latest`, removes everything else.
 prune_old_image_tags() {
     local repo="$1"
+    # `|| true`: when a repo has no non-`latest` tag, `grep` exits 1 and (under
+    # `set -o pipefail`) fails the whole pipeline, which with `set -e` would
+    # abort the script right after an otherwise-successful deploy.
     docker images "$repo" --format "{{.Tag}}" \
         | grep -vE '^latest$' | sort -rV | tail -n +3 \
         | while read -r tag; do
             docker rmi "${repo}:${tag}" >/dev/null 2>&1 \
                 && log "Pruned old image: ${repo}:${tag}"
-        done
+        done || true
 }
 if [ "$LOCAL_MODE" != "true" ]; then
     prune_old_image_tags "$API_IMAGE_REPO"

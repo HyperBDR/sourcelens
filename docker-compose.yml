@@ -166,9 +166,16 @@ services:
       LENSNODE_TOKEN: ${LENSNODE_TOKEN:-change-me-lensnode-token}
       # Reach the API through nginx, not a color-specific container: nginx
       # always proxies to the active color, so lensnode rides a blue/green
-      # switch by simply reconnecting (control WS, AI gateway and deliverable
-      # upload URLs are all derived from LENSNODE_SERVER_URL in config.py).
+      # switch by simply reconnecting. These are set explicitly here (not just
+      # via env.sample) so they override any stale ws://backend-api:8000 values
+      # left in an existing .env from before the blue/green upgrade — config.py
+      # prefers an explicit LENSNODE_CONTROL_WS_URL/LENSNODE_AI_GATEWAY_URL over
+      # deriving from LENSNODE_SERVER_URL, and compose `environment:` wins over
+      # `env_file:`. LENSNODE_SERVER_URL still drives the derived deliverable
+      # upload URL.
       LENSNODE_SERVER_URL: http://nginx:80
+      LENSNODE_CONTROL_WS_URL: ws://nginx:80/ws/lens/lensnodes/
+      LENSNODE_AI_GATEWAY_URL: http://nginx:80/api/lens/lensnode/ai-gateway/
       LENSNODE_WORKSPACE_PATH: /workspace
       LENSNODE_HEARTBEAT_INTERVAL_S: 15
       LENSNODE_REQUEST_TIMEOUT_S: ${LENSNODE_REQUEST_TIMEOUT_S:-240}

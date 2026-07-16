@@ -6,10 +6,19 @@
 # It lives inside conf.d/ specifically so nginx's directory bind mount (not a
 # single-file mount) sees in-place rewrites — see docker-compose.yml's nginx
 # volumes comment for why that distinction matters here.
-upstream sourcelens_api_active {
-    server sourcelens-api-blue:8000;
+#
+# These are `map`s (not `upstream` blocks) on purpose: default.conf proxies to
+# them via a variable + `resolver` (per-request DNS re-resolution), so nginx
+# does NOT resolve the color hostname at config-parse/start time. That means
+# nginx starts (and `nginx -t` passes) even when the active color's container
+# isn't up yet — no "host not found in upstream" crash-loop on a host reboot —
+# and a color container recreated with a new IP is picked up within the
+# resolver's `valid` window instead of being cached forever. switch_traffic
+# flips the default value here from one color to the other.
+map $host $sourcelens_api_active {
+    default sourcelens-api-blue:8000;
 }
 
-upstream sourcelens_ui_active {
-    server sourcelens-ui-blue:80;
+map $host $sourcelens_ui_active {
+    default sourcelens-ui-blue:80;
 }

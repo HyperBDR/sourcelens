@@ -26,11 +26,17 @@ die() { echo -e "\033[1;31m[sourcelensctl] ERROR:\033[0m $*" >&2; exit 1; }
 acquire_deploy_lock() {
     local lock_file="/tmp/sourcelens-install.lock"
     local max_wait=300 waited=0
-    while [ -f "$lock_file" ] && [ "$waited" -lt "$max_wait" ]; do
+    # Atomic acquire via noclobber (see install.sh for why a `[ -f ]` check is a
+    # TOCTOU race); take over a stale lock after max_wait.
+    while ! (set -o noclobber; echo "$$ $(date)" > "$lock_file") 2>/dev/null; do
+        if [ "$waited" -ge "$max_wait" ]; then
+            log "Lock $lock_file still held after ${max_wait}s — taking it over"
+            echo "$$ $(date)" > "$lock_file"
+            break
+        fi
         log "install.sh (or another ops command) is running, waiting... (${waited}s)"
         sleep 5; waited=$((waited + 5))
     done
-    echo "$$ $(date)" > "$lock_file"
     trap 'rm -f "'"$lock_file"'"' EXIT
 }
 
@@ -73,16 +79,36 @@ cmd_restart_workers() {
 
 cmd_rollback() {
     acquire_deploy_lock
-    local active target
+    local active target rollback_version from_version
     active="$(current_color)"
     target="$(other_color "$active")"
-    log "Active color is ${active}; rolling back to ${target}"
+
+    # The target color's container was removed when it was retired, so `up -d`
+    # recreates it from the compose image ref `...:${APP_VERSION:-latest}`. Left
+    # unset, that resolves to `latest` = the CURRENT (being-rolled-back-from)
+    # release, so rollback would silently redeploy the bad version on the other
+    # color. Pin APP_VERSION to the version install.sh recorded when it retired
+    # that color.
+    rollback_version=""
+    if [ -f "$DEPLOY_PATH/.rollback_version" ]; then
+        rollback_version="$(cat "$DEPLOY_PATH/.rollback_version")"
+    fi
+    if [ -z "$rollback_version" ]; then
+        die "No .rollback_version recorded (need at least one prior upgrade on this host) — can't tell which image to roll back to. Redeploy the target version explicitly: ./scripts/install.sh <tag>"
+    fi
+    export APP_VERSION="$rollback_version"
+
+    # Remember the version we're rolling back FROM so a subsequent rollback can
+    # return to it (read now, while the active color is still up).
+    from_version="$(color_image_version "$active")"
+
+    log "Active color is ${active}; rolling back to ${target} (version ${rollback_version})"
     log "(no pull, no build, no migration — this only works if"
-    log "sourcelens-api-${target}'s image is still present locally)"
+    log "sourcelens-api-${target}'s image ${rollback_version} is still present locally)"
 
     if ! docker compose --profile "$target" up -d \
         "sourcelens-api-${target}" "sourcelens-ui-${target}"; then
-        die "Could not start sourcelens-api-${target}/sourcelens-ui-${target}. If that color's image was pruned, rollback isn't possible this way — redeploy the target version instead: ./scripts/install.sh <tag>"
+        die "Could not start sourcelens-api-${target}/sourcelens-ui-${target}. If that color's image ${rollback_version} was pruned, rollback isn't possible this way — redeploy the target version instead: ./scripts/install.sh <tag>"
     fi
 
     log "Waiting for sourcelens-api-${target} to report healthy..."
@@ -94,8 +120,11 @@ cmd_rollback() {
 
     switch_traffic "$active" "$target"
     echo "$target" > "$DEPLOY_PATH/.active_color"
+    if [ -n "$from_version" ]; then
+        echo "$from_version" > "$DEPLOY_PATH/.rollback_version"
+    fi
 
-    log "Rolled back: active color is now ${target}."
+    log "Rolled back: active color is now ${target} (version ${rollback_version})."
     log "${active} was left running (not stopped) so you can inspect its logs."
     log "Once you've confirmed ${target} is good, retire it yourself:"
     log "  docker compose --profile ${active} stop sourcelens-api-${active} sourcelens-ui-${active}"

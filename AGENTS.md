@@ -269,9 +269,11 @@ nginx 流量路径上。升级时先起空闲色、健康门控、原子切换 n
 - **nginx 按整目录挂载**：`docker/nginx/conf.d/` 整个目录 bind-mount，**不是**单
   文件。切流用 `sed -i`/rename 原子改写 `upstream.conf`（换 inode）；单文件挂载会
   钉死在旧 inode，导致持续 502、旧色退役后变成 `host not found in upstream`。
-- **运行时状态不提交**：`.active_color` 与 `docker/nginx/conf.d/upstream.conf` 由
-  install.sh 首次从 `upstream.conf.default` 引导后即为运行时状态，`.gitignore` 已
-  忽略，切勿提交或被 install 覆盖。
+- **运行时状态不提交**：`.active_color`、`.rollback_version` 与
+  `docker/nginx/conf.d/upstream.conf` 由 install.sh 首次从 `upstream.conf.default`
+  引导/切换时写入，均为运行时状态，`.gitignore` 已忽略，切勿提交或被 install 覆盖。
+  （`.rollback_version` 记录被退役旧色的镜像版本，供 `sourcelensctl.sh rollback`
+  用正确的旧镜像重建，而非 `:latest`。）
 - **install.sh 是唯一支持的起停入口**：blue/green 服务之间不写 `depends_on`（
   profiled 服务被非 profiled 服务引用会破坏所有不带 `--profile` 的 compose 命令
   校验），起停顺序由脚本命令式掌控。裸 `docker compose up -d` 不受支持。
