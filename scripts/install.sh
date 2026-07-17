@@ -338,6 +338,14 @@ else
         "sourcelens-api-${CURRENT_COLOR}" "sourcelens-ui-${CURRENT_COLOR}"
 fi
 
+# One-time cleanup of the legacy pre-blue/green single containers, if present.
+# Migrating a host from the old single-container deploy (service backend-api /
+# frontend, containers sourcelens-api / sourcelens-ui) to blue/green leaves those
+# old containers running as orphans — they are not part of this compose's
+# services, so `up` never touches them and they keep holding a DB connection and
+# memory. Retire them here. No-op once the host is already on blue/green.
+docker rm -f sourcelens-api sourcelens-ui >/dev/null 2>&1 || true
+
 # --- Worker/scheduler/lensnode: no blue/green, just a rolling restart ----
 # CELERY_TASK_ACKS_LATE + prefetch + stop_grace_period already make `up -d` here
 # a graceful drain-and-replace, not a hard kill. lensnode reconnects to the new
