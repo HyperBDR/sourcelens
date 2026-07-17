@@ -125,6 +125,12 @@ jobs:
     needs:
       - prepare-version
       - build-images
+    # Gate: auto-deploy runs only when the repo/environment variable
+    # SOURCELENS_AUTO_DEPLOY is "true". It is intentionally left unset for the
+    # first blue/green cutover, which is done manually and supervised on the
+    # host; a tag push then only builds+pushes images. Set the variable to
+    # "true" after the first cutover succeeds to make releases hands-off.
+    if: ${{ vars.SOURCELENS_AUTO_DEPLOY == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
