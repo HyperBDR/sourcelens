@@ -173,6 +173,18 @@ was caught only in review. Treat them as acceptance criteria.
       `install.sh` derives the image tag from the ref it fetches (`${ref#v}`),
       then a build tagged with a *short* SHA but fetched from the *full* SHA pulls
       a nonexistent tag. Use one consistent value.
+- [ ] **First cutover cleans up the old single-container stack.** Migrating a
+      host from a pre-blue/green single-container deploy: the old single `api`/`ui`
+      containers are NOT part of the blue/green compose, so `up` leaves them
+      running as orphans (holding DB connections / memory) — `--remove-orphans`
+      won't catch them across different compose files either. Add a one-time
+      `docker rm -f <app>-api <app>-ui || true` after the first install. The
+      first cutover's only downtime is the nginx **container recreate** (single-
+      file → directory mount), which is sub-second when the new color is
+      health-gated up *before* nginx is recreated; steady-state deploys are a
+      reload (zero-downtime).
+      *(sourcelens `install.sh` does NOT do this cleanup yet — copy it from the
+      devify implementation, which does `docker rm -f devify-api devify-ui`.)*
 
 ### 5.2 nginx
 
