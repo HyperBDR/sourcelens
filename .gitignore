@@ -15,6 +15,9 @@ downloads/
 eggs/
 .eggs/
 lib/
+# But keep the blue/green deploy helpers (scripts/lib/ is source, not a build dir)
+!scripts/lib/
+!scripts/lib/**
 lib64/
 parts/
 sdist/
@@ -118,6 +121,11 @@ celerybeat.pid
 
 # SageMath parsed files
 *.sage.py
+
+# Blue/green deploy runtime state (bootstrapped by scripts/install.sh, never committed)
+/.active_color
+/.rollback_version
+/docker/nginx/conf.d/upstream.conf
 
 # Environments
 .env
