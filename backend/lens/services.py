@@ -425,6 +425,8 @@ def validate_run_dispatch(run):
     lensnode = run.lensnode
     if lensnode is None:
         raise LensNodeDispatchError("LENSNODE_REQUIRED")
+    if lensnode.status == LensNode.Status.DRAINING:
+        raise LensNodeDispatchError("LENSNODE_DRAINING")
     if lensnode.status != LensNode.Status.ONLINE:
         raise LensNodeDispatchError("LENSNODE_OFFLINE")
     if lensnode.enrollment_status != LensNode.EnrollmentStatus.APPROVED:
