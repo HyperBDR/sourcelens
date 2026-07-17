@@ -79,6 +79,7 @@
             <span class="truncate">{{ t('common.logout') }}</span>
           </button>
         </div>
+        <div class="dock-build-info">{{ buildInfo }}</div>
       </div>
     </Transition>
   </div>
@@ -107,6 +108,12 @@ const uiStore = useUiStore()
 
 const dockMenuOpen = ref(false)
 const dockMenuRef = ref(null)
+const buildInfo = [
+  import.meta.env.VITE_APP_VERSION || 'dev',
+  import.meta.env.VITE_APP_RELEASE_DATE
+]
+  .filter(Boolean)
+  .join(' · ')
 onClickOutside(dockMenuRef, () => {
   dockMenuOpen.value = false
 })
@@ -212,5 +219,9 @@ async function handleLogout() {
 
 .dock-link:hover {
   @apply bg-line-soft text-ink-900;
+}
+
+.dock-build-info {
+  @apply border-t border-line px-6 py-3 text-center text-xs text-ink-400;
 }
 </style>

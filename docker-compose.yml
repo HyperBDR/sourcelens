@@ -88,6 +88,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        APP_RELEASE_DATE: ${APP_RELEASE_DATE:-}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
         VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
