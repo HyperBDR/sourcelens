@@ -36,7 +36,7 @@ x-sourcelens-api-common: &sourcelens-api-common
     args:
       DEV_MODE: "1"
       APP_VERSION: ${APP_VERSION:-0.0.0}
-      APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/ubuntu}
+      APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
       PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
   env_file:

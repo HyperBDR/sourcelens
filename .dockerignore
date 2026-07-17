@@ -61,6 +61,20 @@ yarn-error.log*
 data/
 cache/
 
+# Tool caches and generated analysis output
+.codegraph/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.understand-anything/
+htmlcov/
+**/.codegraph/
+**/.mypy_cache/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.tox/
+
 # Frontend workspace
 frontend/node_modules/
 frontend/dist/

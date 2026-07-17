@@ -1,132 +1,163 @@
-# Use official Python 3.12 on Ubuntu 24.04 LTS
-FROM ubuntu:24.04 AS backend
+# syntax=docker/dockerfile:1.6
+
+# -----------------------------------------------------------------------------
+# Backend builder image
+# -----------------------------------------------------------------------------
+
+FROM m.daocloud.io/docker.io/library/python:3.12-slim-bookworm AS backend-builder
 
 SHELL ["/bin/bash", "-c"]
 
-ARG DEV_MODE=0
-ARG APT_MIRROR_URL=http://archive.ubuntu.com/ubuntu
+ARG APT_MIRROR_URL=https://deb.debian.org/debian
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG PIP_TRUSTED_HOST=pypi.org
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive \
-    DEV_MODE=${DEV_MODE} \
-    PIP_INDEX_URL=${PIP_INDEX_URL} \
-    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
 
-# Install ca-certificates first to avoid SSL certificate issues
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
-
-# Setup mirrors before installing the rest of the packages
+# Build tools and development headers stay in this disposable stage.
+# gettext is required to compile Django message catalogs.
 RUN set -eux; \
-    echo "Using Ubuntu mirror: ${APT_MIRROR_URL}"; \
-    printf '%s\n' \
-        "deb ${APT_MIRROR_URL} noble main restricted universe multiverse" \
-        "deb ${APT_MIRROR_URL} noble-updates main restricted universe multiverse" \
-        "deb ${APT_MIRROR_URL} noble-backports main restricted universe multiverse" \
-        "deb ${APT_MIRROR_URL} noble-security main restricted universe multiverse" \
-        > /etc/apt/sources.list; \
-    apt-get update
+    sed -i \
+        -e "s|http://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
+        -e "s|https://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        gettext \
+        libmagic-dev \
+        libpq-dev \
+        libxml2-dev \
+        libxslt1-dev \
+        pkg-config \
+        zlib1g-dev; \
+    rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 
-# Install Python 3.12, pip and system dependencies in one step
-# libmagic is for python-magic which is a library for file type detection
-# gettext is for Django i18n (makemessages, compilemessages)
-# postgresql-client is for PostgreSQL database support
-RUN apt-get install -y --no-install-recommends \
-    python3.12 \
-    python3.12-dev \
-    python3-pip \
-    build-essential \
-    git \
-    curl \
-    libpq-dev \
-    postgresql-client \
-    pkg-config \
-    libxml2-dev \
-    libxslt1-dev \
-    zlib1g-dev \
-    libmagic1 \
-    libmagic-dev \
-    gettext \
-    procps \
-    htop \
-    net-tools \
-    iputils-ping \
-    dnsutils \
-    # PostgreSQL is the recommended database (postgresql-client, libpq-dev)
-    && rm -rf /var/lib/apt/lists/* \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
-
-# Disable externally-managed-environment restriction for container environment
-RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
-
-# Set working directory
-WORKDIR /opt/backend
-
-# Copy project files
-COPY backend /opt/backend
-COPY pyproject.toml /opt/backend/
-
-# Install uv and project dependencies using the preselected index settings
-RUN set -eux; \
-    echo "Installing uv from ${PIP_INDEX_URL}"; \
-    pip install \
+RUN pip install \
         --index-url "$PIP_INDEX_URL" \
         --trusted-host "$PIP_TRUSTED_HOST" \
         --timeout 120 \
         --retries 5 \
-        uv; \
-    echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc; \
-    export PATH="/root/.local/bin:$PATH"; \
-    # Always install agentcore from the bundled submodules (the pinned
-    # source of truth) so image builds never drift to an unpinned git ref.
+        uv \
+    && python -m venv /opt/venv
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    VIRTUAL_ENV=/opt/venv
+
+WORKDIR /opt/backend
+
+COPY backend /opt/backend
+COPY pyproject.toml /opt/backend/
+
+# Always install agentcore from the bundled, pinned submodules so image builds
+# cannot drift to an unpinned Git ref.
+RUN set -eux; \
     sed -i \
         -e 's#agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git#agentcore-metering @ file:///opt/backend/agentcore/agentcore-metering#' \
         -e 's#agentcore-task @ git+https://github.com/cloud2ai/agentcore-task.git#agentcore-task @ file:///opt/backend/agentcore/agentcore-task#' \
         -e 's#agentcore-notifier @ git+https://github.com/cloud2ai/agentcore-notifier.git#agentcore-notifier @ file:///opt/backend/agentcore/agentcore-notifier#' \
         pyproject.toml; \
-    echo "Using Python index: ${PIP_INDEX_URL}"; \
-    uv pip compile pyproject.toml -o requirements.txt --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"; \
-    uv pip install --system -r requirements.txt --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"
+    uv pip compile \
+        pyproject.toml \
+        -o requirements.txt \
+        --index-url "$PIP_INDEX_URL" \
+        --trusted-host "$PIP_TRUSTED_HOST"; \
+    uv pip install \
+        --python /opt/venv/bin/python \
+        -r requirements.txt \
+        --index-url "$PIP_INDEX_URL" \
+        --trusted-host "$PIP_TRUSTED_HOST"
 
-# In dev mode, reinstall agentcore packages as editable so that volume-mapped
-# source changes are picked up without rebuilding the image.
+# In dev mode, overlay editable agentcore installs so volume-mounted source
+# changes are picked up without rebuilding the image.
+ARG DEV_MODE=0
 RUN set -eux; \
     if [ "$DEV_MODE" = "1" ]; then \
-        export PATH="/root/.local/bin:$PATH"; \
         for d in /opt/backend/agentcore/*/; do \
             if [ -f "${d}pyproject.toml" ]; then \
                 echo "Dev mode: installing ${d} as editable"; \
-                (cd "$d" && uv pip install --system -e . --index-url "$PIP_INDEX_URL" --trusted-host "$PIP_TRUSTED_HOST"); \
+                (cd "$d" && uv pip install \
+                    --python /opt/venv/bin/python \
+                    --index-url "$PIP_INDEX_URL" \
+                    --trusted-host "$PIP_TRUSTED_HOST" \
+                    -e .); \
             fi; \
         done; \
     fi
 
-# Compile Django message catalogs (.po -> .mo) so runtime gettext works.
-# DJANGO_DEBUG=true only for this build step: settings import enforces a
-# Turnstile fail-fast that has no .env at build time. Runtime (gunicorn)
-# still imports settings with the real env, so the guard stays in effect.
-RUN DJANGO_DEBUG=true python manage.py compilemessages -l zh_Hans -l en
+# DJANGO_DEBUG is scoped to this build step because production-only settings
+# require secrets that are unavailable while the image is built.
+RUN DJANGO_DEBUG=true python manage.py compilemessages -l zh_Hans -l en \
+    && rm -rf /root/.cache /tmp/* \
+    && find /opt/venv -type d -name __pycache__ -prune \
+        -exec rm -rf {} + \
+    && find /opt/backend -type d -name __pycache__ -prune \
+        -exec rm -rf {} + \
+    && find /opt/backend/agentcore -type d -name build -prune \
+        -exec rm -rf {} +
 
-# Create necessary directories
-RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/sourcelens
+# -----------------------------------------------------------------------------
+# Backend runtime image
+# -----------------------------------------------------------------------------
 
-# Copy entrypoint script
+FROM m.daocloud.io/docker.io/library/python:3.12-slim-bookworm AS backend
+
+SHELL ["/bin/bash", "-c"]
+
+ARG APT_MIRROR_URL=https://deb.debian.org/debian
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_TRUSTED_HOST=pypi.org
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PATH="/opt/venv/bin:$PATH" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv
+
+# Keep only runtime tools and shared libraries. Git is used by datasource
+# synchronization, curl by container health checks, and psql by operations.
+RUN set -eux; \
+    sed -i \
+        -e "s|http://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
+        -e "s|https://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+        git \
+        libmagic1 \
+        postgresql-client; \
+    rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
+
+ARG DEV_MODE=0
+ENV DEV_MODE=${DEV_MODE}
+
+WORKDIR /opt/backend
+
+COPY --from=backend-builder /opt/venv /opt/venv
+COPY --from=backend-builder /opt/backend /opt/backend
+
+RUN mkdir -p \
+        /var/cache/sourcelens \
+        /var/log/celery \
+        /var/log/gunicorn
+
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Stamp the release version onto the image so scripts/install.sh can read it
-# (docker inspect Config.Labels) to skip redeploying a color that already runs
-# this version. Absent/default => 0.0.0, which install.sh treats as "never skip".
-# Kept as the last layer so a version bump never invalidates the expensive
-# apt/pip build layers above it.
+# Keep the version stamp last so version-only changes reuse expensive layers.
 ARG APP_VERSION=0.0.0
 LABEL com.oneprocloud.sourcelens.version=$APP_VERSION
 
-# Set default command
 ENTRYPOINT ["/entrypoint.sh"]
