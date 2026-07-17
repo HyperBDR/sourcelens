@@ -1,0 +1,434 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.sender.type != 'Bot' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Validate required LLM configuration
+        shell: bash
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LLM_API_KEY}" ] || [ -z "${LLM_BASE_URL}" ]; then
+            echo "::error::LLM_API_KEY and LLM_BASE_URL must be"
+            echo "::error::configured as repository secrets."
+            exit 1
+          fi
+
+      - name: Review and describe pull request in English
+        id: pr_agent
+        # v0.39.0
+        uses: >-
+          The-PR-Agent/pr-agent@8e4d32e5497defd43c023a404f73560c62728961
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.LLM_API_KEY }}
+          OPENAI.API_BASE: ${{ secrets.LLM_BASE_URL }}
+          CONFIG.MODEL: ${{ vars.LLM_MODEL || 'openai/deepseek-v3' }}
+          CONFIG.FALLBACK_MODELS: >-
+            ["${{ vars.LLM_MODEL || 'openai/deepseek-v3' }}"]
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: >-
+            ${{ vars.LLM_MODEL_MAX_TOKENS || '64000' }}
+          CONFIG.RESPONSE_LANGUAGE: en-US
+          CONFIG.REPO_CONTEXT_FILES: >-
+            ["PR_WORKFLOW.md"]
+          PR_REVIEWER.EXTRA_INSTRUCTIONS: >-
+            Every review summary, finding, inline comment, test note,
+            merge recommendation, and no-issue conclusion published to
+            GitHub must be written in English only. Do not produce
+            mixed-language review prose.
+          PR_DESCRIPTION.EXTRA_INSTRUCTIONS: >-
+            Every generated PR title, description, summary, walkthrough,
+            and diagram label published to GitHub must be written in
+            English only.
+          PR_CODE_SUGGESTIONS.EXTRA_INSTRUCTIONS: >-
+            Every code suggestion explanation and suggested-change
+            comment published to GitHub must be written in English only.
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "true"
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
+          GITHUB_ACTION_CONFIG.PUSH_COMMANDS: >-
+            ["/describe", "/review"]
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: >-
+            ["opened", "reopened", "ready_for_review"]
+
+      - name: Notify Feishu
+        if: always()
+        shell: bash
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_AGENT_OUTCOME: ${{ steps.pr_agent.outcome }}
+          PROJECT_NAME: SourceLens
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_STATE: ${{ github.event.pull_request.state }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${FEISHU_WEBHOOK}" ]; then
+            echo "::warning::FEISHU_WEBHOOK is not configured;" \
+              "skipping notification."
+            exit 0
+          fi
+
+          REVIEW=""
+          if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
+            COMMENTS_URL="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+            COMMENTS_URL="${COMMENTS_URL}/issues/${PR_NUMBER}/comments"
+            COMMENTS_URL="${COMMENTS_URL}?per_page=100"
+            if ! COMMENTS="$(
+              curl --fail --silent --show-error \
+                --retry 3 \
+                --max-time 20 \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "${COMMENTS_URL}"
+            )"; then
+              echo "::warning::Unable to read the PR-Agent review comment."
+              COMMENTS="[]"
+            fi
+
+            REVIEW="$(
+              jq -r '
+                [
+                  .[]
+                  | select(.user.login == "github-actions[bot]")
+                  | select(.body | test("PR Reviewer Guide|PR Review"; "i"))
+                ]
+                | last
+                | .body // ""
+              ' <<< "${COMMENTS}"
+            )"
+          fi
+
+          REQUIREMENTS="$(
+            awk '
+              /Compliant requirements:/ {
+                capture = 1
+                next
+              }
+              capture && /^- / {
+                requirement = $0
+                sub(/^- /, "", requirement)
+                print requirement
+                found = 1
+                next
+              }
+              capture && found && NF {
+                exit
+              }
+            ' <<< "${REVIEW}"
+          )"
+
+          if [ -n "${REQUIREMENTS}" ]; then
+            REQUIREMENTS_JSON="$(
+              jq -Rsc '
+                split("\n")
+                | map(select(length > 0))
+                | map({
+                    requirement: .,
+                    status: "✅ Covered"
+                  })
+              ' <<< "${REQUIREMENTS}"
+            )"
+          else
+            if [ "${PR_AGENT_OUTCOME}" = "success" ] && \
+              [ -n "${REVIEW}" ]; then
+              REQUIREMENT_LABEL="Review requirement coverage details"
+              REQUIREMENT_STATUS="ℹ️ See full review"
+            elif [ "${PR_AGENT_OUTCOME}" = "success" ]; then
+              REQUIREMENT_LABEL="PR-Agent review"
+              REQUIREMENT_STATUS="⚠️ Review unavailable"
+            else
+              REQUIREMENT_LABEL="PR-Agent review"
+              REQUIREMENT_STATUS="❌ Failed"
+            fi
+            REQUIREMENTS_JSON="$(
+              jq -cn \
+                --arg requirement "${REQUIREMENT_LABEL}" \
+                --arg status "${REQUIREMENT_STATUS}" \
+                '[{
+                  requirement: $requirement,
+                  status: $status
+                }]'
+            )"
+          fi
+
+          if [ "${PR_AGENT_OUTCOME}" != "success" ]; then
+            CARD_TEMPLATE="red"
+            STATUS_COLOR="red"
+            STATUS_ICON="❌"
+            ISSUES="PR-Agent review did not complete. "
+            ISSUES+="Check the GitHub Actions logs."
+            TESTS="- Review failed; test coverage was not analyzed."
+            MERGE_STATUS="Not ready"
+            MERGE_ADVICE="Fix the AI Review workflow before "
+            MERGE_ADVICE+="manual verification."
+          elif [ -z "${REVIEW}" ]; then
+            CARD_TEMPLATE="orange"
+            STATUS_COLOR="orange"
+            STATUS_ICON="⚠️"
+            ISSUES="No PR-Agent review comment was found."
+            TESTS="- Test and verification analysis is unavailable."
+            MERGE_STATUS="Needs attention"
+            MERGE_ADVICE="Check the AI Review workflow before merging."
+          elif grep -qi "No major issues detected" <<< "${REVIEW}"; then
+            CARD_TEMPLATE="green"
+            STATUS_COLOR="green"
+            STATUS_ICON="✅"
+            ISSUES="No major issues detected."
+            MERGE_STATUS="Ready after verification"
+            MERGE_ADVICE="No blocking issues were found. "
+            MERGE_ADVICE+="Complete human verification before merging."
+          else
+            CARD_TEMPLATE="orange"
+            STATUS_COLOR="orange"
+            STATUS_ICON="⚠️"
+            ISSUES="$(
+              jq -nr --arg review "${REVIEW}" '$review[0:3000]'
+            )"
+            MERGE_STATUS="Needs human review"
+            MERGE_ADVICE="Review the findings before merging."
+          fi
+
+          if [ "${PR_AGENT_OUTCOME}" = "success" ] && \
+            [ -n "${REVIEW}" ]; then
+            if grep -qi "No relevant tests" <<< "${REVIEW}"; then
+              TESTS="- PR-Agent did not identify relevant automated tests."
+            else
+              TESTS="- PR-Agent completed its test and verification review. "
+              TESTS+="See the full review for details."
+            fi
+          fi
+
+          REPORT_DATE="$(TZ=Asia/Shanghai date +%F)"
+          PR_STATE_UPPER="$(
+            printf '%s' "${PR_STATE}" | tr '[:lower:]' '[:upper:]'
+          )"
+          STATUS_HIGHLIGHT="${STATUS_ICON} "
+          STATUS_HIGHLIGHT+="<font color='${STATUS_COLOR}'>"
+          STATUS_HIGHLIGHT+="**${MERGE_STATUS}**</font>"
+          FOOTER="<font color='grey'>Generated automatically by PR-Agent. "
+          FOOTER+="Complete human review before merging.</font>"
+
+          PAYLOAD="$(
+            jq -cn \
+              --arg project "${PROJECT_NAME}" \
+              --arg repository "${GITHUB_REPOSITORY}" \
+              --arg report_date "${REPORT_DATE}" \
+              --arg pr_number "${PR_NUMBER}" \
+              --arg pr_title "${PR_TITLE}" \
+              --arg pr_author "${PR_AUTHOR}" \
+              --arg pr_state "${PR_STATE_UPPER}" \
+              --arg head_ref "${PR_HEAD_REF}" \
+              --arg base_ref "${PR_BASE_REF}" \
+              --arg changed_files "${PR_CHANGED_FILES}" \
+              --arg additions "${PR_ADDITIONS}" \
+              --arg deletions "${PR_DELETIONS}" \
+              --arg card_template "${CARD_TEMPLATE}" \
+              --arg status_highlight "${STATUS_HIGHLIGHT}" \
+              --arg issues "${ISSUES}" \
+              --arg tests "${TESTS}" \
+              --arg merge_status "${MERGE_STATUS}" \
+              --arg merge_advice "${MERGE_ADVICE}" \
+              --arg footer "${FOOTER}" \
+              --arg pr_url "${PR_URL}" \
+              --argjson requirements "${REQUIREMENTS_JSON}" \
+              '
+              def markdown($content):
+                {
+                  tag: "markdown",
+                  content: $content
+                };
+
+              def column($content; $weight):
+                {
+                  tag: "column",
+                  width: "weighted",
+                  weight: $weight,
+                  vertical_align: "center",
+                  elements: [markdown($content)]
+                };
+
+              def column_set($background; $columns):
+                {
+                  tag: "column_set",
+                  flex_mode: "stretch",
+                  background_style: $background,
+                  columns: $columns
+                };
+
+              def requirement_row($item; $index):
+                column_set(
+                  (if ($index % 2) == 0 then "grey" else "default" end);
+                  [
+                    column($item.requirement; 4),
+                    column($item.status; 2)
+                  ]
+                );
+
+              {
+                msg_type: "interactive",
+                card: {
+                  schema: "2.0",
+                  config: {
+                    wide_screen_mode: true
+                  },
+                  header: {
+                    title: {
+                      tag: "plain_text",
+                      content: (
+                        "[Code Review] "
+                        + $project
+                        + " PR #"
+                        + $pr_number
+                      )
+                    },
+                    template: $card_template
+                  },
+                  body: {
+                    elements: (
+                      [
+                        markdown(
+                          $status_highlight
+                          + "\n"
+                          + $merge_advice
+                        ),
+                        markdown(
+                          "**Repository**: "
+                          + $repository
+                          + "\n**Author**: "
+                          + $pr_author
+                          + "\n**Date**: "
+                          + $report_date
+                          + "\n**PR**: #"
+                          + $pr_number
+                          + " — "
+                          + $pr_title
+                        ),
+                        {tag: "hr"},
+                        column_set(
+                          "grey";
+                          [
+                            column(
+                              "**Status**\n" + $pr_state;
+                              1
+                            ),
+                            column(
+                              "**Files Changed**\n"
+                              + $changed_files
+                              + " files | +"
+                              + $additions
+                              + " / -"
+                              + $deletions;
+                              1
+                            )
+                          ]
+                        ),
+                        column_set(
+                          "default";
+                          [
+                            column(
+                              "**Source Branch**\n" + $head_ref;
+                              1
+                            ),
+                            column(
+                              "**Target Branch**\n" + $base_ref;
+                              1
+                            )
+                          ]
+                        ),
+                        {tag: "hr"},
+                        markdown("**📋 Requirement Coverage**"),
+                        column_set(
+                          "blue";
+                          [
+                            column("**Requirement**"; 4),
+                            column("**Status**"; 2)
+                          ]
+                        )
+                      ]
+                      + [
+                        range(0; $requirements | length) as $index
+                        | requirement_row(
+                            $requirements[$index];
+                            $index
+                          )
+                      ]
+                      + [
+                        {tag: "hr"},
+                        markdown(
+                          "**⚠️ Issues Found**\n"
+                          + $issues
+                        ),
+                        markdown(
+                          "**🧪 Tests and Verification**\n"
+                          + $tests
+                        ),
+                        {tag: "hr"},
+                        markdown(
+                          "🔗 [View Full Review]("
+                          + $pr_url
+                          + ")"
+                        )
+                        ,
+                        markdown($footer)
+                      ]
+                    )
+                  }
+                }
+              }
+              '
+          )"
+
+          RESPONSE="$(
+            curl --fail --silent --show-error \
+              --retry 3 \
+              --max-time 20 \
+              -X POST \
+              -H "Content-Type: application/json" \
+              --data "${PAYLOAD}" \
+              "${FEISHU_WEBHOOK}"
+          )"
+
+          if ! jq -e \
+            '(.code? == 0) or (.StatusCode? == 0)' \
+            <<< "${RESPONSE}" > /dev/null; then
+            echo "::error::Feishu rejected the notification payload."
+            exit 1
+          fi
