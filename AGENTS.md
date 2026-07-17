@@ -123,10 +123,16 @@ docker restart sourcelens-scheduler-dev
 > 速记：**改普通代码** → api 自动生效、worker 手动重启；
 > **加 migration** → 额外重启 api。
 
-### Docker 生产构建
+### Docker 生产构建（蓝绿零停机）
+
+生产使用 `scripts/install.sh` 做蓝绿部署，**不要**直接 `docker compose up -d`
+（API/UI 是 blue/green profiled 服务，裸 `up` 不会启动任何一个颜色）。详见下方
+「零停机部署 (Blue/Green)」章节。
+
 ```bash
-cp env.sample .env
-docker-compose up -d
+# 首次安装 / 每次升级，同一条命令幂等：
+curl -fsSL https://raw.githubusercontent.com/HyperBDR/sourcelens/<tag>/scripts/install.sh \
+    -o install.sh && chmod +x install.sh && ./install.sh <tag>
 # 默认端口: HTTP 10080, HTTPS 10443
 ```
 
@@ -221,6 +227,74 @@ agentcore 是独立维护的包，通过 git submodule 引入。子模块被当�
 - **业务逻辑位置**：放在 models、serializers、services 中，views 只处理请求
 - **Django/DRF**：优先使用 CBV（复杂逻辑）和 DRF 内置功能，不手写原始 SQL
 - **调试用 print**：避免使用，用 logging 代替
+
+## 部署编排选择（三选一）
+
+三份 compose 各司其职：
+
+| 文件 | 场景 | project 名 | 起停方式 | 镜像 | 零停机 |
+|---|---|---|---|---|---|
+| `docker-compose.dev.yml` | 开发 | `sourcelens-dev` | 裸 `docker compose -f … up -d` | 源码构建 + 热挂载 | 否 |
+| `docker-compose.standalone.yml` | 生产 · 简单单实例 | `sourcelens` | 裸 `docker compose -f … up -d` | 拉发布镜像（无源码挂载） | 否 |
+| `docker-compose.yml` | 生产 · 零停机 | `sourcelens` | `scripts/install.sh`（蓝绿） | 拉发布镜像 | 是 |
+
+> **铁律：dev 与 prod 必须用不同的 compose project 名。** 每个 compose 文件都
+> **显式**设顶层 `name:`（dev 为 `sourcelens-dev`，生产为 `sourcelens`），绝不
+> 依赖"目录名"默认值——否则三者共享同一 project 命名空间 + 同名 `postgresql`/
+> `redis` 服务键，在本目录起生产栈会**把 dev 容器顶掉重建**（反之亦然）。生产两
+> 份共享 `sourcelens`（同一单例库数据），**只跑其一**。要隔离测试某个生产栈用
+> `COMPOSE_PROJECT_NAME=sourcelens-verify`（覆盖文件里的 `name:`），不扰动其它。
+
+- **只想 `docker compose up` 一把起、不要零停机** → `docker-compose.standalone.yml`
+  （单 `backend-api` + 单文件 `docker/nginx/default.standalone.conf` 直连，无
+  profiles、无 upstream 运行时状态）。部署就是 `pull` + `up -d`，会短暂重建
+  backend-api（在途请求会断）。
+- **要零停机** → 走下方蓝绿方案。注意 `docker-compose.yml` **不能**用裸
+  `docker compose up -d` 起（API/UI 是 profiled 服务，且 nginx 依赖运行时
+  `upstream.conf`），必须用 `install.sh`。
+
+## 零停机部署 (Blue/Green)
+
+单生产主机、无 k8s/Swarm。API/UI 各有 blue、green 两份，同一时刻只有一个颜色在
+nginx 流量路径上。升级时先起空闲色、健康门控、原子切换 nginx（`nginx -s reload`，
+不断连），观察一段时间后再退役旧色；回滚就是切回另一色。
+
+> 完整的**可复用规范**（架构、逐项适配清单、正确性必须项清单、验证协议，供其他
+> 项目移植）见 [`docs/blue-green-deployment.md`](docs/blue-green-deployment.md)。
+> 本节是 sourcelens 的速查；改动部署脚本/nginx 前先过一遍那份的「正确性清单」。
+
+### 命令
+
+- **安装 / 升级**：`scripts/install.sh <tag>`（或 `--local [tag]` 用本地工作树
+  构建、跳过远程拉取，便于对未提交改动做整链路测试）。一条命令幂等，首装与每次
+  升级同路径。CI（`.github/workflows/build_and_deploy.yml`）在服务器上引导并运行
+  它。
+- **日常运维**：`scripts/sourcelensctl.sh {status|restart-workers|rollback}`。与
+  install.sh 共享单飞锁与 `deploy-common.sh` 助手，但独立入口——"装新版本"和"操作
+  已在跑的东西"风险面不同。`rollback` 不做 pull/build/migrate，只在目标色镜像仍在
+  本地时可用。
+
+### 关键约束
+
+- **nginx 按整目录挂载**：`docker/nginx/conf.d/` 整个目录 bind-mount，**不是**单
+  文件。切流用 `sed -i`/rename 原子改写 `upstream.conf`（换 inode）；单文件挂载会
+  钉死在旧 inode，导致持续 502、旧色退役后变成 `host not found in upstream`。
+- **运行时状态不提交**：`.active_color`、`.rollback_version` 与
+  `docker/nginx/conf.d/upstream.conf` 由 install.sh 首次从 `upstream.conf.default`
+  引导/切换时写入，均为运行时状态，`.gitignore` 已忽略，切勿提交或被 install 覆盖。
+  （`.rollback_version` 记录被退役旧色的镜像版本，供 `sourcelensctl.sh rollback`
+  用正确的旧镜像重建，而非 `:latest`。）
+- **install.sh 是唯一支持的起停入口**：blue/green 服务之间不写 `depends_on`（
+  profiled 服务被非 profiled 服务引用会破坏所有不带 `--profile` 的 compose 命令
+  校验），起停顺序由脚本命令式掌控。裸 `docker compose up -d` 不受支持。
+- **lensnode 经 nginx 寻址**：`LENSNODE_SERVER_URL=http://nginx:80`，始终打到
+  active 色，切换时靠重连过渡（PR2 增加断连宽限期后，在途 run 不会被误判失败）。
+
+### 迁移必须 expand/contract 安全
+
+观察窗内，**旧色仍在对切换后的库表结构提供服务**。因此**同一发布**里既删/改列或
+收紧约束、又上线不再使用它的代码，会在窗口内打挂旧色。此类变更必须拆成两个发布：
+先加、双写/兼容，下个版本再删。
 
 ## 安全与配置
 

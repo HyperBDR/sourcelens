@@ -326,7 +326,6 @@ def test_lensnode_run_cancel_cancels_running_task():
         client = LensNodeClient(config)
         executor = BlockingExecutor()
         client.executor = executor
-        send_queue = asyncio.Queue()
         run_uuid = "00000000-0000-0000-0000-000000000003"
 
         await client._handle_message(
@@ -337,8 +336,7 @@ def test_lensnode_run_cancel_cancels_running_task():
                     "task": "knowledge_qa",
                     "target_dirs": [],
                 }
-            ),
-            send_queue,
+            )
         )
         await asyncio.wait_for(executor.started.wait(), timeout=1)
 
@@ -348,8 +346,7 @@ def test_lensnode_run_cancel_cancels_running_task():
                     "type": "run_cancel",
                     "run_uuid": run_uuid,
                 }
-            ),
-            send_queue,
+            )
         )
 
         await asyncio.wait_for(executor.cancelled.wait(), timeout=1)
