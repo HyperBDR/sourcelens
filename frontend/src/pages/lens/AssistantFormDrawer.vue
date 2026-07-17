@@ -59,6 +59,16 @@
       <FormRow :label="t('lensAdmin.fields.name')">
         <input v-model="form.name" class="form-input" required />
       </FormRow>
+      <FormRow :label="t('lensAdmin.fields.description')">
+        <textarea
+          v-model="form.description"
+          class="form-input min-h-24"
+          :placeholder="t('lensAdmin.placeholders.assistantDescription')"
+        />
+        <p class="mt-1 text-xs text-ink-500">
+          {{ t('lensAdmin.wizard.assistantDescriptionHint') }}
+        </p>
+      </FormRow>
       <FormRow :label="t('lensAdmin.fields.slug')">
         <input v-model="form.slug" class="form-input" required />
       </FormRow>

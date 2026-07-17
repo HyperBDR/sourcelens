@@ -313,8 +313,18 @@
           <span class="chat-header-title">{{ t('lens.qa.mineTitle') }}</span>
         </template>
         <template v-else>
-          <AssistantSwitcher v-if="switchable" mode="header" />
-          <span v-else class="chat-header-title">{{ assistantName }}</span>
+          <div class="chat-header-assistant">
+            <AssistantSwitcher v-if="switchable" mode="header" />
+            <div v-else class="chat-header-title">{{ assistantName }}</div>
+            <p
+              v-if="assistantDescription"
+              class="chat-header-description"
+              :class="{ 'pl-2': switchable }"
+              :title="assistantDescription"
+            >
+              {{ assistantDescription }}
+            </p>
+          </div>
           <router-link
             v-if="assistantSlug"
             :to="`/lens/assistants/${assistantSlug}/qa`"
@@ -997,6 +1007,13 @@ const emptyVariant = computed(() =>
 
 const assistantName = computed(
   () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
+)
+
+const assistantDescription = computed(
+  () =>
+    selectedAssistant.value?.description?.trim() ||
+    publicAssistant.value?.description?.trim() ||
+    ''
 )
 
 // The top header turns the assistant name into a switcher only when an
@@ -2437,6 +2454,14 @@ onBeforeUnmount(() => {
 
 .chat-header-title {
   @apply min-w-0 truncate text-base font-semibold text-ink-900;
+}
+
+.chat-header-assistant {
+  @apply min-w-0 flex-1;
+}
+
+.chat-header-description {
+  @apply mt-0.5 max-w-2xl truncate text-xs leading-5 text-ink-500;
 }
 
 .chat-header-back {

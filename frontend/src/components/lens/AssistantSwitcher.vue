@@ -316,8 +316,17 @@
               >
                 {{ assistantInitial(assistant) }}
               </span>
-              <span class="min-w-0 flex-1 truncate font-medium">
-                {{ assistant.name || assistant.slug }}
+              <span class="min-w-0 flex-1">
+                <span class="block truncate font-medium">
+                  {{ assistant.name || assistant.slug }}
+                </span>
+                <span
+                  v-if="assistant.description?.trim()"
+                  class="assistant-switcher-item-description"
+                  :title="assistant.description"
+                >
+                  {{ assistant.description }}
+                </span>
               </span>
               <span
                 v-if="assistant.slug === currentAssistantSlug"
@@ -621,7 +630,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-item {
-  @apply flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left text-sm text-ink-700 transition-colors;
 }
 
 .assistant-switcher-item:hover {
@@ -633,11 +642,18 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-item-avatar {
-  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white;
+  @apply mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white;
+}
+
+.assistant-switcher-item-description {
+  @apply mt-0.5 overflow-hidden text-xs leading-5 text-ink-500;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .assistant-switcher-pill {
-  @apply shrink-0 rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700;
+  @apply mt-0.5 shrink-0 rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700;
 }
 
 .assistant-switcher-embedded {
