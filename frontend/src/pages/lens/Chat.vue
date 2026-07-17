@@ -2519,11 +2519,18 @@ onBeforeUnmount(() => {
 }
 
 .message-row-user .message-body {
-  @apply w-fit max-w-[640px] flex-none text-right;
+  @apply w-fit flex-none text-right;
+  max-width: min(640px, calc(100% - 46px));
 }
 
 .message-card {
   @apply min-w-0;
+}
+
+.message-card.user {
+  @apply rounded-2xl px-4 py-3 text-left;
+  background: #f3f4f6;
+  overflow-wrap: anywhere;
 }
 
 .message-time {
