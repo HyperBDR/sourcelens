@@ -195,6 +195,7 @@
       "sessionAccessDenied": "You don't have access to this session, or it no longer exists. Select one of your recent sessions or start a new one.",
       "sessionTitle": "{name} query",
       "sessionCreated": "Session created.",
+      "sessionCreateFailed": "Failed to create session, please try again.",
       "messageCopied": "Message copied.",
       "copyFailed": "Copy failed.",
       "downloadFailed": "Download failed, please try again.",

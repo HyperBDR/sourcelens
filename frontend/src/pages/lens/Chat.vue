@@ -1542,15 +1542,25 @@ async function createNewSession(notify = true) {
   }
   mySharesOpen.value = false
 
-  const session = await createSession({
-    assistant_uuid: selectedAssistant.value.uuid,
-    title: ''
-  })
+  let session
+  try {
+    session = await createSession({
+      assistant_uuid: selectedAssistant.value.uuid,
+      title: ''
+    })
+  } catch {
+    showError(t('lens.chat.sessionCreateFailed'))
+    return null
+  }
 
   sessions.value = [session, ...sessions.value]
   selectedSessionUuid.value = session.uuid
+  question.value = ''
+  if (composerRef.value) composerRef.value.style.height = 'auto'
+  clearAttachments()
   messages.value = []
   currentRun.value = null
+  resetStreamState()
   router.replace({
     path: route.path,
     query: { session: session.uuid }

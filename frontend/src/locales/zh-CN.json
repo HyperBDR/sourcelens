@@ -195,6 +195,7 @@
       "sessionAccessDenied": "你无权访问该会话，或该会话已不存在。请从自己的最近会话中选择，或新建会话。",
       "sessionTitle": "{name} 查询",
       "sessionCreated": "已创建会话。",
+      "sessionCreateFailed": "创建会话失败，请重试。",
       "messageCopied": "已复制消息。",
       "copyFailed": "复制失败。",
       "downloadFailed": "下载失败，请稍后重试。",
