@@ -12,10 +12,13 @@
 # unlike the dev stack. For zero-downtime instead, use docker-compose.yml with
 # scripts/install.sh.
 #
-# Pick ONE stack per host/directory: this file, docker-compose.yml, and
-# docker-compose.dev.yml share the default compose project name and overlapping
-# service names (postgresql/redis), so running two of them in the same directory
-# will fight over the shared containers.
+# Pick ONE production stack per host: this file and docker-compose.yml (blue/
+# green) are the two production shapes and share project name "sourcelens" (and
+# the postgresql/redis singletons), so run only one of them. The dev stack
+# (docker-compose.dev.yml) is isolated under project "sourcelens-dev" and does
+# not collide with either.
+name: sourcelens
+
 services:
   backend-api:
     image: oneprocloud/sourcelens-backend:${APP_VERSION:-latest}

@@ -1,3 +1,11 @@
+# Distinct compose project name so the dev stack is fully isolated from the
+# production stacks (docker-compose.yml / docker-compose.standalone.yml, which
+# use project "sourcelens"). Without this all three would default to the
+# directory name and share a project namespace + the postgresql/redis service
+# keys, so bringing up a production stack in this directory would recreate the
+# dev containers (and vice versa).
+name: sourcelens-dev
+
 services:
   backend-api:
     image: sourcelens-api:latest

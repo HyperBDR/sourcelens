@@ -48,18 +48,29 @@ single-node deploys*, not a coordinated fleet switch; don't mistake it for one.
 
 ---
 
-## 2. Topology model — three compose files, pick one per host
+## 2. Topology model — three compose files
 
-Keeping these separate is the whole mental model. **Only one runs per
-host/directory** (they share the default compose project name and the
-`postgresql`/`redis` service names, so two in the same dir fight over shared
-containers).
+| File | Role | Project name | Brought up by | Images | Zero-downtime |
+|---|---|---|---|---|---|
+| `docker-compose.dev.yml` | development | `<app>-dev` | `docker compose -f … up -d` | built from source, hot-reload mounts | no |
+| `docker-compose.standalone.yml` | simple prod, single instance | `<app>` | `docker compose -f … up -d` | pulled release images, no source mounts | no |
+| `docker-compose.yml` | zero-downtime prod | `<app>` | **`scripts/install.sh`** (blue/green) | pulled release images | **yes** |
 
-| File | Role | Brought up by | Images | Zero-downtime |
-|---|---|---|---|---|
-| `docker-compose.dev.yml` | development | `docker compose -f … up -d` | built from source, hot-reload mounts | no |
-| `docker-compose.standalone.yml` | simple prod, single instance | `docker compose -f … up -d` | pulled release images, no source mounts | no |
-| `docker-compose.yml` | zero-downtime prod | **`scripts/install.sh`** (blue/green) | pulled release images | **yes** |
+> ### IRON RULE — dev and prod must use distinct compose project names
+>
+> **Every compose file MUST set an explicit top-level `name:`.** Dev gets its own
+> project (`<app>-dev`); the production shapes share `<app>`. Without an explicit
+> `name:` every file defaults to the **directory name** and they share one
+> project namespace — and because they also share service keys (`postgresql`,
+> `redis`, …), bringing up a production stack in that directory **recreates the
+> dev containers** (and vice versa), silently taking down the other environment.
+> This is not hypothetical: it happened during this project's own testing.
+>
+> Dev must be isolated from prod. Of the two **production** shapes, run only one
+> per host — they intentionally share `<app>` (and the singleton
+> postgres/redis data). `COMPOSE_PROJECT_NAME` / `-p` still override the file's
+> `name:`, which is how you run an isolated *test* copy of a prod stack
+> (`COMPOSE_PROJECT_NAME=<app>-verify`) without disturbing anything.
 
 The blue/green file **cannot** be brought up with a bare `docker compose up -d`
 (API/UI are `profiles`-gated, and nginx needs bootstrapped runtime state) — that
@@ -134,6 +145,10 @@ was caught only in review. Treat them as acceptance criteria.
 
 ### 5.1 Deploy scripts
 
+- [ ] **Every compose file sets an explicit distinct `name:`** (IRON RULE, §2):
+      dev under `<app>-dev`, prod under `<app>`. Never rely on the directory-name
+      default — a prod `up` in the repo dir otherwise recreates the dev
+      containers (shared project namespace + `postgresql`/`redis` service keys).
 - [ ] **Atomic single-flight lock.** Acquire with `set -o noclobber`
       (`while ! (set -o noclobber; echo $$ > "$LOCK"); do …`), never a
       `[ -f "$LOCK" ] && echo > "$LOCK"` check-then-write — that is a TOCTOU race

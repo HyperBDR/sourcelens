@@ -230,14 +230,20 @@ agentcore 是独立维护的包，通过 git submodule 引入。子模块被当�
 
 ## 部署编排选择（三选一）
 
-三份 compose 各司其职，**同一主机/目录只跑其中一个**（它们共享默认 project 名与
-`postgresql`/`redis` 服务名，同目录并起会互相顶掉容器）：
+三份 compose 各司其职：
 
-| 文件 | 场景 | 起停方式 | 镜像 | 零停机 |
-|---|---|---|---|---|
-| `docker-compose.dev.yml` | 开发 | 裸 `docker compose -f … up -d` | 源码构建 + 热挂载 | 否 |
-| `docker-compose.standalone.yml` | 生产 · 简单单实例 | 裸 `docker compose -f … up -d` | 拉发布镜像（无源码挂载） | 否 |
-| `docker-compose.yml` | 生产 · 零停机 | `scripts/install.sh`（蓝绿） | 拉发布镜像 | 是 |
+| 文件 | 场景 | project 名 | 起停方式 | 镜像 | 零停机 |
+|---|---|---|---|---|---|
+| `docker-compose.dev.yml` | 开发 | `sourcelens-dev` | 裸 `docker compose -f … up -d` | 源码构建 + 热挂载 | 否 |
+| `docker-compose.standalone.yml` | 生产 · 简单单实例 | `sourcelens` | 裸 `docker compose -f … up -d` | 拉发布镜像（无源码挂载） | 否 |
+| `docker-compose.yml` | 生产 · 零停机 | `sourcelens` | `scripts/install.sh`（蓝绿） | 拉发布镜像 | 是 |
+
+> **铁律：dev 与 prod 必须用不同的 compose project 名。** 每个 compose 文件都
+> **显式**设顶层 `name:`（dev 为 `sourcelens-dev`，生产为 `sourcelens`），绝不
+> 依赖"目录名"默认值——否则三者共享同一 project 命名空间 + 同名 `postgresql`/
+> `redis` 服务键，在本目录起生产栈会**把 dev 容器顶掉重建**（反之亦然）。生产两
+> 份共享 `sourcelens`（同一单例库数据），**只跑其一**。要隔离测试某个生产栈用
+> `COMPOSE_PROJECT_NAME=sourcelens-verify`（覆盖文件里的 `name:`），不扰动其它。
 
 - **只想 `docker compose up` 一把起、不要零停机** → `docker-compose.standalone.yml`
   （单 `backend-api` + 单文件 `docker/nginx/default.standalone.conf` 直连，无

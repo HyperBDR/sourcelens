@@ -19,6 +19,13 @@
 # command that doesn't pass `--profile <color>`), so ordering — migrate, health-
 # gate the deploy color, switch nginx, roll workers — is owned imperatively by
 # the script, not declaratively here.
+
+# Explicit production project name — keeps this stack isolated from the dev
+# stack (docker-compose.dev.yml, project "sourcelens-dev"); scripts/install.sh's
+# bare `docker compose` commands still resolve to this. (COMPOSE_PROJECT_NAME /
+# -p still override it, e.g. for an isolated local switch test.)
+name: sourcelens
+
 x-sourcelens-api-common: &sourcelens-api-common
   image: oneprocloud/sourcelens-backend:${APP_VERSION:-latest}
   restart: unless-stopped
