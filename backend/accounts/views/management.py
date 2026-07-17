@@ -159,6 +159,12 @@ class ManagementUserListView(APIView):
             groups_prefetch,
             user_role_prefetch,
         ).order_by('id')
+        username = request.query_params.get('username')
+        if username is not None:
+            qs = qs.filter(username=username)
+        email = request.query_params.get('email')
+        if email is not None:
+            qs = qs.filter(email=email)
         total = qs.count()
         start = (page - 1) * page_size
         end = start + page_size
