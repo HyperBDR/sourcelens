@@ -12,6 +12,8 @@
       >
         <PublicQaAccessState
           :type="accessState"
+          @login="goLogin"
+          @home="goHome"
         />
       </div>
 
@@ -57,6 +59,7 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
 import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
@@ -68,6 +71,8 @@ import { getPublicAssistantQa } from '@/api/lens'
 const props = defineProps({ slug: { type: String, required: true } })
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 const PAGE_SIZE = 20
 const assistant = ref(null)
@@ -77,6 +82,17 @@ const nextOffset = ref(0)
 const loading = ref(true)
 const loadingMore = ref(false)
 const accessState = ref(null)
+
+function accessStateFromError(error) {
+  const code = error?.response?.data?.code
+  if (error?.response?.status === 403 && code === 'AUTHENTICATION_REQUIRED') {
+    return 'login-required'
+  }
+  if (error?.response?.status === 403 && code === 'ASSISTANT_ACCESS_DENIED') {
+    return 'forbidden'
+  }
+  return 'not-found'
+}
 
 async function load() {
   loading.value = true
@@ -94,8 +110,8 @@ async function load() {
     items.value = data?.results || []
     total.value = data?.total || 0
     nextOffset.value = data?.next_offset ?? null
-  } catch {
-    accessState.value = 'not-found'
+  } catch (error) {
+    accessState.value = accessStateFromError(error)
   } finally {
     loading.value = false
   }
@@ -116,6 +132,14 @@ async function loadMore() {
   } finally {
     loadingMore.value = false
   }
+}
+
+function goLogin() {
+  router.push({ path: '/login', query: { next: route.fullPath } })
+}
+
+function goHome() {
+  router.push('/')
 }
 
 onMounted(load)

@@ -25,6 +25,28 @@
       </div>
     </div>
 
+    <div
+      v-else-if="type === 'forbidden'"
+      class="mx-auto flex max-w-md flex-col items-center"
+    >
+      <div
+        class="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-warning-50 text-warning-600"
+      >
+        <ShieldAlert :size="22" :stroke-width="2" aria-hidden="true" />
+      </div>
+      <h1 class="text-lg font-semibold text-ink-900">
+        {{ t('lens.qa.accessDeniedTitle') }}
+      </h1>
+      <p class="mt-2 text-sm leading-6 text-ink-500">
+        {{ t('lens.qa.accessDeniedDescription') }}
+      </p>
+      <div class="mt-6 flex flex-wrap justify-center gap-3">
+        <BaseButton variant="secondary" @click="$emit('home')">
+          {{ t('lens.qa.returnHome') }}
+        </BaseButton>
+      </div>
+    </div>
+
     <p v-else class="text-sm font-medium text-ink-500">
       {{ t('lens.qa.notFound') }}
     </p>
@@ -32,7 +54,7 @@
 </template>
 
 <script setup>
-import { LockKeyhole } from '@lucide/vue'
+import { LockKeyhole, ShieldAlert } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -41,7 +63,8 @@ defineProps({
   type: {
     type: String,
     default: 'not-found',
-    validator: (value) => ['not-found', 'login-required'].includes(value)
+    validator: (value) =>
+      ['not-found', 'login-required', 'forbidden'].includes(value)
   }
 })
 

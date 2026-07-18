@@ -55,6 +55,13 @@ class LensNode(TimestampedUUIDModel):
     token_revoked = models.BooleanField(default=False)
     last_authenticated_at = models.DateTimeField(null=True, blank=True)
     last_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    # Set when the node's WebSocket drops, cleared on reconnect. A blue/green
+    # API deploy recycles the container the node is connected to, so a
+    # disconnect is not by itself proof the node's runs failed. Its runs are
+    # only failed if it is still disconnected after a grace window (see
+    # lens.tasks.check_lensnode_disconnect_grace_period); this timestamp both
+    # schedules and episode-pins that deferred check.
+    disconnected_at = models.DateTimeField(null=True, blank=True)
     registered_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -119,6 +126,7 @@ class Assistant(TimestampedUUIDModel):
     objects = AssistantQuerySet.as_manager()
 
     name = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
     slug = models.SlugField(max_length=180, unique=True)
     visibility = models.CharField(
         max_length=16,

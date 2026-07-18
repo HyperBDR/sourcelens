@@ -103,12 +103,25 @@ const loading = ref(true)
 const accessState = ref(null)
 const isAuthenticated = computed(() => userStore.isAuthenticated)
 
-function setAccessStateAfterError() {
-  accessState.value = isAuthenticated.value ? 'not-found' : 'login-required'
+function accessStateFromError(error) {
+  const code = error?.response?.data?.code
+  if (error?.response?.status === 403 && code === 'AUTHENTICATION_REQUIRED') {
+    return 'login-required'
+  }
+  if (error?.response?.status === 403 && code === 'ASSISTANT_ACCESS_DENIED') {
+    return 'forbidden'
+  }
+  return 'not-found'
+}
+
+function setAccessStateAfterError(error) {
+  accessState.value = accessStateFromError(error)
   document.title =
     accessState.value === 'login-required'
       ? t('lens.qa.loginRequiredTitle')
-      : t('lens.qa.notFound')
+      : accessState.value === 'forbidden'
+        ? t('lens.qa.accessDeniedTitle')
+        : t('lens.qa.notFound')
 }
 
 async function load() {
@@ -122,8 +135,8 @@ async function load() {
     if (title) {
       document.title = title
     }
-  } catch {
-    setAccessStateAfterError()
+  } catch (error) {
+    setAccessStateAfterError(error)
   } finally {
     loading.value = false
   }

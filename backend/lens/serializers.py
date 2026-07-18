@@ -304,6 +304,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         fields = [
             "uuid",
             "name",
+            "description",
             "slug",
             "lensnode",
             "lensnode_uuid",

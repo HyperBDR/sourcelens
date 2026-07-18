@@ -5,6 +5,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Build arguments for configuration
+ARG APP_VERSION
+ARG APP_RELEASE_DATE
 ARG VITE_API_BASE_URL
 ARG VITE_TURNSTILE_SITE_KEY
 ARG VITE_SENTRY_DSN
@@ -14,6 +16,8 @@ ARG VITE_SENTRY_SEND_DEFAULT_PII
 ARG VITE_GA_ID
 
 # Set as environment variables for build
+ENV VITE_APP_VERSION=${APP_VERSION}
+ENV VITE_APP_RELEASE_DATE=${APP_RELEASE_DATE}
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_TURNSTILE_SITE_KEY=${VITE_TURNSTILE_SITE_KEY}
 ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
@@ -42,6 +46,13 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Copy custom nginx configuration for SPA routing
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Stamp the release version onto the runtime image so scripts/install.sh can
+# read it (docker inspect Config.Labels) for its version-skip check. Absent =>
+# 0.0.0, which install.sh treats as "never skip". Kept last so a version bump
+# doesn't invalidate the COPY layers above it.
+ARG APP_VERSION=0.0.0
+LABEL com.oneprocloud.sourcelens.version=$APP_VERSION
 
 # Expose port
 EXPOSE 80

@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import json
 import logging
 import os
@@ -31,12 +32,64 @@ class LensNodeClient:
         self.config = config
         self.executor = LensNodeExecutor(config)
         self.stopping = asyncio.Event()
+        # Set while draining on shutdown/upgrade: stop accepting new runs and
+        # stop heartbeating (a heartbeat would flip the node back to ONLINE
+        # server-side and undo the DRAINING state). See stop().
+        self.draining = asyncio.Event()
         self.websocket = None
         self.connected_at = None
         self.connect_started_at = None
         self.heartbeat_count = 0
         self.last_report_signature = None
         self.running_tasks = {}
+        # Durable outbound buffer, persistent across reconnects. A run started
+        # on one connection keeps executing across a blue/green API recycle and
+        # emits run_event/run_output/run_done frames while the socket is down;
+        # buffering them here (instead of on a per-connection queue that is
+        # discarded on disconnect) means the next connection's send loop
+        # flushes them rather than losing them. The send loop pops a frame
+        # before sending and re-queues it at the front on a mid-send failure,
+        # so an outage preserves frames and their order.
+        #
+        # Bounded so a prolonged outage (run threads keep emitting with no
+        # consumer draining) can't grow it without limit and OOM-kill the node
+        # — better to drop the oldest frames of one run than to lose every run.
+        self._outbox = collections.deque()
+        self._outbox_ready = asyncio.Event()
+        self._outbox_max = int(
+            os.getenv("LENSNODE_OUTBOX_MAX_FRAMES", "10000")
+        )
+        self._outbox_dropped = 0
+
+    def _enqueue(self, payload):
+        """Append an outbound frame to the durable outbox.
+
+        Not coroutine-safe with respect to threads; background run threads
+        must schedule it via loop.call_soon_threadsafe(self._enqueue, payload).
+        Drops the oldest frame when the buffer is full (see __init__). Safe
+        against the send loop: that loop pops its in-flight frame out before
+        awaiting, so a drop here never races the frame being sent.
+        """
+
+        while len(self._outbox) >= self._outbox_max:
+            self._outbox.popleft()
+            self._outbox_dropped += 1
+            if self._outbox_dropped == 1 or self._outbox_dropped % 1000 == 0:
+                LOGGER.warning(
+                    task_log(
+                        (
+                            "Dropping buffered frames for LensNode "
+                            f"{self.config.name}. Current status is "
+                            "outbox_full."
+                        ),
+                        details=[
+                            f"MaxFrames: {self._outbox_max}",
+                            f"TotalDropped: {self._outbox_dropped}",
+                        ],
+                    )
+                )
+        self._outbox.append(payload)
+        self._outbox_ready.set()
 
     async def run_forever(self):
         """Run the client with reconnect backoff until stopped."""
@@ -83,13 +136,43 @@ class LensNodeClient:
             backoff_s = min(backoff_s * 2, 30)
 
     async def stop(self):
-        """Stop the client and close its WebSocket."""
+        """Gracefully drain in-flight runs, then stop the client.
 
-        if self.stopping.is_set():
+        Triggered by SIGTERM/SIGINT on shutdown/upgrade (see _run_client).
+        This is the single, reusable drain entry point: a future control-plane
+        drain/upgrade command (issue #27) can call this same method. It stops
+        accepting new runs, announces draining so the control plane routes new
+        runs elsewhere, lets in-flight runs finish within the drain timeout,
+        then closes the socket and cancels only what is still running past the
+        deadline. An idle node (no in-flight runs) drains and exits at once.
+        """
+
+        if self.stopping.is_set() or self.draining.is_set():
             return
+        self.draining.set()
         LOGGER.info(
-            task_log(f"Stopping service LensNode {self.config.name}.")
+            task_log(
+                f"Draining LensNode {self.config.name} before shutdown.",
+                details=[
+                    f"InFlightRuns: {len(self.running_tasks)}",
+                    "DrainTimeout: "
+                    f"{format_duration(self.config.drain_timeout_s)}",
+                ],
+            )
         )
+        # Announce draining so the control plane flips this node out of
+        # dispatch. Enqueued (not sent directly) so it stays ordered behind
+        # buffered frames and never races the send loop on the socket; the
+        # heartbeat loop has already stopped (it gates on draining), so this is
+        # the node's last state frame and the DRAINING status sticks.
+        self._enqueue(
+            {
+                "type": "node_draining",
+                "lensnode_name": self.config.name,
+            }
+        )
+        await self._drain_running_tasks()
+        await self._flush_outbox()
         self.stopping.set()
         if self.websocket is not None:
             await self.websocket.close()
@@ -100,6 +183,38 @@ class LensNodeClient:
                 *self.running_tasks.values(),
                 return_exceptions=True,
             )
+
+    async def _drain_running_tasks(self):
+        """Wait for in-flight runs to finish, bounded by the drain timeout."""
+
+        tasks = list(self.running_tasks.values())
+        if not tasks:
+            return
+        done, pending = await asyncio.wait(
+            tasks, timeout=self.config.drain_timeout_s
+        )
+        if pending:
+            LOGGER.warning(
+                task_log(
+                    (
+                        f"Drain deadline reached for LensNode "
+                        f"{self.config.name}; cancelling runs still active."
+                    ),
+                    details=[f"StillActive: {len(pending)}"],
+                )
+            )
+
+    async def _flush_outbox(self, attempts=50):
+        """Let the send loop flush buffered frames before the socket closes.
+
+        The send loop runs until stopping is set (not draining), so it is still
+        active here — this just yields long enough for node_draining and any
+        final run_done frames to reach the server before we close.
+        """
+
+        while self._outbox and attempts > 0:
+            await asyncio.sleep(0.1)
+            attempts -= 1
 
     def _ws_url(self):
         """Return the token-authenticated WebSocket URL."""
@@ -113,7 +228,6 @@ class LensNodeClient:
     async def _run_connection(self, url):
         """Run one WebSocket connection until it closes."""
 
-        send_queue = asyncio.Queue()
         connected = False
         async with connect(
             url,
@@ -122,16 +236,12 @@ class LensNodeClient:
         ) as websocket:
             self.websocket = websocket
             try:
-                await self._on_connected(send_queue)
+                await self._on_connected()
                 connected = True
                 tasks = [
-                    asyncio.create_task(
-                        self._send_loop(websocket, send_queue)
-                    ),
-                    asyncio.create_task(self._heartbeat_loop(send_queue)),
-                    asyncio.create_task(
-                        self._receive_loop(websocket, send_queue)
-                    ),
+                    asyncio.create_task(self._send_loop(websocket)),
+                    asyncio.create_task(self._heartbeat_loop()),
+                    asyncio.create_task(self._receive_loop(websocket)),
                 ]
                 done, pending = await asyncio.wait(
                     tasks,
@@ -150,7 +260,7 @@ class LensNodeClient:
                 self.websocket = None
         return connected
 
-    async def _on_connected(self, send_queue):
+    async def _on_connected(self):
         """Record connection state and send initial report."""
 
         self.connected_at = utc_now()
@@ -164,18 +274,18 @@ class LensNodeClient:
                 self.connected_at,
             )
         )
-        await self._send_hello(send_queue)
+        await self._send_hello()
 
-    async def _receive_loop(self, websocket, send_queue):
+    async def _receive_loop(self, websocket):
         """Receive and dispatch control-plane messages."""
 
         try:
             async for raw_message in websocket:
-                await self._handle_message(raw_message, send_queue)
+                await self._handle_message(raw_message)
         finally:
             self._log_disconnected(None, None)
 
-    async def _handle_message(self, raw_message, send_queue):
+    async def _handle_message(self, raw_message):
         """Dispatch one inbound control-plane message."""
 
         try:
@@ -193,15 +303,15 @@ class LensNodeClient:
 
         message_type = message.get("type")
         if message_type == "run_start":
-            await self._start_command(message, send_queue)
+            await self._start_command(message)
         elif message_type == "list_dirs":
-            await self._handle_list_dirs(message, send_queue)
+            await self._handle_list_dirs(message)
         elif message_type == "datasource_check_path":
-            await self._handle_datasource_check_path(message, send_queue)
+            await self._handle_datasource_check_path(message)
         elif message_type == "datasource_test_connection":
-            await self._handle_datasource_test_connection(message, send_queue)
+            await self._handle_datasource_test_connection(message)
         elif message_type == "datasource_sync":
-            await self._start_datasource_sync(message, send_queue)
+            await self._start_datasource_sync(message)
         elif message_type == "datasource_cancel":
             task_id = str(message.get("task_id") or "")
             task_key = f"datasource:{task_id}"
@@ -268,18 +378,21 @@ class LensNodeClient:
                 )
             )
 
-    async def _start_command(self, message, send_queue):
+    async def _start_command(self, message):
         """Start one LensNode command if local capacity allows it."""
 
         run_uuid = str(message.get("run_uuid") or "")
         if not run_uuid:
             return
+        if self.draining.is_set():
+            await self._send_busy(run_uuid, "LENSNODE_DRAINING")
+            return
         if run_uuid in self.running_tasks:
-            await self._send_busy(run_uuid, send_queue, "LENSNODE_RUN_ACTIVE")
+            await self._send_busy(run_uuid, "LENSNODE_RUN_ACTIVE")
             return
         max_runs = max(1, int(getattr(self.config, "max_concurrent_runs", 1)))
         if len(self.running_tasks) >= max_runs:
-            await self._send_busy(run_uuid, send_queue, "LENSNODE_BUSY")
+            await self._send_busy(run_uuid, "LENSNODE_BUSY")
             return
 
         LOGGER.info(
@@ -296,12 +409,12 @@ class LensNodeClient:
             )
         )
         task = asyncio.create_task(
-            self._execute_command(run_uuid, message, send_queue)
+            self._execute_command(run_uuid, message)
         )
         self.running_tasks[run_uuid] = task
         task.add_done_callback(lambda item: self._consume_task_exception(item))
 
-    async def _handle_list_dirs(self, message, send_queue):
+    async def _handle_list_dirs(self, message):
         """List immediate subdirectories for requested paths and reply."""
 
         from pathlib import Path
@@ -322,13 +435,13 @@ class LensNodeClient:
                 except PermissionError:
                     pass
             result[path] = subdirs
-        await send_queue.put({
+        self._enqueue({
             "type": "list_dirs_result",
             "request_id": request_id,
             "dirs": result,
         })
 
-    async def _handle_datasource_check_path(self, message, send_queue):
+    async def _handle_datasource_check_path(self, message):
         """Inspect a datasource path and reply to the control plane."""
 
         request_id = str(message.get("request_id") or "")
@@ -344,7 +457,7 @@ class LensNodeClient:
                 "status": "blocked",
                 "message": str(exc),
             }
-        await send_queue.put(
+        self._enqueue(
             {
                 "type": "datasource_path_result",
                 "request_id": request_id,
@@ -352,7 +465,7 @@ class LensNodeClient:
             }
         )
 
-    async def _handle_datasource_test_connection(self, message, send_queue):
+    async def _handle_datasource_test_connection(self, message):
         """Test datasource connectivity and reply to the control plane."""
 
         request_id = str(message.get("request_id") or "")
@@ -367,7 +480,7 @@ class LensNodeClient:
                 "message_code": str(exc),
                 "message": str(exc),
             }
-        await send_queue.put(
+        self._enqueue(
             {
                 "type": "datasource_connection_result",
                 "request_id": request_id,
@@ -375,7 +488,7 @@ class LensNodeClient:
             }
         )
 
-    async def _start_datasource_sync(self, message, send_queue):
+    async def _start_datasource_sync(self, message):
         """Start one datasource sync without blocking WebSocket receive."""
 
         request_id = str(message.get("request_id") or "")
@@ -385,12 +498,12 @@ class LensNodeClient:
 
         task_key = f"datasource:{task_id}"
         task = asyncio.create_task(
-            self._execute_datasource_sync(message, send_queue)
+            self._execute_datasource_sync(message)
         )
         self.running_tasks[task_key] = task
         task.add_done_callback(lambda item: self._consume_task_exception(item))
 
-    async def _execute_datasource_sync(self, message, send_queue):
+    async def _execute_datasource_sync(self, message):
         """Execute a datasource sync command in a worker thread."""
 
         request_id = str(message.get("request_id") or "")
@@ -405,7 +518,7 @@ class LensNodeClient:
                 "task_id": task_id,
                 **event,
             }
-            loop.call_soon_threadsafe(send_queue.put_nowait, payload)
+            loop.call_soon_threadsafe(self._enqueue, payload)
 
         try:
             command = {
@@ -419,7 +532,7 @@ class LensNodeClient:
                 self.config.workspace_path,
                 emit,
             )
-            await send_queue.put(
+            self._enqueue(
                 {
                     "type": "datasource_sync_done",
                     "request_id": request_id,
@@ -429,7 +542,7 @@ class LensNodeClient:
                 }
             )
         except Exception as exc:
-            await send_queue.put(
+            self._enqueue(
                 {
                     "type": "datasource_sync_event",
                     "request_id": request_id,
@@ -439,7 +552,7 @@ class LensNodeClient:
                     "message": str(exc),
                 }
             )
-            await send_queue.put(
+            self._enqueue(
                 {
                     "type": "datasource_sync_done",
                     "request_id": request_id,
@@ -451,10 +564,10 @@ class LensNodeClient:
         finally:
             self.running_tasks.pop(task_key, None)
 
-    async def _send_busy(self, run_uuid, send_queue, reason):
+    async def _send_busy(self, run_uuid, reason):
         """Report a run that cannot start because local capacity is full."""
 
-        await send_queue.put(
+        self._enqueue(
             {
                 "type": "run_event",
                 "run_uuid": run_uuid,
@@ -472,7 +585,7 @@ class LensNodeClient:
                 },
             }
         )
-        await send_queue.put(
+        self._enqueue(
             {
                 "type": "run_done",
                 "run_uuid": run_uuid,
@@ -481,13 +594,13 @@ class LensNodeClient:
             }
         )
 
-    async def _execute_command(self, run_uuid, message, send_queue):
+    async def _execute_command(self, run_uuid, message):
         """Run one LensNode command without blocking WebSocket receive."""
 
         loop = asyncio.get_running_loop()
 
         def emit(payload):
-            loop.call_soon_threadsafe(send_queue.put_nowait, payload)
+            loop.call_soon_threadsafe(self._enqueue, payload)
 
         try:
             await self.executor.execute(message, emit)
@@ -504,8 +617,16 @@ class LensNodeClient:
         except asyncio.CancelledError:
             return
 
-    async def _send_hello(self, send_queue):
-        """Send initial LensNode capabilities."""
+    async def _send_hello(self):
+        """Send initial LensNode capabilities.
+
+        Sent directly on the socket (not via the durable outbox) and only from
+        _on_connected, before the send loop starts — so it is always this
+        connection's first frame and never persists across a reconnect. A hello
+        left buffered in the durable outbox would otherwise be replayed on the
+        next connection carrying a stale active_runs snapshot, triggering a
+        spurious reconcile pass server-side.
+        """
 
         dirs = available_dirs(self.config.workspace_path)
         LOGGER.info(
@@ -526,26 +647,34 @@ class LensNodeClient:
             for key in self.running_tasks
             if not key.startswith("datasource:")
         ]
-        await send_queue.put(
-            {
-                "type": "hello",
-                "lensnode_name": self.config.name,
-                "protocol_version": self.config.protocol_version,
-                "agent_version": self.config.agent_version,
-                "workspace_path": self.config.workspace_path,
-                "available_dirs": dirs,
-                "tasks": TASKS,
-                "active_runs": active_runs,
-                "labels": {
-                    "mode": "local",
+        await self.websocket.send(
+            json.dumps(
+                {
+                    "type": "hello",
+                    "lensnode_name": self.config.name,
+                    "protocol_version": self.config.protocol_version,
+                    "agent_version": self.config.agent_version,
+                    "workspace_path": self.config.workspace_path,
+                    "available_dirs": dirs,
+                    "tasks": TASKS,
+                    "active_runs": active_runs,
+                    "labels": {
+                        "mode": "local",
+                    },
                 },
-            }
+                ensure_ascii=False,
+            )
         )
 
-    async def _heartbeat_loop(self, send_queue):
-        """Periodically report workspace state while connected."""
+    async def _heartbeat_loop(self):
+        """Periodically report workspace state while connected.
 
-        while not self.stopping.is_set():
+        Stops once draining: a heartbeat sets the node ONLINE server-side,
+        which would undo the DRAINING state and let new runs be dispatched
+        here mid-shutdown.
+        """
+
+        while not self.stopping.is_set() and not self.draining.is_set():
             await asyncio.sleep(self.config.heartbeat_interval_s)
             dirs = available_dirs(self.config.workspace_path)
             signature = (
@@ -573,7 +702,7 @@ class LensNodeClient:
                     )
                 )
             self.last_report_signature = signature
-            await send_queue.put(
+            self._enqueue(
                 {
                     "type": "heartbeat",
                     "available_dirs": dirs,
@@ -581,12 +710,36 @@ class LensNodeClient:
                 }
             )
 
-    async def _send_loop(self, websocket, send_queue):
-        """Serialize and send queued frames to the control plane."""
+    async def _send_loop(self, websocket):
+        """Drain the durable outbox to the control plane over one connection.
+
+        Pops a frame BEFORE awaiting the send (so a concurrent _enqueue that
+        drops the oldest frame when the buffer is full can never touch the
+        in-flight one), and on a mid-send failure re-queues it at the FRONT so
+        the frame and its order survive for the next connection's send loop.
+        Waits on _outbox_ready when the outbox is empty.
+
+        Re-delivery is at-least-once: a frame whose bytes reached the server
+        before the send raised is re-sent on reconnect. The backend tolerates
+        this — a run's final_content frame reconciles the accumulated output —
+        matching the reference ws_client design.
+        """
 
         while not self.stopping.is_set():
-            payload = await send_queue.get()
-            await websocket.send(json.dumps(payload, ensure_ascii=False))
+            while self._outbox:
+                payload = self._outbox.popleft()
+                try:
+                    await websocket.send(
+                        json.dumps(payload, ensure_ascii=False)
+                    )
+                except Exception:
+                    self._outbox.appendleft(payload)
+                    self._outbox_ready.set()
+                    raise
+            self._outbox_ready.clear()
+            if self._outbox:
+                continue
+            await self._outbox_ready.wait()
 
     def _log_connection_error(self, error):
         """Log WebSocket connection errors."""

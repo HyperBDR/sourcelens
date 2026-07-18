@@ -94,14 +94,14 @@ class PublicSharedQAView(APIView):
             .filter(token=token, status=SharedQA.Status.PUBLISHED)
             .first()
         )
-        if share is None or not _shared_qa_visible_to_user(
-            share,
-            request.user,
-        ):
+        if share is None or share.assistant is None:
             return Response(
                 {"detail": "Shared Q&A not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        access_error = _shared_qa_access_error(share.assistant, request.user)
+        if access_error is not None:
+            return access_error
         SharedQA.objects.filter(pk=share.pk).update(
             view_count=F("view_count") + 1
         )
@@ -112,16 +112,40 @@ class PublicSharedQAView(APIView):
 def _shared_qa_visible_to_user(share, user):
     """Return whether a shared Q&A may be read through its token."""
 
-    if share.is_listed:
-        return True
-    return bool(user and user.is_authenticated)
+    return bool(
+        user and
+        user.is_authenticated and
+        share.assistant and
+        share.assistant.is_accessible_by(user)
+    )
+
+
+def _shared_qa_access_error(assistant, user):
+    """Return an access error response for shared Q&A, or None if allowed."""
+
+    if not (user and user.is_authenticated):
+        return Response(
+            {
+                "code": "AUTHENTICATION_REQUIRED",
+                "detail": "Sign in to view this shared Q&A.",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if not assistant.is_accessible_by(user):
+        return Response(
+            {
+                "code": "ASSISTANT_ACCESS_DENIED",
+                "detail": "You do not have access to this assistant.",
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
 
 
 class PublicSharedQAListView(APIView):
     """Public list of an assistant's curated shared Q&As (anonymous)."""
 
-    authentication_classes = []
-    permission_classes = []
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request, slug):
         """Return curated, listed shares for one active assistant."""
@@ -135,6 +159,9 @@ class PublicSharedQAListView(APIView):
                 {"detail": "Assistant not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        access_error = _shared_qa_access_error(assistant, request.user)
+        if access_error is not None:
+            return access_error
         params = request.query_params
         limit = _admin_safe_int(params.get("limit"), 20, maximum=50)
         offset = _admin_safe_int(params.get("offset"), 0, minimum=0)
