@@ -163,6 +163,7 @@ class LensApiTests(TestCase):
     def test_assistant_create_saves_lensnode_and_bindings(self):
         payload = {
             "name": "API Explorer",
+            "description": "Explore API behavior and implementation.",
             "slug": "api-explorer",
             "lensnode_uuid": str(self.lensnode.uuid),
             "selected_task": "knowledge_qa",
@@ -192,12 +193,35 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         assistant = Assistant.objects.get(slug="api-explorer")
         self.assertEqual(assistant.lensnode, self.lensnode)
+        self.assertEqual(
+            assistant.description,
+            "Explore API behavior and implementation.",
+        )
+        self.assertEqual(response.data["description"], assistant.description)
         self.assertEqual(assistant.selected_task, "knowledge_qa")
         self.assertEqual(assistant.skill_bindings.count(), 1)
         self.assertEqual(assistant.mcp_bindings.count(), 1)
         self.assertEqual(
             assistant.settings["_model_check"]["agent_model_ref"]["status"],
             "skipped",
+        )
+
+    def test_assistant_update_saves_description(self):
+        response = self.client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {"description": "Updated assistant description."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assistant.refresh_from_db()
+        self.assertEqual(
+            self.assistant.description,
+            "Updated assistant description.",
+        )
+        self.assertEqual(
+            response.data["description"],
+            "Updated assistant description.",
         )
 
     def test_assistant_create_saves_workspace_guide_skill(self):
@@ -1541,6 +1565,7 @@ class AssistantAccessTests(TestCase):
         )
         self.assistant = Assistant.objects.create(
             name="Private One",
+            description="Answers private workspace questions.",
             slug="private-one",
             lensnode=self.lensnode,
             selected_task="knowledge_qa",
@@ -1573,6 +1598,7 @@ class AssistantAccessTests(TestCase):
             f"/api/lens/public/assistants/{self.assistant.slug}/"
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["description"], self.assistant.description)
 
     def test_list_hides_private_from_unauthorized_then_group_grant(self):
         client = self._client(self.member)

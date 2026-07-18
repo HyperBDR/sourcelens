@@ -71,6 +71,7 @@ class PublicAssistantView(APIView):
         return Response(
             {
                 "name": assistant.name,
+                "description": assistant.description,
                 "slug": assistant.slug,
                 "status": assistant.status,
             }

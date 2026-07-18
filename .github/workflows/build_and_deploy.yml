@@ -27,19 +27,38 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release_date: ${{ steps.version.outputs.release_date }}
+      ref: ${{ steps.version.outputs.ref }}
     steps:
       - name: Resolve version
         id: version
         shell: bash
         run: |
+          # version = the image tag (v-stripped); ref = the git ref
+          # scripts/install.sh fetches deploy assets from and derives the same
+          # image tag out of (${ref#v}). For a tag push they line up exactly.
+          # A manual dispatch is assumed to redeploy an existing release, so its
+          # ref is the corresponding v<version> tag.
           if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ -n "${GITHUB_REF_NAME}" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
+            REF="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
+            REF="v${{ inputs.version }}"
           else
-            VERSION="${GITHUB_SHA::7}"
+            # No tag, no manual version: build/deploy the pushed commit. Use the
+            # FULL SHA for both — install.sh derives the image tag from the ref
+            # it fetches (${ref#v}), so a 7-char VERSION with a 40-char REF would
+            # tag images :<short> but make install.sh pull :<full> (a nonexistent
+            # tag). raw.githubusercontent.com resolves a full SHA but not a short
+            # one, so the full SHA is the value that works for both.
+            VERSION="${GITHUB_SHA}"
+            REF="${GITHUB_SHA}"
           fi
+          RELEASE_DATE="$(date -u +'%Y/%m/%d')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_date=$RELEASE_DATE" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
   build-images:
     runs-on: ubuntu-latest
@@ -90,10 +109,11 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
             ${{ env.REGISTRY }}/${{ matrix.image_name }}:latest
-          # VITE_* args are only consumed by the frontend image; the backend
-          # and lensnode builds ignore them (harmless unused-arg warnings).
+          # Frontend args are ignored by the backend and lensnode builds.
           build-args: |
             USE_MIRROR=false
+            APP_VERSION=${{ needs.prepare-version.outputs.version }}
+            APP_RELEASE_DATE=${{ needs.prepare-version.outputs.release_date }}
             VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL }}
             VITE_TURNSTILE_SITE_KEY=${{ vars.VITE_TURNSTILE_SITE_KEY }}
             VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
@@ -108,6 +128,12 @@ jobs:
     needs:
       - prepare-version
       - build-images
+    # Gate: auto-deploy runs only when the repo/environment variable
+    # SOURCELENS_AUTO_DEPLOY is "true". It is intentionally left unset for the
+    # first blue/green cutover, which is done manually and supervised on the
+    # host; a tag push then only builds+pushes images. Set the variable to
+    # "true" after the first cutover succeeds to make releases hands-off.
+    if: ${{ vars.SOURCELENS_AUTO_DEPLOY == 'true' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -119,8 +145,12 @@ jobs:
           known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
           if_key_exists: fail
 
-      # Only the compose files are shipped to the server; application source
-      # stays out of the deploy host (images carry the code).
+      # No source or compose files are shipped from CI anymore: scripts/install.sh
+      # self-fetches the small set of declarative deploy assets (compose file,
+      # nginx/postgres config, the scripts themselves) straight from the public
+      # repo at the release ref, then runs the health-gated blue/green switch. It
+      # owns its own single-flight lock, so the ad-hoc lock the old inline script
+      # kept is gone too.
       - name: Ensure deploy directory exists
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -130,17 +160,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: mkdir -p ${{ env.DEPLOY_PATH }}
 
-      - name: Copy compose files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ env.SSH_HOST }}
-          username: ${{ env.SSH_USER }}
-          port: ${{ env.SSH_PORT }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.yml,docker"
-          target: ${{ env.DEPLOY_PATH }}
-
-      - name: Deploy to Server
+      - name: Deploy to Server (blue/green install.sh)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
@@ -148,51 +168,26 @@ jobs:
           port: ${{ env.SSH_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 3600s
-          # Stop and fail the job on the first failing command so a broken
-          # deploy (e.g. `up -d` aborting) surfaces as red instead of a
-          # false "success".
+          # Fail the job on the first failing command so a broken deploy (health
+          # gate timing out, migration failing) surfaces as red, not a false
+          # "success".
           script_stop: true
-          # Use Docker Compose v2 (`docker compose`). Unlike legacy
-          # docker-compose v1, v2 does not require a service's build context to
-          # exist on the host when an image is present — it pulls the tagged
-          # image and only builds on `--build`, so `build:` can stay in the
-          # compose file while prod deploys purely from pushed images.
           script: |
+            set -euo pipefail
             cd ${{ env.DEPLOY_PATH }}
-            APP_VERSION="${{ needs.prepare-version.outputs.version }}"
-            LOCK_FILE="/tmp/sourcelens-deploy.lock"
-            MAX_WAIT=300
-            WAIT_INTERVAL=5
-            ELAPSED=0
+            DEPLOY_REF="${{ needs.prepare-version.outputs.ref }}"
+            echo "Bootstrapping scripts/install.sh at ${DEPLOY_REF}..."
+            # Public repo: raw fetch needs no auth. Atomic write so a running
+            # install.sh reading itself isn't truncated mid-run.
+            mkdir -p scripts
+            curl -fsSL \
+              "https://raw.githubusercontent.com/HyperBDR/sourcelens/${DEPLOY_REF}/scripts/install.sh" \
+              -o scripts/install.sh.tmp
+            mv scripts/install.sh.tmp scripts/install.sh
+            chmod +x scripts/install.sh
+            # install.sh fetches the remaining assets, runs migrations against
+            # the idle color, health-gates it, flips nginx (no dropped requests),
+            # observes, retires the old color, then rolls the workers/lensnode.
+            DEPLOY_PATH="${{ env.DEPLOY_PATH }}" ./scripts/install.sh "${DEPLOY_REF}"
 
-            # Wait for any existing deployment to complete
-            while [ -f "$LOCK_FILE" ] && [ $ELAPSED -lt $MAX_WAIT ]; do
-              echo "Deployment in progress, waiting... (${ELAPSED}s/${MAX_WAIT}s)"
-              sleep $WAIT_INTERVAL
-              ELAPSED=$((ELAPSED + WAIT_INTERVAL))
-            done
-
-            if [ -f "$LOCK_FILE" ]; then
-              echo "Timeout waiting for deployment lock. Proceeding anyway..."
-            fi
-
-            # Create lock file
-            echo "$$ $(date)" > "$LOCK_FILE"
-            trap "rm -f $LOCK_FILE" EXIT
-
-            echo "Starting sourcelens deployment for version ${APP_VERSION}..."
-            # Pull the specified image tag
-            APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml pull
-            # Recreate only the containers whose image/config changed (the
-            # new app images). Avoid --force-recreate: it rebuilds every
-            # service (incl. db/nginx) and can abort the deploy mid-way.
-            APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml up -d
-            # Reload nginx config in place; fall back to a restart if reload
-            # fails. (The old nginx-reload issue that motivated force-recreate
-            # is fixed, so a full recreate is no longer needed.)
-            APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml exec -T nginx nginx -s reload 2>/dev/null || APP_VERSION="${APP_VERSION}" docker compose -f docker-compose.yml restart nginx
-            docker system prune -f
-
-            echo "sourcelens deployment completed for version ${APP_VERSION}"
-            echo "Note: Celery workers are gracefully shutting down old tasks in the background (up to 30 minutes)"
-            rm -f "$LOCK_FILE"
+            echo "sourcelens blue/green deploy completed for ${DEPLOY_REF}"

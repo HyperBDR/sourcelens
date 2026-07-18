@@ -14,6 +14,7 @@ from django.utils import timezone
 from .attachments import attachment_data_url, bind_attachments_to_message
 from .llm import run_completion, run_completion_multimodal
 from .models import (
+    GlobalSetting,
     LensNode,
     Message,
     MessageAttachment,
@@ -78,8 +79,76 @@ def lensnode_group_name(lensnode_uuid):
     return f"lens.lensnode.{lensnode_uuid}"
 
 
+LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT = 180
+
+
+def get_lensnode_disconnect_grace_seconds():
+    """Return how long a disconnected node keeps its runs before they fail.
+
+    A blue/green API deploy recycles the container a node is connected to, so
+    a WebSocket drop is not proof the node's in-flight runs failed — the node
+    reconnects on an interval. Only a node still gone after this window has its
+    RUNNING/STREAMING runs marked failed (see
+    lens.tasks.check_lensnode_disconnect_grace_period). Admin-tunable via the
+    GlobalSetting key ``lensnode.disconnect_grace_s``.
+    """
+
+    setting = GlobalSetting.objects.filter(
+        key="lensnode.disconnect_grace_s"
+    ).first()
+    try:
+        value = int(
+            setting.value
+            if setting
+            else LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT
+        )
+    except (TypeError, ValueError):
+        return LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT
+    return max(1, value)
+
+
+def schedule_lensnode_disconnect_grace_check(lensnode_uuid, disconnected_at):
+    """Schedule the one-shot check that fails a node's runs if it stays gone
+    past the grace window.
+
+    Kept here (not in the consumer) so the scheduling policy is a service, not
+    transport logic. Uses a Celery countdown task, not an in-process timer: the
+    API process itself is what gets recycled on a blue/green switch, so an
+    asyncio timer would die with it — the Celery worker is a separate process.
+    disconnected_at pins the check to this disconnect episode.
+
+    apply_async talks to the broker; wrap it so a broker hiccup at disconnect
+    time can't raise out of the consumer's disconnect() — the periodic idle
+    reaper (lens.lensnode_cleanup) remains the backstop for a genuinely dead
+    node whose check never got scheduled.
+    """
+
+    from .tasks import check_lensnode_disconnect_grace_period
+
+    grace_s = get_lensnode_disconnect_grace_seconds()
+    try:
+        check_lensnode_disconnect_grace_period.apply_async(
+            args=[str(lensnode_uuid), disconnected_at.isoformat()],
+            countdown=grace_s,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to schedule disconnect grace check for lensnode %s; "
+            "its runs will be reaped by the idle sweep instead",
+            lensnode_uuid,
+        )
+
+
 def fail_active_runs_for_lensnode(lensnode_uuid):
-    """Mark all non-terminal runs for a lensnode as failed on disconnect."""
+    """Mark all non-terminal runs for a lensnode as failed.
+
+    Called from the grace-period check once a node is confirmed still gone
+    (see lens.tasks.check_lensnode_disconnect_grace_period), NOT directly on
+    every disconnect — a brief drop during a blue/green switch must not fail
+    runs the node is still executing and will report on reconnect. The
+    status=RUNNING/STREAMING filter is itself the guard against a run that
+    finished (left those states) while the node was reconnecting.
+    """
 
     now = timezone.now()
     Run.objects.filter(
@@ -356,6 +425,8 @@ def validate_run_dispatch(run):
     lensnode = run.lensnode
     if lensnode is None:
         raise LensNodeDispatchError("LENSNODE_REQUIRED")
+    if lensnode.status == LensNode.Status.DRAINING:
+        raise LensNodeDispatchError("LENSNODE_DRAINING")
     if lensnode.status != LensNode.Status.ONLINE:
         raise LensNodeDispatchError("LENSNODE_OFFLINE")
     if lensnode.enrollment_status != LensNode.EnrollmentStatus.APPROVED:

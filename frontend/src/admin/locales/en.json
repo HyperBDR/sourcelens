@@ -53,6 +53,11 @@
     "roleManagement": "Roles",
     "backToUserPlatform": "Back to Assistant",
     "usersSubtitle": "View and manage all users",
+    "usernameFilter": "Exact username",
+    "usernameFilterPlaceholder": "Enter the full username",
+    "emailFilter": "Exact email",
+    "emailFilterPlaceholder": "Enter the full email address",
+    "resetFilters": "Reset",
     "groupsSubtitle": "View and manage all groups",
     "rolesSubtitle": "Configure roles, visible features, and default landing platforms",
     "totalUsers": "{count} user(s) in total",
@@ -936,6 +941,7 @@
       "visibility": "Visibility"
     },
     "placeholders": {
+      "assistantDescription": "Describe what this assistant helps users do.",
       "selectLensNode": "Select a LensNode",
       "selectTask": "Select a task",
       "selectDir": "Select a directory",
@@ -1203,6 +1209,7 @@
       "finish": "Done"
     },
     "wizard": {
+      "assistantDescriptionHint": "Use one sentence to explain the assistant's purpose; 80 characters or fewer is recommended.",
       "step1Title": "Basics & Models",
       "step1Desc": "Set name, slug, agent model (required), and optional multimodal model",
       "agentModelHint": "Required — the LensNode uses this model to run deep analysis agents.",
