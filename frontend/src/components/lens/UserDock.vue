@@ -61,6 +61,7 @@
             class="dock-link"
             @click="dockMenuOpen = false"
           >
+            <Shield :size="18" :stroke-width="2" aria-hidden="true" />
             <span class="truncate">{{ t('platforms.adminConsole') }}</span>
           </router-link>
         </div>
@@ -70,16 +71,19 @@
           :class="{ 'border-t border-line': isAdmin }"
         >
           <button type="button" class="dock-link" @click="openMyShares">
+            <Share2 :size="18" :stroke-width="2" aria-hidden="true" />
             <span class="truncate">{{ t('lens.qa.mineEntry') }}</span>
           </button>
           <button type="button" class="dock-link" @click="openSettings">
+            <Settings :size="18" :stroke-width="2" aria-hidden="true" />
             <span class="truncate">{{ t('common.settings') }}</span>
           </button>
           <button type="button" class="dock-link" @click="handleLogout">
+            <LogOut :size="18" :stroke-width="2" aria-hidden="true" />
             <span class="truncate">{{ t('common.logout') }}</span>
           </button>
+          <div class="dock-build-info">{{ buildInfo }}</div>
         </div>
-        <div class="dock-build-info">{{ buildInfo }}</div>
       </div>
     </Transition>
   </div>
@@ -90,7 +94,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { onClickOutside } from '@vueuse/core'
-import { LogIn } from '@lucide/vue'
+import { LogIn, LogOut, Settings, Share2, Shield } from '@lucide/vue'
 
 import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
@@ -214,7 +218,7 @@ async function handleLogout() {
 }
 
 .dock-link {
-  @apply flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-ink-700 transition-colors;
 }
 
 .dock-link:hover {
@@ -222,6 +226,6 @@ async function handleLogout() {
 }
 
 .dock-build-info {
-  @apply border-t border-line px-6 py-3 text-center text-xs text-ink-400;
+  @apply px-3 pb-1 pt-2 text-left text-xs text-ink-400;
 }
 </style>
