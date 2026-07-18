@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("lens", "0018_runoutputfile"),
+        ("lens", "0019_lensnode_disconnected_at"),
     ]
 
     operations = [
