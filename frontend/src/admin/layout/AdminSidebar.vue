@@ -30,8 +30,9 @@
         @click="isMobile && $emit('close')"
       >
         <BrandLogo
-          variant="mark"
-          wrapperClass="rounded-xl bg-white p-1 shadow-sm"
+          variant="wordmark"
+          tone="dark"
+          wrapperClass="origin-left scale-[0.88] mix-blend-screen"
         />
       </router-link>
       <button
