@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release_date: ${{ steps.version.outputs.release_date }}
       ref: ${{ steps.version.outputs.ref }}
     steps:
       - name: Resolve version
@@ -54,7 +55,9 @@ jobs:
             VERSION="${GITHUB_SHA}"
             REF="${GITHUB_SHA}"
           fi
+          RELEASE_DATE="$(date -u +'%Y/%m/%d')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_date=$RELEASE_DATE" >> "$GITHUB_OUTPUT"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
   build-images:
@@ -106,11 +109,11 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
             ${{ env.REGISTRY }}/${{ matrix.image_name }}:latest
-          # VITE_* args are only consumed by the frontend image; the backend
-          # and lensnode builds ignore them (harmless unused-arg warnings).
+          # Frontend args are ignored by the backend and lensnode builds.
           build-args: |
             USE_MIRROR=false
             APP_VERSION=${{ needs.prepare-version.outputs.version }}
+            APP_RELEASE_DATE=${{ needs.prepare-version.outputs.release_date }}
             VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL }}
             VITE_TURNSTILE_SITE_KEY=${{ vars.VITE_TURNSTILE_SITE_KEY }}
             VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
