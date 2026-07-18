@@ -398,6 +398,7 @@ async function refreshDirs() {
 function defaultForm() {
   return {
     name: '',
+    description: '',
     slug: '',
     lensnode_uuid: '',
     selected_task: '',
@@ -436,6 +437,7 @@ function formFromRow(row) {
   return {
     uuid: row.uuid,
     name: row.name || '',
+    description: row.description || '',
     slug: row.slug || '',
     lensnode_uuid: row.lensnode?.uuid || row.lensnode || '',
     selected_task: row.selected_task || '',
@@ -515,6 +517,7 @@ function buildPayload() {
   const guideContent = (form.value.workspace_guide_overview || '').trim()
   return {
     name: form.value.name,
+    description: form.value.description?.trim() || '',
     slug: form.value.slug,
     lensnode_uuid: form.value.lensnode_uuid,
     selected_task: form.value.selected_task,

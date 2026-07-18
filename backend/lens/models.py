@@ -126,6 +126,7 @@ class Assistant(TimestampedUUIDModel):
     objects = AssistantQuerySet.as_manager()
 
     name = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
     slug = models.SlugField(max_length=180, unique=True)
     visibility = models.CharField(
         max_length=16,
