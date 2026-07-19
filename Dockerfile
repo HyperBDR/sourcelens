@@ -4,7 +4,7 @@
 # Backend builder image
 # -----------------------------------------------------------------------------
 
-FROM m.daocloud.io/docker.io/library/python:3.12-slim-bookworm AS backend-builder
+FROM python:3.12-slim-bookworm AS backend-builder
 
 SHELL ["/bin/bash", "-c"]
 
@@ -105,7 +105,7 @@ RUN DJANGO_DEBUG=true python manage.py compilemessages -l zh_Hans -l en \
 # Backend runtime image
 # -----------------------------------------------------------------------------
 
-FROM m.daocloud.io/docker.io/library/python:3.12-slim-bookworm AS backend
+FROM python:3.12-slim-bookworm AS backend
 
 SHELL ["/bin/bash", "-c"]
 
