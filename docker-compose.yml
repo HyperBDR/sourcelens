@@ -74,6 +74,7 @@ x-sourcelens-ui-common: &sourcelens-ui-common
     dockerfile: Dockerfile
     args:
       APP_VERSION: ${APP_VERSION:-0.0.0}
+      APP_RELEASE_DATE: ${APP_RELEASE_DATE:-}
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
       VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
       VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
@@ -166,6 +167,11 @@ services:
     image: oneprocloud/sourcelens-lensnode:${APP_VERSION:-latest}
     container_name: sourcelens-lensnode
     restart: unless-stopped
+    # On stop/upgrade the node drains in-flight runs (up to
+    # LENSNODE_DRAIN_TIMEOUT_S) before exiting; give docker enough grace to let
+    # that finish before SIGKILL, otherwise a long run is cut short. Must stay
+    # larger than LENSNODE_DRAIN_TIMEOUT_S.
+    stop_grace_period: 270s
     env_file:
       - ./.env
     environment:
@@ -187,6 +193,8 @@ services:
       LENSNODE_HEARTBEAT_INTERVAL_S: 15
       LENSNODE_REQUEST_TIMEOUT_S: ${LENSNODE_REQUEST_TIMEOUT_S:-240}
       LENSNODE_RUN_IDLE_TIMEOUT_S: ${LENSNODE_RUN_IDLE_TIMEOUT_S:-180}
+      # Graceful-drain budget on shutdown/upgrade. Keep below stop_grace_period.
+      LENSNODE_DRAIN_TIMEOUT_S: ${LENSNODE_DRAIN_TIMEOUT_S:-240}
       # Max concurrent runs per node. Each run holds a slot for the full answer
       # duration; without this it falls back to 1 and questions queue.
       LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-8}

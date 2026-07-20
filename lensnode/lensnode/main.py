@@ -32,6 +32,10 @@ class LensNodeClient:
         self.config = config
         self.executor = LensNodeExecutor(config)
         self.stopping = asyncio.Event()
+        # Set while draining on shutdown/upgrade: stop accepting new runs and
+        # stop heartbeating (a heartbeat would flip the node back to ONLINE
+        # server-side and undo the DRAINING state). See stop().
+        self.draining = asyncio.Event()
         self.websocket = None
         self.connected_at = None
         self.connect_started_at = None
@@ -132,13 +136,43 @@ class LensNodeClient:
             backoff_s = min(backoff_s * 2, 30)
 
     async def stop(self):
-        """Stop the client and close its WebSocket."""
+        """Gracefully drain in-flight runs, then stop the client.
 
-        if self.stopping.is_set():
+        Triggered by SIGTERM/SIGINT on shutdown/upgrade (see _run_client).
+        This is the single, reusable drain entry point: a future control-plane
+        drain/upgrade command (issue #27) can call this same method. It stops
+        accepting new runs, announces draining so the control plane routes new
+        runs elsewhere, lets in-flight runs finish within the drain timeout,
+        then closes the socket and cancels only what is still running past the
+        deadline. An idle node (no in-flight runs) drains and exits at once.
+        """
+
+        if self.stopping.is_set() or self.draining.is_set():
             return
+        self.draining.set()
         LOGGER.info(
-            task_log(f"Stopping service LensNode {self.config.name}.")
+            task_log(
+                f"Draining LensNode {self.config.name} before shutdown.",
+                details=[
+                    f"InFlightRuns: {len(self.running_tasks)}",
+                    "DrainTimeout: "
+                    f"{format_duration(self.config.drain_timeout_s)}",
+                ],
+            )
         )
+        # Announce draining so the control plane flips this node out of
+        # dispatch. Enqueued (not sent directly) so it stays ordered behind
+        # buffered frames and never races the send loop on the socket; the
+        # heartbeat loop has already stopped (it gates on draining), so this is
+        # the node's last state frame and the DRAINING status sticks.
+        self._enqueue(
+            {
+                "type": "node_draining",
+                "lensnode_name": self.config.name,
+            }
+        )
+        await self._drain_running_tasks()
+        await self._flush_outbox()
         self.stopping.set()
         if self.websocket is not None:
             await self.websocket.close()
@@ -149,6 +183,38 @@ class LensNodeClient:
                 *self.running_tasks.values(),
                 return_exceptions=True,
             )
+
+    async def _drain_running_tasks(self):
+        """Wait for in-flight runs to finish, bounded by the drain timeout."""
+
+        tasks = list(self.running_tasks.values())
+        if not tasks:
+            return
+        done, pending = await asyncio.wait(
+            tasks, timeout=self.config.drain_timeout_s
+        )
+        if pending:
+            LOGGER.warning(
+                task_log(
+                    (
+                        f"Drain deadline reached for LensNode "
+                        f"{self.config.name}; cancelling runs still active."
+                    ),
+                    details=[f"StillActive: {len(pending)}"],
+                )
+            )
+
+    async def _flush_outbox(self, attempts=50):
+        """Let the send loop flush buffered frames before the socket closes.
+
+        The send loop runs until stopping is set (not draining), so it is still
+        active here — this just yields long enough for node_draining and any
+        final run_done frames to reach the server before we close.
+        """
+
+        while self._outbox and attempts > 0:
+            await asyncio.sleep(0.1)
+            attempts -= 1
 
     def _ws_url(self):
         """Return the token-authenticated WebSocket URL."""
@@ -317,6 +383,9 @@ class LensNodeClient:
 
         run_uuid = str(message.get("run_uuid") or "")
         if not run_uuid:
+            return
+        if self.draining.is_set():
+            await self._send_busy(run_uuid, "LENSNODE_DRAINING")
             return
         if run_uuid in self.running_tasks:
             await self._send_busy(run_uuid, "LENSNODE_RUN_ACTIVE")
@@ -598,9 +667,14 @@ class LensNodeClient:
         )
 
     async def _heartbeat_loop(self):
-        """Periodically report workspace state while connected."""
+        """Periodically report workspace state while connected.
 
-        while not self.stopping.is_set():
+        Stops once draining: a heartbeat sets the node ONLINE server-side,
+        which would undo the DRAINING state and let new runs be dispatched
+        here mid-shutdown.
+        """
+
+        while not self.stopping.is_set() and not self.draining.is_set():
             await asyncio.sleep(self.config.heartbeat_interval_s)
             dirs = available_dirs(self.config.workspace_path)
             signature = (

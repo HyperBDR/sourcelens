@@ -182,6 +182,13 @@ services:
       LENSNODE_RUN_IDLE_TIMEOUT_S: ${LENSNODE_RUN_IDLE_TIMEOUT_S:-180}
       # Max concurrent runs per node. Increase in production based on node resources.
       LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-8}
+      # Proactive file-offload thresholds (issue #60). Tool default 5000:
+      # large workspace reads are evicted to re-readable files so heavy-
+      # retrieval runs stop thrashing the summarizer. Human unset = library
+      # default 50000 (pasted subject stays inline, protected by the anchor
+      # exemption). Override here only for experiments.
+      LENSNODE_OFFLOAD_TOOL_TOKENS: ${LENSNODE_OFFLOAD_TOOL_TOKENS:-}
+      LENSNODE_OFFLOAD_HUMAN_TOKENS: ${LENSNODE_OFFLOAD_HUMAN_TOKENS:-}
       PYTHONPATH: /opt/lensnode
     volumes:
       - ./data.dev/workspace:/workspace

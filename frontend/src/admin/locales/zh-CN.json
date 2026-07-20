@@ -53,6 +53,11 @@
     "roleManagement": "角色管理",
     "backToUserPlatform": "返回助手",
     "usersSubtitle": "查看与管理全部用户",
+    "usernameFilter": "精确用户名",
+    "usernameFilterPlaceholder": "请输入完整用户名",
+    "emailFilter": "精确邮箱",
+    "emailFilterPlaceholder": "请输入完整邮箱地址",
+    "resetFilters": "重置",
     "groupsSubtitle": "查看与管理全部组",
     "rolesSubtitle": "配置角色、可见功能与默认登录平台",
     "totalUsers": "共 {count} 位用户",
@@ -936,6 +941,7 @@
       "visibility": "可见性"
     },
     "placeholders": {
+      "assistantDescription": "说明该助手可以帮助用户完成什么。",
       "selectLensNode": "请选择节点",
       "selectTask": "请选择任务",
       "selectDir": "请选择目录",
@@ -1203,6 +1209,7 @@
       "finish": "完成"
     },
     "wizard": {
+      "assistantDescriptionHint": "建议用一句话说明助手用途，尽量控制在 80 字以内。",
       "step1Title": "基础与模型",
       "step1Desc": "设置名称、Slug 与 Agent 模型（必填），以及可选的多模态模型",
       "agentModelHint": "必填 — LensNode 使用该模型运行深度分析 Agent。",

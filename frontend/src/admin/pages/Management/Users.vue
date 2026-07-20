@@ -38,6 +38,56 @@
         </div>
 
         <div class="flex min-h-0 flex-1 flex-col px-5 py-4">
+          <form
+            class="mb-4 flex flex-shrink-0 flex-wrap items-end gap-3"
+            @submit.prevent="applyExactFilters"
+          >
+            <label class="min-w-0 flex-1 sm:max-w-xs">
+              <span class="mb-1 block text-sm font-medium text-ink-700">
+                {{ t('management.usernameFilter') }}
+              </span>
+              <input
+                v-model="usernameFilterInput"
+                data-testid="username-filter-input"
+                type="text"
+                class="form-input"
+                :placeholder="t('management.usernameFilterPlaceholder')"
+              />
+            </label>
+            <label class="min-w-0 flex-1 sm:max-w-xs">
+              <span class="mb-1 block text-sm font-medium text-ink-700">
+                {{ t('management.emailFilter') }}
+              </span>
+              <input
+                v-model="emailFilterInput"
+                data-testid="email-filter-input"
+                type="email"
+                class="form-input"
+                :placeholder="t('management.emailFilterPlaceholder')"
+              />
+            </label>
+            <BaseButton
+              data-testid="user-filter-submit"
+              type="submit"
+              :loading="loading"
+            >
+              {{ t('common.search') }}
+            </BaseButton>
+            <BaseButton
+              data-testid="user-filter-reset"
+              variant="outline"
+              :disabled="
+                !usernameFilterInput &&
+                !usernameFilter &&
+                !emailFilterInput &&
+                !emailFilter
+              "
+              @click="resetExactFilters"
+            >
+              {{ t('management.resetFilters') }}
+            </BaseButton>
+          </form>
+
           <BaseLoading v-if="loading && !users.length" />
 
           <div
@@ -282,6 +332,10 @@ const togglingId = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalCount = ref(0)
+const usernameFilterInput = ref('')
+const usernameFilter = ref('')
+const emailFilterInput = ref('')
+const emailFilter = ref('')
 
 const currentUserId = computed(() => userStore.userInfo?.id)
 
@@ -432,14 +486,37 @@ async function toggleActive(user) {
   }
 }
 
+function applyExactFilters() {
+  usernameFilter.value = usernameFilterInput.value.trim()
+  emailFilter.value = emailFilterInput.value.trim()
+  currentPage.value = 1
+  fetchUsers()
+}
+
+function resetExactFilters() {
+  usernameFilterInput.value = ''
+  usernameFilter.value = ''
+  emailFilterInput.value = ''
+  emailFilter.value = ''
+  currentPage.value = 1
+  fetchUsers()
+}
+
 async function fetchUsers() {
   loading.value = true
   error.value = null
   try {
-    const data = await managementApi.getUsers({
+    const params = {
       page: currentPage.value,
       page_size: pageSize.value
-    })
+    }
+    if (usernameFilter.value) {
+      params.username = usernameFilter.value
+    }
+    if (emailFilter.value) {
+      params.email = emailFilter.value
+    }
+    const data = await managementApi.getUsers(params)
     users.value = Array.isArray(data) ? data : (data?.results ?? [])
     totalCount.value = Array.isArray(data)
       ? data.length

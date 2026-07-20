@@ -5,7 +5,7 @@
  */
 import { expect, test } from '@playwright/test'
 
-import { authHeader, fixtures } from './helpers.js'
+import { asRole, authHeader, fixtures } from './helpers.js'
 
 const f = fixtures()
 const ADMIN = authHeader('admin')
@@ -108,6 +108,85 @@ test.describe('Management: users are disabled, never deleted', () => {
         data: { is_active: true }
       })
     }
+  })
+})
+
+test.describe('Management: exact user filters', () => {
+  test.beforeEach(async ({ page }) => {
+    await asRole(page, 'admin')
+    await page.goto('/management/users')
+    await expect(page.getByTestId('username-filter-input')).toBeVisible()
+    await expect(page.getByTestId('email-filter-input')).toBeVisible()
+  })
+
+  test('filters exactly, preserves refresh, and resets', async ({ page }) => {
+    const username = f.users.user
+    const input = page.getByTestId('username-filter-input')
+
+    await input.fill(username)
+    await page.getByTestId('user-filter-submit').click()
+
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await expect(page.locator('tbody tr')).toContainText(username)
+
+    const refreshResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return (
+        url.pathname === '/api/v1/management/users/' &&
+        url.searchParams.get('username') === username
+      )
+    })
+    await page.getByRole('button', { name: 'Refresh' }).click()
+    await refreshResponse
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+
+    await input.fill(username.toUpperCase())
+    await input.press('Enter')
+    await expect(page.locator('tbody tr')).toHaveCount(0)
+    await expect(page.getByText('No data')).toBeVisible()
+
+    await page.getByTestId('user-filter-reset').click()
+    await expect(page.locator('tbody tr').first()).toBeVisible()
+    await expect(input).toHaveValue('')
+  })
+
+  test('filters by exact email and combines both fields', async ({
+    page,
+    request
+  }) => {
+    const username = f.users.user
+    const email = 'e2e_user@example.com'
+    const emailInput = page.getByTestId('email-filter-input')
+
+    const update = await request.patch(`/api/v1/management/users/${USER_ID}/`, {
+      headers: ADMIN,
+      data: { email }
+    })
+    expect(update.ok()).toBeTruthy()
+
+    await emailInput.fill(email)
+    await page.getByTestId('user-filter-submit').click()
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await expect(page.locator('tbody tr')).toContainText(email)
+
+    await emailInput.fill(email.toUpperCase())
+    await emailInput.press('Enter')
+    await expect(page.locator('tbody tr')).toHaveCount(0)
+
+    await page.getByTestId('username-filter-input').fill(username)
+    await emailInput.fill(email)
+    await emailInput.press('Enter')
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await expect(page.locator('tbody tr')).toContainText(username)
+
+    await emailInput.fill('other@example.com')
+    await emailInput.press('Enter')
+    await expect(page.locator('tbody tr')).toHaveCount(0)
+
+    await page.getByTestId('user-filter-reset').click()
+    await expect(page.locator('tbody tr').first()).toBeVisible()
+    await expect(page.getByTestId('username-filter-input')).toHaveValue('')
+    await expect(emailInput).toHaveValue('')
   })
 })
 

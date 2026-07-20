@@ -73,6 +73,8 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_hello(content)
         elif frame_type == "heartbeat":
             await self._handle_heartbeat(content)
+        elif frame_type == "node_draining":
+            await self._handle_node_draining(content)
         elif frame_type == "run_event":
             await self._handle_run_event(content)
         elif frame_type == "run_output":
@@ -208,6 +210,29 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
                 "type": "heartbeat_ack",
                 "ts": timezone.now().isoformat(),
             }
+        )
+
+    async def _handle_node_draining(self, content):
+        """Flip the node to DRAINING so no new runs are dispatched to it.
+
+        Sent by a node shutting down/upgrading. The node stops heartbeating
+        once draining, so this DRAINING status is not overwritten back to
+        ONLINE until the node reconnects with a fresh hello.
+        """
+
+        del content
+        await self._mark_draining(self.lensnode.uuid, self.channel_name)
+
+    @database_sync_to_async
+    def _mark_draining(self, lensnode_uuid, connection_id):
+        """Mark a LensNode DRAINING if this connection still owns it."""
+
+        LensNode.objects.filter(
+            uuid=lensnode_uuid,
+            connection_id=connection_id,
+        ).update(
+            status=LensNode.Status.DRAINING,
+            updated_at=timezone.now(),
         )
 
     @database_sync_to_async

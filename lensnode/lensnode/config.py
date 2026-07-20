@@ -18,9 +18,18 @@ class LensNodeConfig:
     heartbeat_interval_s: int
     request_timeout_s: int
     run_idle_timeout_s: int
+    drain_timeout_s: int
     max_concurrent_runs: int
     summary_trigger_tokens: int
     summary_keep_tokens: int
+    offload_tool_tokens: int
+    offload_human_tokens: int | None
+
+
+def _optional_int(value):
+    """Return int(value), or None when the env var is unset or empty."""
+
+    return int(value) if value not in (None, "") else None
 
 
 def _derive_ws_url(server_url):
@@ -67,11 +76,20 @@ def load_config():
         run_idle_timeout_s=int(
             os.getenv("LENSNODE_RUN_IDLE_TIMEOUT_S", "180")
         ),
+        drain_timeout_s=int(
+            os.getenv("LENSNODE_DRAIN_TIMEOUT_S", "240")
+        ),
         max_concurrent_runs=int(os.getenv("LENSNODE_MAX_CONCURRENT_RUNS", "1")),
         summary_trigger_tokens=int(
             os.getenv("LENSNODE_SUMMARY_TRIGGER_TOKENS", "48000")
         ),
         summary_keep_tokens=int(
             os.getenv("LENSNODE_SUMMARY_KEEP_TOKENS", "16000")
+        ),
+        offload_tool_tokens=int(
+            os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"
+        ),
+        offload_human_tokens=_optional_int(
+            os.getenv("LENSNODE_OFFLOAD_HUMAN_TOKENS")
         ),
     )

@@ -16,6 +16,189 @@ def _payload(response):
 
 @pytest.mark.django_db
 class TestManagementUsersPagination:
+    def test_users_list_filters_by_exact_case_sensitive_username(self):
+        admin = User.objects.create_user(
+            username="admin_for_exact_username",
+            password="x",
+            is_staff=True,
+        )
+        matching_user = User.objects.create_user(
+            username="hfl-u-123",
+            password="x",
+        )
+        User.objects.create_user(username="hfl-u-1234", password="x")
+        User.objects.create_user(username="HFL-U-123", password="x")
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"username": "hfl-u-123"},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert [user["id"] for user in data["results"]] == [matching_user.id]
+
+    def test_users_list_returns_empty_page_for_unknown_username(self):
+        admin = User.objects.create_user(
+            username="admin_for_unknown_username",
+            password="x",
+            is_staff=True,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"username": "missing-user"},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 0
+        assert data["results"] == []
+
+    def test_users_list_filters_by_exact_case_sensitive_email(self):
+        admin = User.objects.create_user(
+            username="admin_for_exact_email",
+            password="x",
+            is_staff=True,
+        )
+        matching_user = User.objects.create_user(
+            username="email-match",
+            email="user@example.com",
+            password="x",
+        )
+        User.objects.create_user(
+            username="email-case-mismatch",
+            email="USER@example.com",
+            password="x",
+        )
+        User.objects.create_user(
+            username="email-partial-mismatch",
+            email="user@example.com.extra",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"email": "user@example.com"},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert [user["id"] for user in data["results"]] == [matching_user.id]
+
+    def test_users_list_combines_username_and_email_filters(self):
+        admin = User.objects.create_user(
+            username="admin_for_combined_filters",
+            password="x",
+            is_staff=True,
+        )
+        matching_user = User.objects.create_user(
+            username="combined-user",
+            email="combined@example.com",
+            password="x",
+        )
+        User.objects.create_user(
+            username="other-combined-user",
+            email="combined@example.com",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {
+                "username": "combined-user",
+                "email": "combined@example.com",
+            },
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert [user["id"] for user in data["results"]] == [matching_user.id]
+
+    def test_users_list_applies_pagination_after_email_filter(self):
+        admin = User.objects.create_user(
+            username="admin_for_email_pagination",
+            password="x",
+            is_staff=True,
+        )
+        User.objects.create_user(
+            username="first-shared-email",
+            email="shared@example.com",
+            password="x",
+        )
+        second_user = User.objects.create_user(
+            username="second-shared-email",
+            email="shared@example.com",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"email": "shared@example.com", "page": 2, "page_size": 1},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 2
+        assert data["page"] == 2
+        assert data["page_size"] == 1
+        assert [user["id"] for user in data["results"]] == [second_user.id]
+
+    def test_users_list_applies_pagination_after_username_filter(self):
+        admin = User.objects.create_user(
+            username="admin_for_filtered_pagination",
+            password="x",
+            is_staff=True,
+        )
+        User.objects.create_user(username="filtered-user", password="x")
+        for idx in range(3):
+            User.objects.create_user(
+                username=f"unrelated_user_{idx}",
+                password="x",
+            )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"username": "filtered-user", "page": 2, "page_size": 1},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert data["page"] == 2
+        assert data["page_size"] == 1
+        assert data["results"] == []
+
+    def test_users_list_username_filter_keeps_management_permission(self):
+        user = User.objects.create_user(
+            username="user_without_management_access",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"username": user.username},
+        )
+
+        assert response.status_code == 403
+
     def test_users_list_supports_page_and_page_size(self):
         admin = User.objects.create_user(
             username="admin_for_users",
