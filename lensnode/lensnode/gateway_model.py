@@ -11,6 +11,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
+from .tls import create_ssl_context
+
 LOGGER = logging.getLogger("lensnode")
 
 
@@ -59,6 +61,8 @@ class LensGatewayChatModel(BaseChatModel):
     ai_gateway_url: str
     token: str
     request_timeout_s: int = 120
+    tls_skip_verify: bool = False
+    tls_ca_file: str | None = None
     emit_output: Optional[Any] = None
     # Called on EVERY gateway SSE event (reasoning/tool-call tokens,
     # heartbeats, done) to prove transport liveness to the run watchdog.
@@ -138,7 +142,13 @@ class LensGatewayChatModel(BaseChatModel):
 
         payload["return_message"] = True
         start = time.monotonic()
-        with httpx.Client(timeout=self.request_timeout_s) as client:
+        with httpx.Client(
+            timeout=self.request_timeout_s,
+            verify=create_ssl_context(
+                self.tls_skip_verify,
+                self.tls_ca_file,
+            ),
+        ) as client:
             response = client.post(
                 self.ai_gateway_url,
                 headers={"Authorization": f"Bearer {self.token}"},
@@ -172,7 +182,13 @@ class LensGatewayChatModel(BaseChatModel):
 
         start = time.monotonic()
         done_received = False
-        with httpx.Client(timeout=self.request_timeout_s) as client:
+        with httpx.Client(
+            timeout=self.request_timeout_s,
+            verify=create_ssl_context(
+                self.tls_skip_verify,
+                self.tls_ca_file,
+            ),
+        ) as client:
             with client.stream(
                 "POST",
                 self.ai_gateway_url,
@@ -352,6 +368,8 @@ def describe_image(
     model_ref,
     ai_gateway_url,
     token,
+    tls_skip_verify=False,
+    tls_ca_file=None,
 ):
     """Describe one image through the AI gateway."""
 
@@ -362,6 +380,8 @@ def describe_image(
         model_ref=model_ref,
         ai_gateway_url=ai_gateway_url,
         token=token,
+        tls_skip_verify=tls_skip_verify,
+        tls_ca_file=tls_ca_file,
     )
     return result.get("content") or ""
 
@@ -374,6 +394,8 @@ def describe_image_result(
     model_ref,
     ai_gateway_url,
     token,
+    tls_skip_verify=False,
+    tls_ca_file=None,
 ):
     """Describe one image and return content plus usage."""
 
@@ -396,7 +418,10 @@ def describe_image_result(
             }
         ],
     }
-    with httpx.Client(timeout=120) as client:
+    with httpx.Client(
+        timeout=120,
+        verify=create_ssl_context(tls_skip_verify, tls_ca_file),
+    ) as client:
         response = client.post(
             ai_gateway_url,
             headers={"Authorization": f"Bearer {token}"},

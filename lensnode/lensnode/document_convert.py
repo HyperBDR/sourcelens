@@ -1706,6 +1706,8 @@ def describe_image_bytes(image_bytes, mime_type, context):
         model_ref=model_ref,
         ai_gateway_url=gateway_url,
         token=token,
+        tls_skip_verify=context.get("tls_skip_verify", False),
+        tls_ca_file=context.get("tls_ca_file"),
     )
     return result.get("content") or "", result.get("usage") or {}
 

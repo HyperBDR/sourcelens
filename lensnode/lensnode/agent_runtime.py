@@ -183,6 +183,8 @@ def _build_summarization_middleware(
         ai_gateway_url=config.ai_gateway_url,
         token=config.token,
         request_timeout_s=config.request_timeout_s,
+        tls_skip_verify=getattr(config, "tls_skip_verify", False),
+        tls_ca_file=getattr(config, "tls_ca_file", None),
         cancel_event=cancel_event,
         run_uuid=run_uuid,
     )
@@ -328,6 +330,10 @@ class LensDeepAgentRuntime:
                 ai_gateway_url=self.config.ai_gateway_url,
                 token=self.config.token,
                 request_timeout_s=self.config.request_timeout_s,
+                tls_skip_verify=getattr(
+                    self.config, "tls_skip_verify", False
+                ),
+                tls_ca_file=getattr(self.config, "tls_ca_file", None),
                 emit_output=emit_output,
                 on_activity=on_activity,
                 cancel_event=cancel_event,
