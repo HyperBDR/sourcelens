@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import threading
 
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import SummarizationMiddleware
-from langchain_core.messages import RemoveMessage
+from langchain_core.messages import HumanMessage, RemoveMessage
 
 from .agent_tools import (
     SELF_REPORTING_TOOLS,
@@ -74,10 +76,10 @@ CONTINUATION_SUMMARY_PROMPT = (
     "are still gathering evidence from the workspace and MUST keep working "
     "after this compaction. The notes below replace the older conversation "
     "history.\n\n"
-    "Extract only what you need to continue and ultimately answer the "
-    "question. Use these sections, writing 'None' where empty:\n\n"
-    "## ORIGINAL QUESTION\n"
-    "The user's exact question, verbatim.\n\n"
+    "The user's own messages are preserved verbatim outside this summary, "
+    "so do NOT restate the question here — focus on distilling the evidence "
+    "and the remaining work. Use these sections, writing 'None' where "
+    "empty:\n\n"
     "## EVIDENCE GATHERED SO FAR\n"
     "Concrete findings already discovered, with file paths and the key "
     "facts/identifiers/values they contain. Be specific.\n\n"
@@ -97,10 +99,41 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
     make every later LLM round re-send a growing transcript, and per-round
     latency scales with that context. Compacting the oldest turns into a
     summary keeps the recent working set verbatim while bounding context,
-    cutting tail latency and the risk of context overflow. The workspace
-    stays fully re-queryable, so any evidence dropped from the summary can
-    simply be searched again.
+    cutting tail latency and the risk of context overflow. Re-queryable
+    evidence (tool/file reads) can be searched again from the workspace if
+    dropped; user-authored input cannot, so it is exempted from compaction
+    (see _partition_messages and issue #60).
     """
+
+    def _partition_messages(self, conversation_messages, cutoff_index):
+        """Keep human input verbatim; summarize only re-queryable turns.
+
+        The base split summarizes everything before the cutoff, which includes
+        the user's original input. Content the user pasted into the chat is NOT
+        re-queryable from the workspace, so summarizing it away loses it
+        irrecoverably (issue #60). Move every HumanMessage out of the
+        to-summarize set into the preserved set so the subject and the task
+        survive compaction; summarize only the re-queryable tool/AI turns.
+        """
+
+        to_summarize = conversation_messages[:cutoff_index]
+        preserved = conversation_messages[cutoff_index:]
+        human_anchors = [
+            message
+            for message in to_summarize
+            if isinstance(message, HumanMessage)
+        ]
+        if not human_anchors:
+            return to_summarize, preserved
+        non_human = [
+            message
+            for message in to_summarize
+            if not isinstance(message, HumanMessage)
+        ]
+        # Anchors are clustered ahead of the preserved tail, not kept in their
+        # original positions. The stream stays valid (no orphaned ToolMessages;
+        # only HumanMessages move) and the user turns survive verbatim.
+        return non_human, human_anchors + preserved
 
     def before_model(self, state, runtime):
         """Summarize on threshold and report what was compacted."""
@@ -161,6 +194,53 @@ def _build_summarization_middleware(
     )
     middleware._emit_event = emit_event
     return middleware
+
+
+_OFFLOAD_PATCH_LOCK = threading.Lock()
+
+
+def _apply_offload_thresholds(config):
+    """Tune deepagents' proactive file-offload thresholds (issue #60).
+
+    FilesystemMiddleware evicts oversized tool results (and human messages) to
+    re-readable workspace files, but create_deep_agent hard-wires it with the
+    library defaults (tool 20000 / human 50000 tokens) and exposes no way to
+    configure them. Lowering the tool threshold offloads large workspace reads
+    to files sooner, keeping the inline context lean so heavy-retrieval runs
+    stop thrashing the summarizer (issue #60 "Snape timeline" repro: offload
+    off = 4 compactions and no convergence; offload on = 0 compactions).
+
+    The thresholds are captured into the wrapper closure and the wrapper is
+    installed once per process, guarded by a lock so concurrent runs (lensnode
+    executes runs on worker threads) cannot double-install. There is no shared
+    mutable state to race across runs. Values are injected via setdefault, so
+    the class identity is unchanged (required-middleware and isinstance checks
+    are unaffected) and any explicit call-site argument still wins. The tool
+    threshold is always set (config default 5000; 0 disables eviction); a None
+    human threshold leaves the library default in place.
+    """
+
+    if getattr(FilesystemMiddleware.__init__, "_lens_offload_wrapped", False):
+        return
+    with _OFFLOAD_PATCH_LOCK:
+        if getattr(
+            FilesystemMiddleware.__init__, "_lens_offload_wrapped", False
+        ):
+            return
+        tool_tokens = config.offload_tool_tokens
+        human_tokens = config.offload_human_tokens
+        original_init = FilesystemMiddleware.__init__
+
+        def init_with_offload_defaults(self, *args, **kwargs):
+            kwargs.setdefault("tool_token_limit_before_evict", tool_tokens)
+            if human_tokens is not None:
+                kwargs.setdefault(
+                    "human_message_token_limit_before_evict", human_tokens
+                )
+            original_init(self, *args, **kwargs)
+
+        init_with_offload_defaults._lens_offload_wrapped = True
+        FilesystemMiddleware.__init__ = init_with_offload_defaults
 
 
 class LensDeepAgentRuntime:
@@ -225,6 +305,14 @@ class LensDeepAgentRuntime:
                 "question_chars": len(question),
                 "target_dirs": len(command.get("target_dirs") or []),
                 "history_turns": len(command.get("history") or []),
+            },
+        )
+        _apply_offload_thresholds(self.config)
+        emit_agent_event(
+            "deepagents.offload.configured",
+            {
+                "tool_tokens": self.config.offload_tool_tokens,
+                "human_tokens": self.config.offload_human_tokens,
             },
         )
         resources = prepare_runtime_resources(
