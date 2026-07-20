@@ -32,7 +32,7 @@
         <BrandLogo
           variant="wordmark"
           tone="dark"
-          wrapperClass="origin-left scale-[0.88] mix-blend-screen"
+          wrapperClass="-ml-[27px] mix-blend-screen [&_img]:!w-52"
         />
       </router-link>
       <button
