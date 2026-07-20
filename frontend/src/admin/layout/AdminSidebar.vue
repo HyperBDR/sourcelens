@@ -29,9 +29,11 @@
         class="flex flex-1 items-center"
         @click="isMobile && $emit('close')"
       >
-        <span class="text-lg font-semibold tracking-tight text-white">
-          {{ t('management.logoTitle') }}
-        </span>
+        <BrandLogo
+          variant="wordmark"
+          tone="dark"
+          wrapperClass="-ml-[27px] mix-blend-screen [&_img]:!w-52"
+        />
       </router-link>
       <button
         v-if="isMobile"
@@ -1012,8 +1014,9 @@
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useUserStore } from '@/store/user'
+import BrandLogo from '@/components/layout/BrandLogo.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { useUserStore } from '@/store/user'
 
 defineProps({
   showMobileMenu: {
