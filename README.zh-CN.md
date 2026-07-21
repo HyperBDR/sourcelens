@@ -11,7 +11,7 @@
 
 </div>
 
-**SourceLens** 是一套基于 Harness 的 Agentic RAG（Agentic Retrieval-Augmented Generation）方案：底层由 AI 编程 agent 所使用的同一套 harness（Claude Code、Codex 等）驱动，在沙箱环境中运行。它不需要提前把文件做 embedding 建成向量索引，而是直接把文档和代码交给 agent harness，由其在文件系统上按需读取、检索、推理——让任意一堆文档或代码都能直接拿来问问题。
+**SourceLens** 是一套基于 Harness 的 Agentic RAG（Agentic Retrieval-Augmented Generation）方案：底层由一套 AI 编程 agent harness 驱动（跟 Claude Code、Codex 背后是同一类 harness，但并非直接集成这些产品本身），在沙箱环境中运行。它不需要提前把文件做 embedding 建成向量索引，而是直接把文档和代码交给 agent harness，由其在文件系统上按需读取、检索、推理——让任意一堆文档或代码都能直接拿来问问题。
 
 ## 工作流程
 
@@ -19,7 +19,7 @@
 flowchart TD
     A["用户选择文档 / 代码"] --> B[("本地文件系统存储")]
     B --> C["检索前 LLM 处理<br/>查询理解、上下文规划"]
-    C --> D["沙箱内 AI agent 检索<br/>Claude Code / Codex 搜索与分析"]
+    C --> D["沙箱内 AI agent 检索<br/>agent harness 搜索与分析"]
     D --> E["检索后 LLM 处理<br/>答案整合、引用格式化"]
     E --> F["带来源引用的<br/>结构化答案"]
 ```
@@ -28,7 +28,7 @@ flowchart TD
 
 ## 为什么选择 SourceLens
 
-- **Agentic RAG，而非 embedding** — agent harness（Claude Code、Codex）直接读取并推理文件，无需向量数据库，无需提前建索引
+- **Agentic RAG，而非 embedding** — agent harness（跟 Claude Code、Codex 背后是同一类 harness）直接读取并推理文件，无需向量数据库，无需提前建索引
 - **沙箱隔离执行** — 所有 agent 操作在隔离环境中运行，安全处理任意代码仓库和文档
 - **LLM 前后置编排** — 检索前后可配置 LLM 步骤，优化查询理解与答案合成
 - **来源可追溯** — 每个答案精确关联到源文件路径和代码位置
