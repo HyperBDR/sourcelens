@@ -11,7 +11,7 @@
 
 </div>
 
-**SourceLens** is Agentic RAG built on top of an AI coding agent harness (Claude Code, Codex, etc.), running inside a sandboxed environment. Instead of embedding your files into a vector index ahead of time, SourceLens hands them directly to the agent harness, which reads, searches, and reasons over the file system on demand — turning any pile of documents or code into something you can just ask questions of.
+**SourceLens** is Agentic RAG built on an AI coding agent harness — the same kind of harness behind tools like Claude Code or Codex, not those products themselves — running inside a sandboxed environment. Instead of embedding your files into a vector index ahead of time, SourceLens hands them directly to the agent harness, which reads, searches, and reasons over the file system on demand — turning any pile of documents or code into something you can just ask questions of.
 
 ## How It Works
 
@@ -19,7 +19,7 @@
 flowchart TD
     A["User selects documents / code"] --> B[("Local file system storage")]
     B --> C["Pre-retrieval LLM processing<br/>query understanding, context planning"]
-    C --> D["Sandboxed AI agent retrieval<br/>Claude Code / Codex search &amp; analyze"]
+    C --> D["Sandboxed AI agent retrieval<br/>agent harness search &amp; analyze"]
     D --> E["Post-retrieval LLM processing<br/>answer synthesis, citation formatting"]
     E --> F["Structured answer<br/>with source references"]
 ```
@@ -28,7 +28,7 @@ Instead of vector embeddings or keyword indexes, SourceLens uses AI coding agent
 
 ## Why SourceLens
 
-- **Agentic RAG, not embeddings** — the agent harness (Claude Code, Codex) reads and reasons over files directly, no vector DB, no pre-indexing step
+- **Agentic RAG, not embeddings** — an agent harness (the same kind behind Claude Code, Codex, etc.) reads and reasons over files directly, no vector DB, no pre-indexing step
 - **Sandboxed execution** — all agent operations run in isolated environments, safe for arbitrary codebases and documents
 - **Pre/post LLM orchestration** — customizable LLM steps before and after retrieval for query refinement and answer synthesis
 - **Source-traceable** — every answer references exact file paths and code locations
