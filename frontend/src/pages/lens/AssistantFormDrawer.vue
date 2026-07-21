@@ -147,10 +147,10 @@
             </option>
           </select>
         </FormRow>
-        <FormRow :label="t('lensAdmin.fields.task')">
+        <FormRow :label="t('lensAdmin.fields.type')">
           <select v-model="form.selected_task" class="form-input" required>
             <option value="">
-              {{ t('lensAdmin.placeholders.selectTask') }}
+              {{ t('lensAdmin.placeholders.selectType') }}
             </option>
             <option
               v-for="task in selectedLensNodeTasks"
@@ -158,7 +158,9 @@
               :value="task.name"
               :title="task.description"
             >
-              {{ task.title || task.name }}
+              {{
+                formatAssistantType(task.name, t, task.title || task.name)
+              }}
             </option>
           </select>
         </FormRow>
@@ -609,7 +611,11 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
-import { EMPTY_VALUE, formatLLMConfigLabel } from './adminHelpers'
+import {
+  EMPTY_VALUE,
+  formatAssistantType,
+  formatLLMConfigLabel
+} from './adminHelpers'
 
 const props = defineProps({
   show: Boolean,
