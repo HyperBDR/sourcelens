@@ -998,6 +998,7 @@
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmAdminApi } from '@/admin/api'
+import { DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS } from '@/admin/api/llmTimeout'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import ProviderIcon from '@/components/llm/ProviderIcon.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -1036,7 +1037,7 @@ const GLOBAL_PARAM_DEFAULTS = {
   max_tokens: 16384,
   temperature: 0.7,
   top_p: 1,
-  request_timeout_seconds: 180
+  request_timeout_seconds: DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS
 }
 const PARAM_LABEL_KEYS = {
   api_version: 'apiVersion',
