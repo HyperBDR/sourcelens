@@ -15,23 +15,13 @@
 
 ## How It Works
 
-```
-User selects documents / code
-        │
-        ▼
-  Local file system storage
-        │
-        ▼
-  Pre-retrieval LLM processing ── query understanding, context planning
-        │
-        ▼
-  Sandboxed AI agent retrieval ── Claude Code / Codex search & analyze
-        │
-        ▼
-  Post-retrieval LLM processing ── answer synthesis, citation formatting
-        │
-        ▼
-  Structured answer with source references
+```mermaid
+flowchart TD
+    A["User selects documents / code"] --> B[("Local file system storage")]
+    B --> C["Pre-retrieval LLM processing<br/>query understanding, context planning"]
+    C --> D["Sandboxed AI agent retrieval<br/>Claude Code / Codex search &amp; analyze"]
+    D --> E["Post-retrieval LLM processing<br/>answer synthesis, citation formatting"]
+    E --> F["Structured answer<br/>with source references"]
 ```
 
 Instead of vector embeddings or keyword indexes, SourceLens uses AI coding agents running in a sandbox to directly read, navigate, and reason over the file system. This means the retrieval understands code structure, cross-file relationships, and semantic intent — not just surface-level text matching.
