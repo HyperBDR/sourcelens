@@ -2961,8 +2961,8 @@ onBeforeUnmount(() => {
 }
 
 .composer-thumb-spinner {
-  @apply absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2
-    rounded-full border-2 border-gray-300 border-t-primary-500;
+  @apply absolute inset-0 m-auto h-5 w-5 rounded-full border-2
+    border-gray-300 border-t-primary-500;
   animation: spin 0.7s linear infinite;
 }
 

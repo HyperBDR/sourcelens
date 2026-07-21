@@ -7,9 +7,11 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+**Harness-based Agentic RAG** — no embeddings, no vector DB, no pre-indexing
+
 </div>
 
-**SourceLens** is a file-system-native retrieval engine that leverages AI coding agents (Claude Code, Codex, etc.) to search, understand, and answer questions from local documents and codebases. It runs inside a sandboxed environment, making it a reliable retrieval backend for RAG pipelines.
+**SourceLens** is Agentic RAG built on top of an AI coding agent harness (Claude Code, Codex, etc.), running inside a sandboxed environment. Instead of embedding your files into a vector index ahead of time, SourceLens hands them directly to the agent harness, which reads, searches, and reasons over the file system on demand — turning any pile of documents or code into something you can just ask questions of.
 
 ## How It Works
 
@@ -36,21 +38,38 @@ Instead of vector embeddings or keyword indexes, SourceLens uses AI coding agent
 
 ## Why SourceLens
 
-- **AI-native retrieval** — leverages Claude Code and Codex as the retrieval engine, no vector DB required
-- **Sandboxed execution** — all agent operations run in isolated environments, safe for arbitrary codebases
+- **Agentic RAG, not embeddings** — the agent harness (Claude Code, Codex) reads and reasons over files directly, no vector DB, no pre-indexing step
+- **Sandboxed execution** — all agent operations run in isolated environments, safe for arbitrary codebases and documents
 - **Pre/post LLM orchestration** — customizable LLM steps before and after retrieval for query refinement and answer synthesis
 - **Source-traceable** — every answer references exact file paths and code locations
-- **Works with any format** — documents (md, txt, pdf) and code (py, js, ts, vue, go, etc.)
+- **Works with any format** — Markdown, Word, PPT, images, and code (py, js, ts, vue, go, etc.), with zero prep
 
-## Typical Use Cases
+## Use Cases
 
-| Scenario | Description |
-|---|---|
-| **Code Q&A** | Ask natural-language questions about large codebases, get precise answers with file references |
-| **Document retrieval** | Search across project docs, API specs, and design documents in one query |
-| **RAG pipeline backend** | Serve as the retrieval layer for LLM applications needing private knowledge |
-| **Code review assist** | Find related changes and similar patterns across the repository |
-| **Onboarding** | New team members explore code structure and business logic via natural language |
+Three scenarios from how we use SourceLens internally today:
+
+### 1. RAG over documents — no embedding step required
+
+Point SourceLens at documents in any of these formats and start asking questions immediately — no pre-indexing, no embedding pipeline to run first:
+
+- Markdown exported from online docs platforms (e.g. ViewPress)
+- Word documents
+- PowerPoint decks
+- Content inside images
+
+### 2. Deep code insight from a screenshot
+
+Hit an error? Paste a screenshot of it and let the agent harness trace it back through the actual source — a deep, source-level investigation instead of just matching the error string.
+
+### 3. Company-wide Skills as a universal chat interface
+
+We package internal engineering knowledge as company-level Skills that anyone can use to find and diagnose problems, exposed as one universal chat mode:
+
+- **No install** — nothing to set up in a local tool first
+- **Answer online** — ask in a chat session and get the answer directly
+- **Generate & download** — the same session can generate a file and hand it back to you
+
+> Also fun in testing: pointing the same deep-insight flow at long-form content like novels turns out to be a surprisingly effective way to explore and query them.
 
 ## Architecture
 

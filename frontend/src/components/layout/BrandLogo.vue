@@ -39,10 +39,14 @@ const props = defineProps({
   }
 })
 
-const markSrc = computed(() => '/brand/logo_transparent.png')
+const markSrc = computed(() =>
+  props.tone === 'dark' ? '/brand/logo_dark.png' : '/brand/logo_transparent.png'
+)
 
-const wordmarkSrc = computed(
-  () => '/brand/logo_with_text_transparent.png'
+const wordmarkSrc = computed(() =>
+  props.tone === 'dark'
+    ? '/brand/logo_with_text_dark.png'
+    : '/brand/logo_with_text_transparent.png'
 )
 
 const showMark = computed(() => props.variant !== 'wordmark')
