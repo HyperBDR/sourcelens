@@ -808,6 +808,30 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         call_and_track.assert_not_called()
 
+    def test_lensnode_ai_gateway_rejects_malformed_run_uuid(self):
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        client = APIClient()
+
+        with patch(
+            "agentcore_metering.adapters.django.LLMTracker.call_and_track"
+        ) as call_and_track:
+            response = client.post(
+                "/api/lens/lensnode/ai-gateway/",
+                {
+                    "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "run_uuid": "not-a-uuid",
+                },
+                format="json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["detail"], "Run not found.")
+        call_and_track.assert_not_called()
+
     def test_lensnode_deliverable_upload_records_output_file(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from lens.models import RunOutputFile, Session

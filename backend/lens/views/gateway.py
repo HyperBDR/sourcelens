@@ -5,6 +5,7 @@ import json
 import os
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -63,7 +64,7 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
                 run = Run.objects.select_related("session").get(
                     uuid=run_uuid
                 )
-            except Run.DoesNotExist:
+            except (Run.DoesNotExist, ValidationError):
                 return Response(
                     {"detail": "Run not found."},
                     status=status.HTTP_404_NOT_FOUND,
