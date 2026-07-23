@@ -538,6 +538,9 @@ class LensServiceTests(TransactionTestCase):
                 "documents": 0,
                 "by_extension": {},
                 "by_type": {},
+                "repository_summaries": [],
+                "failed_repositories": [],
+                "partial_success": False,
                 "target_path": self.datasource.target_path,
             },
         )
