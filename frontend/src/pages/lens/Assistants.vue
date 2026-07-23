@@ -74,9 +74,10 @@
               <thead class="bg-surface-sunken">
                 <tr>
                   <th
-                    v-for="column in activeColumns"
+                    v-for="(column, index) in activeColumns"
                     :key="column"
                     class="table-head"
+                    :class="{ 'assistant-type-column': index === 2 }"
                   >
                     {{ column }}
                   </th>
@@ -99,8 +100,8 @@
                   <td class="table-cell text-ink-600">
                     {{ lensNodeName(row.lensnode) }}
                   </td>
-                  <td class="table-cell text-ink-600">
-                    {{ row.selected_task || emptyValue }}
+                  <td class="assistant-type-column table-cell text-ink-600">
+                    {{ assistantTypeLabel(row.selected_task) }}
                   </td>
                   <td class="table-cell font-mono text-xs text-ink-500">
                     {{ row.selected_dirs?.[0]?.path || emptyValue }}
@@ -238,6 +239,7 @@ import AssistantFormDrawer from './AssistantFormDrawer.vue'
 import RowActions from './components/RowActions.vue'
 import {
   EMPTY_VALUE as emptyValue,
+  formatAssistantType,
   listToText,
   normalizeList,
   selectedDirsFromValue,
@@ -270,7 +272,7 @@ const activeColumns = computed(() =>
   [
     'assistant',
     'lensnode',
-    'task',
+    'type',
     'dirs',
     'tools',
     'visibility',
@@ -306,6 +308,10 @@ function lensNodeName(value) {
   const uuid = typeof value === 'object' ? value?.uuid : value
   const found = lensnodes.value.find((lensnode) => lensnode.uuid === uuid)
   return found?.name || uuid || emptyValue
+}
+
+function assistantTypeLabel(value) {
+  return formatAssistantType(value, t)
 }
 
 function shareUrl(row) {
@@ -621,5 +627,10 @@ onMounted(load)
 
 .table-cell {
   @apply px-4 py-4 text-sm text-ink-700;
+}
+
+.assistant-type-column {
+  white-space: nowrap;
+  word-break: keep-all;
 }
 </style>

@@ -160,7 +160,7 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
 
 
 def _build_summarization_middleware(
-    config, model_ref, emit_event, cancel_event=None
+    config, model_ref, emit_event, cancel_event=None, run_uuid=""
 ):
     """Build context-compaction middleware, or None when disabled.
 
@@ -183,7 +183,10 @@ def _build_summarization_middleware(
         ai_gateway_url=config.ai_gateway_url,
         token=config.token,
         request_timeout_s=config.request_timeout_s,
+        tls_skip_verify=getattr(config, "tls_skip_verify", False),
+        tls_ca_file=getattr(config, "tls_ca_file", None),
         cancel_event=cancel_event,
+        run_uuid=run_uuid,
     )
     middleware = LensSummarizationMiddleware(
         model=summary_model,
@@ -321,15 +324,20 @@ class LensDeepAgentRuntime:
             emit_event=emit_agent_event,
         )
         try:
+            run_uuid = str(command.get("run_uuid") or "")
             model = LensGatewayChatModel(
                 model_ref=str(model_ref),
                 ai_gateway_url=self.config.ai_gateway_url,
                 token=self.config.token,
                 request_timeout_s=self.config.request_timeout_s,
+                tls_skip_verify=getattr(
+                    self.config, "tls_skip_verify", False
+                ),
+                tls_ca_file=getattr(self.config, "tls_ca_file", None),
                 emit_output=emit_output,
                 on_activity=on_activity,
                 cancel_event=cancel_event,
-                run_uuid=str(command.get("run_uuid") or ""),
+                run_uuid=run_uuid,
             )
             if _is_general_chat(command):
                 tools = build_general_chat_tools(
@@ -364,7 +372,11 @@ class LensDeepAgentRuntime:
                 kwargs["skills"] = resources.skill_paths
 
             summarizer = _build_summarization_middleware(
-                self.config, model_ref, emit_agent_event, cancel_event
+                self.config,
+                model_ref,
+                emit_agent_event,
+                cancel_event,
+                run_uuid=run_uuid,
             )
             if summarizer is not None:
                 kwargs["middleware"] = [summarizer]

@@ -1,0 +1,42 @@
+import ssl
+from types import SimpleNamespace
+
+import httpx
+
+from lensnode.runtime_resources import _download_skill_package
+
+
+def test_skill_package_download_uses_configured_tls_context(monkeypatch):
+    captured = {}
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, content=b"package")
+    )
+    real_client = httpx.Client
+
+    def fake_client(*args, **kwargs):
+        captured.update(kwargs)
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "lensnode.runtime_resources.httpx.Client",
+        fake_client,
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="https://server.example/api/lens/lensnode/ai-gateway/",
+        token="token",
+        request_timeout_s=30,
+        tls_skip_verify=True,
+        tls_ca_file=None,
+    )
+
+    package = _download_skill_package(
+        config,
+        {
+            "skill_uuid": "11111111-1111-1111-1111-111111111111",
+            "package_hash": "sha256:abc",
+        },
+    )
+
+    assert package == b"package"
+    assert captured["verify"].verify_mode == ssl.CERT_NONE

@@ -716,6 +716,11 @@
     "skillDetail": {
       "title": "Skill Detail"
     },
+    "assistantTypes": {
+      "knowledgeQa": "Knowledge Q&A",
+      "codeAnalysis": "Code Analysis",
+      "generalChat": "General Chat"
+    },
     "columns": {
       "assistant": "Assistant",
       "lensnode": "Node",
@@ -944,6 +949,7 @@
       "assistantDescription": "Describe what this assistant helps users do.",
       "selectLensNode": "Select a LensNode",
       "selectTask": "Select a task",
+      "selectType": "Select a type",
       "selectDir": "Select a directory",
       "selectModel": "Select a model",
       "noModel": "Default",
@@ -1216,7 +1222,7 @@
       "multimodalModelHint": "Optional — for vision or image-aware tasks.",
       "maxConcurrencyHint": "Maximum simultaneous runs for this assistant. Extra requests queue automatically.",
       "step2Title": "Execution",
-      "step2Desc": "Select node, task, directories, and retrieval policy",
+      "step2Desc": "Select node, type, directories, and retrieval policy",
       "generalChatExecutionHint": "General Chat uses bound Skills and bundled scripts. Workspace directory retrieval is disabled for this assistant.",
       "step3Title": "Skills & Workspace",
       "step3Desc": "Bind Skills and MCP, and add workspace context — all optional",

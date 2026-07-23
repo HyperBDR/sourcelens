@@ -10,6 +10,8 @@ from pathlib import Path, PurePosixPath
 
 import httpx
 
+from .tls import create_config_ssl_context
+
 MAX_SKILL_PACKAGE_BYTES = 25 * 1024 * 1024
 
 
@@ -149,7 +151,10 @@ def _download_skill_package(config, skill):
     if not skill_uuid:
         raise ValueError("skill_uuid is required to download a Skill package")
     url = _skill_package_url(config.ai_gateway_url, skill_uuid)
-    with httpx.Client(timeout=config.request_timeout_s) as client:
+    with httpx.Client(
+        timeout=config.request_timeout_s,
+        verify=create_config_ssl_context(config),
+    ) as client:
         response = client.get(
             url,
             headers={"Authorization": f"Bearer {config.token}"},

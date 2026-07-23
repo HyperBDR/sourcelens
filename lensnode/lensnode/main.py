@@ -20,6 +20,8 @@ from .logging_utils import (
     task_log,
     utc_now,
 )
+from .tls import create_config_ssl_context
+from .tls import warn_if_verification_disabled
 from .workspace import available_dirs
 
 LOGGER = logging.getLogger("lensnode")
@@ -30,6 +32,7 @@ class LensNodeClient:
 
     def __init__(self, config):
         self.config = config
+        self.ssl_context = create_config_ssl_context(config)
         self.executor = LensNodeExecutor(config)
         self.stopping = asyncio.Event()
         # Set while draining on shutdown/upgrade: stop accepting new runs and
@@ -229,10 +232,15 @@ class LensNodeClient:
         """Run one WebSocket connection until it closes."""
 
         connected = False
+        connection_options = {
+            "open_timeout": 10,
+            "ping_interval": None,
+        }
+        if url.lower().startswith("wss://"):
+            connection_options["ssl"] = self.ssl_context
         async with connect(
             url,
-            open_timeout=10,
-            ping_interval=None,
+            **connection_options,
         ) as websocket:
             self.websocket = websocket
             try:
@@ -525,6 +533,10 @@ class LensNodeClient:
                 **message,
                 "ai_gateway_url": self.config.ai_gateway_url,
                 "lensnode_token": self.config.token,
+                "tls_skip_verify": getattr(
+                    self.config, "tls_skip_verify", False
+                ),
+                "tls_ca_file": getattr(self.config, "tls_ca_file", None),
             }
             result = await asyncio.to_thread(
                 sync_datasource,
@@ -779,7 +791,9 @@ class LensNodeClient:
 async def _run_client():
     """Run LensNode and bind process signals to graceful shutdown."""
 
-    client = LensNodeClient(load_config())
+    config = load_config()
+    warn_if_verification_disabled(config, LOGGER)
+    client = LensNodeClient(config)
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(

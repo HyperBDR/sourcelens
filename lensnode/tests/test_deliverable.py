@@ -1,4 +1,5 @@
 import json
+import ssl
 from pathlib import Path
 
 import httpx
@@ -17,6 +18,8 @@ def _config():
         control_ws_url="ws://backend/ws/",
         ai_gateway_url="http://b/api/lens/lensnode/ai-gateway/",
         deliverable_upload_url="http://b/api/lens/lensnode/deliverables/",
+        tls_skip_verify=True,
+        tls_ca_file=None,
         deliverable_max_bytes=50 * 1024 * 1024,
         workspace_path="/workspace",
         protocol_version="v1",
@@ -24,9 +27,12 @@ def _config():
         heartbeat_interval_s=15,
         request_timeout_s=30,
         run_idle_timeout_s=180,
+        drain_timeout_s=240,
         max_concurrent_runs=1,
         summary_trigger_tokens=48000,
         summary_keep_tokens=16000,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
     )
 
 
@@ -41,13 +47,15 @@ def _resources(root):
     )
 
 
-def _install_transport(monkeypatch, handler):
+def _install_transport(monkeypatch, handler, client_options=None):
     """Route agent_tools' httpx.Client through a mock transport."""
 
     transport = httpx.MockTransport(handler)
     real_client = httpx.Client
 
     def fake_client(*args, **kwargs):
+        if client_options is not None:
+            client_options.update(kwargs)
         kwargs["transport"] = transport
         return real_client(*args, **kwargs)
 
@@ -57,6 +65,7 @@ def _install_transport(monkeypatch, handler):
 def test_save_deliverable_uploads_file(monkeypatch, tmp_path):
     (tmp_path / "report.html").write_text("<h1>ok</h1>", encoding="utf-8")
     captured = {}
+    client_options = {}
 
     def handler(request):
         captured["url"] = str(request.url)
@@ -64,7 +73,7 @@ def test_save_deliverable_uploads_file(monkeypatch, tmp_path):
         captured["body"] = request.read()
         return httpx.Response(201, json={"ok": True})
 
-    _install_transport(monkeypatch, handler)
+    _install_transport(monkeypatch, handler, client_options)
     events = []
     tool = _build_save_deliverable_tool(
         {"run_uuid": "run-123"},
@@ -79,6 +88,7 @@ def test_save_deliverable_uploads_file(monkeypatch, tmp_path):
     assert payload["filename"] == "report.html"
     assert captured["url"].endswith("/api/lens/lensnode/deliverables/")
     assert captured["auth"] == "Bearer test-token"
+    assert client_options["verify"].verify_mode == ssl.CERT_NONE
     assert b"run-123" in captured["body"]
     assert b"<h1>ok</h1>" in captured["body"]
     assert ("tool.save_deliverable.done", None) not in events

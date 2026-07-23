@@ -11,6 +11,7 @@ import httpx
 from langchain_core.tools import tool
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
+from .tls import create_config_ssl_context
 from .workspace import (
     DEFAULT_EXCLUDED_DIRS,
     DEFAULT_EXCLUDED_EXTENSIONS,
@@ -525,7 +526,10 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
             mimetypes.guess_type(filename)[0] or "application/octet-stream"
         )
         try:
-            with httpx.Client(timeout=config.request_timeout_s) as client:
+            with httpx.Client(
+                timeout=config.request_timeout_s,
+                verify=create_config_ssl_context(config),
+            ) as client:
                 response = client.post(
                     config.deliverable_upload_url,
                     headers={"Authorization": f"Bearer {config.token}"},
