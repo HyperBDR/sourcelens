@@ -160,7 +160,7 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
 
 
 def _build_summarization_middleware(
-    config, model_ref, emit_event, cancel_event=None
+    config, model_ref, emit_event, cancel_event=None, run_uuid=""
 ):
     """Build context-compaction middleware, or None when disabled.
 
@@ -184,6 +184,7 @@ def _build_summarization_middleware(
         token=config.token,
         request_timeout_s=config.request_timeout_s,
         cancel_event=cancel_event,
+        run_uuid=run_uuid,
     )
     middleware = LensSummarizationMiddleware(
         model=summary_model,
@@ -321,6 +322,7 @@ class LensDeepAgentRuntime:
             emit_event=emit_agent_event,
         )
         try:
+            run_uuid = str(command.get("run_uuid") or "")
             model = LensGatewayChatModel(
                 model_ref=str(model_ref),
                 ai_gateway_url=self.config.ai_gateway_url,
@@ -329,7 +331,7 @@ class LensDeepAgentRuntime:
                 emit_output=emit_output,
                 on_activity=on_activity,
                 cancel_event=cancel_event,
-                run_uuid=str(command.get("run_uuid") or ""),
+                run_uuid=run_uuid,
             )
             if _is_general_chat(command):
                 tools = build_general_chat_tools(
@@ -364,7 +366,11 @@ class LensDeepAgentRuntime:
                 kwargs["skills"] = resources.skill_paths
 
             summarizer = _build_summarization_middleware(
-                self.config, model_ref, emit_agent_event, cancel_event
+                self.config,
+                model_ref,
+                emit_agent_event,
+                cancel_event,
+                run_uuid=run_uuid,
             )
             if summarizer is not None:
                 kwargs["middleware"] = [summarizer]

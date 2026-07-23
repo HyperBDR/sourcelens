@@ -1,6 +1,7 @@
 import io
 import tempfile
 import zipfile
+from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
 from asgiref.sync import async_to_sync
@@ -11,7 +12,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
-from agentcore_metering.adapters.django.models import LLMConfig
+from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_task.adapters.django.models import TaskExecution
 
 from lens.lensnode_auth import hash_lensnode_token
@@ -654,11 +655,27 @@ class LensApiTests(TestCase):
         self.assertTrue(call_and_track.call_args.kwargs["return_message"])
 
     def test_lensnode_ai_gateway_forwards_run_correlation(self):
+        from lens.models import Session
+        from lens.services import create_execution_run
+
         token = "dev-lensnode-token"
         self.lensnode.auth_token_hash = hash_lensnode_token(token)
         self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
         client = APIClient()
-        run_uuid = "3a2b7d54-9c1e-4f7a-8f27-0a4c1d2e3f45"
+        chat_user = User.objects.create_user(
+            username="chat-user",
+            email="chat-user@example.com",
+            password="pass12345",
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=chat_user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="hello",
+            enqueue=False,
+        )
 
         with patch(
             "agentcore_metering.adapters.django.LLMTracker.call_and_track",
@@ -669,7 +686,7 @@ class LensApiTests(TestCase):
                 {
                     "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
                     "messages": [{"role": "user", "content": "hello"}],
-                    "run_uuid": run_uuid,
+                    "run_uuid": str(run.uuid),
                     "is_subagent": True,
                 },
                 format="json",
@@ -678,8 +695,142 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         state = call_and_track.call_args.kwargs["state"]
-        self.assertEqual(state["metadata"]["run_uuid"], run_uuid)
+        self.assertEqual(state["user_id"], chat_user.id)
+        self.assertEqual(state["metadata"]["run_uuid"], str(run.uuid))
         self.assertTrue(state["metadata"]["is_subagent"])
+
+    def test_lensnode_ai_gateway_attributes_every_call_to_run_owner(self):
+        from lens.models import Session
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        chat_user = User.objects.create_user(
+            username="usage-chat-user",
+            email="usage-chat-user@example.com",
+            password="pass12345",
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=chat_user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="hello",
+            enqueue=False,
+        )
+        config = LLMConfig.objects.create(
+            scope=LLMConfig.Scope.GLOBAL,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai",
+            config={"api_key": "test", "model": "gpt-4o-mini"},
+            is_active=True,
+        )
+        completion = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="ok"),
+                )
+            ],
+            usage=SimpleNamespace(
+                prompt_tokens=2,
+                completion_tokens=1,
+                total_tokens=3,
+                cached_tokens=0,
+                reasoning_tokens=0,
+            ),
+            model="gpt-4o-mini",
+        )
+        client = APIClient()
+        payload = {
+            "model_ref": str(config.uuid),
+            "messages": [{"role": "user", "content": "hello"}],
+            "run_uuid": str(run.uuid),
+        }
+
+        with patch("litellm.completion", return_value=completion):
+            for _ in range(2):
+                response = client.post(
+                    "/api/lens/lensnode/ai-gateway/",
+                    payload,
+                    format="json",
+                    HTTP_AUTHORIZATION=f"Bearer {token}",
+                )
+                self.assertEqual(response.status_code, 200)
+
+        usages = list(LLMUsage.objects.order_by("created_at"))
+        self.assertEqual(len(usages), 2)
+        self.assertTrue(all(item.user_id == chat_user.id for item in usages))
+        self.assertTrue(
+            all(
+                item.metadata["run_uuid"] == str(run.uuid)
+                for item in usages
+            )
+        )
+
+    def test_lensnode_ai_gateway_rejects_run_from_another_lensnode(self):
+        from lens.models import Session
+        from lens.services import create_execution_run
+
+        token = "other-lensnode-token"
+        LensNode.objects.create(
+            name="Other LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            auth_token_hash=hash_lensnode_token(token),
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="hello",
+            enqueue=False,
+        )
+        client = APIClient()
+
+        with patch(
+            "agentcore_metering.adapters.django.LLMTracker.call_and_track"
+        ) as call_and_track:
+            response = client.post(
+                "/api/lens/lensnode/ai-gateway/",
+                {
+                    "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "run_uuid": str(run.uuid),
+                },
+                format="json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+        self.assertEqual(response.status_code, 403)
+        call_and_track.assert_not_called()
+
+    def test_lensnode_ai_gateway_rejects_malformed_run_uuid(self):
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        client = APIClient()
+
+        with patch(
+            "agentcore_metering.adapters.django.LLMTracker.call_and_track"
+        ) as call_and_track:
+            response = client.post(
+                "/api/lens/lensnode/ai-gateway/",
+                {
+                    "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "run_uuid": "not-a-uuid",
+                },
+                format="json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data["detail"], "Run not found.")
+        call_and_track.assert_not_called()
 
     def test_lensnode_deliverable_upload_records_output_file(self):
         from django.core.files.uploadedfile import SimpleUploadedFile

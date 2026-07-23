@@ -5,6 +5,7 @@ import json
 import os
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -57,8 +58,24 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
             "lensnode_uuid": str(lensnode.uuid),
         }
         correlation = {}
-        if request.data.get("run_uuid"):
-            correlation["run_uuid"] = str(request.data["run_uuid"])
+        run_uuid = request.data.get("run_uuid")
+        if run_uuid:
+            try:
+                run = Run.objects.select_related("session").get(
+                    uuid=run_uuid
+                )
+            except (Run.DoesNotExist, ValidationError):
+                return Response(
+                    {"detail": "Run not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if run.lensnode_id != lensnode.id:
+                return Response(
+                    {"detail": "Run does not belong to this LensNode."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            tracker_state["user_id"] = run.session.user_id
+            correlation["run_uuid"] = str(run.uuid)
             correlation["is_subagent"] = bool(
                 request.data.get("is_subagent")
             )

@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+from lensnode import agent_runtime
 from lensnode.agent_runtime import (
     _build_initial_messages,
     _run_agent_with_turn_limit,
@@ -47,6 +50,40 @@ def test_build_initial_messages_without_history():
     assert _build_initial_messages(None, "q") == [
         {"role": "user", "content": "q"}
     ]
+
+
+def test_summarization_middleware_forwards_run_uuid(monkeypatch):
+    captured = {}
+
+    class CapturingMiddleware:
+        """Capture the model configured for compaction."""
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "LensSummarizationMiddleware",
+        CapturingMiddleware,
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        request_timeout_s=120,
+        summary_keep_tokens=8000,
+        summary_trigger_tokens=48000,
+        token="token",
+    )
+    run_uuid = "00000000-0000-0000-0000-000000000009"
+
+    middleware = agent_runtime._build_summarization_middleware(
+        config,
+        "model-ref",
+        lambda *_args, **_kwargs: None,
+        run_uuid=run_uuid,
+    )
+
+    assert isinstance(middleware, CapturingMiddleware)
+    assert captured["model"].run_uuid == run_uuid
 
 
 def test_turn_limit_excludes_historical_assistant_turns():
