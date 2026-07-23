@@ -50,11 +50,13 @@ def test_executor_emits_streamed_output_delta():
         )
     )
 
-    assert {
-        "type": "run_output",
-        "run_uuid": "00000000-0000-0000-0000-000000000001",
-        "content_delta": "streamed",
-    } in events
+    assert any(
+        event.get("type") == "run_output"
+        and event.get("run_uuid") == "00000000-0000-0000-0000-000000000001"
+        and event.get("content_delta") == "streamed"
+        and event.get("reset") is False
+        for event in events
+    )
     assert {
         "type": "run_output",
         "run_uuid": "00000000-0000-0000-0000-000000000001",
