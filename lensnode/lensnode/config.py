@@ -11,6 +11,8 @@ class LensNodeConfig:
     control_ws_url: str
     ai_gateway_url: str
     deliverable_upload_url: str
+    tls_skip_verify: bool
+    tls_ca_file: str | None
     deliverable_max_bytes: int
     workspace_path: str
     protocol_version: str
@@ -30,6 +32,15 @@ def _optional_int(value):
     """Return int(value), or None when the env var is unset or empty."""
 
     return int(value) if value not in (None, "") else None
+
+
+def _env_bool(name, default=False):
+    """Return a case-insensitive boolean environment setting."""
+
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _derive_ws_url(server_url):
@@ -63,6 +74,8 @@ def load_config():
         or f"{server_url}/api/lens/lensnode/ai-gateway/",
         deliverable_upload_url=os.getenv("LENSNODE_DELIVERABLE_UPLOAD_URL")
         or f"{server_url}/api/lens/lensnode/deliverables/",
+        tls_skip_verify=_env_bool("LENSNODE_TLS_SKIP_VERIFY"),
+        tls_ca_file=os.getenv("LENSNODE_TLS_CA_FILE") or None,
         deliverable_max_bytes=int(
             os.getenv("LENSNODE_DELIVERABLE_MAX_BYTES", str(50 * 1024 * 1024))
         ),
