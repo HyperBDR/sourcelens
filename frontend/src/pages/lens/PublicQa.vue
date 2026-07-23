@@ -8,13 +8,12 @@
     <main class="mx-auto max-w-3xl px-4 py-8">
       <BaseLoading v-if="loading" />
 
-      <div
-        v-else-if="notFound"
-        class="rounded-lg border border-line bg-surface py-16 text-center"
-      >
-        <p class="text-sm font-medium text-ink-500">
-          {{ t('lens.qa.notFound') }}
-        </p>
+      <div v-else-if="accessState">
+        <PublicQaAccessState
+          :type="accessState"
+          @login="goLogin"
+          @home="goHome"
+        />
       </div>
 
       <article v-else-if="qa">
@@ -73,11 +72,13 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { Copy } from '@lucide/vue'
 
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
+import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { getPublicQa } from '@/api/lens'
@@ -85,28 +86,55 @@ import { copyToClipboard } from '@/utils/clipboard'
 import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
 import { useToast } from '@/composables/useToast'
+import { useUserStore } from '@/store/user'
 
 const props = defineProps({ token: { type: String, required: true } })
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const { showSuccess, showError } = useToast()
+const userStore = useUserStore()
 
 const qa = ref(null)
 const loading = ref(true)
-const notFound = ref(false)
+const accessState = ref(null)
+const isAuthenticated = computed(() => userStore.isAuthenticated)
+
+function accessStateFromError(error) {
+  const code = error?.response?.data?.code
+  if (error?.response?.status === 403 && code === 'AUTHENTICATION_REQUIRED') {
+    return 'login-required'
+  }
+  if (error?.response?.status === 403 && code === 'ASSISTANT_ACCESS_DENIED') {
+    return 'forbidden'
+  }
+  return 'not-found'
+}
+
+function setAccessStateAfterError(error) {
+  accessState.value = accessStateFromError(error)
+  document.title =
+    accessState.value === 'login-required'
+      ? t('lens.qa.loginRequiredTitle')
+      : accessState.value === 'forbidden'
+        ? t('lens.qa.accessDeniedTitle')
+        : t('lens.qa.notFound')
+}
 
 async function load() {
   loading.value = true
-  notFound.value = false
+  accessState.value = null
+  qa.value = null
+
   try {
     qa.value = await getPublicQa(props.token)
     const title = qa.value?.title || qa.value?.question
     if (title) {
       document.title = title
     }
-  } catch {
-    qa.value = null
-    notFound.value = true
+  } catch (error) {
+    setAccessStateAfterError(error)
   } finally {
     loading.value = false
   }
@@ -120,6 +148,19 @@ async function copyLink() {
   }
 }
 
+function goLogin() {
+  router.push({ path: '/login', query: { next: route.fullPath } })
+}
+
+function goHome() {
+  router.push('/')
+}
+
 onMounted(load)
 watch(() => props.token, load)
+watch(isAuthenticated, (authenticated) => {
+  if (authenticated && accessState.value === 'login-required') {
+    load()
+  }
+})
 </script>

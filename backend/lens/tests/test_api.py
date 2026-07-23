@@ -1656,7 +1656,7 @@ class AssistantAccessTests(TestCase):
         )
         self.assertEqual(run.status_code, 403)
 
-    def test_public_qa_404_for_private_assistant(self):
+    def test_public_qa_requires_login_for_private_assistant(self):
         share = SharedQA.objects.create(
             token="tok-private",
             assistant=self.assistant,
@@ -1671,11 +1671,19 @@ class AssistantAccessTests(TestCase):
         list_resp = self.client.get(
             f"/api/lens/public/assistants/{self.assistant.slug}/qa/"
         )
-        self.assertEqual(list_resp.status_code, 404)
+        self.assertEqual(list_resp.status_code, 403)
+        self.assertEqual(
+            list_resp.data["code"],
+            "AUTHENTICATION_REQUIRED",
+        )
         single_resp = self.client.get(
             f"/api/lens/public/qa/{share.token}/"
         )
-        self.assertEqual(single_resp.status_code, 404)
+        self.assertEqual(single_resp.status_code, 403)
+        self.assertEqual(
+            single_resp.data["code"],
+            "AUTHENTICATION_REQUIRED",
+        )
 
     def test_access_grants_round_trip_via_serializer(self):
         group = Group.objects.create(name="grp")

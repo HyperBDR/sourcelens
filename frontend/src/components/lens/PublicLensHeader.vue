@@ -23,7 +23,7 @@
       </router-link>
       <router-link
         v-if="!isAuthenticated"
-        to="/login"
+        :to="loginTarget"
         class="rounded-md px-3 py-1.5 text-sm font-medium text-ink-600 no-underline transition-colors hover:bg-surface-sunken"
       >
         {{ t('auth.signIn') }}
@@ -35,6 +35,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { MessagesSquare } from '@lucide/vue'
 
 import BrandLogo from '@/components/layout/BrandLogo.vue'
@@ -47,8 +48,13 @@ const props = defineProps({
 })
 
 const { t } = useI18n()
+const route = useRoute()
 const userStore = useUserStore()
 const isAuthenticated = computed(() => userStore.isAuthenticated)
+const loginTarget = computed(() => ({
+  path: '/login',
+  query: { next: route.fullPath }
+}))
 const ctaLabel = computed(() =>
   props.assistantName
     ? t('lens.qa.ctaAction', { name: props.assistantName })
