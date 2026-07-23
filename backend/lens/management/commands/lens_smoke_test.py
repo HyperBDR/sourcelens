@@ -19,6 +19,7 @@ EXPECTED_MODELS = {
     "LensNode",
     "Run",
     "RunExecution",
+    "RunOutputFile",
     "RunStep",
     "ScheduledTask",
     "Session",
