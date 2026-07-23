@@ -881,7 +881,6 @@
       "description": "Description",
       "content": "Content",
       "lensnode": "LensNode",
-      "task": "Task",
       "selectedDirs": "Select Directory",
       "includePaths": "Retrieval Scope",
       "retrievalPolicy": "Retrieval Policy",
@@ -948,7 +947,6 @@
     "placeholders": {
       "assistantDescription": "Describe what this assistant helps users do.",
       "selectLensNode": "Select a LensNode",
-      "selectTask": "Select a task",
       "selectType": "Select a type",
       "selectDir": "Select a directory",
       "selectModel": "Select a model",
