@@ -158,9 +158,7 @@
               :value="task.name"
               :title="task.description"
             >
-              {{
-                formatAssistantType(task.name, t, task.title || task.name)
-              }}
+              {{ formatAssistantType(task.name, t, task.title || task.name) }}
             </option>
           </select>
         </FormRow>

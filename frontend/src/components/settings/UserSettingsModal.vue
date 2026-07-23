@@ -27,9 +27,13 @@
           class="relative flex h-[480px] max-h-[82vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-white shadow-soft-lg"
         >
           <!-- Left nav -->
-          <nav class="flex w-44 shrink-0 flex-col border-r border-line bg-gray-50 py-3">
+          <nav
+            class="flex w-44 shrink-0 flex-col border-r border-line bg-gray-50 py-3"
+          >
             <div class="px-3 pb-2 pt-1">
-              <div class="text-xs font-semibold uppercase tracking-wide text-gray-400">
+              <div
+                class="text-xs font-semibold uppercase tracking-wide text-gray-400"
+              >
                 {{ t('settings.modal.label') }}
               </div>
             </div>
@@ -58,9 +62,24 @@
                 class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600"
                 @click="handleLogout"
               >
-                <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-linecap="round" stroke-linejoin="round" />
-                  <polyline points="16 17 21 12 16 7" stroke-linecap="round" stroke-linejoin="round" />
+                <svg
+                  class="h-4 w-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <polyline
+                    points="16 17 21 12 16 7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
                   <line x1="21" y1="12" x2="9" y2="12" stroke-linecap="round" />
                 </svg>
                 {{ t('common.logout') }}
@@ -70,9 +89,11 @@
 
           <!-- Right content -->
           <div class="flex min-w-0 flex-1 flex-col">
-            <header class="flex items-center justify-between border-b border-line px-5 py-4">
+            <header
+              class="flex items-center justify-between border-b border-line px-5 py-4"
+            >
               <h2 class="text-base font-semibold text-gray-900">
-                {{ sections.find(s => s.key === activeSection)?.label }}
+                {{ sections.find((s) => s.key === activeSection)?.label }}
               </h2>
               <button
                 type="button"
@@ -80,8 +101,19 @@
                 :aria-label="t('common.close')"
                 @click="emit('close')"
               >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" aria-hidden="true">
-                  <path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                <svg
+                  class="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.25"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M6 18L18 6M6 6l12 12"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
                 </svg>
               </button>
             </header>
@@ -101,20 +133,26 @@
                       {{ displayName }}
                     </div>
                     <div class="mt-0.5 truncate text-sm text-gray-500">
-                      {{ userStore.userInfo?.email || t('settings.modal.noEmail') }}
+                      {{
+                        userStore.userInfo?.email || t('settings.modal.noEmail')
+                      }}
                     </div>
                   </div>
                 </div>
 
                 <div class="divide-y divide-line rounded-xl border border-line">
                   <div class="flex items-center justify-between px-4 py-3">
-                    <span class="text-sm text-gray-500">{{ t('settings.modal.username') }}</span>
+                    <span class="text-sm text-gray-500">{{
+                      t('settings.modal.username')
+                    }}</span>
                     <span class="text-sm font-medium text-gray-900">
                       {{ userStore.userInfo?.username || '—' }}
                     </span>
                   </div>
                   <div class="flex items-center justify-between px-4 py-3">
-                    <span class="text-sm text-gray-500">{{ t('settings.modal.email') }}</span>
+                    <span class="text-sm text-gray-500">{{
+                      t('settings.modal.email')
+                    }}</span>
                     <span class="text-sm font-medium text-gray-900">
                       {{ userStore.userInfo?.email || '—' }}
                     </span>
@@ -124,20 +162,38 @@
 
               <!-- Language section -->
               <div v-if="activeSection === 'language'" class="space-y-3">
-                <p class="text-sm text-gray-500">{{ t('settings.modal.languageDesc') }}</p>
+                <p class="text-sm text-gray-500">
+                  {{ t('settings.modal.languageDesc') }}
+                </p>
                 <div class="relative">
                   <select
                     :value="locale"
                     class="w-full appearance-none rounded-xl border border-line bg-white py-2.5 pl-3 pr-9 text-sm text-gray-800 transition-colors focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
                     @change="selectLanguage($event.target.value)"
                   >
-                    <option v-for="lang in languages" :key="lang.value" :value="lang.value">
+                    <option
+                      v-for="lang in languages"
+                      :key="lang.value"
+                      :value="lang.value"
+                    >
                       {{ lang.flag }} {{ lang.label }}
                     </option>
                   </select>
-                  <div class="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                    <svg class="h-4 w-4 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+                  <div
+                    class="pointer-events-none absolute inset-y-0 right-3 flex items-center"
+                  >
+                    <svg
+                      class="h-4 w-4 text-gray-400"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                    >
+                      <path
+                        d="m6 9 6 6 6-6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
                     </svg>
                   </div>
                 </div>
@@ -189,15 +245,25 @@ const displayName = computed(() => {
   const userInfo = userStore.userInfo
   if (!userInfo) return 'User'
   if (userInfo.display_name) return userInfo.display_name
-  if (userInfo.first_name && userInfo.last_name) return `${userInfo.first_name} ${userInfo.last_name}`
+  if (userInfo.first_name && userInfo.last_name)
+    return `${userInfo.first_name} ${userInfo.last_name}`
   if (userInfo.first_name) return userInfo.first_name
   return userInfo.username || 'User'
 })
 
-const userInitials = computed(() => displayName.value.trim().charAt(0).toUpperCase() || 'U')
+const userInitials = computed(
+  () => displayName.value.trim().charAt(0).toUpperCase() || 'U'
+)
 
 const avatarBgColor = computed(() => {
-  const colors = ['bg-blue-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-rose-500', 'bg-amber-500', 'bg-cyan-500']
+  const colors = [
+    'bg-blue-500',
+    'bg-indigo-500',
+    'bg-emerald-500',
+    'bg-rose-500',
+    'bg-amber-500',
+    'bg-cyan-500'
+  ]
   return colors[userInitials.value.charCodeAt(0) % colors.length]
 })
 
@@ -219,15 +285,18 @@ const handleKeydown = (event) => {
 watch(
   () => props.show,
   (show) => {
-    if (typeof document !== 'undefined') document.body.style.overflow = show ? 'hidden' : ''
+    if (typeof document !== 'undefined')
+      document.body.style.overflow = show ? 'hidden' : ''
   },
   { immediate: true }
 )
 
-if (typeof window !== 'undefined') window.addEventListener('keydown', handleKeydown)
+if (typeof window !== 'undefined')
+  window.addEventListener('keydown', handleKeydown)
 
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') document.body.style.overflow = ''
-  if (typeof window !== 'undefined') window.removeEventListener('keydown', handleKeydown)
+  if (typeof window !== 'undefined')
+    window.removeEventListener('keydown', handleKeydown)
 })
 </script>
