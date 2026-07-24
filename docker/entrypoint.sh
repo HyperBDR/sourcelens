@@ -50,6 +50,8 @@ start_gunicorn() {
         exec daphne core.asgi:application \
             --bind 0.0.0.0 \
             --port 8000 \
+            --ping-interval ${UVICORN_WS_PING_INTERVAL:-45} \
+            --ping-timeout ${UVICORN_WS_PING_TIMEOUT:-30} \
             --access-log $ACCESS_LOG
     fi
     log "Starting Uvicorn ASGI workers (API_WORKERS=${API_WORKERS:-3})..."
@@ -62,6 +64,8 @@ start_gunicorn() {
         --limit-max-requests ${UVICORN_MAX_REQUESTS:-10000} \
         --timeout-keep-alive ${UVICORN_KEEPALIVE:-75} \
         --timeout-graceful-shutdown ${UVICORN_GRACEFUL_TIMEOUT:-120} \
+        --ws-ping-interval ${UVICORN_WS_PING_INTERVAL:-45} \
+        --ws-ping-timeout ${UVICORN_WS_PING_TIMEOUT:-30} \
         --access-log \
         --no-server-header \
         --log-level ${API_LOG_LEVEL:-info}
