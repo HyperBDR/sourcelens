@@ -941,6 +941,13 @@ def _synthesize_wrapup_answer(model, current, answer_language, emit_event):
     from the conversation so far, so the turns already spent are not
     wasted. Returns "" (letting the caller keep the empty-answer path) if
     this call itself fails.
+
+    A RunCancelledError is deliberately NOT caught here: model.invoke()
+    checks cancel_event at the top of the gateway call
+    (LensGatewayChatModel._check_cancelled), so a cancellation landing in
+    the narrow window between the turn-limit loop exiting and this call
+    starting must still stop the run, not be swallowed into an empty
+    "wrap-up failed" result.
     """
 
     instruction = _pick_text(
@@ -960,6 +967,8 @@ def _synthesize_wrapup_answer(model, current, answer_language, emit_event):
         emit_event("deepagents.agent.wrapup", {})
     try:
         response = model.invoke(wrapup_messages)
+    except RunCancelledError:
+        raise
     except Exception:
         LOGGER.exception("Wrap-up synthesis call failed after truncation")
         return ""

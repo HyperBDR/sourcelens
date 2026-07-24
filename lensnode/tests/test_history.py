@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 from lensnode import agent_runtime
 from lensnode.agent_runtime import (
-    _pick_text,
     _build_initial_messages,
+    _pick_text,
     _run_agent_with_turn_limit,
     _strip_dangling_tool_call,
     _synthesize_wrapup_answer,
@@ -162,6 +162,13 @@ class _FailingModel:
         raise RuntimeError("gateway unreachable")
 
 
+class _CancelledModel:
+    """Mimics LensGatewayChatModel raising RunCancelledError mid-call."""
+
+    def invoke(self, _messages):
+        raise agent_runtime.RunCancelledError("cancelled")
+
+
 def test_synthesize_wrapup_answer_strips_dangling_call_and_returns_content():
     model = _FakeWrapupModel("here is what I found")
     current = [
@@ -185,6 +192,20 @@ def test_synthesize_wrapup_answer_returns_empty_on_failure():
     )
 
     assert answer == ""
+
+
+def test_synthesize_wrapup_answer_propagates_cancellation():
+    # A cancellation landing during the wrap-up call must stop the run,
+    # not be swallowed into an empty "wrap-up failed" result.
+    try:
+        _synthesize_wrapup_answer(
+            _CancelledModel(), [_Msg("human", "q")], "English", None
+        )
+        raised = False
+    except agent_runtime.RunCancelledError:
+        raised = True
+
+    assert raised is True
 
 
 def test_truncated_run_falls_back_to_wrapup_when_no_answer_text():
