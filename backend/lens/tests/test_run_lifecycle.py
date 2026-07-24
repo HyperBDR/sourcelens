@@ -1,5 +1,6 @@
 import uuid
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -12,7 +13,7 @@ from lens.services import (
     record_lensnode_run_event,
     touch_run_activity,
 )
-from lens.tasks import lensnode_cleanup_task
+from lens.tasks import confirm_reconcile_orphan, lensnode_cleanup_task
 
 User = get_user_model()
 
@@ -132,19 +133,28 @@ class RunLifecycleTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, Run.Status.STREAMING)
 
-    def test_reconcile_fails_orphaned_run(self):
+    def test_reconcile_schedules_confirmation_instead_of_failing_inline(self):
+        # LensNode redelivers run_done at-least-once through a durable
+        # outbox, so a run absent from a fresh hello's active list may just
+        # be finishing, not dead — reconcile must not fail it on the spot.
         run = self._run(
             Run.Status.STREAMING,
             timedelta(minutes=5),
             timedelta(minutes=5),
         )
 
-        count = reconcile_lensnode_active_runs(self.lensnode.uuid, [])
+        with patch(
+            "lens.tasks.confirm_reconcile_orphan.apply_async"
+        ) as apply_async:
+            count = reconcile_lensnode_active_runs(self.lensnode.uuid, [])
 
         run.refresh_from_db()
         self.assertEqual(count, 1)
-        self.assertEqual(run.status, Run.Status.FAILED)
-        self.assertEqual(run.error, "LENSNODE_RECONNECT_ORPHANED")
+        self.assertEqual(run.status, Run.Status.STREAMING)
+        self.assertTrue(apply_async.called)
+        kwargs = apply_async.call_args.kwargs
+        self.assertEqual(kwargs["args"][0], str(run.uuid))
+        self.assertIn("countdown", kwargs)
 
     def test_reconcile_keeps_claimed_and_fresh_runs(self):
         claimed = self._run(
@@ -158,11 +168,47 @@ class RunLifecycleTests(TestCase):
             timedelta(seconds=10),
         )
 
-        reconcile_lensnode_active_runs(
-            self.lensnode.uuid, [str(claimed.uuid)]
-        )
+        with patch(
+            "lens.tasks.confirm_reconcile_orphan.apply_async"
+        ) as apply_async:
+            reconcile_lensnode_active_runs(
+                self.lensnode.uuid, [str(claimed.uuid)]
+            )
 
         claimed.refresh_from_db()
         fresh.refresh_from_db()
         self.assertEqual(claimed.status, Run.Status.STREAMING)
         self.assertEqual(fresh.status, Run.Status.RUNNING)
+        apply_async.assert_not_called()
+
+    def test_confirm_reconcile_orphan_fails_still_running_run(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+
+        confirm_reconcile_orphan(str(run.uuid))
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.error, "LENSNODE_RECONNECT_ORPHANED")
+
+    def test_confirm_reconcile_orphan_noops_if_already_terminal(self):
+        # The normal completion path (a late but durably-delivered run_done)
+        # won the race and finished the run before this fired.
+        run = self._run(
+            Run.Status.DONE,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+
+        confirm_reconcile_orphan(str(run.uuid))
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.DONE)
+        self.assertEqual(run.error, "")
+
+    def test_confirm_reconcile_orphan_noops_for_unknown_run(self):
+        # Must not raise for a run_uuid that no longer exists.
+        confirm_reconcile_orphan(str(uuid.uuid4()))
