@@ -1250,15 +1250,15 @@
     },
     "agentRounds": {
       "flash": "极速",
-      "flashHint": "~5 步",
+      "flashHint": "最快，分析步骤最少",
       "fast": "快速",
-      "fastHint": "~13 步",
+      "fastHint": "更快，分析较浅",
       "balanced": "均衡",
-      "balancedHint": "~26 步",
+      "balancedHint": "速度与深度兼顾",
       "deep": "深度",
-      "deepHint": "~50 步",
+      "deepHint": "更彻底，耗时更久",
       "max": "极限",
-      "maxHint": "~100 步"
+      "maxHint": "最彻底，耗时最久"
     },
     "messages": {
       "loadFailed": "加载 Lens 管理数据失败",
