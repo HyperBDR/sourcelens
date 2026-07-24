@@ -231,7 +231,8 @@ import {
   listEnvironmentVariableSets,
   listSkills,
   revealEnvironmentVariableSet,
-  updateAssistant
+  updateAssistant,
+  updateEnvironmentVariableSet
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -562,14 +563,26 @@ async function createDraftEnvironmentSets() {
       key: item.name,
       value: enteredValues[item.name] ?? existingValues[item.name] ?? ''
     }))
-    const created = await createEnvironmentVariableSet({
-      name: nextEnvironmentSetName(skill),
-      description: '',
-      values,
-      enabled: true
-    })
-    environmentVariableSets.value.push(created)
-    form.value.skill_environment_set_uuids[skillUuid] = created.uuid
+    if (existingUuid) {
+      const updated = await updateEnvironmentVariableSet(existingUuid, {
+        values
+      })
+      const index = environmentVariableSets.value.findIndex(
+        (item) => item.uuid === existingUuid
+      )
+      if (index >= 0) {
+        environmentVariableSets.value.splice(index, 1, updated)
+      }
+    } else {
+      const created = await createEnvironmentVariableSet({
+        name: nextEnvironmentSetName(skill),
+        description: '',
+        values,
+        enabled: true
+      })
+      environmentVariableSets.value.push(created)
+      form.value.skill_environment_set_uuids[skillUuid] = created.uuid
+    }
     draft.values = {}
   }
 }
