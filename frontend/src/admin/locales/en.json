@@ -1250,15 +1250,15 @@
     },
     "agentRounds": {
       "flash": "Flash",
-      "flashHint": "~5 steps",
+      "flashHint": "Fastest, fewest steps",
       "fast": "Fast",
-      "fastHint": "~13 steps",
+      "fastHint": "Quicker, lighter analysis",
       "balanced": "Balanced",
-      "balancedHint": "~26 steps",
+      "balancedHint": "Balances speed and depth",
       "deep": "Deep",
-      "deepHint": "~50 steps",
+      "deepHint": "More thorough, takes longer",
       "max": "Max",
-      "maxHint": "~100 steps"
+      "maxHint": "Most thorough, slowest"
     },
     "messages": {
       "loadFailed": "Failed to load Lens admin data",
