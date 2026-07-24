@@ -336,6 +336,20 @@ const MOCK = {
   }
 }
 
+// Per-assistant MCP bindings (for assistant edit modal)
+const MOCK_ASSISTANT_MCP_BINDINGS = {
+  'a1b2c3d4-0001-0000-0000-000000000001': [
+    {
+      mcp_uuid: 'mcp-0001',
+      enabled: true,
+      load_config: false,
+      scope: 'session'
+    }
+  ],
+  'a1b2c3d4-0002-0000-0000-000000000002': [],
+  'a1b2c3d4-0003-0000-0000-000000000003': []
+}
+
 function formatDate(isoString) {
   if (!isoString) return '—'
   const d = new Date(isoString)
@@ -345,4 +359,157 @@ function formatDate(isoString) {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+function statusBadge(status) {
+  const map = {
+    active: 'bg-green-100 text-green-800',
+    disabled: 'bg-gray-100 text-gray-600',
+    error: 'bg-red-100 text-red-800',
+    archived: 'bg-yellow-100 text-yellow-800',
+    queued: 'bg-blue-100 text-blue-800',
+    running: 'bg-indigo-100 text-indigo-800',
+    done: 'bg-green-100 text-green-800',
+    failed: 'bg-red-100 text-red-800',
+    cancelled: 'bg-orange-100 text-orange-700',
+    success: 'bg-green-100 text-green-800'
+  }
+  const label = {
+    active: '运行中',
+    disabled: '已禁用',
+    error: '错误',
+    archived: '已归档',
+    queued: '排队中',
+    running: '运行中',
+    done: '完成',
+    failed: '失败',
+    cancelled: '已取消',
+    success: '成功'
+  }
+  return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}">${label[status] || status}</span>`
+}
+
+function engineBadge(engine) {
+  const map = {
+    claude_code: 'bg-violet-100 text-violet-800',
+    codex: 'bg-sky-100 text-sky-800',
+    http_direct: 'bg-gray-100 text-gray-500',
+    deepagent: 'bg-gray-100 text-gray-500'
+  }
+  return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono ${map[engine] || 'bg-gray-100 text-gray-600'}">${engine}</span>`
+}
+
+// M1: model validation badge with real states
+function modelValidationBadge(mv) {
+  if (!mv) return '<span class="text-xs text-gray-400">—</span>'
+  if (mv.status === 'ok') {
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800" title="校验时间: ${formatDate(mv.checked_at)}">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>校验通过</span>`
+  }
+  if (mv.status === 'saved_with_error') {
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800" title="错误: ${mv.error}">
+      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>已保存（校验失败）</span>`
+  }
+  return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">未校验</span>`
+}
+
+// D4: sync task status badge (6 states)
+function syncTaskStatusBadge(status) {
+  const cfg = {
+    PENDING: { cls: 'bg-blue-100 text-blue-700', label: '排队中', spin: true },
+    STARTED: {
+      cls: 'bg-indigo-100 text-indigo-700',
+      label: '同步中…',
+      spin: true
+    },
+    RETRY: {
+      cls: 'bg-yellow-100 text-yellow-700',
+      label: '重试中…',
+      spin: true
+    },
+    SUCCESS: {
+      cls: 'bg-green-100 text-green-700',
+      label: '已完成',
+      spin: false
+    },
+    FAILURE: { cls: 'bg-red-100 text-red-700', label: '失败', spin: false },
+    REVOKED: {
+      cls: 'bg-amber-100 text-amber-700',
+      label: '已撤销',
+      spin: false
+    }
+  }
+  const c = cfg[status] || {
+    cls: 'bg-gray-100 text-gray-600',
+    label: status,
+    spin: false
+  }
+  const spinner = c.spin
+    ? `<svg class="animate-spin w-3 h-3 mr-1 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>`
+    : ''
+  return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${c.cls}">${spinner}${c.label}</span>`
+}
+
+function calcDuration(started_at, finished_at) {
+  if (!started_at) return '—'
+  const s = new Date(started_at)
+  const f = finished_at ? new Date(finished_at) : null
+  if (!f) return '<span class="text-indigo-600">进行中…</span>'
+  const secs = Math.round((f - s) / 1000)
+  if (secs < 60) return `${secs}s`
+  const m = Math.floor(secs / 60),
+    r = secs % 60
+  return r > 0 ? `${m}m ${r}s` : `${m}m`
+}
+
+function showToast(msg, type = 'success') {
+  const el = document.createElement('div')
+  const color =
+    type === 'success'
+      ? 'bg-green-600'
+      : type === 'error'
+        ? 'bg-red-600'
+        : type === 'warn'
+          ? 'bg-orange-500'
+          : 'bg-blue-600'
+  const icon =
+    type === 'success'
+      ? 'M5 13l4 4L19 7'
+      : type === 'warn'
+        ? 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z'
+        : 'M6 18L18 6M6 6l12 12'
+  el.className = `fixed top-4 right-4 z-50 ${color} text-white px-4 py-3 rounded-lg shadow-lg text-sm flex items-center gap-2 transition-all`
+  el.innerHTML = `<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${icon}"/></svg>${msg}`
+  document.body.appendChild(el)
+  setTimeout(() => {
+    el.style.opacity = '0'
+    setTimeout(() => el.remove(), 300)
+  }, 2800)
+}
+
+function openModal(id) {
+  document.getElementById(id)?.classList.remove('hidden')
+}
+function closeModal(id) {
+  document.getElementById(id)?.classList.add('hidden')
+}
+
+function getAssistantDatasourceSummary(assistant) {
+  const datasourceIds = assistant.datasource_uuids || []
+  if (datasourceIds.length === 0) {
+    return {
+      total: assistant.datasources || 0,
+      active: assistant.datasources || 0,
+      disabled: 0
+    }
+  }
+  const bound = datasourceIds
+    .map((uuid) => MOCK.datasources.find((ds) => ds.uuid === uuid))
+    .filter(Boolean)
+  const disabled = bound.filter((ds) => ds.status === 'disabled').length
+  return {
+    total: bound.length,
+    active: bound.length - disabled,
+    disabled
+  }
 }
