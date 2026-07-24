@@ -44,7 +44,7 @@ RUN pip install \
         --timeout 120 \
         --retries 5 \
         uv \
-    && python -m venv /opt/venv
+    && python -m venv --without-pip /opt/venv
 
 ENV PATH="/opt/venv/bin:$PATH" \
     VIRTUAL_ENV=/opt/venv
@@ -140,6 +140,17 @@ RUN set -eux; \
         postgresql-client; \
     rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 
+# Runtime images must not carry package-install tooling (issue #55). The
+# base image bundles pip via ensurepip; the venv copied in below is built
+# --without-pip (see the builder stage above), so this is the only
+# remaining source of pip in the final image.
+RUN rm -rf \
+        /usr/local/lib/python3.12/site-packages/pip \
+        /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+        /usr/local/bin/pip \
+        /usr/local/bin/pip3 \
+        /usr/local/bin/pip3.12
+
 ARG DEV_MODE=0
 ENV DEV_MODE=${DEV_MODE}
 
@@ -147,6 +158,15 @@ WORKDIR /opt/backend
 
 COPY --from=backend-builder /opt/venv /opt/venv
 COPY --from=backend-builder /opt/backend /opt/backend
+
+# Verify neither the system install nor the copied venv resurrected pip.
+RUN set -eux; \
+    if command -v pip >/dev/null 2>&1; then \
+        echo "ERROR: pip is present in the runtime image" >&2; exit 1; \
+    fi; \
+    if python -m pip --version >/dev/null 2>&1; then \
+        echo "ERROR: python -m pip works in the runtime image" >&2; exit 1; \
+    fi
 
 RUN mkdir -p \
         /var/cache/sourcelens \
