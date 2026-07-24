@@ -716,6 +716,45 @@ def check_lensnode_disconnect_grace_period(lensnode_uuid, disconnected_at_iso):
     fail_active_runs_for_lensnode(lensnode_uuid)
 
 
+@shared_task(
+    name="lens.confirm_reconcile_orphan",
+    queue="lens",
+    ignore_result=True,
+)
+def confirm_reconcile_orphan(run_uuid):
+    """Fail a run only if it's still non-terminal after the confirm window.
+
+    Scheduled (with a countdown) by
+    lens.services.schedule_reconcile_orphan_confirmation when a reconnecting
+    node's hello doesn't report the run as active. LensNode redelivers
+    run_done at-least-once through a durable outbox, so a run that finished
+    during the drop reaches a terminal state through the normal completion
+    path before this fires. The filtered update is atomic and inherently
+    idempotent — no episode-pinning needed (unlike
+    check_lensnode_disconnect_grace_period, which guards a shared,
+    overwritable LensNode.disconnected_at field): this only ever acts on the
+    one run_uuid it was scheduled for, and a run that already left
+    RUNNING/STREAMING simply won't match the filter.
+    """
+
+    now = timezone.now()
+    updated = Run.objects.filter(
+        uuid=run_uuid,
+        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+    ).update(
+        status=Run.Status.FAILED,
+        error="LENSNODE_RECONNECT_ORPHANED",
+        finished_at=now,
+        updated_at=now,
+    )
+    if updated:
+        logger.warning(
+            "Run %s still non-terminal after the reconcile confirm grace "
+            "window; marking it failed (LENSNODE_RECONNECT_ORPHANED)",
+            run_uuid,
+        )
+
+
 @shared_task(name="lens.lensnode_health", queue="lens")
 def lensnode_health_task():
     """Mark stale online LensNodes offline based on heartbeat age."""
