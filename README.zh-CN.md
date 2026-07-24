@@ -27,14 +27,7 @@
 
 ## 工作流程
 
-```mermaid
-flowchart TD
-    A["用户选择文档 / 代码"] --> B[("本地文件系统存储")]
-    B --> C["检索前 LLM 处理<br/>查询理解、上下文规划"]
-    C --> D["沙箱内 AI agent 检索<br/>agent harness 搜索与分析"]
-    D --> E["检索后 LLM 处理<br/>答案整合、引用格式化"]
-    E --> F["带来源引用的<br/>结构化答案"]
-```
+![What is SourceLens](docs/images/what_is_sourcelens.png)
 
 区别于向量嵌入或关键词索引，SourceLens 让 AI 编程 agent 在沙箱中直接读取、导航和推理文件系统。这意味着检索过程能够理解代码结构、跨文件关系和语义意图，而非仅停留在表层文本匹配。
 

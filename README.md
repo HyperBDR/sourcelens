@@ -27,14 +27,7 @@ The underlying loop stays deliberately simple: a query triggers the agent to sea
 
 ## How It Works
 
-```mermaid
-flowchart TD
-    A["User selects documents / code"] --> B[("Local file system storage")]
-    B --> C["Pre-retrieval LLM processing<br/>query understanding, context planning"]
-    C --> D["Sandboxed AI agent retrieval<br/>agent harness search &amp; analyze"]
-    D --> E["Post-retrieval LLM processing<br/>answer synthesis, citation formatting"]
-    E --> F["Structured answer<br/>with source references"]
-```
+![What is SourceLens](docs/images/what_is_sourcelens.png)
 
 Instead of vector embeddings or keyword indexes, SourceLens uses AI coding agents running in a sandbox to directly read, navigate, and reason over the file system. This means the retrieval understands code structure, cross-file relationships, and semantic intent — not just surface-level text matching.
 
