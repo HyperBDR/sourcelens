@@ -193,6 +193,7 @@
         :form="form"
         :lensnodes="lensnodes"
         :skills="skills"
+        :environment-variable-sets="environmentVariableSets"
         :mcps="mcps"
         :llm-config-options="llmConfigOptions"
         :groups="groups"
@@ -220,13 +221,16 @@ import { extractErrorMessage } from '@/utils/api'
 import { assistantChatUrl } from '@/utils/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
+  createEnvironmentVariableSet,
   createAssistant,
   deleteAssistant,
   listAssistants,
   listGlobalSettings,
   listLensNodes,
   listMcpServers,
+  listEnvironmentVariableSets,
   listSkills,
+  revealEnvironmentVariableSet,
   updateAssistant
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
@@ -235,7 +239,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
-import AssistantFormDrawer from './AssistantFormDrawer.vue'
+import AssistantFormDrawer from './AssistantFormDrawerDirectEnvironment.vue'
 import RowActions from './components/RowActions.vue'
 import {
   EMPTY_VALUE as emptyValue,
@@ -262,6 +266,7 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const lensnodes = ref([])
 const skills = ref([])
+const environmentVariableSets = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
@@ -338,6 +343,7 @@ async function load() {
       assistantRows,
       lensnodeRows,
       skillRows,
+      environmentVariableSetRows,
       mcpRows,
       settingRows,
       llmRows,
@@ -347,6 +353,7 @@ async function load() {
       listAssistants(),
       listLensNodes(),
       listSkills(),
+      listEnvironmentVariableSets(),
       listMcpServers(),
       listGlobalSettings(),
       llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => []),
@@ -357,6 +364,7 @@ async function load() {
     assistants.value = normalizeList(assistantRows)
     lensnodes.value = normalizeList(lensnodeRows)
     skills.value = normalizeList(skillRows)
+    environmentVariableSets.value = normalizeList(environmentVariableSetRows)
     mcps.value = normalizeList(mcpRows)
     globalSettings.value = normalizeList(settingRows)
     llmConfigOptions.value = normalizeList(llmRows)
@@ -419,6 +427,8 @@ function defaultForm() {
     pre_prompt: '',
     post_prompt: '',
     skill_uuids: [],
+    skill_environment_set_uuids: {},
+    skill_environment_drafts: {},
     mcp_uuids: [],
     visibility: 'private',
     access_group_ids: [],
@@ -475,6 +485,15 @@ function formFromRow(row) {
     skill_uuids: (row.skill_bindings || [])
       .map((b) => b.skill?.uuid || b.skill_uuid)
       .filter((u) => u && !wgUuids.has(u)),
+    skill_environment_set_uuids: Object.fromEntries(
+      (row.skill_bindings || [])
+        .filter((binding) => binding.environment_variable_set_uuid)
+        .map((binding) => [
+          binding.skill_uuid,
+          binding.environment_variable_set_uuid
+        ])
+    ),
+    skill_environment_drafts: {},
     mcp_uuids: (row.mcp_bindings || [])
       .map((b) => b.mcp_server?.uuid || b.mcp_uuid)
       .filter(Boolean),
@@ -494,6 +513,7 @@ async function save() {
   saving.value = true
   formError.value = ''
   try {
+    await createDraftEnvironmentSets()
     const payload = buildPayload()
     const uuid = form.value.uuid
     await saveByMode(uuid, payload, createAssistant, updateAssistant)
@@ -509,6 +529,68 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+async function createDraftEnvironmentSets() {
+  for (const skillUuid of form.value.skill_uuids || []) {
+    const skill = skills.value.find((item) => item.uuid === skillUuid)
+    const declarations = skill?.definition?.environment || []
+    if (!declarations.length) {
+      continue
+    }
+    const draft = form.value.skill_environment_drafts?.[skillUuid] || {}
+    const draftValues = draft.values || {}
+    const enteredValues = Object.fromEntries(
+      declarations
+        .filter((item) => String(draftValues[item.name] || '').trim())
+        .map((item) => [item.name, draftValues[item.name]])
+    )
+    const selectedUuid =
+      form.value.skill_environment_set_uuids?.[skillUuid] || ''
+    const existingUuid = selectedUuid === '__new__' ? '' : selectedUuid
+    if (!Object.keys(enteredValues).length) {
+      continue
+    }
+    let existingValues = {}
+    if (existingUuid) {
+      const revealed = await revealEnvironmentVariableSet(existingUuid)
+      existingValues = Object.fromEntries(
+        (revealed?.values || []).map((item) => [item.key, item.value])
+      )
+    }
+    const values = declarations.map((item) => ({
+      key: item.name,
+      value: enteredValues[item.name] ?? existingValues[item.name] ?? ''
+    }))
+    const created = await createEnvironmentVariableSet({
+      name: nextEnvironmentSetName(skill),
+      description: '',
+      values,
+      enabled: true
+    })
+    environmentVariableSets.value.push(created)
+    form.value.skill_environment_set_uuids[skillUuid] = created.uuid
+    draft.values = {}
+  }
+}
+
+function nextEnvironmentSetName(skill) {
+  const assistantName = (
+    form.value.name ||
+    form.value.slug ||
+    'Assistant'
+  ).trim()
+  const skillName = (skill?.name || skill?.slug || 'Skill').trim()
+  const base = `${assistantName} · ${skillName}`.slice(0, 150)
+  const names = new Set(environmentVariableSets.value.map((item) => item.name))
+  if (!names.has(base)) {
+    return base
+  }
+  let suffix = 2
+  while (names.has(`${base} (${suffix})`)) {
+    suffix += 1
+  }
+  return `${base} (${suffix})`.slice(0, 160)
 }
 
 async function saveByMode(uuid, payload, createFn, updateFn) {
@@ -539,7 +621,9 @@ function buildPayload() {
       content: guideContent
     },
     skill_bindings: (form.value.skill_uuids || []).map((uuid) => ({
-      skill_uuid: uuid
+      skill_uuid: uuid,
+      environment_variable_set_uuid:
+        form.value.skill_environment_set_uuids?.[uuid] || null
     })),
     mcp_bindings: (form.value.mcp_uuids || []).map((uuid) => ({
       mcp_uuid: uuid

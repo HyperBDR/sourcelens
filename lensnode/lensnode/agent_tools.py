@@ -1,11 +1,13 @@
 import json
 import mimetypes
 import os
+import re
 import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from langchain_core.tools import tool
@@ -31,6 +33,7 @@ SELF_REPORTING_TOOLS = {
     "git_log",
     "git_diff",
     "summarize_recent_changes",
+    "call_skill_api",
     "run_skill_script",
 }
 
@@ -457,6 +460,38 @@ class _RunSkillScriptArgs(BaseModel):
     stdin: str = Field(default="", description="Optional standard input.")
 
 
+class _CallSkillApiArgs(BaseModel):
+    """Args schema for an HTTP request configured by a loaded Skill."""
+
+    skill: str = Field(description="Loaded Skill slug or name.")
+    base_url_env: str = Field(
+        description="Environment variable containing the API base URL."
+    )
+    method: str = Field(default="GET", description="HTTP method.")
+    path: str = Field(default="", description="Path relative to the base URL.")
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Headers with {{ENV_NAME}} or {{session.name}} references."
+        ),
+    )
+    query: dict[str, object] = Field(
+        default_factory=dict,
+        description="Query parameters with environment/session references.",
+    )
+    json_body: object | None = Field(
+        default=None,
+        description="JSON body with environment/session references.",
+    )
+    capture: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Session value names mapped to dotted JSON response paths. "
+            "Captured values are stored for later calls and redacted."
+        ),
+    )
+
+
 def _build_save_deliverable_tool(command, resources, config, emit_event):
     """Build the save_deliverable tool bound to this run.
 
@@ -571,6 +606,150 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
     return save_deliverable
 
 
+def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
+    """Build a secret-safe HTTP client for loaded manual Skills."""
+
+    session_values = {}
+
+    def emit(name, detail=None):
+        if emit_event is not None:
+            emit_event(name, detail or {})
+
+    @tool("call_skill_api", args_schema=_CallSkillApiArgs)
+    def call_skill_api(
+        skill: str,
+        base_url_env: str,
+        method: str = "GET",
+        path: str = "",
+        headers: dict[str, str] | None = None,
+        query: dict[str, object] | None = None,
+        json_body: object | None = None,
+        capture: dict[str, str] | None = None,
+    ) -> str:
+        """Call an HTTP API using one loaded Skill's bound environment.
+
+        Use this when a loaded Skill describes an HTTP integration. Supply
+        only environment-variable references, never resolved secrets.
+        References use ``{{ENV_NAME}}``. Values captured from an earlier
+        response use ``{{session.name}}`` and exist only for this run.
+        ``base_url_env`` must name a bound environment variable. ``path``
+        must be relative to that base URL. Use ``capture`` to retain tokens
+        without exposing them, for example ``{"token": "data.access"}``.
+        """
+
+        started = time.monotonic()
+        skill_dir = _resolve_skill_dir(resources.root / "skills", skill)
+        if skill_dir is None:
+            emit("tool.call_skill_api.denied", {"skill": skill})
+            return _json({"ok": False, "error": "SKILL_NOT_LOADED"})
+        environment = resources.skill_environments.get(skill_dir.name, {})
+        base_url = environment.get(str(base_url_env or "").strip())
+        if not base_url:
+            return _json({"ok": False, "error": "ENVIRONMENT_NOT_BOUND"})
+        parsed_base = urlparse(base_url)
+        if (
+            parsed_base.scheme not in {"http", "https"}
+            or not parsed_base.netloc
+            or parsed_base.username
+            or parsed_base.password
+        ):
+            return _json({"ok": False, "error": "INVALID_BASE_URL"})
+        parsed_path = urlparse(str(path or ""))
+        if parsed_path.scheme or parsed_path.netloc:
+            return _json({"ok": False, "error": "PATH_MUST_BE_RELATIVE"})
+        request_method = str(method or "GET").upper()
+        if request_method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            return _json({"ok": False, "error": "METHOD_NOT_ALLOWED"})
+
+        skill_session = session_values.setdefault(skill_dir.name, {})
+        try:
+            resolved_headers = _resolve_skill_api_references(
+                headers or {}, environment, skill_session
+            )
+            resolved_query = _resolve_skill_api_references(
+                query or {}, environment, skill_session
+            )
+            resolved_body = _resolve_skill_api_references(
+                json_body, environment, skill_session
+            )
+        except ValueError as exc:
+            return _json({"ok": False, "error": str(exc)})
+
+        url = urljoin(base_url.rstrip("/") + "/", str(path or "").lstrip("/"))
+        emit(
+            "tool.call_skill_api.start",
+            {
+                "skill": skill_dir.name,
+                "method": request_method,
+                "path": parsed_path.path,
+                "summary": f"{request_method} {parsed_path.path or '/'}",
+            },
+        )
+        try:
+            with httpx.Client(
+                timeout=timeout_s,
+                follow_redirects=False,
+            ) as client:
+                response = client.request(
+                    request_method,
+                    url,
+                    headers=resolved_headers,
+                    params=resolved_query,
+                    json=(resolved_body if json_body is not None else None),
+                )
+            payload = _skill_api_response_payload(response)
+            captured_names = []
+            for name, response_path in (capture or {}).items():
+                normalized_name = str(name or "").strip()
+                if not re.fullmatch(
+                    r"[A-Za-z][A-Za-z0-9_]{0,63}", normalized_name
+                ):
+                    return _json(
+                        {"ok": False, "error": "INVALID_CAPTURE_NAME"}
+                    )
+                captured_value = _json_path_value(payload, response_path)
+                if captured_value in (None, ""):
+                    return _json(
+                        {
+                            "ok": False,
+                            "error": "CAPTURE_VALUE_MISSING",
+                            "capture": normalized_name,
+                        }
+                    )
+                skill_session[normalized_name] = captured_value
+                captured_names.append(normalized_name)
+            output = {
+                "ok": response.is_success,
+                "status_code": response.status_code,
+                "response": _redact_skill_api_payload(
+                    payload,
+                    [*environment.values(), *skill_session.values()],
+                ),
+            }
+            if captured_names:
+                output["captured"] = captured_names
+        except httpx.HTTPError:
+            output = {"ok": False, "error": "HTTP_REQUEST_FAILED"}
+        emit(
+            "tool.call_skill_api.done",
+            {
+                "skill": skill_dir.name,
+                "method": request_method,
+                "path": parsed_path.path,
+                "ok": output.get("ok", False),
+                "status_code": output.get("status_code"),
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "summary": (
+                    f"{request_method} {parsed_path.path or '/'} · "
+                    f"{output.get('status_code') or output.get('error')}"
+                ),
+            },
+        )
+        return _json(output)
+
+    return call_skill_api
+
+
 def build_general_chat_tools(command, resources, config=None, emit_event=None):
     """Build tools for General Chat without workspace retrieval tools."""
 
@@ -645,6 +824,9 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             completed = subprocess.run(
                 [*command_args, *args],
                 cwd=str(skill_dir),
+                env=_skill_script_environment(
+                    resources.skill_environments.get(skill_dir.name, {})
+                ),
                 input=stdin,
                 capture_output=True,
                 check=False,
@@ -697,7 +879,20 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         )
         return _json(payload)
 
-    tools = [run_skill_script]
+    tools = [
+        _build_skill_api_tool(
+            resources,
+            timeout_s=min(
+                _positive_int(
+                    tool_policy.get("skill_http_timeout_s"),
+                    default=60,
+                ),
+                300,
+            ),
+            emit_event=emit_event,
+        ),
+        run_skill_script,
+    ]
     if config is not None:
         tools.append(
             _build_save_deliverable_tool(
@@ -759,6 +954,30 @@ def _skill_script_command(script_path):
     if os.access(script_path, os.X_OK):
         return [str(script_path)]
     return None
+
+
+def _skill_script_environment(environment):
+    """Build an isolated subprocess environment for one loaded Skill."""
+
+    allowed = {
+        "HOME",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "LANG",
+        "LC_ALL",
+        "NO_PROXY",
+        "PATH",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_FILE",
+        "TMPDIR",
+    }
+    process_environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key in allowed or key.startswith("LC_")
+    }
+    process_environment.update(environment or {})
+    return process_environment
 
 
 def _decode_output(value):
@@ -979,6 +1198,121 @@ def _run_git(root, args):
         "stdout": completed.stdout[:20000],
         "stderr": completed.stderr[:4000],
     }
+
+
+_SKILL_API_REFERENCE_RE = re.compile(
+    r"{{\s*(?:(session)\.)?([A-Za-z_][A-Za-z0-9_]*)\s*}}"
+)
+_SENSITIVE_RESPONSE_KEY_RE = re.compile(
+    r"(?:^|_)(?:access|refresh|token|secret|password|passwd|authorization|"
+    r"cookie|api_key|private_key)(?:$|_)",
+    re.IGNORECASE,
+)
+
+
+def _resolve_skill_api_references(value, environment, session):
+    """Resolve secret references without exposing their values to the model."""
+
+    if isinstance(value, dict):
+        return {
+            key: _resolve_skill_api_references(item, environment, session)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _resolve_skill_api_references(item, environment, session)
+            for item in value
+        ]
+    if not isinstance(value, str):
+        return value
+
+    exact = _SKILL_API_REFERENCE_RE.fullmatch(value)
+    if exact:
+        source, name = exact.groups()
+        values = session if source == "session" else environment
+        if name not in values:
+            error = (
+                "SESSION_REFERENCE_MISSING"
+                if source == "session"
+                else "ENVIRONMENT_REFERENCE_MISSING"
+            )
+            raise ValueError(error)
+        return values[name]
+
+    def replace(match):
+        source, name = match.groups()
+        values = session if source == "session" else environment
+        if name not in values:
+            error = (
+                "SESSION_REFERENCE_MISSING"
+                if source == "session"
+                else "ENVIRONMENT_REFERENCE_MISSING"
+            )
+            raise ValueError(error)
+        return str(values[name])
+
+    return _SKILL_API_REFERENCE_RE.sub(replace, value)
+
+
+def _skill_api_response_payload(response):
+    """Return a bounded JSON-compatible response payload."""
+
+    if len(response.content) > 100000:
+        return {"detail": "Response body exceeded the 100 KB limit."}
+    try:
+        return response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return response.text[:20000]
+
+
+def _json_path_value(payload, path):
+    """Read a dotted dict/list path from a JSON-compatible payload."""
+
+    value = payload
+    for part in str(path or "").split("."):
+        if not part:
+            return None
+        if isinstance(value, dict):
+            if part not in value:
+                return None
+            value = value[part]
+            continue
+        if isinstance(value, list) and part.isdigit():
+            index = int(part)
+            if index >= len(value):
+                return None
+            value = value[index]
+            continue
+        return None
+    return value
+
+
+def _redact_skill_api_payload(payload, secret_values=()):
+    """Redact credentials and tokens from an external API response."""
+
+    secrets = [
+        str(value) for value in secret_values if value not in (None, "")
+    ]
+    if isinstance(payload, dict):
+        return {
+            key: (
+                "***"
+                if _SENSITIVE_RESPONSE_KEY_RE.search(str(key))
+                else _redact_skill_api_payload(value, secrets)
+            )
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return [_redact_skill_api_payload(item, secrets) for item in payload]
+    if isinstance(payload, str):
+        if payload in secrets:
+            return "***"
+        redacted = payload
+        for secret in secrets:
+            if len(secret) >= 4:
+                redacted = redacted.replace(secret, "***")
+        return redacted
+    return payload
 
 
 def _positive_int(value, default):

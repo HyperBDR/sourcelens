@@ -208,6 +208,62 @@
                 :placeholder="t('lensAdmin.placeholders.skillDescription')"
               />
             </FormRow>
+            <FormRow
+              :label="t('lensAdmin.skills.environmentVariables')"
+              required
+            >
+              <div
+                class="overflow-hidden rounded-lg border border-line bg-surface"
+              >
+                <div
+                  class="flex items-center justify-between gap-3 border-b border-line bg-surface-sunken px-3 py-2.5"
+                >
+                  <p class="text-xs leading-5 text-ink-500">
+                    {{ t('lensAdmin.skills.environmentVariablesHelp') }}
+                  </p>
+                  <BaseButton
+                    size="sm"
+                    variant="outline"
+                    @click="addEnvironment"
+                  >
+                    {{ t('common.add') }}
+                  </BaseButton>
+                </div>
+                <div
+                  v-if="!form.environment.length"
+                  class="px-3 py-4 text-sm text-ink-400"
+                >
+                  {{ t('lensAdmin.skills.noEnvironmentVariables') }}
+                </div>
+                <div
+                  v-for="(item, index) in form.environment"
+                  :key="index"
+                  class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2 border-b border-line p-3 last:border-b-0"
+                >
+                  <input
+                    v-model.trim="item.name"
+                    class="form-input min-w-0 font-mono"
+                    pattern="[A-Z_][A-Z0-9_]*"
+                    :placeholder="t('lensAdmin.skills.environmentKey')"
+                    required
+                  />
+                  <input
+                    v-model="item.description"
+                    class="form-input min-w-0"
+                    :placeholder="t('lensAdmin.skills.environmentDescription')"
+                  />
+                  <button
+                    type="button"
+                    class="inline-flex h-9 w-9 items-center justify-center rounded-md text-danger-600 transition-colors hover:bg-danger-50 hover:text-danger-700"
+                    :aria-label="t('common.delete')"
+                    :title="t('common.delete')"
+                    @click="removeEnvironment(index)"
+                  >
+                    <MinusIcon class="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </FormRow>
             <FormRow :label="t('lensAdmin.fields.content')">
               <div class="mb-2 flex items-center justify-between gap-2">
                 <span class="text-xs text-ink-400">
@@ -489,7 +545,11 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { UploadCloud as UploadCloudIcon, X as XIcon } from '@lucide/vue'
+import {
+  Minus as MinusIcon,
+  UploadCloud as UploadCloudIcon,
+  X as XIcon
+} from '@lucide/vue'
 
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
@@ -700,6 +760,7 @@ function defaultForm() {
     slug: '',
     description: '',
     content: '',
+    environment: [],
     enabled: true
   }
 }
@@ -711,12 +772,26 @@ function formFromRow(row) {
     slug: row.slug || '',
     description: skillDescription(row),
     content: skillContent(row),
+    environment: (row?.definition?.environment || []).map((item) => ({
+      name: item.name || '',
+      description: item.description || '',
+      required: true,
+      secret: !!item.secret || isSensitiveEnvironmentName(item.name)
+    })),
     enabled: row.enabled !== false
   }
 }
 
 function buildPayload() {
-  const definition = { content: form.value.content || '' }
+  const definition = {
+    content: form.value.content || '',
+    environment: (form.value.environment || []).map((item) => ({
+      name: (item.name || '').trim(),
+      description: (item.description || '').trim(),
+      required: true,
+      secret: !!item.secret || isSensitiveEnvironmentName(item.name)
+    }))
+  }
   const description = (form.value.description || '').trim()
   if (description) {
     definition.description = description
@@ -727,6 +802,25 @@ function buildPayload() {
     definition,
     enabled: !!form.value.enabled
   }
+}
+
+function addEnvironment() {
+  form.value.environment.push({
+    name: '',
+    description: '',
+    required: true,
+    secret: false
+  })
+}
+
+function removeEnvironment(index) {
+  form.value.environment.splice(index, 1)
+}
+
+function isSensitiveEnvironmentName(value) {
+  return /(?:PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|PRIVATE_KEY)$/i.test(
+    String(value || '')
+  )
 }
 
 async function load() {
@@ -881,6 +975,9 @@ async function save() {
       await updateGithubSkill(form.value.uuid, githubUrl.value)
       showSuccess(t('lensAdmin.messages.saveSuccess'))
     } else {
+      if (!(form.value.environment || []).length) {
+        throw new Error(t('lensAdmin.environmentVariables.noValues'))
+      }
       await saveByMode(form.value.uuid, buildPayload())
       showSuccess(t('lensAdmin.messages.saveSuccess'))
     }

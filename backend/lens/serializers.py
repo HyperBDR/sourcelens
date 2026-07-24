@@ -13,6 +13,11 @@ from .datasource_services import (
     normalize_workspace_target_path,
     validate_datasource_lensnode,
 )
+from .environment_variables import (
+    missing_required_environment,
+    validate_environment_schema,
+    validate_environment_values,
+)
 from .model_checks import check_assistant_model_refs
 from .models import (
     Assistant,
@@ -21,6 +26,7 @@ from .models import (
     AssistantSkill,
     DataSource,
     DataSourceCredential,
+    EnvironmentVariableSet,
     GlobalSetting,
     MCPServer,
     Message,
@@ -171,13 +177,25 @@ class SkillBindingsField(serializers.Field):
     """Read/write field for assistant skill bindings."""
 
     def to_representation(self, bindings):
-        bindings = bindings.select_related("skill").all()
+        bindings = bindings.select_related(
+            "skill", "environment_variable_set"
+        ).all()
         return [
             {
                 "skill_uuid": str(binding.skill.uuid),
                 "skill_name": binding.skill.name,
                 "enabled": binding.enabled,
                 "load_config": binding.load_config,
+                "environment_variable_set_uuid": (
+                    str(binding.environment_variable_set.uuid)
+                    if binding.environment_variable_set
+                    else None
+                ),
+                "environment_variable_set_name": (
+                    binding.environment_variable_set.name
+                    if binding.environment_variable_set
+                    else ""
+                ),
             }
             for binding in bindings
         ]
@@ -192,11 +210,32 @@ class SkillBindingsField(serializers.Field):
                 raise serializers.ValidationError("Each binding must be an object.")
             if "skill_uuid" not in item:
                 raise serializers.ValidationError("Missing skill_uuid in binding.")
+            skill = Skill.objects.filter(uuid=item["skill_uuid"]).first()
+            if skill is None:
+                raise serializers.ValidationError("Skill does not exist.")
+            variable_set_uuid = item.get("environment_variable_set_uuid")
+            variable_set = None
+            if variable_set_uuid:
+                variable_set = EnvironmentVariableSet.objects.filter(
+                    uuid=variable_set_uuid,
+                    enabled=True,
+                ).first()
+                if variable_set is None:
+                    raise serializers.ValidationError(
+                        "The selected environment variable set is unavailable."
+                    )
+            missing = missing_required_environment(skill, variable_set)
+            if missing:
+                raise serializers.ValidationError(
+                    "Add values for the required environment variables for "
+                    f'"{skill.name}": {", ".join(missing)}.'
+                )
             validated.append(
                 {
                     "skill_uuid": item["skill_uuid"],
                     "enabled": item.get("enabled", True),
                     "load_config": item.get("load_config", {}),
+                    "environment_variable_set": variable_set,
                 }
             )
         return validated
@@ -429,6 +468,9 @@ class AssistantSerializer(serializers.ModelSerializer):
                 AssistantSkill.objects.create(
                     assistant=assistant,
                     skill=skill,
+                    environment_variable_set=binding.get(
+                        "environment_variable_set"
+                    ),
                     enabled=binding.get("enabled", True),
                     load_config=binding.get("load_config", {}),
                 )
@@ -1394,6 +1436,70 @@ class SkillSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def validate_definition(self, value):
+        """Validate and normalize the Skill environment declaration."""
+
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                "The Skill definition must be an object."
+            )
+        normalized = dict(value)
+        environment = validate_environment_schema(
+            normalized.get("environment")
+        )
+        if not environment:
+            raise serializers.ValidationError(
+                "Add at least one environment variable."
+            )
+        normalized["environment"] = environment
+        return normalized
+
+
+class EnvironmentVariableSetSerializer(serializers.ModelSerializer):
+    """Encrypted environment-variable set serializer."""
+
+    values = serializers.JSONField(write_only=True, required=False)
+    keys = serializers.ListField(read_only=True)
+
+    class Meta:
+        model = EnvironmentVariableSet
+        fields = [
+            "uuid",
+            "name",
+            "description",
+            "values",
+            "keys",
+            "enabled",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["uuid", "keys", "created_at", "updated_at"]
+
+    def validate_values(self, value):
+        """Validate environment variable names and scalar values."""
+
+        return validate_environment_values(value)
+
+    def create(self, validated_data):
+        """Create a set and encrypt its values."""
+
+        values = validated_data.pop("values", {})
+        variable_set = EnvironmentVariableSet(**validated_data)
+        variable_set.set_values(values)
+        variable_set.save()
+        return variable_set
+
+    def update(self, instance, validated_data):
+        """Update metadata and optionally replace encrypted values."""
+
+        values = validated_data.pop("values", None)
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        if values is not None:
+            instance.set_values(values)
+        instance.save()
+        return instance
 
 
 class MCPServerSerializer(serializers.ModelSerializer):

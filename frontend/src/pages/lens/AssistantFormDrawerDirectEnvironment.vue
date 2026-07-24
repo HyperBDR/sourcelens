@@ -158,9 +158,7 @@
               :value="task.name"
               :title="task.description"
             >
-              {{
-                formatAssistantType(task.name, t, task.title || task.name)
-              }}
+              {{ formatAssistantType(task.name, t, task.title || task.name) }}
             </option>
           </select>
         </FormRow>
@@ -259,7 +257,7 @@
       </FormRow>
     </div>
 
-    <!-- Wizard Step 3 — Workspace, Skills & MCP -->
+    <!-- Wizard Step 3 — Workspace, Skills, Environment & MCP -->
     <div v-else-if="wizardStep === 3" class="space-y-5">
       <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step3Desc') }}</p>
       <div v-if="!isGeneralChatTask">
@@ -290,64 +288,114 @@
           v-if="selectableSkills.length"
           class="space-y-2 rounded-md border border-line bg-surface-sunken p-2"
         >
-          <label
-            v-for="skill in selectableSkills"
-            :key="skill.uuid"
-            class="group flex cursor-pointer items-start gap-3 rounded-md border bg-surface px-3 py-2.5 transition-colors hover:border-primary-200 hover:bg-primary-50/40"
-            :class="
-              isSkillSelected(skill.uuid)
-                ? 'border-primary-300 bg-primary-50'
-                : 'border-line'
-            "
-          >
-            <input
-              type="checkbox"
-              :value="skill.uuid"
-              v-model="form.skill_uuids"
-              class="sr-only"
-            />
-            <span
-              class="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border transition-colors"
+          <template v-for="skill in selectableSkills" :key="skill.uuid">
+            <label
+              class="group flex cursor-pointer items-start gap-3 rounded-md border bg-surface px-3 py-2.5 transition-colors hover:border-primary-200 hover:bg-primary-50/40"
               :class="
                 isSkillSelected(skill.uuid)
-                  ? 'border-primary-600 bg-primary-600 text-white'
-                  : 'border-line bg-surface text-transparent group-hover:border-primary-300'
+                  ? 'border-primary-300 bg-primary-50'
+                  : 'border-line'
               "
             >
-              <svg
-                class="h-3.5 w-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+              <input
+                type="checkbox"
+                :value="skill.uuid"
+                v-model="form.skill_uuids"
+                class="sr-only"
+              />
+              <span
+                class="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border transition-colors"
+                :class="
+                  isSkillSelected(skill.uuid)
+                    ? 'border-primary-600 bg-primary-600 text-white'
+                    : 'border-line bg-surface text-transparent group-hover:border-primary-300'
+                "
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="3"
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            </span>
-            <div class="min-w-0 flex-1 space-y-1">
-              <div class="flex min-w-0 items-start justify-between gap-2">
-                <div
-                  class="min-w-0 truncate text-sm font-semibold text-ink-900"
+                <svg
+                  class="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  {{ skill.name }}
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="3"
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
+              </span>
+              <div class="min-w-0 flex-1 space-y-1">
+                <div class="flex min-w-0 items-start justify-between gap-2">
+                  <div
+                    class="min-w-0 truncate text-sm font-semibold text-ink-900"
+                  >
+                    {{ skill.name }}
+                  </div>
+                  <StatusBadge
+                    :status="skill.enabled ? 'enabled' : 'disabled'"
+                  />
                 </div>
-                <StatusBadge :status="skill.enabled ? 'enabled' : 'disabled'" />
+                <div class="truncate font-mono text-xs text-ink-400">
+                  {{ skill.slug }}
+                </div>
+                <p
+                  v-if="skillDescription(skill)"
+                  class="line-clamp-2 text-xs leading-5 text-ink-500"
+                >
+                  {{ skillDescription(skill) }}
+                </p>
               </div>
-              <div class="truncate font-mono text-xs text-ink-400">
-                {{ skill.slug }}
+            </label>
+            <div
+              v-if="
+                isSkillSelected(skill.uuid) && skillEnvironment(skill).length
+              "
+              class="-mt-2 space-y-3 rounded-b-md border border-t-0 border-primary-300 bg-surface px-3 py-3"
+            >
+              <div>
+                <div class="text-sm font-medium text-ink-700">
+                  {{ t('lensAdmin.wizard.environmentConfiguration') }}
+                  <span
+                    v-if="hasRequiredEnvironment(skill)"
+                    class="text-danger-600"
+                    >*</span
+                  >
+                </div>
               </div>
-              <p
-                v-if="skillDescription(skill)"
-                class="line-clamp-2 text-xs leading-5 text-ink-500"
+              <div
+                class="space-y-3 rounded-md border border-line bg-surface-sunken p-3"
               >
-                {{ skillDescription(skill) }}
-              </p>
+                <div
+                  v-for="item in skillEnvironment(skill)"
+                  :key="item.name"
+                  class="space-y-1.5"
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="font-mono text-xs font-medium text-ink-700">
+                      {{ item.name
+                      }}<span v-if="item.required" class="text-danger-600">
+                        *</span
+                      >
+                    </label>
+                    <span
+                      v-if="environmentItemSaved(skill, item)"
+                      class="text-xs text-success-700"
+                    >
+                      {{ t('lensAdmin.wizard.environmentConfigured') }}
+                    </span>
+                  </div>
+                  <input
+                    v-model="environmentDraft(skill.uuid).values[item.name]"
+                    class="form-input font-mono"
+                    :type="item.secret ? 'password' : 'text'"
+                    :placeholder="environmentInputPlaceholder(item)"
+                    autocomplete="off"
+                  />
+                </div>
+              </div>
             </div>
-          </label>
+          </template>
         </div>
         <div
           v-else
@@ -625,6 +673,7 @@ const props = defineProps({
   form: { type: Object, required: true },
   lensnodes: { type: Array, default: () => [] },
   skills: { type: Array, default: () => [] },
+  environmentVariableSets: { type: Array, default: () => [] },
   mcps: { type: Array, default: () => [] },
   llmConfigOptions: { type: Array, default: () => [] },
   groups: { type: Array, default: () => [] },
@@ -734,8 +783,10 @@ const canProceedWizard = computed(() => {
       selectedDirs().length > 0
     )
   }
-  if (wizardStep.value === 3 && isGeneralChatTask.value) {
-    return (props.form.skill_uuids || []).length > 0
+  if (wizardStep.value === 3) {
+    const hasRequiredSkill =
+      !isGeneralChatTask.value || (props.form.skill_uuids || []).length > 0
+    return hasRequiredSkill && selectedSkillEnvironmentsConfigured()
   }
   return true
 })
@@ -811,6 +862,53 @@ function skillDescription(skill) {
     skill?.package_manifest?.description ||
     ''
   )
+}
+
+function skillEnvironment(skill) {
+  const environment = skill?.definition?.environment
+  return Array.isArray(environment) ? environment : []
+}
+
+function hasRequiredEnvironment(skill) {
+  return skillEnvironment(skill).some((item) => item.required)
+}
+
+function environmentDraft(skillUuid) {
+  props.form.skill_environment_drafts ||= {}
+  props.form.skill_environment_drafts[skillUuid] ||= {
+    values: {}
+  }
+  return props.form.skill_environment_drafts[skillUuid]
+}
+
+function selectedEnvironmentSet(skillUuid) {
+  const selectedUuid = props.form.skill_environment_set_uuids?.[skillUuid]
+  return props.environmentVariableSets.find(
+    (variableSet) => variableSet.uuid === selectedUuid
+  )
+}
+
+function environmentItemConfigured(skill, item) {
+  const draftValue = environmentDraft(skill.uuid).values[item.name]
+  return !!String(draftValue || '').trim() || environmentItemSaved(skill, item)
+}
+
+function environmentItemSaved(skill, item) {
+  return (selectedEnvironmentSet(skill.uuid)?.keys || []).includes(item.name)
+}
+
+function environmentInputPlaceholder(item) {
+  return item.description || item.name
+}
+
+function selectedSkillEnvironmentsConfigured() {
+  return (props.form.skill_uuids || []).every((skillUuid) => {
+    const skill = props.skills.find((item) => item.uuid === skillUuid)
+    if (!skill) return true
+    return skillEnvironment(skill)
+      .filter((item) => item.required)
+      .every((item) => environmentItemConfigured(skill, item))
+  })
 }
 
 function selectedDirs() {

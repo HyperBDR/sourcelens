@@ -1,4 +1,5 @@
 import io
+import json
 import tempfile
 import zipfile
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ from lens.models import (
     AssistantSkill,
     DataSource,
     DataSourceCredential,
+    EnvironmentVariableSet,
     GlobalSetting,
     LensNode,
     MCPServer,
@@ -30,7 +32,7 @@ from lens.models import (
     Skill,
 )
 from lens.datasource_services import test_datasource_connection
-from lens.services import build_loaded_skills
+from lens.services import build_loaded_skills, resolve_loaded_skill_environment
 from lens.tasks import acquire_datasource_lock, release_datasource_lock
 
 User = get_user_model()
@@ -81,7 +83,7 @@ def bearer_header(user):
     return f"Bearer {AccessToken.for_user(user)}"
 
 
-def skill_zip_upload(name, body):
+def skill_zip_upload(name, body, environment=None):
     """Return an uploaded zip containing one SKILL.md."""
 
     buffer = io.BytesIO()
@@ -94,6 +96,11 @@ def skill_zip_upload(name, body):
     )
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr(f"{name}/SKILL.md", skill_md)
+        if environment is not None:
+            archive.writestr(
+                f"{name}/sourcelens.json",
+                json.dumps({"environment": environment}),
+            )
     buffer.seek(0)
     return SimpleUploadedFile(
         f"{name}.zip",
@@ -326,6 +333,23 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_manual_skill_requires_environment_variable(self):
+        response = self.client.post(
+            "/api/lens/admin/skills/",
+            {
+                "name": "Jira Connector",
+                "slug": "jira-connector",
+                "definition": {"content": "Use Jira.", "environment": []},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "Add at least one environment variable.",
+            str(response.data),
+        )
+
     @patch("lens.skill_generation.run_completion")
     def test_skill_beautify_returns_polished_content(self, mock_run):
         GlobalSetting.objects.create(
@@ -379,6 +403,36 @@ class LensApiTests(TestCase):
         self.assertFalse(Skill.objects.filter(pk=self.skill.pk).exists())
         self.assertFalse(
             AssistantSkill.objects.filter(assistant=self.assistant).exists()
+        )
+
+    def test_uploaded_skill_reads_environment_schema(self):
+        environment = [
+            {
+                "name": "JIRA_API_TOKEN",
+                "description": "Jira token",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "jira-connector",
+                            "Use the Jira API.",
+                            environment,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["definition"]["environment"],
+            environment,
         )
 
     def test_uploaded_skill_update_preserves_assistant_binding(self):
@@ -530,6 +584,100 @@ class LensApiTests(TestCase):
 
         self.assertEqual(len(loaded), 1)
         self.assertNotIn("package_files", loaded[0])
+
+    def test_environment_variable_set_encrypts_values_and_masks_api(self):
+        response = self.client.post(
+            "/api/lens/admin/environment-variable-sets/",
+            {
+                "name": "Jira - Production",
+                "values": [
+                    {
+                        "key": "JIRA_BASE_URL",
+                        "value": "https://jira.example.com",
+                    },
+                    {"key": "JIRA_API_TOKEN", "value": "secret-token"},
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        variable_set = EnvironmentVariableSet.objects.get(
+            name="Jira - Production"
+        )
+        self.assertNotIn("secret-token", variable_set.encrypted_values)
+        self.assertEqual(
+            variable_set.get_values()["JIRA_API_TOKEN"],
+            "secret-token",
+        )
+        self.assertNotIn("values", response.data)
+        self.assertEqual(
+            response.data["keys"],
+            ["JIRA_API_TOKEN", "JIRA_BASE_URL"],
+        )
+
+    def test_assistant_skill_requires_declared_environment_values(self):
+        self.skill.definition = {
+            "environment": [
+                {
+                    "name": "JIRA_API_TOKEN",
+                    "description": "Jira token",
+                    "required": True,
+                    "secret": True,
+                }
+            ]
+        }
+        self.skill.save(update_fields=["definition"])
+        response = self.client.post(
+            "/api/lens/assistants/",
+            {
+                "name": "Jira Assistant",
+                "slug": "jira-assistant",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "selected_task": "knowledge_qa",
+                "selected_dirs": [{"path": "/workspace/repo"}],
+                "skill_bindings": [{"skill_uuid": str(self.skill.uuid)}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("JIRA_API_TOKEN", str(response.data))
+
+    def test_runtime_resolves_environment_without_snapshot_plaintext(self):
+        self.skill.definition = {
+            "environment": [
+                {
+                    "name": "JIRA_API_TOKEN",
+                    "description": "Jira token",
+                    "required": True,
+                    "secret": True,
+                }
+            ]
+        }
+        self.skill.save(update_fields=["definition"])
+        variable_set = EnvironmentVariableSet.objects.create(
+            name="Jira - Production"
+        )
+        variable_set.set_values(
+            {"JIRA_API_TOKEN": "secret-token", "UNDECLARED": "hidden"}
+        )
+        variable_set.save(update_fields=["encrypted_values"])
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=self.skill,
+            environment_variable_set=variable_set,
+        )
+
+        loaded = build_loaded_skills(self.assistant)
+        runtime = resolve_loaded_skill_environment(loaded)
+
+        self.assertNotIn("environment", loaded[0])
+        self.assertNotIn("secret-token", str(loaded))
+        self.assertEqual(
+            runtime[0]["environment"],
+            {"JIRA_API_TOKEN": "secret-token"},
+        )
 
     def test_assistant_model_check_uses_agent_model_ref(self):
         config = LLMConfig.objects.create(

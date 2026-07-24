@@ -43,6 +43,7 @@ def _resources(root):
         root=Path(root),
         skill_paths=[],
         context_skill_contents=[],
+        skill_environments={},
         mcp_config_path=Path(root) / "mcp.json",
     )
 
