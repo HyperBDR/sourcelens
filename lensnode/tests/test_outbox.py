@@ -11,9 +11,12 @@ def _make_client():
         "Config",
         (),
         {
+            "agent_version": "test-agent",
             "name": "test-node",
+            "protocol_version": "v1",
             "request_timeout_s": 240,
             "max_concurrent_runs": 1,
+            "workspace_path": "/missing-test-workspace",
         },
     )()
     return LensNodeClient(config)
@@ -103,5 +106,97 @@ def test_outbox_preserves_frame_and_order_on_send_failure():
         assert [json.loads(item)["content_delta"] for item in ws.sent] == ["a"]
         remaining = [frame["content_delta"] for frame in client._outbox]
         assert remaining == ["b", "c"]
+
+    asyncio.run(exercise())
+
+
+def test_completed_run_hands_terminal_frame_to_outbox():
+    """A completed run enters the outbox before leaving running_tasks."""
+
+    async def exercise():
+        client = _make_client()
+        run_uuid = "completed-run"
+
+        class FakeExecutor:
+            """Emit a terminal frame without yielding to the event loop."""
+
+            async def execute(self, command, emit):
+                """Complete the requested run immediately."""
+
+                emit(
+                    {
+                        "type": "run_done",
+                        "run_uuid": command["run_uuid"],
+                        "status": "done",
+                    }
+                )
+
+        client.executor = FakeExecutor()
+        client.running_tasks[run_uuid] = asyncio.current_task()
+
+        await client._execute_command(run_uuid, {"run_uuid": run_uuid})
+
+        assert run_uuid not in client.running_tasks
+        assert list(client._outbox) == [
+            {
+                "type": "run_done",
+                "run_uuid": run_uuid,
+                "status": "done",
+            }
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_reconnect_hello_claims_buffered_terminal_run_before_flush():
+    """Hello protects a completed run whose terminal frame is buffered."""
+
+    async def exercise():
+        client = _make_client()
+        client.running_tasks["running-run"] = asyncio.current_task()
+        client.running_tasks["datasource:sync-1"] = asyncio.current_task()
+        client._enqueue(
+            {
+                "type": "run_output",
+                "run_uuid": "incomplete-run",
+                "content_delta": "partial",
+            }
+        )
+        client._enqueue(
+            {
+                "type": "run_output",
+                "run_uuid": "completed-run",
+                "final_content": "complete answer",
+            }
+        )
+        client._enqueue(
+            {
+                "type": "run_done",
+                "run_uuid": "completed-run",
+                "status": "done",
+            }
+        )
+
+        ws = FakeWebSocket()
+        client.websocket = ws
+        await client._send_hello()
+
+        loop_task = asyncio.create_task(client._send_loop(ws))
+        await _wait_until(lambda: len(ws.sent) == 4)
+        client.stopping.set()
+        client._outbox_ready.set()
+        await asyncio.wait_for(loop_task, timeout=1)
+
+        frames = [json.loads(item) for item in ws.sent]
+        assert frames[0]["type"] == "hello"
+        assert frames[0]["active_runs"] == [
+            "completed-run",
+            "running-run",
+        ]
+        assert [frame["type"] for frame in frames[1:]] == [
+            "run_output",
+            "run_output",
+            "run_done",
+        ]
 
     asyncio.run(exercise())

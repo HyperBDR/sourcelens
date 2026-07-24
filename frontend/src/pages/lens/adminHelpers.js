@@ -8,6 +8,27 @@
 
 export const EMPTY_VALUE = '—'
 
+const ASSISTANT_TYPE_TRANSLATION_KEYS = {
+  code_analysis: 'codeAnalysis',
+  general_chat: 'generalChat',
+  knowledge_qa: 'knowledgeQa',
+  qa: 'knowledgeQa'
+}
+
+export function formatAssistantType(value, t, fallback = '') {
+  const normalizedValue = String(value || '').trim()
+  if (!normalizedValue) {
+    return EMPTY_VALUE
+  }
+
+  const translationKey = ASSISTANT_TYPE_TRANSLATION_KEYS[normalizedValue]
+  if (translationKey) {
+    return t(`lensAdmin.assistantTypes.${translationKey}`)
+  }
+
+  return fallback || normalizedValue.replace(/[_-]+/g, ' ')
+}
+
 export function compactUuid(value) {
   if (!value) {
     return EMPTY_VALUE

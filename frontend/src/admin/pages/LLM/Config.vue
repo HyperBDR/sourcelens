@@ -96,6 +96,11 @@
                     <th
                       class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
                     >
+                      {{ t('llm.config.modelParameters') }}
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                    >
                       {{ t('llm.config.apiBase') }}
                     </th>
                     <th
@@ -162,6 +167,29 @@
                       class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
                     >
                       {{ row.config?.model || '–' }}
+                    </td>
+                    <td class="px-4 py-4 text-sm text-gray-700">
+                      <div
+                        v-if="getRowModelParameters(row).length"
+                        class="space-y-1 whitespace-nowrap"
+                      >
+                        <div
+                          v-for="parameter in getRowModelParameters(row)"
+                          :key="parameter.name"
+                        >
+                          <span class="text-gray-500"
+                            >{{ parameter.name }}:</span
+                          >
+                          {{ parameter.value }}
+                          <span
+                            v-if="parameter.isDefault"
+                            class="text-xs text-gray-400"
+                          >
+                            ({{ t('llm.config.defaultParameterValue') }})
+                          </span>
+                        </div>
+                      </div>
+                      <span v-else class="text-gray-400">–</span>
                     </td>
                     <td
                       class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
@@ -873,7 +901,10 @@
             />
           </div>
 
-          <div class="rounded-xl border border-gray-200 bg-gray-50/80 p-4">
+          <div
+            v-if="advancedEditableParams.length"
+            class="rounded-xl border border-gray-200 bg-gray-50/80 p-4"
+          >
             <h3
               class="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700"
             >
@@ -892,75 +923,29 @@
               </svg>
               {{ t('llm.config.advancedOptions') }}
             </h3>
-            <div class="space-y-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-xs font-medium text-gray-600 mb-1"
-                    >{{ t('llm.config.maxOutputTokens') }} (max_tokens)</label
-                  >
-                  <input
-                    v-model.number="form.config.max_tokens"
-                    type="number"
-                    min="1"
-                    class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                    placeholder="optional"
-                  />
-                </div>
-                <div>
-                  <label class="block text-xs font-medium text-gray-600 mb-1">{{
-                    t('llm.config.temperature')
-                  }}</label>
-                  <input
-                    v-model.number="form.config.temperature"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="2"
-                    class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                  />
-                </div>
-                <div>
-                  <label class="block text-xs font-medium text-gray-600 mb-1">{{
-                    t('llm.config.topP')
-                  }}</label>
-                  <input
-                    v-model.number="form.config.top_p"
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="1"
-                    class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                  />
-                </div>
-              </div>
-              <template v-if="form.provider === 'azure_openai'">
-                <div
-                  class="grid grid-cols-2 gap-3 border-t border-gray-200 pt-3"
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div
+                v-for="parameter in advancedEditableParams"
+                :key="parameter"
+                class="flex min-w-0 flex-col"
+              >
+                <label
+                  class="mb-1 block h-5 truncate text-xs font-medium text-gray-600"
+                  :title="parameter"
                 >
-                  <div>
-                    <label
-                      class="block text-xs font-medium text-gray-600 mb-1"
-                      >{{ t('llm.config.deployment') }}</label
-                    >
-                    <input
-                      v-model="form.config.deployment"
-                      type="text"
-                      class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      class="block text-xs font-medium text-gray-600 mb-1"
-                      >{{ t('llm.config.apiVersion') }}</label
-                    >
-                    <input
-                      v-model="form.config.api_version"
-                      type="text"
-                      class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                    />
-                  </div>
-                </div>
-              </template>
+                  {{ parameterLabel(parameter) }}
+                </label>
+                <input
+                  :value="form.config[parameter]"
+                  :type="parameterInputType(parameter)"
+                  :step="parameterInputStep(parameter)"
+                  :min="parameterInputMin(parameter)"
+                  :max="parameterInputMax(parameter)"
+                  class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                  :placeholder="parameterPlaceholder(parameter)"
+                  @input="updateParameterValue(parameter, $event.target.value)"
+                />
+              </div>
             </div>
           </div>
 
@@ -1013,6 +998,7 @@
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmAdminApi } from '@/admin/api'
+import { DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS } from '@/admin/api/llmTimeout'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import ProviderIcon from '@/components/llm/ProviderIcon.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -1037,6 +1023,37 @@ const PROVIDER_LABELS = {
   openrouter: 'OpenRouter'
 }
 
+const CORE_CONFIG_PARAMS = new Set(['api_base', 'api_key', 'model'])
+const COMMON_EDITABLE_PARAMS = [
+  'api_base',
+  'api_key',
+  'model',
+  'max_tokens',
+  'temperature',
+  'top_p',
+  'request_timeout_seconds'
+]
+const GLOBAL_PARAM_DEFAULTS = {
+  max_tokens: 16384,
+  temperature: 0.7,
+  top_p: 1,
+  request_timeout_seconds: DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS
+}
+const PARAM_LABEL_KEYS = {
+  api_version: 'apiVersion',
+  deployment: 'deployment',
+  max_tokens: 'maxOutputTokens',
+  request_timeout_seconds: 'requestTimeoutSeconds',
+  temperature: 'temperature',
+  top_p: 'topP'
+}
+const NUMERIC_PARAM_RULES = {
+  max_tokens: { min: 1, step: 1 },
+  request_timeout_seconds: { min: 1, step: 1 },
+  temperature: { min: 0, max: 2, step: 0.1 },
+  top_p: { min: 0, max: 1, step: 0.1 }
+}
+
 function providerLabel(provider) {
   return PROVIDER_LABELS[provider] || provider || '–'
 }
@@ -1059,6 +1076,7 @@ const pageSize = ref(20)
 const pendingDeleteId = ref(null)
 const userList = ref([])
 const modelsData = ref({ providers: [], capability_labels: {} })
+const providerSchemas = ref({})
 
 const showConfigModal = ref(false)
 const showTestModal = ref(false)
@@ -1092,7 +1110,8 @@ const form = reactive({
     api_version: '2024-02-15-preview',
     max_tokens: null,
     temperature: null,
-    top_p: null
+    top_p: null,
+    request_timeout_seconds: null
   },
   is_active: true
 })
@@ -1104,6 +1123,16 @@ const providersFromModels = computed(() => {
   }))
 })
 
+const currentProviderSchema = computed(
+  () => providerSchemas.value[form.provider] || null
+)
+
+const advancedEditableParams = computed(() =>
+  getProviderEditableParams(form.provider).filter(
+    (parameter) => !CORE_CONFIG_PARAMS.has(parameter)
+  )
+)
+
 const currentProviderModels = computed(() => {
   const list = (modelsData.value?.providers || []).find(
     (p) => (p.id || '').toLowerCase() === (form.provider || '').toLowerCase()
@@ -1112,6 +1141,9 @@ const currentProviderModels = computed(() => {
 })
 
 const defaultApiBaseForProvider = computed(() => {
+  if (currentProviderSchema.value?.default_api_base) {
+    return currentProviderSchema.value.default_api_base
+  }
   const p = (modelsData.value?.providers || []).find(
     (x) => (x.id || '').toLowerCase() === (form.provider || '').toLowerCase()
   )
@@ -1311,9 +1343,107 @@ function getRowCapabilities(row) {
   return model?.capabilities || []
 }
 
+function getProviderEditableParams(provider) {
+  const editableParams = providerSchemas.value[provider]?.editable_params
+  if (Array.isArray(editableParams) && editableParams.length) {
+    return editableParams
+  }
+  if (provider === 'azure_openai') {
+    return [
+      'api_base',
+      'api_key',
+      'deployment',
+      'model',
+      'api_version',
+      'max_tokens',
+      'temperature',
+      'top_p',
+      'request_timeout_seconds'
+    ]
+  }
+  return COMMON_EDITABLE_PARAMS
+}
+
+function getParameterDefault(provider, parameter) {
+  const schema = providerSchemas.value[provider] || {}
+  const providerDefault = schema[`default_${parameter}`]
+  if (providerDefault !== null && providerDefault !== undefined) {
+    return providerDefault
+  }
+  return GLOBAL_PARAM_DEFAULTS[parameter]
+}
+
+function getRowModelParameters(row) {
+  const config = row.config || {}
+  return getProviderEditableParams(row.provider)
+    .filter((parameter) => !CORE_CONFIG_PARAMS.has(parameter))
+    .map((parameter) => {
+      const configuredValue = config[parameter]
+      const hasConfiguredValue =
+        configuredValue !== null &&
+        configuredValue !== undefined &&
+        configuredValue !== ''
+      return {
+        name: parameter,
+        value: hasConfiguredValue
+          ? configuredValue
+          : getParameterDefault(row.provider, parameter),
+        isDefault: !hasConfiguredValue
+      }
+    })
+    .filter(
+      (parameter) => parameter.value !== null && parameter.value !== undefined
+    )
+}
+
+function parameterLabel(parameter) {
+  const labelKey = PARAM_LABEL_KEYS[parameter]
+  return labelKey ? t(`llm.config.${labelKey}`) : parameter
+}
+
+function parameterInputType(parameter) {
+  return NUMERIC_PARAM_RULES[parameter] ? 'number' : 'text'
+}
+
+function parameterInputStep(parameter) {
+  return NUMERIC_PARAM_RULES[parameter]?.step
+}
+
+function parameterInputMin(parameter) {
+  return NUMERIC_PARAM_RULES[parameter]?.min
+}
+
+function parameterInputMax(parameter) {
+  return NUMERIC_PARAM_RULES[parameter]?.max
+}
+
+function parameterPlaceholder(parameter) {
+  const defaultValue = getParameterDefault(form.provider, parameter)
+  if (defaultValue !== null && defaultValue !== undefined) {
+    return t('llm.config.defaultParameterPlaceholder', {
+      value: defaultValue
+    })
+  }
+  return t('llm.config.optionalParameterPlaceholder')
+}
+
+function updateParameterValue(parameter, value) {
+  if (value === '') {
+    form.config[parameter] = null
+    return
+  }
+  form.config[parameter] = NUMERIC_PARAM_RULES[parameter]
+    ? Number(value)
+    : value
+}
+
 function onProviderChange() {
   form.config.model = ''
   form.config.api_base = defaultApiBaseForProvider.value || ''
+  const editableParams = new Set(getProviderEditableParams(form.provider))
+  for (const parameter of Object.keys(form.config)) {
+    if (!editableParams.has(parameter)) delete form.config[parameter]
+  }
   connectionTestedSuccess.value = false
 }
 
@@ -1329,7 +1459,8 @@ function resetForm() {
     api_version: '2024-02-15-preview',
     max_tokens: null,
     temperature: null,
-    top_p: null
+    top_p: null,
+    request_timeout_seconds: null
   }
   form.is_active = true
   formMessage.value = ''
@@ -1346,6 +1477,16 @@ async function loadModels() {
   } catch (e) {
     if (e?.response?.status !== 404) console.error(e)
     modelsData.value = { providers: [], capability_labels: {} }
+  }
+}
+
+async function loadProviderSchemas() {
+  try {
+    const data = await llmAdminApi.getLLMConfigProviders()
+    providerSchemas.value = data?.providers || {}
+  } catch (e) {
+    if (e?.response?.status !== 404) console.error(e)
+    providerSchemas.value = {}
   }
 }
 
@@ -1386,6 +1527,7 @@ async function editConfig(row) {
     form.provider = (data?.provider || 'openai').toLowerCase()
     const c = data?.config || {}
     form.config = {
+      ...c,
       api_key: c.api_key ?? '',
       api_base: c.api_base ?? '',
       model: c.model ?? '',
@@ -1393,7 +1535,8 @@ async function editConfig(row) {
       api_version: c.api_version ?? '2024-02-15-preview',
       max_tokens: c.max_tokens ?? null,
       temperature: c.temperature ?? null,
-      top_p: c.top_p ?? null
+      top_p: c.top_p ?? null,
+      request_timeout_seconds: c.request_timeout_seconds ?? null
     }
     form.is_active = data?.is_active !== false
   } catch (e) {
@@ -1534,19 +1677,30 @@ function stopTestCallStream() {
   }
 }
 
+function buildFormConfigPayload(includeEmpty = false) {
+  const payload = {}
+  for (const parameter of getProviderEditableParams(form.provider)) {
+    const value = form.config[parameter]
+    if (value !== null && value !== undefined && value !== '') {
+      payload[parameter] = value
+    } else if (
+      includeEmpty &&
+      parameter !== 'api_key' &&
+      !CORE_CONFIG_PARAMS.has(parameter)
+    ) {
+      payload[parameter] = null
+    }
+  }
+  return payload
+}
+
 async function testConnection() {
   testLoading.value = true
   formMessage.value = ''
   try {
     const payload = {
       provider: form.provider,
-      config: {
-        api_key: form.config.api_key || undefined,
-        api_base: form.config.api_base || undefined,
-        model: form.config.model || undefined,
-        deployment: form.config.deployment || undefined,
-        api_version: form.config.api_version || undefined
-      }
+      config: buildFormConfigPayload()
     }
     const res = await llmAdminApi.postLLMConfigTest(payload)
     if (res?.ok) {
@@ -1577,16 +1731,7 @@ async function submitConfigForm() {
   try {
     const body = {
       provider: form.provider,
-      config: {
-        api_key: form.config.api_key || undefined,
-        api_base: form.config.api_base || undefined,
-        model: form.config.model || undefined,
-        deployment: form.config.deployment || undefined,
-        api_version: form.config.api_version || undefined,
-        max_tokens: form.config.max_tokens ?? undefined,
-        temperature: form.config.temperature ?? undefined,
-        top_p: form.config.top_p ?? undefined
-      },
+      config: buildFormConfigPayload(Boolean(editingId.value)),
       is_active: form.is_active
     }
     if (editingId.value) {
@@ -1618,16 +1763,7 @@ async function setActive(row, value) {
     const c = data?.config || {}
     const body = {
       provider: (data?.provider || row.provider || 'openai').toLowerCase(),
-      config: {
-        api_key: c.api_key ?? '',
-        api_base: c.api_base ?? undefined,
-        model: c.model ?? undefined,
-        deployment: c.deployment ?? undefined,
-        api_version: c.api_version ?? undefined,
-        max_tokens: c.max_tokens ?? undefined,
-        temperature: c.temperature ?? undefined,
-        top_p: c.top_p ?? undefined
-      },
+      config: { ...c },
       is_active: value
     }
     await llmAdminApi.putLLMConfigDetail(row.uuid || row.id, body)
@@ -1644,16 +1780,7 @@ async function setAsDefault(row) {
     const c = data?.config || {}
     const body = {
       provider: (data?.provider || row.provider || 'openai').toLowerCase(),
-      config: {
-        api_key: c.api_key ?? '',
-        api_base: c.api_base ?? undefined,
-        model: c.model ?? undefined,
-        deployment: c.deployment ?? undefined,
-        api_version: c.api_version ?? undefined,
-        max_tokens: c.max_tokens ?? undefined,
-        temperature: c.temperature ?? undefined,
-        top_p: c.top_p ?? undefined
-      },
+      config: { ...c },
       is_active: data?.is_active !== false,
       is_default: true
     }
@@ -1680,6 +1807,7 @@ function confirmDeleteConfig(row) {
 }
 
 onMounted(() => {
+  loadProviderSchemas()
   loadModels()
   loadAll()
 })

@@ -20,6 +20,8 @@ from .logging_utils import (
     task_log,
     utc_now,
 )
+from .tls import create_config_ssl_context
+from .tls import warn_if_verification_disabled
 from .workspace import available_dirs
 
 LOGGER = logging.getLogger("lensnode")
@@ -30,6 +32,7 @@ class LensNodeClient:
 
     def __init__(self, config):
         self.config = config
+        self.ssl_context = create_config_ssl_context(config)
         self.executor = LensNodeExecutor(config)
         self.stopping = asyncio.Event()
         # Set while draining on shutdown/upgrade: stop accepting new runs and
@@ -229,10 +232,15 @@ class LensNodeClient:
         """Run one WebSocket connection until it closes."""
 
         connected = False
+        connection_options = {
+            "open_timeout": 10,
+            "ping_interval": None,
+        }
+        if url.lower().startswith("wss://"):
+            connection_options["ssl"] = self.ssl_context
         async with connect(
             url,
-            open_timeout=10,
-            ping_interval=None,
+            **connection_options,
         ) as websocket:
             self.websocket = websocket
             try:
@@ -525,6 +533,10 @@ class LensNodeClient:
                 **message,
                 "ai_gateway_url": self.config.ai_gateway_url,
                 "lensnode_token": self.config.token,
+                "tls_skip_verify": getattr(
+                    self.config, "tls_skip_verify", False
+                ),
+                "tls_ca_file": getattr(self.config, "tls_ca_file", None),
             }
             result = await asyncio.to_thread(
                 sync_datasource,
@@ -602,10 +614,19 @@ class LensNodeClient:
         def emit(payload):
             loop.call_soon_threadsafe(self._enqueue, payload)
 
+        completed = False
         try:
             await self.executor.execute(message, emit)
+            completed = True
         finally:
-            self.running_tasks.pop(run_uuid, None)
+            try:
+                if completed:
+                    # Let terminal frames enter the outbox before the run stops
+                    # being reported as active. A cancelled run has no terminal
+                    # frame and must leave running_tasks immediately.
+                    await asyncio.sleep(0)
+            finally:
+                self.running_tasks.pop(run_uuid, None)
 
     def _consume_task_exception(self, task):
         """Consume task exceptions so cancelled runs do not leak warnings."""
@@ -616,6 +637,22 @@ class LensNodeClient:
             task.exception()
         except asyncio.CancelledError:
             return
+
+    def _reported_active_runs(self):
+        """Return runs executing or awaiting terminal-frame delivery."""
+
+        active_runs = {
+            key
+            for key in self.running_tasks
+            if not key.startswith("datasource:")
+        }
+        active_runs.update(
+            str(payload["run_uuid"])
+            for payload in self._outbox
+            if payload.get("type") == "run_done"
+            and payload.get("run_uuid")
+        )
+        return sorted(active_runs)
 
     async def _send_hello(self):
         """Send initial LensNode capabilities.
@@ -642,11 +679,7 @@ class LensNodeClient:
                 ],
             )
         )
-        active_runs = [
-            key
-            for key in self.running_tasks
-            if not key.startswith("datasource:")
-        ]
+        active_runs = self._reported_active_runs()
         await self.websocket.send(
             json.dumps(
                 {
@@ -779,7 +812,9 @@ class LensNodeClient:
 async def _run_client():
     """Run LensNode and bind process signals to graceful shutdown."""
 
-    client = LensNodeClient(load_config())
+    config = load_config()
+    warn_if_verification_disabled(config, LOGGER)
+    client = LensNodeClient(config)
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(

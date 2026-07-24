@@ -7,13 +7,12 @@
     <main class="mx-auto max-w-3xl px-4 py-8">
       <BaseLoading v-if="loading && !items.length" />
 
-      <div
-        v-else-if="notFound"
-        class="rounded-lg border border-line bg-surface py-16 text-center"
-      >
-        <p class="text-sm font-medium text-ink-500">
-          {{ t('lens.qa.notFound') }}
-        </p>
+      <div v-else-if="accessState">
+        <PublicQaAccessState
+          :type="accessState"
+          @login="goLogin"
+          @home="goHome"
+        />
       </div>
 
       <template v-else>
@@ -33,11 +32,7 @@
         </div>
 
         <div v-else class="space-y-3">
-          <SharedQaCard
-            v-for="item in items"
-            :key="item.token"
-            :item="item"
-          />
+          <SharedQaCard v-for="item in items" :key="item.token" :item="item" />
         </div>
 
         <div v-if="nextOffset !== null" class="mt-5 text-center">
@@ -58,8 +53,10 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
+import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
 import SharedQaCard from '@/components/lens/SharedQaCard.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -68,6 +65,8 @@ import { getPublicAssistantQa } from '@/api/lens'
 const props = defineProps({ slug: { type: String, required: true } })
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 const PAGE_SIZE = 20
 const assistant = ref(null)
@@ -76,13 +75,26 @@ const total = ref(0)
 const nextOffset = ref(0)
 const loading = ref(true)
 const loadingMore = ref(false)
-const notFound = ref(false)
+const accessState = ref(null)
+
+function accessStateFromError(error) {
+  const code = error?.response?.data?.code
+  if (error?.response?.status === 403 && code === 'AUTHENTICATION_REQUIRED') {
+    return 'login-required'
+  }
+  if (error?.response?.status === 403 && code === 'ASSISTANT_ACCESS_DENIED') {
+    return 'forbidden'
+  }
+  return 'not-found'
+}
 
 async function load() {
   loading.value = true
-  notFound.value = false
+  accessState.value = null
   items.value = []
   nextOffset.value = 0
+  total.value = 0
+
   try {
     const data = await getPublicAssistantQa(props.slug, {
       limit: PAGE_SIZE,
@@ -92,8 +104,8 @@ async function load() {
     items.value = data?.results || []
     total.value = data?.total || 0
     nextOffset.value = data?.next_offset ?? null
-  } catch {
-    notFound.value = true
+  } catch (error) {
+    accessState.value = accessStateFromError(error)
   } finally {
     loading.value = false
   }
@@ -114,6 +126,14 @@ async function loadMore() {
   } finally {
     loadingMore.value = false
   }
+}
+
+function goLogin() {
+  router.push({ path: '/login', query: { next: route.fullPath } })
+}
+
+function goHome() {
+  router.push('/')
 }
 
 onMounted(load)

@@ -7,50 +7,62 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+**Harness-based Agentic RAG** — no embeddings, no vector DB, no pre-indexing
+
 </div>
 
-**SourceLens** is a file-system-native retrieval engine that leverages AI coding agents (Claude Code, Codex, etc.) to search, understand, and answer questions from local documents and codebases. It runs inside a sandboxed environment, making it a reliable retrieval backend for RAG pipelines.
+**SourceLens** is Agentic RAG built on an AI coding agent harness — the same kind of harness behind tools like Cursor, Claude Code, or Codex, not those products themselves — running inside a sandboxed environment. Instead of embedding your files into a vector index ahead of time, SourceLens hands them directly to the agent harness, which reads, searches, and reasons over the file system on demand — turning any pile of documents or code into something you can just ask questions of.
 
-## How It Works
-
-```
-User selects documents / code
-        │
-        ▼
-  Local file system storage
-        │
-        ▼
-  Pre-retrieval LLM processing ── query understanding, context planning
-        │
-        ▼
-  Sandboxed AI agent retrieval ── Claude Code / Codex search & analyze
-        │
-        ▼
-  Post-retrieval LLM processing ── answer synthesis, citation formatting
-        │
-        ▼
-  Structured answer with source references
-```
+![What is SourceLens](docs/images/what_is_sourcelens.png)
 
 Instead of vector embeddings or keyword indexes, SourceLens uses AI coding agents running in a sandbox to directly read, navigate, and reason over the file system. This means the retrieval understands code structure, cross-file relationships, and semantic intent — not just surface-level text matching.
 
+## Background
+
+Our first attempts at RAG used graphical workflow tools like Dify and n8n. They asked a lot of the people building on them, and the real difficulty was always upfront: splitting documents and embedding them before they ever reached a vector store. That prep work took real effort to get right, and even after all of it, recall accuracy stayed disappointing — answers would come back incomplete, sometimes missing the point that was in the document all along.
+
+Around the same time, we noticed something different from using Cursor for development: it did no pre-training or pre-indexing at all, yet it was consistently accurate at reasoning over a codebase. That raised an obvious question — why not use the same approach for RAG?
+
+That's the idea behind SourceLens: instead of the embed-then-retrieve pipeline, hand documents and code straight to an AI coding agent harness — the same kind of logic behind Cursor, Claude Code, or Codex — and let it read and reason over them directly. In practice we've found the answers come back more accurate, more precise, and more concise than what the traditional RAG pipeline produced, and that experience is what turned into this project.
+
+Most teams building a RAG knowledge base today go through some version of this same graphical-orchestration pipeline — tools like Dify, n8n, Coze, or FastGPT, wired up to a vector store. SourceLens's core goal is to drive the cost of standing up a working RAG system as close to zero as possible, without trading away answer quality.
+
+The underlying loop stays deliberately simple: a query triggers the agent to search, it synthesizes what it finds into a partial answer, and if that's not enough, it searches again and synthesizes again — repeating until it can answer with confidence. Skills and MCP integration are the planned path for extending what the agent can reach beyond the local file system, without changing that core loop.
+
 ## Why SourceLens
 
-- **AI-native retrieval** — leverages Claude Code and Codex as the retrieval engine, no vector DB required
-- **Sandboxed execution** — all agent operations run in isolated environments, safe for arbitrary codebases
+- **Agentic RAG, not embeddings** — an agent harness (the same kind behind Cursor, Claude Code, Codex, etc.) reads and reasons over files directly, no vector DB, no pre-indexing step
+- **Sandboxed execution** — all agent operations run in isolated environments, safe for arbitrary codebases and documents
 - **Pre/post LLM orchestration** — customizable LLM steps before and after retrieval for query refinement and answer synthesis
 - **Source-traceable** — every answer references exact file paths and code locations
-- **Works with any format** — documents (md, txt, pdf) and code (py, js, ts, vue, go, etc.)
+- **Works with any format** — Markdown, Word, PPT, images, and code (py, js, ts, vue, go, etc.), with zero prep
 
-## Typical Use Cases
+## Use Cases
 
-| Scenario | Description |
-|---|---|
-| **Code Q&A** | Ask natural-language questions about large codebases, get precise answers with file references |
-| **Document retrieval** | Search across project docs, API specs, and design documents in one query |
-| **RAG pipeline backend** | Serve as the retrieval layer for LLM applications needing private knowledge |
-| **Code review assist** | Find related changes and similar patterns across the repository |
-| **Onboarding** | New team members explore code structure and business logic via natural language |
+Three scenarios from how we use SourceLens internally today:
+
+### 1. RAG over documents — no embedding step required
+
+Point SourceLens at documents in any of these formats and start asking questions immediately — no pre-indexing, no embedding pipeline to run first:
+
+- Markdown exported from online docs platforms (e.g. ViewPress)
+- Word documents
+- PowerPoint decks
+- Content inside images
+
+### 2. Deep code insight from a screenshot
+
+Hit an error? Paste a screenshot of it and let the agent harness trace it back through the actual source — a deep, source-level investigation instead of just matching the error string.
+
+### 3. Company-wide Skills as a universal chat interface
+
+We package internal engineering knowledge as company-level Skills that anyone can use to find and diagnose problems, exposed as one universal chat mode:
+
+- **No install** — nothing to set up in a local tool first
+- **Answer online** — ask in a chat session and get the answer directly
+- **Generate & download** — the same session can generate a file and hand it back to you
+
+> Also fun in testing: pointing the same deep-insight flow at long-form content like novels turns out to be a surprisingly effective way to explore and query them.
 
 ## Architecture
 

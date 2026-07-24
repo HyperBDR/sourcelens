@@ -313,8 +313,18 @@
           <span class="chat-header-title">{{ t('lens.qa.mineTitle') }}</span>
         </template>
         <template v-else>
-          <AssistantSwitcher v-if="switchable" mode="header" />
-          <span v-else class="chat-header-title">{{ assistantName }}</span>
+          <div class="chat-header-assistant">
+            <AssistantSwitcher v-if="switchable" mode="header" />
+            <div v-else class="chat-header-title">{{ assistantName }}</div>
+            <p
+              v-if="assistantDescription"
+              class="chat-header-description"
+              :class="{ 'pl-2': switchable }"
+              :title="assistantDescription"
+            >
+              {{ assistantDescription }}
+            </p>
+          </div>
           <router-link
             v-if="assistantSlug"
             :to="`/lens/assistants/${assistantSlug}/qa`"
@@ -999,6 +1009,13 @@ const assistantName = computed(
   () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
+const assistantDescription = computed(
+  () =>
+    selectedAssistant.value?.description?.trim() ||
+    publicAssistant.value?.description?.trim() ||
+    ''
+)
+
 // The top header turns the assistant name into a switcher only when an
 // authenticated user has more than one assistant to choose from. Mirror the
 // switcher's own visibility rule (active assistants only) so the header never
@@ -1542,15 +1559,25 @@ async function createNewSession(notify = true) {
   }
   mySharesOpen.value = false
 
-  const session = await createSession({
-    assistant_uuid: selectedAssistant.value.uuid,
-    title: ''
-  })
+  let session
+  try {
+    session = await createSession({
+      assistant_uuid: selectedAssistant.value.uuid,
+      title: ''
+    })
+  } catch {
+    showError(t('lens.chat.sessionCreateFailed'))
+    return null
+  }
 
   sessions.value = [session, ...sessions.value]
   selectedSessionUuid.value = session.uuid
+  question.value = ''
+  if (composerRef.value) composerRef.value.style.height = 'auto'
+  clearAttachments()
   messages.value = []
   currentRun.value = null
+  resetStreamState()
   router.replace({
     path: route.path,
     query: { session: session.uuid }
@@ -2439,6 +2466,14 @@ onBeforeUnmount(() => {
   @apply min-w-0 truncate text-base font-semibold text-ink-900;
 }
 
+.chat-header-assistant {
+  @apply min-w-0 flex-1;
+}
+
+.chat-header-description {
+  @apply mt-0.5 max-w-2xl truncate text-xs leading-5 text-ink-500;
+}
+
 .chat-header-back {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-500 transition-colors;
 }
@@ -2926,8 +2961,8 @@ onBeforeUnmount(() => {
 }
 
 .composer-thumb-spinner {
-  @apply absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2
-    rounded-full border-2 border-gray-300 border-t-primary-500;
+  @apply absolute inset-0 m-auto h-5 w-5 rounded-full border-2
+    border-gray-300 border-t-primary-500;
   animation: spin 0.7s linear infinite;
 }
 

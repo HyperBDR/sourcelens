@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import threading
 
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain.agents.middleware import SummarizationMiddleware
-from langchain_core.messages import RemoveMessage
+from langchain_core.messages import HumanMessage, RemoveMessage
 
 from .agent_tools import (
     SELF_REPORTING_TOOLS,
@@ -74,10 +76,10 @@ CONTINUATION_SUMMARY_PROMPT = (
     "are still gathering evidence from the workspace and MUST keep working "
     "after this compaction. The notes below replace the older conversation "
     "history.\n\n"
-    "Extract only what you need to continue and ultimately answer the "
-    "question. Use these sections, writing 'None' where empty:\n\n"
-    "## ORIGINAL QUESTION\n"
-    "The user's exact question, verbatim.\n\n"
+    "The user's own messages are preserved verbatim outside this summary, "
+    "so do NOT restate the question here — focus on distilling the evidence "
+    "and the remaining work. Use these sections, writing 'None' where "
+    "empty:\n\n"
     "## EVIDENCE GATHERED SO FAR\n"
     "Concrete findings already discovered, with file paths and the key "
     "facts/identifiers/values they contain. Be specific.\n\n"
@@ -97,10 +99,41 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
     make every later LLM round re-send a growing transcript, and per-round
     latency scales with that context. Compacting the oldest turns into a
     summary keeps the recent working set verbatim while bounding context,
-    cutting tail latency and the risk of context overflow. The workspace
-    stays fully re-queryable, so any evidence dropped from the summary can
-    simply be searched again.
+    cutting tail latency and the risk of context overflow. Re-queryable
+    evidence (tool/file reads) can be searched again from the workspace if
+    dropped; user-authored input cannot, so it is exempted from compaction
+    (see _partition_messages and issue #60).
     """
+
+    def _partition_messages(self, conversation_messages, cutoff_index):
+        """Keep human input verbatim; summarize only re-queryable turns.
+
+        The base split summarizes everything before the cutoff, which includes
+        the user's original input. Content the user pasted into the chat is NOT
+        re-queryable from the workspace, so summarizing it away loses it
+        irrecoverably (issue #60). Move every HumanMessage out of the
+        to-summarize set into the preserved set so the subject and the task
+        survive compaction; summarize only the re-queryable tool/AI turns.
+        """
+
+        to_summarize = conversation_messages[:cutoff_index]
+        preserved = conversation_messages[cutoff_index:]
+        human_anchors = [
+            message
+            for message in to_summarize
+            if isinstance(message, HumanMessage)
+        ]
+        if not human_anchors:
+            return to_summarize, preserved
+        non_human = [
+            message
+            for message in to_summarize
+            if not isinstance(message, HumanMessage)
+        ]
+        # Anchors are clustered ahead of the preserved tail, not kept in their
+        # original positions. The stream stays valid (no orphaned ToolMessages;
+        # only HumanMessages move) and the user turns survive verbatim.
+        return non_human, human_anchors + preserved
 
     def before_model(self, state, runtime):
         """Summarize on threshold and report what was compacted."""
@@ -127,7 +160,7 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
 
 
 def _build_summarization_middleware(
-    config, model_ref, emit_event, cancel_event=None
+    config, model_ref, emit_event, cancel_event=None, run_uuid=""
 ):
     """Build context-compaction middleware, or None when disabled.
 
@@ -150,7 +183,10 @@ def _build_summarization_middleware(
         ai_gateway_url=config.ai_gateway_url,
         token=config.token,
         request_timeout_s=config.request_timeout_s,
+        tls_skip_verify=getattr(config, "tls_skip_verify", False),
+        tls_ca_file=getattr(config, "tls_ca_file", None),
         cancel_event=cancel_event,
+        run_uuid=run_uuid,
     )
     middleware = LensSummarizationMiddleware(
         model=summary_model,
@@ -161,6 +197,53 @@ def _build_summarization_middleware(
     )
     middleware._emit_event = emit_event
     return middleware
+
+
+_OFFLOAD_PATCH_LOCK = threading.Lock()
+
+
+def _apply_offload_thresholds(config):
+    """Tune deepagents' proactive file-offload thresholds (issue #60).
+
+    FilesystemMiddleware evicts oversized tool results (and human messages) to
+    re-readable workspace files, but create_deep_agent hard-wires it with the
+    library defaults (tool 20000 / human 50000 tokens) and exposes no way to
+    configure them. Lowering the tool threshold offloads large workspace reads
+    to files sooner, keeping the inline context lean so heavy-retrieval runs
+    stop thrashing the summarizer (issue #60 "Snape timeline" repro: offload
+    off = 4 compactions and no convergence; offload on = 0 compactions).
+
+    The thresholds are captured into the wrapper closure and the wrapper is
+    installed once per process, guarded by a lock so concurrent runs (lensnode
+    executes runs on worker threads) cannot double-install. There is no shared
+    mutable state to race across runs. Values are injected via setdefault, so
+    the class identity is unchanged (required-middleware and isinstance checks
+    are unaffected) and any explicit call-site argument still wins. The tool
+    threshold is always set (config default 5000; 0 disables eviction); a None
+    human threshold leaves the library default in place.
+    """
+
+    if getattr(FilesystemMiddleware.__init__, "_lens_offload_wrapped", False):
+        return
+    with _OFFLOAD_PATCH_LOCK:
+        if getattr(
+            FilesystemMiddleware.__init__, "_lens_offload_wrapped", False
+        ):
+            return
+        tool_tokens = config.offload_tool_tokens
+        human_tokens = config.offload_human_tokens
+        original_init = FilesystemMiddleware.__init__
+
+        def init_with_offload_defaults(self, *args, **kwargs):
+            kwargs.setdefault("tool_token_limit_before_evict", tool_tokens)
+            if human_tokens is not None:
+                kwargs.setdefault(
+                    "human_message_token_limit_before_evict", human_tokens
+                )
+            original_init(self, *args, **kwargs)
+
+        init_with_offload_defaults._lens_offload_wrapped = True
+        FilesystemMiddleware.__init__ = init_with_offload_defaults
 
 
 class LensDeepAgentRuntime:
@@ -227,21 +310,34 @@ class LensDeepAgentRuntime:
                 "history_turns": len(command.get("history") or []),
             },
         )
+        _apply_offload_thresholds(self.config)
+        emit_agent_event(
+            "deepagents.offload.configured",
+            {
+                "tool_tokens": self.config.offload_tool_tokens,
+                "human_tokens": self.config.offload_human_tokens,
+            },
+        )
         resources = prepare_runtime_resources(
             self.config,
             command,
             emit_event=emit_agent_event,
         )
         try:
+            run_uuid = str(command.get("run_uuid") or "")
             model = LensGatewayChatModel(
                 model_ref=str(model_ref),
                 ai_gateway_url=self.config.ai_gateway_url,
                 token=self.config.token,
                 request_timeout_s=self.config.request_timeout_s,
+                tls_skip_verify=getattr(
+                    self.config, "tls_skip_verify", False
+                ),
+                tls_ca_file=getattr(self.config, "tls_ca_file", None),
                 emit_output=emit_output,
                 on_activity=on_activity,
                 cancel_event=cancel_event,
-                run_uuid=str(command.get("run_uuid") or ""),
+                run_uuid=run_uuid,
             )
             if _is_general_chat(command):
                 tools = build_general_chat_tools(
@@ -276,7 +372,11 @@ class LensDeepAgentRuntime:
                 kwargs["skills"] = resources.skill_paths
 
             summarizer = _build_summarization_middleware(
-                self.config, model_ref, emit_agent_event, cancel_event
+                self.config,
+                model_ref,
+                emit_agent_event,
+                cancel_event,
+                run_uuid=run_uuid,
             )
             if summarizer is not None:
                 kwargs["middleware"] = [summarizer]
@@ -309,6 +409,7 @@ class LensDeepAgentRuntime:
                 agent,
                 messages,
                 max_turns,
+                model=model,
                 emit_event=emit_agent_event,
                 answer_language=_detect_answer_language(question),
                 cancel_event=cancel_event,
@@ -367,6 +468,27 @@ def _detect_answer_language(question):
     if has(0x0600, 0x06FF):
         return "Arabic"
     return "English"
+
+
+def _pick_text(zh_text, en_text, answer_language):
+    """Pick zh_text for Chinese, en_text for every other detected language.
+
+    LensNode has no i18n framework (no gettext/Babel, checked — this
+    inline branch is the established way this file produces user-facing
+    text), so this stays a plain lookup rather than pulling one in for a
+    handful of strings. It only distinguishes Chinese from "everything
+    else" — Japanese/Korean/Thai/Russian/Arabic (all real
+    _detect_answer_language outcomes) fall back to en_text same as
+    English. TODO: if LensNode-generated user-facing strings keep
+    growing, revisit proper i18n; also consider moving this text out of
+    LensNode entirely — have it report a structured signal (e.g.
+    truncated=True on the run_done frame) and let the backend/frontend
+    render it, the way errorModelTimeout/errorNodeLost already work in
+    Chat.vue::mapRunError. Not done now: fixing the truncation bug itself
+    takes priority over that reshuffle.
+    """
+
+    return zh_text if answer_language == "Chinese" else en_text
 
 
 def _system_prompt(scenario, command, context_skill_contents=None):
@@ -696,6 +818,7 @@ def _run_agent_with_turn_limit(
     agent,
     messages,
     max_turns,
+    model=None,
     emit_event=None,
     answer_language="English",
     cancel_event=None,
@@ -705,6 +828,15 @@ def _run_agent_with_turn_limit(
     `messages` may be prefixed with prior conversation turns. Historical
     assistant turns are excluded from both the turn count and event
     emission, so the limit and trace reflect only the current run.
+
+    A subagent ``task`` delegation runs to completion inside a single
+    parent-graph step (deepagents calls it via a plain, synchronous
+    ``subagent.invoke(...)``), so the turn count can only be checked
+    between parent steps — a delegation in flight when the budget is
+    reached can overshoot max_turns by however many turns it used
+    internally before returning. This is expected, not a bug in the
+    count itself; it is the reason a forced wrap-up (see
+    _synthesize_wrapup_answer) matters more than counting precisely.
 
     Returns (answer, truncated) where truncated=True means the agent
     was stopped before it finished naturally.
@@ -756,18 +888,94 @@ def _run_agent_with_turn_limit(
             break
 
     answer = _extract_final_message(last_state or {})
+    if truncated and not answer.strip() and model is not None:
+        # The cutoff landed mid-turn (e.g. right after a tool call, before
+        # any answer text), so there is nothing to extract — but the
+        # conversation likely still holds real findings from every prior
+        # turn. Ask once more, without tools, for a best-effort synthesis
+        # instead of discarding all of that work.
+        answer = _synthesize_wrapup_answer(
+            model,
+            (last_state or {}).get("messages", []),
+            answer_language,
+            emit_event,
+        )
     if truncated and answer.strip():
-        if answer_language == "Chinese":
-            answer += (
-                "\n\n---\n*已达到当前分析深度上限，"
-                "如需更完整的结果，请调高分析档位后重试。*"
-            )
-        else:
-            answer += (
-                "\n\n---\n*Reached the current analysis-depth limit. "
-                "Raise the analysis tier for a more complete result.*"
-            )
+        answer += _pick_text(
+            "\n\n---\n*已达到当前分析深度上限，本次调查未完全完成。"
+            "如需更完整的结果，请调高分析档位后重试。*",
+            "\n\n---\n*Reached the current analysis-depth limit before "
+            "the investigation fully completed. Raise the analysis "
+            "tier for a more complete result.*",
+            answer_language,
+        )
     return answer, truncated
+
+
+def _strip_dangling_tool_call(messages):
+    """Drop a trailing AI message with unresolved tool_calls.
+
+    A truncated loop can stop right after the model requested a tool call
+    but before the tool result was recorded. Most providers reject a
+    follow-up call whose history ends on a tool_calls message with no
+    matching tool response, so that dangling turn is dropped before
+    asking for a wrap-up answer — every earlier, resolved turn is kept.
+    """
+
+    if not messages:
+        return messages
+    last = messages[-1]
+    if getattr(last, "type", "") == "ai" and getattr(
+        last, "tool_calls", None
+    ):
+        return messages[:-1]
+    return messages
+
+
+def _synthesize_wrapup_answer(model, current, answer_language, emit_event):
+    """Ask the model for a best-effort answer after the turn budget runs out.
+
+    Called only when the agent was truncated mid-turn and there is no
+    extractable answer text (see _run_agent_with_turn_limit). Makes one
+    plain, tool-free call asking the model to synthesize its best answer
+    from the conversation so far, so the turns already spent are not
+    wasted. Returns "" (letting the caller keep the empty-answer path) if
+    this call itself fails.
+
+    A RunCancelledError is deliberately NOT caught here: model.invoke()
+    checks cancel_event at the top of the gateway call
+    (LensGatewayChatModel._check_cancelled), so a cancellation landing in
+    the narrow window between the turn-limit loop exiting and this call
+    starting must still stop the run, not be swallowed into an empty
+    "wrap-up failed" result.
+    """
+
+    instruction = _pick_text(
+        "你已经达到本次分析的步数上限，不能再调用任何工具。请基于目前为止"
+        "已经掌握的全部信息，直接给出你能给出的最完整回答。如果调查还有"
+        "尚未确认或未覆盖到的部分，请明确说明。",
+        "You have reached the step limit for this analysis and cannot "
+        "call any more tools. Based on everything you have gathered so "
+        "far, write the most complete answer you can now. Clearly note "
+        "any part of the investigation you were not able to confirm.",
+        answer_language,
+    )
+    wrapup_messages = _strip_dangling_tool_call(current) + [
+        HumanMessage(content=instruction)
+    ]
+    if emit_event is not None:
+        emit_event("deepagents.agent.wrapup", {})
+    try:
+        response = model.invoke(wrapup_messages)
+    except RunCancelledError:
+        raise
+    except Exception:
+        LOGGER.exception("Wrap-up synthesis call failed after truncation")
+        return ""
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content.strip()
+    return str(content or "").strip()
 
 
 def _model_summary(message, limit=160):
