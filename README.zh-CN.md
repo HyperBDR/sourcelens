@@ -11,7 +11,15 @@
 
 </div>
 
-**SourceLens** 是一套基于 Harness 的 Agentic RAG（Agentic Retrieval-Augmented Generation）方案：底层由一套 AI 编程 agent harness 驱动（跟 Claude Code、Codex 背后是同一类 harness，但并非直接集成这些产品本身），在沙箱环境中运行。它不需要提前把文件做 embedding 建成向量索引，而是直接把文档和代码交给 agent harness，由其在文件系统上按需读取、检索、推理——让任意一堆文档或代码都能直接拿来问问题。
+**SourceLens** 是一套基于 Harness 的 Agentic RAG（Agentic Retrieval-Augmented Generation）方案：底层由一套 AI 编程 agent harness 驱动（跟 Cursor、Claude Code、Codex 背后是同一类 harness，但并非直接集成这些产品本身），在沙箱环境中运行。它不需要提前把文件做 embedding 建成向量索引，而是直接把文档和代码交给 agent harness，由其在文件系统上按需读取、检索、推理——让任意一堆文档或代码都能直接拿来问问题。
+
+## 项目背景
+
+我们最早做 RAG 用的是 Dify、n8n 这类图形化编排工具。这类工具对使用者的专业要求很高，而真正的难点始终在前期：文档要先拆分、做 embedding，才能存入向量库。这一步准备工作要做好并不容易，投入了不少精力之后，召回的准确率却始终不太理想——回答经常不完整，有时候明明文档里写着答案，却还是会被漏掉。
+
+差不多同一时期，我们在用 Cursor 做开发时注意到一件不一样的事：它完全没有做任何预训练或者预先建索引的动作，但在代码库上推理、回答问题的准确度却一直很稳。这就带来一个很自然的问题——既然如此，为什么不能把这套思路用在 RAG 上？
+
+这就是 SourceLens 的由来：不走"先 embedding、再检索"这条传统路径，而是把文档和代码直接交给 AI 编程 agent harness——跟 Cursor、Claude Code、Codex 背后是同一套逻辑——让它直接读取、推理。实际用下来，我们发现答案的准确度、精确度和简练程度，都明显好过传统 RAG 方式的效果，这段经历也就变成了现在这个项目。
 
 ## 工作流程
 
@@ -28,7 +36,7 @@ flowchart TD
 
 ## 为什么选择 SourceLens
 
-- **Agentic RAG，而非 embedding** — agent harness（跟 Claude Code、Codex 背后是同一类 harness）直接读取并推理文件，无需向量数据库，无需提前建索引
+- **Agentic RAG，而非 embedding** — agent harness（跟 Cursor、Claude Code、Codex 背后是同一类 harness）直接读取并推理文件，无需向量数据库，无需提前建索引
 - **沙箱隔离执行** — 所有 agent 操作在隔离环境中运行，安全处理任意代码仓库和文档
 - **LLM 前后置编排** — 检索前后可配置 LLM 步骤，优化查询理解与答案合成
 - **来源可追溯** — 每个答案精确关联到源文件路径和代码位置
