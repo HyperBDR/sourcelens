@@ -1,5 +1,5 @@
 <template>
-  <div class="layout-admin flex h-screen w-full overflow-hidden bg-ink-50">
+  <div class="layout-admin fixed inset-0 flex w-full overflow-hidden bg-ink-50">
     <AdminSidebar
       :show-mobile-menu="showMobileMenu"
       @close="showMobileMenu = false"
