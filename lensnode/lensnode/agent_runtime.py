@@ -470,7 +470,7 @@ def _detect_answer_language(question):
     return "English"
 
 
-def _bilingual(zh_text, en_text, answer_language):
+def _pick_text(zh_text, en_text, answer_language):
     """Pick zh_text for Chinese, en_text for every other detected language.
 
     LensNode has no i18n framework (no gettext/Babel, checked — this
@@ -901,7 +901,7 @@ def _run_agent_with_turn_limit(
             emit_event,
         )
     if truncated and answer.strip():
-        answer += _bilingual(
+        answer += _pick_text(
             "\n\n---\n*已达到当前分析深度上限，本次调查未完全完成。"
             "如需更完整的结果，请调高分析档位后重试。*",
             "\n\n---\n*Reached the current analysis-depth limit before "
@@ -943,7 +943,7 @@ def _synthesize_wrapup_answer(model, current, answer_language, emit_event):
     this call itself fails.
     """
 
-    instruction = _bilingual(
+    instruction = _pick_text(
         "你已经达到本次分析的步数上限，不能再调用任何工具。请基于目前为止"
         "已经掌握的全部信息，直接给出你能给出的最完整回答。如果调查还有"
         "尚未确认或未覆盖到的部分，请明确说明。",

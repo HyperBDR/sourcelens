@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from lensnode import agent_runtime
 from lensnode.agent_runtime import (
-    _bilingual,
+    _pick_text,
     _build_initial_messages,
     _run_agent_with_turn_limit,
     _strip_dangling_tool_call,
@@ -118,12 +118,12 @@ def test_turn_limit_no_history_runs_to_completion():
     assert "answer 2" in answer
 
 
-def test_bilingual_picks_chinese_only_for_chinese():
-    assert _bilingual("zh", "en", "Chinese") == "zh"
-    assert _bilingual("zh", "en", "English") == "en"
+def test_pick_text_picks_chinese_only_for_chinese():
+    assert _pick_text("zh", "en", "Chinese") == "zh"
+    assert _pick_text("zh", "en", "English") == "en"
     # every other detected language falls back to English text too
-    assert _bilingual("zh", "en", "Japanese") == "en"
-    assert _bilingual("zh", "en", "Korean") == "en"
+    assert _pick_text("zh", "en", "Japanese") == "en"
+    assert _pick_text("zh", "en", "Korean") == "en"
 
 
 def test_strip_dangling_tool_call_drops_trailing_pending_call():
