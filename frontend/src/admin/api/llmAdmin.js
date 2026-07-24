@@ -4,6 +4,7 @@
  * Providers schema: GET llm-config/providers/. Test: POST llm-config/test/.
  */
 import apiClient from '@/api/index'
+import { resolveLLMConfigTestTimeoutMs } from './llmTimeout'
 
 const LLM_ADMIN_REQUEST_TIMEOUT = 90000
 
@@ -80,7 +81,7 @@ export const llmAdminApi = {
   postLLMConfigTest(body) {
     return apiClient
       .post('/v1/admin/llm-config/test/', body, {
-        timeout: LLM_ADMIN_REQUEST_TIMEOUT
+        timeout: resolveLLMConfigTestTimeoutMs(body)
       })
       .then(extractData)
   },

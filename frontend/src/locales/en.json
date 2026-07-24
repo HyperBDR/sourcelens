@@ -684,6 +684,7 @@
       "apiKey": "API Key",
       "apiKeyPlaceholder": "Leave blank to keep existing",
       "model": "Model",
+      "modelParameters": "Model parameters",
       "modelPlaceholder": "e.g. gpt-4o-mini",
       "apiBase": "API Base URL",
       "apiBasePlaceholder": "Optional",
@@ -738,6 +739,10 @@
       "per1MTokens": "per 1M tokens",
       "temperature": "Temperature",
       "topP": "Top P",
+      "requestTimeoutSeconds": "Request timeout (s)",
+      "defaultParameterPlaceholder": "Default: {value}",
+      "optionalParameterPlaceholder": "Optional",
+      "defaultParameterValue": "default",
       "advancedOptions": "Advanced Options",
       "errors": {
         "invalid_api_key": "Invalid or expired API key. Please check and try again.",
