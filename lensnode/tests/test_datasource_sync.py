@@ -115,8 +115,74 @@ def test_discover_github_org_repositories(monkeypatch):
     )
 
 
-def test_discover_github_user_repositories_after_org_404(monkeypatch):
-    """GitHub user namespace URLs fall back from orgs to users."""
+def test_discover_github_user_private_repositories_after_org_404(
+    monkeypatch,
+):
+    """GitHub user namespaces include token-accessible private repos."""
+
+    calls = []
+
+    def fake_api(url, config, auth_style, timeout=30):
+        del config, timeout
+        calls.append((url, auth_style))
+        if "/orgs/" in url:
+            return None, 'HTTP 404: {"message":"Not Found"}'
+        if "/user/repos?" in url:
+            return [
+                {
+                    "name": "private-repo",
+                    "full_name": "CarltonXu/private-repo",
+                    "clone_url": (
+                        "https://github.com/CarltonXu/private-repo.git"
+                    ),
+                    "default_branch": "main",
+                    "private": True,
+                },
+                {
+                    "name": "shared-repo",
+                    "full_name": "Other/shared-repo",
+                    "clone_url": (
+                        "https://github.com/Other/shared-repo.git"
+                    ),
+                    "default_branch": "main",
+                    "private": True,
+                },
+            ], ""
+        return [], ""
+
+    monkeypatch.setattr("lensnode.datasource_sync._git_api_json", fake_api)
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._git_repo_branches",
+        lambda repo_url, config: ["main"],
+    )
+
+    result = _discover_git_organization(
+        {
+            "repo_url": "https://github.com/CarltonXu/",
+            "provider": "github",
+            "auth_scheme": "token",
+            "access_token": "ghp_example",
+        }
+    )
+
+    assert result["status"] == "success"
+    assert result["details"]["owner_type"] == "user"
+    assert result["details"]["repositories"][0]["path"] == (
+        "CarltonXu/private-repo"
+    )
+    assert len(result["details"]["repositories"]) == 1
+    assert calls[0][0] == (
+        "https://api.github.com/orgs/CarltonXu/repos?per_page=100&page=1"
+    )
+    assert calls[1][0] == (
+        "https://api.github.com/user/repos?visibility=all"
+        "&affiliation=owner,collaborator,organization_member"
+        "&per_page=100&page=1"
+    )
+
+
+def test_discover_github_public_user_repositories_without_token(monkeypatch):
+    """Anonymous GitHub user discovery keeps the public endpoint fallback."""
 
     calls = []
 
@@ -144,18 +210,13 @@ def test_discover_github_user_repositories_after_org_404(monkeypatch):
         {
             "repo_url": "https://github.com/CarltonXu/",
             "provider": "github",
-            "auth_scheme": "token",
-            "access_token": "ghp_example",
+            "auth_scheme": "none",
         }
     )
 
     assert result["status"] == "success"
-    assert result["details"]["owner_type"] == "user"
     assert result["details"]["repositories"][0]["path"] == (
         "CarltonXu/dotfiles"
-    )
-    assert calls[0][0] == (
-        "https://api.github.com/orgs/CarltonXu/repos?per_page=100&page=1"
     )
     assert calls[1][0] == (
         "https://api.github.com/users/CarltonXu/repos?per_page=100&page=1"

@@ -625,6 +625,16 @@ def _discover_github_projects(parsed, group_path, config):
     )
     if projects:
         return projects, attempts
+    authenticated_projects, authenticated_attempts = (
+        _discover_github_authenticated_user_projects(
+            api_base,
+            owner,
+            config,
+        )
+    )
+    attempts.extend(authenticated_attempts)
+    if authenticated_projects:
+        return authenticated_projects, attempts
     user_projects, user_attempts = _discover_github_owner_projects(
         api_base,
         owner,
@@ -648,6 +658,41 @@ def _github_api_base(parsed, config):
         return "https://api.github.com"
     base_url = parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
     return f"{base_url}/api/v3"
+
+
+def _discover_github_authenticated_user_projects(api_base, owner, config):
+    """Discover token-accessible repositories for a GitHub user owner."""
+
+    credentials = _load_credentials(config)
+    if not credentials.get("token"):
+        return None, []
+
+    projects = []
+    attempts = []
+    for page in range(1, 11):
+        url = (
+            f"{api_base}/user/repos?visibility=all"
+            "&affiliation=owner,collaborator,organization_member"
+            f"&per_page=100&page={page}"
+        )
+        payload, error_detail = _git_api_json(
+            url,
+            config,
+            auth_style="github",
+        )
+        attempts.append(_git_api_attempt("github", url, error_detail))
+        if not isinstance(payload, list):
+            return None if page == 1 else projects, attempts
+        if not payload:
+            break
+        projects.extend(
+            _github_project(item, api_base, "user")
+            for item in payload
+            if _github_repository_matches_owner(item, owner)
+        )
+        if len(payload) < 100:
+            break
+    return projects, attempts
 
 
 def _discover_github_owner_projects(api_base, owner, owner_type, config):
@@ -682,6 +727,15 @@ def _discover_github_owner_projects(api_base, owner, owner_type, config):
     if last_error and not projects:
         return None, attempts
     return projects, attempts
+
+
+def _github_repository_matches_owner(item, owner):
+    """Return whether a GitHub repository belongs to the requested owner."""
+
+    item_owner = (item.get("owner") or {}).get("login") or ""
+    if not item_owner:
+        item_owner, _, _ = str(item.get("full_name") or "").partition("/")
+    return item_owner.casefold() == str(owner or "").casefold()
 
 
 def _github_project(item, api_base, owner_type):
