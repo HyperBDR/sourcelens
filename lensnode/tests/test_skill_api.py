@@ -255,6 +255,38 @@ def test_manual_skill_api_redacts_camel_case_credentials(
     }
 
 
+def test_manual_skill_api_redacts_only_complete_secret_tokens(
+    monkeypatch,
+    tmp_path,
+):
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "reference": "super-secret-value",
+                "message": "Bearer super-secret",
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_skill_api_tool(_resources(tmp_path))
+
+    payload = json.loads(
+        tool.invoke(
+            {
+                "skill": "devmind-connector",
+                "base_url_env": "DEVMIND_BASE_URL",
+                "path": "/api/v1/quotation/quotations",
+            }
+        )
+    )
+
+    assert payload["response"] == {
+        "reference": "super-secret-value",
+        "message": "Bearer ***",
+    }
+
+
 def test_manual_skill_api_stops_reading_oversized_response(
     monkeypatch,
     tmp_path,

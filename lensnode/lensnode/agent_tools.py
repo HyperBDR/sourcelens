@@ -1405,7 +1405,11 @@ def _redact_skill_api_payload(payload, secret_values=()):
         redacted = payload
         for secret in secrets:
             if len(secret) >= 4:
-                redacted = redacted.replace(secret, "***")
+                pattern = (
+                    rf"(?<![A-Za-z0-9._~+/-]){re.escape(secret)}"
+                    r"(?![A-Za-z0-9._~+/-])"
+                )
+                redacted = re.sub(pattern, "***", redacted)
         return redacted
     return payload
 
