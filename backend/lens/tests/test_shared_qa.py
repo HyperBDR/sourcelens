@@ -1,6 +1,11 @@
+import tempfile
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.files.storage import storages
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from lens.models import (
@@ -8,9 +13,12 @@ from lens.models import (
     AssistantAccess,
     LensNode,
     Message,
+    MessageAttachment,
     Run,
+    RunOutputFile,
     Session,
     SharedQA,
+    SharedQAFile,
 )
 
 User = get_user_model()
@@ -18,6 +26,22 @@ User = get_user_model()
 TEST_CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+}
+
+TEST_MEDIA_ROOT = tempfile.mkdtemp()
+TEST_DELIVERABLE_ROOT = tempfile.mkdtemp()
+TEST_STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": TEST_MEDIA_ROOT},
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+    "deliverables": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": TEST_DELIVERABLE_ROOT},
     },
 }
 
@@ -30,12 +54,13 @@ def _results(data):
     return data
 
 
-@override_settings(CACHES=TEST_CACHES)
+@override_settings(CACHES=TEST_CACHES, STORAGES=TEST_STORAGES)
 class SharedQAApiTests(TestCase):
     """Integration tests for the public shareable Q&A feature."""
 
     def setUp(self):
         self.client = APIClient()
+        self._use_test_deliverable_storage()
         self.owner = User.objects.create_user(
             username="qa-owner",
             email="owner@example.com",
@@ -74,6 +99,20 @@ class SharedQAApiTests(TestCase):
             visibility=Assistant.Visibility.PUBLIC,
         )
         self.run = self._make_done_run()
+
+    def _use_test_deliverable_storage(self):
+        """Point callable FileFields at the overridden test storage."""
+
+        for model in [RunOutputFile, SharedQAFile]:
+            field = model._meta.get_field("file")
+            original_storage = field.storage
+            field.storage = storages["deliverables"]
+            self.addCleanup(
+                setattr,
+                field,
+                "storage",
+                original_storage,
+            )
 
     def _make_done_run(self, assistant=None):
         """Create a completed run with a question and an answer message."""
@@ -115,7 +154,7 @@ class SharedQAApiTests(TestCase):
             format="json",
         )
 
-    def _private_share_token(self):
+    def _private_share_token(self, with_files=False):
         """Create a share token from a private assistant run."""
 
         private_assistant = Assistant.objects.create(
@@ -127,7 +166,64 @@ class SharedQAApiTests(TestCase):
             visibility=Assistant.Visibility.PRIVATE,
         )
         run = self._make_done_run(private_assistant)
+        if with_files:
+            self._add_run_files(run)
         return self._share(run=run).data["token"]
+
+    def _add_run_files(self, run=None):
+        """Add one input image and one output deliverable to a run."""
+
+        run = run or self.run
+        attachment_bytes = b"question image bytes"
+        output_bytes = b"<h1>Shared report</h1>"
+        attachment = MessageAttachment.objects.create(
+            session=run.session,
+            message=run.input_message,
+            uploaded_by=self.owner,
+            file=SimpleUploadedFile(
+                "question.png",
+                attachment_bytes,
+                content_type="image/png",
+            ),
+            original_name="question.png",
+            mime_type="image/png",
+            byte_size=len(attachment_bytes),
+            order=0,
+        )
+        output = RunOutputFile.objects.create(
+            run=run,
+            message=run.output_message,
+            session=run.session,
+            assistant=run.session.assistant,
+            file=SimpleUploadedFile(
+                "report.html",
+                output_bytes,
+                content_type="text/html",
+            ),
+            filename="report.html",
+            content_type="text/html",
+            byte_size=len(output_bytes),
+        )
+        return attachment, output, attachment_bytes, output_bytes
+
+    def _public_file_url(self, token, file_uuid):
+        return f"/api/lens/public/qa/{token}/files/{file_uuid}/"
+
+    def _legacy_share(self, token):
+        """Create a pre-file-snapshot share for compatibility tests."""
+
+        return SharedQA.objects.create(
+            token=token,
+            run=self.run,
+            assistant=self.assistant,
+            assistant_name=self.assistant.name,
+            assistant_slug=self.assistant.slug,
+            question="What is X?",
+            answer="X is a thing.",
+            title="Legacy share",
+            published_by=self.owner,
+            published_at=timezone.now(),
+        )
 
     def test_share_creates_snapshot(self):
         resp = self._share()
@@ -143,6 +239,187 @@ class SharedQAApiTests(TestCase):
         self.assertEqual(share.published_by, self.owner)
         self.assertIsNotNone(share.published_at)
         self.assertTrue(share.title)
+
+    def test_share_snapshots_input_and_output_file_bytes(self):
+        _, _, attachment_bytes, output_bytes = self._add_run_files()
+
+        resp = self._share()
+
+        self.assertEqual(resp.status_code, 201)
+        share = SharedQA.objects.get(token=resp.data["token"])
+        files = {
+            item.kind: item
+            for item in share.files.order_by("kind", "order")
+        }
+        self.assertEqual(
+            files[SharedQAFile.Kind.INPUT].file.read(),
+            attachment_bytes,
+        )
+        self.assertEqual(
+            files[SharedQAFile.Kind.OUTPUT].file.read(),
+            output_bytes,
+        )
+
+    def test_public_share_lists_files_in_turn_context(self):
+        self._add_run_files()
+        token = self._share().data["token"]
+        self.client.force_authenticate(self.other)
+
+        resp = self.client.get(f"/api/lens/public/qa/{token}/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            [item["filename"] for item in resp.data["input_attachments"]],
+            ["question.png"],
+        )
+        self.assertEqual(
+            [item["filename"] for item in resp.data["output_files"]],
+            ["report.html"],
+        )
+        for field in ["input_attachments", "output_files"]:
+            item = resp.data[field][0]
+            self.assertIn(token, item["url"])
+            self.assertIn(str(item["uuid"]), item["url"])
+            self.assertGreater(item["byte_size"], 0)
+            self.assertTrue(item["content_type"])
+
+    def test_share_file_requires_login_and_assistant_access(self):
+        self._add_run_files()
+        token = self._share().data["token"]
+        snapshot = SharedQAFile.objects.get(
+            share__token=token,
+            kind=SharedQAFile.Kind.OUTPUT,
+        )
+        url = self._public_file_url(token, snapshot.uuid)
+
+        self.client.force_authenticate(user=None)
+        anonymous = self.client.get(url)
+        self.assertEqual(anonymous.status_code, 403)
+        self.assertEqual(
+            anonymous.data["code"],
+            "AUTHENTICATION_REQUIRED",
+        )
+
+        private_token = self._private_share_token(with_files=True)
+        private_share = SharedQA.objects.get(token=private_token)
+        private_snapshot = private_share.files.get(
+            kind=SharedQAFile.Kind.OUTPUT
+        )
+        private_url = self._public_file_url(
+            private_token,
+            private_snapshot.uuid,
+        )
+        self.client.force_authenticate(self.other)
+        denied = self.client.get(private_url)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.data["code"], "ASSISTANT_ACCESS_DENIED")
+
+    def test_share_file_download_is_private_and_token_scoped(self):
+        _, _, _, output_bytes = self._add_run_files()
+        token = self._share().data["token"]
+        snapshot = SharedQAFile.objects.get(
+            share__token=token,
+            kind=SharedQAFile.Kind.OUTPUT,
+        )
+        self.client.force_authenticate(self.other)
+
+        response = self.client.get(
+            self._public_file_url(token, snapshot.uuid)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), output_bytes)
+        self.assertTrue(response["Cache-Control"].startswith("private"))
+        self.assertIn("attachment", response["Content-Disposition"])
+
+        other_run = self._make_done_run()
+        self._add_run_files(other_run)
+        other_token = self._share(run=other_run).data["token"]
+        mismatched = self.client.get(
+            self._public_file_url(other_token, snapshot.uuid)
+        )
+        self.assertEqual(mismatched.status_code, 404)
+
+    def test_hidden_or_deleted_share_cannot_serve_snapshot_file(self):
+        self._add_run_files()
+        token = self._share().data["token"]
+        share = SharedQA.objects.get(token=token)
+        snapshot = share.files.first()
+        url = self._public_file_url(token, snapshot.uuid)
+        self.client.force_authenticate(self.other)
+
+        share.status = SharedQA.Status.HIDDEN
+        share.save(update_fields=["status"])
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+        share.status = SharedQA.Status.PUBLISHED
+        share.save(update_fields=["status"])
+        share.delete()
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_snapshot_survives_source_run_and_session_deletion(self):
+        self._add_run_files()
+        token = self._share().data["token"]
+        share = SharedQA.objects.get(token=token)
+        snapshot = share.files.get(kind=SharedQAFile.Kind.OUTPUT)
+        url = self._public_file_url(token, snapshot.uuid)
+
+        session = self.run.session
+        self.run.delete()
+        session.delete()
+        share.refresh_from_db()
+        self.assertIsNone(share.run)
+
+        self.client.force_authenticate(self.other)
+        metadata = self.client.get(f"/api/lens/public/qa/{token}/")
+        file_response = self.client.get(url)
+        self.assertEqual(metadata.status_code, 200)
+        self.assertEqual(len(metadata.data["output_files"]), 1)
+        self.assertEqual(file_response.status_code, 200)
+
+    def test_legacy_share_snapshots_still_available_source_files(self):
+        self._add_run_files()
+        share = self._legacy_share("legacy-share")
+        self.assertEqual(share.files.count(), 0)
+        self.client.force_authenticate(self.other)
+
+        resp = self.client.get("/api/lens/public/qa/legacy-share/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(share.files.count(), 2)
+        self.assertEqual(len(resp.data["input_attachments"]), 1)
+        self.assertEqual(len(resp.data["output_files"]), 1)
+
+    def test_missing_legacy_file_does_not_break_text_snapshot(self):
+        _, output, _, _ = self._add_run_files()
+        share = self._legacy_share("legacy-missing-file")
+        output.file.delete(save=False)
+        self.client.force_authenticate(self.other)
+
+        resp = self.client.get(
+            "/api/lens/public/qa/legacy-missing-file/"
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["answer"], "X is a thing.")
+        self.assertEqual(len(resp.data["input_attachments"]), 1)
+        self.assertEqual(resp.data["output_files"], [])
+        self.assertEqual(share.files.count(), 1)
+
+    def test_deleting_share_purges_owned_snapshot_bytes(self):
+        self._add_run_files()
+        token = self._share().data["token"]
+        share = SharedQA.objects.get(token=token)
+        snapshots = list(share.files.all())
+        storage_names = [item.file.name for item in snapshots]
+        storage = snapshots[0].file.storage
+        self.assertTrue(all(storage.exists(name) for name in storage_names))
+
+        share.delete()
+
+        self.assertTrue(
+            all(not storage.exists(name) for name in storage_names)
+        )
 
     def test_share_is_idempotent_per_run(self):
         first = self._share()

@@ -25,6 +25,7 @@ from .sessions import (
 )
 from .shares import (
     AdminSharedQAViewSet,
+    PublicSharedQAFileView,
     PublicSharedQAListView,
     PublicSharedQAView,
     SharedQAViewSet,
@@ -47,6 +48,7 @@ __all__ = [
     "LensNodeViewSet",
     "MCPServerViewSet",
     "PublicAssistantView",
+    "PublicSharedQAFileView",
     "PublicSharedQAListView",
     "PublicSharedQAView",
     "RunOutputFileDownloadView",
