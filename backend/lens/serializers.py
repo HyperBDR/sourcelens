@@ -1340,12 +1340,15 @@ def _validate_unique_datasource_target_path(target_path, lensnode, instance):
     for datasource in query.only("target_path"):
         if not datasource.target_path:
             continue
-        existing = PurePosixPath(
-            normalize_workspace_target_path(
-                datasource.target_path,
-                lensnode.workspace_path,
+        try:
+            existing = PurePosixPath(
+                normalize_workspace_target_path(
+                    datasource.target_path,
+                    lensnode.workspace_path,
+                )
             )
-        )
+        except DataSourcePathError:
+            continue
         if existing == target:
             raise serializers.ValidationError(
                 {
