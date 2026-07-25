@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 from langchain_core.tools import tool
@@ -655,11 +655,27 @@ def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
         ):
             return _json({"ok": False, "error": "INVALID_BASE_URL"})
         parsed_path = urlparse(str(path or ""))
-        if parsed_path.scheme or parsed_path.netloc:
+        if (
+            parsed_path.scheme
+            or parsed_path.netloc
+            or parsed_path.params
+            or parsed_path.query
+            or parsed_path.fragment
+        ):
             return _json({"ok": False, "error": "PATH_MUST_BE_RELATIVE"})
         request_method = str(method or "GET").upper()
         if request_method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
             return _json({"ok": False, "error": "METHOD_NOT_ALLOWED"})
+        request_path = _normalized_skill_api_path(parsed_path.path)
+        if request_path is None:
+            return _json({"ok": False, "error": "PATH_MUST_BE_RELATIVE"})
+        if not _skill_api_request_allowed(
+            skill_dir,
+            base_url_env,
+            request_method,
+            request_path,
+        ):
+            return _json({"ok": False, "error": "API_ROUTE_NOT_ALLOWED"})
 
         skill_session = session_values.setdefault(skill_dir.name, {})
         try:
@@ -675,7 +691,7 @@ def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
         except ValueError as exc:
             return _json({"ok": False, "error": str(exc)})
 
-        url = urljoin(base_url.rstrip("/") + "/", str(path or "").lstrip("/"))
+        url = urljoin(base_url.rstrip("/") + "/", request_path.lstrip("/"))
         emit(
             "tool.call_skill_api.start",
             {
@@ -690,14 +706,16 @@ def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
                 timeout=timeout_s,
                 follow_redirects=False,
             ) as client:
-                response = client.request(
+                with client.stream(
                     request_method,
                     url,
                     headers=resolved_headers,
                     params=resolved_query,
                     json=(resolved_body if json_body is not None else None),
-                )
-            payload = _skill_api_response_payload(response)
+                ) as response:
+                    response_status_code = response.status_code
+                    response_is_success = response.is_success
+                    payload = _skill_api_response_payload(response)
             captured_names = []
             for name, response_path in (capture or {}).items():
                 normalized_name = str(name or "").strip()
@@ -719,8 +737,8 @@ def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
                 skill_session[normalized_name] = captured_value
                 captured_names.append(normalized_name)
             output = {
-                "ok": response.is_success,
-                "status_code": response.status_code,
+                "ok": response_is_success,
+                "status_code": response_status_code,
                 "response": _redact_skill_api_payload(
                     payload,
                     [*environment.values(), *skill_session.values()],
@@ -1208,6 +1226,7 @@ _SENSITIVE_RESPONSE_KEY_RE = re.compile(
     r"cookie|api_key|private_key)(?:$|_)",
     re.IGNORECASE,
 )
+_SKILL_API_MAX_RESPONSE_BYTES = 100000
 
 
 def _resolve_skill_api_references(value, environment, session):
@@ -1257,12 +1276,86 @@ def _resolve_skill_api_references(value, environment, session):
 def _skill_api_response_payload(response):
     """Return a bounded JSON-compatible response payload."""
 
-    if len(response.content) > 100000:
-        return {"detail": "Response body exceeded the 100 KB limit."}
+    content_length = response.headers.get("content-length")
     try:
-        return response.json()
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return response.text[:20000]
+        if (
+            content_length
+            and int(content_length) > _SKILL_API_MAX_RESPONSE_BYTES
+        ):
+            return {"detail": "Response body exceeded the 100 KB limit."}
+    except ValueError:
+        pass
+
+    body = bytearray()
+    for chunk in response.iter_bytes():
+        if len(body) + len(chunk) > _SKILL_API_MAX_RESPONSE_BYTES:
+            return {"detail": "Response body exceeded the 100 KB limit."}
+        body.extend(chunk)
+    text = bytes(body).decode(response.encoding or "utf-8", errors="replace")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text[:20000]
+
+
+def _normalized_skill_api_path(value):
+    """Return a decoded absolute path without traversal segments."""
+
+    decoded = str(value or "")
+    for _ in range(5):
+        next_decoded = unquote(decoded)
+        if next_decoded == decoded:
+            break
+        decoded = next_decoded
+    if unquote(decoded) != decoded:
+        return None
+    decoded = decoded.replace("\\", "/")
+    parts = decoded.split("/")
+    if any(part in {".", ".."} for part in parts):
+        return None
+    return "/" + decoded.lstrip("/")
+
+
+def _skill_api_request_allowed(
+    skill_dir,
+    base_url_env,
+    request_method,
+    request_path,
+):
+    """Return whether a Skill metadata policy permits one API request."""
+
+    try:
+        metadata = json.loads(
+            (skill_dir / "metadata.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    policy = metadata.get("api") if isinstance(metadata, dict) else None
+    if not isinstance(policy, dict):
+        return False
+    if policy.get("base_url_env") != str(base_url_env or "").strip():
+        return False
+    for route in policy.get("routes") or []:
+        if not isinstance(route, dict):
+            continue
+        methods = {
+            str(method).upper()
+            for method in route.get("methods") or []
+            if str(method).upper()
+            in {"GET", "POST", "PUT", "PATCH", "DELETE"}
+        }
+        if request_method not in methods:
+            continue
+        exact_path = _normalized_skill_api_path(route.get("path"))
+        if route.get("path") and exact_path == request_path:
+            return True
+        prefix = route.get("path_prefix")
+        normalized_prefix = _normalized_skill_api_path(prefix)
+        if prefix and normalized_prefix and request_path.startswith(
+            normalized_prefix.rstrip("/") + "/"
+        ):
+            return True
+    return False
 
 
 def _json_path_value(payload, path):
@@ -1297,7 +1390,9 @@ def _redact_skill_api_payload(payload, secret_values=()):
         return {
             key: (
                 "***"
-                if _SENSITIVE_RESPONSE_KEY_RE.search(str(key))
+                if _SENSITIVE_RESPONSE_KEY_RE.search(
+                    _normalized_sensitive_key(key)
+                )
                 else _redact_skill_api_payload(value, secrets)
             )
             for key, value in payload.items()
@@ -1313,6 +1408,13 @@ def _redact_skill_api_payload(payload, secret_values=()):
                 redacted = redacted.replace(secret, "***")
         return redacted
     return payload
+
+
+def _normalized_sensitive_key(value):
+    """Normalize camelCase and separators before sensitive-key matching."""
+
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(value or ""))
+    return re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").lower()
 
 
 def _positive_int(value, default):

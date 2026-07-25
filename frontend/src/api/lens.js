@@ -229,7 +229,9 @@ export async function deleteCredential(uuid) {
 }
 
 export async function listEnvironmentVariableSets() {
-  const response = await api.get('/lens/admin/environment-variable-sets/')
+  const response = await api.get('/lens/admin/environment-variable-sets/', {
+    params: { page_size: 10000 }
+  })
   return unwrapList(unwrapResponse(response))
 }
 

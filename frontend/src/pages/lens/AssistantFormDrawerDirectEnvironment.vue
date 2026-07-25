@@ -362,7 +362,45 @@
                     >*</span
                   >
                 </div>
+                <p class="mt-1 text-xs leading-5 text-ink-500">
+                  {{
+                    t('lensAdmin.wizard.environmentConfigurationHint', {
+                      count: skillEnvironment(skill).length
+                    })
+                  }}
+                </p>
               </div>
+              <select
+                v-model="form.skill_environment_set_uuids[skill.uuid]"
+                class="form-input"
+                :aria-label="t('lensAdmin.wizard.selectEnvironmentSet')"
+              >
+                <option value="">
+                  {{ t('lensAdmin.wizard.selectEnvironmentSet') }}
+                </option>
+                <option value="__new__">
+                  {{ t('lensAdmin.wizard.createEnvironmentSet') }}
+                </option>
+                <option
+                  v-for="variableSet in enabledEnvironmentVariableSets"
+                  :key="variableSet.uuid"
+                  :value="variableSet.uuid"
+                >
+                  {{ variableSet.name }}
+                </option>
+              </select>
+              <input
+                v-if="
+                  form.skill_environment_set_uuids[skill.uuid] === '__new__'
+                "
+                v-model="environmentDraft(skill.uuid).name"
+                class="form-input"
+                type="text"
+                :placeholder="t('lensAdmin.wizard.environmentSetName')"
+                :aria-label="t('lensAdmin.wizard.environmentSetName')"
+                maxlength="160"
+                autocomplete="off"
+              />
               <div
                 class="space-y-3 rounded-md border border-line bg-surface-sunken p-3"
               >
@@ -390,6 +428,7 @@
                     class="form-input font-mono"
                     :type="item.secret ? 'password' : 'text'"
                     :placeholder="environmentInputPlaceholder(item)"
+                    :aria-label="item.name"
                     autocomplete="off"
                   />
                 </div>
@@ -849,6 +888,10 @@ const selectableSkills = computed(() =>
   )
 )
 
+const enabledEnvironmentVariableSets = computed(() =>
+  props.environmentVariableSets.filter((variableSet) => variableSet.enabled)
+)
+
 function isSkillSelected(uuid) {
   return (props.form.skill_uuids || []).includes(uuid)
 }
@@ -876,6 +919,7 @@ function hasRequiredEnvironment(skill) {
 function environmentDraft(skillUuid) {
   props.form.skill_environment_drafts ||= {}
   props.form.skill_environment_drafts[skillUuid] ||= {
+    name: '',
     values: {}
   }
   return props.form.skill_environment_drafts[skillUuid]
@@ -905,9 +949,19 @@ function selectedSkillEnvironmentsConfigured() {
   return (props.form.skill_uuids || []).every((skillUuid) => {
     const skill = props.skills.find((item) => item.uuid === skillUuid)
     if (!skill) return true
-    return skillEnvironment(skill)
-      .filter((item) => item.required)
-      .every((item) => environmentItemConfigured(skill, item))
+    const required = skillEnvironment(skill).filter((item) => item.required)
+    const selectedUuid =
+      props.form.skill_environment_set_uuids?.[skillUuid] || ''
+    const draft = environmentDraft(skillUuid)
+    const hasEnteredValue = Object.values(draft.values || {}).some((value) =>
+      String(value ?? '').trim()
+    )
+    if (!selectedUuid && (required.length || hasEnteredValue)) return false
+    if (selectedUuid === '__new__' && !String(draft.name || '').trim()) {
+      return false
+    }
+    if (!required.length) return true
+    return required.every((item) => environmentItemConfigured(skill, item))
   })
 }
 

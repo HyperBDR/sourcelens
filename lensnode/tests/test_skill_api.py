@@ -7,12 +7,31 @@ from lensnode.agent_tools import _build_skill_api_tool
 from lensnode.runtime_resources import RuntimeResources
 
 
-def _resources(root):
+def _resources(root, api_policy="default"):
     """Build runtime resources with one manual Skill environment."""
 
     skill_dir = Path(root) / "skills" / "devmind-connector"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# DevMind", encoding="utf-8")
+    if api_policy == "default":
+        api_policy = {
+            "base_url_env": "DEVMIND_BASE_URL",
+            "routes": [
+                {
+                    "path": "/api/v1/auth/login",
+                    "methods": ["POST"],
+                },
+                {
+                    "path_prefix": "/api/v1/quotation/",
+                    "methods": ["GET"],
+                },
+            ],
+        }
+    metadata = {"api": api_policy} if api_policy is not None else {}
+    (skill_dir / "metadata.json").write_text(
+        json.dumps(metadata),
+        encoding="utf-8",
+    )
     return RuntimeResources(
         root=Path(root),
         skill_paths=[str(skill_dir)],
@@ -156,3 +175,122 @@ def test_manual_skill_api_rejects_absolute_request_path(
     )
 
     assert payload == {"ok": False, "error": "PATH_MUST_BE_RELATIVE"}
+
+
+def test_manual_skill_api_rejects_route_outside_skill_policy(
+    monkeypatch,
+    tmp_path,
+):
+    def handler(request):
+        raise AssertionError(f"Unexpected request to {request.url}")
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_skill_api_tool(_resources(tmp_path))
+
+    payload = json.loads(
+        tool.invoke(
+            {
+                "skill": "devmind-connector",
+                "base_url_env": "DEVMIND_BASE_URL",
+                "method": "DELETE",
+                "path": "/api/v1/users/1",
+            }
+        )
+    )
+
+    assert payload == {"ok": False, "error": "API_ROUTE_NOT_ALLOWED"}
+
+
+def test_manual_skill_api_requires_declared_policy(monkeypatch, tmp_path):
+    def handler(request):
+        raise AssertionError(f"Unexpected request to {request.url}")
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_skill_api_tool(_resources(tmp_path, api_policy=None))
+
+    payload = json.loads(
+        tool.invoke(
+            {
+                "skill": "devmind-connector",
+                "base_url_env": "DEVMIND_BASE_URL",
+                "path": "/api/v1/quotation/quotations",
+            }
+        )
+    )
+
+    assert payload == {"ok": False, "error": "API_ROUTE_NOT_ALLOWED"}
+
+
+def test_manual_skill_api_redacts_camel_case_credentials(
+    monkeypatch,
+    tmp_path,
+):
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "accessToken": "private-access-token",
+                "client-secret": "private-client-secret",
+                "message": "ok",
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_skill_api_tool(_resources(tmp_path))
+
+    payload = json.loads(
+        tool.invoke(
+            {
+                "skill": "devmind-connector",
+                "base_url_env": "DEVMIND_BASE_URL",
+                "path": "/api/v1/quotation/quotations",
+            }
+        )
+    )
+
+    assert payload["response"] == {
+        "accessToken": "***",
+        "client-secret": "***",
+        "message": "ok",
+    }
+
+
+def test_manual_skill_api_stops_reading_oversized_response(
+    monkeypatch,
+    tmp_path,
+):
+    class OversizedStream(httpx.SyncByteStream):
+        def __init__(self):
+            self.iterations = 0
+
+        def __iter__(self):
+            self.iterations += 1
+            yield b"x" * 60000
+            self.iterations += 1
+            yield b"x" * 60000
+            raise AssertionError(
+                "Response stream was not stopped at the limit"
+            )
+
+    stream = OversizedStream()
+
+    def handler(request):
+        return httpx.Response(200, stream=stream)
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_skill_api_tool(_resources(tmp_path))
+
+    payload = json.loads(
+        tool.invoke(
+            {
+                "skill": "devmind-connector",
+                "base_url_env": "DEVMIND_BASE_URL",
+                "path": "/api/v1/quotation/quotations",
+            }
+        )
+    )
+
+    assert payload["response"] == {
+        "detail": "Response body exceeded the 100 KB limit."
+    }
+    assert stream.iterations == 2

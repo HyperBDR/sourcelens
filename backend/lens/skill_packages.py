@@ -14,7 +14,10 @@ from urllib import parse, request
 from django.conf import settings
 from django.db import transaction
 
-from .environment_variables import validate_environment_schema
+from .environment_variables import (
+    validate_environment_schema,
+    validate_skill_api_policy,
+)
 from .models import Skill
 
 MAX_ZIP_SIZE = 20 * 1024 * 1024
@@ -57,7 +60,7 @@ def import_skill_zip(
         skill_root = _find_skill_root(extract_root)
         skill_md = skill_root / "SKILL.md"
         metadata = _parse_skill_md(skill_md)
-        metadata["environment"] = _parse_environment_schema(skill_root)
+        metadata.update(_parse_sourcelens_config(skill_root))
         slug = _slug_from_metadata(metadata)
         manifest = _package_manifest(skill_root)
         package_root = skill_package_root(slug, digest)
@@ -92,6 +95,7 @@ def import_skill_zip(
                             "content": metadata["content"],
                             "skill_md": metadata["skill_md"],
                             "environment": metadata["environment"],
+                            "api": metadata["api"],
                         },
                         "version": digest[:12],
                         "enabled": True,
@@ -140,7 +144,7 @@ def update_skill_zip(
         _safe_extract_zip(data, extract_root)
         skill_root = _find_skill_root(extract_root)
         metadata = _parse_skill_md(skill_root / "SKILL.md")
-        metadata["environment"] = _parse_environment_schema(skill_root)
+        metadata.update(_parse_sourcelens_config(skill_root))
         slug = _slug_from_metadata(metadata)
         if slug != skill.slug:
             raise SkillPackageError(
@@ -168,6 +172,7 @@ def update_skill_zip(
                     "content": metadata["content"],
                     "skill_md": metadata["skill_md"],
                     "environment": metadata["environment"],
+                    "api": metadata["api"],
                 }
                 skill.version = digest[:12]
                 skill.enabled = True
@@ -293,12 +298,17 @@ def package_zip_bytes(skill):
                 f"{skill.slug}/SKILL.md",
                 _skill_md_from_definition(skill),
             )
-            environment = (skill.definition or {}).get("environment") or []
-            if environment:
+            definition = skill.definition or {}
+            environment = definition.get("environment") or []
+            api = definition.get("api") or {}
+            if environment or api:
+                config = {"environment": environment}
+                if api:
+                    config["api"] = api
                 archive.writestr(
                     f"{skill.slug}/sourcelens.json",
                     json.dumps(
-                        {"environment": environment},
+                        config,
                         ensure_ascii=False,
                         indent=2,
                     )
@@ -409,12 +419,12 @@ def _parse_skill_md(path):
     }
 
 
-def _parse_environment_schema(skill_root):
-    """Read optional SourceLens environment declarations from a package."""
+def _parse_sourcelens_config(skill_root):
+    """Read and validate optional SourceLens Skill package configuration."""
 
     path = skill_root / "sourcelens.json"
     if not path.exists():
-        return []
+        return {"environment": [], "api": {}}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -426,7 +436,9 @@ def _parse_environment_schema(skill_root):
             "sourcelens.json must contain a JSON object."
         )
     try:
-        return validate_environment_schema(payload.get("environment"))
+        environment = validate_environment_schema(payload.get("environment"))
+        api = validate_skill_api_policy(payload.get("api"), environment)
+        return {"environment": environment, "api": api}
     except Exception as exc:
         raise SkillPackageError(str(exc)) from exc
 

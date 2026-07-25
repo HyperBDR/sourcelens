@@ -221,7 +221,6 @@ import { extractErrorMessage } from '@/utils/api'
 import { assistantChatUrl } from '@/utils/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
-  createEnvironmentVariableSet,
   createAssistant,
   deleteAssistant,
   listAssistants,
@@ -230,9 +229,7 @@ import {
   listMcpServers,
   listEnvironmentVariableSets,
   listSkills,
-  revealEnvironmentVariableSet,
-  updateAssistant,
-  updateEnvironmentVariableSet
+  updateAssistant
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -241,6 +238,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import AssistantFormDrawer from './AssistantFormDrawerDirectEnvironment.vue'
+import { buildSkillEnvironmentBinding } from './assistantEnvironment'
 import RowActions from './components/RowActions.vue'
 import {
   EMPTY_VALUE as emptyValue,
@@ -514,7 +512,6 @@ async function save() {
   saving.value = true
   formError.value = ''
   try {
-    await createDraftEnvironmentSets()
     const payload = buildPayload()
     const uuid = form.value.uuid
     await saveByMode(uuid, payload, createAssistant, updateAssistant)
@@ -530,80 +527,6 @@ async function save() {
   } finally {
     saving.value = false
   }
-}
-
-async function createDraftEnvironmentSets() {
-  for (const skillUuid of form.value.skill_uuids || []) {
-    const skill = skills.value.find((item) => item.uuid === skillUuid)
-    const declarations = skill?.definition?.environment || []
-    if (!declarations.length) {
-      continue
-    }
-    const draft = form.value.skill_environment_drafts?.[skillUuid] || {}
-    const draftValues = draft.values || {}
-    const enteredValues = Object.fromEntries(
-      declarations
-        .filter((item) => String(draftValues[item.name] || '').trim())
-        .map((item) => [item.name, draftValues[item.name]])
-    )
-    const selectedUuid =
-      form.value.skill_environment_set_uuids?.[skillUuid] || ''
-    const existingUuid = selectedUuid === '__new__' ? '' : selectedUuid
-    if (!Object.keys(enteredValues).length) {
-      continue
-    }
-    let existingValues = {}
-    if (existingUuid) {
-      const revealed = await revealEnvironmentVariableSet(existingUuid)
-      existingValues = Object.fromEntries(
-        (revealed?.values || []).map((item) => [item.key, item.value])
-      )
-    }
-    const values = declarations.map((item) => ({
-      key: item.name,
-      value: enteredValues[item.name] ?? existingValues[item.name] ?? ''
-    }))
-    if (existingUuid) {
-      const updated = await updateEnvironmentVariableSet(existingUuid, {
-        values
-      })
-      const index = environmentVariableSets.value.findIndex(
-        (item) => item.uuid === existingUuid
-      )
-      if (index >= 0) {
-        environmentVariableSets.value.splice(index, 1, updated)
-      }
-    } else {
-      const created = await createEnvironmentVariableSet({
-        name: nextEnvironmentSetName(skill),
-        description: '',
-        values,
-        enabled: true
-      })
-      environmentVariableSets.value.push(created)
-      form.value.skill_environment_set_uuids[skillUuid] = created.uuid
-    }
-    draft.values = {}
-  }
-}
-
-function nextEnvironmentSetName(skill) {
-  const assistantName = (
-    form.value.name ||
-    form.value.slug ||
-    'Assistant'
-  ).trim()
-  const skillName = (skill?.name || skill?.slug || 'Skill').trim()
-  const base = `${assistantName} · ${skillName}`.slice(0, 150)
-  const names = new Set(environmentVariableSets.value.map((item) => item.name))
-  if (!names.has(base)) {
-    return base
-  }
-  let suffix = 2
-  while (names.has(`${base} (${suffix})`)) {
-    suffix += 1
-  }
-  return `${base} (${suffix})`.slice(0, 160)
 }
 
 async function saveByMode(uuid, payload, createFn, updateFn) {
@@ -633,11 +556,17 @@ function buildPayload() {
       enabled: form.value.selected_task !== 'general_chat' && !!guideContent,
       content: guideContent
     },
-    skill_bindings: (form.value.skill_uuids || []).map((uuid) => ({
-      skill_uuid: uuid,
-      environment_variable_set_uuid:
-        form.value.skill_environment_set_uuids?.[uuid] || null
-    })),
+    skill_bindings: (form.value.skill_uuids || []).map((uuid) => {
+      const skill = skills.value.find((item) => item.uuid === uuid) || {
+        uuid,
+        definition: {}
+      }
+      return buildSkillEnvironmentBinding(
+        skill,
+        form.value.skill_environment_set_uuids?.[uuid],
+        form.value.skill_environment_drafts?.[uuid]
+      )
+    }),
     mcp_bindings: (form.value.mcp_uuids || []).map((uuid) => ({
       mcp_uuid: uuid
     })),

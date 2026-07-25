@@ -3,6 +3,7 @@ from urllib import parse
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.db import transaction
 from django.urls import reverse
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
@@ -14,9 +15,10 @@ from .datasource_services import (
     validate_datasource_lensnode,
 )
 from .environment_variables import (
-    missing_required_environment,
+    missing_required_environment_values,
     validate_environment_schema,
     validate_environment_values,
+    validate_skill_api_policy,
 )
 from .model_checks import check_assistant_model_refs
 from .models import (
@@ -224,18 +226,51 @@ class SkillBindingsField(serializers.Field):
                     raise serializers.ValidationError(
                         "The selected environment variable set is unavailable."
                     )
-            missing = missing_required_environment(skill, variable_set)
-            if missing:
+            environment_values = validate_environment_values(
+                item.get("environment_values")
+            )
+            declarations = (skill.definition or {}).get("environment") or []
+            declared_names = {
+                declaration.get("name")
+                for declaration in declarations
+                if isinstance(declaration, dict)
+            }
+            unknown_names = sorted(set(environment_values) - declared_names)
+            if unknown_names:
+                raise serializers.ValidationError(
+                    "Environment values must be declared by the Skill: "
+                    f'{", ".join(unknown_names)}.'
+                )
+            effective_values = (
+                variable_set.get_values() if variable_set is not None else {}
+            )
+            effective_values.update(environment_values)
+            missing = missing_required_environment_values(
+                skill,
+                effective_values,
+            )
+            enabled = item.get("enabled", True)
+            if enabled and missing:
                 raise serializers.ValidationError(
                     "Add values for the required environment variables for "
                     f'"{skill.name}": {", ".join(missing)}.'
                 )
+            variable_set_name = str(
+                item.get("environment_variable_set_name") or ""
+            ).strip()
+            if len(variable_set_name) > 160:
+                raise serializers.ValidationError(
+                    "The environment variable set name must be 160 "
+                    "characters or fewer."
+                )
             validated.append(
                 {
                     "skill_uuid": item["skill_uuid"],
-                    "enabled": item.get("enabled", True),
+                    "enabled": enabled,
                     "load_config": item.get("load_config", {}),
                     "environment_variable_set": variable_set,
+                    "environment_variable_set_name": variable_set_name,
+                    "environment_values": environment_values,
                 }
             )
         return validated
@@ -465,12 +500,15 @@ class AssistantSerializer(serializers.ModelSerializer):
             assistant.skill_bindings.all().delete()
             for binding in skill_bindings:
                 skill = Skill.objects.get(uuid=binding["skill_uuid"])
+                variable_set = self._sync_environment_variable_set(
+                    assistant,
+                    skill,
+                    binding,
+                )
                 AssistantSkill.objects.create(
                     assistant=assistant,
                     skill=skill,
-                    environment_variable_set=binding.get(
-                        "environment_variable_set"
-                    ),
+                    environment_variable_set=variable_set,
                     enabled=binding.get("enabled", True),
                     load_config=binding.get("load_config", {}),
                 )
@@ -485,6 +523,53 @@ class AssistantSerializer(serializers.ModelSerializer):
                     enabled=binding.get("enabled", True),
                     load_config=binding.get("load_config", {}),
                 )
+
+    def _sync_environment_variable_set(self, assistant, skill, binding):
+        """Apply inline values without mutating another Assistant's set."""
+
+        variable_set = binding.get("environment_variable_set")
+        values = binding.get("environment_values") or {}
+        if not values:
+            return variable_set
+
+        merged_values = variable_set.get_values() if variable_set else {}
+        merged_values.update(values)
+        if variable_set and not variable_set.skill_bindings.exists():
+            variable_set.set_values(merged_values)
+            variable_set.save(update_fields=["encrypted_values", "updated_at"])
+            return variable_set
+
+        requested_name = binding.get("environment_variable_set_name") or ""
+        base_name = requested_name or f"{assistant.name} · {skill.name}"
+        description = variable_set.description if variable_set else ""
+        variable_set = EnvironmentVariableSet(
+            name=self._next_environment_variable_set_name(base_name),
+            description=description,
+            enabled=True,
+        )
+        variable_set.set_values(merged_values)
+        variable_set.save()
+        return variable_set
+
+    @staticmethod
+    def _next_environment_variable_set_name(base_name):
+        """Return an available variable-set name within the model limit."""
+
+        normalized_base = str(base_name or "Environment").strip()
+        normalized_base = normalized_base[:160] or "Environment"
+        if not EnvironmentVariableSet.objects.filter(
+            name=normalized_base
+        ).exists():
+            return normalized_base
+        suffix = 2
+        while True:
+            suffix_text = f" ({suffix})"
+            candidate = normalized_base[: 160 - len(suffix_text)] + suffix_text
+            if not EnvironmentVariableSet.objects.filter(
+                name=candidate
+            ).exists():
+                return candidate
+            suffix += 1
 
     def _sync_access_grants(self, assistant, grants):
         if grants is None:
@@ -518,6 +603,7 @@ class AssistantSerializer(serializers.ModelSerializer):
                     granted_by=granted_by,
                 )
 
+    @transaction.atomic
     def create(self, validated_data):
         """Create assistant and optional bindings."""
 
@@ -538,6 +624,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         check_assistant_model_refs(assistant)
         return assistant
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         """Update assistant and optional bindings."""
 
@@ -1453,6 +1540,11 @@ class SkillSerializer(serializers.ModelSerializer):
                 "Add at least one environment variable."
             )
         normalized["environment"] = environment
+        api = validate_skill_api_policy(normalized.get("api"), environment)
+        if api:
+            normalized["api"] = api
+        else:
+            normalized.pop("api", None)
         return normalized
 
 

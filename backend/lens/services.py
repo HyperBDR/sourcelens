@@ -549,9 +549,12 @@ def validate_run_dispatch(run):
     for binding in assistant.skill_bindings.select_related(
         "skill", "environment_variable_set"
     ).filter(enabled=True, skill__enabled=True):
+        variable_set = binding.environment_variable_set
+        if variable_set is not None and not variable_set.enabled:
+            variable_set = None
         if missing_required_environment(
             binding.skill,
-            binding.environment_variable_set,
+            variable_set,
         ):
             raise LensNodeDispatchError("SKILL_ENVIRONMENT_REQUIRED")
 

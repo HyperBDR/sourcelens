@@ -368,6 +368,7 @@ def _skill_metadata(skill):
         "version": skill.get("version"),
         "content_hash": skill.get("content_hash"),
         "load_config": skill.get("load_config") or {},
+        "api": (skill.get("definition") or {}).get("api") or {},
     }
 
 

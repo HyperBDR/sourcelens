@@ -1,9 +1,11 @@
 import re
+from urllib.parse import unquote, urlparse
 
 from rest_framework import serializers
 
 
 ENVIRONMENT_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+ALLOWED_SKILL_API_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 
 
 def validate_environment_schema(value):
@@ -95,8 +97,117 @@ def validate_environment_values(value):
     return normalized
 
 
+def validate_skill_api_policy(value, environment):
+    """Return a normalized allowlist for Skill HTTP API requests."""
+
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, dict):
+        raise serializers.ValidationError(
+            "The Skill API policy must be an object."
+        )
+    base_url_env = str(value.get("base_url_env") or "").strip()
+    declared_names = {item["name"] for item in environment or []}
+    if base_url_env not in declared_names:
+        raise serializers.ValidationError(
+            "The Skill API base_url_env must name a declared environment "
+            "variable."
+        )
+    routes = value.get("routes")
+    if not isinstance(routes, list) or not routes:
+        raise serializers.ValidationError(
+            "The Skill API policy must declare at least one route."
+        )
+
+    normalized_routes = []
+    for route in routes:
+        if not isinstance(route, dict):
+            raise serializers.ValidationError(
+                "Each Skill API route must be an object."
+            )
+        path = route.get("path")
+        path_prefix = route.get("path_prefix")
+        if bool(path) == bool(path_prefix):
+            raise serializers.ValidationError(
+                "Each Skill API route must declare either path or "
+                "path_prefix."
+            )
+        methods = route.get("methods")
+        if not isinstance(methods, list) or not methods:
+            raise serializers.ValidationError(
+                "Each Skill API route must declare at least one method."
+            )
+        normalized_methods = []
+        for method in methods:
+            normalized_method = str(method or "").upper()
+            if normalized_method not in ALLOWED_SKILL_API_METHODS:
+                raise serializers.ValidationError(
+                    f'"{normalized_method}" is not an allowed API method.'
+                )
+            if normalized_method not in normalized_methods:
+                normalized_methods.append(normalized_method)
+        route_key = "path" if path else "path_prefix"
+        normalized_route = {
+            route_key: _normalize_skill_api_path(
+                path if path else path_prefix,
+                prefix=route_key == "path_prefix",
+            ),
+            "methods": normalized_methods,
+        }
+        normalized_routes.append(normalized_route)
+    return {
+        "base_url_env": base_url_env,
+        "routes": normalized_routes,
+    }
+
+
+def _normalize_skill_api_path(value, *, prefix=False):
+    """Return a safe absolute API path or prefix."""
+
+    text = str(value or "").strip()
+    parsed = urlparse(text)
+    if (
+        not text.startswith("/")
+        or parsed.scheme
+        or parsed.netloc
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise serializers.ValidationError(
+            "Skill API routes must use absolute paths without a host, "
+            "query, or fragment."
+        )
+    decoded = parsed.path
+    for _ in range(5):
+        next_decoded = unquote(decoded)
+        if next_decoded == decoded:
+            break
+        decoded = next_decoded
+    if unquote(decoded) != decoded:
+        raise serializers.ValidationError(
+            "Skill API routes must not contain path traversal."
+        )
+    decoded = decoded.replace("\\", "/")
+    if any(part in {".", ".."} for part in decoded.split("/")):
+        raise serializers.ValidationError(
+            "Skill API routes must not contain path traversal."
+        )
+    normalized = "/" + decoded.lstrip("/")
+    if prefix:
+        normalized = normalized.rstrip("/") + "/"
+    return normalized
+
+
 def missing_required_environment(skill, variable_set):
     """Return required Skill keys missing from an environment-variable set."""
+
+    values = variable_set.get_values() if variable_set is not None else {}
+    return missing_required_environment_values(skill, values)
+
+
+def missing_required_environment_values(skill, values):
+    """Return required Skill keys missing from a value mapping."""
 
     declarations = (skill.definition or {}).get("environment") or []
     required = {
@@ -106,5 +217,4 @@ def missing_required_environment(skill, variable_set):
     }
     if not required:
         return []
-    values = variable_set.get_values() if variable_set is not None else {}
     return sorted(name for name in required if not str(values.get(name) or ""))
