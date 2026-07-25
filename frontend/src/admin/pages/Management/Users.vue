@@ -215,28 +215,36 @@
         :subtitle="form.username || ''"
         @close="closeModal"
       >
-        <form id="user-form" class="space-y-4" @submit.prevent="submitUser">
+        <form
+          id="user-form"
+          class="space-y-4"
+          novalidate
+          @submit.prevent="submitUser"
+        >
           <p v-if="submitError" class="text-sm text-danger-700">
             {{ submitError }}
           </p>
-          <div>
-            <label class="mb-1 block text-sm font-medium text-ink-700">{{
-              t('dashboard.username')
-            }}</label>
-            <input v-model="form.username" type="text" class="form-input" />
-          </div>
-          <div>
-            <label class="mb-1 block text-sm font-medium text-ink-700">{{
-              t('dashboard.email')
-            }}</label>
-            <input v-model="form.email" type="email" class="form-input" />
-          </div>
-          <div v-if="mode === 'create'">
-            <label class="mb-1 block text-sm font-medium text-ink-700">{{
-              t('password.reset.newPassword')
-            }}</label>
-            <input v-model="form.password" type="password" class="form-input" />
-          </div>
+          <BaseInput
+            v-model="form.username"
+            :label="t('dashboard.username')"
+            :error="formErrors.username"
+            required
+            @update:model-value="formErrors.username = ''"
+          />
+          <BaseInput
+            v-model="form.email"
+            type="email"
+            :label="t('dashboard.email')"
+          />
+          <BaseInput
+            v-if="mode === 'create'"
+            v-model="form.password"
+            type="password"
+            :label="t('password.reset.newPassword')"
+            :error="formErrors.password"
+            required
+            @update:model-value="formErrors.password = ''"
+          />
           <div>
             <label class="mb-1 block text-sm font-medium text-ink-700">{{
               t('management.selectGroups')
@@ -293,8 +301,7 @@
             <BaseButton
               variant="primary"
               :loading="submitLoading"
-              type="submit"
-              form="user-form"
+              @click="submitUser"
             >
               {{ t('common.confirm') }}
             </BaseButton>
@@ -313,6 +320,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
@@ -344,6 +352,7 @@ const mode = ref('create')
 const editingUserId = ref(null)
 const submitLoading = ref(false)
 const submitError = ref(null)
+const formErrors = ref({ username: '', password: '' })
 
 const groupOptions = ref([])
 
@@ -385,18 +394,21 @@ function closeModal() {
   submitError.value = null
   submitLoading.value = false
   editingUserId.value = null
+  formErrors.value = { username: '', password: '' }
   form.value = createEmptyForm()
 }
 
 function openCreateModal() {
   mode.value = 'create'
   form.value = createEmptyForm()
+  formErrors.value = { username: '', password: '' }
   showModal.value = true
 }
 
 function openEditModal(user) {
   mode.value = 'edit'
   editingUserId.value = user.id
+  formErrors.value = { username: '', password: '' }
   form.value = {
     username: user.username || '',
     email: user.email || '',
@@ -426,6 +438,7 @@ async function loadOptions() {
 
 async function submitUser() {
   submitError.value = null
+  formErrors.value = { username: '', password: '' }
   const payload = {
     username: (form.value.username || '').trim(),
     email: (form.value.email || '').trim(),
@@ -435,17 +448,17 @@ async function submitUser() {
   }
 
   if (!payload.username) {
-    submitError.value = t('management.usernameRequired')
-    return
+    formErrors.value.username = t('management.usernameRequired')
   }
 
   if (mode.value === 'create') {
     payload.password = (form.value.password || '').trim()
     if (!payload.password) {
-      submitError.value = t('management.passwordRequired')
-      return
+      formErrors.value.password = t('management.passwordRequired')
     }
   }
+
+  if (formErrors.value.username || formErrors.value.password) return
 
   submitLoading.value = true
   try {
