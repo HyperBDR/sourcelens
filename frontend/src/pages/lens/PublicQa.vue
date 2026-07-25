@@ -72,7 +72,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { Copy } from '@lucide/vue'
@@ -156,8 +156,7 @@ function goHome() {
   router.push('/')
 }
 
-onMounted(load)
-watch(() => props.token, load)
+watch(() => props.token, load, { immediate: true })
 watch(isAuthenticated, (authenticated) => {
   if (authenticated && accessState.value === 'login-required') {
     load()

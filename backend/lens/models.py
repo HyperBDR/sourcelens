@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import uuid
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -279,6 +280,53 @@ class Skill(TimestampedUUIDModel):
         return self.name
 
 
+class EnvironmentVariableSet(TimestampedUUIDModel):
+    """Reusable encrypted environment values for Skill bindings."""
+
+    name = models.CharField(max_length=160, unique=True)
+    description = models.TextField(blank=True, default="")
+    encrypted_values = models.TextField(blank=True, default="")
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def set_values(self, values):
+        """Encrypt and store a mapping of environment-variable values."""
+
+        payload = json.dumps(values or {}, sort_keys=True).encode("utf-8")
+        self.encrypted_values = _datasource_fernet().encrypt(payload).decode(
+            "utf-8"
+        )
+
+    def get_values(self):
+        """Return decrypted environment-variable values."""
+
+        if not self.encrypted_values:
+            return {}
+        try:
+            payload = _datasource_fernet().decrypt(
+                self.encrypted_values.encode("utf-8")
+            )
+            values = json.loads(payload.decode("utf-8"))
+            return values if isinstance(values, dict) else {}
+        except (InvalidToken, json.JSONDecodeError):
+            return {}
+
+    @property
+    def keys(self):
+        """Return configured variable names without exposing their values."""
+
+        return sorted(
+            key
+            for key, value in self.get_values().items()
+            if str(value or "")
+        )
+
+    def __str__(self):
+        return self.name
+
+
 class MCPServer(TimestampedUUIDModel):
     """Global MCP server resource."""
 
@@ -435,6 +483,13 @@ class AssistantSkill(models.Model):
         related_name="skill_bindings",
     )
     skill = models.ForeignKey(Skill, on_delete=models.PROTECT)
+    environment_variable_set = models.ForeignKey(
+        EnvironmentVariableSet,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="skill_bindings",
+    )
     enabled = models.BooleanField(default=True)
     load_config = models.JSONField(default=dict, blank=True)
 

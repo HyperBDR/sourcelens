@@ -651,6 +651,12 @@
         "label": "Credential",
         "action": "Create Credential"
       },
+      "environmentVariables": {
+        "title": "Environment Variable Sets",
+        "description": "Store encrypted environment variable values and reuse them across Skills and Assistants.",
+        "label": "Variable Set",
+        "action": "New variable set"
+      },
       "skills": {
         "title": "Skill Library",
         "description": "Manage reusable Skill resources that Assistants can load.",
@@ -707,11 +713,30 @@
       "downloadFailed": "Skill download failed",
       "sourceType": "Source",
       "files": "Files",
+      "environmentVariables": "Env",
+      "environmentVariablesHelp": "List the variables this Skill needs. You'll provide their values when adding the Skill to an Assistant.",
+      "addEnvironmentVariable": "Add",
+      "noEnvironmentVariables": "No environment variables added yet.",
+      "environmentKey": "Variable name",
+      "environmentDescription": "What should the user enter? Include an example when helpful.",
+      "environmentRequired": "Required",
+      "environmentSecret": "Sensitive value",
       "deleteTitle": "Delete Skill",
       "deleteRiskMessage": "The Skill \"{name}\" is currently used by assistants. Deleting it will remove those bindings and may cause related assistant workflows or tools to stop working.",
       "boundAssistants": "Bound assistants ({count})",
       "confirmSkillName": "Confirm Skill name",
       "confirmSkillNameHelp": "Type \"{name}\" to permanently delete this Skill."
+    },
+    "environmentVariables": {
+      "empty": "No variable sets yet.",
+      "keys": "Variables",
+      "values": "Environment variables",
+      "value": "Value",
+      "addValue": "Add variable",
+      "noValues": "No variables added yet.",
+      "createTitle": "New environment variable set",
+      "editTitle": "Edit environment variable set",
+      "deleteConfirm": "Delete this variable set? Variable sets currently in use cannot be deleted."
     },
     "skillDetail": {
       "title": "Skill Detail"
@@ -1241,6 +1266,13 @@
       "skillsSection": "Skills",
       "skillsSectionRequired": "Skills *",
       "generalChatSkillsHint": "Select at least one Skill. General Chat runs from bound Skill instructions and bundled scripts.",
+      "environmentConfiguration": "Environment variables",
+      "environmentConfigurationHint": "This Skill needs {count} environment variables. Choose an existing variable set or create a new one.",
+      "selectEnvironmentSet": "Choose a variable set",
+      "createEnvironmentSet": "Create a new variable set",
+      "environmentSetName": "Variable set name (for example, Jira – Production)",
+      "environmentConfigured": "Saved",
+      "environmentMissing": "Not set",
       "mcpSection": "MCP Servers",
       "noSkills": "No Skills available — create one in the Skill Library first",
       "noMcp": "No MCP Servers available — create one in the MCP Server Library first",
@@ -1248,15 +1280,15 @@
     },
     "agentRounds": {
       "flash": "Flash",
-      "flashHint": "~5 steps",
+      "flashHint": "Fastest, fewest steps",
       "fast": "Fast",
-      "fastHint": "~13 steps",
+      "fastHint": "Quicker, lighter analysis",
       "balanced": "Balanced",
-      "balancedHint": "~26 steps",
+      "balancedHint": "Balances speed and depth",
       "deep": "Deep",
-      "deepHint": "~50 steps",
+      "deepHint": "More thorough, takes longer",
       "max": "Max",
-      "maxHint": "~100 steps"
+      "maxHint": "Most thorough, slowest"
     },
     "messages": {
       "loadFailed": "Failed to load Lens admin data",

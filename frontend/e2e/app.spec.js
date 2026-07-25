@@ -5,20 +5,30 @@ import { test, expect } from '@playwright/test'
 
 async function tryLogin(page) {
   const username = process.env.TEST_USERNAME || 'admin'
-  const password = process.env.TEST_PASSWORD || 'admin'
+  const password = process.env.TEST_PASSWORD || 'adminpassword'
 
   await page.goto('/login')
   await page.waitForLoadState('networkidle')
 
-  const loginForm = page.locator('form').first()
-  const formVisible = await loginForm.isVisible().catch(() => false)
-  if (!formVisible) return false
+  const response = await page.request.post('/api/v1/auth/login', {
+    data: { username, password }
+  })
+  if (!response.ok()) return false
 
-  await page.fill('input[name="username"]', username)
-  await page.fill('input[name="password"]', password)
-  await page.click('button[type="submit"]')
-  await page.waitForLoadState('networkidle')
-  return !page.url().includes('/login')
+  const body = await response.json()
+  const data = body?.data || body
+  const access = data?.access || data?.access_token || data?.token
+  const refresh = data?.refresh || data?.refresh_token
+  if (!access) return false
+
+  await page.addInitScript(
+    ({ accessToken, refreshToken }) => {
+      localStorage.setItem('access_token', accessToken)
+      if (refreshToken) localStorage.setItem('refresh_token', refreshToken)
+    },
+    { accessToken: access, refreshToken: refresh }
+  )
+  return true
 }
 
 test.describe('App shell', () => {
@@ -30,31 +40,29 @@ test.describe('App shell', () => {
   })
 })
 
-test.describe('Dashboard', () => {
+test.describe('Authenticated landing', () => {
   test.beforeEach(async ({ page }) => {
     const loggedIn = await tryLogin(page)
-    if (!loggedIn) test.skip()
+    expect(loggedIn).toBeTruthy()
   })
 
-  test('Dashboard page renders with hero and pillar sections', async ({
+  test('dashboard route resolves to an available workspace', async ({
     page
   }) => {
     await page.goto('/dashboard')
     await page.waitForLoadState('networkidle')
 
-    await expect(page).toHaveURL(/\/dashboard/)
-    // Hero title
-    await expect(page.locator('h1').first()).toBeVisible({ timeout: 10000 })
-    // Platform highlights section
-    await expect(
-      page.locator('text=/highlights|capabilities|highlightsTitle/i').first()
-    ).toBeVisible({ timeout: 5000 })
+    await expect(page).toHaveURL(/\/lens\/assistants\/[^/]+\/chat/)
+    await expect(page.locator('.composer-input')).toBeVisible({
+      timeout: 10000
+    })
   })
 
-  test('Dashboard sidebar navigation is visible', async ({ page }) => {
+  test('workspace sidebar navigation is visible', async ({ page }) => {
     await page.goto('/dashboard')
     await page.waitForLoadState('networkidle')
 
+    await expect(page).toHaveURL(/\/lens\/assistants\/[^/]+\/chat/)
     const sidebar = page.locator('nav, [class*="sidebar"]').first()
     await expect(sidebar).toBeVisible({ timeout: 5000 })
   })
@@ -63,15 +71,22 @@ test.describe('Dashboard', () => {
 test.describe('Settings', () => {
   test.beforeEach(async ({ page }) => {
     const loggedIn = await tryLogin(page)
-    if (!loggedIn) test.skip()
+    expect(loggedIn).toBeTruthy()
   })
 
-  test('Profile settings page loads', async ({ page }) => {
+  test('legacy profile settings route resolves to the user landing', async ({
+    page
+  }) => {
     await page.goto('/settings/profile')
     await page.waitForLoadState('networkidle')
 
-    await expect(page).toHaveURL(/\/settings\/profile/)
-    await expect(page.locator('h1, h2').first()).toBeVisible({ timeout: 10000 })
+    await expect(page).toHaveURL(/\/lens\/assistants\/[^/]+\/chat/)
+    await expect(
+      page
+        .locator('.composer-input')
+        .or(page.getByRole('heading', { name: /Welcome to SourceLens|欢迎/i }))
+        .first()
+    ).toBeVisible({ timeout: 10000 })
   })
 })
 
@@ -79,11 +94,6 @@ test.describe('404 page', () => {
   test('unknown routes show 404 page', async ({ page }) => {
     await page.goto('/this-route-does-not-exist-xyz')
     await page.waitForLoadState('networkidle')
-    // Should show 404 or redirect to /404
-    const url = page.url()
-    const bodyText = await page.locator('body').textContent()
-    expect(
-      url.includes('404') || bodyText.toLowerCase().includes('not found')
-    ).toBeTruthy()
+    await expect(page.getByRole('heading', { name: '404' })).toBeVisible()
   })
 })

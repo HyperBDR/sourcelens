@@ -12,8 +12,10 @@ from django.db.models import Max, Q
 from django.utils import timezone
 
 from .attachments import attachment_data_url, bind_attachments_to_message
+from .environment_variables import missing_required_environment
 from .llm import run_completion, run_completion_multimodal
 from .models import (
+    EnvironmentVariableSet,
     GlobalSetting,
     LensNode,
     Message,
@@ -163,33 +165,93 @@ def fail_active_runs_for_lensnode(lensnode_uuid):
 
 
 RECONCILE_GRACE_SECONDS = 60
+RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT = 20
+
+
+def get_reconcile_confirm_grace_seconds():
+    """Return how long a reconnect-unreported run waits before being failed.
+
+    A node's ``hello`` on reconnect reports its currently in-flight runs, but
+    LensNode redelivers ``run_done`` at-least-once through a durable outbox
+    (``LensNodeClient._send_loop``) — a run that finished during the drop is
+    legitimately absent from that snapshot while its already-computed answer
+    is still safely queued for delivery. Failing it immediately discards a
+    correct answer that was moments from arriving. This window gives the
+    normal completion path a chance to land first (see
+    lens.tasks.confirm_reconcile_orphan). Admin-tunable via the GlobalSetting
+    key ``lensnode.reconcile_confirm_grace_s``.
+    """
+
+    setting = GlobalSetting.objects.filter(
+        key="lensnode.reconcile_confirm_grace_s"
+    ).first()
+    try:
+        value = int(
+            setting.value
+            if setting
+            else RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT
+        )
+    except (TypeError, ValueError):
+        return RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT
+    return max(1, value)
+
+
+def schedule_reconcile_orphan_confirmation(run_uuid):
+    """Schedule the delayed check that fails a run if it's still non-terminal.
+
+    Called from reconcile_lensnode_active_runs for each candidate instead of
+    failing it inline, so a run that legitimately finished during the drop
+    gets a chance to reach a terminal state through the normal completion
+    path (see get_reconcile_confirm_grace_seconds) before being written off.
+
+    apply_async talks to the broker; wrap it so a broker hiccup can't raise
+    out of the consumer's hello handler — the periodic idle reaper
+    (lens.lensnode_cleanup) remains the backstop if scheduling fails.
+    """
+
+    from .tasks import confirm_reconcile_orphan
+
+    grace_s = get_reconcile_confirm_grace_seconds()
+    try:
+        confirm_reconcile_orphan.apply_async(
+            args=[str(run_uuid)],
+            countdown=grace_s,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to schedule reconcile-orphan confirmation for run %s; "
+            "it will be reaped by the idle sweep instead",
+            run_uuid,
+        )
 
 
 def reconcile_lensnode_active_runs(lensnode_uuid, active_run_uuids):
-    """Fail this node's non-terminal runs that it is no longer running.
+    """Schedule an orphan check for this node's runs it is no longer running.
 
-    On (re)connect a LensNode reports the runs it is actively executing.
-    Any RUNNING/STREAMING run assigned to the node that the node does not
-    claim was orphaned (e.g. the control plane restarted mid-answer and
-    the terminal frame was lost on the dropped socket); fail it now rather
-    than waiting for the idle reaper. A short grace window avoids racing a
-    run that was just dispatched but not yet started node-side.
+    On (re)connect a LensNode reports the runs it is actively executing. A
+    RUNNING/STREAMING run assigned to the node that the node does not claim
+    is a candidate orphan (e.g. the control plane restarted mid-answer and
+    the terminal frame was delayed on the dropped socket) — but LensNode
+    redelivers at-least-once on reconnect, so a run that just finished is
+    legitimately unreported while its result is still in flight. Rather than
+    failing candidates inline, this schedules a delayed confirmation per
+    candidate so the normal completion path gets a chance to resolve it
+    first (see schedule_reconcile_orphan_confirmation). A short grace window
+    on run age avoids even considering a run that was just dispatched but
+    not yet started node-side.
     """
 
     active = {str(value) for value in (active_run_uuids or [])}
     now = timezone.now()
-    orphaned = Run.objects.filter(
+    candidates = Run.objects.filter(
         lensnode__uuid=lensnode_uuid,
         status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
         started_at__lt=now - timedelta(seconds=RECONCILE_GRACE_SECONDS),
-    ).exclude(uuid__in=active)
-    count = orphaned.count()
-    orphaned.update(
-        status=Run.Status.FAILED,
-        error="LENSNODE_RECONNECT_ORPHANED",
-        finished_at=now,
-        updated_at=now,
-    )
+    ).exclude(uuid__in=active).values_list("uuid", flat=True)
+    count = 0
+    for run_uuid in candidates:
+        schedule_reconcile_orphan_confirmation(run_uuid)
+        count += 1
     return count
 
 
@@ -338,7 +400,9 @@ def build_loaded_skills(assistant):
     """Snapshot active skill bindings for LensNode dispatch."""
 
     loaded = []
-    for binding in assistant.skill_bindings.select_related("skill").filter(
+    for binding in assistant.skill_bindings.select_related(
+        "skill", "environment_variable_set"
+    ).filter(
         enabled=True,
         skill__enabled=True,
     ):
@@ -356,6 +420,11 @@ def build_loaded_skills(assistant):
                 "package_size": skill.package_size,
                 "package_manifest": skill.package_manifest,
                 "load_config": binding.load_config,
+                "environment_variable_set_uuid": (
+                    str(binding.environment_variable_set.uuid)
+                    if binding.environment_variable_set
+                    else None
+                ),
             }
         )
     return loaded
@@ -394,6 +463,35 @@ def _content_hash(value):
 
     payload = json.dumps(value, sort_keys=True, ensure_ascii=False)
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def resolve_loaded_skill_environment(loaded_skills):
+    """Add decrypted per-Skill values to an ephemeral runtime payload."""
+
+    runtime_skills = []
+    for skill in loaded_skills or []:
+        runtime_skill = dict(skill)
+        variable_set_uuid = skill.get("environment_variable_set_uuid")
+        variable_set = None
+        if variable_set_uuid:
+            variable_set = EnvironmentVariableSet.objects.filter(
+                uuid=variable_set_uuid,
+                enabled=True,
+            ).first()
+        values = variable_set.get_values() if variable_set else {}
+        declarations = (skill.get("definition") or {}).get("environment") or []
+        declared_names = {
+            item.get("name")
+            for item in declarations
+            if isinstance(item, dict) and item.get("name")
+        }
+        runtime_skill["environment"] = {
+            name: str(values[name])
+            for name in declared_names
+            if name in values
+        }
+        runtime_skills.append(runtime_skill)
+    return runtime_skills
 
 
 def task_names(lensnode):
@@ -447,6 +545,18 @@ def validate_run_dispatch(run):
         for item in assistant.selected_dirs or []:
             if item.get("path") not in available:
                 raise LensNodeDispatchError("LENSNODE_DIR_UNAVAILABLE")
+
+    for binding in assistant.skill_bindings.select_related(
+        "skill", "environment_variable_set"
+    ).filter(enabled=True, skill__enabled=True):
+        variable_set = binding.environment_variable_set
+        if variable_set is not None and not variable_set.enabled:
+            variable_set = None
+        if missing_required_environment(
+            binding.skill,
+            variable_set,
+        ):
+            raise LensNodeDispatchError("SKILL_ENVIRONMENT_REQUIRED")
 
 
 @transaction.atomic
@@ -587,7 +697,9 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                 "question": rewritten_question,
                 "history": build_run_history(run),
                 "target_dirs": execution.target_dirs,
-                "loaded_skills": execution.loaded_skills,
+                "loaded_skills": resolve_loaded_skill_environment(
+                    execution.loaded_skills
+                ),
                 "loaded_mcps": execution.loaded_mcps,
                 "agent_model_ref": (
                     str(run.session.assistant.agent_model_ref)

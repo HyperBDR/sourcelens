@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import httpx
@@ -22,7 +22,9 @@ class RuntimeResources:
     root: Path
     skill_paths: list[str]
     context_skill_contents: list[str]
+    skill_environments: dict[str, dict[str, str]]
     mcp_config_path: Path
+    skill_api_policies: dict[str, dict] = field(default_factory=dict)
 
 
 def prepare_runtime_resources(config, command, emit_event=None):
@@ -39,12 +41,29 @@ def prepare_runtime_resources(config, command, emit_event=None):
     mcp_root.mkdir(parents=True, exist_ok=True)
 
     skill_paths = []
+    skill_environments = {}
+    skill_api_policies = {}
     context_skill_contents = []
     general_chat_mode = command.get("task") == "general_chat"
     for skill in command.get("loaded_skills") or []:
         skill_path = _materialize_skill(config, cache_root, skills_root, skill)
         if skill_path is not None:
             skill_paths.append(str(skill_path))
+            environment = skill.get("environment") or {}
+            if isinstance(environment, dict):
+                skill_environments[skill_path.name] = {
+                    str(key): str(value)
+                    for key, value in environment.items()
+                }
+            definition = skill.get("definition") or {}
+            api_policy = (
+                definition.get("api")
+                if isinstance(definition, dict)
+                else None
+            )
+            skill_api_policies[skill_path.name] = (
+                api_policy if isinstance(api_policy, dict) else {}
+            )
         context_content = _context_skill_content(
             skill,
             skill_path=skill_path,
@@ -77,7 +96,9 @@ def prepare_runtime_resources(config, command, emit_event=None):
         root=runtime_root,
         skill_paths=skill_paths,
         context_skill_contents=context_skill_contents,
+        skill_environments=skill_environments,
         mcp_config_path=mcp_config_path,
+        skill_api_policies=skill_api_policies,
     )
 
 
@@ -359,6 +380,7 @@ def _skill_metadata(skill):
         "version": skill.get("version"),
         "content_hash": skill.get("content_hash"),
         "load_config": skill.get("load_config") or {},
+        "api": (skill.get("definition") or {}).get("api") or {},
     }
 
 

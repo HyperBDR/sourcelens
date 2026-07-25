@@ -52,6 +52,11 @@ renderer.code = ({ text, lang }) => {
   return `<pre><code class="hljs language-${language}">${body}</code></pre>`
 }
 
+const renderTable = renderer.table.bind(renderer)
+renderer.table = (token) => {
+  return '<div class="markdown-table-scroll">' + renderTable(token) + '</div>'
+}
+
 // Open answer links in a new tab so clicking a doc link never replaces the
 // chat page. rel="noopener noreferrer" avoids the opened page accessing
 // window.opener. (sanitizeHtml already allows target/rel attributes.)
@@ -303,8 +308,12 @@ const renderedContent = computed(() => {
   @apply bg-gray-900;
 }
 
+.markdown-content :deep(.markdown-table-scroll) {
+  @apply my-4 w-full max-w-full overflow-x-auto;
+}
+
 .markdown-content :deep(table) {
-  @apply w-full border-collapse border border-gray-300 my-4;
+  @apply w-full border-collapse border border-gray-300;
 }
 
 .markdown-content :deep(th) {

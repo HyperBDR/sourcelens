@@ -228,6 +228,43 @@ export async function deleteCredential(uuid) {
   return unwrapResponse(response)
 }
 
+export async function listEnvironmentVariableSets() {
+  const response = await api.get('/lens/admin/environment-variable-sets/', {
+    params: { page_size: 10000 }
+  })
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function createEnvironmentVariableSet(payload) {
+  const response = await api.post(
+    '/lens/admin/environment-variable-sets/',
+    payload
+  )
+  return unwrapResponse(response)
+}
+
+export async function updateEnvironmentVariableSet(uuid, payload) {
+  const response = await api.patch(
+    `/lens/admin/environment-variable-sets/${uuid}/`,
+    payload
+  )
+  return unwrapResponse(response)
+}
+
+export async function revealEnvironmentVariableSet(uuid) {
+  const response = await api.post(
+    `/lens/admin/environment-variable-sets/${uuid}/reveal/`
+  )
+  return unwrapResponse(response)
+}
+
+export async function deleteEnvironmentVariableSet(uuid) {
+  const response = await api.delete(
+    `/lens/admin/environment-variable-sets/${uuid}/`
+  )
+  return unwrapResponse(response)
+}
+
 export async function syncDataSource(uuid, payload = {}) {
   const response = await api.post(
     `/lens/admin/datasources/${uuid}/sync/`,

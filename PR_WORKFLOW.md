@@ -48,6 +48,11 @@ Every review should cover two dimensions:
    authorization, protocol, data consistency, deployment, performance, and
    maintainability problems introduced by the pull request.
 
+The terms MUST, MUST NOT, REQUIRED, and BLOCKING in this policy are mandatory.
+A mandatory check is not satisfied by a PR-description claim, the presence of
+tests, or a successful workflow status. The reviewer must connect the claim to
+the supplied implementation and verification evidence.
+
 High implementation quality does not compensate for a missing core
 requirement. A pull request should not be required to implement work outside
 its documented scope.
@@ -80,6 +85,37 @@ defect.
 The existing build_and_deploy.yml workflow runs only for version tags or
 manual dispatch. It is not a PR validation workflow and is not evidence that
 a pull request passed tests, lint, or builds.
+
+## Mandatory Review Protocol
+
+Before reporting a pull request as fully compliant or as having no major
+issues, the reviewer MUST:
+
+1. Compare the changed-file count in PR metadata with the files represented in
+   the supplied diff. If files or hunks were omitted, clipped, or listed as
+   unprocessed, report that the review is incomplete and require human review.
+2. Map every concrete linked-Issue requirement and PR acceptance claim to the
+   changed implementation and available evidence. Ambiguous requirements must
+   require human verification; they must not be silently treated as complete.
+3. Read changed tests first, then trace every changed behavior across its
+   input, validation, persistence, shared references, dispatch or transport,
+   runtime use, response, and failure cleanup as applicable.
+4. Apply every relevant mandatory invariant in this policy, including negative
+   and partial-failure scenarios. Happy-path coverage alone is insufficient.
+5. State material evidence gaps. A successful Action, author-reported test, or
+   manual-verification claim must not be converted into reviewer-verified fact.
+
+If the pull request changes more than one runtime unit or introduces a new
+trust boundary, inspecting only the primary implementation file is
+insufficient. If the supplied context cannot establish a mandatory invariant,
+the reviewer MUST fail closed by requiring human verification, not by assuming
+the invariant holds.
+
+A behavior-changing pull request over 1,000 changed lines, or over 20 files
+while spanning multiple runtime units, MUST be split before merge unless the
+change is generated, mechanical, or documented as technically indivisible and
+a maintainer explicitly accepts the review risk. The automated reviewer MUST
+not issue a merge-ready conclusion for an oversized exception.
 
 ## Requirement Compliance
 
@@ -133,15 +169,22 @@ comment prevents duplicate top-level comments, but the current model prompt
 does not provide a complete per-finding history. Within the current output,
 avoid repeating the same root cause across multiple findings.
 
-Read changed tests before implementation when possible. For cross-component
-changes, inspect the changed protocol producer and consumer, persisted state,
-permissions, and deployment compatibility. Report a missing counterpart only
-when the diff and available context provide concrete evidence.
+Read changed tests before implementation. For cross-component changes, inspect
+the changed protocol producer and consumer, persisted state, shared-resource
+ownership, permissions, failure cleanup, and deployment compatibility. When a
+required counterpart is absent from the supplied context, mark it as requiring
+human verification rather than silently skipping the check.
 
 ## Finding Priority
 
 The current PR-Agent configuration publishes at most three key implementation
 findings. Use those slots for the highest-impact, actionable problems.
+
+A violated mandatory invariant is merge-blocking and MUST use a key-issue slot
+unless a higher-severity finding consumes every slot. Closely related failures
+may be grouped under one root cause, but their distinct trigger scenarios must
+remain explicit. The three-finding limit must never be used to justify an empty
+finding list or a positive conclusion.
 
 Prefix the issue header with one of:
 
@@ -196,6 +239,10 @@ callbacks. Do not treat TaskExecution as part of every answer Run.
 - Prefer DRF permissions, validation, pagination, and exception handling.
 - Check REST request and response compatibility, status codes, pagination,
   OpenAPI implications, and matching frontend consumers.
+- Every consumer of a paginated endpoint MUST either follow all required pages
+  or request a supported page size that covers the bounded selection use case.
+  Unwrapping only the first default page is a functional defect. Verify the
+  actual pagination parameter names and maximums rather than assuming them.
 - New or changed model fields require migrations. Review existing-data impact,
   reversibility, constraints, indexes, and startup migration behavior.
 - Check querysets and object permissions for unauthorized UUID access. Do not
@@ -226,6 +273,28 @@ callbacks. Do not treat TaskExecution as part of every answer Run.
   and download behavior.
 - Store DataSourceCredential secrets encrypted. Never expose plaintext in
   ordinary APIs, logs, exceptions, or task metadata.
+
+## State, Transaction, and Shared-Resource Invariants
+
+- A user-visible save that mutates multiple models or resources MUST be atomic
+  at the server boundary. If multiple requests are unavoidable, the design
+  MUST provide idempotency and explicit rollback or compensation for every
+  partial-failure order. A frontend MUST NOT persist a reusable child resource
+  before its parent save without such recovery.
+- Validate all replacement data before deleting existing related rows. Create,
+  update, binding synchronization, access grants, and derived resources MUST
+  not leave partial state when any later step fails.
+- Before editing a referenced resource, determine whether it is shared. An edit
+  initiated from one Assistant or consumer MUST NOT change another consumer's
+  behavior unless shared mutation is the explicit, confirmed product behavior.
+  Otherwise use selection, cloning, or copy-on-write semantics.
+- Resource creation/editing and resource selection/binding are distinct user
+  actions. A binding UI MUST preserve reusable named resources and MUST NOT
+  silently turn selection into mutation or per-consumer duplication.
+- Enabled, disabled, deleted, and unavailable states MUST have identical
+  meaning during save validation, snapshot creation, dispatch validation, and
+  runtime resolution. Passing validation and then omitting required runtime
+  values is a broken execution path.
 
 ## Run, WebSocket, and Streaming Focus
 
@@ -286,6 +355,20 @@ callbacks. Do not treat TaskExecution as part of every answer Run.
   MCP caches, and deliverables.
 - Knowledge Q&A and code analysis are read-only by default. Treat new shell,
   file-write, MCP, or Skill capabilities as trust-boundary changes.
+- Treat every LLM-produced tool argument and every Skill package as untrusted.
+  A credential-bearing HTTP tool MUST enforce a declarative allowlist of
+  methods, routes or route prefixes, and destination scope. A relative URL and
+  a configured base URL alone do not authorize arbitrary GET, write, or delete
+  operations with privileged credentials.
+- URL enforcement MUST cover scheme, host, credentials, redirects, base-path
+  escape, and unintended private or control-plane destinations as applicable.
+- Response-size limits MUST be enforced while streaming bytes from the network
+  and before full buffering, decoding, decompression, JSON parsing, or capture.
+  Checking the length of an already-buffered body is not a resource limit.
+- Secret redaction MUST cover nested response values, headers, cookies, and
+  sensitive key variants across case and camelCase, snake_case, and kebab-case
+  separators. Captured session values and substituted secrets must never be
+  returned, logged, or included in event summaries.
 - Check model and idle timeouts, cancellation signals, threads, semaphores,
   caches, and temporary resources for leaks and late emits.
 - Limit document conversion and data source adapters by size, type, timeout,
@@ -358,6 +441,13 @@ Additional expectations:
   duplicate or late events, and offline nodes.
 - Bug fixes should include a regression test that fails before the fix.
 - If verification cannot run, state the reason and remaining risk.
+- Test presence is not evidence of invariant coverage. For changed persistence,
+  shared resources, pagination, runtime state, or privileged tools, inspect for
+  negative tests covering rollback, cross-consumer isolation, multiple pages,
+  disabled resources, unauthorized methods/routes, oversized streaming
+  responses, and secret-key variants as applicable.
+- A new trust-boundary capability without focused abuse-case tests is an
+  Important missing protection even when happy-path tests pass.
 
 ## PR-Agent Output and Merge Boundary
 
@@ -376,6 +466,13 @@ If no key issues are found, do not invent optional or style comments. Absence
 of findings means only that no merge-blocking defect was identified from the
 available diff and context; it does not prove that tests or deployment checks
 passed.
+
+The phrases "Fully compliant", "No security concerns identified", and "No
+major issues detected" are permitted only after every applicable mandatory
+check above is completed with sufficient supplied evidence. If diff coverage,
+requirement mapping, a cross-component counterpart, or a mandatory invariant
+cannot be established, the output MUST explicitly require human verification
+and MUST NOT present a green or merge-ready conclusion.
 
 The automated reviewer never merges a pull request. Human reviewers and
 GitHub protection rules make the final approval and merge decision.

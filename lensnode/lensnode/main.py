@@ -614,10 +614,19 @@ class LensNodeClient:
         def emit(payload):
             loop.call_soon_threadsafe(self._enqueue, payload)
 
+        completed = False
         try:
             await self.executor.execute(message, emit)
+            completed = True
         finally:
-            self.running_tasks.pop(run_uuid, None)
+            try:
+                if completed:
+                    # Let terminal frames enter the outbox before the run stops
+                    # being reported as active. A cancelled run has no terminal
+                    # frame and must leave running_tasks immediately.
+                    await asyncio.sleep(0)
+            finally:
+                self.running_tasks.pop(run_uuid, None)
 
     def _consume_task_exception(self, task):
         """Consume task exceptions so cancelled runs do not leak warnings."""
@@ -628,6 +637,22 @@ class LensNodeClient:
             task.exception()
         except asyncio.CancelledError:
             return
+
+    def _reported_active_runs(self):
+        """Return runs executing or awaiting terminal-frame delivery."""
+
+        active_runs = {
+            key
+            for key in self.running_tasks
+            if not key.startswith("datasource:")
+        }
+        active_runs.update(
+            str(payload["run_uuid"])
+            for payload in self._outbox
+            if payload.get("type") == "run_done"
+            and payload.get("run_uuid")
+        )
+        return sorted(active_runs)
 
     async def _send_hello(self):
         """Send initial LensNode capabilities.
@@ -654,11 +679,7 @@ class LensNodeClient:
                 ],
             )
         )
-        active_runs = [
-            key
-            for key in self.running_tasks
-            if not key.startswith("datasource:")
-        ]
+        active_runs = self._reported_active_runs()
         await self.websocket.send(
             json.dumps(
                 {

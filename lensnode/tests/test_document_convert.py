@@ -129,7 +129,7 @@ def test_prepare_image_downscales_and_reencodes(tmp_path):
         == 80
     )
     assert result["stats"]["images_compressed"] == 1
-    assert result["stats"]["image_upload_bytes"] < path.stat().st_size
+    assert result["stats"]["image_upload_bytes"] == len(result["bytes"])
 
 
 def test_image_prompt_uses_document_language(tmp_path):

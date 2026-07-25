@@ -224,8 +224,15 @@ router.beforeEach(async (to, from, next) => {
     }
 
     next()
-  } else if (to.meta.requiresGuest && userStore.isAuthenticated) {
-    next(getLandingPath(userStore.userInfo))
+  } else if (to.meta.requiresGuest) {
+    if (!userStore.isAuthenticated && localStorage.getItem('access_token')) {
+      await userStore.checkAuth()
+    }
+    if (userStore.isAuthenticated) {
+      next(getLandingPath(userStore.userInfo))
+      return
+    }
+    next()
   } else {
     next()
   }

@@ -11,7 +11,7 @@ dependencies = [
     "deepagents>=0.2.0",
     "httpx>=0.28.0",
     "langchain-core==1.4.0",
-    "markitdown[all]>=0.1.2",
+    "markitdown[docx,pdf,pptx,xlsx]>=0.1.2",
     "openpyxl>=3.1.0",
     "pillow>=10.0.0",
     "pymupdf>=1.24.0",

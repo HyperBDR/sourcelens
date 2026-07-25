@@ -3076,8 +3076,8 @@ onBeforeUnmount(() => {
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
   }
 
-  .sidebar-open {
-    @apply translate-x-0;
+  .sidebar.sidebar-open {
+    transform: translateX(0);
   }
 
   .side-head {

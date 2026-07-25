@@ -409,6 +409,7 @@ class LensDeepAgentRuntime:
                 agent,
                 messages,
                 max_turns,
+                model=model,
                 emit_event=emit_agent_event,
                 answer_language=_detect_answer_language(question),
                 cancel_event=cancel_event,
@@ -467,6 +468,27 @@ def _detect_answer_language(question):
     if has(0x0600, 0x06FF):
         return "Arabic"
     return "English"
+
+
+def _pick_text(zh_text, en_text, answer_language):
+    """Pick zh_text for Chinese, en_text for every other detected language.
+
+    LensNode has no i18n framework (no gettext/Babel, checked — this
+    inline branch is the established way this file produces user-facing
+    text), so this stays a plain lookup rather than pulling one in for a
+    handful of strings. It only distinguishes Chinese from "everything
+    else" — Japanese/Korean/Thai/Russian/Arabic (all real
+    _detect_answer_language outcomes) fall back to en_text same as
+    English. TODO: if LensNode-generated user-facing strings keep
+    growing, revisit proper i18n; also consider moving this text out of
+    LensNode entirely — have it report a structured signal (e.g.
+    truncated=True on the run_done frame) and let the backend/frontend
+    render it, the way errorModelTimeout/errorNodeLost already work in
+    Chat.vue::mapRunError. Not done now: fixing the truncation bug itself
+    takes priority over that reshuffle.
+    """
+
+    return zh_text if answer_language == "Chinese" else en_text
 
 
 def _system_prompt(scenario, command, context_skill_contents=None):
@@ -609,7 +631,9 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         "or a report), write it to scratch and then call "
         "save_deliverable(path) with that path to deliver it for download. "
         "Only deliver the final artifact, not intermediate scratch files. "
-        "You may use "
+        "Use call_skill_api when a loaded Skill describes an HTTP connector; "
+        "refer to its bound environment variables by name and never ask the "
+        "user to repeat secret values in chat. You may use "
         "run_skill_script to execute scripts bundled inside loaded Skills' "
         "scripts/ directories. Only run scripts that the Skill instructions "
         "directly call for, pass focused arguments, and inspect stdout/stderr "
@@ -796,6 +820,7 @@ def _run_agent_with_turn_limit(
     agent,
     messages,
     max_turns,
+    model=None,
     emit_event=None,
     answer_language="English",
     cancel_event=None,
@@ -805,6 +830,15 @@ def _run_agent_with_turn_limit(
     `messages` may be prefixed with prior conversation turns. Historical
     assistant turns are excluded from both the turn count and event
     emission, so the limit and trace reflect only the current run.
+
+    A subagent ``task`` delegation runs to completion inside a single
+    parent-graph step (deepagents calls it via a plain, synchronous
+    ``subagent.invoke(...)``), so the turn count can only be checked
+    between parent steps — a delegation in flight when the budget is
+    reached can overshoot max_turns by however many turns it used
+    internally before returning. This is expected, not a bug in the
+    count itself; it is the reason a forced wrap-up (see
+    _synthesize_wrapup_answer) matters more than counting precisely.
 
     Returns (answer, truncated) where truncated=True means the agent
     was stopped before it finished naturally.
@@ -856,18 +890,94 @@ def _run_agent_with_turn_limit(
             break
 
     answer = _extract_final_message(last_state or {})
+    if truncated and not answer.strip() and model is not None:
+        # The cutoff landed mid-turn (e.g. right after a tool call, before
+        # any answer text), so there is nothing to extract — but the
+        # conversation likely still holds real findings from every prior
+        # turn. Ask once more, without tools, for a best-effort synthesis
+        # instead of discarding all of that work.
+        answer = _synthesize_wrapup_answer(
+            model,
+            (last_state or {}).get("messages", []),
+            answer_language,
+            emit_event,
+        )
     if truncated and answer.strip():
-        if answer_language == "Chinese":
-            answer += (
-                "\n\n---\n*已达到当前分析深度上限，"
-                "如需更完整的结果，请调高分析档位后重试。*"
-            )
-        else:
-            answer += (
-                "\n\n---\n*Reached the current analysis-depth limit. "
-                "Raise the analysis tier for a more complete result.*"
-            )
+        answer += _pick_text(
+            "\n\n---\n*已达到当前分析深度上限，本次调查未完全完成。"
+            "如需更完整的结果，请调高分析档位后重试。*",
+            "\n\n---\n*Reached the current analysis-depth limit before "
+            "the investigation fully completed. Raise the analysis "
+            "tier for a more complete result.*",
+            answer_language,
+        )
     return answer, truncated
+
+
+def _strip_dangling_tool_call(messages):
+    """Drop a trailing AI message with unresolved tool_calls.
+
+    A truncated loop can stop right after the model requested a tool call
+    but before the tool result was recorded. Most providers reject a
+    follow-up call whose history ends on a tool_calls message with no
+    matching tool response, so that dangling turn is dropped before
+    asking for a wrap-up answer — every earlier, resolved turn is kept.
+    """
+
+    if not messages:
+        return messages
+    last = messages[-1]
+    if getattr(last, "type", "") == "ai" and getattr(
+        last, "tool_calls", None
+    ):
+        return messages[:-1]
+    return messages
+
+
+def _synthesize_wrapup_answer(model, current, answer_language, emit_event):
+    """Ask the model for a best-effort answer after the turn budget runs out.
+
+    Called only when the agent was truncated mid-turn and there is no
+    extractable answer text (see _run_agent_with_turn_limit). Makes one
+    plain, tool-free call asking the model to synthesize its best answer
+    from the conversation so far, so the turns already spent are not
+    wasted. Returns "" (letting the caller keep the empty-answer path) if
+    this call itself fails.
+
+    A RunCancelledError is deliberately NOT caught here: model.invoke()
+    checks cancel_event at the top of the gateway call
+    (LensGatewayChatModel._check_cancelled), so a cancellation landing in
+    the narrow window between the turn-limit loop exiting and this call
+    starting must still stop the run, not be swallowed into an empty
+    "wrap-up failed" result.
+    """
+
+    instruction = _pick_text(
+        "你已经达到本次分析的步数上限，不能再调用任何工具。请基于目前为止"
+        "已经掌握的全部信息，直接给出你能给出的最完整回答。如果调查还有"
+        "尚未确认或未覆盖到的部分，请明确说明。",
+        "You have reached the step limit for this analysis and cannot "
+        "call any more tools. Based on everything you have gathered so "
+        "far, write the most complete answer you can now. Clearly note "
+        "any part of the investigation you were not able to confirm.",
+        answer_language,
+    )
+    wrapup_messages = _strip_dangling_tool_call(current) + [
+        HumanMessage(content=instruction)
+    ]
+    if emit_event is not None:
+        emit_event("deepagents.agent.wrapup", {})
+    try:
+        response = model.invoke(wrapup_messages)
+    except RunCancelledError:
+        raise
+    except Exception:
+        LOGGER.exception("Wrap-up synthesis call failed after truncation")
+        return ""
+    content = getattr(response, "content", None)
+    if isinstance(content, str):
+        return content.strip()
+    return str(content or "").strip()
 
 
 def _model_summary(message, limit=160):

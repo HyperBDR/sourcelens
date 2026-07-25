@@ -133,16 +133,22 @@
         :subtitle="form.name || ''"
         @close="closeModal"
       >
-        <form id="group-form" class="space-y-4" @submit.prevent="submitGroup">
+        <form
+          id="group-form"
+          class="space-y-4"
+          novalidate
+          @submit.prevent="submitGroup"
+        >
           <p v-if="submitError" class="text-sm text-danger-700">
             {{ submitError }}
           </p>
-          <div>
-            <label class="mb-1 block text-sm font-medium text-ink-700">{{
-              t('management.groupName')
-            }}</label>
-            <input v-model="form.name" type="text" class="form-input" />
-          </div>
+          <BaseInput
+            v-model="form.name"
+            :label="t('management.groupName')"
+            :error="formErrors.name"
+            required
+            @update:model-value="formErrors.name = ''"
+          />
           <div>
             <label class="mb-1 block text-sm font-medium text-ink-700">{{
               t('management.members')
@@ -182,8 +188,7 @@
             <BaseButton
               variant="primary"
               :loading="submitLoading"
-              type="submit"
-              form="group-form"
+              @click="submitGroup"
             >
               {{ t('common.confirm') }}
             </BaseButton>
@@ -232,6 +237,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
@@ -257,6 +263,7 @@ const mode = ref('create')
 const editingGroupId = ref(null)
 const submitLoading = ref(false)
 const submitError = ref(null)
+const formErrors = ref({ name: '' })
 const form = ref({ name: '', user_ids: [] })
 
 const totalPages = computed(() =>
@@ -274,12 +281,14 @@ function closeModal() {
   editingGroupId.value = null
   submitError.value = null
   submitLoading.value = false
+  formErrors.value = { name: '' }
   form.value = { name: '', user_ids: [] }
 }
 
 function openCreateModal() {
   mode.value = 'create'
   form.value = { name: '', user_ids: [] }
+  formErrors.value = { name: '' }
   showModal.value = true
 }
 
@@ -292,6 +301,7 @@ function memberIdsForGroup(groupId) {
 function openEditModal(group) {
   mode.value = 'edit'
   editingGroupId.value = group.id
+  formErrors.value = { name: '' }
   form.value = {
     name: group.name || '',
     user_ids: memberIdsForGroup(group.id)
@@ -330,9 +340,10 @@ async function confirmDelete() {
 
 async function submitGroup() {
   submitError.value = null
+  formErrors.value = { name: '' }
   const name = (form.value.name || '').trim()
   if (!name) {
-    submitError.value = t('management.groupNameRequired')
+    formErrors.value.name = t('management.groupNameRequired')
     return
   }
 
@@ -411,9 +422,5 @@ onMounted(async () => {
 
 .table-cell {
   @apply px-4 py-4 text-sm text-ink-700;
-}
-
-.form-input {
-  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
 }
 </style>

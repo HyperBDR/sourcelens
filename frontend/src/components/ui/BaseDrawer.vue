@@ -8,7 +8,13 @@
       leave-from-class="opacity-100"
       leave-to-class="opacity-0"
     >
-      <div v-if="show" class="fixed inset-0 z-50 flex justify-end">
+      <div
+        v-if="show"
+        class="fixed inset-0 z-50 flex justify-end"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="title"
+      >
         <div class="fixed inset-0 bg-black/40" @click="handleBackdropClick" />
         <Transition
           enter-active-class="transition-transform duration-300 ease-out"
@@ -44,7 +50,8 @@
               <button
                 type="button"
                 class="ml-3 flex-shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-ink-600 focus:outline-none"
-                @click="$emit('close')"
+                :aria-label="t('common.close')"
+                @click="requestClose"
               >
                 <svg
                   class="h-5 w-5"
@@ -81,7 +88,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -105,6 +115,32 @@ const widthClass = computed(() => {
 })
 
 function handleBackdropClick() {
-  if (props.closeOnBackdrop) emit('close')
+  if (props.closeOnBackdrop) requestClose()
 }
+
+function handleKeydown(event) {
+  if (event.key !== 'Escape' || !props.show) return
+  event.preventDefault()
+  requestClose()
+}
+
+function requestClose() {
+  emit('close')
+}
+
+watch(
+  () => props.show,
+  (show) => {
+    if (typeof window === 'undefined') return
+    const action = show ? 'addEventListener' : 'removeEventListener'
+    window[action]('keydown', handleKeydown)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', handleKeydown)
+  }
+})
 </script>

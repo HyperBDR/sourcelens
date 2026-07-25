@@ -55,7 +55,7 @@ async function tryLogin(page) {
 test.describe('LLM pages', () => {
   test.beforeEach(async ({ page }) => {
     const loggedIn = await tryLogin(page)
-    if (!loggedIn) test.skip()
+    expect(loggedIn).toBeTruthy()
   })
 
   test('LLM admin navigation shows the Models section', async ({ page }) => {

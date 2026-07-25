@@ -255,6 +255,10 @@ tmp
 
 .vscode
 
+# Claude Code local state (personal permissions, session locks)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
 staticfiles
 data
 data.dev

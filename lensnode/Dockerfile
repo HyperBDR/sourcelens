@@ -1,55 +1,96 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.6
+
+# -----------------------------------------------------------------------------
+# LensNode builder image
+# -----------------------------------------------------------------------------
+
+FROM python:3.12-slim-bookworm AS builder
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_TRUSTED_HOST=pypi.org
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /opt/lensnode
+
+RUN pip install \
+        --index-url "$PIP_INDEX_URL" \
+        --trusted-host "$PIP_TRUSTED_HOST" \
+        --timeout 120 \
+        --retries 5 \
+        uv \
+    && python -m venv --without-pip /opt/venv
+
+COPY pyproject.toml ./
+COPY lensnode ./lensnode
+
+RUN uv pip install \
+        --python /opt/venv/bin/python \
+        --index-url "$PIP_INDEX_URL" \
+        --trusted-host "$PIP_TRUSTED_HOST" \
+        . \
+    && rm -rf /root/.cache /tmp/* \
+    && find /opt/venv -type d -name __pycache__ -prune \
+        -exec rm -rf {} +
+
+# -----------------------------------------------------------------------------
+# LensNode runtime image
+# -----------------------------------------------------------------------------
+
+FROM python:3.12-slim-bookworm AS runtime
 
 ARG APT_MIRROR_URL=https://deb.debian.org/debian
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG PIP_TRUSTED_HOST=pypi.org
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
-ENV PIP_INDEX_URL=${PIP_INDEX_URL}
-ENV PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}
+ENV PATH="/opt/venv/bin:$PATH" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv
 
 WORKDIR /opt/lensnode
 
 RUN set -eux; \
-    echo "Using Debian mirror: ${APT_MIRROR_URL}"; \
-    if [ -f /etc/apt/sources.list ]; then \
-        sed -i "s|http://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
-            /etc/apt/sources.list; \
-        sed -i "s|https://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
-            /etc/apt/sources.list; \
-    fi; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i "s|http://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
-            /etc/apt/sources.list.d/debian.sources; \
-        sed -i "s|https://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
-            /etc/apt/sources.list.d/debian.sources; \
-    fi; \
+    sed -i \
+        -e "s|http://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
+        -e "s|https://deb.debian.org/debian|${APT_MIRROR_URL}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
     apt-get update; \
     apt-get install -y --no-install-recommends git ripgrep; \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 
-COPY pyproject.toml ./
-COPY lensnode ./lensnode
+# Runtime images must not carry package-install tooling (issue #55). The
+# base image bundles pip via ensurepip; the venv copied in below is built
+# --without-pip (see the builder stage above), so this is the only
+# remaining source of pip in the final image.
+RUN rm -rf \
+        /usr/local/lib/python3.12/site-packages/pip \
+        /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+        /usr/local/bin/pip \
+        /usr/local/bin/pip3 \
+        /usr/local/bin/pip3.12
+
+COPY --from=builder /opt/venv /opt/venv
 COPY docker/entrypoint.sh /entrypoint.sh
 
+RUN chmod +x /entrypoint.sh
+
+# Verify neither the system install nor the copied venv resurrected pip.
 RUN set -eux; \
-    echo "Installing uv from ${PIP_INDEX_URL}"; \
-    pip install \
-        --index-url "$PIP_INDEX_URL" \
-        --trusted-host "$PIP_TRUSTED_HOST" \
-        --timeout 120 \
-        --retries 5 \
-        uv; \
-    echo "Using Python index: ${PIP_INDEX_URL}"; \
-    uv pip install \
-        --system \
-        --index-url "$PIP_INDEX_URL" \
-        --trusted-host "$PIP_TRUSTED_HOST" \
-        .; \
-    chmod +x /entrypoint.sh
+    if command -v pip >/dev/null 2>&1; then \
+        echo "ERROR: pip is present in the runtime image" >&2; exit 1; \
+    fi; \
+    if python -m pip --version >/dev/null 2>&1; then \
+        echo "ERROR: python -m pip works in the runtime image" >&2; exit 1; \
+    fi
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["lensnode"]

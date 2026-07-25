@@ -6,7 +6,11 @@
       <div class="flex justify-between items-center h-16">
         <div class="flex items-center gap-3">
           <button
-            @click="$emit('toggle-menu')"
+            type="button"
+            aria-controls="admin-sidebar"
+            :aria-expanded="showMobileMenu"
+            :aria-label="`${t('common.expand')} ${t('management.logoTitle')}`"
+            @click="$emit('open-menu')"
             class="lg:hidden p-2 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <svg
@@ -148,7 +152,14 @@ import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
 
-defineEmits(['toggle-menu'])
+defineProps({
+  showMobileMenu: {
+    type: Boolean,
+    default: false
+  }
+})
+
+defineEmits(['open-menu'])
 
 const { t } = useI18n()
 const route = useRoute()
@@ -167,6 +178,7 @@ const pageTitle = computed(() => {
     LensNodes: t('lensAdmin.pages.lensnodes.title'),
     LensDataSources: t('lensAdmin.pages.datasources.title'),
     LensCredentials: t('lensAdmin.pages.credentials.title'),
+    LensEnvironmentVariables: t('lensAdmin.pages.environmentVariables.title'),
     LensSkills: t('lensAdmin.pages.skills.title'),
     LensMcp: t('lensAdmin.pages.mcp.title'),
     LensResourceSettings: t('lensAdmin.pages.resourceSettings.title'),

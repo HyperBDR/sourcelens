@@ -190,6 +190,111 @@ test.describe('Management: exact user filters', () => {
   })
 })
 
+test.describe('Management: create drawers', () => {
+  const drawers = [
+    {
+      path: '/management/users',
+      title: 'Create User',
+      errors: ['Username is required', 'Password is required'],
+      fieldLabel: 'Username',
+      postPath: '/api/v1/management/users/'
+    },
+    {
+      path: '/management/groups',
+      title: 'Create Group',
+      errors: ['Group name is required'],
+      fieldLabel: 'Group name',
+      postPath: '/api/v1/management/groups/'
+    }
+  ]
+
+  test.beforeEach(async ({ page }) => {
+    await asRole(page, 'admin')
+  })
+
+  for (const drawer of drawers) {
+    test(`${drawer.title} supports every dismissal action`, async ({
+      page
+    }) => {
+      await page.goto(drawer.path)
+
+      await page.getByRole('button', { name: drawer.title }).click()
+      const dialog = page.getByRole('dialog', { name: drawer.title })
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole('button', { name: 'Cancel' }).click()
+      await expect(
+        page.getByRole('dialog', { name: drawer.title })
+      ).toBeHidden()
+
+      await page.getByRole('button', { name: drawer.title }).click()
+      await dialog.getByRole('button', { name: 'Close' }).click()
+      await expect(
+        page.getByRole('dialog', { name: drawer.title })
+      ).toBeHidden()
+
+      await page.getByRole('button', { name: drawer.title }).click()
+      await page.keyboard.press('Escape')
+      await expect(
+        page.getByRole('dialog', { name: drawer.title })
+      ).toBeHidden()
+    })
+
+    test(`${drawer.title} shows field errors without posting`, async ({
+      page
+    }) => {
+      const posts = []
+      page.on('request', (request) => {
+        const path = new URL(request.url()).pathname
+        if (request.method() === 'POST' && path === drawer.postPath) {
+          posts.push(request.url())
+        }
+      })
+
+      await page.setViewportSize({ width: 900, height: 700 })
+      await page.goto(drawer.path)
+      await page.getByRole('button', { name: drawer.title }).click()
+      const dialog = page.getByRole('dialog', { name: drawer.title })
+      const confirmButton = dialog.getByRole('button', { name: 'Confirm' })
+      await confirmButton.click()
+
+      for (const error of drawer.errors) {
+        const message = page.getByText(error, { exact: true })
+        await expect(message).toBeVisible()
+        await expect(message).toBeInViewport()
+      }
+      await expect(confirmButton).toBeInViewport()
+      expect(posts).toEqual([])
+
+      await dialog.getByLabel(drawer.fieldLabel).fill('fixed value')
+      await expect(
+        page.getByText(drawer.errors[0], { exact: true })
+      ).toBeHidden()
+    })
+  }
+
+  test('shared drawer supports every dismissal action', async ({ page }) => {
+    await page.goto('/management/lens/assistants')
+
+    const createButton = page.getByRole('button', {
+      name: 'Create Assistant'
+    })
+    const dialog = page.getByRole('dialog', { name: 'Create Assistant' })
+
+    await createButton.click()
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toBeHidden()
+
+    await createButton.click()
+    await dialog.getByRole('button', { name: 'Close' }).click()
+    await expect(dialog).toBeHidden()
+
+    await createButton.click()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+  })
+})
+
 test.describe('Management: deleting a group revokes its assistant grants', () => {
   test('group deletion cascades AssistantAccess', async ({ request }) => {
     const baseline = (await privateGrants(request)).map((g) => ({
