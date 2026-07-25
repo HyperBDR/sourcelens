@@ -2,7 +2,7 @@ import asyncio
 import json
 import subprocess
 
-from lensnode.agent_tools import build_agent_tools
+from lensnode.agent_tools import _skill_script_environment, build_agent_tools
 from lensnode.agent_runtime import _system_prompt
 from lensnode.executor import LensNodeExecutor
 from lensnode.main import LensNodeClient
@@ -32,6 +32,17 @@ class FakeAgent:
             "answer": "streamed final",
             "samples": [],
         }
+
+
+def test_skill_script_environment_isolated_from_lensnode_token(monkeypatch):
+    monkeypatch.setenv("LENSNODE_TOKEN", "control-plane-secret")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    environment = _skill_script_environment({"JIRA_API_TOKEN": "jira-secret"})
+
+    assert environment["JIRA_API_TOKEN"] == "jira-secret"
+    assert environment["PATH"] == "/usr/bin"
+    assert "LENSNODE_TOKEN" not in environment
 
 
 def test_executor_emits_streamed_output_delta():
@@ -195,6 +206,15 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
                         "# Repo Guide\n\n"
                         "Inspect service-api before deployment repos."
                     ),
+                    "api": {
+                        "base_url_env": "REPO_BASE_URL",
+                        "routes": [
+                            {
+                                "path": "/api/status",
+                                "methods": ["GET"],
+                            }
+                        ],
+                    },
                 },
                 "load_config": {"mode": "context", "inject": True},
             },
@@ -208,6 +228,15 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
         assert len(resources.skill_paths) == 1
         assert len(resources.context_skill_contents) == 1
         assert "Inspect service-api" in resources.context_skill_contents[0]
+        assert resources.skill_api_policies["repo-guide"] == {
+            "base_url_env": "REPO_BASE_URL",
+            "routes": [
+                {
+                    "path": "/api/status",
+                    "methods": ["GET"],
+                }
+            ],
+        }
         assert resources.mcp_config_path.exists()
     finally:
         cleanup_runtime_resources(resources)

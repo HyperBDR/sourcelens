@@ -8,6 +8,7 @@ from .views import (
     AssistantViewSet,
     DataSourceCredentialViewSet,
     DataSourceViewSet,
+    EnvironmentVariableSetViewSet,
     GlobalSettingViewSet,
     LensAttachmentView,
     MCPServerViewSet,
@@ -46,6 +47,11 @@ router.register(
     "admin/credentials",
     DataSourceCredentialViewSet,
     basename="lens-admin-credentials",
+)
+router.register(
+    "admin/environment-variable-sets",
+    EnvironmentVariableSetViewSet,
+    basename="lens-admin-environment-variable-sets",
 )
 router.register("admin/skills", SkillViewSet, basename="lens-admin-skills")
 router.register(

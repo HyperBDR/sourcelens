@@ -651,6 +651,12 @@
         "label": "凭证",
         "action": "新建凭证"
       },
+      "environmentVariables": {
+        "title": "环境变量",
+        "description": "管理可被 Skill 复用的加密运行时配置集。",
+        "label": "环境变量配置集",
+        "action": "新建配置集"
+      },
       "skills": {
         "title": "Skill 资源库",
         "description": "维护可被 Assistant 加载的全局 Skill 资源。",
@@ -707,11 +713,30 @@
       "downloadFailed": "Skill 下载失败",
       "sourceType": "来源",
       "files": "文件数",
+      "environmentVariables": "Env",
+      "environmentVariablesHelp": "添加此 Skill 运行所需的变量；将 Skill 绑定到 Assistant 时再填写变量值。",
+      "addEnvironmentVariable": "添加",
+      "noEnvironmentVariables": "此 Skill 暂未声明环境变量。",
+      "environmentKey": "VARIABLE_NAME",
+      "environmentDescription": "说明用户应该填写什么；必要时给出示例。",
+      "environmentRequired": "必填",
+      "environmentSecret": "敏感值",
       "deleteTitle": "删除 Skill",
       "deleteRiskMessage": "Skill「{name}」当前已被助手关联使用。删除后会移除这些绑定关系，可能导致相关助手工作流或工具不可用。",
       "boundAssistants": "关联助手（{count}）",
       "confirmSkillName": "确认 Skill 名称",
       "confirmSkillNameHelp": "请输入「{name}」以永久删除该 Skill。"
+    },
+    "environmentVariables": {
+      "empty": "暂无环境变量配置集。",
+      "keys": "变量 Key",
+      "values": "变量值",
+      "value": "变量值",
+      "addValue": "＋ 添加变量",
+      "noValues": "请添加 Skill 所需的环境变量。",
+      "createTitle": "新建环境配置",
+      "editTitle": "编辑环境配置",
+      "deleteConfirm": "确定删除这个环境变量配置集吗？"
     },
     "skillDetail": {
       "title": "Skill 详情"
@@ -1243,6 +1268,13 @@
       "skillsSection": "Skills",
       "skillsSectionRequired": "Skills *",
       "generalChatSkillsHint": "请至少选择一个 Skill。通用对话会根据绑定 Skill 的指令和内置脚本运行。",
+      "environmentConfiguration": "环境配置",
+      "environmentConfigurationHint": "该 Skill 声明了 {count} 个环境变量。请选择已有配置集，或在这里新建。",
+      "selectEnvironmentSet": "请选择配置集",
+      "createEnvironmentSet": "新建配置集",
+      "environmentSetName": "配置集名称，例如 Jira - Production",
+      "environmentConfigured": "已保存",
+      "environmentMissing": "未配置",
       "mcpSection": "MCP Servers",
       "noSkills": "暂无可用 Skill，请先在 Skill 资源库中创建",
       "noMcp": "暂无可用 MCP Server，请先在 MCP Server 资源库中创建",

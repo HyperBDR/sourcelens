@@ -344,6 +344,38 @@
                 <span>{{ t('lensAdmin.pages.credentials.title') }}</span>
               </router-link>
               <router-link
+                to="/management/lens/resources/environment-variables"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/resources/environment-variables')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="
+                  preloadRoute(
+                    '/management/lens/resources/environment-variables'
+                  )
+                "
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 6h16M4 12h16M4 18h10"
+                  />
+                </svg>
+                <span>{{
+                  t('lensAdmin.pages.environmentVariables.title')
+                }}</span>
+              </router-link>
+              <router-link
                 to="/management/lens/resources/skills"
                 class="admin-nav-item admin-nav-item-child"
                 :class="

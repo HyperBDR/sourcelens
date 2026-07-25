@@ -8,6 +8,7 @@ from .admin_runs import (
 from .assistants import AssistantViewSet, PublicAssistantView
 from .credentials import DataSourceCredentialViewSet
 from .datasources import DataSourceViewSet
+from .environment_variables import EnvironmentVariableSetViewSet
 from .gateway import (
     LensNodeAIGatewayView,
     LensNodeDeliverableUploadView,
@@ -37,6 +38,7 @@ __all__ = [
     "AssistantViewSet",
     "DataSourceCredentialViewSet",
     "DataSourceViewSet",
+    "EnvironmentVariableSetViewSet",
     "GlobalSettingViewSet",
     "LensAttachmentView",
     "LensNodeAIGatewayView",

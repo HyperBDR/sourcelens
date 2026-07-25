@@ -193,6 +193,7 @@
         :form="form"
         :lensnodes="lensnodes"
         :skills="skills"
+        :environment-variable-sets="environmentVariableSets"
         :mcps="mcps"
         :llm-config-options="llmConfigOptions"
         :groups="groups"
@@ -226,6 +227,7 @@ import {
   listGlobalSettings,
   listLensNodes,
   listMcpServers,
+  listEnvironmentVariableSets,
   listSkills,
   updateAssistant
 } from '@/api/lens'
@@ -235,7 +237,8 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
-import AssistantFormDrawer from './AssistantFormDrawer.vue'
+import AssistantFormDrawer from './AssistantFormDrawerDirectEnvironment.vue'
+import { buildSkillEnvironmentBinding } from './assistantEnvironment'
 import RowActions from './components/RowActions.vue'
 import {
   EMPTY_VALUE as emptyValue,
@@ -262,6 +265,7 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const lensnodes = ref([])
 const skills = ref([])
+const environmentVariableSets = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
@@ -338,6 +342,7 @@ async function load() {
       assistantRows,
       lensnodeRows,
       skillRows,
+      environmentVariableSetRows,
       mcpRows,
       settingRows,
       llmRows,
@@ -347,6 +352,7 @@ async function load() {
       listAssistants(),
       listLensNodes(),
       listSkills(),
+      listEnvironmentVariableSets(),
       listMcpServers(),
       listGlobalSettings(),
       llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => []),
@@ -357,6 +363,7 @@ async function load() {
     assistants.value = normalizeList(assistantRows)
     lensnodes.value = normalizeList(lensnodeRows)
     skills.value = normalizeList(skillRows)
+    environmentVariableSets.value = normalizeList(environmentVariableSetRows)
     mcps.value = normalizeList(mcpRows)
     globalSettings.value = normalizeList(settingRows)
     llmConfigOptions.value = normalizeList(llmRows)
@@ -419,6 +426,8 @@ function defaultForm() {
     pre_prompt: '',
     post_prompt: '',
     skill_uuids: [],
+    skill_environment_set_uuids: {},
+    skill_environment_drafts: {},
     mcp_uuids: [],
     visibility: 'private',
     access_group_ids: [],
@@ -475,6 +484,15 @@ function formFromRow(row) {
     skill_uuids: (row.skill_bindings || [])
       .map((b) => b.skill?.uuid || b.skill_uuid)
       .filter((u) => u && !wgUuids.has(u)),
+    skill_environment_set_uuids: Object.fromEntries(
+      (row.skill_bindings || [])
+        .filter((binding) => binding.environment_variable_set_uuid)
+        .map((binding) => [
+          binding.skill_uuid,
+          binding.environment_variable_set_uuid
+        ])
+    ),
+    skill_environment_drafts: {},
     mcp_uuids: (row.mcp_bindings || [])
       .map((b) => b.mcp_server?.uuid || b.mcp_uuid)
       .filter(Boolean),
@@ -538,9 +556,17 @@ function buildPayload() {
       enabled: form.value.selected_task !== 'general_chat' && !!guideContent,
       content: guideContent
     },
-    skill_bindings: (form.value.skill_uuids || []).map((uuid) => ({
-      skill_uuid: uuid
-    })),
+    skill_bindings: (form.value.skill_uuids || []).map((uuid) => {
+      const skill = skills.value.find((item) => item.uuid === uuid) || {
+        uuid,
+        definition: {}
+      }
+      return buildSkillEnvironmentBinding(
+        skill,
+        form.value.skill_environment_set_uuids?.[uuid],
+        form.value.skill_environment_drafts?.[uuid]
+      )
+    }),
     mcp_bindings: (form.value.mcp_uuids || []).map((uuid) => ({
       mcp_uuid: uuid
     })),
