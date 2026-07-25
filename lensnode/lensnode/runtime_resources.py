@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import httpx
@@ -24,6 +24,7 @@ class RuntimeResources:
     context_skill_contents: list[str]
     skill_environments: dict[str, dict[str, str]]
     mcp_config_path: Path
+    skill_api_policies: dict[str, dict] = field(default_factory=dict)
 
 
 def prepare_runtime_resources(config, command, emit_event=None):
@@ -41,6 +42,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
 
     skill_paths = []
     skill_environments = {}
+    skill_api_policies = {}
     context_skill_contents = []
     general_chat_mode = command.get("task") == "general_chat"
     for skill in command.get("loaded_skills") or []:
@@ -53,6 +55,15 @@ def prepare_runtime_resources(config, command, emit_event=None):
                     str(key): str(value)
                     for key, value in environment.items()
                 }
+            definition = skill.get("definition") or {}
+            api_policy = (
+                definition.get("api")
+                if isinstance(definition, dict)
+                else None
+            )
+            skill_api_policies[skill_path.name] = (
+                api_policy if isinstance(api_policy, dict) else {}
+            )
         context_content = _context_skill_content(
             skill,
             skill_path=skill_path,
@@ -87,6 +98,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
         context_skill_contents=context_skill_contents,
         skill_environments=skill_environments,
         mcp_config_path=mcp_config_path,
+        skill_api_policies=skill_api_policies,
     )
 
 

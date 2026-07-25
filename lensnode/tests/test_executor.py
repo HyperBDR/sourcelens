@@ -206,6 +206,15 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
                         "# Repo Guide\n\n"
                         "Inspect service-api before deployment repos."
                     ),
+                    "api": {
+                        "base_url_env": "REPO_BASE_URL",
+                        "routes": [
+                            {
+                                "path": "/api/status",
+                                "methods": ["GET"],
+                            }
+                        ],
+                    },
                 },
                 "load_config": {"mode": "context", "inject": True},
             },
@@ -219,6 +228,15 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
         assert len(resources.skill_paths) == 1
         assert len(resources.context_skill_contents) == 1
         assert "Inspect service-api" in resources.context_skill_contents[0]
+        assert resources.skill_api_policies["repo-guide"] == {
+            "base_url_env": "REPO_BASE_URL",
+            "routes": [
+                {
+                    "path": "/api/status",
+                    "methods": ["GET"],
+                }
+            ],
+        }
         assert resources.mcp_config_path.exists()
     finally:
         cleanup_runtime_resources(resources)

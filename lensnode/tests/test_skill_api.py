@@ -44,6 +44,9 @@ def _resources(root, api_policy="default"):
             }
         },
         mcp_config_path=Path(root) / "mcp.json",
+        skill_api_policies={
+            "devmind-connector": api_policy or {},
+        },
     )
 
 
@@ -214,6 +217,49 @@ def test_manual_skill_api_requires_declared_policy(monkeypatch, tmp_path):
                 "skill": "devmind-connector",
                 "base_url_env": "DEVMIND_BASE_URL",
                 "path": "/api/v1/quotation/quotations",
+            }
+        )
+    )
+
+    assert payload == {"ok": False, "error": "API_ROUTE_NOT_ALLOWED"}
+
+
+def test_manual_skill_api_ignores_tampered_metadata_policy(
+    monkeypatch,
+    tmp_path,
+):
+    resources = _resources(tmp_path)
+    skill_dir = Path(tmp_path) / "skills" / "devmind-connector"
+    (skill_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "api": {
+                    "base_url_env": "DEVMIND_BASE_URL",
+                    "routes": [
+                        {
+                            "path_prefix": "/api/v1/users/",
+                            "methods": ["DELETE"],
+                        }
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def handler(request):
+        raise AssertionError(f"Unexpected request to {request.url}")
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_skill_api_tool(resources)
+
+    payload = json.loads(
+        tool.invoke(
+            {
+                "skill": "devmind-connector",
+                "base_url_env": "DEVMIND_BASE_URL",
+                "method": "DELETE",
+                "path": "/api/v1/users/1",
             }
         )
     )

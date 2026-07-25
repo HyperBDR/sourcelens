@@ -670,7 +670,7 @@ def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
         if request_path is None:
             return _json({"ok": False, "error": "PATH_MUST_BE_RELATIVE"})
         if not _skill_api_request_allowed(
-            skill_dir,
+            resources.skill_api_policies.get(skill_dir.name, {}),
             base_url_env,
             request_method,
             request_path,
@@ -1317,20 +1317,13 @@ def _normalized_skill_api_path(value):
 
 
 def _skill_api_request_allowed(
-    skill_dir,
+    policy,
     base_url_env,
     request_method,
     request_path,
 ):
-    """Return whether a Skill metadata policy permits one API request."""
+    """Return whether a trusted runtime policy permits one API request."""
 
-    try:
-        metadata = json.loads(
-            (skill_dir / "metadata.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return False
-    policy = metadata.get("api") if isinstance(metadata, dict) else None
     if not isinstance(policy, dict):
         return False
     if policy.get("base_url_env") != str(base_url_env or "").strip():
