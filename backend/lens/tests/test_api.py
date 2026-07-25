@@ -348,7 +348,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    def test_manual_skill_requires_environment_variable(self):
+    def test_manual_skill_allows_empty_environment_schema(self):
         response = self.client.post(
             "/api/lens/admin/skills/",
             {
@@ -359,10 +359,38 @@ class LensApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(
-            "Add at least one environment variable.",
-            str(response.data),
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(
+            response.data["definition"]["environment"],
+            [],
+        )
+
+    def test_manual_skill_update_accepts_legacy_definition_without_environment(
+        self,
+    ):
+        legacy_skill = Skill.objects.create(
+            name="Legacy Skill",
+            slug="legacy-skill",
+            definition={"content": "Old instructions."},
+        )
+
+        response = self.client.patch(
+            f"/api/lens/admin/skills/{legacy_skill.uuid}/",
+            {
+                "definition": {
+                    "content": "Updated instructions.",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data["definition"],
+            {
+                "content": "Updated instructions.",
+                "environment": [],
+            },
         )
 
     @patch("lens.skill_generation.run_completion")

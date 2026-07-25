@@ -208,10 +208,7 @@
                 :placeholder="t('lensAdmin.placeholders.skillDescription')"
               />
             </FormRow>
-            <FormRow
-              :label="t('lensAdmin.skills.environmentVariables')"
-              required
-            >
+            <FormRow :label="t('lensAdmin.skills.environmentVariables')">
               <div
                 class="overflow-hidden rounded-lg border border-line bg-surface"
               >
@@ -975,9 +972,6 @@ async function save() {
       await updateGithubSkill(form.value.uuid, githubUrl.value)
       showSuccess(t('lensAdmin.messages.saveSuccess'))
     } else {
-      if (!(form.value.environment || []).length) {
-        throw new Error(t('lensAdmin.environmentVariables.noValues'))
-      }
       await saveByMode(form.value.uuid, buildPayload())
       showSuccess(t('lensAdmin.messages.saveSuccess'))
     }

@@ -1554,10 +1554,6 @@ class SkillSerializer(serializers.ModelSerializer):
         environment = validate_environment_schema(
             normalized.get("environment")
         )
-        if not environment:
-            raise serializers.ValidationError(
-                "Add at least one environment variable."
-            )
         normalized["environment"] = environment
         api = validate_skill_api_policy(normalized.get("api"), environment)
         if api:
