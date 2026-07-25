@@ -15,6 +15,7 @@
   </Transition>
 
   <aside
+    id="admin-sidebar"
     :class="[
       'layout-admin-sidebar flex h-full w-64 flex-shrink-0 flex-col border-r border-ink-800 bg-ink-900 transition-transform duration-300 ease-in-out',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
@@ -37,6 +38,8 @@
       </router-link>
       <button
         v-if="isMobile"
+        type="button"
+        :aria-label="`${t('common.close')} ${t('management.logoTitle')}`"
         @click="$emit('close')"
         class="rounded-md p-2 text-ink-400 hover:bg-white/10 hover:text-white"
       >
