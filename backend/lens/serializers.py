@@ -497,6 +497,25 @@ class AssistantSerializer(serializers.ModelSerializer):
         mcp_bindings = validated_data.pop("mcp_bindings", None)
 
         if skill_bindings is not None:
+            variable_set_ids = {
+                binding["environment_variable_set"].pk
+                for binding in skill_bindings
+                if binding.get("environment_variable_set") is not None
+                and binding.get("environment_values")
+            }
+            locked_variable_sets = (
+                EnvironmentVariableSet.objects.select_for_update().in_bulk(
+                    variable_set_ids
+                )
+                if variable_set_ids
+                else {}
+            )
+            for binding in skill_bindings:
+                variable_set = binding.get("environment_variable_set")
+                if variable_set is not None:
+                    binding["environment_variable_set"] = (
+                        locked_variable_sets.get(variable_set.pk, variable_set)
+                    )
             assistant.skill_bindings.all().delete()
             for binding in skill_bindings:
                 skill = Skill.objects.get(uuid=binding["skill_uuid"])

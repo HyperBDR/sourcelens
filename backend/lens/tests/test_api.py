@@ -9,7 +9,9 @@ from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -950,6 +952,60 @@ class LensApiTests(TestCase):
             variable_set.get_values(),
             {"JIRA_API_TOKEN": "new-token"},
         )
+
+    def test_assistant_update_locks_environment_set_before_rebinding(self):
+        self.skill.definition = {
+            "environment": [
+                {
+                    "name": "JIRA_API_TOKEN",
+                    "required": True,
+                    "secret": True,
+                }
+            ]
+        }
+        self.skill.save(update_fields=["definition"])
+        variable_set = EnvironmentVariableSet.objects.create(
+            name="Jira - Locked"
+        )
+        variable_set.set_values({"JIRA_API_TOKEN": "old-token"})
+        variable_set.save(update_fields=["encrypted_values"])
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=self.skill,
+            environment_variable_set=variable_set,
+        )
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.patch(
+                f"/api/lens/assistants/{self.assistant.uuid}/",
+                {
+                    "skill_bindings": [
+                        {
+                            "skill_uuid": str(self.skill.uuid),
+                            "environment_variable_set_uuid": str(
+                                variable_set.uuid
+                            ),
+                            "environment_values": [
+                                {
+                                    "key": "JIRA_API_TOKEN",
+                                    "value": "new-token",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        table_name = EnvironmentVariableSet._meta.db_table.upper()
+        lock_queries = [
+            query["sql"]
+            for query in queries.captured_queries
+            if "FOR UPDATE" in query["sql"].upper()
+            and table_name in query["sql"].upper()
+        ]
+        self.assertTrue(lock_queries)
 
     def test_disabled_binding_does_not_require_environment(self):
         self.skill.definition = {
