@@ -208,59 +208,10 @@
                 :placeholder="t('lensAdmin.placeholders.skillDescription')"
               />
             </FormRow>
-            <FormRow :label="t('lensAdmin.skills.environmentVariables')">
-              <div
-                class="overflow-hidden rounded-lg border border-line bg-surface"
-              >
-                <div
-                  class="flex items-center justify-between gap-3 border-b border-line bg-surface-sunken px-3 py-2.5"
-                >
-                  <p class="text-xs leading-5 text-ink-500">
-                    {{ t('lensAdmin.skills.environmentVariablesHelp') }}
-                  </p>
-                  <BaseButton
-                    size="sm"
-                    variant="outline"
-                    @click="addEnvironment"
-                  >
-                    {{ t('common.add') }}
-                  </BaseButton>
-                </div>
-                <div
-                  v-if="!form.environment.length"
-                  class="px-3 py-4 text-sm text-ink-400"
-                >
-                  {{ t('lensAdmin.skills.noEnvironmentVariables') }}
-                </div>
-                <div
-                  v-for="(item, index) in form.environment"
-                  :key="index"
-                  class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2 border-b border-line p-3 last:border-b-0"
-                >
-                  <input
-                    v-model.trim="item.name"
-                    class="form-input min-w-0 font-mono"
-                    pattern="[A-Z_][A-Z0-9_]*"
-                    :placeholder="t('lensAdmin.skills.environmentKey')"
-                    required
-                  />
-                  <input
-                    v-model="item.description"
-                    class="form-input min-w-0"
-                    :placeholder="t('lensAdmin.skills.environmentDescription')"
-                  />
-                  <button
-                    type="button"
-                    class="inline-flex h-9 w-9 items-center justify-center rounded-md text-danger-600 transition-colors hover:bg-danger-50 hover:text-danger-700"
-                    :aria-label="t('common.delete')"
-                    :title="t('common.delete')"
-                    @click="removeEnvironment(index)"
-                  >
-                    <MinusIcon class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            </FormRow>
+            <SkillEnvironmentEditor
+              v-model="form.environment"
+              @change="markEnvironmentChanged"
+            />
             <FormRow :label="t('lensAdmin.fields.content')">
               <div class="mb-2 flex items-center justify-between gap-2">
                 <span class="text-xs text-ink-400">
@@ -286,7 +237,10 @@
           </template>
 
           <template v-else-if="activeMethod === 'upload'">
-            <FormRow :label="t('lensAdmin.skills.packageFile')" required>
+            <FormRow
+              :label="t('lensAdmin.skills.packageFile')"
+              :required="mode === 'create'"
+            >
               <input
                 ref="packageInput"
                 class="hidden"
@@ -339,9 +293,17 @@
                 </button>
               </div>
               <p class="mt-1 text-xs leading-5 text-ink-500">
-                {{ t('lensAdmin.skills.packageFileHelp') }}
+                {{
+                  mode === 'create'
+                    ? t('lensAdmin.skills.packageFileHelp')
+                    : t('lensAdmin.skills.packageFileOptionalHelp')
+                }}
               </p>
             </FormRow>
+            <SkillEnvironmentEditor
+              v-model="form.environment"
+              @change="markEnvironmentChanged"
+            />
           </template>
 
           <template v-else-if="activeMethod === 'github'">
@@ -542,11 +504,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  Minus as MinusIcon,
-  UploadCloud as UploadCloudIcon,
-  X as XIcon
-} from '@lucide/vue'
+import { UploadCloud as UploadCloudIcon, X as XIcon } from '@lucide/vue'
 
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
@@ -576,7 +534,9 @@ import { extractErrorMessage } from '@/utils/api'
 import BooleanRow from './components/BooleanRow.vue'
 import FormRow from './components/FormRow.vue'
 import RowActions from './components/RowActions.vue'
+import SkillEnvironmentEditor from './components/SkillEnvironmentEditor.vue'
 import { normalizeList } from './adminHelpers'
+import { buildSkillEnvironment, skillEnvironmentForm } from './skillEnvironment'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
@@ -601,6 +561,7 @@ const editSourceType = ref('manual')
 const packageFile = ref(null)
 const packageInput = ref(null)
 const packageDragging = ref(false)
+const environmentChanged = ref(false)
 const deleteTarget = ref(null)
 const deleteImpact = ref({})
 const deleteConfirmation = ref('')
@@ -763,18 +724,16 @@ function defaultForm() {
 }
 
 function formFromRow(row) {
+  const originalDefinition =
+    row?.definition && typeof row.definition === 'object' ? row.definition : {}
   return {
     uuid: row.uuid,
     name: row.name || '',
     slug: row.slug || '',
     description: skillDescription(row),
     content: skillContent(row),
-    environment: (row?.definition?.environment || []).map((item) => ({
-      name: item.name || '',
-      description: item.description || '',
-      required: true,
-      secret: !!item.secret || isSensitiveEnvironmentName(item.name)
-    })),
+    environment: skillEnvironmentForm(originalDefinition.environment),
+    originalDefinition,
     enabled: row.enabled !== false
   }
 }
@@ -782,12 +741,7 @@ function formFromRow(row) {
 function buildPayload() {
   const definition = {
     content: form.value.content || '',
-    environment: (form.value.environment || []).map((item) => ({
-      name: (item.name || '').trim(),
-      description: (item.description || '').trim(),
-      required: true,
-      secret: !!item.secret || isSensitiveEnvironmentName(item.name)
-    }))
+    environment: buildSkillEnvironment(form.value.environment)
   }
   const description = (form.value.description || '').trim()
   if (description) {
@@ -801,23 +755,17 @@ function buildPayload() {
   }
 }
 
-function addEnvironment() {
-  form.value.environment.push({
-    name: '',
-    description: '',
-    required: true,
-    secret: false
-  })
+function buildEnvironmentPayload() {
+  return {
+    definition: {
+      ...(form.value.originalDefinition || {}),
+      environment: buildSkillEnvironment(form.value.environment)
+    }
+  }
 }
 
-function removeEnvironment(index) {
-  form.value.environment.splice(index, 1)
-}
-
-function isSensitiveEnvironmentName(value) {
-  return /(?:PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|PRIVATE_KEY)$/i.test(
-    String(value || '')
-  )
+function markEnvironmentChanged() {
+  environmentChanged.value = true
 }
 
 async function load() {
@@ -882,6 +830,7 @@ function startCreate() {
   form.value = defaultForm()
   githubUrl.value = ''
   packageFile.value = null
+  environmentChanged.value = false
   showModal.value = true
 }
 
@@ -893,6 +842,7 @@ function startEdit(row) {
   form.value = formFromRow(row)
   githubUrl.value = row?.source_url || ''
   packageFile.value = null
+  environmentChanged.value = false
   showModal.value = true
 }
 
@@ -903,6 +853,7 @@ function closeModal() {
   githubUrl.value = ''
   editSourceType.value = 'manual'
   packageFile.value = null
+  environmentChanged.value = false
 }
 
 function openDetail(row) {
@@ -957,16 +908,27 @@ async function save() {
       if (!packageFile.value) {
         throw new Error(t('lensAdmin.skills.packageFileRequired'))
       }
-      await uploadSkill(packageFile.value)
+      const environment = environmentChanged.value
+        ? buildSkillEnvironment(form.value.environment)
+        : undefined
+      await uploadSkill(packageFile.value, environment)
       showSuccess(t('lensAdmin.skills.uploadSuccess'))
     } else if (mode.value === 'create' && createMethod.value === 'github') {
       await importSkillFromGithub(githubUrl.value)
       showSuccess(t('lensAdmin.skills.importSuccess'))
     } else if (mode.value === 'edit' && activeMethod.value === 'upload') {
-      if (!packageFile.value) {
-        throw new Error(t('lensAdmin.skills.packageFileRequired'))
+      if (packageFile.value) {
+        const environment = environmentChanged.value
+          ? buildSkillEnvironment(form.value.environment)
+          : undefined
+        await updateUploadedSkill(
+          form.value.uuid,
+          packageFile.value,
+          environment
+        )
+      } else {
+        await updateSkill(form.value.uuid, buildEnvironmentPayload())
       }
-      await updateUploadedSkill(form.value.uuid, packageFile.value)
       showSuccess(t('lensAdmin.messages.saveSuccess'))
     } else if (mode.value === 'edit' && activeMethod.value === 'github') {
       await updateGithubSkill(form.value.uuid, githubUrl.value)

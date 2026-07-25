@@ -116,7 +116,7 @@
                 <input
                   v-model.trim="item.key"
                   class="form-input font-mono"
-                  pattern="[A-Z_][A-Z0-9_]*"
+                  :pattern="SHELL_ENVIRONMENT_NAME_PATTERN"
                   :placeholder="t('lensAdmin.skills.environmentKey')"
                   required
                 />
@@ -184,6 +184,7 @@ import { extractErrorMessage } from '@/utils/api'
 
 import FormRow from './components/FormRow.vue'
 import { normalizeList } from './adminHelpers'
+import { SHELL_ENVIRONMENT_NAME_PATTERN } from './skillEnvironment'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()

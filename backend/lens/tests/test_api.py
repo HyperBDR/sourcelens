@@ -124,6 +124,28 @@ def skill_zip_upload(name, body, environment=None, api=None):
     )
 
 
+def skill_zip_upload_with_file(name, file_size):
+    """Return a compressed Skill zip containing one generated package file."""
+
+    buffer = io.BytesIO()
+    skill_md = (
+        "---\n"
+        f"name: {name}\n"
+        f"description: {name} description\n"
+        "---\n"
+        "Use the bundled executable.\n"
+    )
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{name}/SKILL.md", skill_md)
+        archive.writestr(f"{name}/bin/tool", b"\0" * file_size)
+    buffer.seek(0)
+    return SimpleUploadedFile(
+        f"{name}.zip",
+        buffer.read(),
+        content_type="application/zip",
+    )
+
+
 @override_settings(CACHES=TEST_CACHES, CHANNEL_LAYERS=TEST_CHANNEL_LAYERS)
 class LensApiTests(TestCase):
     def setUp(self):
@@ -478,6 +500,96 @@ class LensApiTests(TestCase):
             environment,
         )
 
+    def test_uploaded_skill_accepts_ten_megabyte_package_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload_with_file(
+                            "binary-skill",
+                            10 * 1024 * 1024,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_uploaded_skill_rejects_package_file_over_ten_megabytes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload_with_file(
+                            "oversized-binary-skill",
+                            10 * 1024 * 1024 + 1,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Skill package contains an oversized file.",
+        )
+
+    def test_uploaded_skill_accepts_environment_schema_override(self):
+        environment = [
+            {
+                "name": "JIRA_API_TOKEN",
+                "description": "Jira token",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "jira-connector",
+                            "Use the Jira API.",
+                        ),
+                        "environment": json.dumps(environment),
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["definition"]["environment"],
+            environment,
+        )
+
+    def test_uploaded_skill_rejects_invalid_environment_schema_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "jira-connector",
+                            "Use the Jira API.",
+                        ),
+                        "environment": "{invalid",
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Environment variables must be valid JSON.",
+        )
+        self.assertFalse(
+            Skill.objects.filter(slug="jira-connector").exists()
+        )
+
     def test_uploaded_skill_reads_api_access_policy(self):
         environment = [
             {
@@ -578,6 +690,42 @@ class LensApiTests(TestCase):
                 assistant=self.assistant,
                 skill=skill,
             ).exists()
+        )
+
+    def test_uploaded_skill_update_accepts_environment_schema_override(self):
+        skill = Skill.objects.create(
+            name="package-skill",
+            slug="package-skill",
+            definition={"content": "old", "environment": []},
+            source_type="upload",
+        )
+        environment = [
+            {
+                "name": "PACKAGE_TOKEN",
+                "description": "Package token",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    f"/api/lens/admin/skills/{skill.uuid}/update-upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "package-skill",
+                            "new body",
+                        ),
+                        "environment": json.dumps(environment),
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["definition"]["environment"],
+            environment,
         )
 
     def test_assistant_create_rejects_unreported_task(self):

@@ -12,7 +12,7 @@
       <BaseButton size="sm" variant="outline" @click="$emit('edit', row)">
         {{ t('common.edit') }}
       </BaseButton>
-      <BaseButton size="sm" variant="danger" @click="confirming = true">
+      <BaseButton size="sm" variant="danger" @click="requestDelete">
         {{ t('common.delete') }}
       </BaseButton>
     </template>
@@ -29,6 +29,10 @@ const props = defineProps({
   row: {
     type: Object,
     required: true
+  },
+  confirmInline: {
+    type: Boolean,
+    default: true
   }
 })
 const emit = defineEmits(['edit', 'delete'])
@@ -38,6 +42,14 @@ const confirming = ref(false)
 
 function confirmDelete() {
   confirming.value = false
+  emit('delete', props.row)
+}
+
+function requestDelete() {
+  if (props.confirmInline) {
+    confirming.value = true
+    return
+  }
   emit('delete', props.row)
 }
 </script>

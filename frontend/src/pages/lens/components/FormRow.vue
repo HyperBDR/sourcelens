@@ -1,6 +1,9 @@
 <template>
   <div>
-    <label class="mb-1 block text-sm font-medium text-ink-700">
+    <label
+      class="mb-1 block text-sm font-medium text-ink-700"
+      :for="forId || undefined"
+    >
       {{ label }}
       <span v-if="required" class="text-danger-600">*</span>
     </label>
@@ -17,6 +20,10 @@ defineProps({
   required: {
     type: Boolean,
     default: false
+  },
+  forId: {
+    type: String,
+    default: ''
   }
 })
 </script>

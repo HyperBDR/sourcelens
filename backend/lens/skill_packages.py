@@ -13,6 +13,7 @@ from urllib import parse, request
 
 from django.conf import settings
 from django.db import transaction
+from rest_framework.exceptions import ValidationError
 
 from .environment_variables import (
     validate_environment_schema,
@@ -22,7 +23,7 @@ from .models import Skill
 
 MAX_ZIP_SIZE = 20 * 1024 * 1024
 MAX_UNPACKED_SIZE = 50 * 1024 * 1024
-MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_FILE_SIZE = 10 * 1024 * 1024
 MAX_SKILL_MD_SIZE = 256 * 1024
 MAX_FILE_COUNT = 300
 MAX_GITHUB_DOWNLOAD_SIZE = MAX_ZIP_SIZE
@@ -41,6 +42,7 @@ def import_skill_zip(
     original_name="",
     source_type="upload",
     source_url="",
+    environment_override=None,
 ):
     """Validate and persist a Skill zip package."""
 
@@ -61,6 +63,7 @@ def import_skill_zip(
         skill_md = skill_root / "SKILL.md"
         metadata = _parse_skill_md(skill_md)
         metadata.update(_parse_sourcelens_config(skill_root))
+        _apply_environment_override(metadata, environment_override)
         slug = _slug_from_metadata(metadata)
         manifest = _package_manifest(skill_root)
         package_root = skill_package_root(slug, digest)
@@ -122,6 +125,7 @@ def update_skill_zip(
     original_name="",
     source_type="upload",
     source_url="",
+    environment_override=None,
 ):
     """Validate a Skill zip package and replace an existing Skill snapshot."""
 
@@ -145,6 +149,7 @@ def update_skill_zip(
         skill_root = _find_skill_root(extract_root)
         metadata = _parse_skill_md(skill_root / "SKILL.md")
         metadata.update(_parse_sourcelens_config(skill_root))
+        _apply_environment_override(metadata, environment_override)
         slug = _slug_from_metadata(metadata)
         if slug != skill.slug:
             raise SkillPackageError(
@@ -441,6 +446,21 @@ def _parse_sourcelens_config(skill_root):
         return {"environment": environment, "api": api}
     except Exception as exc:
         raise SkillPackageError(str(exc)) from exc
+
+
+def _apply_environment_override(metadata, environment_override):
+    """Apply an optional admin-provided environment declaration."""
+
+    if environment_override is None:
+        return
+    try:
+        environment = validate_environment_schema(environment_override)
+        api = validate_skill_api_policy(metadata.get("api"), environment)
+    except ValidationError as exc:
+        detail = exc.detail[0] if isinstance(exc.detail, list) else exc.detail
+        raise SkillPackageError(str(detail)) from exc
+    metadata["environment"] = environment
+    metadata["api"] = api
 
 
 def _parse_simple_frontmatter(frontmatter):
