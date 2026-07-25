@@ -4,7 +4,7 @@
   >
     <div class="px-4 sm:px-6 lg:px-8">
       <div class="flex justify-between items-center h-16">
-        <div class="flex items-center gap-3">
+        <div class="flex min-w-0 flex-1 items-center gap-3">
           <button
             type="button"
             aria-controls="admin-sidebar"
@@ -27,16 +27,19 @@
               />
             </svg>
           </button>
-          <h1 class="text-lg font-semibold text-white lg:hidden">
+          <h1
+            class="min-w-0 truncate whitespace-nowrap text-base font-semibold text-white lg:hidden sm:text-lg"
+          >
             {{ pageTitle }}
           </h1>
         </div>
 
-        <div class="flex items-center space-x-4">
+        <div class="ml-2 flex shrink-0 items-center space-x-1 sm:space-x-4">
           <LanguageSwitcher variant="dark" />
           <router-link
             to="/"
-            class="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 shadow-sm transition-colors hover:border-slate-500 hover:bg-slate-700"
+            :aria-label="t('management.backToUserPlatform')"
+            class="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-sm font-medium text-slate-100 shadow-sm transition-colors hover:border-slate-500 hover:bg-slate-700 sm:px-3"
           >
             <svg
               class="h-4 w-4"
@@ -51,7 +54,9 @@
                 d="M10 19l-7-7m0 0l7-7m-7 7h18"
               />
             </svg>
-            <span>{{ t('management.backToUserPlatform') }}</span>
+            <span class="hidden sm:inline">
+              {{ t('management.backToUserPlatform') }}
+            </span>
           </router-link>
           <div class="relative" ref="userMenuRef">
             <button

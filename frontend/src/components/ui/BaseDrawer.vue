@@ -10,7 +10,8 @@
     >
       <div
         v-if="show"
-        class="fixed inset-0 z-50 flex justify-end"
+        ref="dialogRef"
+        class="fixed inset-0 z-[60] flex justify-end"
         role="dialog"
         aria-modal="true"
         :aria-label="title"
@@ -26,6 +27,7 @@
         >
           <div
             v-if="show"
+            tabindex="-1"
             class="relative z-10 flex h-full w-full flex-col bg-surface shadow-xl"
             :class="widthClass"
             @click.stop
@@ -88,8 +90,16 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+
+import {
+  acquireBodyScrollLock,
+  isTopDialog,
+  registerDialog,
+  unregisterDialog,
+  releaseBodyScrollLock
+} from './dialogScrollLock'
 
 const { t } = useI18n()
 
@@ -102,6 +112,20 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close'])
+const dialogRef = ref(null)
+
+const focusableSelector = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])'
+].join(',')
+
+let previousFocus = null
+let dialogActive = false
+const dialogToken = Symbol('base-drawer')
 
 const widthClass = computed(() => {
   const map = {
@@ -119,28 +143,86 @@ function handleBackdropClick() {
 }
 
 function handleKeydown(event) {
-  if (event.key !== 'Escape' || !props.show) return
-  event.preventDefault()
-  requestClose()
+  if (!props.show || !isTopDialog(dialogToken)) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    requestClose()
+    return
+  }
+  if (event.key !== 'Tab') return
+
+  const focusable = getFocusableElements()
+  if (focusable.length === 0) {
+    event.preventDefault()
+    dialogRef.value?.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 function requestClose() {
   emit('close')
 }
 
+function getFocusableElements() {
+  if (!dialogRef.value) return []
+  return [...dialogRef.value.querySelectorAll(focusableSelector)].filter(
+    (element) => element.getClientRects().length > 0
+  )
+}
+
+function activateDialog() {
+  if (dialogActive) return
+  dialogActive = true
+  previousFocus = document.activeElement
+  acquireBodyScrollLock()
+  registerDialog(dialogToken)
+  window.addEventListener('keydown', handleKeydown)
+  nextTick(() => {
+    const initialFocus = getFocusableElements().find((element) =>
+      element.matches('input, select, textarea, [autofocus]')
+    )
+    ;(initialFocus || getFocusableElements()[0] || dialogRef.value)?.focus()
+  })
+}
+
+function deactivateDialog() {
+  if (!dialogActive) return
+  dialogActive = false
+  window.removeEventListener('keydown', handleKeydown)
+  unregisterDialog(dialogToken)
+  releaseBodyScrollLock()
+  const focusTarget = previousFocus
+  previousFocus = null
+  nextTick(() => {
+    if (focusTarget?.isConnected) focusTarget.focus()
+  })
+}
+
 watch(
   () => props.show,
   (show) => {
     if (typeof window === 'undefined') return
-    const action = show ? 'addEventListener' : 'removeEventListener'
-    window[action]('keydown', handleKeydown)
+    if (show) {
+      activateDialog()
+    } else {
+      deactivateDialog()
+    }
   },
   { immediate: true }
 )
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
-    window.removeEventListener('keydown', handleKeydown)
+    deactivateDialog()
   }
 })
 </script>
