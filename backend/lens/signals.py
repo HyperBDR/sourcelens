@@ -3,19 +3,19 @@ import logging
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
-from .models import RunOutputFile
+from .models import RunOutputFile, SharedQAFile
 
 logger = logging.getLogger(__name__)
 
 
+@receiver(post_delete, sender=SharedQAFile)
 @receiver(post_delete, sender=RunOutputFile)
-def purge_output_file_bytes(sender, instance, **kwargs):
-    """Delete the stored bytes when a RunOutputFile row is removed.
+def purge_deliverable_bytes(sender, instance, **kwargs):
+    """Delete stored bytes when a deliverable record is removed.
 
-    Django cascades the row on session/run deletion but leaves the
-    FileField bytes in the 'deliverables' storage. Removing them here
-    keeps deliverable storage bounded to live sessions across every
-    deletion path (session purge, run delete, admin delete).
+    Django cascades database rows but leaves FileField bytes in storage.
+    Removing them here keeps both private and shared deliverables bounded
+    to live database records across every deletion path.
     """
 
     if not instance.file:
@@ -24,6 +24,7 @@ def purge_output_file_bytes(sender, instance, **kwargs):
         instance.file.delete(save=False)
     except Exception:
         logger.warning(
-            "Failed to purge deliverable bytes for %s", instance.uuid,
+            "Failed to purge deliverable bytes for %s",
+            instance.uuid,
             exc_info=True,
         )

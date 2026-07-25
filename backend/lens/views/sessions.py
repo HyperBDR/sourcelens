@@ -3,6 +3,7 @@
 import json
 
 from asgiref.sync import sync_to_async
+from django.db import transaction
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -34,6 +35,7 @@ from lens.services import (
     cancel_run_on_lensnode,
     stream_run_events_async,
 )
+from lens.shared_qa_files import snapshot_shared_qa_files
 from .base import (
     BaseAuthenticatedViewSet,
     EventStreamRenderer,
@@ -315,18 +317,20 @@ class RunViewSet(BaseAuthenticatedViewSet):
         title = (request.data.get("title") or "").strip()[:200]
         if not title:
             title = _shared_qa_default_title(question)
-        share = SharedQA.objects.create(
-            token=_unique_share_token(),
-            run=run,
-            assistant=assistant,
-            assistant_name=assistant.name if assistant else "",
-            assistant_slug=assistant.slug if assistant else "",
-            question=question,
-            answer=answer,
-            title=title,
-            published_by=request.user,
-            published_at=timezone.now(),
-        )
+        with transaction.atomic():
+            share = SharedQA.objects.create(
+                token=_unique_share_token(),
+                run=run,
+                assistant=assistant,
+                assistant_name=assistant.name if assistant else "",
+                assistant_slug=assistant.slug if assistant else "",
+                question=question,
+                answer=answer,
+                title=title,
+                published_by=request.user,
+                published_at=timezone.now(),
+            )
+            snapshot_shared_qa_files(share)
         return Response(
             SharedQAMineSerializer(share).data,
             status=status.HTTP_201_CREATED,

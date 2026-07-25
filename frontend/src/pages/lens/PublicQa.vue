@@ -25,15 +25,53 @@
           {{ qa.assistant_name }}
         </router-link>
 
-        <h1
-          class="mt-3 whitespace-pre-wrap rounded-lg border border-line bg-surface px-4 py-3 text-lg font-semibold text-ink-900"
-        >
+        <h1 class="mt-3 text-xl font-semibold text-ink-900">
           {{ qa.title || qa.question }}
         </h1>
 
-        <div class="mt-5">
+        <section
+          class="mt-5 rounded-lg border border-line bg-surface px-4 py-4"
+          :aria-labelledby="`shared-question-${token}`"
+        >
+          <h2
+            :id="`shared-question-${token}`"
+            class="text-xs font-semibold uppercase tracking-wide text-ink-400"
+          >
+            {{ t('lens.qa.question') }}
+          </h2>
+          <SharedQaFileList
+            v-if="qa.input_attachments?.length"
+            class="mt-3"
+            :files="qa.input_attachments"
+            :label="t('lens.qa.inputAttachments')"
+            @preview="openPreview"
+            @download="downloadFile"
+          />
+          <p class="mt-3 whitespace-pre-wrap text-base text-ink-900">
+            {{ qa.question }}
+          </p>
+        </section>
+
+        <section class="mt-5" :aria-labelledby="`shared-answer-${token}`">
+          <h2
+            :id="`shared-answer-${token}`"
+            class="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-400"
+          >
+            {{ t('lens.qa.answer') }}
+          </h2>
           <MarkdownRenderer :content="qa.answer || ''" />
-        </div>
+          <div v-if="qa.output_files?.length" class="mt-5">
+            <h3 class="mb-2 text-sm font-medium text-ink-600">
+              {{ t('lens.qa.outputFiles') }}
+            </h3>
+            <SharedQaFileList
+              :files="qa.output_files"
+              :label="t('lens.qa.outputFiles')"
+              @preview="openPreview"
+              @download="downloadFile"
+            />
+          </div>
+        </section>
 
         <div
           class="mt-6 flex items-center justify-between border-t border-line pt-4 text-xs text-ink-400"
@@ -68,6 +106,11 @@
         </div>
       </article>
     </main>
+    <FilePreviewModal
+      :file="previewFile"
+      @close="closePreview"
+      @download="downloadFile"
+    />
   </div>
 </template>
 
@@ -79,12 +122,15 @@ import { Copy } from '@lucide/vue'
 
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
 import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
+import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
+import SharedQaFileList from '@/components/lens/SharedQaFileList.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { getPublicQa } from '@/api/lens'
 import { copyToClipboard } from '@/utils/clipboard'
 import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
+import { fetchDeliverableBlob } from '@/utils/filePreview'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/store/user'
 
@@ -99,6 +145,7 @@ const userStore = useUserStore()
 const qa = ref(null)
 const loading = ref(true)
 const accessState = ref(null)
+const previewFile = ref(null)
 const isAuthenticated = computed(() => userStore.isAuthenticated)
 
 function accessStateFromError(error) {
@@ -145,6 +192,31 @@ async function copyLink() {
     showSuccess(t('lens.qa.copied'))
   } else {
     showError(t('lens.qa.copyFailed'))
+  }
+}
+
+function openPreview(file) {
+  previewFile.value = file
+}
+
+function closePreview() {
+  previewFile.value = null
+}
+
+async function downloadFile(file) {
+  if (!file?.url) return
+  try {
+    const blob = await fetchDeliverableBlob(file)
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = file.filename || 'download'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+  } catch {
+    showError(t('lens.chat.downloadFailed'))
   }
 }
 

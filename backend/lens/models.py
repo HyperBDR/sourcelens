@@ -822,7 +822,7 @@ class GlobalSetting(models.Model):
 
 
 class SharedQA(TimestampedUUIDModel):
-    """Public, immutable snapshot of one Q&A turn, shareable anonymously.
+    """Immutable snapshot of one Q&A turn shared with eligible viewers.
 
     The question and answer text are snapshotted at share time so the
     public page stays stable and decoupled from the private session
@@ -894,6 +894,12 @@ def deliverable_storage():
     return storages["deliverables"]
 
 
+def shared_qa_file_upload_to(instance, filename):
+    """Return an isolated storage path for one shared file snapshot."""
+
+    return f"shared-qa/{instance.share.uuid}/{instance.kind}/{filename}"
+
+
 def run_output_file_upload_to(instance, filename):
     """Return the deliverables path: <assistant>/<session>/<filename>.
 
@@ -950,6 +956,48 @@ class RunOutputFile(TimestampedUUIDModel):
         indexes = [
             models.Index(fields=["message"], name="lens_outfile_msg_idx"),
             models.Index(fields=["session"], name="lens_outfile_sess_idx"),
+        ]
+
+    def __str__(self):
+        return self.filename or str(self.uuid)
+
+
+class SharedQAFile(TimestampedUUIDModel):
+    """Share-owned immutable copy of one user-visible turn file."""
+
+    class Kind(models.TextChoices):
+        INPUT = "input", "Input attachment"
+        OUTPUT = "output", "Output deliverable"
+
+    share = models.ForeignKey(
+        SharedQA,
+        on_delete=models.CASCADE,
+        related_name="files",
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    source_uuid = models.UUIDField(null=True, blank=True)
+    file = models.FileField(
+        storage=deliverable_storage,
+        upload_to=shared_qa_file_upload_to,
+    )
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=120, blank=True, default="")
+    byte_size = models.PositiveIntegerField(default=0)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["kind", "order", "created_at"]
+        indexes = [
+            models.Index(
+                fields=["share", "kind", "order"],
+                name="lens_sharefile_order_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["share", "kind", "source_uuid"],
+                name="lens_sharefile_source_uniq",
+            ),
         ]
 
     def __str__(self):

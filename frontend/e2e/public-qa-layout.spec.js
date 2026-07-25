@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test'
 
 const SHARE_TOKEN = 'e2e-wide-table'
+const INPUT_UUID = '11111111-1111-4111-8111-111111111111'
+const HTML_UUID = '22222222-2222-4222-8222-222222222222'
+const BROKEN_UUID = '33333333-3333-4333-8333-333333333333'
+const ARCHIVE_UUID = '44444444-4444-4444-8444-444444444444'
 const TABLE_MARKDOWN = `
 | Environment | Region | Provider | Instance type | Operating system | Database | Cache | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -94,4 +98,118 @@ test('shared Q&A tables retain their desktop styling', async ({ page }) => {
   expect(layout.wrapperPadding).toBe('0px')
   expect(layout.tableBorderCollapse).toBe('collapse')
   expect(layout.tableWidth).toBeGreaterThanOrEqual(layout.wrapperWidth)
+})
+
+function sharedFile(uuid, filename, contentType, byteSize = 32) {
+  return {
+    uuid,
+    url: `/api/lens/public/qa/${SHARE_TOKEN}/files/${uuid}/`,
+    filename,
+    content_type: contentType,
+    byte_size: byteSize,
+    order: 0
+  }
+}
+
+async function routeCompleteShare(page, outputFiles) {
+  await page.route(`**/api/lens/public/qa/${SHARE_TOKEN}/`, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          title: 'Complete shared turn',
+          question: 'What does the attached diagram show?',
+          input_attachments: [
+            sharedFile(INPUT_UUID, 'diagram.png', 'image/png')
+          ],
+          answer: 'It shows the deployment flow.',
+          output_files: outputFiles,
+          published_at: '2026-07-25T00:00:00Z',
+          view_count: 1
+        }
+      })
+    })
+  })
+}
+
+test('shared page keeps question attachments and output files in context', async ({
+  page
+}) => {
+  await routeCompleteShare(page, [
+    sharedFile(HTML_UUID, 'report.html', 'text/html')
+  ])
+
+  await page.goto(`/lens/qa/${SHARE_TOKEN}`)
+
+  await expect(
+    page.getByRole('heading', { name: 'Complete shared turn' })
+  ).toBeVisible()
+  await expect(
+    page.getByText('What does the attached diagram show?')
+  ).toBeVisible()
+  await expect(page.getByText('diagram.png')).toBeVisible()
+  await expect(page.getByText('It shows the deployment flow.')).toBeVisible()
+  await expect(page.getByText('report.html')).toBeVisible()
+})
+
+test('shared HTML preview uses a blob URL and an empty sandbox', async ({
+  page
+}) => {
+  await routeCompleteShare(page, [
+    sharedFile(HTML_UUID, 'report.html', 'text/html')
+  ])
+  await page.route(
+    `**/api/lens/public/qa/${SHARE_TOKEN}/files/${HTML_UUID}/`,
+    async (route) => {
+      await route.fulfill({
+        contentType: 'text/html',
+        body: '<script>parent.document.body.dataset.compromised="yes"</script>'
+      })
+    }
+  )
+
+  await page.goto(`/lens/qa/${SHARE_TOKEN}`)
+  await page.getByRole('button', { name: 'Preview report.html' }).click()
+
+  const frame = page.locator('iframe[title="report.html"]')
+  await expect(frame).toHaveAttribute('sandbox', '')
+  await expect(frame).toHaveAttribute('src', /^blob:/)
+  await expect(page.locator('body')).not.toHaveAttribute(
+    'data-compromised',
+    'yes'
+  )
+})
+
+test('shared file preview failure falls back to download-only behavior', async ({
+  page
+}) => {
+  await routeCompleteShare(page, [
+    sharedFile(BROKEN_UUID, 'broken.txt', 'text/plain'),
+    sharedFile(ARCHIVE_UUID, 'archive.zip', 'application/zip')
+  ])
+  await page.route(
+    `**/api/lens/public/qa/${SHARE_TOKEN}/files/${BROKEN_UUID}/`,
+    async (route) => route.fulfill({ status: 404 })
+  )
+  await page.route(
+    `**/api/lens/public/qa/${SHARE_TOKEN}/files/${ARCHIVE_UUID}/`,
+    async (route) => {
+      await route.fulfill({
+        contentType: 'application/zip',
+        body: 'archive bytes'
+      })
+    }
+  )
+
+  await page.goto(`/lens/qa/${SHARE_TOKEN}`)
+  await page.getByRole('button', { name: 'Preview broken.txt' }).click()
+  await expect(
+    page.getByText('Preview failed, please download instead.')
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'Close' }).click()
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download archive.zip' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('archive.zip')
 })
