@@ -1945,6 +1945,7 @@ def _sync_feishu_drive_item(
         "type": item_type,
         "file": local_path,
         "local_path": local_path,
+        "file_extension": _feishu_item_file_extension(item),
         "metadata": _feishu_item_sync_metadata(item),
         "remote": {"token": token, "type": item_type},
     }

@@ -249,6 +249,14 @@ def test_sync_git_update_uses_shallow_fetch(tmp_path, monkeypatch):
 
     monkeypatch.setattr("lensnode.datasource_sync._run_git", run_git)
     monkeypatch.setattr(
+        "lensnode.datasource_sync._git_output",
+        lambda args, cwd=None: (
+            "https://github.com/example/repo.git"
+            if args[:3] == ["remote", "get-url", "origin"]
+            else "commit1"
+        ),
+    )
+    monkeypatch.setattr(
         "lensnode.datasource_sync._count_files",
         lambda path: 1,
     )
@@ -451,7 +459,7 @@ def test_sync_feishu_folder_preserves_tree(tmp_path, monkeypatch):
 
     assert result["synced"] == 2
     assert (tmp_path / "doc1.docx").exists()
-    assert (tmp_path / "Child-Folder" / "doc2.docx").exists()
+    assert (tmp_path / "Child Folder" / "doc2.docx").exists()
 
 
 def test_sync_feishu_folder_uses_configured_workers(tmp_path, monkeypatch):
@@ -833,7 +841,7 @@ def test_feishu_export_filename_uses_original_extension():
         "file_extension": "docx",
     }
 
-    assert _export_filename(exported, "fallback", "docx") == "Example-Doc.docx"
+    assert _export_filename(exported, "fallback", "docx") == "Example Doc.docx"
     assert _feishu_export_extension("bitable") == "xlsx"
     assert _is_feishu_exportable_type("slides")
     assert _is_feishu_exportable_type("slide")

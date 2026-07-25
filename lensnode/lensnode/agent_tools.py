@@ -58,6 +58,16 @@ class _ReadWorkspaceFileArgs(BaseModel):
     limit: int = Field(default=250, description="Max lines to read.")
 
 
+class _GitLogArgs(BaseModel):
+    """Args schema for git_log."""
+
+    path: str = Field(default="", description="Workspace repository path.")
+    max_count: int | str = Field(
+        default=10,
+        description="Max commits to return.",
+    )
+
+
 def build_agent_tools(command, resources=None, config=None, emit_event=None):
     """Build read-only tools scoped to the selected workspace dirs."""
 
@@ -268,8 +278,8 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
             payload["note"] = note
         return _json(payload)
 
-    @tool("git_log")
-    def git_log(path: str = "", max_count: int = 10) -> str:
+    @tool("git_log", args_schema=_GitLogArgs)
+    def git_log(path: str = "", max_count: int | str = 10) -> str:
         """Show recent git commits for a selected workspace repository."""
 
         root = _resolve_repo_path(path, target_dirs)
