@@ -7,23 +7,13 @@
         <div
           class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
         >
-          <div class="min-w-0 space-y-2">
+          <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="text-xl font-semibold text-ink-900">
                 {{ t('lensAdmin.pages.skills.title') }}
               </h1>
               <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs font-medium text-ink-500"
-              >
-                {{ t('lensAdmin.pages.skills.label') }}
-              </span>
-            </div>
-            <p class="max-w-3xl text-sm leading-6 text-ink-500">
-              {{ t('lensAdmin.pages.skills.description') }}
-            </p>
-            <div class="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-              <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs text-ink-500"
               >
                 {{
                   t('lensAdmin.total', {
@@ -31,11 +21,6 @@
                     count: skills.length
                   })
                 }}
-              </span>
-              <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
-              >
-                {{ t('lensAdmin.pages.skills.action') }}
               </span>
             </div>
           </div>
@@ -70,13 +55,23 @@
             v-else
             class="relative overflow-x-auto rounded-lg border border-line bg-surface"
           >
-            <table class="min-w-full divide-y divide-line">
+            <table
+              class="w-full min-w-[56rem] table-fixed divide-y divide-line"
+            >
+              <colgroup>
+                <col />
+                <col class="w-44" />
+                <col class="w-28" />
+                <col class="w-24" />
+                <col class="w-52" />
+              </colgroup>
               <thead class="bg-surface-sunken">
                 <tr>
                   <th
                     v-for="column in columns"
                     :key="column"
                     class="table-head"
+                    scope="col"
                   >
                     {{ column }}
                   </th>
@@ -91,7 +86,8 @@
                   <td class="table-cell">
                     <button
                       type="button"
-                      class="text-left font-medium text-ink-900 hover:text-primary-700 hover:underline"
+                      class="block max-w-full truncate text-left font-medium text-ink-900 hover:text-primary-700 hover:underline"
+                      :title="row.name"
                       @click="openDetail(row)"
                     >
                       {{ row.name }}
@@ -104,9 +100,11 @@
                     </div>
                   </td>
                   <td class="table-cell font-mono text-ink-500">
-                    {{ row.slug }}
+                    <span class="block truncate" :title="row.slug">
+                      {{ row.slug }}
+                    </span>
                   </td>
-                  <td class="table-cell">
+                  <td class="table-cell text-center">
                     <span
                       v-if="isWorkspaceGuideSkill(row)"
                       class="inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
@@ -118,13 +116,15 @@
                       {{ t('lensAdmin.pages.skills.label') }}
                     </span>
                   </td>
-                  <td class="table-cell">
+                  <td class="table-cell text-center">
                     <StatusBadge
                       :status="row.enabled ? 'enabled' : 'disabled'"
                     />
                   </td>
                   <td class="table-cell">
-                    <div class="flex flex-wrap items-center gap-2">
+                    <div
+                      class="flex flex-nowrap items-center justify-center gap-2"
+                    >
                       <BaseButton
                         size="sm"
                         variant="outline"
@@ -237,6 +237,30 @@
           </template>
 
           <template v-else-if="activeMethod === 'upload'">
+            <details
+              class="rounded-lg border border-primary-200 bg-primary-50/60"
+            >
+              <summary
+                class="cursor-pointer px-3 py-2 text-left marker:text-primary-500"
+              >
+                <span class="block text-sm font-medium text-primary-800">
+                  {{ t('lensAdmin.skills.packageGuideTitle') }}
+                </span>
+                <span
+                  class="mt-1 block pr-4 text-xs leading-5 text-primary-700"
+                >
+                  {{ t('lensAdmin.skills.packageGuideSummary') }}
+                </span>
+              </summary>
+              <div class="border-t border-primary-200 p-3">
+                <pre
+                  tabindex="0"
+                  :aria-label="t('lensAdmin.skills.packageGuideTitle')"
+                  class="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 font-mono text-xs leading-5 text-ink-700"
+                  >{{ tm('lensAdmin.skills.packageGuidePrompt') }}</pre
+                >
+              </div>
+            </details>
             <FormRow
               :label="t('lensAdmin.skills.packageFile')"
               :required="mode === 'create'"
@@ -538,7 +562,7 @@ import SkillEnvironmentEditor from './components/SkillEnvironmentEditor.vue'
 import { normalizeList } from './adminHelpers'
 import { buildSkillEnvironment, skillEnvironmentForm } from './skillEnvironment'
 
-const { t } = useI18n()
+const { t, tm } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const MAX_SKILL_PACKAGE_BYTES = 20 * 1024 * 1024
@@ -1027,7 +1051,7 @@ onMounted(load)
 }
 
 .table-head {
-  @apply border-b border-line px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
+  @apply border-b border-line px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-ink-500;
 }
 
 .table-cell {

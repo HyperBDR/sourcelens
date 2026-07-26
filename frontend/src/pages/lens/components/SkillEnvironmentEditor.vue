@@ -4,10 +4,15 @@
       <div
         class="flex items-center justify-between gap-3 border-b border-line bg-surface-sunken px-3 py-2.5"
       >
-        <p class="text-xs leading-5 text-ink-500">
+        <p class="text-sm leading-5 text-ink-600">
           {{ t('lensAdmin.skills.environmentVariablesHelp') }}
         </p>
-        <BaseButton size="sm" variant="outline" @click="addEnvironment">
+        <BaseButton
+          class="shrink-0"
+          size="sm"
+          variant="outline"
+          @click="addEnvironment"
+        >
           {{ t('common.add') }}
         </BaseButton>
       </div>
@@ -21,7 +26,7 @@
       >
         <input
           :value="item.name"
-          class="form-input min-w-0 font-mono"
+          class="form-input min-w-0 font-mono font-medium tracking-tight"
           :pattern="SHELL_ENVIRONMENT_NAME_PATTERN"
           :aria-label="t('lensAdmin.skills.environmentKey')"
           :placeholder="t('lensAdmin.skills.environmentKey')"
@@ -30,7 +35,7 @@
         />
         <input
           :value="item.description"
-          class="form-input min-w-0"
+          class="form-input min-w-0 font-sans"
           :aria-label="t('lensAdmin.skills.environmentDescription')"
           :placeholder="t('lensAdmin.skills.environmentDescription')"
           @input="updateEnvironment(index, 'description', $event.target.value)"
@@ -98,3 +103,9 @@ function removeEnvironment(index) {
   emit('change')
 }
 </script>
+
+<style scoped>
+.form-input {
+  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+</style>

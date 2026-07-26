@@ -3,6 +3,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ class RuntimeResources:
     skill_environments: dict[str, dict[str, str]]
     mcp_config_path: Path
     skill_api_policies: dict[str, dict] = field(default_factory=dict)
+    skill_artifacts: dict[str, dict] = field(default_factory=dict)
 
 
 def prepare_runtime_resources(config, command, emit_event=None):
@@ -43,6 +45,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
     skill_paths = []
     skill_environments = {}
     skill_api_policies = {}
+    skill_artifacts = {}
     context_skill_contents = []
     general_chat_mode = command.get("task") == "general_chat"
     for skill in command.get("loaded_skills") or []:
@@ -63,6 +66,14 @@ def prepare_runtime_resources(config, command, emit_event=None):
             )
             skill_api_policies[skill_path.name] = (
                 api_policy if isinstance(api_policy, dict) else {}
+            )
+            artifacts = (
+                definition.get("artifacts")
+                if isinstance(definition, dict)
+                else None
+            )
+            skill_artifacts[skill_path.name] = (
+                artifacts if isinstance(artifacts, dict) else {}
             )
         context_content = _context_skill_content(
             skill,
@@ -99,6 +110,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
         skill_environments=skill_environments,
         mcp_config_path=mcp_config_path,
         skill_api_policies=skill_api_policies,
+        skill_artifacts=skill_artifacts,
     )
 
 
@@ -124,6 +136,7 @@ def _materialize_skill(config, cache_root, skills_root, skill):
 
     runtime_dir = skills_root / slug
     _copy_dir(cache_dir, runtime_dir)
+    _enable_skill_scripts(runtime_dir)
     return Path("skills") / slug
 
 
@@ -215,6 +228,9 @@ def _safe_extract_zip(data, target_dir):
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as source, target.open("wb") as output:
                 shutil.copyfileobj(source, output)
+            source_mode = (info.external_attr >> 16) & 0o777
+            target.chmod(0o755 if source_mode & 0o111 else 0o644)
+    _enable_skill_scripts(target_dir)
 
 
 def _single_root_prefix(infos):
@@ -258,6 +274,8 @@ def _write_skill_package(cache_dir, package_files):
         target = cache_dir / relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
+        target.chmod(_safe_package_file_mode(item.get("mode")))
+    _enable_skill_scripts(cache_dir)
 
 
 def _safe_relative_package_path(value):
@@ -381,6 +399,9 @@ def _skill_metadata(skill):
         "content_hash": skill.get("content_hash"),
         "load_config": skill.get("load_config") or {},
         "api": (skill.get("definition") or {}).get("api") or {},
+        "artifacts": (
+            (skill.get("definition") or {}).get("artifacts") or {}
+        ),
     }
 
 
@@ -453,3 +474,24 @@ def _safe_name(value):
         elif char.isspace():
             output.append("-")
     return "".join(output).strip("-_")
+
+
+def _safe_package_file_mode(value):
+    """Return a sanitized regular-file mode from package metadata."""
+
+    try:
+        mode = int(value)
+    except (TypeError, ValueError):
+        mode = 0
+    return 0o755 if stat.S_IMODE(mode) & 0o111 else 0o644
+
+
+def _enable_skill_scripts(skill_root):
+    """Grant sanitized execute permission to files under scripts/."""
+
+    scripts_root = skill_root / "scripts"
+    if not scripts_root.is_dir() or scripts_root.is_symlink():
+        return
+    for path in scripts_root.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            path.chmod(0o755)
