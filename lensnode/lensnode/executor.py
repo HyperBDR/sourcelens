@@ -11,6 +11,12 @@ LOGGER = logging.getLogger("lensnode")
 WATCHDOG_INTERVAL_S = 5
 
 
+def _wrapup_grace_seconds(timeout_s):
+    """Reserve bounded time for a tool-free answer before hard timeout."""
+
+    return min(60.0, max(5.0, timeout_s * 0.2), timeout_s * 0.5)
+
+
 class RunStalledError(TimeoutError):
     """No transport activity at all for the whole idle window.
 
@@ -208,7 +214,9 @@ class LensNodeExecutor:
             loop = asyncio.get_running_loop()
             activity = {"at": loop.time()}
             deadline_at = loop.time() + timeout_s
+            wrapup_at = deadline_at - _wrapup_grace_seconds(timeout_s)
             cancel_event = threading.Event()
+            wrapup_event = threading.Event()
 
             def touch_activity():
                 activity["at"] = loop.time()
@@ -261,6 +269,7 @@ class LensNodeExecutor:
                     emit_output=emit_output,
                     on_activity=touch_activity,
                     cancel_event=cancel_event,
+                    wrapup_event=wrapup_event,
                 )
             )
 
@@ -283,9 +292,32 @@ class LensNodeExecutor:
                             "Run exceeded total request timeout of "
                             f"{format_duration(timeout_s)}."
                         )
+                    if not wrapup_event.is_set() and loop.time() >= wrapup_at:
+                        wrapup_event.set()
+                        emit_progress(
+                            task_log(
+                                "Soft deadline reached; requesting a "
+                                "best-effort final answer."
+                            ),
+                            {
+                                "agent_event": (
+                                    "deepagents.agent.soft_deadline.requested"
+                                ),
+                                "remaining_s": max(0, int(remaining_s)),
+                            },
+                        )
+                    wait_timeout_s = min(
+                        WATCHDOG_INTERVAL_S,
+                        remaining_s,
+                    )
+                    if not wrapup_event.is_set():
+                        wait_timeout_s = min(
+                            wait_timeout_s,
+                            max(0, wrapup_at - loop.time()),
+                        )
                     done, _ = await asyncio.wait(
                         {answer_task},
-                        timeout=min(WATCHDOG_INTERVAL_S, remaining_s),
+                        timeout=wait_timeout_s,
                     )
                     if answer_task in done:
                         result = answer_task.result()

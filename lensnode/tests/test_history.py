@@ -1,3 +1,4 @@
+import threading
 from types import SimpleNamespace
 
 from lensnode import agent_runtime
@@ -354,4 +355,27 @@ def test_truncated_run_falls_back_to_wrapup_when_no_answer_text():
     assert truncated is True
     assert "best-effort synthesis" in answer
     assert "Reached the current analysis-depth limit" in answer
+    assert model.invoked_with is not None
+
+
+def test_soft_deadline_forces_wrapup_from_current_evidence():
+    messages = [{"role": "user", "content": "q"}]
+    prefix = [_Msg("human", "q")]
+    agent = _FakeStreamAgent(prefix, new_ai_turns=3)
+    model = _FakeWrapupModel("deadline synthesis")
+    wrapup_event = threading.Event()
+    wrapup_event.set()
+
+    answer, truncated = _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=5,
+        model=model,
+        answer_language="English",
+        wrapup_event=wrapup_event,
+    )
+
+    assert truncated is True
+    assert "deadline synthesis" in answer
+    assert "hard deadline" in answer
     assert model.invoked_with is not None

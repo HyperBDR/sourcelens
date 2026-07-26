@@ -345,6 +345,7 @@ class LensDeepAgentRuntime:
         emit_output=None,
         on_activity=None,
         cancel_event=None,
+        wrapup_event=None,
     ):
         """Execute a run_start command with create_deep_agent."""
 
@@ -355,6 +356,7 @@ class LensDeepAgentRuntime:
             emit_output,
             on_activity,
             cancel_event,
+            wrapup_event,
         )
 
     def _answer_sync(
@@ -364,6 +366,7 @@ class LensDeepAgentRuntime:
         emit_output=None,
         on_activity=None,
         cancel_event=None,
+        wrapup_event=None,
     ):
         """Synchronous Deep Agents invocation run in a worker thread."""
 
@@ -508,6 +511,7 @@ class LensDeepAgentRuntime:
                 emit_event=emit_agent_event,
                 answer_language=_detect_answer_language(question),
                 cancel_event=cancel_event,
+                wrapup_event=wrapup_event,
             )
             if not (answer or "").strip():
                 # the model finished a turn without emitting answer text (e.g.
@@ -954,6 +958,7 @@ def _run_agent_with_turn_limit(
     emit_event=None,
     answer_language="English",
     cancel_event=None,
+    wrapup_event=None,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -976,6 +981,7 @@ def _run_agent_with_turn_limit(
 
     last_state = None
     truncated = False
+    truncation_reason = None
     seen_tool_calls = set()
     seen_model_calls = set()
     baseline_ai = sum(1 for m in messages if m.get("role") == "assistant")
@@ -1015,32 +1021,52 @@ def _run_agent_with_turn_limit(
             for m in current
             if getattr(m, "type", "") == "ai"
         ) - baseline_ai
+        if wrapup_event is not None and wrapup_event.is_set():
+            truncated = True
+            truncation_reason = "soft_deadline"
+            if emit_event is not None:
+                emit_event("deepagents.agent.soft_deadline", {})
+            break
         if ai_turns >= max_turns:
             truncated = True
+            truncation_reason = "turn_limit"
             break
 
     answer = _extract_final_message(last_state or {})
-    if truncated and not answer.strip() and model is not None:
+    force_wrapup = truncation_reason == "soft_deadline"
+    if truncated and model is not None and (force_wrapup or not answer.strip()):
         # The cutoff landed mid-turn (e.g. right after a tool call, before
         # any answer text), so there is nothing to extract — but the
         # conversation likely still holds real findings from every prior
         # turn. Ask once more, without tools, for a best-effort synthesis
         # instead of discarding all of that work.
-        answer = _synthesize_wrapup_answer(
+        synthesis = _synthesize_wrapup_answer(
             model,
             (last_state or {}).get("messages", []),
             answer_language,
             emit_event,
         )
+        if synthesis:
+            answer = synthesis
     if truncated and answer.strip():
-        answer += _pick_text(
-            "\n\n---\n*已达到当前分析深度上限，本次调查未完全完成。"
-            "如需更完整的结果，请调高分析档位后重试。*",
-            "\n\n---\n*Reached the current analysis-depth limit before "
-            "the investigation fully completed. Raise the analysis "
-            "tier for a more complete result.*",
-            answer_language,
-        )
+        if truncation_reason == "soft_deadline":
+            answer += _pick_text(
+                "\n\n---\n*即将达到硬截止时间，以上回答由当前已有证据"
+                "综合生成，调查可能尚未完全完成。*",
+                "\n\n---\n*Approaching the hard deadline, this answer was "
+                "synthesized from the evidence already collected and the "
+                "investigation may be incomplete.*",
+                answer_language,
+            )
+        else:
+            answer += _pick_text(
+                "\n\n---\n*已达到当前分析深度上限，本次调查未完全完成。"
+                "如需更完整的结果，请调高分析档位后重试。*",
+                "\n\n---\n*Reached the current analysis-depth limit before "
+                "the investigation fully completed. Raise the analysis "
+                "tier for a more complete result.*",
+                answer_language,
+            )
     return answer, truncated
 
 
