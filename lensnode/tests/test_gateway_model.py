@@ -72,6 +72,7 @@ def test_streaming_touches_activity_on_every_event(monkeypatch):
     assert "incomplete" in message.content.lower()
     assert message.response_metadata["finish_reason"] == "length"
     assert message.response_metadata["model_length_capped"] is True
+    assert model.stop_reason == "model_length_capped"
     # heartbeat + reasoning + content + done all count as activity,
     # while only the content token reaches the user-facing stream.
     assert activity["count"] == 4
@@ -197,6 +198,83 @@ def test_length_finish_reason_marks_visible_content_incomplete():
     assert "partial answer" in message.content
     assert "incomplete" in message.content.lower()
     assert message.response_metadata["model_length_capped"] is True
+
+
+def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
+    requests = []
+    responses = [
+        {
+            "message": {
+                "content": "",
+                "finish_reason": "tool_calls",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "search_workspace",
+                            "arguments": '{"query":"first"}',
+                        },
+                    }
+                ],
+            },
+            "usage": {
+                "prompt_tokens": 70,
+                "completion_tokens": 10,
+                "total_tokens": 80,
+            },
+        },
+        {
+            "message": {
+                "content": "",
+                "finish_reason": "tool_calls",
+                "tool_calls": [
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {
+                            "name": "search_workspace",
+                            "arguments": '{"query":"second"}',
+                        },
+                    }
+                ],
+            },
+            "usage": {
+                "prompt_tokens": 20,
+                "completion_tokens": 10,
+                "total_tokens": 30,
+            },
+        },
+    ]
+
+    def handler(request):
+        requests.append(request.read().decode("utf-8"))
+        return httpx.Response(200, json=responses[len(requests) - 1])
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        token_budget_max_tokens=100,
+        token_budget_warn_ratio=0.8,
+    )
+
+    first = model._generate([HumanMessage(content="hi")])
+    second = model._generate([HumanMessage(content="continue")])
+
+    assert len(first.generations[0].message.tool_calls) == 1
+    assert "TOKEN BUDGET WARNING" in requests[1]
+    capped = second.generations[0].message
+    assert capped.tool_calls == []
+    assert capped.response_metadata["token_capped"] is True
+    assert "token budget" in capped.content.lower()
+    assert model.stop_reason == "token_capped"
+    assert model.token_usage == {
+        "prompt_tokens": 90,
+        "completion_tokens": 20,
+        "total_tokens": 110,
+    }
 
 
 def test_image_gateway_request_uses_configured_tls_context(monkeypatch):

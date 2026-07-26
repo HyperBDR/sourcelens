@@ -39,3 +39,13 @@ def test_load_config_reads_tls_ca_file(monkeypatch):
     config = load_config()
 
     assert config.tls_ca_file == "/etc/sourcelens/ca.crt"
+
+
+def test_load_config_reads_run_token_budget(monkeypatch):
+    monkeypatch.setenv("LENSNODE_TOKEN_BUDGET_MAX_TOKENS", "120000")
+    monkeypatch.setenv("LENSNODE_TOKEN_BUDGET_WARN_RATIO", "0.75")
+
+    config = load_config()
+
+    assert config.token_budget_max_tokens == 120000
+    assert config.token_budget_warn_ratio == 0.75

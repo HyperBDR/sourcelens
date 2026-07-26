@@ -433,6 +433,16 @@ class LensDeepAgentRuntime:
                 on_activity=on_activity,
                 cancel_event=cancel_event,
                 run_uuid=run_uuid,
+                token_budget_max_tokens=getattr(
+                    self.config,
+                    "token_budget_max_tokens",
+                    200000,
+                ),
+                token_budget_warn_ratio=getattr(
+                    self.config,
+                    "token_budget_warn_ratio",
+                    0.8,
+                ),
             )
             if _is_general_chat(command):
                 tools = build_general_chat_tools(
@@ -529,11 +539,15 @@ class LensDeepAgentRuntime:
                 {
                     "actual_duration": elapsed_since(started_at),
                     "answer_chars": len(answer),
+                    "stop_reason": model.stop_reason,
+                    "token_usage": model.token_usage,
                 },
             )
             return {
                 "answer": answer,
                 "samples": [],
+                "stop_reason": model.stop_reason,
+                "token_usage": model.token_usage,
             }
         finally:
             cleanup_runtime_resources(resources)
@@ -1246,6 +1260,11 @@ def _emit_new_model_calls(messages, seen, emit_event):
                 "reasoning_tokens": usage.get("reasoning_tokens") or 0,
                 "cost": usage.get("cost"),
                 "latency_ms": meta.get("latency_ms"),
+                "finish_reason": meta.get("finish_reason"),
+                "stop_reason": (
+                    "token_capped" if meta.get("token_capped") else None
+                ),
+                "run_token_usage": meta.get("run_token_usage"),
                 "summary": _model_summary(message),
             },
         )

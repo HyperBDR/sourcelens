@@ -365,6 +365,8 @@ class LensNodeExecutor:
                         "message": retrieval_done_message,
                         "sample_count": len(samples),
                         "sample_paths": sample_paths,
+                        "stop_reason": result.get("stop_reason"),
+                        "token_usage": result.get("token_usage") or {},
                     },
                 }
             )

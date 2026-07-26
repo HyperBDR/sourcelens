@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import threading
 import time
 from typing import Any, Optional, Sequence
 
@@ -11,6 +12,7 @@ from langchain_core.messages.tool import invalid_tool_call
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from pydantic import PrivateAttr
 
 from .tls import create_ssl_context
 
@@ -31,6 +33,15 @@ LENGTH_FINISH_REASONS = {
     "max_tokens_reached",
 }
 INVALID_TOOL_ARGUMENT_PREVIEW_CHARS = 1024
+TOKEN_BUDGET_WARNING = (
+    "[TOKEN BUDGET WARNING] This run is approaching its token budget. "
+    "Stop expanding the investigation, avoid new tool calls unless strictly "
+    "necessary, and synthesize the final answer from evidence already found."
+)
+TOKEN_BUDGET_STOP = (
+    "The run reached its token budget. New tool calls were suppressed; this "
+    "answer must use the evidence already collected."
+)
 
 
 class GatewayStreamError(RuntimeError):
@@ -87,6 +98,19 @@ class LensGatewayChatModel(BaseChatModel):
     on_activity: Optional[Any] = None
     cancel_event: Optional[Any] = None
     run_uuid: str = ""
+    token_budget_max_tokens: int = 200000
+    token_budget_warn_ratio: float = 0.8
+    _usage_lock: Any = PrivateAttr(default_factory=threading.Lock)
+    _run_token_usage: dict[str, int] = PrivateAttr(
+        default_factory=lambda: {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+    )
+    _budget_warning_pending: bool = PrivateAttr(default=False)
+    _budget_warned: bool = PrivateAttr(default=False)
+    _stop_reason: str | None = PrivateAttr(default=None)
 
     @property
     def _llm_type(self):
@@ -102,6 +126,20 @@ class LensGatewayChatModel(BaseChatModel):
             "model_ref": self.model_ref,
             "ai_gateway_url": self.ai_gateway_url,
         }
+
+    @property
+    def token_usage(self):
+        """Return cumulative model usage for this run."""
+
+        with self._usage_lock:
+            return dict(self._run_token_usage)
+
+    @property
+    def stop_reason(self):
+        """Return the runtime stop reason, when a guardrail fired."""
+
+        with self._usage_lock:
+            return self._stop_reason
 
     def bind_tools(
         self,
@@ -138,9 +176,16 @@ class LensGatewayChatModel(BaseChatModel):
 
         del stop, run_manager
         self._check_cancelled()
+        gateway_messages = [
+            _message_to_gateway(message) for message in messages
+        ]
+        if self._consume_budget_warning():
+            gateway_messages.append(
+                {"role": "user", "content": TOKEN_BUDGET_WARNING}
+            )
         payload = {
             "model_ref": self.model_ref,
-            "messages": [_message_to_gateway(message) for message in messages],
+            "messages": gateway_messages,
         }
         if self.run_uuid:
             payload["run_uuid"] = self.run_uuid
@@ -178,6 +223,10 @@ class LensGatewayChatModel(BaseChatModel):
         message.response_metadata["usage"] = data.get("usage") or {}
         message.response_metadata["latency_ms"] = int(
             (time.monotonic() - start) * 1000
+        )
+        message = self._apply_token_budget(
+            message,
+            data.get("usage") or {},
         )
         return ChatResult(
             generations=[ChatGeneration(message=message)],
@@ -285,9 +334,103 @@ class LensGatewayChatModel(BaseChatModel):
         message.response_metadata["latency_ms"] = int(
             (time.monotonic() - start) * 1000
         )
+        message = self._apply_token_budget(message, usage)
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": usage},
+        )
+
+    def _consume_budget_warning(self):
+        """Consume the one-shot soft-budget warning for a model request."""
+
+        with self._usage_lock:
+            pending = self._budget_warning_pending
+            self._budget_warning_pending = False
+            return pending
+
+    def _apply_token_budget(self, message, usage):
+        """Accumulate usage and fail closed when the run budget is reached."""
+
+        source_metadata = dict(message.response_metadata or {})
+        prompt_tokens = _usage_int(
+            usage,
+            "prompt_tokens",
+            fallback_key="input_tokens",
+        )
+        completion_tokens = _usage_int(
+            usage,
+            "completion_tokens",
+            fallback_key="output_tokens",
+        )
+        total_tokens = _usage_int(usage, "total_tokens")
+        if total_tokens <= 0:
+            total_tokens = prompt_tokens + completion_tokens
+
+        with self._usage_lock:
+            if source_metadata.get("safety_terminated"):
+                self._stop_reason = "safety_terminated"
+            elif source_metadata.get("model_length_capped"):
+                self._stop_reason = "model_length_capped"
+            self._run_token_usage["prompt_tokens"] += prompt_tokens
+            self._run_token_usage["completion_tokens"] += completion_tokens
+            self._run_token_usage["total_tokens"] += total_tokens
+            cumulative = dict(self._run_token_usage)
+            limit = max(int(self.token_budget_max_tokens or 0), 0)
+            warn_ratio = min(
+                max(float(self.token_budget_warn_ratio or 0), 0.0),
+                1.0,
+            )
+            hard_stop = bool(
+                limit and cumulative["total_tokens"] >= limit
+            )
+            if hard_stop:
+                self._stop_reason = "token_capped"
+                self._budget_warning_pending = False
+            elif (
+                limit
+                and not self._budget_warned
+                and cumulative["total_tokens"] >= limit * warn_ratio
+            ):
+                self._budget_warned = True
+                self._budget_warning_pending = True
+
+        metadata = source_metadata
+        metadata["run_token_usage"] = cumulative
+        if not hard_stop:
+            return message.model_copy(
+                update={"response_metadata": metadata}
+            )
+
+        suppressed = list(message.tool_calls or [])
+        invalid_calls = list(message.invalid_tool_calls or [])
+        invalid_calls.extend(
+            _suppressed_tool_calls(suppressed, "Run token budget reached")
+        )
+        additional_kwargs = dict(message.additional_kwargs or {})
+        additional_kwargs.pop("tool_calls", None)
+        additional_kwargs.pop("function_call", None)
+        metadata.update(
+            {
+                "token_capped": True,
+                "suppressed_tool_call_count": len(suppressed),
+            }
+        )
+        if metadata.get("finish_reason") in {
+            "function_call",
+            "tool_calls",
+        }:
+            metadata["finish_reason"] = "stop"
+        return message.model_copy(
+            update={
+                "content": _append_runtime_notice(
+                    message.content,
+                    TOKEN_BUDGET_STOP,
+                ),
+                "tool_calls": [],
+                "invalid_tool_calls": invalid_calls,
+                "additional_kwargs": additional_kwargs,
+                "response_metadata": metadata,
+            }
         )
 
 
@@ -474,6 +617,18 @@ def _append_runtime_notice(content, notice):
     if not text:
         return notice
     return f"{text}\n\n{notice}"
+
+
+def _usage_int(usage, key, fallback_key=None):
+    """Return a non-negative integer usage field."""
+
+    value = usage.get(key)
+    if value is None and fallback_key is not None:
+        value = usage.get(fallback_key)
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _content_to_text(content):

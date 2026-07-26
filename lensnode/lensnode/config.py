@@ -26,6 +26,8 @@ class LensNodeConfig:
     summary_keep_tokens: int
     offload_tool_tokens: int
     offload_human_tokens: int | None
+    token_budget_max_tokens: int = 200000
+    token_budget_warn_ratio: float = 0.8
 
 
 def _optional_int(value):
@@ -98,6 +100,12 @@ def load_config():
         ),
         summary_keep_tokens=int(
             os.getenv("LENSNODE_SUMMARY_KEEP_TOKENS", "16000")
+        ),
+        token_budget_max_tokens=int(
+            os.getenv("LENSNODE_TOKEN_BUDGET_MAX_TOKENS", "200000")
+        ),
+        token_budget_warn_ratio=float(
+            os.getenv("LENSNODE_TOKEN_BUDGET_WARN_RATIO", "0.8")
         ),
         offload_tool_tokens=int(
             os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"
