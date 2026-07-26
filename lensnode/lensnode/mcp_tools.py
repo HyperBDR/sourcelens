@@ -91,7 +91,7 @@ class DeferredMCPToolMiddleware(AgentMiddleware):
 def load_mcp_tools(
     server_configs,
     *,
-    discovery_timeout_s=15,
+    discovery_timeout_s=30,
     tool_timeout_s=60,
     emit_event=None,
 ):

@@ -61,3 +61,14 @@ def test_load_config_reads_mcp_runtime_limits(monkeypatch):
     assert config.mcp_discovery_timeout_s == 12
     assert config.mcp_tool_timeout_s == 45
     assert config.mcp_defer_threshold == 8
+
+
+def test_load_config_allows_mcp_discovery_and_cleanup_headroom(monkeypatch):
+    monkeypatch.delenv(
+        "LENSNODE_MCP_DISCOVERY_TIMEOUT_S",
+        raising=False,
+    )
+
+    config = load_config()
+
+    assert config.mcp_discovery_timeout_s == 30

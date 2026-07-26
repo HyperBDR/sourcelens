@@ -466,7 +466,7 @@ class LensDeepAgentRuntime:
                 discovery_timeout_s=getattr(
                     self.config,
                     "mcp_discovery_timeout_s",
-                    15,
+                    30,
                 ),
                 tool_timeout_s=getattr(
                     self.config,
