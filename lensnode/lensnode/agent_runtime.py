@@ -26,6 +26,12 @@ from .runtime_resources import prepare_runtime_resources
 LOGGER = logging.getLogger("lensnode")
 
 
+class EmptyAgentResponseError(RuntimeError):
+    """The agent and its one recovery attempt both returned no text."""
+
+    code = "EMPTY_AGENT_RESPONSE"
+
+
 class _NoTaskMiddleware(AgentMiddleware):
     """Remove the built-in subagent task tool from model requests."""
 
@@ -513,12 +519,6 @@ class LensDeepAgentRuntime:
                 cancel_event=cancel_event,
                 wrapup_event=wrapup_event,
             )
-            if not (answer or "").strip():
-                # the model finished a turn without emitting answer text (e.g.
-                # a reasoning-only final turn). Leave the answer empty so the
-                # frontend can show a transient retry hint instead of a
-                # persisted system-looking message.
-                emit_agent_event("deepagents.answer.empty", {})
             if truncated:
                 emit_agent_event(
                     "deepagents.agent.truncated",
@@ -1053,6 +1053,18 @@ def _run_agent_with_turn_limit(
         )
         if synthesis:
             answer = synthesis
+    if not truncated and not answer.strip() and model is not None:
+        answer = _synthesize_wrapup_answer(
+            model,
+            (last_state or {}).get("messages", []),
+            answer_language,
+            emit_event,
+            reason="empty",
+        )
+    if not answer.strip():
+        raise EmptyAgentResponseError(
+            "Agent returned no answer after one recovery attempt."
+        )
     if truncated and answer.strip():
         if truncation_reason == "soft_deadline":
             answer += _pick_text(
@@ -1095,15 +1107,19 @@ def _strip_dangling_tool_call(messages):
     return messages
 
 
-def _synthesize_wrapup_answer(model, current, answer_language, emit_event):
-    """Ask the model for a best-effort answer after the turn budget runs out.
+def _synthesize_wrapup_answer(
+    model,
+    current,
+    answer_language,
+    emit_event,
+    reason="limit",
+):
+    """Ask once for a tool-free answer after cutoff or an empty terminal.
 
-    Called only when the agent was truncated mid-turn and there is no
-    extractable answer text (see _run_agent_with_turn_limit). Makes one
-    plain, tool-free call asking the model to synthesize its best answer
-    from the conversation so far, so the turns already spent are not
-    wasted. Returns "" (letting the caller keep the empty-answer path) if
-    this call itself fails.
+    The prompt asks the model to synthesize its best answer from the current
+    conversation, so prior work is not discarded. Returns "" if this call
+    fails; the caller decides whether existing partial text is sufficient or
+    an explicit empty-response error should be raised.
 
     A RunCancelledError is deliberately NOT caught here: model.invoke()
     checks cancel_event at the top of the gateway call
@@ -1113,21 +1129,36 @@ def _synthesize_wrapup_answer(model, current, answer_language, emit_event):
     "wrap-up failed" result.
     """
 
-    instruction = _pick_text(
-        "你已经达到本次分析的步数上限，不能再调用任何工具。请基于目前为止"
-        "已经掌握的全部信息，直接给出你能给出的最完整回答。如果调查还有"
-        "尚未确认或未覆盖到的部分，请明确说明。",
-        "You have reached the step limit for this analysis and cannot "
-        "call any more tools. Based on everything you have gathered so "
-        "far, write the most complete answer you can now. Clearly note "
-        "any part of the investigation you were not able to confirm.",
-        answer_language,
-    )
+    if reason == "empty":
+        instruction = _pick_text(
+            "你上一轮没有输出可见答案。不要调用任何工具，请仅基于当前对话"
+            "和已取得的结果，直接向用户给出完整答案。",
+            "Your previous turn produced no visible answer. Do not call "
+            "tools. Based only on the current conversation and collected "
+            "results, write the complete answer to the user now.",
+            answer_language,
+        )
+    else:
+        instruction = _pick_text(
+            "你已经达到本次分析的步数上限，不能再调用任何工具。请基于目前"
+            "为止已经掌握的全部信息，直接给出你能给出的最完整回答。如果"
+            "调查还有尚未确认或未覆盖到的部分，请明确说明。",
+            "You have reached the step limit for this analysis and cannot "
+            "call any more tools. Based on everything you have gathered so "
+            "far, write the most complete answer you can now. Clearly note "
+            "any part of the investigation you were not able to confirm.",
+            answer_language,
+        )
     wrapup_messages = _strip_dangling_tool_call(current) + [
         HumanMessage(content=instruction)
     ]
     if emit_event is not None:
-        emit_event("deepagents.agent.wrapup", {})
+        event = (
+            "deepagents.answer.recovery"
+            if reason == "empty"
+            else "deepagents.agent.wrapup"
+        )
+        emit_event(event, {})
     try:
         response = model.invoke(wrapup_messages)
     except RunCancelledError:

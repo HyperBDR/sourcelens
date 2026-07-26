@@ -268,8 +268,10 @@ class _FakeWrapupModel:
     def __init__(self, content="synthesized answer"):
         self.content = content
         self.invoked_with = None
+        self.call_count = 0
 
     def invoke(self, messages):
+        self.call_count += 1
         self.invoked_with = list(messages)
         return _Msg("ai", self.content)
 
@@ -380,3 +382,53 @@ def test_soft_deadline_forces_wrapup_from_current_evidence():
     assert "deadline synthesis" in answer
     assert "hard deadline" in answer
     assert model.invoked_with is not None
+
+
+def test_empty_terminal_response_recovers_once_without_tools():
+    class _EmptyEndingAgent:
+        def stream(self, _inp, stream_mode=None, config=None):
+            yield {
+                "messages": [
+                    _Msg("human", "q"),
+                    _Msg("ai", ""),
+                ]
+            }
+
+    model = _FakeWrapupModel("recovered answer")
+    events = []
+
+    answer, truncated = _run_agent_with_turn_limit(
+        _EmptyEndingAgent(),
+        [{"role": "user", "content": "q"}],
+        max_turns=5,
+        model=model,
+        emit_event=lambda name, detail: events.append((name, detail)),
+    )
+
+    assert answer == "recovered answer"
+    assert truncated is False
+    assert model.call_count == 1
+    assert any(name == "deepagents.answer.recovery" for name, _ in events)
+
+
+def test_empty_terminal_response_raises_after_one_failed_recovery():
+    class _EmptyEndingAgent:
+        def stream(self, _inp, stream_mode=None, config=None):
+            yield {"messages": [_Msg("human", "q"), _Msg("ai", "")]}
+
+    model = _FakeWrapupModel("")
+
+    try:
+        _run_agent_with_turn_limit(
+            _EmptyEndingAgent(),
+            [{"role": "user", "content": "q"}],
+            max_turns=5,
+            model=model,
+        )
+        raised = None
+    except agent_runtime.EmptyAgentResponseError as exc:
+        raised = exc
+
+    assert raised is not None
+    assert raised.code == "EMPTY_AGENT_RESPONSE"
+    assert model.call_count == 1
