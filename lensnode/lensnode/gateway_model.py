@@ -7,6 +7,7 @@ from typing import Any, Optional, Sequence
 import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages.tool import invalid_tool_call
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -14,6 +15,22 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from .tls import create_ssl_context
 
 LOGGER = logging.getLogger("lensnode")
+
+SAFETY_FINISH_REASONS = {
+    "blocked",
+    "content_filter",
+    "prohibited_content",
+    "refusal",
+    "safety",
+}
+LENGTH_FINISH_REASONS = {
+    "length",
+    "max_completion_tokens",
+    "max_output_tokens",
+    "max_tokens",
+    "max_tokens_reached",
+}
+INVALID_TOOL_ARGUMENT_PREVIEW_CHARS = 1024
 
 
 class GatewayStreamError(RuntimeError):
@@ -173,6 +190,7 @@ class LensGatewayChatModel(BaseChatModel):
         content_parts = []
         tool_calls = []
         usage = {}
+        finish_reason = None
         # Subagent output must not reach the user-facing answer/thinking
         # stream. deepagents tags subagent runs via the langsmith tracing
         # context; when set, collect content/tool_calls normally but stay
@@ -226,6 +244,7 @@ class LensGatewayChatModel(BaseChatModel):
                                 done_received = True
                                 usage = data.get("usage") or {}
                                 tool_calls = data.get("tool_calls") or []
+                                finish_reason = data.get("finish_reason")
                             elif data.get("type") == "error":
                                 error = data.get("error") or {}
                                 raise GatewayStreamError(
@@ -251,6 +270,7 @@ class LensGatewayChatModel(BaseChatModel):
 
         gateway_message = {
             "content": content,
+            "finish_reason": finish_reason,
             "tool_calls": [
                 {
                     "id": tc.get("id"),
@@ -327,27 +347,133 @@ def _message_from_gateway(payload):
     """Convert gateway assistant payload to AIMessage."""
 
     tool_calls = []
+    invalid_calls = []
+    raw_valid_calls = []
     for raw_call in payload.get("tool_calls") or []:
         function = raw_call.get("function") or {}
-        arguments = function.get("arguments") or "{}"
-        try:
-            args = json.loads(arguments)
-        except json.JSONDecodeError:
-            args = {}
+        name = str(function.get("name") or "").strip()
+        call_id = str(raw_call.get("id") or "").strip()
+        arguments = function.get("arguments")
+        error = None
+        if isinstance(arguments, dict):
+            args = arguments
+        elif isinstance(arguments, str):
+            try:
+                args = json.loads(arguments or "{}")
+            except json.JSONDecodeError as exc:
+                args = None
+                error = f"Invalid JSON arguments: {exc.msg}"
+        else:
+            args = None
+            error = "Tool arguments must be a JSON object."
+        if args is not None and not isinstance(args, dict):
+            args = None
+            error = "Tool arguments must decode to a JSON object."
+        if not name:
+            error = "Tool call name is missing."
+        if not call_id:
+            error = "Tool call id is missing."
+        if error is not None:
+            preview = (
+                arguments
+                if isinstance(arguments, str)
+                else json.dumps(arguments, ensure_ascii=False, default=str)
+            )
+            invalid_calls.append(
+                invalid_tool_call(
+                    name=name or None,
+                    args=preview[:INVALID_TOOL_ARGUMENT_PREVIEW_CHARS],
+                    id=call_id or None,
+                    error=error,
+                )
+            )
+            continue
         tool_calls.append(
             {
-                "name": function.get("name", ""),
+                "name": name,
                 "args": args,
-                "id": raw_call.get("id"),
+                "id": call_id,
             }
         )
+        raw_valid_calls.append(raw_call)
+
+    finish_reason = payload.get("finish_reason")
+    normalized_reason = str(finish_reason or "").strip().lower()
+    response_metadata = {}
+    if finish_reason is not None:
+        response_metadata["finish_reason"] = str(finish_reason)
+
+    content = payload.get("content") or ""
+    if normalized_reason in SAFETY_FINISH_REASONS:
+        suppressed = len(tool_calls)
+        invalid_calls.extend(
+            _suppressed_tool_calls(tool_calls, "Provider safety termination")
+        )
+        tool_calls = []
+        raw_valid_calls = []
+        response_metadata.update(
+            {
+                "safety_terminated": True,
+                "suppressed_tool_call_count": suppressed,
+            }
+        )
+        content = _append_runtime_notice(
+            content,
+            "The provider stopped this response for safety reasons. "
+            "Any tool calls from this response were suppressed.",
+        )
+    elif normalized_reason in LENGTH_FINISH_REASONS:
+        suppressed = len(tool_calls)
+        invalid_calls.extend(
+            _suppressed_tool_calls(tool_calls, "Provider length termination")
+        )
+        tool_calls = []
+        raw_valid_calls = []
+        response_metadata.update(
+            {
+                "model_length_capped": True,
+                "suppressed_tool_call_count": suppressed,
+            }
+        )
+        content = _append_runtime_notice(
+            content,
+            "This response is incomplete because the provider reached its "
+            "output length limit. Any unfinished tool calls were suppressed.",
+        )
+
+    additional_kwargs = {}
+    if raw_valid_calls:
+        additional_kwargs["tool_calls"] = raw_valid_calls
     return AIMessage(
-        content=payload.get("content") or "",
+        content=content,
         tool_calls=tool_calls,
-        additional_kwargs={
-            "tool_calls": payload.get("tool_calls") or [],
-        },
+        invalid_tool_calls=invalid_calls,
+        additional_kwargs=additional_kwargs,
+        response_metadata=response_metadata,
     )
+
+
+def _suppressed_tool_calls(tool_calls, error):
+    """Return invalid call records for provider-suppressed tool calls."""
+
+    return [
+        invalid_tool_call(
+            name=call.get("name"),
+            args=json.dumps(call.get("args") or {}, ensure_ascii=False),
+            id=call.get("id"),
+            error=error,
+        )
+        for call in tool_calls
+    ]
+
+
+def _append_runtime_notice(content, notice):
+    """Append a provider termination notice to visible response content."""
+
+    text = str(content or "").strip()
+    if not text:
+        return notice
+    return f"{text}\n\n{notice}"
 
 
 def _content_to_text(content):

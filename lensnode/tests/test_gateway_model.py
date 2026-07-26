@@ -10,6 +10,7 @@ from lensnode.agent_runtime import _build_summarization_middleware
 from lensnode.gateway_model import (
     LensGatewayChatModel,
     RunCancelledError,
+    _message_from_gateway,
     describe_image_result,
 )
 
@@ -19,7 +20,7 @@ SSE_BODY = (
     'data: {"type": "token", "kind": "reasoning", "content": "thinking"}\n\n'
     'data: {"type": "token", "kind": "content", "content": "Hello"}\n\n'
     'data: {"type": "done", "usage": {"total_tokens": 5}, '
-    '"tool_calls": []}\n\n'
+    '"tool_calls": [], "finish_reason": "length"}\n\n'
 )
 
 
@@ -67,7 +68,10 @@ def test_streaming_touches_activity_on_every_event(monkeypatch):
     result = model._generate([HumanMessage(content="hi")])
 
     message = result.generations[0].message
-    assert message.content == "Hello"
+    assert message.content.startswith("Hello")
+    assert "incomplete" in message.content.lower()
+    assert message.response_metadata["finish_reason"] == "length"
+    assert message.response_metadata["model_length_capped"] is True
     # heartbeat + reasoning + content + done all count as activity,
     # while only the content token reaches the user-facing stream.
     assert activity["count"] == 4
@@ -103,7 +107,13 @@ def test_https_gateway_request_uses_configured_tls_context(monkeypatch):
     def handler(request):
         return httpx.Response(
             200,
-            json={"message": {"role": "assistant", "content": "ok"}},
+            json={
+                "message": {
+                    "role": "assistant",
+                    "content": "ok",
+                    "finish_reason": "stop",
+                }
+            },
         )
 
     _install_transport(monkeypatch, handler, client_options)
@@ -117,9 +127,76 @@ def test_https_gateway_request_uses_configured_tls_context(monkeypatch):
     result = model._generate([HumanMessage(content="hi")])
 
     assert result.generations[0].message.content == "ok"
+    assert (
+        result.generations[0].message.response_metadata["finish_reason"]
+        == "stop"
+    )
     context = client_options["verify"]
     assert context.verify_mode == ssl.CERT_NONE
     assert context.check_hostname is False
+
+
+def test_malformed_tool_arguments_are_not_executable():
+    message = _message_from_gateway(
+        {
+            "content": "",
+            "finish_reason": "tool_calls",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "search_workspace",
+                        "arguments": '{"query":',
+                    },
+                }
+            ],
+        }
+    )
+
+    assert message.tool_calls == []
+    assert len(message.invalid_tool_calls) == 1
+    assert message.invalid_tool_calls[0]["id"] == "call_1"
+    assert "tool_calls" not in message.additional_kwargs
+
+
+def test_safety_finish_reason_suppresses_tool_calls():
+    message = _message_from_gateway(
+        {
+            "content": "partial",
+            "finish_reason": "content_filter",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "run_skill_script",
+                        "arguments": '{"path":"scripts/run.py"}',
+                    },
+                }
+            ],
+        }
+    )
+
+    assert message.tool_calls == []
+    assert "safety" in message.content.lower()
+    assert message.response_metadata["safety_terminated"] is True
+    assert message.response_metadata["suppressed_tool_call_count"] == 1
+    assert "tool_calls" not in message.additional_kwargs
+
+
+def test_length_finish_reason_marks_visible_content_incomplete():
+    message = _message_from_gateway(
+        {
+            "content": "partial answer",
+            "finish_reason": "MAX_TOKENS",
+            "tool_calls": [],
+        }
+    )
+
+    assert "partial answer" in message.content
+    assert "incomplete" in message.content.lower()
+    assert message.response_metadata["model_length_capped"] is True
 
 
 def test_image_gateway_request_uses_configured_tls_context(monkeypatch):
