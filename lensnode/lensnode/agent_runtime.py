@@ -1261,13 +1261,25 @@ def _emit_new_model_calls(messages, seen, emit_event):
                 "cost": usage.get("cost"),
                 "latency_ms": meta.get("latency_ms"),
                 "finish_reason": meta.get("finish_reason"),
-                "stop_reason": (
-                    "token_capped" if meta.get("token_capped") else None
-                ),
+                "stop_reason": _response_stop_reason(meta),
                 "run_token_usage": meta.get("run_token_usage"),
                 "summary": _model_summary(message),
             },
         )
+
+
+def _response_stop_reason(metadata):
+    """Return the normalized runtime stop reason for one model response."""
+
+    for key, reason in (
+        ("token_capped", "token_capped"),
+        ("loop_capped", "loop_capped"),
+        ("safety_terminated", "safety_terminated"),
+        ("model_length_capped", "model_length_capped"),
+    ):
+        if metadata.get(key):
+            return reason
+    return None
 
 
 def _emit_new_tool_calls(messages, seen, emit_event):

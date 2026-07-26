@@ -3,6 +3,7 @@ import json
 import logging
 import threading
 import time
+from collections import Counter, deque
 from typing import Any, Optional, Sequence
 
 import httpx
@@ -41,6 +42,14 @@ TOKEN_BUDGET_WARNING = (
 TOKEN_BUDGET_STOP = (
     "The run reached its token budget. New tool calls were suppressed; this "
     "answer must use the evidence already collected."
+)
+LOOP_WARNING = (
+    "[LOOP DETECTED] Tool calls are repeating without a final answer. Stop "
+    "calling tools and synthesize the result from evidence already collected."
+)
+LOOP_STOP = (
+    "Repeated tool calls reached the runtime safety limit. New tool calls "
+    "were suppressed; this answer must use the results already collected."
 )
 
 
@@ -100,6 +109,10 @@ class LensGatewayChatModel(BaseChatModel):
     run_uuid: str = ""
     token_budget_max_tokens: int = 200000
     token_budget_warn_ratio: float = 0.8
+    loop_repeat_warn: int = 3
+    loop_repeat_hard: int = 5
+    loop_tool_warn: int = 30
+    loop_tool_hard: int = 50
     _usage_lock: Any = PrivateAttr(default_factory=threading.Lock)
     _run_token_usage: dict[str, int] = PrivateAttr(
         default_factory=lambda: {
@@ -110,6 +123,15 @@ class LensGatewayChatModel(BaseChatModel):
     )
     _budget_warning_pending: bool = PrivateAttr(default=False)
     _budget_warned: bool = PrivateAttr(default=False)
+    _loop_warnings_pending: list[str] = PrivateAttr(default_factory=list)
+    _tool_call_history: Any = PrivateAttr(
+        default_factory=lambda: deque(maxlen=20)
+    )
+    _tool_name_history: Any = PrivateAttr(
+        default_factory=lambda: deque(maxlen=50)
+    )
+    _loop_warned: set[str] = PrivateAttr(default_factory=set)
+    _tool_warned: set[str] = PrivateAttr(default_factory=set)
     _stop_reason: str | None = PrivateAttr(default=None)
 
     @property
@@ -179,9 +201,10 @@ class LensGatewayChatModel(BaseChatModel):
         gateway_messages = [
             _message_to_gateway(message) for message in messages
         ]
-        if self._consume_budget_warning():
+        warnings = self._consume_runtime_warnings()
+        if warnings:
             gateway_messages.append(
-                {"role": "user", "content": TOKEN_BUDGET_WARNING}
+                {"role": "user", "content": "\n\n".join(warnings)}
             )
         payload = {
             "model_ref": self.model_ref,
@@ -228,6 +251,7 @@ class LensGatewayChatModel(BaseChatModel):
             message,
             data.get("usage") or {},
         )
+        message = self._apply_loop_detection(message)
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": data.get("usage") or {}},
@@ -335,18 +359,23 @@ class LensGatewayChatModel(BaseChatModel):
             (time.monotonic() - start) * 1000
         )
         message = self._apply_token_budget(message, usage)
+        message = self._apply_loop_detection(message)
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": usage},
         )
 
-    def _consume_budget_warning(self):
-        """Consume the one-shot soft-budget warning for a model request."""
+    def _consume_runtime_warnings(self):
+        """Consume pending guardrail warnings for one model request."""
 
         with self._usage_lock:
-            pending = self._budget_warning_pending
+            warnings = []
+            if self._budget_warning_pending:
+                warnings.append(TOKEN_BUDGET_WARNING)
             self._budget_warning_pending = False
-            return pending
+            warnings.extend(self._loop_warnings_pending)
+            self._loop_warnings_pending.clear()
+            return warnings
 
     def _apply_token_budget(self, message, usage):
         """Accumulate usage and fail closed when the run budget is reached."""
@@ -401,36 +430,77 @@ class LensGatewayChatModel(BaseChatModel):
                 update={"response_metadata": metadata}
             )
 
-        suppressed = list(message.tool_calls or [])
-        invalid_calls = list(message.invalid_tool_calls or [])
-        invalid_calls.extend(
-            _suppressed_tool_calls(suppressed, "Run token budget reached")
+        return _stop_tool_calls(
+            message,
+            TOKEN_BUDGET_STOP,
+            "Run token budget reached",
+            {"token_capped": True},
         )
-        additional_kwargs = dict(message.additional_kwargs or {})
-        additional_kwargs.pop("tool_calls", None)
-        additional_kwargs.pop("function_call", None)
-        metadata.update(
-            {
-                "token_capped": True,
-                "suppressed_tool_call_count": len(suppressed),
-            }
-        )
-        if metadata.get("finish_reason") in {
-            "function_call",
-            "tool_calls",
-        }:
-            metadata["finish_reason"] = "stop"
-        return message.model_copy(
-            update={
-                "content": _append_runtime_notice(
-                    message.content,
-                    TOKEN_BUDGET_STOP,
+
+    def _apply_loop_detection(self, message):
+        """Warn on repeated tool activity and stop persistent loops."""
+
+        calls = list(message.tool_calls or [])
+        if not calls:
+            return message
+        fingerprint = _tool_call_fingerprint(calls)
+        names = [str(call.get("name") or "") for call in calls]
+
+        with self._usage_lock:
+            self._tool_call_history.append(fingerprint)
+            repeat_count = self._tool_call_history.count(fingerprint)
+            for name in names:
+                self._tool_name_history.append(name)
+            frequencies = Counter(self._tool_name_history)
+
+            repeat_warn = max(int(self.loop_repeat_warn or 1), 1)
+            repeat_hard = max(
+                int(self.loop_repeat_hard or repeat_warn),
+                repeat_warn,
+            )
+            tool_warn = max(int(self.loop_tool_warn or 1), 1)
+            tool_hard = max(
+                int(self.loop_tool_hard or tool_warn),
+                tool_warn,
+            )
+            loop_tool = next(
+                (
+                    name
+                    for name in names
+                    if frequencies[name] >= tool_hard
                 ),
-                "tool_calls": [],
-                "invalid_tool_calls": invalid_calls,
-                "additional_kwargs": additional_kwargs,
-                "response_metadata": metadata,
-            }
+                None,
+            )
+            hard_stop = repeat_count >= repeat_hard or loop_tool is not None
+
+            if hard_stop:
+                self._stop_reason = "loop_capped"
+                self._loop_warnings_pending.clear()
+            else:
+                if (
+                    repeat_count >= repeat_warn
+                    and fingerprint not in self._loop_warned
+                ):
+                    self._loop_warned.add(fingerprint)
+                    self._loop_warnings_pending.append(LOOP_WARNING)
+                for name in names:
+                    if (
+                        frequencies[name] >= tool_warn
+                        and name not in self._tool_warned
+                    ):
+                        self._tool_warned.add(name)
+                        self._loop_warnings_pending.append(LOOP_WARNING)
+
+        if not hard_stop:
+            return message
+        updates = {"loop_capped": True}
+        if loop_tool is not None:
+            updates["loop_tool"] = loop_tool
+        return _stop_tool_calls(
+            message,
+            LOOP_STOP,
+            "Tool-call loop safety limit reached",
+            updates,
         )
 
 
@@ -629,6 +699,60 @@ def _usage_int(usage, key, fallback_key=None):
         return max(int(value or 0), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _tool_call_fingerprint(tool_calls):
+    """Return a stable fingerprint for one model tool-call set."""
+
+    normalized = [
+        {
+            "name": str(call.get("name") or ""),
+            "args": call.get("args") or {},
+        }
+        for call in tool_calls
+    ]
+    normalized.sort(
+        key=lambda item: json.dumps(
+            item,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+    )
+    return json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _stop_tool_calls(message, notice, error, metadata_updates):
+    """Return a copy whose tool calls are retained only as invalid records."""
+
+    suppressed = list(message.tool_calls or [])
+    invalid_calls = list(message.invalid_tool_calls or [])
+    invalid_calls.extend(_suppressed_tool_calls(suppressed, error))
+    additional_kwargs = dict(message.additional_kwargs or {})
+    additional_kwargs.pop("tool_calls", None)
+    additional_kwargs.pop("function_call", None)
+    metadata = dict(message.response_metadata or {})
+    metadata.update(metadata_updates)
+    metadata["suppressed_tool_call_count"] = len(suppressed)
+    if metadata.get("finish_reason") in {
+        "function_call",
+        "tool_calls",
+    }:
+        metadata["finish_reason"] = "stop"
+    return message.model_copy(
+        update={
+            "content": _append_runtime_notice(message.content, notice),
+            "tool_calls": [],
+            "invalid_tool_calls": invalid_calls,
+            "additional_kwargs": additional_kwargs,
+            "response_metadata": metadata,
+        }
+    )
 
 
 def _content_to_text(content):

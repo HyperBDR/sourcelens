@@ -277,6 +277,108 @@ def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
     }
 
 
+def test_repeated_tool_call_set_warns_then_stops(monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(request.read().decode("utf-8"))
+        index = len(requests)
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": "",
+                    "finish_reason": "tool_calls",
+                    "tool_calls": [
+                        {
+                            "id": f"call_{index}",
+                            "type": "function",
+                            "function": {
+                                "name": "search_workspace",
+                                "arguments": '{"query":"same"}',
+                            },
+                        }
+                    ],
+                },
+                "usage": {"total_tokens": 1},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        token_budget_max_tokens=1000,
+        loop_repeat_warn=2,
+        loop_repeat_hard=3,
+    )
+
+    first = model._generate([HumanMessage(content="one")])
+    second = model._generate([HumanMessage(content="two")])
+    third = model._generate([HumanMessage(content="three")])
+
+    assert first.generations[0].message.tool_calls
+    assert second.generations[0].message.tool_calls
+    assert "LOOP DETECTED" in requests[2]
+    stopped = third.generations[0].message
+    assert stopped.tool_calls == []
+    assert stopped.response_metadata["loop_capped"] is True
+    assert model.stop_reason == "loop_capped"
+
+
+def test_varying_calls_to_one_tool_hit_frequency_limit(monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(request.read().decode("utf-8"))
+        index = len(requests)
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": "",
+                    "finish_reason": "tool_calls",
+                    "tool_calls": [
+                        {
+                            "id": f"call_{index}",
+                            "type": "function",
+                            "function": {
+                                "name": "read_workspace_file",
+                                "arguments": (
+                                    f'{{"path":"file-{index}.py"}}'
+                                ),
+                            },
+                        }
+                    ],
+                },
+                "usage": {"total_tokens": 1},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        token_budget_max_tokens=1000,
+        loop_repeat_warn=10,
+        loop_repeat_hard=20,
+        loop_tool_warn=2,
+        loop_tool_hard=3,
+    )
+
+    model._generate([HumanMessage(content="one")])
+    model._generate([HumanMessage(content="two")])
+    third = model._generate([HumanMessage(content="three")])
+
+    assert "LOOP DETECTED" in requests[2]
+    stopped = third.generations[0].message
+    assert stopped.tool_calls == []
+    assert stopped.response_metadata["loop_capped"] is True
+    assert stopped.response_metadata["loop_tool"] == "read_workspace_file"
+
+
 def test_image_gateway_request_uses_configured_tls_context(monkeypatch):
     client_options = {}
 
