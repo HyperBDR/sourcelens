@@ -36,6 +36,16 @@ def _write_result(resources, payload, filename="orders.json"):
     return f"/large_tool_results/{filename}", path
 
 
+def _write_text_result(resources, content, filename="result.txt"):
+    """Write one text result and return its virtual runtime reference."""
+
+    output_dir = resources.root / "large_tool_results"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / filename
+    path.write_text(content, encoding="utf-8")
+    return f"/large_tool_results/{filename}", path
+
+
 def _tool(resources, name, command=None, events=None):
     """Return one General Chat tool by name."""
 
@@ -267,6 +277,56 @@ def test_analyze_structured_output_enforces_call_budget(tmp_path):
     assert second["call_count"] == 2
     assert second["max_calls"] == 1
     assert events[-1][0] == "tool.analyze_structured_output.budget_exceeded"
+
+
+def test_inspect_saved_output_summarizes_csv_and_reads_bounded_window(
+    tmp_path,
+):
+    resources = _resources(tmp_path)
+    ref, _path = _write_text_result(
+        resources,
+        "id,status,amount\n1,paid,10\n2,pending,20\n3,paid,30\n",
+    )
+
+    payload = json.loads(
+        _tool(resources, "inspect_saved_output").invoke(
+            {"ref": ref, "offset": 1, "limit": 2}
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["format"] == "csv"
+    assert payload["synopsis"]["columns"] == [
+        "id",
+        "status",
+        "amount",
+    ]
+    assert payload["synopsis"]["row_count"] == 3
+    assert payload["lines"] == [
+        {"number": 2, "text": "1,paid,10"},
+        {"number": 3, "text": "2,pending,20"},
+    ]
+    assert payload["has_more"] is True
+
+
+def test_inspect_saved_output_summarizes_text_and_caps_long_lines(tmp_path):
+    resources = _resources(tmp_path)
+    ref, _path = _write_text_result(
+        resources,
+        "first\n" + ("x" * 800) + "\nthird\n",
+    )
+
+    payload = json.loads(
+        _tool(resources, "inspect_saved_output").invoke(
+            {"ref": ref, "offset": 0, "limit": 2}
+        )
+    )
+
+    assert payload["format"] == "text"
+    assert payload["synopsis"]["line_count"] == 3
+    assert payload["lines"][0] == {"number": 1, "text": "first"}
+    assert len(payload["lines"][1]["text"]) == 501
+    assert payload["lines"][1]["text"].endswith("…")
 
 
 def test_run_skill_transform_uses_declared_entrypoint_and_input_ref(tmp_path):

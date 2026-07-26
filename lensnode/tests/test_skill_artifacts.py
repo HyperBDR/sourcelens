@@ -167,6 +167,28 @@ def test_run_skill_artifact_preserves_large_output_by_reference(tmp_path):
     assert events[-1][1]["stdout_truncated"] is True
 
 
+def test_run_skill_artifact_summarizes_large_csv_output(tmp_path):
+    content = (
+        b"#!/bin/sh\n"
+        b"printf 'id,status\\n1,paid\\n2,pending\\n'\n"
+    )
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {"tool_policy": {"skill_artifact_stdout_limit": 8}}
+    }
+
+    payload = json.loads(
+        _artifact_tool(resources, command).invoke(
+            {"skill": "income-cli", "artifact": "income"}
+        )
+    )
+
+    assert payload["stdout_format"] == "csv"
+    assert payload["stdout_synopsis"]["columns"] == ["id", "status"]
+    assert payload["stdout_synopsis"]["row_count"] == 2
+    assert "inspect_saved_output" in payload["instruction"]
+
+
 def test_run_skill_artifact_stops_after_configured_call_budget(tmp_path):
     resources = _resources(tmp_path, b"#!/bin/sh\nprintf 'ok'\n")
     command = {

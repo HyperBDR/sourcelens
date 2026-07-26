@@ -1,4 +1,6 @@
+import csv
 import hashlib
+import io
 import json
 import math
 import mimetypes
@@ -40,6 +42,7 @@ SELF_REPORTING_TOOLS = {
     "summarize_recent_changes",
     "call_skill_api",
     "analyze_structured_output",
+    "inspect_saved_output",
     "run_skill_script",
     "run_skill_artifact",
     "run_skill_transform",
@@ -47,6 +50,7 @@ SELF_REPORTING_TOOLS = {
 
 _STRUCTURED_INPUT_MAX_BYTES = 50 * 1024 * 1024
 _STRUCTURED_GROUP_MAX_ITEMS = 1000
+_SAVED_OUTPUT_LINE_MAX_CHARS = 500
 _STRUCTURED_OPERATIONS = {
     "count",
     "group_count",
@@ -543,6 +547,27 @@ class _AnalyzeStructuredOutputArgs(BaseModel):
     descending: bool = Field(default=False)
 
 
+class _InspectSavedOutputArgs(BaseModel):
+    """Args schema for bounded inspection of a saved tool result."""
+
+    ref: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Input reference below /large_tool_results/.",
+    )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="Zero-based line offset.",
+    )
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=100,
+        description="Number of lines to return, from 1 to 100.",
+    )
+
+
 class _RunSkillTransformArgs(BaseModel):
     """Args schema for running a declared Skill Transform."""
 
@@ -931,6 +956,14 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         100000,
     )
     structured_analysis_calls = {"count": 0}
+    saved_output_inspection_max_calls = min(
+        _positive_int(
+            tool_policy.get("saved_output_inspection_max_calls"),
+            default=8,
+        ),
+        20,
+    )
+    saved_output_inspection_calls = {"count": 0}
     transform_max_calls = min(
         _positive_int(
             tool_policy.get("skill_transform_max_calls"),
@@ -1123,6 +1156,147 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 **output,
             }
         )
+
+    @tool("inspect_saved_output", args_schema=_InspectSavedOutputArgs)
+    def inspect_saved_output(
+        ref: str,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> str:
+        """Inspect a saved JSON, CSV, or text result through a small window.
+
+        Use this for non-JSON ``stdout_ref`` values instead of ``read_file``
+        or ``grep``. The tool reports a typed synopsis and returns at most
+        100 lines with long lines capped. For JSON aggregation, prefer
+        ``analyze_structured_output``.
+        """
+
+        started = time.monotonic()
+        invocation_id = uuid.uuid4().hex
+        saved_output_inspection_calls["count"] += 1
+        call_count = saved_output_inspection_calls["count"]
+        if call_count > saved_output_inspection_max_calls:
+            emit(
+                "tool.inspect_saved_output.budget_exceeded",
+                {
+                    "invocation_id": invocation_id,
+                    "input_ref": str(ref or "")[:512],
+                    "call_count": call_count,
+                    "max_calls": saved_output_inspection_max_calls,
+                    "summary": "saved output · call budget exceeded",
+                },
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "SAVED_OUTPUT_INSPECTION_CALL_LIMIT",
+                    "call_count": call_count,
+                    "max_calls": saved_output_inspection_max_calls,
+                    "instruction": (
+                        "Stop inspecting this output and synthesize the "
+                        "answer from the bounded windows already returned."
+                    ),
+                }
+            )
+
+        emit(
+            "tool.inspect_saved_output.start",
+            {
+                "invocation_id": invocation_id,
+                "input_ref": str(ref or "")[:512],
+                "offset": offset,
+                "limit": limit,
+                "call_count": call_count,
+                "max_calls": saved_output_inspection_max_calls,
+                "summary": f"inspect · {_basename(ref)}",
+            },
+        )
+        input_path = _resolve_large_tool_result_ref(resources.root, ref)
+        if input_path is None:
+            emit(
+                "tool.inspect_saved_output.failed",
+                {
+                    "invocation_id": invocation_id,
+                    "input_ref": str(ref or "")[:512],
+                    "error": "INPUT_REF_NOT_ALLOWED",
+                    "summary": "inspect · input denied",
+                },
+            )
+            return _json({"ok": False, "error": "INPUT_REF_NOT_ALLOWED"})
+        try:
+            raw = input_path.read_bytes()
+        except OSError:
+            emit(
+                "tool.inspect_saved_output.failed",
+                {
+                    "invocation_id": invocation_id,
+                    "input_ref": str(ref),
+                    "error": "INPUT_READ_FAILED",
+                    "summary": "inspect · read failed",
+                },
+            )
+            return _json({"ok": False, "error": "INPUT_READ_FAILED"})
+        if len(raw) > _STRUCTURED_INPUT_MAX_BYTES:
+            emit(
+                "tool.inspect_saved_output.failed",
+                {
+                    "invocation_id": invocation_id,
+                    "input_ref": str(ref),
+                    "input_bytes": len(raw),
+                    "error": "INPUT_TOO_LARGE",
+                    "summary": "inspect · input too large",
+                },
+            )
+            return _json({"ok": False, "error": "INPUT_TOO_LARGE"})
+
+        text = _decode_output(raw)
+        output_format, synopsis = _saved_output_synopsis(raw, text)
+        all_lines = text.splitlines()
+        selected = all_lines[offset : offset + limit]
+        lines = [
+            {
+                "number": offset + index + 1,
+                "text": _truncate_output(
+                    value,
+                    _SAVED_OUTPUT_LINE_MAX_CHARS,
+                ),
+            }
+            for index, value in enumerate(selected)
+        ]
+        duration_ms = int((time.monotonic() - started) * 1000)
+        payload = {
+            "ok": True,
+            "invocation_id": invocation_id,
+            "input_ref": str(ref),
+            "input_bytes": len(raw),
+            "input_sha256": hashlib.sha256(raw).hexdigest(),
+            "format": output_format,
+            "synopsis": synopsis,
+            "offset": offset,
+            "limit": limit,
+            "returned_lines": len(lines),
+            "has_more": offset + len(selected) < len(all_lines),
+            "lines": lines,
+            "duration_ms": duration_ms,
+        }
+        emit(
+            "tool.inspect_saved_output.done",
+            {
+                "invocation_id": invocation_id,
+                "input_ref": str(ref),
+                "input_bytes": len(raw),
+                "format": output_format,
+                "offset": offset,
+                "returned_lines": len(lines),
+                "has_more": payload["has_more"],
+                "duration_ms": duration_ms,
+                "summary": (
+                    f"inspect {output_format} · {len(lines)} lines · "
+                    f"{duration_ms}ms"
+                ),
+            },
+        )
+        return _json(payload)
 
     @tool("run_skill_transform", args_schema=_RunSkillTransformArgs)
     def run_skill_transform(
@@ -1441,10 +1615,17 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             **stderr,
         }
         if payload["stdout_truncated"]:
-            payload["instruction"] = (
-                "Use analyze_structured_output on stdout_ref. Do not rerun "
-                "the Transform to recover its full output."
-            )
+            if payload["stdout_format"] == "json":
+                payload["instruction"] = (
+                    "Use analyze_structured_output on stdout_ref. Do not "
+                    "rerun the Transform to recover its full output."
+                )
+            else:
+                payload["instruction"] = (
+                    "Read stdout_ref with inspect_saved_output for a "
+                    "bounded view. Do not rerun the Transform to recover "
+                    "its full output."
+                )
         return _json(payload)
 
     @tool("run_skill_script", args_schema=_RunSkillScriptArgs)
@@ -1810,11 +1991,18 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         payload["progress_stalled"] = artifact_progress["stalled"]
         if payload["stdout_truncated"]:
             artifact_output_refs.append(payload["stdout_ref"])
-            payload["instruction"] = (
-                "Read stdout_ref for the complete output. Do not rerun the "
-                "Artifact merely to change limit, pagination, or output "
-                "format."
-            )
+            if payload["stdout_format"] == "json":
+                payload["instruction"] = (
+                    "Use analyze_structured_output on stdout_ref. Do not "
+                    "rerun the Artifact merely to change pagination or "
+                    "output format."
+                )
+            else:
+                payload["instruction"] = (
+                    "Read stdout_ref with inspect_saved_output for a "
+                    "bounded view. Do not rerun the Artifact merely to "
+                    "change pagination or output format."
+                )
         if artifact_progress["stalled"]:
             payload["instruction"] = (
                 "Artifact results have stopped changing. Stop calling it "
@@ -1855,6 +2043,7 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             emit_event=emit_event,
         ),
         analyze_structured_output,
+        inspect_saved_output,
         run_skill_transform,
         run_skill_script,
         run_skill_artifact,
@@ -2472,6 +2661,7 @@ def _persist_large_tool_output(root, invocation_id, stream, value, limit):
 
     text = _decode_output(value)
     raw = value if isinstance(value, bytes) else text.encode("utf-8")
+    output_format, synopsis = _saved_output_synopsis(raw, text)
     truncated = len(text) > limit
     output_ref = None
     if truncated:
@@ -2488,6 +2678,92 @@ def _persist_large_tool_output(root, invocation_id, stream, value, limit):
         f"{stream}_sha256": hashlib.sha256(raw).hexdigest(),
         f"{stream}_truncated": truncated,
         f"{stream}_ref": output_ref,
+        f"{stream}_format": output_format,
+        f"{stream}_synopsis": synopsis,
+    }
+
+
+def _saved_output_synopsis(raw, text):
+    """Return a typed, bounded synopsis for saved subprocess output."""
+
+    lines = text.splitlines()
+    base = {
+        "line_count": len(lines),
+        "char_count": len(text),
+    }
+    if b"\x00" in raw:
+        return "binary", {**base, "byte_count": len(raw)}
+
+    stripped = text.strip()
+    if stripped:
+        try:
+            payload = json.loads(
+                stripped,
+                parse_constant=_reject_json_constant,
+            )
+        except (json.JSONDecodeError, ValueError):
+            payload = None
+        else:
+            synopsis = {
+                **base,
+                "top_level_type": type(payload).__name__,
+            }
+            if isinstance(payload, dict):
+                synopsis["keys"] = [str(key) for key in list(payload)[:32]]
+                synopsis["key_count"] = len(payload)
+            elif isinstance(payload, list):
+                synopsis["item_count"] = len(payload)
+            return "json", synopsis
+
+    csv_synopsis = _csv_output_synopsis(text, lines)
+    if csv_synopsis is not None:
+        return "csv", {**base, **csv_synopsis}
+    return "text", {
+        **base,
+        "nonempty_line_count": sum(bool(line.strip()) for line in lines),
+        "max_line_chars": max((len(line) for line in lines), default=0),
+    }
+
+
+def _csv_output_synopsis(text, lines):
+    """Return CSV shape metadata when text has a consistent table shape."""
+
+    if len(lines) < 2:
+        return None
+    sample = "\n".join(lines[:20])[:8192]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
+        has_header = csv.Sniffer().has_header(sample)
+    except csv.Error:
+        return None
+
+    reader = csv.reader(io.StringIO(text), dialect)
+    try:
+        first = next(reader)
+    except StopIteration:
+        return None
+    width = len(first)
+    if width < 2:
+        return None
+    row_count = 1
+    consistent_rows = 1
+    for row in reader:
+        row_count += 1
+        if len(row) == width:
+            consistent_rows += 1
+    if consistent_rows / row_count < 0.9:
+        return None
+    columns = (
+        [str(value)[:200] for value in first]
+        if has_header
+        else [f"column_{index}" for index in range(1, width + 1)]
+    )
+    return {
+        "delimiter": dialect.delimiter,
+        "has_header": has_header,
+        "columns": columns,
+        "column_count": width,
+        "row_count": row_count - (1 if has_header else 0),
     }
 
 

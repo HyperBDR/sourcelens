@@ -155,6 +155,7 @@ def test_general_chat_prompt_prefers_bounded_large_result_tools():
     )
 
     assert "analyze_structured_output" in prompt
+    assert "inspect_saved_output" in prompt
     assert "run_skill_transform" in prompt
     assert "Never use read_file or grep" in prompt
     assert "/large_tool_results/" in prompt

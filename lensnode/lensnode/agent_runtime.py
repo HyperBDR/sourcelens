@@ -746,7 +746,9 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         "stdout_truncated is true, do not parse the incomplete stdout preview "
         "and do not repeat or paginate the same query merely to recover it; "
         "use analyze_structured_output on the complete stdout_ref when the "
-        "result is JSON. Never use read_file or grep on files below "
+        "result is JSON. For CSV or plain text, use inspect_saved_output to "
+        "get its typed synopsis and a bounded line window. Never use "
+        "read_file or grep on files below "
         "/large_tool_results/. If the structured analysis call budget is "
         "exhausted, answer from the bounded results already returned instead "
         "of falling back to filesystem tools. Use fields with project, sort, "
@@ -1036,7 +1038,8 @@ def _run_agent_with_turn_limit(
 
     answer = _extract_final_message(last_state or {})
     force_wrapup = truncation_reason == "soft_deadline"
-    if truncated and model is not None and (force_wrapup or not answer.strip()):
+    needs_wrapup = force_wrapup or not answer.strip()
+    if truncated and model is not None and needs_wrapup:
         # The cutoff landed mid-turn (e.g. right after a tool call, before
         # any answer text), so there is nothing to extract — but the
         # conversation likely still holds real findings from every prior
