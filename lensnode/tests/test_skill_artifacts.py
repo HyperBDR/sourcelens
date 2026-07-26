@@ -63,10 +63,14 @@ def _resources(root, content, sha256=None, os_name=None, arch=None):
     )
 
 
-def _artifact_tool(resources, command=None):
+def _artifact_tool(resources, command=None, emit_event=None):
     """Return the General Chat artifact tool."""
 
-    tools = build_general_chat_tools(command or {}, resources)
+    tools = build_general_chat_tools(
+        command or {},
+        resources,
+        emit_event=emit_event,
+    )
     return next(item for item in tools if item.name == "run_skill_artifact")
 
 
@@ -113,7 +117,11 @@ def test_run_skill_artifact_replaces_non_utf8_output(tmp_path):
 
 
 def test_run_skill_artifact_preserves_output_whitespace(tmp_path):
-    content = b"#!/bin/sh\nprintf 'row  1\\nrow  2\\n'\nprintf 'error\\nline\\n' >&2\n"
+    content = (
+        b"#!/bin/sh\n"
+        b"printf 'row  1\\nrow  2\\n'\n"
+        b"printf 'error\\nline\\n' >&2\n"
+    )
     resources = _resources(tmp_path, content)
 
     payload = json.loads(
@@ -125,6 +133,97 @@ def test_run_skill_artifact_preserves_output_whitespace(tmp_path):
     assert payload["ok"] is True
     assert payload["stdout"] == "row  1\nrow  2\n"
     assert payload["stderr"] == "error\nline\n"
+
+
+def test_run_skill_artifact_preserves_large_output_by_reference(tmp_path):
+    content = b"#!/bin/sh\nprintf 'abcdefghijklmnopqrstuvwxyz'\n"
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {"tool_policy": {"skill_script_stdout_limit": 10}}
+    }
+    events = []
+
+    payload = json.loads(
+        _artifact_tool(
+            resources,
+            command,
+            lambda name, detail: events.append((name, detail)),
+        ).invoke(
+            {"skill": "income-cli", "artifact": "income"}
+        )
+    )
+
+    output_path = resources.root / payload["stdout_ref"].lstrip("/")
+    assert payload["stdout"] == "abcdefghij…"
+    assert payload["stdout_truncated"] is True
+    assert payload["stdout_bytes"] == 26
+    assert "Read stdout_ref" in payload["instruction"]
+    saved_output = output_path.read_text(encoding="utf-8")
+    assert saved_output == "abcdefghijklmnopqrstuvwxyz"
+    assert events[0][0] == "tool.run_skill_artifact.start"
+    assert events[-1][0] == "tool.run_skill_artifact.done"
+    assert events[0][1]["invocation_id"] == events[-1][1]["invocation_id"]
+    assert events[-1][1]["stdout_ref"] == payload["stdout_ref"]
+    assert events[-1][1]["stdout_truncated"] is True
+
+
+def test_run_skill_artifact_stops_after_configured_call_budget(tmp_path):
+    resources = _resources(tmp_path, b"#!/bin/sh\nprintf 'ok'\n")
+    command = {
+        "settings": {"tool_policy": {"skill_artifact_max_calls": 2}}
+    }
+    events = []
+    artifact = _artifact_tool(
+        resources,
+        command,
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    first = json.loads(
+        artifact.invoke({"skill": "income-cli", "artifact": "income"})
+    )
+    second = json.loads(
+        artifact.invoke({"skill": "income-cli", "artifact": "income"})
+    )
+    third = json.loads(
+        artifact.invoke({"skill": "income-cli", "artifact": "income"})
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert third["ok"] is False
+    assert third["error"] == "ARTIFACT_CALL_LIMIT"
+    assert third["max_calls"] == 2
+    assert "Stop requesting" in third["instruction"]
+    assert events[-1][0] == "tool.run_skill_artifact.budget_exceeded"
+    assert events[-1][1]["call_count"] == 3
+    assert events[-1][1]["max_calls"] == 2
+
+
+def test_run_skill_artifact_redacts_sensitive_args_in_history(tmp_path):
+    resources = _resources(tmp_path, b"#!/bin/sh\nexit 0\n")
+    events = []
+
+    _artifact_tool(
+        resources,
+        emit_event=lambda name, detail: events.append((name, detail)),
+    ).invoke(
+        {
+            "skill": "income-cli",
+            "artifact": "income",
+            "args": ["auth", "login", "--token", "secret", "--limit", "20"],
+        }
+    )
+
+    start = events[0][1]
+    assert start["args_redacted"] == [
+        "auth",
+        "login",
+        "--token",
+        "[REDACTED]",
+        "--limit",
+        "20",
+    ]
 
 
 def test_run_skill_artifact_timeout_preserves_output_whitespace(tmp_path):
@@ -143,6 +242,32 @@ def test_run_skill_artifact_timeout_preserves_output_whitespace(tmp_path):
     assert payload["ok"] is False
     assert payload["error"] == "ARTIFACT_TIMEOUT"
     assert payload["stdout"] == "row  1\nrow  2\n"
+
+
+def test_run_skill_artifact_timeout_preserves_large_output_by_reference(
+    tmp_path,
+):
+    content = b"#!/bin/sh\nprintf 'abcdefghij'\nsleep 2\n"
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {
+            "tool_policy": {
+                "skill_script_timeout_s": 1,
+                "skill_script_stdout_limit": 5,
+            }
+        }
+    }
+
+    payload = json.loads(
+        _artifact_tool(resources, command).invoke(
+            {"skill": "income-cli", "artifact": "income"}
+        )
+    )
+
+    output_path = resources.root / payload["stdout_ref"].lstrip("/")
+    assert payload["stdout"] == "abcde…"
+    assert payload["stdout_truncated"] is True
+    assert output_path.read_text(encoding="utf-8") == "abcdefghij"
 
 
 def test_run_skill_artifact_rejects_undeclared_binary(tmp_path):

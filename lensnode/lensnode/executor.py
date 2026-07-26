@@ -23,6 +23,12 @@ class RunStalledError(TimeoutError):
     code = "NO_ACTIVITY_TIMEOUT"
 
 
+class RunDeadlineExceededError(TimeoutError):
+    """The run exceeded its configured total wall-clock duration."""
+
+    code = "RUN_TIMEOUT"
+
+
 def _failure_error_code(exc):
     """Map a run failure to a stable, user-facing error code.
 
@@ -171,6 +177,8 @@ class LensNodeExecutor:
                     "message": start_message,
                     "task": task,
                     "target_dirs": target_dirs,
+                    "request_timeout_s": timeout_s,
+                    "idle_timeout_s": idle_timeout_s,
                 },
             }
         )
@@ -199,6 +207,7 @@ class LensNodeExecutor:
 
             loop = asyncio.get_running_loop()
             activity = {"at": loop.time()}
+            deadline_at = loop.time() + timeout_s
             cancel_event = threading.Event()
 
             def touch_activity():
@@ -254,21 +263,41 @@ class LensNodeExecutor:
                     cancel_event=cancel_event,
                 )
             )
+
+            async def cancel_answer_task():
+                """Stop the coroutine and signal its worker thread."""
+
+                cancel_event.set()
+                answer_task.cancel()
+                try:
+                    await answer_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
             try:
                 while True:
+                    remaining_s = deadline_at - loop.time()
+                    if remaining_s <= 0:
+                        await cancel_answer_task()
+                        raise RunDeadlineExceededError(
+                            "Run exceeded total request timeout of "
+                            f"{format_duration(timeout_s)}."
+                        )
                     done, _ = await asyncio.wait(
-                        {answer_task}, timeout=WATCHDOG_INTERVAL_S
+                        {answer_task},
+                        timeout=min(WATCHDOG_INTERVAL_S, remaining_s),
                     )
                     if answer_task in done:
                         result = answer_task.result()
                         break
+                    if loop.time() >= deadline_at:
+                        await cancel_answer_task()
+                        raise RunDeadlineExceededError(
+                            "Run exceeded total request timeout of "
+                            f"{format_duration(timeout_s)}."
+                        )
                     if loop.time() - activity["at"] > idle_timeout_s:
-                        cancel_event.set()
-                        answer_task.cancel()
-                        try:
-                            await answer_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
+                        await cancel_answer_task()
                         raise RunStalledError(
                             "Run saw no gateway activity for "
                             f"{format_duration(idle_timeout_s)}; aborting."

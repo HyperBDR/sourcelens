@@ -13,10 +13,17 @@ from lensnode.agent_runtime import (
 class _Msg:
     """Minimal stand-in for a LangChain message with a type/content."""
 
-    def __init__(self, type_, content="", tool_calls=None):
+    def __init__(
+        self,
+        type_,
+        content="",
+        tool_calls=None,
+        response_metadata=None,
+    ):
         self.type = type_
         self.content = content
         self.tool_calls = tool_calls
+        self.response_metadata = response_metadata or {}
 
 
 class _FakeStreamAgent:
@@ -54,6 +61,114 @@ def test_build_initial_messages_without_history():
     assert _build_initial_messages(None, "q") == [
         {"role": "user", "content": "q"}
     ]
+
+
+def test_model_event_records_cache_reasoning_and_latency():
+    events = []
+    message = _Msg(
+        "ai",
+        "answer",
+        response_metadata={
+            "usage": {
+                "model": "deepseek-v4-flash",
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "cached_tokens": 80,
+                "reasoning_tokens": 5,
+            },
+            "latency_ms": 1234,
+        },
+    )
+
+    agent_runtime._emit_new_model_calls(
+        [message],
+        set(),
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    assert events[0][0] == "llm.response"
+    assert events[0][1]["cached_tokens"] == 80
+    assert events[0][1]["reasoning_tokens"] == 5
+    assert events[0][1]["latency_ms"] == 1234
+
+
+def test_general_chat_middleware_removes_task_tool():
+    class Request:
+        tools = [
+            SimpleNamespace(name="run_skill_artifact"),
+            SimpleNamespace(name="task"),
+        ]
+
+        def override(self, **changes):
+            return SimpleNamespace(**changes)
+
+    middleware = agent_runtime._NoTaskMiddleware()
+    result = middleware.wrap_model_call(
+        Request(),
+        lambda request: [tool.name for tool in request.tools],
+    )
+
+    assert result == ["run_skill_artifact"]
+
+
+def test_general_chat_middleware_denies_task_execution():
+    events = []
+    handler_called = []
+    middleware = agent_runtime._NoTaskMiddleware(
+        lambda name, detail: events.append((name, detail))
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="task"),
+        tool_call={"name": "task", "id": "call-1", "args": {}},
+    )
+
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _request: handler_called.append(True),
+    )
+
+    assert handler_called == []
+    assert result.status == "error"
+    assert result.tool_call_id == "call-1"
+    assert "SUBAGENT_DISABLED" in result.content
+    assert events[0][0] == "tool.task.denied"
+
+
+def test_general_chat_uses_no_task_middleware():
+    middleware = agent_runtime._agent_middleware(
+        {"task": "general_chat"},
+        summarizer=None,
+    )
+
+    assert any(
+        isinstance(item, agent_runtime._NoTaskMiddleware)
+        for item in middleware
+    )
+
+
+def test_general_chat_prompt_prefers_bounded_large_result_tools():
+    prompt = agent_runtime._general_chat_system_prompt(
+        {"question": "Summarize all orders."},
+        [],
+    )
+
+    assert "analyze_structured_output" in prompt
+    assert "run_skill_transform" in prompt
+    assert "Never use read_file or grep" in prompt
+    assert "/large_tool_results/" in prompt
+
+
+def test_knowledge_qa_keeps_task_tool_available():
+    middleware = agent_runtime._agent_middleware(
+        {"task": "knowledge_qa"},
+        summarizer=None,
+    )
+
+    assert not any(
+        isinstance(item, agent_runtime._NoTaskMiddleware)
+        for item in middleware
+    )
 
 
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):

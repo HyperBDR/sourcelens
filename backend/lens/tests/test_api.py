@@ -102,6 +102,7 @@ def skill_zip_upload(
     environment=None,
     api=None,
     artifacts=None,
+    transforms=None,
     package_files=None,
 ):
     """Return an uploaded zip containing one SKILL.md."""
@@ -119,7 +120,8 @@ def skill_zip_upload(
         for path, content in (package_files or {}).items():
             archive.writestr(f"{name}/{path}", content)
         if any(
-            value is not None for value in (environment, api, artifacts)
+            value is not None
+            for value in (environment, api, artifacts, transforms)
         ):
             config = {}
             if environment is not None:
@@ -128,6 +130,8 @@ def skill_zip_upload(
                 config["api"] = api
             if artifacts is not None:
                 config["artifacts"] = artifacts
+            if transforms is not None:
+                config["transforms"] = transforms
             archive.writestr(
                 f"{name}/sourcelens.json",
                 json.dumps(config),
@@ -730,6 +734,157 @@ class LensApiTests(TestCase):
                     & 0o777,
                     0o755,
                 )
+
+    def test_uploaded_skill_reads_declared_transform(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "scripts/summarize_orders.py",
+                "input_format": "json",
+                "environment": [],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "order-transform",
+                            "Summarize an order result reference.",
+                            transforms=transforms,
+                            package_files={
+                                "scripts/summarize_orders.py": (
+                                    b"import json, sys\n"
+                                ),
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+                self.assertEqual(response.status_code, 200)
+                saved_transform = response.data["definition"][
+                    "transforms"
+                ]["summarize-orders"]
+                self.assertEqual(
+                    saved_transform["entrypoint"],
+                    "scripts/summarize_orders.py",
+                )
+                self.assertEqual(saved_transform["input_format"], "json")
+                self.assertEqual(saved_transform["environment"], [])
+                self.assertEqual(
+                    saved_transform["sha256"],
+                    hashlib.sha256(b"import json, sys\n").hexdigest(),
+                )
+                skill = Skill.objects.get(slug="order-transform")
+                with zipfile.ZipFile(package_zip_bytes(skill)) as archive:
+                    config = json.loads(
+                        archive.read(
+                            "order-transform/sourcelens.json"
+                        ).decode("utf-8")
+                    )
+                self.assertEqual(config["transforms"], transforms)
+
+    def test_uploaded_skill_rejects_transform_outside_scripts(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "bin/summarize_orders.py",
+                "input_format": "json",
+                "environment": [],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "unsafe-transform",
+                            "Run a transform.",
+                            transforms=transforms,
+                            package_files={
+                                "bin/summarize_orders.py": b"print('no')\n",
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("scripts/", response.data["detail"])
+
+    def test_uploaded_skill_rejects_transform_undeclared_environment(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "scripts/summarize_orders.py",
+                "input_format": "json",
+                "environment": ["ORDER_TOKEN"],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "unsafe-transform-env",
+                            "Run a transform.",
+                            transforms=transforms,
+                            package_files={
+                                "scripts/summarize_orders.py": (
+                                    b"print('no')\n"
+                                ),
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ORDER_TOKEN", response.data["detail"])
+
+    def test_uploaded_skill_revalidates_transform_environment_override(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "scripts/summarize_orders.py",
+                "input_format": "json",
+                "environment": ["ORDER_TOKEN"],
+            }
+        }
+        environment = [
+            {
+                "name": "ORDER_TOKEN",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "transform-override",
+                            "Run a transform.",
+                            environment=environment,
+                            transforms=transforms,
+                            package_files={
+                                "scripts/summarize_orders.py": (
+                                    b"print('ok')\n"
+                                ),
+                            },
+                        ),
+                        "environment": json.dumps([]),
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ORDER_TOKEN", response.data["detail"])
 
     def test_uploaded_skill_rejects_artifact_outside_bin(self):
         content = b"#!/bin/sh\n"

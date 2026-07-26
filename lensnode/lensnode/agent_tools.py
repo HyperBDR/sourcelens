@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import platform
@@ -9,6 +10,7 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
@@ -37,8 +39,24 @@ SELF_REPORTING_TOOLS = {
     "git_diff",
     "summarize_recent_changes",
     "call_skill_api",
+    "analyze_structured_output",
     "run_skill_script",
     "run_skill_artifact",
+    "run_skill_transform",
+}
+
+_STRUCTURED_INPUT_MAX_BYTES = 50 * 1024 * 1024
+_STRUCTURED_GROUP_MAX_ITEMS = 1000
+_STRUCTURED_OPERATIONS = {
+    "count",
+    "group_count",
+    "max",
+    "min",
+    "paginate",
+    "project",
+    "sample",
+    "sort",
+    "sum",
 }
 
 
@@ -483,6 +501,67 @@ class _RunSkillArtifactArgs(BaseModel):
     stdin: str = Field(default="", description="Optional standard input.")
 
 
+class _AnalyzeStructuredOutputArgs(BaseModel):
+    """Args schema for bounded analysis of a saved JSON tool result."""
+
+    ref: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Input reference below /large_tool_results/.",
+    )
+    operation: str = Field(
+        description=(
+            "One of count, project, group_count, sum, min, max, sort, "
+            "sample, or paginate."
+        )
+    )
+    path: str = Field(
+        default="",
+        max_length=512,
+        description="Optional dotted path to the target JSON value.",
+    )
+    field: str = Field(
+        default="",
+        max_length=512,
+        description="Value or sort field for sum/min/max/sort.",
+    )
+    group_by: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="One to three dotted fields for group_count.",
+    )
+    fields: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description=(
+            "Optional dotted fields returned by project, sort, sample, "
+            "or paginate."
+        ),
+    )
+    offset: int = Field(default=0, ge=0, le=1000000)
+    limit: int = Field(default=100, ge=1, le=1000)
+    descending: bool = Field(default=False)
+
+
+class _RunSkillTransformArgs(BaseModel):
+    """Args schema for running a declared Skill Transform."""
+
+    skill: str = Field(description="Loaded Skill slug or name.")
+    transform: str = Field(
+        description="Transform name declared in sourcelens.json."
+    )
+    stdin_ref: str = Field(
+        min_length=1,
+        max_length=512,
+        description="JSON input reference below /large_tool_results/.",
+    )
+    args: list[str] = Field(
+        default_factory=list,
+        max_length=64,
+        description="Optional bounded arguments for the declared transform.",
+    )
+
+
 class _CallSkillApiArgs(BaseModel):
     """Args schema for an HTTP request configured by a loaded Skill."""
 
@@ -811,11 +890,556 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         _positive_int(tool_policy.get("skill_script_stderr_limit"), 8000),
         50000,
     )
+    artifact_stdout_setting = tool_policy.get(
+        "skill_artifact_stdout_limit"
+    )
+    if artifact_stdout_setting is None:
+        artifact_stdout_setting = tool_policy.get(
+            "skill_script_stdout_limit"
+        )
+    artifact_stdout_limit = min(
+        _positive_int(artifact_stdout_setting, 8000),
+        50000,
+    )
+    artifact_max_calls = min(
+        _positive_int(
+            tool_policy.get("skill_artifact_max_calls"),
+            default=4,
+        ),
+        20,
+    )
+    artifact_calls = {"count": 0}
+    artifact_output_refs = []
+    structured_analysis_max_calls = min(
+        _positive_int(
+            tool_policy.get("structured_analysis_max_calls"),
+            default=6,
+        ),
+        20,
+    )
+    structured_analysis_output_limit = min(
+        _positive_int(
+            tool_policy.get("structured_analysis_output_limit"),
+            default=20000,
+        ),
+        100000,
+    )
+    structured_analysis_calls = {"count": 0}
+    transform_max_calls = min(
+        _positive_int(
+            tool_policy.get("skill_transform_max_calls"),
+            default=4,
+        ),
+        20,
+    )
+    transform_calls = {"count": 0}
+    transform_output_refs = []
     skills_root = resources.root / "skills"
 
     def emit(name, detail=None):
         if emit_event is not None:
             emit_event(name, detail or {})
+
+    @tool(
+        "analyze_structured_output",
+        args_schema=_AnalyzeStructuredOutputArgs,
+    )
+    def analyze_structured_output(
+        ref: str,
+        operation: str,
+        path: str = "",
+        field: str = "",
+        group_by: list[str] | None = None,
+        fields: list[str] | None = None,
+        offset: int = 0,
+        limit: int = 100,
+        descending: bool = False,
+    ) -> str:
+        """Analyze a saved JSON result with fixed, bounded operations.
+
+        Use this instead of repeatedly reading or grepping a large JSON
+        result. ``ref`` must be a file returned as a tool ``stdout_ref``
+        below ``/large_tool_results/``. No Python, SQL, shell expression, or
+        arbitrary code is accepted. Results are bounded and large analysis
+        output is preserved by reference.
+        """
+
+        started = time.monotonic()
+        invocation_id = uuid.uuid4().hex
+        normalized_operation = str(operation or "").strip().lower()
+        structured_analysis_calls["count"] += 1
+        call_count = structured_analysis_calls["count"]
+        if call_count > structured_analysis_max_calls:
+            detail = {
+                "invocation_id": invocation_id,
+                "input_ref": str(ref or "")[:512],
+                "operation": normalized_operation,
+                "call_count": call_count,
+                "max_calls": structured_analysis_max_calls,
+                "summary": "structured analysis · call budget exceeded",
+            }
+            emit(
+                "tool.analyze_structured_output.budget_exceeded",
+                detail,
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "STRUCTURED_ANALYSIS_CALL_LIMIT",
+                    "invocation_id": invocation_id,
+                    "call_count": call_count,
+                    "max_calls": structured_analysis_max_calls,
+                }
+            )
+
+        request_detail = {
+            "invocation_id": invocation_id,
+            "input_ref": str(ref or "")[:512],
+            "operation": normalized_operation,
+            "path": str(path or "")[:512],
+            "field": str(field or "")[:512],
+            "group_by": [str(item)[:512] for item in (group_by or [])],
+            "fields": [str(item)[:512] for item in (fields or [])],
+            "offset": offset,
+            "limit": limit,
+            "descending": bool(descending),
+            "call_count": call_count,
+            "max_calls": structured_analysis_max_calls,
+            "summary": f"{normalized_operation} · {_basename(ref)}",
+        }
+        emit("tool.analyze_structured_output.start", request_detail)
+
+        input_path = _resolve_large_tool_result_ref(resources.root, ref)
+        if input_path is None:
+            return _structured_analysis_failure(
+                emit,
+                started,
+                invocation_id,
+                normalized_operation,
+                ref,
+                "INPUT_REF_NOT_ALLOWED",
+            )
+        try:
+            raw = input_path.read_bytes()
+        except OSError:
+            return _structured_analysis_failure(
+                emit,
+                started,
+                invocation_id,
+                normalized_operation,
+                ref,
+                "INPUT_READ_FAILED",
+            )
+        if len(raw) > _STRUCTURED_INPUT_MAX_BYTES:
+            return _structured_analysis_failure(
+                emit,
+                started,
+                invocation_id,
+                normalized_operation,
+                ref,
+                "INPUT_TOO_LARGE",
+                raw=raw,
+            )
+        try:
+            payload = json.loads(raw, parse_constant=_reject_json_constant)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return _structured_analysis_failure(
+                emit,
+                started,
+                invocation_id,
+                normalized_operation,
+                ref,
+                "INVALID_JSON",
+                raw=raw,
+            )
+        try:
+            result = _apply_structured_operation(
+                payload,
+                normalized_operation,
+                path=path,
+                field=field,
+                group_by=group_by or [],
+                fields=fields or [],
+                offset=offset,
+                limit=limit,
+                descending=descending,
+            )
+        except ValueError as exc:
+            return _structured_analysis_failure(
+                emit,
+                started,
+                invocation_id,
+                normalized_operation,
+                ref,
+                str(exc),
+                raw=raw,
+            )
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        output = _persist_json_analysis_output(
+            resources.root,
+            invocation_id,
+            result,
+            structured_analysis_output_limit,
+        )
+        result_count = len(result) if isinstance(result, (dict, list)) else 1
+        input_sha256 = hashlib.sha256(raw).hexdigest()
+        detail = {
+            "invocation_id": invocation_id,
+            "input_ref": str(ref),
+            "input_bytes": len(raw),
+            "input_sha256": input_sha256,
+            "operation": normalized_operation,
+            "duration_ms": duration_ms,
+            "result_count": result_count,
+            "output_bytes": output["output_bytes"],
+            "output_sha256": output["output_sha256"],
+            "output_truncated": output["output_truncated"],
+            "output_ref": output["output_ref"],
+            "call_count": call_count,
+            "max_calls": structured_analysis_max_calls,
+            "summary": (
+                f"{normalized_operation} · {result_count} result"
+                f"{'s' if result_count != 1 else ''} · {duration_ms}ms"
+            ),
+        }
+        emit("tool.analyze_structured_output.done", detail)
+        return _json(
+            {
+                "ok": True,
+                "invocation_id": invocation_id,
+                "operation": normalized_operation,
+                "input_ref": str(ref),
+                "input_bytes": len(raw),
+                "input_sha256": input_sha256,
+                "duration_ms": duration_ms,
+                "result_count": result_count,
+                **output,
+            }
+        )
+
+    @tool("run_skill_transform", args_schema=_RunSkillTransformArgs)
+    def run_skill_transform(
+        skill: str,
+        transform: str,
+        stdin_ref: str,
+        args: list[str] | None = None,
+    ) -> str:
+        """Run a predeclared JSON Transform from a loaded Skill.
+
+        The Transform name and Python entrypoint must be declared in the
+        uploaded Skill's ``sourcelens.json``. Input is read only from a saved
+        ``/large_tool_results/`` reference. The model cannot provide code or
+        an executable path. Only environment variables explicitly listed by
+        the Transform declaration are injected.
+        """
+
+        started = time.monotonic()
+        invocation_id = uuid.uuid4().hex
+        args = [str(item) for item in (args or [])]
+        transform_name = str(transform or "").strip()
+        skill_dir = _resolve_skill_dir(skills_root, skill)
+        if skill_dir is None:
+            emit(
+                "tool.run_skill_transform.denied",
+                {
+                    "skill": str(skill or "")[:180],
+                    "transform": transform_name[:64],
+                    "error": "SKILL_NOT_LOADED",
+                    "invocation_id": invocation_id,
+                },
+            )
+            return _json({"ok": False, "error": "SKILL_NOT_LOADED"})
+        definition, script_path, error = _resolve_skill_transform(
+            skill_dir,
+            resources.skill_transforms.get(skill_dir.name, {}),
+            transform_name,
+        )
+        if definition is None or script_path is None:
+            emit(
+                "tool.run_skill_transform.denied",
+                {
+                    "skill": skill_dir.name,
+                    "transform": transform_name,
+                    "error": error,
+                    "invocation_id": invocation_id,
+                },
+            )
+            return _json({"ok": False, "error": error})
+        if len(args) > 64 or any(len(item) > 512 for item in args):
+            emit(
+                "tool.run_skill_transform.denied",
+                {
+                    "skill": skill_dir.name,
+                    "transform": transform_name,
+                    "error": "TRANSFORM_ARGUMENTS_TOO_LARGE",
+                    "invocation_id": invocation_id,
+                },
+            )
+            return _json(
+                {"ok": False, "error": "TRANSFORM_ARGUMENTS_TOO_LARGE"}
+            )
+
+        transform_calls["count"] += 1
+        call_count = transform_calls["count"]
+        if call_count > transform_max_calls:
+            detail = {
+                "skill": skill_dir.name,
+                "transform": transform_name,
+                "entrypoint": definition["entrypoint"],
+                "args_redacted": _redact_command_args(args),
+                "input_ref": str(stdin_ref or "")[:512],
+                "call_count": call_count,
+                "max_calls": transform_max_calls,
+                "invocation_id": invocation_id,
+                "summary": (
+                    f"{skill_dir.name}/{transform_name} · "
+                    "call budget exceeded"
+                ),
+            }
+            emit("tool.run_skill_transform.budget_exceeded", detail)
+            return _json(
+                {
+                    "ok": False,
+                    "error": "TRANSFORM_CALL_LIMIT",
+                    "invocation_id": invocation_id,
+                    "call_count": call_count,
+                    "max_calls": transform_max_calls,
+                    "available_output_refs": transform_output_refs,
+                }
+            )
+
+        input_path = _resolve_large_tool_result_ref(
+            resources.root,
+            stdin_ref,
+        )
+        if input_path is None:
+            emit(
+                "tool.run_skill_transform.denied",
+                {
+                    "skill": skill_dir.name,
+                    "transform": transform_name,
+                    "entrypoint": definition["entrypoint"],
+                    "input_ref": str(stdin_ref or "")[:512],
+                    "error": "INPUT_REF_NOT_ALLOWED",
+                    "invocation_id": invocation_id,
+                },
+            )
+            return _json({"ok": False, "error": "INPUT_REF_NOT_ALLOWED"})
+        try:
+            raw = input_path.read_bytes()
+        except OSError:
+            emit(
+                "tool.run_skill_transform.failed",
+                {
+                    "skill": skill_dir.name,
+                    "transform": transform_name,
+                    "input_ref": str(stdin_ref),
+                    "error": "INPUT_READ_FAILED",
+                    "invocation_id": invocation_id,
+                },
+            )
+            return _json({"ok": False, "error": "INPUT_READ_FAILED"})
+        if len(raw) > _STRUCTURED_INPUT_MAX_BYTES:
+            return _transform_input_failure(
+                emit,
+                started,
+                invocation_id,
+                skill_dir.name,
+                transform_name,
+                definition["entrypoint"],
+                stdin_ref,
+                raw,
+                "INPUT_TOO_LARGE",
+            )
+        try:
+            json.loads(raw, parse_constant=_reject_json_constant)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return _transform_input_failure(
+                emit,
+                started,
+                invocation_id,
+                skill_dir.name,
+                transform_name,
+                definition["entrypoint"],
+                stdin_ref,
+                raw,
+                "INVALID_JSON",
+            )
+
+        input_sha256 = hashlib.sha256(raw).hexdigest()
+        selected_environment = {
+            name: value
+            for name, value in resources.skill_environments.get(
+                skill_dir.name,
+                {},
+            ).items()
+            if name in definition["environment"]
+        }
+        display_name = f"{skill_dir.name}/{transform_name}"
+        emit(
+            "tool.run_skill_transform.start",
+            {
+                "skill": skill_dir.name,
+                "transform": transform_name,
+                "entrypoint": definition["entrypoint"],
+                "args_redacted": _redact_command_args(args),
+                "arg_count": len(args),
+                "input_ref": str(stdin_ref),
+                "input_bytes": len(raw),
+                "input_sha256": input_sha256,
+                "environment_names": sorted(selected_environment),
+                "call_count": call_count,
+                "max_calls": transform_max_calls,
+                "invocation_id": invocation_id,
+                "summary": display_name,
+            },
+        )
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(script_path), *args],
+                cwd=str(skill_dir),
+                env=_skill_script_environment(selected_environment),
+                input=raw,
+                capture_output=True,
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            stdout = _persist_large_tool_output(
+                resources.root,
+                invocation_id,
+                "stdout",
+                exc.stdout,
+                artifact_stdout_limit,
+            )
+            stderr = _persist_large_tool_output(
+                resources.root,
+                invocation_id,
+                "stderr",
+                exc.stderr,
+                stderr_limit,
+            )
+            if stdout["stdout_ref"]:
+                transform_output_refs.append(stdout["stdout_ref"])
+            emit(
+                "tool.run_skill_transform.timeout",
+                {
+                    "skill": skill_dir.name,
+                    "transform": transform_name,
+                    "entrypoint": definition["entrypoint"],
+                    "input_ref": str(stdin_ref),
+                    "input_bytes": len(raw),
+                    "input_sha256": input_sha256,
+                    "duration_ms": duration_ms,
+                    "timeout_s": timeout_s,
+                    "invocation_id": invocation_id,
+                    "stdout_bytes": stdout["stdout_bytes"],
+                    "stdout_ref": stdout["stdout_ref"],
+                    "stdout_truncated": stdout["stdout_truncated"],
+                    "stderr_bytes": stderr["stderr_bytes"],
+                    "stderr_ref": stderr["stderr_ref"],
+                    "stderr_truncated": stderr["stderr_truncated"],
+                    "summary": f"{display_name} · timeout",
+                },
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "TRANSFORM_TIMEOUT",
+                    "duration_ms": duration_ms,
+                    "invocation_id": invocation_id,
+                    "input_ref": str(stdin_ref),
+                    "input_bytes": len(raw),
+                    "input_sha256": input_sha256,
+                    "timeout_s": timeout_s,
+                    **stdout,
+                    **stderr,
+                }
+            )
+        except OSError:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            emit(
+                "tool.run_skill_transform.failed",
+                {
+                    "skill": skill_dir.name,
+                    "transform": transform_name,
+                    "entrypoint": definition["entrypoint"],
+                    "input_ref": str(stdin_ref),
+                    "input_bytes": len(raw),
+                    "input_sha256": input_sha256,
+                    "duration_ms": duration_ms,
+                    "error": "TRANSFORM_EXECUTION_FAILED",
+                    "invocation_id": invocation_id,
+                    "summary": f"{display_name} · failed",
+                },
+            )
+            return _json(
+                {"ok": False, "error": "TRANSFORM_EXECUTION_FAILED"}
+            )
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        stdout = _persist_large_tool_output(
+            resources.root,
+            invocation_id,
+            "stdout",
+            completed.stdout,
+            artifact_stdout_limit,
+        )
+        stderr = _persist_large_tool_output(
+            resources.root,
+            invocation_id,
+            "stderr",
+            completed.stderr,
+            stderr_limit,
+        )
+        if stdout["stdout_ref"]:
+            transform_output_refs.append(stdout["stdout_ref"])
+        detail = {
+            "skill": skill_dir.name,
+            "transform": transform_name,
+            "entrypoint": definition["entrypoint"],
+            "ok": completed.returncode == 0,
+            "returncode": completed.returncode,
+            "duration_ms": duration_ms,
+            "invocation_id": invocation_id,
+            "input_ref": str(stdin_ref),
+            "input_bytes": len(raw),
+            "input_sha256": input_sha256,
+            "stdout_bytes": stdout["stdout_bytes"],
+            "stdout_sha256": stdout["stdout_sha256"],
+            "stdout_ref": stdout["stdout_ref"],
+            "stdout_truncated": stdout["stdout_truncated"],
+            "stderr_bytes": stderr["stderr_bytes"],
+            "stderr_sha256": stderr["stderr_sha256"],
+            "stderr_ref": stderr["stderr_ref"],
+            "stderr_truncated": stderr["stderr_truncated"],
+            "call_count": call_count,
+            "max_calls": transform_max_calls,
+            "summary": f"{display_name} · rc={completed.returncode}",
+        }
+        emit("tool.run_skill_transform.done", detail)
+        payload = {
+            "ok": completed.returncode == 0,
+            "returncode": completed.returncode,
+            "duration_ms": duration_ms,
+            "skill": skill_dir.name,
+            "transform": transform_name,
+            "entrypoint": definition["entrypoint"],
+            "invocation_id": invocation_id,
+            "input_ref": str(stdin_ref),
+            "input_bytes": len(raw),
+            "input_sha256": input_sha256,
+            **stdout,
+            **stderr,
+        }
+        if payload["stdout_truncated"]:
+            payload["instruction"] = (
+                "Use analyze_structured_output on stdout_ref. Do not rerun "
+                "the Transform to recover its full output."
+            )
+        return _json(payload)
 
     @tool("run_skill_script", args_schema=_RunSkillScriptArgs)
     def run_skill_script(
@@ -932,14 +1556,20 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         Use the Artifact name from the Skill's sourcelens.json, never a file
         path. SourceLens selects the entrypoint matching this LensNode's OS
         and CPU architecture, verifies its SHA-256, and executes only that
-        exact regular file under the Skill's bin/ directory.
+        exact regular file under the Skill's bin/ directory. Calls have a
+        strict per-run budget, so use Skill references instead of probing
+        version or help commands and avoid repeating successful queries.
         """
 
         started = time.monotonic()
+        invocation_id = uuid.uuid4().hex
         args = [str(item) for item in (args or [])]
         skill_dir = _resolve_skill_dir(skills_root, skill)
         if skill_dir is None:
-            emit("tool.run_skill_artifact.denied", {"skill": skill})
+            emit(
+                "tool.run_skill_artifact.denied",
+                {"skill": skill, "invocation_id": invocation_id},
+            )
             return _json({"ok": False, "error": "SKILL_NOT_LOADED"})
         artifact_name = str(artifact or "").strip()
         artifact_path, error = _resolve_skill_artifact(
@@ -954,17 +1584,49 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                     "skill": skill_dir.name,
                     "artifact": artifact_name,
                     "error": error,
+                    "invocation_id": invocation_id,
                 },
             )
             return _json({"ok": False, "error": error})
 
         display_name = f"{skill_dir.name}/{artifact_name}"
+        artifact_calls["count"] += 1
+        call_count = artifact_calls["count"]
+        if call_count > artifact_max_calls:
+            detail = {
+                "skill": skill_dir.name,
+                "artifact": artifact_name,
+                "args_redacted": _redact_command_args(args),
+                "call_count": call_count,
+                "max_calls": artifact_max_calls,
+                "invocation_id": invocation_id,
+                "summary": f"{display_name} · call budget exceeded",
+            }
+            emit("tool.run_skill_artifact.budget_exceeded", detail)
+            return _json(
+                {
+                    "ok": False,
+                    "error": "ARTIFACT_CALL_LIMIT",
+                    "call_count": call_count,
+                    "max_calls": artifact_max_calls,
+                    "available_output_refs": artifact_output_refs,
+                    "instruction": (
+                        "Stop requesting more Artifact calls. Read an "
+                        "available output reference if needed, then answer "
+                        "from the results already collected."
+                    ),
+                }
+            )
         emit(
             "tool.run_skill_artifact.start",
             {
                 "skill": skill_dir.name,
                 "artifact": artifact_name,
                 "arg_count": len(args),
+                "args_redacted": _redact_command_args(args),
+                "call_count": call_count,
+                "max_calls": artifact_max_calls,
+                "invocation_id": invocation_id,
                 "summary": display_name,
             },
         )
@@ -981,11 +1643,36 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 timeout=timeout_s,
             )
         except subprocess.TimeoutExpired as exc:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            stdout = _persist_large_tool_output(
+                resources.root,
+                invocation_id,
+                "stdout",
+                exc.stdout,
+                artifact_stdout_limit,
+            )
+            stderr = _persist_large_tool_output(
+                resources.root,
+                invocation_id,
+                "stderr",
+                exc.stderr,
+                stderr_limit,
+            )
+            if stdout["stdout_ref"]:
+                artifact_output_refs.append(stdout["stdout_ref"])
             emit(
                 "tool.run_skill_artifact.timeout",
                 {
                     "skill": skill_dir.name,
                     "artifact": artifact_name,
+                    "duration_ms": duration_ms,
+                    "invocation_id": invocation_id,
+                    "stdout_bytes": stdout["stdout_bytes"],
+                    "stdout_ref": stdout["stdout_ref"],
+                    "stdout_truncated": stdout["stdout_truncated"],
+                    "stderr_bytes": stderr["stderr_bytes"],
+                    "stderr_ref": stderr["stderr_ref"],
+                    "stderr_truncated": stderr["stderr_truncated"],
                     "timeout_s": timeout_s,
                 },
             )
@@ -993,29 +1680,57 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 {
                     "ok": False,
                     "error": "ARTIFACT_TIMEOUT",
+                    "duration_ms": duration_ms,
+                    "invocation_id": invocation_id,
                     "timeout_s": timeout_s,
-                    "stdout": _truncate_output(exc.stdout, stdout_limit),
-                    "stderr": _truncate_output(exc.stderr, stderr_limit),
+                    **stdout,
+                    **stderr,
                 }
             )
         except OSError:
             emit(
                 "tool.run_skill_artifact.failed",
-                {"skill": skill_dir.name, "artifact": artifact_name},
+                {
+                    "skill": skill_dir.name,
+                    "artifact": artifact_name,
+                    "invocation_id": invocation_id,
+                },
             )
             return _json(
                 {"ok": False, "error": "ARTIFACT_EXECUTION_FAILED"}
             )
 
         duration_ms = int((time.monotonic() - started) * 1000)
+        stdout = _persist_large_tool_output(
+            resources.root,
+            invocation_id,
+            "stdout",
+            completed.stdout,
+            artifact_stdout_limit,
+        )
+        stderr = _persist_large_tool_output(
+            resources.root,
+            invocation_id,
+            "stderr",
+            completed.stderr,
+            stderr_limit,
+        )
         payload = {
             "ok": completed.returncode == 0,
             "returncode": completed.returncode,
-            "stdout": _truncate_output(completed.stdout, stdout_limit),
-            "stderr": _truncate_output(completed.stderr, stderr_limit),
             "duration_ms": duration_ms,
             "artifact": artifact_name,
+            "invocation_id": invocation_id,
+            **stdout,
+            **stderr,
         }
+        if payload["stdout_truncated"]:
+            artifact_output_refs.append(payload["stdout_ref"])
+            payload["instruction"] = (
+                "Read stdout_ref for the complete output. Do not rerun the "
+                "Artifact merely to change limit, pagination, or output "
+                "format."
+            )
         emit(
             "tool.run_skill_artifact.done",
             {
@@ -1024,6 +1739,13 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 "ok": payload["ok"],
                 "returncode": completed.returncode,
                 "duration_ms": duration_ms,
+                "invocation_id": invocation_id,
+                "stdout_bytes": payload["stdout_bytes"],
+                "stdout_ref": payload["stdout_ref"],
+                "stdout_truncated": payload["stdout_truncated"],
+                "stderr_bytes": payload["stderr_bytes"],
+                "stderr_ref": payload["stderr_ref"],
+                "stderr_truncated": payload["stderr_truncated"],
                 "summary": f"{display_name} · rc={completed.returncode}",
             },
         )
@@ -1041,6 +1763,8 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             ),
             emit_event=emit_event,
         ),
+        analyze_structured_output,
+        run_skill_transform,
         run_skill_script,
         run_skill_artifact,
     ]
@@ -1051,6 +1775,422 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             )
         )
     return tools
+
+
+def _resolve_large_tool_result_ref(root, value):
+    """Resolve one regular non-symlink large-result file by virtual ref."""
+
+    ref = str(value or "").replace("\\", "/")
+    prefix = "/large_tool_results/"
+    if not ref.startswith(prefix):
+        return None
+    relative_text = ref[len(prefix) :]
+    if (
+        not relative_text
+        or relative_text.startswith("/")
+        or any(part in {"", ".", ".."} for part in relative_text.split("/"))
+    ):
+        return None
+    output_root = Path(root) / "large_tool_results"
+    candidate = output_root.joinpath(*relative_text.split("/"))
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(output_root.resolve(strict=True))
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    if _path_contains_symlink(output_root, candidate):
+        return None
+    try:
+        if not stat.S_ISREG(candidate.lstat().st_mode):
+            return None
+    except OSError:
+        return None
+    return candidate
+
+
+def _reject_json_constant(value):
+    """Reject non-standard JSON numeric constants."""
+
+    raise ValueError(f"Invalid JSON constant: {value}")
+
+
+def _structured_analysis_failure(
+    emit,
+    started,
+    invocation_id,
+    operation,
+    input_ref,
+    error,
+    raw=None,
+):
+    """Emit and return a stable structured-analysis failure."""
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    detail = {
+        "invocation_id": invocation_id,
+        "input_ref": str(input_ref or "")[:512],
+        "operation": operation,
+        "error": error,
+        "duration_ms": duration_ms,
+        "summary": f"{operation or 'analysis'} · {error}",
+    }
+    payload = {
+        "ok": False,
+        "error": error,
+        "invocation_id": invocation_id,
+        "input_ref": str(input_ref or "")[:512],
+        "operation": operation,
+        "duration_ms": duration_ms,
+    }
+    if raw is not None:
+        input_sha256 = hashlib.sha256(raw).hexdigest()
+        detail.update(
+            {"input_bytes": len(raw), "input_sha256": input_sha256}
+        )
+        payload.update(
+            {"input_bytes": len(raw), "input_sha256": input_sha256}
+        )
+    emit("tool.analyze_structured_output.failed", detail)
+    return _json(payload)
+
+
+def _structured_path_value(payload, path):
+    """Read a required dotted path, allowing an empty path for the root."""
+
+    if not str(path or "").strip():
+        return payload
+    sentinel = object()
+    value = payload
+    for part in str(path).split("."):
+        if not part:
+            raise ValueError("PATH_NOT_FOUND")
+        next_value = sentinel
+        if isinstance(value, dict):
+            next_value = value.get(part, sentinel)
+        elif isinstance(value, list) and part.isdigit():
+            index = int(part)
+            if index < len(value):
+                next_value = value[index]
+        if next_value is sentinel:
+            raise ValueError("PATH_NOT_FOUND")
+        value = next_value
+    return value
+
+
+def _structured_record_value(record, field):
+    """Read a field from one structured record."""
+
+    if not str(field or "").strip():
+        return record
+    return _structured_path_value(record, field)
+
+
+def _structured_numeric_values(target, field):
+    """Return finite numeric values from a list target."""
+
+    if not isinstance(target, list):
+        raise ValueError("OPERATION_INPUT_INVALID")
+    values = []
+    for item in target:
+        try:
+            value = _structured_record_value(item, field)
+        except ValueError as exc:
+            raise ValueError("FIELD_NOT_FOUND") from exc
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("FIELD_NOT_NUMERIC")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("FIELD_NOT_NUMERIC")
+        values.append(value)
+    if not values:
+        raise ValueError("OPERATION_INPUT_EMPTY")
+    return values
+
+
+def _structured_sort_key(value):
+    """Return a deterministic key for JSON-compatible sort values."""
+
+    if isinstance(value, bool):
+        return "bool", int(value)
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("FIELD_NOT_SORTABLE")
+        return "number", value
+    if isinstance(value, str):
+        return "string", value
+    try:
+        return "json", json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("FIELD_NOT_SORTABLE") from exc
+
+
+def _apply_structured_operation(
+    payload,
+    operation,
+    *,
+    path,
+    field,
+    group_by,
+    fields,
+    offset,
+    limit,
+    descending,
+):
+    """Apply one allowlisted JSON operation and return its bounded result."""
+
+    if operation not in _STRUCTURED_OPERATIONS:
+        raise ValueError("OPERATION_NOT_ALLOWED")
+    target = _structured_path_value(payload, path)
+    if operation == "count":
+        if not isinstance(target, (dict, list)):
+            raise ValueError("OPERATION_INPUT_INVALID")
+        return len(target)
+    if operation == "project":
+        if (
+            not isinstance(target, list)
+            or not fields
+        ):
+            raise ValueError("OPERATION_INPUT_INVALID")
+        return _project_structured_items(
+            target[offset : offset + limit],
+            fields,
+        )
+    if operation == "group_count":
+        if (
+            not isinstance(target, list)
+            or not group_by
+            or any(not str(item).strip() for item in group_by)
+            or len(set(group_by)) != len(group_by)
+        ):
+            raise ValueError("OPERATION_INPUT_INVALID")
+        groups = {}
+        for item in target:
+            values = []
+            for item_field in group_by:
+                try:
+                    values.append(
+                        _structured_record_value(item, item_field)
+                    )
+                except ValueError as exc:
+                    raise ValueError("FIELD_NOT_FOUND") from exc
+            try:
+                key = json.dumps(
+                    values,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("FIELD_NOT_GROUPABLE") from exc
+            if key not in groups:
+                if len(groups) >= _STRUCTURED_GROUP_MAX_ITEMS:
+                    raise ValueError("GROUP_LIMIT_EXCEEDED")
+                groups[key] = {
+                    "group": dict(zip(group_by, values, strict=True)),
+                    "count": 0,
+                }
+            groups[key]["count"] += 1
+        return sorted(
+            groups.values(),
+            key=lambda item: (
+                -item["count"],
+                json.dumps(
+                    item["group"],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            ),
+        )[:limit]
+    if operation in {"sum", "min", "max"}:
+        values = _structured_numeric_values(target, field)
+        if operation == "sum":
+            return sum(values)
+        return min(values) if operation == "min" else max(values)
+    if operation == "sort":
+        if not isinstance(target, list) or not str(field).strip():
+            raise ValueError("OPERATION_INPUT_INVALID")
+        sortable = []
+        missing = []
+        for item in target:
+            try:
+                value = _structured_record_value(item, field)
+            except ValueError:
+                missing.append(item)
+                continue
+            sortable.append((_structured_sort_key(value), item))
+        sortable.sort(key=lambda item: item[0], reverse=descending)
+        ordered = [item for _key, item in sortable] + missing
+        return _project_structured_items(
+            ordered[offset : offset + limit],
+            fields,
+        )
+    if operation == "paginate":
+        if not isinstance(target, list):
+            raise ValueError("OPERATION_INPUT_INVALID")
+        return _project_structured_items(
+            target[offset : offset + limit],
+            fields,
+        )
+    if not isinstance(target, list):
+        raise ValueError("OPERATION_INPUT_INVALID")
+    items = target[offset:]
+    if len(items) <= limit:
+        sampled = items
+    else:
+        sampled = [
+            items[index * len(items) // limit] for index in range(limit)
+        ]
+    return _project_structured_items(sampled, fields)
+
+
+def _project_structured_items(items, fields):
+    """Return collection items with an optional bounded field projection."""
+
+    if not fields:
+        return items
+    if (
+        any(not str(item).strip() for item in fields)
+        or len(set(fields)) != len(fields)
+    ):
+        raise ValueError("OPERATION_INPUT_INVALID")
+    projected = []
+    for item in items:
+        row = {}
+        for item_field in fields:
+            try:
+                row[item_field] = _structured_record_value(
+                    item,
+                    item_field,
+                )
+            except ValueError as exc:
+                raise ValueError("FIELD_NOT_FOUND") from exc
+        projected.append(row)
+    return projected
+
+
+def _persist_json_analysis_output(root, invocation_id, result, limit):
+    """Return output metadata and preserve an oversized JSON result."""
+
+    try:
+        raw = json.dumps(
+            result,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("OUTPUT_NOT_JSON") from exc
+    truncated = len(raw) > limit
+    output_ref = None
+    if truncated:
+        output_dir = Path(root) / "large_tool_results"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"analysis_{invocation_id}.json"
+        output_path = output_dir / filename
+        output_path.write_bytes(raw)
+        output_ref = f"/large_tool_results/{filename}"
+    return {
+        "result": None if truncated else result,
+        "output_bytes": len(raw),
+        "output_sha256": hashlib.sha256(raw).hexdigest(),
+        "output_truncated": truncated,
+        "output_ref": output_ref,
+        "instruction": (
+            "Read output_ref only if another bounded operation is needed."
+            if truncated
+            else ""
+        ),
+    }
+
+
+def _resolve_skill_transform(skill_dir, transforms, name):
+    """Resolve one declared Python Transform and its verified entrypoint."""
+
+    if not isinstance(transforms, dict):
+        return None, None, "TRANSFORM_NOT_DECLARED"
+    definition = transforms.get(str(name or "").strip())
+    if not isinstance(definition, dict):
+        return None, None, "TRANSFORM_NOT_DECLARED"
+    entrypoint = str(definition.get("entrypoint") or "").replace("\\", "/")
+    parts = entrypoint.split("/")
+    if (
+        len(parts) < 2
+        or parts[0] != "scripts"
+        or any(part in {"", ".", ".."} for part in parts)
+        or not entrypoint.lower().endswith(".py")
+        or definition.get("input_format") != "json"
+        or not isinstance(definition.get("environment"), list)
+    ):
+        return None, None, "TRANSFORM_DECLARATION_INVALID"
+    script_path = skill_dir.joinpath(*parts)
+    scripts_root = skill_dir / "scripts"
+    try:
+        resolved = script_path.resolve(strict=True)
+        resolved.relative_to(scripts_root.resolve(strict=True))
+    except (FileNotFoundError, OSError, ValueError):
+        return None, None, "TRANSFORM_ENTRYPOINT_INVALID"
+    if _path_contains_symlink(skill_dir, script_path):
+        return None, None, "TRANSFORM_ENTRYPOINT_INVALID"
+    try:
+        if not stat.S_ISREG(script_path.lstat().st_mode):
+            return None, None, "TRANSFORM_ENTRYPOINT_INVALID"
+    except OSError:
+        return None, None, "TRANSFORM_ENTRYPOINT_INVALID"
+    expected_hash = str(definition.get("sha256") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        return None, None, "TRANSFORM_DECLARATION_INVALID"
+    try:
+        actual_hash = hashlib.sha256(script_path.read_bytes()).hexdigest()
+    except OSError:
+        return None, None, "TRANSFORM_ENTRYPOINT_INVALID"
+    if actual_hash != expected_hash:
+        return None, None, "TRANSFORM_HASH_MISMATCH"
+    return definition, script_path, None
+
+
+def _transform_input_failure(
+    emit,
+    started,
+    invocation_id,
+    skill,
+    transform,
+    entrypoint,
+    input_ref,
+    raw,
+    error,
+):
+    """Emit and return a stable Transform input failure."""
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    input_sha256 = hashlib.sha256(raw).hexdigest()
+    detail = {
+        "skill": skill,
+        "transform": transform,
+        "entrypoint": entrypoint,
+        "input_ref": str(input_ref or "")[:512],
+        "input_bytes": len(raw),
+        "input_sha256": input_sha256,
+        "error": error,
+        "duration_ms": duration_ms,
+        "invocation_id": invocation_id,
+        "summary": f"{skill}/{transform} · {error}",
+    }
+    emit("tool.run_skill_transform.failed", detail)
+    return _json(
+        {
+            "ok": False,
+            "error": error,
+            "invocation_id": invocation_id,
+            "input_ref": str(input_ref or "")[:512],
+            "input_bytes": len(raw),
+            "input_sha256": input_sha256,
+            "duration_ms": duration_ms,
+        }
+    )
 
 
 def _resolve_skill_dir(skills_root, value):
@@ -1234,6 +2374,69 @@ def _truncate_output(value, limit):
 
     text = _decode_output(value)
     return text[:limit] + "…" if len(text) > limit else text
+
+
+def _persist_large_tool_output(root, invocation_id, stream, value, limit):
+    """Return bounded output metadata and preserve a complete large value."""
+
+    text = _decode_output(value)
+    raw = value if isinstance(value, bytes) else text.encode("utf-8")
+    truncated = len(text) > limit
+    output_ref = None
+    if truncated:
+        output_dir = Path(root) / "large_tool_results"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"artifact_{invocation_id}.{stream}.txt"
+        output_path = output_dir / filename
+        output_path.write_text(text, encoding="utf-8")
+        output_ref = f"/large_tool_results/{filename}"
+    return {
+        stream: _truncate_output(text, limit),
+        f"{stream}_bytes": len(raw),
+        f"{stream}_chars": len(text),
+        f"{stream}_sha256": hashlib.sha256(raw).hexdigest(),
+        f"{stream}_truncated": truncated,
+        f"{stream}_ref": output_ref,
+    }
+
+
+def _redact_command_args(args):
+    """Return bounded CLI arguments with likely secret values removed."""
+
+    sensitive_fragments = {
+        "api-key",
+        "apikey",
+        "authorization",
+        "cookie",
+        "email",
+        "passwd",
+        "password",
+        "secret",
+        "token",
+        "username",
+    }
+    output = []
+    redact_next = False
+    for item in args[:64]:
+        value = str(item)
+        if redact_next:
+            output.append("[REDACTED]")
+            redact_next = False
+            continue
+        key, separator, _argument_value = value.partition("=")
+        normalized = key.lstrip("-").lower().replace("_", "-")
+        sensitive = any(
+            fragment in normalized for fragment in sensitive_fragments
+        )
+        if value.startswith("-") and sensitive:
+            if separator:
+                output.append(f"{key}=[REDACTED]")
+            else:
+                output.append(value[:160])
+                redact_next = True
+            continue
+        output.append(value[:160])
+    return output
 
 
 def _safe_relative_path(value):

@@ -237,30 +237,58 @@
           </template>
 
           <template v-else-if="activeMethod === 'upload'">
-            <details
-              class="rounded-lg border border-primary-200 bg-primary-50/60"
+            <div
+              class="overflow-hidden rounded-lg border border-line bg-surface"
             >
-              <summary
-                class="cursor-pointer px-3 py-2 text-left marker:text-primary-500"
+              <div
+                class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
               >
-                <span class="block text-sm font-medium text-primary-800">
-                  {{ t('lensAdmin.skills.packageGuideTitle') }}
-                </span>
-                <span
-                  class="mt-1 block pr-4 text-xs leading-5 text-primary-700"
+                <div class="flex min-w-0 items-start gap-3">
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-700"
+                  >
+                    <BotIcon class="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div class="min-w-0">
+                    <div class="text-sm font-medium text-ink-800">
+                      {{ t('lensAdmin.skills.packageGuideTitle') }}
+                    </div>
+                    <p class="mt-0.5 text-xs leading-5 text-ink-500">
+                      {{ t('lensAdmin.skills.packageGuideSummary') }}
+                    </p>
+                  </div>
+                </div>
+                <BaseButton
+                  class="shrink-0"
+                  size="sm"
+                  variant="outline"
+                  @click="copyPackageGuidePrompt"
                 >
-                  {{ t('lensAdmin.skills.packageGuideSummary') }}
-                </span>
-              </summary>
-              <div class="border-t border-primary-200 p-3">
-                <pre
-                  tabindex="0"
-                  :aria-label="t('lensAdmin.skills.packageGuideTitle')"
-                  class="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 font-mono text-xs leading-5 text-ink-700"
-                  >{{ tm('lensAdmin.skills.packageGuidePrompt') }}</pre
-                >
+                  <CopyIcon class="h-3.5 w-3.5" aria-hidden="true" />
+                  {{ t('lensAdmin.skills.packageGuideCopy') }}
+                </BaseButton>
               </div>
-            </details>
+              <details class="group border-t border-line">
+                <summary
+                  class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-ink-500 hover:bg-surface-sunken hover:text-ink-700 [&::-webkit-details-marker]:hidden"
+                >
+                  <span>
+                    {{ t('lensAdmin.skills.packageGuideDetails') }}
+                  </span>
+                  <ChevronDownIcon
+                    class="h-4 w-4 shrink-0 transition-transform group-open:rotate-180"
+                    aria-hidden="true"
+                  />
+                </summary>
+                <div class="px-3 pb-3">
+                  <pre
+                    tabindex="0"
+                    :aria-label="t('lensAdmin.skills.packageGuideTitle')"
+                    class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface-sunken p-3 font-mono text-xs leading-5 text-ink-700"
+                    >{{ packageGuidePrompt }}</pre>
+                </div>
+              </details>
+            </div>
             <FormRow
               :label="t('lensAdmin.skills.packageFile')"
               :required="mode === 'create'"
@@ -528,7 +556,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { UploadCloud as UploadCloudIcon, X as XIcon } from '@lucide/vue'
+import {
+  Bot as BotIcon,
+  ChevronDown as ChevronDownIcon,
+  Copy as CopyIcon,
+  UploadCloud as UploadCloudIcon,
+  X as XIcon
+} from '@lucide/vue'
 
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
@@ -561,11 +595,22 @@ import RowActions from './components/RowActions.vue'
 import SkillEnvironmentEditor from './components/SkillEnvironmentEditor.vue'
 import { normalizeList } from './adminHelpers'
 import { buildSkillEnvironment, skillEnvironmentForm } from './skillEnvironment'
+import {
+  buildSkillPackagingPrompt,
+  copySkillPackagingPrompt
+} from './skillPackagingGuide'
 
 const { t, tm } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const MAX_SKILL_PACKAGE_BYTES = 20 * 1024 * 1024
+
+const packageGuidePrompt = computed(() =>
+  buildSkillPackagingPrompt(
+    tm('lensAdmin.skills.packageGuidePrompt'),
+    tm('lensAdmin.skills.packageGuideTransformContract')
+  )
+)
 
 const skills = ref([])
 const currentPage = ref(1)
@@ -913,6 +958,15 @@ async function beautify() {
     showError(extractErrorMessage(error, t('lensAdmin.skills.beautifyFailed')))
   } finally {
     beautifying.value = false
+  }
+}
+
+async function copyPackageGuidePrompt() {
+  const copied = await copySkillPackagingPrompt(packageGuidePrompt.value)
+  if (copied) {
+    showSuccess(t('lensAdmin.skills.packageGuideCopied'))
+  } else {
+    showError(t('lensAdmin.skills.packageGuideCopyFailed'))
   }
 }
 

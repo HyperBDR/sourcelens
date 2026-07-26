@@ -27,6 +27,7 @@ class RuntimeResources:
     mcp_config_path: Path
     skill_api_policies: dict[str, dict] = field(default_factory=dict)
     skill_artifacts: dict[str, dict] = field(default_factory=dict)
+    skill_transforms: dict[str, dict] = field(default_factory=dict)
 
 
 def prepare_runtime_resources(config, command, emit_event=None):
@@ -46,6 +47,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
     skill_environments = {}
     skill_api_policies = {}
     skill_artifacts = {}
+    skill_transforms = {}
     context_skill_contents = []
     general_chat_mode = command.get("task") == "general_chat"
     for skill in command.get("loaded_skills") or []:
@@ -75,6 +77,14 @@ def prepare_runtime_resources(config, command, emit_event=None):
             skill_artifacts[skill_path.name] = (
                 artifacts if isinstance(artifacts, dict) else {}
             )
+            transforms = (
+                definition.get("transforms")
+                if isinstance(definition, dict)
+                else None
+            )
+            skill_transforms[skill_path.name] = (
+                transforms if isinstance(transforms, dict) else {}
+            )
         context_content = _context_skill_content(
             skill,
             skill_path=skill_path,
@@ -99,6 +109,9 @@ def prepare_runtime_resources(config, command, emit_event=None):
                 "skill_count": len(skill_paths),
                 "skill_paths": skill_paths,
                 "mcp_count": len(mcp_configs),
+                "transform_count": sum(
+                    len(items) for items in skill_transforms.values()
+                ),
                 "runtime_root": str(runtime_root),
             },
         )
@@ -111,6 +124,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
         mcp_config_path=mcp_config_path,
         skill_api_policies=skill_api_policies,
         skill_artifacts=skill_artifacts,
+        skill_transforms=skill_transforms,
     )
 
 

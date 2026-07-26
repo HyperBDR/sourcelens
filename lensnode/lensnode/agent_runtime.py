@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import threading
 
@@ -6,8 +7,11 @@ from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
-from langchain.agents.middleware import SummarizationMiddleware
-from langchain_core.messages import HumanMessage, RemoveMessage
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    SummarizationMiddleware,
+)
+from langchain_core.messages import HumanMessage, RemoveMessage, ToolMessage
 
 from .agent_tools import (
     SELF_REPORTING_TOOLS,
@@ -20,6 +24,88 @@ from .runtime_resources import cleanup_runtime_resources
 from .runtime_resources import prepare_runtime_resources
 
 LOGGER = logging.getLogger("lensnode")
+
+
+class _NoTaskMiddleware(AgentMiddleware):
+    """Remove the built-in subagent task tool from model requests."""
+
+    def __init__(self, emit_event=None):
+        self.emit_event = emit_event
+
+    @staticmethod
+    def _filter_tools(tools):
+        return [
+            tool
+            for tool in tools
+            if getattr(tool, "name", None) != "task"
+        ]
+
+    def wrap_model_call(self, request, handler):
+        """Filter synchronous model requests."""
+
+        request = request.override(
+            tools=self._filter_tools(request.tools)
+        )
+        return handler(request)
+
+    async def awrap_model_call(self, request, handler):
+        """Filter asynchronous model requests."""
+
+        request = request.override(
+            tools=self._filter_tools(request.tools)
+        )
+        return await handler(request)
+
+    def _deny_task_call(self, request):
+        """Return a tool error without executing the subagent handler."""
+
+        tool_call = request.tool_call or {}
+        if self.emit_event is not None:
+            self.emit_event(
+                "tool.task.denied",
+                {
+                    "tool_call_id": tool_call.get("id"),
+                    "summary": "General Chat subagent call denied",
+                },
+            )
+        return ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": False,
+                    "error": "SUBAGENT_DISABLED",
+                    "instruction": (
+                        "Do not request task again. Use the current context "
+                        "and available non-subagent tools, then answer."
+                    ),
+                }
+            ),
+            name="task",
+            status="error",
+            tool_call_id=tool_call.get("id") or "task-denied",
+        )
+
+    @staticmethod
+    def _is_task_call(request):
+        tool_call = request.tool_call or {}
+        return (
+            tool_call.get("name") == "task"
+            or getattr(request.tool, "name", None) == "task"
+        )
+
+    def wrap_tool_call(self, request, handler):
+        """Block synchronous task execution for General Chat."""
+
+        if self._is_task_call(request):
+            return self._deny_task_call(request)
+        return handler(request)
+
+    async def awrap_tool_call(self, request, handler):
+        """Block asynchronous task execution for General Chat."""
+
+        if self._is_task_call(request):
+            return self._deny_task_call(request)
+        return await handler(request)
+
 
 SCENARIOS = {
     "knowledge_qa": {
@@ -365,7 +451,9 @@ class LensDeepAgentRuntime:
                     root_dir=str(resources.root),
                     virtual_mode=True,
                 ),
-                "subagents": [_fast_subagent()],
+                "subagents": (
+                    [] if _is_general_chat(command) else [_fast_subagent()]
+                ),
                 "name": f"lensnode-{command.get('task') or 'agent'}",
             }
             if resources.skill_paths and not _is_general_chat(command):
@@ -378,8 +466,14 @@ class LensDeepAgentRuntime:
                 cancel_event,
                 run_uuid=run_uuid,
             )
+            middleware = _agent_middleware(
+                command,
+                summarizer,
+                emit_agent_event,
+            )
+            if middleware:
+                kwargs["middleware"] = middleware
             if summarizer is not None:
-                kwargs["middleware"] = [summarizer]
                 emit_agent_event(
                     "deepagents.summarization.enabled",
                     {
@@ -393,6 +487,7 @@ class LensDeepAgentRuntime:
                 {
                     "tool_count": len(tools),
                     "skill_count": len(resources.skill_paths),
+                    "task_tool_enabled": not _is_general_chat(command),
                     "mcp_config_path": str(resources.mcp_config_path),
                 },
             )
@@ -637,10 +732,31 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         "run_skill_script to execute scripts bundled inside loaded Skills' "
         "scripts/ directories. Only run scripts that the Skill instructions "
         "directly call for, pass focused arguments, and inspect stdout/stderr "
-        "before deciding what to do next. Use run_skill_artifact when a Skill "
+        "before deciding what to do next. Scratch files are not executable; "
+        "do not write a temporary script and then try to run it. Use "
+        "run_skill_artifact when a Skill "
         "directs you to a named executable Artifact from sourcelens.json. "
         "Pass the Artifact name, never search for or execute files from bin/ "
-        "by path; SourceLens selects and verifies the platform entrypoint.\n\n"
+        "by path; SourceLens selects and verifies the platform entrypoint. "
+        "Artifact results report byte counts and truncation explicitly. When "
+        "stdout_truncated is true, do not parse the incomplete stdout preview "
+        "and do not repeat or paginate the same query merely to recover it; "
+        "use analyze_structured_output on the complete stdout_ref when the "
+        "result is JSON. Never use read_file or grep on files below "
+        "/large_tool_results/. If the structured analysis call budget is "
+        "exhausted, answer from the bounded results already returned instead "
+        "of falling back to filesystem tools. Use fields with project, sort, "
+        "sample, or paginate to return only the properties you need. "
+        "When the loaded Skill instructions name a declared Transform, use "
+        "run_skill_transform with that Transform name and stdout_ref as "
+        "stdin_ref; never provide generated code or an entrypoint path. "
+        "Transform output can be analyzed again through its stdout_ref. "
+        "Artifact calls have a "
+        "strict per-run budget. Use the Skill reference files instead of "
+        "probing version or --help, and do not preflight authentication; run "
+        "an auth command only after a business command reports that auth is "
+        "required. Choose the needed result scope and output format before "
+        "the first business query.\n\n"
         "Always end with a written answer to the user; never finish with an "
         "empty reply. When you delivered a file, briefly say what it is and "
         "that it is available to download. If required user inputs are "
@@ -652,6 +768,17 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         f"in {answer_language}. You MUST write your ENTIRE final answer "
         f"in {answer_language}."
     )
+
+
+def _agent_middleware(command, summarizer, emit_event=None):
+    """Return task-specific middleware for one Deep Agent run."""
+
+    middleware = []
+    if summarizer is not None:
+        middleware.append(summarizer)
+    if _is_general_chat(command):
+        middleware.append(_NoTaskMiddleware(emit_event))
+    return middleware
 
 
 def _fast_subagent():
@@ -1049,6 +1176,12 @@ def _emit_new_model_calls(messages, seen, emit_event):
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "completion_tokens": usage.get("completion_tokens"),
                 "total_tokens": usage.get("total_tokens"),
+                "cached_tokens": (
+                    usage.get("cached_tokens")
+                    or usage.get("prompt_cache_hit_tokens")
+                    or 0
+                ),
+                "reasoning_tokens": usage.get("reasoning_tokens") or 0,
                 "cost": usage.get("cost"),
                 "latency_ms": meta.get("latency_ms"),
                 "summary": _model_summary(message),

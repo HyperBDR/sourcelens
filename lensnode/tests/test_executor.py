@@ -183,6 +183,70 @@ def test_executor_watchdog_survives_on_transport_activity(monkeypatch):
     assert done[-1]["status"] == "done"
 
 
+class DeadlineAgent:
+    """Fake agent that stays active beyond the wall-clock deadline."""
+
+    class Config:
+        request_timeout_s = 0.12
+        run_idle_timeout_s = 1
+
+    config = Config()
+
+    def __init__(self):
+        self.cancel_event = None
+
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+    ):
+        del command, emit_progress
+        self.cancel_event = cancel_event
+        try:
+            while True:
+                await asyncio.sleep(0.02)
+                on_activity()
+        finally:
+            emit_output("late deadline output")
+
+
+def test_executor_enforces_wall_clock_deadline_and_mutes_late_emits(
+    monkeypatch,
+):
+    monkeypatch.setattr("lensnode.executor.WATCHDOG_INTERVAL_S", 0.02)
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    agent = DeadlineAgent()
+    executor.agent = agent
+    events = []
+
+    asyncio.run(
+        asyncio.wait_for(
+            executor.execute(
+                {
+                    "run_uuid": "00000000-0000-0000-0000-000000000006",
+                    "task": "general_chat",
+                    "target_dirs": [],
+                },
+                events.append,
+            ),
+            timeout=0.5,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"]
+    assert done[-1]["status"] == "failed"
+    assert done[-1]["error"] == "RUN_TIMEOUT"
+    assert agent.cancel_event is not None
+    assert agent.cancel_event.is_set()
+    assert not any(
+        event.get("content_delta") == "late deadline output"
+        for event in events
+    )
+
+
 def test_runtime_resources_collect_context_skill_content(tmp_path):
     config = type(
         "Config",
@@ -217,6 +281,14 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
                             }
                         ],
                     },
+                    "transforms": {
+                        "summarize": {
+                            "entrypoint": "scripts/summarize.py",
+                            "input_format": "json",
+                            "environment": [],
+                            "sha256": "0" * 64,
+                        }
+                    },
                 },
                 "load_config": {"mode": "context", "inject": True},
             },
@@ -238,6 +310,14 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
                     "methods": ["GET"],
                 }
             ],
+        }
+        assert resources.skill_transforms["repo-guide"] == {
+            "summarize": {
+                "entrypoint": "scripts/summarize.py",
+                "input_format": "json",
+                "environment": [],
+                "sha256": "0" * 64,
+            }
         }
         assert resources.mcp_config_path.exists()
     finally:
