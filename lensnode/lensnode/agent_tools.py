@@ -904,12 +904,18 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
     artifact_max_calls = min(
         _positive_int(
             tool_policy.get("skill_artifact_max_calls"),
-            default=4,
+            default=12,
         ),
         20,
     )
     artifact_calls = {"count": 0}
     artifact_output_refs = []
+    artifact_request_counts = {}
+    artifact_progress = {
+        "last_signature": None,
+        "streak": 0,
+        "stalled": False,
+    }
     structured_analysis_max_calls = min(
         _positive_int(
             tool_policy.get("structured_analysis_max_calls"),
@@ -1557,8 +1563,9 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         path. SourceLens selects the entrypoint matching this LensNode's OS
         and CPU architecture, verifies its SHA-256, and executes only that
         exact regular file under the Skill's bin/ directory. Calls have a
-        strict per-run budget, so use Skill references instead of probing
-        version or help commands and avoid repeating successful queries.
+        bounded hard cap and stop early when requests repeat or results stop
+        changing. Use Skill references instead of probing version or help
+        commands and avoid repeating successful queries.
         """
 
         started = time.monotonic()
@@ -1611,9 +1618,73 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                     "max_calls": artifact_max_calls,
                     "available_output_refs": artifact_output_refs,
                     "instruction": (
-                        "Stop requesting more Artifact calls. Read an "
-                        "available output reference if needed, then answer "
-                        "from the results already collected."
+                        "Stop requesting more Artifact calls and synthesize "
+                        "the answer from the evidence already collected."
+                    ),
+                }
+            )
+        if artifact_progress["stalled"]:
+            detail = {
+                "skill": skill_dir.name,
+                "artifact": artifact_name,
+                "args_redacted": _redact_command_args(args),
+                "call_count": call_count,
+                "max_calls": artifact_max_calls,
+                "invocation_id": invocation_id,
+                "summary": f"{display_name} · progress stalled",
+            }
+            emit("tool.run_skill_artifact.stalled", detail)
+            return _json(
+                {
+                    "ok": False,
+                    "error": "ARTIFACT_STALLED",
+                    "call_count": call_count,
+                    "max_calls": artifact_max_calls,
+                    "available_output_refs": artifact_output_refs,
+                    "instruction": (
+                        "Artifact results stopped changing. Stop calling it "
+                        "and synthesize the answer from existing evidence."
+                    ),
+                }
+            )
+        request_signature = hashlib.sha256(
+            json.dumps(
+                [
+                    skill_dir.name,
+                    artifact_name,
+                    args,
+                    hashlib.sha256(stdin.encode("utf-8")).hexdigest(),
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        request_count = artifact_request_counts.get(request_signature, 0) + 1
+        artifact_request_counts[request_signature] = request_count
+        if request_count > 2:
+            detail = {
+                "skill": skill_dir.name,
+                "artifact": artifact_name,
+                "args_redacted": _redact_command_args(args),
+                "call_count": call_count,
+                "max_calls": artifact_max_calls,
+                "request_count": request_count,
+                "invocation_id": invocation_id,
+                "summary": f"{display_name} · repeated request",
+            }
+            emit("tool.run_skill_artifact.repeated", detail)
+            return _json(
+                {
+                    "ok": False,
+                    "error": "ARTIFACT_REPEATED_CALL",
+                    "call_count": call_count,
+                    "request_count": request_count,
+                    "max_calls": artifact_max_calls,
+                    "available_output_refs": artifact_output_refs,
+                    "instruction": (
+                        "This exact Artifact request has already been run. "
+                        "Stop repeating it and synthesize the answer from "
+                        "the existing results."
                     ),
                 }
             )
@@ -1724,12 +1795,30 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             **stdout,
             **stderr,
         }
+        progress_signature = (
+            completed.returncode,
+            payload["stdout_sha256"],
+            payload["stderr_sha256"],
+        )
+        if progress_signature == artifact_progress["last_signature"]:
+            artifact_progress["streak"] += 1
+        else:
+            artifact_progress["last_signature"] = progress_signature
+            artifact_progress["streak"] = 1
+        artifact_progress["stalled"] = artifact_progress["streak"] >= 3
+        payload["progress_streak"] = artifact_progress["streak"]
+        payload["progress_stalled"] = artifact_progress["stalled"]
         if payload["stdout_truncated"]:
             artifact_output_refs.append(payload["stdout_ref"])
             payload["instruction"] = (
                 "Read stdout_ref for the complete output. Do not rerun the "
                 "Artifact merely to change limit, pagination, or output "
                 "format."
+            )
+        if artifact_progress["stalled"]:
+            payload["instruction"] = (
+                "Artifact results have stopped changing. Stop calling it "
+                "and synthesize the answer from the evidence collected."
             )
         emit(
             "tool.run_skill_artifact.done",
@@ -1746,6 +1835,8 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 "stderr_bytes": payload["stderr_bytes"],
                 "stderr_ref": payload["stderr_ref"],
                 "stderr_truncated": payload["stderr_truncated"],
+                "progress_streak": artifact_progress["streak"],
+                "progress_stalled": artifact_progress["stalled"],
                 "summary": f"{display_name} · rc={completed.returncode}",
             },
         )

@@ -200,6 +200,78 @@ def test_run_skill_artifact_stops_after_configured_call_budget(tmp_path):
     assert events[-1][1]["max_calls"] == 2
 
 
+def test_run_skill_artifact_allows_more_than_four_progressing_calls(
+    tmp_path,
+):
+    content = b"#!/bin/sh\nprintf '%s' \"$1\"\n"
+    resources = _resources(tmp_path, content)
+    artifact = _artifact_tool(resources)
+
+    payloads = [
+        json.loads(
+            artifact.invoke(
+                {
+                    "skill": "income-cli",
+                    "artifact": "income",
+                    "args": [str(index)],
+                }
+            )
+        )
+        for index in range(1, 6)
+    ]
+
+    assert all(payload["ok"] is True for payload in payloads)
+    assert [payload["stdout"] for payload in payloads] == [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+    ]
+
+
+def test_run_skill_artifact_stops_repeated_request(tmp_path):
+    resources = _resources(tmp_path, b"#!/bin/sh\nprintf 'same'\n")
+    events = []
+    artifact = _artifact_tool(
+        resources,
+        emit_event=lambda name, detail: events.append((name, detail)),
+    )
+    request = {"skill": "income-cli", "artifact": "income"}
+
+    first = json.loads(artifact.invoke(request))
+    second = json.loads(artifact.invoke(request))
+    third = json.loads(artifact.invoke(request))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert third["error"] == "ARTIFACT_REPEATED_CALL"
+    assert "synthesize" in third["instruction"]
+    assert events[-1][0] == "tool.run_skill_artifact.repeated"
+
+
+def test_run_skill_artifact_stops_after_results_stagnate(tmp_path):
+    resources = _resources(tmp_path, b"#!/bin/sh\nprintf 'same'\n")
+    artifact = _artifact_tool(resources)
+
+    results = [
+        json.loads(
+            artifact.invoke(
+                {
+                    "skill": "income-cli",
+                    "artifact": "income",
+                    "args": [str(index)],
+                }
+            )
+        )
+        for index in range(1, 5)
+    ]
+
+    assert results[2]["progress_stalled"] is True
+    assert "synthesize" in results[2]["instruction"]
+    assert results[3]["error"] == "ARTIFACT_STALLED"
+
+
 def test_run_skill_artifact_redacts_sensitive_args_in_history(tmp_path):
     resources = _resources(tmp_path, b"#!/bin/sh\nexit 0\n")
     events = []
