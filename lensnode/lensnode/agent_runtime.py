@@ -20,8 +20,11 @@ from .agent_tools import (
 )
 from .gateway_model import LensGatewayChatModel, RunCancelledError
 from .logging_utils import elapsed_since, task_log, utc_now
-from .runtime_resources import cleanup_runtime_resources
-from .runtime_resources import prepare_runtime_resources
+from .mcp_tools import build_deferred_mcp_tools, load_mcp_tools
+from .runtime_resources import (
+    cleanup_runtime_resources,
+    prepare_runtime_resources,
+)
 
 LOGGER = logging.getLogger("lensnode")
 
@@ -458,6 +461,31 @@ class LensDeepAgentRuntime:
                     self.config,
                     emit_event=emit_agent_event,
                 )
+            mcp_tools = load_mcp_tools(
+                resources.mcp_configs,
+                discovery_timeout_s=getattr(
+                    self.config,
+                    "mcp_discovery_timeout_s",
+                    15,
+                ),
+                tool_timeout_s=getattr(
+                    self.config,
+                    "mcp_tool_timeout_s",
+                    60,
+                ),
+                emit_event=emit_agent_event,
+            )
+            registered_mcp_tools, mcp_middleware = (
+                build_deferred_mcp_tools(
+                    mcp_tools,
+                    threshold=getattr(
+                        self.config,
+                        "mcp_defer_threshold",
+                        12,
+                    ),
+                )
+            )
+            tools.extend(registered_mcp_tools)
             kwargs = {
                 "model": model,
                 "tools": tools,
@@ -465,13 +493,16 @@ class LensDeepAgentRuntime:
                     scenario,
                     command,
                     resources.context_skill_contents,
+                    mcp_deferred=mcp_middleware is not None,
                 ),
                 "backend": FilesystemBackend(
                     root_dir=str(resources.root),
                     virtual_mode=True,
                 ),
                 "subagents": (
-                    [] if _is_general_chat(command) else [_fast_subagent()]
+                    []
+                    if _is_general_chat(command)
+                    else [_fast_subagent(mcp_middleware)]
                 ),
                 "name": f"lensnode-{command.get('task') or 'agent'}",
             }
@@ -489,6 +520,7 @@ class LensDeepAgentRuntime:
                 command,
                 summarizer,
                 emit_agent_event,
+                mcp_middleware=mcp_middleware,
             )
             if middleware:
                 kwargs["middleware"] = middleware
@@ -506,6 +538,8 @@ class LensDeepAgentRuntime:
                 {
                     "tool_count": len(tools),
                     "skill_count": len(resources.skill_paths),
+                    "mcp_tool_count": len(mcp_tools),
+                    "mcp_deferred": mcp_middleware is not None,
                     "task_tool_enabled": not _is_general_chat(command),
                     "mcp_config_path": str(resources.mcp_config_path),
                 },
@@ -604,12 +638,31 @@ def _pick_text(zh_text, en_text, answer_language):
     return zh_text if answer_language == "Chinese" else en_text
 
 
-def _system_prompt(scenario, command, context_skill_contents=None):
+def _system_prompt(
+    scenario,
+    command,
+    context_skill_contents=None,
+    *,
+    mcp_deferred=False,
+):
     """Build the per-task Deep Agents system prompt."""
 
     if _is_general_chat(command):
-        return _general_chat_system_prompt(command, context_skill_contents)
-    return _knowledge_system_prompt(scenario, command, context_skill_contents)
+        prompt = _general_chat_system_prompt(command, context_skill_contents)
+    else:
+        prompt = _knowledge_system_prompt(
+            scenario,
+            command,
+            context_skill_contents,
+        )
+    if mcp_deferred:
+        prompt += (
+            "\n\nRemote MCP tool schemas are deferred to conserve context. "
+            "Call tool_search with a focused capability query when a remote "
+            "integration may help; matching tools will be available on the "
+            "next turn."
+        )
+    return prompt
 
 
 def _is_general_chat(command):
@@ -792,7 +845,13 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
     )
 
 
-def _agent_middleware(command, summarizer, emit_event=None):
+def _agent_middleware(
+    command,
+    summarizer,
+    emit_event=None,
+    *,
+    mcp_middleware=None,
+):
     """Return task-specific middleware for one Deep Agent run."""
 
     middleware = []
@@ -800,10 +859,12 @@ def _agent_middleware(command, summarizer, emit_event=None):
         middleware.append(summarizer)
     if _is_general_chat(command):
         middleware.append(_NoTaskMiddleware(emit_event))
+    if mcp_middleware is not None:
+        middleware.append(mcp_middleware)
     return middleware
 
 
-def _fast_subagent():
+def _fast_subagent(mcp_middleware=None):
     """General-purpose subagent that parallelizes its own tool calls.
 
     By default a delegated subagent runs deepagents' stock prompt and
@@ -821,10 +882,13 @@ def _fast_subagent():
         "run concurrently; do not read and validate hits one at a time. "
         "Keep the number of parallel calls reasonable.\n\n"
     )
-    return {
+    subagent = {
         **GENERAL_PURPOSE_SUBAGENT,
         "system_prompt": parallel + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
     }
+    if mcp_middleware is not None:
+        subagent["middleware"] = [mcp_middleware]
+    return subagent
 
 
 def _subagent_guidance(agent_rounds):

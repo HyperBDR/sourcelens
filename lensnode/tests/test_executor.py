@@ -392,6 +392,51 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
         cleanup_runtime_resources(resources)
 
 
+def test_mcp_credentials_are_materialized_only_in_run_directory(tmp_path):
+    config = type(
+        "Config",
+        (),
+        {
+            "workspace_path": str(tmp_path),
+        },
+    )()
+    secret = "Bearer runtime-only-secret"
+    command = {
+        "run_uuid": "00000000-0000-0000-0000-000000000008",
+        "loaded_skills": [],
+        "loaded_mcps": [
+            {
+                "mcp_uuid": "22222222-2222-2222-2222-222222222222",
+                "mcp_name": "Remote API",
+                "content_hash": "sha256:def",
+                "transport": "url",
+                "endpoint": "https://mcp.example.com/api",
+                "config": {"headers": {"Authorization": secret}},
+                "load_config": {},
+            }
+        ],
+    }
+
+    resources = prepare_runtime_resources(config, command)
+
+    try:
+        assert resources.mcp_configs[0]["config"]["headers"] == {
+            "Authorization": secret
+        }
+        runtime_text = resources.mcp_config_path.read_text(encoding="utf-8")
+        assert secret not in runtime_text
+        assert "Authorization" not in runtime_text
+        cache_root = tmp_path / ".sourcelens" / "cache"
+        cached_text = "".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in cache_root.rglob("*")
+            if path.is_file()
+        )
+        assert secret not in cached_text
+    finally:
+        cleanup_runtime_resources(resources)
+
+
 def test_system_prompt_includes_context_skill_guidance():
     prompt = _system_prompt(
         {

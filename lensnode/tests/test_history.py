@@ -173,6 +173,26 @@ def test_knowledge_qa_keeps_task_tool_available():
     )
 
 
+def test_agent_middleware_includes_deferred_mcp_filter():
+    deferred = object()
+
+    middleware = agent_runtime._agent_middleware(
+        {"task": "knowledge_qa"},
+        summarizer=None,
+        mcp_middleware=deferred,
+    )
+
+    assert middleware == [deferred]
+
+
+def test_fast_subagent_inherits_deferred_mcp_filter():
+    deferred = object()
+
+    subagent = agent_runtime._fast_subagent(deferred)
+
+    assert subagent["middleware"] == [deferred]
+
+
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):
     captured = {}
 

@@ -49,3 +49,15 @@ def test_load_config_reads_run_token_budget(monkeypatch):
 
     assert config.token_budget_max_tokens == 120000
     assert config.token_budget_warn_ratio == 0.75
+
+
+def test_load_config_reads_mcp_runtime_limits(monkeypatch):
+    monkeypatch.setenv("LENSNODE_MCP_DISCOVERY_TIMEOUT_S", "12")
+    monkeypatch.setenv("LENSNODE_MCP_TOOL_TIMEOUT_S", "45")
+    monkeypatch.setenv("LENSNODE_MCP_DEFER_THRESHOLD", "8")
+
+    config = load_config()
+
+    assert config.mcp_discovery_timeout_s == 12
+    assert config.mcp_tool_timeout_s == 45
+    assert config.mcp_defer_threshold == 8

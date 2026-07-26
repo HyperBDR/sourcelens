@@ -60,6 +60,7 @@ REMOTE_DATA_TOOLS = {
     "inspect_saved_output",
     "run_skill_artifact",
     "run_skill_transform",
+    "tool_search",
 }
 AUTHORITY_TAG_PATTERN = re.compile(
     r"<\s*/?\s*(?:analysis|ignore|important|instruction|override|prompt|role|"
@@ -560,7 +561,7 @@ def _wrap_user_input(content):
     """Return a neutralized user-input view without mutating the message."""
 
     if isinstance(content, str):
-        text = _neutralize_untrusted_text(content, neutralize_boundaries=True)
+        text = neutralize_untrusted_text(content, neutralize_boundaries=True)
         return f"{USER_INPUT_BEGIN}\n{text}\n{USER_INPUT_END}"
     if not isinstance(content, list):
         return content
@@ -569,7 +570,7 @@ def _wrap_user_input(content):
     for item in content:
         if isinstance(item, str):
             wrapped.append(
-                _neutralize_untrusted_text(
+                neutralize_untrusted_text(
                     item,
                     neutralize_boundaries=True,
                 )
@@ -577,7 +578,7 @@ def _wrap_user_input(content):
             continue
         if isinstance(item, dict) and isinstance(item.get("text"), str):
             item = dict(item)
-            item["text"] = _neutralize_untrusted_text(
+            item["text"] = neutralize_untrusted_text(
                 item["text"],
                 neutralize_boundaries=True,
             )
@@ -586,7 +587,7 @@ def _wrap_user_input(content):
     return wrapped
 
 
-def _neutralize_untrusted_text(text, *, neutralize_boundaries=False):
+def neutralize_untrusted_text(text, *, neutralize_boundaries=False):
     """Escape prompt-like markup in an untrusted model-facing view."""
 
     value = str(text)
@@ -618,8 +619,8 @@ def _tool_result_for_gateway(content, tool_name):
         result = dict(result)
         result["result_meta"] = _tool_result_metadata(result, tool_name)
         text = json.dumps(result, ensure_ascii=False)
-    if tool_name in REMOTE_DATA_TOOLS:
-        text = _neutralize_untrusted_text(text)
+    if tool_name in REMOTE_DATA_TOOLS or tool_name.startswith("mcp__"):
+        text = neutralize_untrusted_text(text)
     return text
 
 

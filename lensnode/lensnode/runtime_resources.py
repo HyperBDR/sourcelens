@@ -28,6 +28,7 @@ class RuntimeResources:
     skill_api_policies: dict[str, dict] = field(default_factory=dict)
     skill_artifacts: dict[str, dict] = field(default_factory=dict)
     skill_transforms: dict[str, dict] = field(default_factory=dict)
+    mcp_configs: list[dict] = field(default_factory=list)
 
 
 def prepare_runtime_resources(config, command, emit_event=None):
@@ -95,12 +96,20 @@ def prepare_runtime_resources(config, command, emit_event=None):
 
     mcp_configs = []
     for mcp in command.get("loaded_mcps") or []:
-        mcp_config = _materialize_mcp(cache_root, mcp_root, mcp)
+        mcp_config = _materialize_mcp(mcp_root, mcp)
         if mcp_config is not None:
             mcp_configs.append(mcp_config)
 
     mcp_config_path = mcp_root / "mcp.json"
-    _write_json(mcp_config_path, {"servers": mcp_configs})
+    _write_private_json(
+        mcp_config_path,
+        {
+            "servers": [
+                _mcp_disk_metadata(config)
+                for config in mcp_configs
+            ]
+        },
+    )
 
     if emit_event is not None:
         emit_event(
@@ -125,6 +134,7 @@ def prepare_runtime_resources(config, command, emit_event=None):
         skill_api_policies=skill_api_policies,
         skill_artifacts=skill_artifacts,
         skill_transforms=skill_transforms,
+        mcp_configs=mcp_configs,
     )
 
 
@@ -302,8 +312,8 @@ def _safe_relative_package_path(value):
     return Path(*path.parts)
 
 
-def _materialize_mcp(cache_root, mcp_root, mcp):
-    """Write one MCP snapshot to cache and link it into the run."""
+def _materialize_mcp(mcp_root, mcp):
+    """Write one MCP snapshot only inside the ephemeral run directory."""
 
     mcp_uuid = str(mcp.get("mcp_uuid") or "").strip()
     content_hash = str(mcp.get("content_hash") or "").replace(":", "-")
@@ -311,22 +321,21 @@ def _materialize_mcp(cache_root, mcp_root, mcp):
     if not mcp_uuid or not content_hash or not name:
         return None
 
-    cache_dir = cache_root / "mcp" / mcp_uuid / content_hash
-    config_file = cache_dir / "mcp.json"
-    if not config_file.exists():
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        _write_json(config_file, _mcp_payload(mcp))
-        _write_json(cache_dir / "metadata.json", _mcp_metadata(mcp))
-
     runtime_dir = mcp_root / name
-    _link_or_copy(cache_dir, runtime_dir)
-    return {
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
         "name": mcp.get("mcp_name"),
         "transport": mcp.get("transport"),
         "endpoint": mcp.get("endpoint"),
-        "config_path": str(runtime_dir / "mcp.json"),
+        "config": mcp.get("config") or {},
         "load_config": mcp.get("load_config") or {},
     }
+    _write_private_json(
+        runtime_dir / "mcp.json",
+        _mcp_disk_metadata(payload),
+    )
+    _write_json(runtime_dir / "metadata.json", _mcp_metadata(mcp))
+    return payload
 
 
 def _skill_markdown(skill):
@@ -419,18 +428,6 @@ def _skill_metadata(skill):
     }
 
 
-def _mcp_payload(mcp):
-    """Return one MCP server config payload."""
-
-    return {
-        "name": mcp.get("mcp_name"),
-        "transport": mcp.get("transport"),
-        "endpoint": mcp.get("endpoint"),
-        "config": mcp.get("config") or {},
-        "load_config": mcp.get("load_config") or {},
-    }
-
-
 def _mcp_metadata(mcp):
     """Return serializable MCP cache metadata."""
 
@@ -439,6 +436,16 @@ def _mcp_metadata(mcp):
         "name": mcp.get("mcp_name"),
         "version": mcp.get("version"),
         "content_hash": mcp.get("content_hash"),
+    }
+
+
+def _mcp_disk_metadata(config):
+    """Return non-sensitive MCP metadata safe for the Agent filesystem."""
+
+    return {
+        "name": config.get("name"),
+        "transport": config.get("transport"),
+        "endpoint_configured": bool(config.get("endpoint")),
     }
 
 
@@ -452,18 +459,11 @@ def _write_json(path, payload):
     )
 
 
-def _link_or_copy(source, target):
-    """Link a cache directory into runtime, falling back to copy."""
+def _write_private_json(path, payload):
+    """Write a per-run JSON file with owner-only permissions."""
 
-    if target.exists() or target.is_symlink():
-        if target.is_symlink() or target.is_file():
-            target.unlink()
-        else:
-            shutil.rmtree(target)
-    try:
-        target.symlink_to(source, target_is_directory=True)
-    except OSError:
-        shutil.copytree(source, target)
+    _write_json(path, payload)
+    path.chmod(0o600)
 
 
 def _copy_dir(source, target):
