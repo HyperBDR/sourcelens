@@ -2016,6 +2016,63 @@ class LensApiTests(TestCase):
         self.assertIn('"type": "sync"', body)
         self.assertIn('"type": "done"', body)
 
+    def test_run_api_returns_created_at(self):
+        session_response = self.client.post(
+            "/api/lens/sessions/",
+            {"assistant_uuid": str(self.assistant.uuid)},
+            format="json",
+        )
+        run_response = self.client.post(
+            f"/api/lens/sessions/{session_response.data['uuid']}/runs/",
+            {
+                "question": "How long has this run been active?",
+                "idempotency_key": "run-created-at",
+                "enqueue": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(run_response.status_code, 201)
+        self.assertIn("created_at", run_response.data)
+        self.assertIsNotNone(run_response.data["created_at"])
+
+        detail_response = self.client.get(
+            f"/api/lens/runs/{run_response.data['uuid']}/"
+        )
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(
+            detail_response.data["created_at"],
+            run_response.data["created_at"],
+        )
+
+    def test_run_created_at_is_read_only(self):
+        session_response = self.client.post(
+            "/api/lens/sessions/",
+            {"assistant_uuid": str(self.assistant.uuid)},
+            format="json",
+        )
+        run_response = self.client.post(
+            f"/api/lens/sessions/{session_response.data['uuid']}/runs/",
+            {
+                "question": "Can the creation time be changed?",
+                "idempotency_key": "run-created-at-read-only",
+                "enqueue": False,
+            },
+            format="json",
+        )
+        self.assertIn("created_at", run_response.data)
+        created_at = run_response.data["created_at"]
+
+        update_response = self.client.patch(
+            f"/api/lens/runs/{run_response.data['uuid']}/",
+            {"created_at": "2000-01-01T00:00:00Z"},
+            format="json",
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.data["created_at"], created_at)
+
     def test_run_stream_accepts_event_stream_header(self):
         session_response = self.client.post(
             "/api/lens/sessions/",

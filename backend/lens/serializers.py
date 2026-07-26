@@ -1850,6 +1850,7 @@ class RunSerializer(serializers.ModelSerializer):
             "lensnode",
             "metering_ref",
             "error",
+            "created_at",
             "started_at",
             "finished_at",
             "idempotency_key",

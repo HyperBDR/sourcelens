@@ -891,6 +891,7 @@ import {
   fetchDeliverableBlob,
   isPreviewable
 } from '@/utils/filePreview'
+import { activeRunElapsedSeconds } from '@/utils/runElapsed'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
@@ -1321,9 +1322,9 @@ const retryHintMessage = computed(() =>
 
 watch(isRunActive, (active) => {
   if (active) {
-    elapsedSeconds.value = 0
+    elapsedSeconds.value = activeRunElapsedSeconds(currentRun.value)
     elapsedTimer = setInterval(() => {
-      elapsedSeconds.value++
+      elapsedSeconds.value = activeRunElapsedSeconds(currentRun.value)
     }, 1000)
     revealTimer = setInterval(() => {
       if (revealedCount.value < allLiveSteps.value.length) {
