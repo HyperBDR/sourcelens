@@ -15,6 +15,7 @@ from .attachments import attachment_data_url, bind_attachments_to_message
 from .environment_variables import missing_required_environment
 from .llm import run_completion, run_completion_multimodal
 from .models import (
+    Assistant,
     EnvironmentVariableSet,
     GlobalSetting,
     LensNode,
@@ -559,11 +560,34 @@ def validate_run_dispatch(run):
             raise LensNodeDispatchError("SKILL_ENVIRONMENT_REQUIRED")
 
 
+TOKEN_BUDGET_PROFILES = {
+    Assistant.TokenBudgetProfile.STANDARD: {
+        "max_tokens": 200000,
+        "final_reserve_tokens": 40000,
+    },
+    Assistant.TokenBudgetProfile.DEEP: {
+        "max_tokens": 500000,
+        "final_reserve_tokens": 75000,
+    },
+}
+
+
+def token_budget_for_profile(profile):
+    """Return the bounded token budget for an Assistant profile."""
+
+    selected = profile if profile in TOKEN_BUDGET_PROFILES else "standard"
+    return {
+        "profile": selected,
+        **TOKEN_BUDGET_PROFILES[selected],
+    }
+
+
 @transaction.atomic
 def create_run_execution_snapshot(run):
     """Create or return the per-run LensNode execution snapshot."""
 
     assistant = run.session.assistant
+    token_budget = token_budget_for_profile(assistant.token_budget_profile)
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
         defaults={
@@ -576,6 +600,11 @@ def create_run_execution_snapshot(run):
                 if assistant.selected_task == "general_chat"
                 else assistant.selected_dirs
             ),
+            "token_budget_profile": token_budget["profile"],
+            "token_budget_max_tokens": token_budget["max_tokens"],
+            "token_budget_final_reserve_tokens": token_budget[
+                "final_reserve_tokens"
+            ],
             "status": RunExecution.Status.DISPATCHED,
         },
     )
@@ -710,6 +739,13 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                     run.session.assistant.agent_rounds, 26
                 ),
                 "agent_rounds": run.session.assistant.agent_rounds,
+                "token_budget": {
+                    "profile": execution.token_budget_profile,
+                    "max_tokens": execution.token_budget_max_tokens,
+                    "final_reserve_tokens": (
+                        execution.token_budget_final_reserve_tokens
+                    ),
+                },
                 "settings": run.session.assistant.settings,
             },
         },

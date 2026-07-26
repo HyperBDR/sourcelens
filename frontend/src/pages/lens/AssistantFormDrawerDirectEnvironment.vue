@@ -131,6 +131,34 @@
           </label>
         </div>
       </FormRow>
+      <FormRow :label="t('lensAdmin.fields.tokenBudget')">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label
+            v-for="profile in tokenBudgetProfiles"
+            :key="profile.value"
+            class="cursor-pointer rounded-lg border-2 p-3 transition-colors"
+            :class="
+              form.token_budget_profile === profile.value
+                ? 'border-brand-600 bg-brand-50 text-brand-700'
+                : 'border-line bg-surface text-ink-600 hover:border-brand-300'
+            "
+          >
+            <input
+              v-model="form.token_budget_profile"
+              class="sr-only"
+              type="radio"
+              :value="profile.value"
+            />
+            <span class="block text-sm font-medium">{{ profile.label }}</span>
+            <span class="mt-1 block text-xs opacity-70">{{
+              profile.hint
+            }}</span>
+          </label>
+        </div>
+        <p class="mt-1 text-xs text-ink-500">
+          {{ t('lensAdmin.tokenBudget.nodeLimitHint') }}
+        </p>
+      </FormRow>
     </div>
 
     <!-- Wizard Step 2 — Execution -->
@@ -794,6 +822,19 @@ const agentRoundsTiers = computed(() => [
     value: 'max',
     label: t('lensAdmin.agentRounds.max'),
     hint: t('lensAdmin.agentRounds.maxHint')
+  }
+])
+
+const tokenBudgetProfiles = computed(() => [
+  {
+    value: 'standard',
+    label: t('lensAdmin.tokenBudget.standard'),
+    hint: t('lensAdmin.tokenBudget.standardHint')
+  },
+  {
+    value: 'deep',
+    label: t('lensAdmin.tokenBudget.deep'),
+    hint: t('lensAdmin.tokenBudget.deepHint')
   }
 ])
 

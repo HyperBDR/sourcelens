@@ -124,6 +124,10 @@ class Assistant(TimestampedUUIDModel):
         PUBLIC = "public", "Public"
         PRIVATE = "private", "Private"
 
+    class TokenBudgetProfile(models.TextChoices):
+        STANDARD = "standard", "Standard"
+        DEEP = "deep", "Deep"
+
     objects = AssistantQuerySet.as_manager()
 
     name = models.CharField(max_length=160)
@@ -156,6 +160,11 @@ class Assistant(TimestampedUUIDModel):
         max_length=16,
         choices=AgentRounds.choices,
         default=AgentRounds.BALANCED,
+    )
+    token_budget_profile = models.CharField(
+        max_length=16,
+        choices=TokenBudgetProfile.choices,
+        default=TokenBudgetProfile.STANDARD,
     )
     max_concurrency = models.PositiveSmallIntegerField(default=5)
     settings = models.JSONField(default=dict, blank=True)
@@ -755,6 +764,15 @@ class RunExecution(models.Model):
     loaded_skills = models.JSONField(default=list, blank=True)
     loaded_mcps = models.JSONField(default=list, blank=True)
     target_dirs = models.JSONField(default=list, blank=True)
+    token_budget_profile = models.CharField(
+        max_length=16,
+        choices=Assistant.TokenBudgetProfile.choices,
+        default=Assistant.TokenBudgetProfile.STANDARD,
+    )
+    token_budget_max_tokens = models.PositiveIntegerField(default=200000)
+    token_budget_final_reserve_tokens = models.PositiveIntegerField(
+        default=40000
+    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,

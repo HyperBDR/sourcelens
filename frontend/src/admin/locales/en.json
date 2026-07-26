@@ -958,6 +958,7 @@
       "workspaceGuideHelp": "Describe repository layout, search priority, and stopping rules. SourceLens will save it as a bound Skill and inject it into LensNode runs.",
       "agentModel": "Agent Model",
       "agentRounds": "Analysis Depth",
+      "tokenBudget": "Run Token Budget",
       "maxConcurrency": "Max Concurrency",
       "multimodalModel": "Multimodal Model",
       "visionModel": "Vision Model",
@@ -1333,6 +1334,13 @@
       "deepHint": "More thorough, takes longer",
       "max": "Max",
       "maxHint": "Most thorough, slowest"
+    },
+    "tokenBudget": {
+      "standard": "Standard",
+      "standardHint": "200K total · 40K reserved for the final answer",
+      "deep": "Deep",
+      "deepHint": "500K total · 75K reserved for the final answer",
+      "nodeLimitHint": "The LensNode hard limit remains the final safety ceiling."
     },
     "messages": {
       "loadFailed": "Failed to load Lens admin data",

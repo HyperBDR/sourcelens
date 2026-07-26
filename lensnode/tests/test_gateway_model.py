@@ -204,6 +204,7 @@ def test_length_finish_reason_marks_visible_content_incomplete():
 
 def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
     requests = []
+    wrapup_event = threading.Event()
     responses = [
         {
             "message": {
@@ -259,7 +260,9 @@ def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
         ai_gateway_url="http://gateway/ai/",
         token="token",
         token_budget_max_tokens=100,
+        token_budget_final_reserve_tokens=10,
         token_budget_warn_ratio=0.8,
+        token_budget_wrapup_event=wrapup_event,
     )
 
     first = model._generate([HumanMessage(content="hi")])
@@ -270,13 +273,57 @@ def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
     capped = second.generations[0].message
     assert capped.tool_calls == []
     assert capped.response_metadata["token_capped"] is True
-    assert "token budget" in capped.content.lower()
+    assert capped.content == ""
+    assert wrapup_event.is_set()
     assert model.stop_reason == "token_capped"
     assert model.token_usage == {
         "prompt_tokens": 90,
         "completion_tokens": 20,
         "total_tokens": 110,
     }
+
+
+def test_final_synthesis_is_preserved_when_it_crosses_hard_budget(monkeypatch):
+    responses = [
+        {
+            "message": {"content": "", "finish_reason": "stop"},
+            "usage": {"total_tokens": 80},
+        },
+        {
+            "message": {
+                "content": "Final answer from collected evidence.",
+                "finish_reason": "stop",
+            },
+            "usage": {"total_tokens": 30},
+        },
+    ]
+    request_count = 0
+
+    def handler(_request):
+        nonlocal request_count
+        response = responses[request_count]
+        request_count += 1
+        return httpx.Response(200, json=response)
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        token_budget_max_tokens=100,
+        token_budget_final_reserve_tokens=20,
+        token_budget_wrapup_event=threading.Event(),
+    )
+
+    model._generate([HumanMessage(content="investigate")])
+    final = model._generate(
+        [HumanMessage(content="summarize")],
+        runtime_final_synthesis=True,
+    ).generations[0].message
+
+    assert final.content == "Final answer from collected evidence."
+    assert final.response_metadata["token_capped"] is True
+    assert model.stop_reason == "token_capped"
 
 
 def test_repeated_tool_call_set_warns_then_stops(monkeypatch):

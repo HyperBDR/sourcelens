@@ -27,6 +27,8 @@ class LensNodeConfig:
     offload_tool_tokens: int
     offload_human_tokens: int | None
     token_budget_max_tokens: int = 200000
+    token_budget_hard_max_tokens: int = 500000
+    token_budget_final_reserve_tokens: int = 40000
     token_budget_warn_ratio: float = 0.8
     mcp_discovery_timeout_s: int = 30
     mcp_tool_timeout_s: int = 60
@@ -106,6 +108,18 @@ def load_config():
         ),
         token_budget_max_tokens=int(
             os.getenv("LENSNODE_TOKEN_BUDGET_MAX_TOKENS", "200000")
+        ),
+        token_budget_hard_max_tokens=int(
+            os.getenv(
+                "LENSNODE_TOKEN_BUDGET_HARD_MAX_TOKENS",
+                "500000",
+            )
+        ),
+        token_budget_final_reserve_tokens=int(
+            os.getenv(
+                "LENSNODE_TOKEN_BUDGET_FINAL_RESERVE_TOKENS",
+                "40000",
+            )
         ),
         token_budget_warn_ratio=float(
             os.getenv("LENSNODE_TOKEN_BUDGET_WARN_RATIO", "0.8")

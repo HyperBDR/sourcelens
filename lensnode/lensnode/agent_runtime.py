@@ -423,6 +423,8 @@ class LensDeepAgentRuntime:
         )
         try:
             run_uuid = str(command.get("run_uuid") or "")
+            token_budget = _resolve_token_budget(self.config, command)
+            token_budget_wrapup_event = threading.Event()
             model = LensGatewayChatModel(
                 model_ref=str(model_ref),
                 ai_gateway_url=self.config.ai_gateway_url,
@@ -436,16 +438,16 @@ class LensDeepAgentRuntime:
                 on_activity=on_activity,
                 cancel_event=cancel_event,
                 run_uuid=run_uuid,
-                token_budget_max_tokens=getattr(
-                    self.config,
-                    "token_budget_max_tokens",
-                    200000,
-                ),
+                token_budget_max_tokens=token_budget["max_tokens"],
+                token_budget_final_reserve_tokens=token_budget[
+                    "final_reserve_tokens"
+                ],
                 token_budget_warn_ratio=getattr(
                     self.config,
                     "token_budget_warn_ratio",
                     0.8,
                 ),
+                token_budget_wrapup_event=token_budget_wrapup_event,
             )
             if _is_general_chat(command):
                 tools = build_general_chat_tools(
@@ -548,7 +550,14 @@ class LensDeepAgentRuntime:
             max_turns = command.get("max_agent_turns", 26)
             emit_agent_event(
                 "deepagents.agent.invoke",
-                {"max_agent_turns": max_turns},
+                {
+                    "max_agent_turns": max_turns,
+                    "token_budget_profile": token_budget["profile"],
+                    "token_budget_max_tokens": token_budget["max_tokens"],
+                    "token_budget_final_reserve_tokens": token_budget[
+                        "final_reserve_tokens"
+                    ],
+                },
             )
             messages = _build_initial_messages(
                 command.get("history"), question
@@ -562,6 +571,7 @@ class LensDeepAgentRuntime:
                 answer_language=_detect_answer_language(question),
                 cancel_event=cancel_event,
                 wrapup_event=wrapup_event,
+                token_budget_wrapup_event=token_budget_wrapup_event,
             )
             if truncated:
                 emit_agent_event(
@@ -585,6 +595,51 @@ class LensDeepAgentRuntime:
             }
         finally:
             cleanup_runtime_resources(resources)
+
+
+def _resolve_token_budget(config, command):
+    """Return a validated per-run budget capped by the LensNode ceiling."""
+
+    requested = command.get("token_budget") or {}
+    profile = str(requested.get("profile") or "standard")
+    if profile not in {"standard", "deep"}:
+        profile = "standard"
+
+    fallback_max = max(
+        int(getattr(config, "token_budget_max_tokens", 200000) or 0),
+        0,
+    )
+    hard_max = max(
+        int(getattr(config, "token_budget_hard_max_tokens", 500000) or 0),
+        0,
+    )
+    try:
+        requested_max = max(int(requested.get("max_tokens")), 0)
+    except (TypeError, ValueError):
+        requested_max = fallback_max
+    max_tokens = min(requested_max, hard_max) if hard_max else requested_max
+
+    fallback_reserve = max(
+        int(
+            getattr(
+                config,
+                "token_budget_final_reserve_tokens",
+                40000,
+            )
+            or 0
+        ),
+        0,
+    )
+    try:
+        reserve = max(int(requested.get("final_reserve_tokens")), 0)
+    except (TypeError, ValueError):
+        reserve = fallback_reserve
+
+    return {
+        "profile": profile,
+        "max_tokens": max_tokens,
+        "final_reserve_tokens": min(reserve, max_tokens),
+    }
 
 
 def _detect_answer_language(question):
@@ -1041,6 +1096,7 @@ def _run_agent_with_turn_limit(
     answer_language="English",
     cancel_event=None,
     wrapup_event=None,
+    token_budget_wrapup_event=None,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -1109,13 +1165,22 @@ def _run_agent_with_turn_limit(
             if emit_event is not None:
                 emit_event("deepagents.agent.soft_deadline", {})
             break
+        if (
+            token_budget_wrapup_event is not None
+            and token_budget_wrapup_event.is_set()
+        ):
+            truncated = True
+            truncation_reason = "token_budget"
+            if emit_event is not None:
+                emit_event("deepagents.agent.token_budget", {})
+            break
         if ai_turns >= max_turns:
             truncated = True
             truncation_reason = "turn_limit"
             break
 
     answer = _extract_final_message(last_state or {})
-    force_wrapup = truncation_reason == "soft_deadline"
+    force_wrapup = truncation_reason in {"soft_deadline", "token_budget"}
     needs_wrapup = force_wrapup or not answer.strip()
     if truncated and model is not None and needs_wrapup:
         # The cutoff landed mid-turn (e.g. right after a tool call, before
@@ -1128,6 +1193,7 @@ def _run_agent_with_turn_limit(
             (last_state or {}).get("messages", []),
             answer_language,
             emit_event,
+            reason=truncation_reason or "limit",
         )
         if synthesis:
             answer = synthesis
@@ -1151,6 +1217,15 @@ def _run_agent_with_turn_limit(
                 "\n\n---\n*Approaching the hard deadline, this answer was "
                 "synthesized from the evidence already collected and the "
                 "investigation may be incomplete.*",
+                answer_language,
+            )
+        elif truncation_reason == "token_budget":
+            answer += _pick_text(
+                "\n\n---\n*已达到当前 Token 调查预算，以上回答由已有证据"
+                "综合生成，未再执行新的工具调用。*",
+                "\n\n---\n*Reached the investigation token budget. This "
+                "answer was synthesized from collected evidence without "
+                "additional tool calls.*",
                 answer_language,
             )
         else:
@@ -1216,6 +1291,17 @@ def _synthesize_wrapup_answer(
             "results, write the complete answer to the user now.",
             answer_language,
         )
+    elif reason == "token_budget":
+        instruction = _pick_text(
+            "你已经达到本次调查的 Token 预算，不能再调用任何工具。请仅基于"
+            "当前对话和已取得的结果，直接给出最完整的最终答案；未确认或未覆盖"
+            "的部分必须明确说明。",
+            "You have reached the token budget for this investigation and "
+            "cannot call more tools. Based only on the current conversation "
+            "and collected results, write the most complete final answer. "
+            "Clearly identify anything unconfirmed or not covered.",
+            answer_language,
+        )
     else:
         instruction = _pick_text(
             "你已经达到本次分析的步数上限，不能再调用任何工具。请基于目前"
@@ -1238,7 +1324,10 @@ def _synthesize_wrapup_answer(
         )
         emit_event(event, {})
     try:
-        response = model.invoke(wrapup_messages)
+        response = model.invoke(
+            wrapup_messages,
+            runtime_final_synthesis=True,
+        )
     except RunCancelledError:
         raise
     except Exception:

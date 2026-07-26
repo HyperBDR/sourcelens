@@ -288,23 +288,25 @@ class _FakeWrapupModel:
     def __init__(self, content="synthesized answer"):
         self.content = content
         self.invoked_with = None
+        self.invoked_kwargs = None
         self.call_count = 0
 
-    def invoke(self, messages):
+    def invoke(self, messages, **kwargs):
         self.call_count += 1
         self.invoked_with = list(messages)
+        self.invoked_kwargs = kwargs
         return _Msg("ai", self.content)
 
 
 class _FailingModel:
-    def invoke(self, _messages):
+    def invoke(self, _messages, **_kwargs):
         raise RuntimeError("gateway unreachable")
 
 
 class _CancelledModel:
     """Mimics LensGatewayChatModel raising RunCancelledError mid-call."""
 
-    def invoke(self, _messages):
+    def invoke(self, _messages, **_kwargs):
         raise agent_runtime.RunCancelledError("cancelled")
 
 
@@ -402,6 +404,29 @@ def test_soft_deadline_forces_wrapup_from_current_evidence():
     assert "deadline synthesis" in answer
     assert "hard deadline" in answer
     assert model.invoked_with is not None
+
+
+def test_token_budget_forces_tool_free_wrapup_from_current_evidence():
+    messages = [{"role": "user", "content": "q"}]
+    prefix = [_Msg("human", "q")]
+    agent = _FakeStreamAgent(prefix, new_ai_turns=3)
+    model = _FakeWrapupModel("budget synthesis")
+    token_budget_wrapup_event = threading.Event()
+    token_budget_wrapup_event.set()
+
+    answer, truncated = _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=5,
+        model=model,
+        answer_language="English",
+        token_budget_wrapup_event=token_budget_wrapup_event,
+    )
+
+    assert truncated is True
+    assert "budget synthesis" in answer
+    assert "token budget" in answer
+    assert model.invoked_kwargs == {"runtime_final_synthesis": True}
 
 
 def test_empty_terminal_response_recovers_once_without_tools():

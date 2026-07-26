@@ -40,10 +40,6 @@ TOKEN_BUDGET_WARNING = (
     "Stop expanding the investigation, avoid new tool calls unless strictly "
     "necessary, and synthesize the final answer from evidence already found."
 )
-TOKEN_BUDGET_STOP = (
-    "The run reached its token budget. New tool calls were suppressed; this "
-    "answer must use the evidence already collected."
-)
 LOOP_WARNING = (
     "[LOOP DETECTED] Tool calls are repeating without a final answer. Stop "
     "calling tools and synthesize the result from evidence already collected."
@@ -128,7 +124,9 @@ class LensGatewayChatModel(BaseChatModel):
     cancel_event: Optional[Any] = None
     run_uuid: str = ""
     token_budget_max_tokens: int = 200000
+    token_budget_final_reserve_tokens: int = 40000
     token_budget_warn_ratio: float = 0.8
+    token_budget_wrapup_event: Optional[Any] = None
     loop_repeat_warn: int = 3
     loop_repeat_hard: int = 5
     loop_tool_warn: int = 30
@@ -267,10 +265,7 @@ class LensGatewayChatModel(BaseChatModel):
         message.response_metadata["latency_ms"] = int(
             (time.monotonic() - start) * 1000
         )
-        message = self._apply_token_budget(
-            message,
-            data.get("usage") or {},
-        )
+        message = self._apply_token_budget(message, data.get("usage") or {})
         message = self._apply_loop_detection(message)
         return ChatResult(
             generations=[ChatGeneration(message=message)],
@@ -429,12 +424,24 @@ class LensGatewayChatModel(BaseChatModel):
                 max(float(self.token_budget_warn_ratio or 0), 0.0),
                 1.0,
             )
-            hard_stop = bool(
-                limit and cumulative["total_tokens"] >= limit
+            reserve = min(
+                max(int(self.token_budget_final_reserve_tokens or 0), 0),
+                limit,
             )
+            work_limit = max(limit - reserve, 0)
+            wrapup_needed = bool(
+                limit
+                and reserve
+                and cumulative["total_tokens"] >= work_limit
+            )
+            hard_stop = bool(limit and cumulative["total_tokens"] >= limit)
+            if wrapup_needed and self.token_budget_wrapup_event is not None:
+                self.token_budget_wrapup_event.set()
             if hard_stop:
                 self._stop_reason = "token_capped"
                 self._budget_warning_pending = False
+            elif wrapup_needed:
+                self._stop_reason = "token_budget_wrapup"
             elif (
                 limit
                 and not self._budget_warned
@@ -445,14 +452,22 @@ class LensGatewayChatModel(BaseChatModel):
 
         metadata = source_metadata
         metadata["run_token_usage"] = cumulative
+        if wrapup_needed:
+            metadata["token_budget_wrapup"] = True
         if not hard_stop:
+            return message.model_copy(
+                update={"response_metadata": metadata}
+            )
+
+        metadata["token_capped"] = True
+        if not message.tool_calls:
             return message.model_copy(
                 update={"response_metadata": metadata}
             )
 
         return _stop_tool_calls(
             message,
-            TOKEN_BUDGET_STOP,
+            "",
             "Run token budget reached",
             {"token_capped": True},
         )
@@ -910,7 +925,11 @@ def _stop_tool_calls(message, notice, error, metadata_updates):
         metadata["finish_reason"] = "stop"
     return message.model_copy(
         update={
-            "content": _append_runtime_notice(message.content, notice),
+            "content": (
+                _append_runtime_notice(message.content, notice)
+                if notice
+                else message.content
+            ),
             "tool_calls": [],
             "invalid_tool_calls": invalid_calls,
             "additional_kwargs": additional_kwargs,

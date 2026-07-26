@@ -958,6 +958,7 @@
       "workspaceGuideHelp": "描述仓库结构、检索优先级和停止规则。SourceLens 会将其保存为绑定 Skill，并在节点执行时注入。",
       "agentModel": "Agent 模型",
       "agentRounds": "分析深度",
+      "tokenBudget": "单次运行 Token 预算",
       "maxConcurrency": "最大并发数",
       "multimodalModel": "多模态模型",
       "visionModel": "视觉模型",
@@ -1333,6 +1334,13 @@
       "deepHint": "更彻底，耗时更久",
       "max": "极限",
       "maxHint": "最彻底，耗时最久"
+    },
+    "tokenBudget": {
+      "standard": "标准",
+      "standardHint": "总计 20 万 · 为最终回答预留 4 万",
+      "deep": "深度",
+      "deepHint": "总计 50 万 · 为最终回答预留 7.5 万",
+      "nodeLimitHint": "LensNode 的硬上限仍是最终安全边界。"
     },
     "messages": {
       "loadFailed": "加载 Lens 管理数据失败",

@@ -233,6 +233,7 @@ class LensApiTests(TestCase):
             "lensnode_uuid": str(self.lensnode.uuid),
             "selected_task": "knowledge_qa",
             "selected_dirs": [{"path": "/workspace/repo"}],
+            "token_budget_profile": "deep",
             "skill_bindings": [
                 {
                     "skill_uuid": str(self.skill.uuid),
@@ -257,6 +258,8 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         assistant = Assistant.objects.get(slug="api-explorer")
+        self.assertEqual(assistant.token_budget_profile, "deep")
+        self.assertEqual(response.data["token_budget_profile"], "deep")
         self.assertEqual(assistant.lensnode, self.lensnode)
         self.assertEqual(
             assistant.description,
@@ -270,6 +273,23 @@ class LensApiTests(TestCase):
             assistant.settings["_model_check"]["agent_model_ref"]["status"],
             "skipped",
         )
+
+    def test_assistant_create_rejects_unknown_token_budget_profile(self):
+        response = self.client.post(
+            "/api/lens/assistants/",
+            {
+                "name": "Invalid Budget",
+                "slug": "invalid-budget",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "selected_task": "knowledge_qa",
+                "selected_dirs": [{"path": "/workspace/repo"}],
+                "token_budget_profile": "unlimited",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("token_budget_profile", response.data)
 
     def test_assistant_update_saves_description(self):
         response = self.client.patch(

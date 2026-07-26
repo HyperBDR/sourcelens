@@ -12,6 +12,7 @@ EXPECTED_MODELS = {
     "AssistantMCP",
     "DataSource",
     "DataSourceCredential",
+    "EnvironmentVariableSet",
     "GlobalSetting",
     "MCPServer",
     "Message",
@@ -24,6 +25,7 @@ EXPECTED_MODELS = {
     "ScheduledTask",
     "Session",
     "SharedQA",
+    "SharedQAFile",
     "Skill",
 }
 

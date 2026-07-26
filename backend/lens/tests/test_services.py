@@ -41,7 +41,9 @@ from lens.services import (
     _step_sequence,
     append_lensnode_output,
     build_run_history,
+    create_run_execution_snapshot,
     create_execution_run,
+    dispatch_run_to_lensnode,
     finish_lensnode_run,
     rewrite_query,
 )
@@ -213,6 +215,8 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(self.session.message_set.count(), 2)
 
     def test_execute_answer_run_creates_execution_snapshot(self):
+        self.assistant.token_budget_profile = "deep"
+        self.assistant.save(update_fields=["token_budget_profile"])
         run = create_execution_run(
             session=self.session,
             question="How does SSE work?",
@@ -228,6 +232,44 @@ class LensServiceTests(TransactionTestCase):
         self.assertTrue(run.output_message.content)
         self.assertEqual(run.execution.task, "knowledge_qa")
         self.assertEqual(run.execution.target_dirs, [{"path": "/workspace/repo"}])
+        self.assertEqual(run.execution.token_budget_profile, "deep")
+        self.assertEqual(run.execution.token_budget_max_tokens, 500000)
+        self.assertEqual(
+            run.execution.token_budget_final_reserve_tokens,
+            75000,
+        )
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_uses_token_budget_execution_snapshot(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        self.assistant.token_budget_profile = "deep"
+        self.assistant.save(update_fields=["token_budget_profile"])
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze everything",
+            enqueue=False,
+        )
+        execution = create_run_execution_snapshot(run)
+
+        self.assistant.token_budget_profile = "standard"
+        self.assistant.save(update_fields=["token_budget_profile"])
+        dispatch_run_to_lensnode(run, "Analyze everything")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            payload["token_budget"],
+            {
+                "profile": "deep",
+                "max_tokens": 500000,
+                "final_reserve_tokens": 75000,
+            },
+        )
+        self.assertEqual(execution.token_budget_profile, "deep")
 
     def test_execute_answer_run_fails_when_lensnode_offline(self):
         self.lensnode.status = LensNode.Status.OFFLINE
