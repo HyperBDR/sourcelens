@@ -7,13 +7,10 @@
         <div
           class="flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-4"
         >
-          <div class="space-y-2">
+          <div>
             <h1 class="text-xl font-semibold text-ink-900">
               {{ t('lensAdmin.pages.environmentVariables.title') }}
             </h1>
-            <p class="max-w-3xl text-sm leading-6 text-ink-500">
-              {{ t('lensAdmin.pages.environmentVariables.description') }}
-            </p>
           </div>
           <BaseButton variant="primary" size="sm" @click="startCreate">
             {{ t('lensAdmin.pages.environmentVariables.action') }}

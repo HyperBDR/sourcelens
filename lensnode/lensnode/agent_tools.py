@@ -1,8 +1,11 @@
+import hashlib
 import json
 import mimetypes
 import os
+import platform
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import time
@@ -35,6 +38,7 @@ SELF_REPORTING_TOOLS = {
     "summarize_recent_changes",
     "call_skill_api",
     "run_skill_script",
+    "run_skill_artifact",
 }
 
 
@@ -470,6 +474,15 @@ class _RunSkillScriptArgs(BaseModel):
     stdin: str = Field(default="", description="Optional standard input.")
 
 
+class _RunSkillArtifactArgs(BaseModel):
+    """Args schema for running a declared executable Skill Artifact."""
+
+    skill: str = Field(description="Loaded Skill slug or name.")
+    artifact: str = Field(description="Artifact name from sourcelens.json.")
+    args: list[str] = Field(default_factory=list, description="Arguments.")
+    stdin: str = Field(default="", description="Optional standard input.")
+
+
 class _CallSkillApiArgs(BaseModel):
     """Args schema for an HTTP request configured by a loaded Skill."""
 
@@ -875,8 +888,8 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                     "ok": False,
                     "error": "SCRIPT_TIMEOUT",
                     "timeout_s": timeout_s,
-                    "stdout": _clip(_decode_output(exc.stdout), stdout_limit),
-                    "stderr": _clip(_decode_output(exc.stderr), stderr_limit),
+                    "stdout": _truncate_output(exc.stdout, stdout_limit),
+                    "stderr": _truncate_output(exc.stderr, stderr_limit),
                 }
             )
         except OSError as exc:
@@ -907,6 +920,115 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         )
         return _json(payload)
 
+    @tool("run_skill_artifact", args_schema=_RunSkillArtifactArgs)
+    def run_skill_artifact(
+        skill: str,
+        artifact: str,
+        args: list[str] | None = None,
+        stdin: str = "",
+    ) -> str:
+        """Run an executable Artifact declared by a loaded Skill.
+
+        Use the Artifact name from the Skill's sourcelens.json, never a file
+        path. SourceLens selects the entrypoint matching this LensNode's OS
+        and CPU architecture, verifies its SHA-256, and executes only that
+        exact regular file under the Skill's bin/ directory.
+        """
+
+        started = time.monotonic()
+        args = [str(item) for item in (args or [])]
+        skill_dir = _resolve_skill_dir(skills_root, skill)
+        if skill_dir is None:
+            emit("tool.run_skill_artifact.denied", {"skill": skill})
+            return _json({"ok": False, "error": "SKILL_NOT_LOADED"})
+        artifact_name = str(artifact or "").strip()
+        artifact_path, error = _resolve_skill_artifact(
+            skill_dir,
+            resources.skill_artifacts.get(skill_dir.name, {}),
+            artifact_name,
+        )
+        if artifact_path is None:
+            emit(
+                "tool.run_skill_artifact.denied",
+                {
+                    "skill": skill_dir.name,
+                    "artifact": artifact_name,
+                    "error": error,
+                },
+            )
+            return _json({"ok": False, "error": error})
+
+        display_name = f"{skill_dir.name}/{artifact_name}"
+        emit(
+            "tool.run_skill_artifact.start",
+            {
+                "skill": skill_dir.name,
+                "artifact": artifact_name,
+                "arg_count": len(args),
+                "summary": display_name,
+            },
+        )
+        try:
+            completed = subprocess.run(
+                [str(artifact_path), *args],
+                cwd=str(skill_dir),
+                env=_skill_script_environment(
+                    resources.skill_environments.get(skill_dir.name, {})
+                ),
+                input=stdin.encode("utf-8"),
+                capture_output=True,
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            emit(
+                "tool.run_skill_artifact.timeout",
+                {
+                    "skill": skill_dir.name,
+                    "artifact": artifact_name,
+                    "timeout_s": timeout_s,
+                },
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "ARTIFACT_TIMEOUT",
+                    "timeout_s": timeout_s,
+                    "stdout": _truncate_output(exc.stdout, stdout_limit),
+                    "stderr": _truncate_output(exc.stderr, stderr_limit),
+                }
+            )
+        except OSError:
+            emit(
+                "tool.run_skill_artifact.failed",
+                {"skill": skill_dir.name, "artifact": artifact_name},
+            )
+            return _json(
+                {"ok": False, "error": "ARTIFACT_EXECUTION_FAILED"}
+            )
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        payload = {
+            "ok": completed.returncode == 0,
+            "returncode": completed.returncode,
+            "stdout": _truncate_output(completed.stdout, stdout_limit),
+            "stderr": _truncate_output(completed.stderr, stderr_limit),
+            "duration_ms": duration_ms,
+            "artifact": artifact_name,
+        }
+        emit(
+            "tool.run_skill_artifact.done",
+            {
+                "skill": skill_dir.name,
+                "artifact": artifact_name,
+                "ok": payload["ok"],
+                "returncode": completed.returncode,
+                "duration_ms": duration_ms,
+                "summary": f"{display_name} · rc={completed.returncode}",
+            },
+        )
+        return _json(payload)
+
     tools = [
         _build_skill_api_tool(
             resources,
@@ -920,6 +1042,7 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             emit_event=emit_event,
         ),
         run_skill_script,
+        run_skill_artifact,
     ]
     if config is not None:
         tools.append(
@@ -959,6 +1082,94 @@ def _resolve_skill_script(skill_dir, script):
     if not candidate.is_file() or candidate.is_symlink():
         return None
     return candidate
+
+
+def _resolve_skill_artifact(skill_dir, artifacts, artifact_name):
+    """Resolve and verify one declared Artifact for the current platform."""
+
+    if not isinstance(artifacts, dict) or artifact_name not in artifacts:
+        return None, "ARTIFACT_NOT_DECLARED"
+    artifact = artifacts.get(artifact_name)
+    if not isinstance(artifact, dict) or artifact.get("type") != "executable":
+        return None, "ARTIFACT_DECLARATION_INVALID"
+    current_os, current_arch = _artifact_platform()
+    entrypoint = next(
+        (
+            item
+            for item in artifact.get("entrypoints") or []
+            if isinstance(item, dict)
+            and item.get("os") == current_os
+            and item.get("arch") == current_arch
+        ),
+        None,
+    )
+    if entrypoint is None:
+        return None, "ARTIFACT_PLATFORM_UNAVAILABLE"
+
+    relative = _safe_relative_path(entrypoint.get("path"))
+    if (
+        relative is None
+        or len(relative.parts) < 2
+        or relative.parts[0] != "bin"
+    ):
+        return None, "ARTIFACT_PATH_INVALID"
+    bin_root = (skill_dir / "bin").resolve()
+    candidate = skill_dir / relative
+    if _path_contains_symlink(skill_dir, candidate):
+        return None, "ARTIFACT_PATH_INVALID"
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(bin_root)
+    except (FileNotFoundError, OSError, ValueError):
+        return None, "ARTIFACT_PATH_INVALID"
+    try:
+        if not stat.S_ISREG(candidate.lstat().st_mode):
+            return None, "ARTIFACT_PATH_INVALID"
+        expected_hash = str(entrypoint.get("sha256") or "").lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            return None, "ARTIFACT_DECLARATION_INVALID"
+        actual_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    except OSError:
+        return None, "ARTIFACT_PATH_INVALID"
+    if actual_hash != expected_hash:
+        return None, "ARTIFACT_HASH_MISMATCH"
+    try:
+        candidate.chmod(0o755)
+    except OSError:
+        return None, "ARTIFACT_PERMISSION_DENIED"
+    return candidate, None
+
+
+def _artifact_platform():
+    """Return normalized OS and CPU values for Artifact selection."""
+
+    os_name = {
+        "darwin": "darwin",
+        "linux": "linux",
+        "windows": "windows",
+    }.get(platform.system().lower(), "")
+    arch = {
+        "aarch64": "arm64",
+        "arm64": "arm64",
+        "amd64": "amd64",
+        "x86_64": "amd64",
+    }.get(platform.machine().lower(), "")
+    return os_name, arch
+
+
+def _path_contains_symlink(root, path):
+    """Return whether a path below root contains a symbolic link."""
+
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return True
+    current = root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def _skill_script_command(script_path):
@@ -1016,6 +1227,13 @@ def _decode_output(value):
     if isinstance(value, bytes):
         return value.decode(errors="replace")
     return str(value)
+
+
+def _truncate_output(value, limit):
+    """Decode and truncate subprocess output without changing whitespace."""
+
+    text = _decode_output(value)
+    return text[:limit] + "…" if len(text) > limit else text
 
 
 def _safe_relative_path(value):
