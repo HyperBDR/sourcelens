@@ -1,7 +1,9 @@
 import hashlib
 import json
+import tracemalloc
 from pathlib import Path
 
+from lensnode.agent_tools import _saved_output_synopsis
 from lensnode.agent_tools import build_general_chat_tools
 from lensnode.runtime_resources import RuntimeResources
 
@@ -327,6 +329,52 @@ def test_inspect_saved_output_summarizes_text_and_caps_long_lines(tmp_path):
     assert payload["lines"][0] == {"number": 1, "text": "first"}
     assert len(payload["lines"][1]["text"]) == 501
     assert payload["lines"][1]["text"].endswith("…")
+
+
+def test_inspect_saved_output_rejects_escape_and_symlink(tmp_path):
+    resources = _resources(tmp_path)
+    outside = resources.root / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    output_dir = resources.root / "large_tool_results"
+    output_dir.mkdir()
+    (output_dir / "link.txt").symlink_to(outside)
+    tool = _tool(resources, "inspect_saved_output")
+
+    escaped = json.loads(
+        tool.invoke(
+            {
+                "ref": "/large_tool_results/../outside.txt",
+                "offset": 0,
+                "limit": 1,
+            }
+        )
+    )
+    linked = json.loads(
+        tool.invoke(
+            {
+                "ref": "/large_tool_results/link.txt",
+                "offset": 0,
+                "limit": 1,
+            }
+        )
+    )
+
+    assert escaped == {"ok": False, "error": "INPUT_REF_NOT_ALLOWED"}
+    assert linked == {"ok": False, "error": "INPUT_REF_NOT_ALLOWED"}
+
+
+def test_saved_output_synopsis_bounds_memory_for_large_text():
+    text = "value\n" * (2 * 1024 * 1024 // 6)
+    raw = text.encode("utf-8")
+
+    tracemalloc.start()
+    output_format, synopsis = _saved_output_synopsis(raw, text)
+    _current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert output_format == "text"
+    assert synopsis["line_count"] > 300000
+    assert peak < len(raw) * 2
 
 
 def test_run_skill_transform_uses_declared_entrypoint_and_input_ref(tmp_path):

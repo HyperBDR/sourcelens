@@ -1,6 +1,5 @@
 import csv
 import hashlib
-import io
 import json
 import math
 import mimetypes
@@ -13,6 +12,7 @@ import subprocess
 import sys
 import time
 import uuid
+from itertools import islice
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
@@ -558,6 +558,7 @@ class _InspectSavedOutputArgs(BaseModel):
     offset: int = Field(
         default=0,
         ge=0,
+        le=1000000,
         description="Zero-based line offset.",
     )
     limit: int = Field(
@@ -1251,8 +1252,15 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
 
         text = _decode_output(raw)
         output_format, synopsis = _saved_output_synopsis(raw, text)
-        all_lines = text.splitlines()
-        selected = all_lines[offset : offset + limit]
+        selected = list(
+            islice(
+                _iter_output_lines(text),
+                offset,
+                offset + limit + 1,
+            )
+        )
+        has_more = len(selected) > limit
+        selected = selected[:limit]
         lines = [
             {
                 "number": offset + index + 1,
@@ -1275,7 +1283,7 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             "offset": offset,
             "limit": limit,
             "returned_lines": len(lines),
-            "has_more": offset + len(selected) < len(all_lines),
+            "has_more": has_more,
             "lines": lines,
             "duration_ms": duration_ms,
         }
@@ -2686,19 +2694,24 @@ def _persist_large_tool_output(root, invocation_id, stream, value, limit):
 def _saved_output_synopsis(raw, text):
     """Return a typed, bounded synopsis for saved subprocess output."""
 
-    lines = text.splitlines()
     base = {
-        "line_count": len(lines),
+        "line_count": _output_line_count(text),
         "char_count": len(text),
     }
     if b"\x00" in raw:
         return "binary", {**base, "byte_count": len(raw)}
 
-    stripped = text.strip()
-    if stripped:
+    start = 0
+    end = len(text)
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    json_candidate = start < end and text[start] in '{["-0123456789tfn'
+    if json_candidate and end - start <= 1024 * 1024:
         try:
             payload = json.loads(
-                stripped,
+                text[start:end],
                 parse_constant=_reject_json_constant,
             )
         except (json.JSONDecodeError, ValueError):
@@ -2714,30 +2727,42 @@ def _saved_output_synopsis(raw, text):
             elif isinstance(payload, list):
                 synopsis["item_count"] = len(payload)
             return "json", synopsis
+    elif json_candidate:
+        pairs = {"{": "}", "[": "]", '"': '"'}
+        if pairs.get(text[start]) == text[end - 1]:
+            top_level = {
+                "{": "dict",
+                "[": "list",
+                '"': "str",
+            }[text[start]]
+            return "json", {
+                **base,
+                "top_level_type": top_level,
+                "validated": False,
+            }
 
-    csv_synopsis = _csv_output_synopsis(text, lines)
+    csv_synopsis = _csv_output_synopsis(text, base["line_count"])
     if csv_synopsis is not None:
         return "csv", {**base, **csv_synopsis}
-    return "text", {
-        **base,
-        "nonempty_line_count": sum(bool(line.strip()) for line in lines),
-        "max_line_chars": max((len(line) for line in lines), default=0),
-    }
+    return "text", base
 
 
-def _csv_output_synopsis(text, lines):
+def _csv_output_synopsis(text, line_count):
     """Return CSV shape metadata when text has a consistent table shape."""
 
-    if len(lines) < 2:
+    if line_count < 2:
         return None
-    sample = "\n".join(lines[:20])[:8192]
+    sample = text[:8192]
+    sample_lines = sample.splitlines()
+    if len(sample_lines) < 2:
+        return None
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
         has_header = csv.Sniffer().has_header(sample)
     except csv.Error:
         return None
 
-    reader = csv.reader(io.StringIO(text), dialect)
+    reader = csv.reader(sample_lines, dialect)
     try:
         first = next(reader)
     except StopIteration:
@@ -2745,13 +2770,13 @@ def _csv_output_synopsis(text, lines):
     width = len(first)
     if width < 2:
         return None
-    row_count = 1
+    sampled_rows = 1
     consistent_rows = 1
     for row in reader:
-        row_count += 1
+        sampled_rows += 1
         if len(row) == width:
             consistent_rows += 1
-    if consistent_rows / row_count < 0.9:
+    if consistent_rows / sampled_rows < 0.9:
         return None
     columns = (
         [str(value)[:200] for value in first]
@@ -2763,8 +2788,29 @@ def _csv_output_synopsis(text, lines):
         "has_header": has_header,
         "columns": columns,
         "column_count": width,
-        "row_count": row_count - (1 if has_header else 0),
+        "row_count": line_count - (1 if has_header else 0),
     }
+
+
+def _output_line_count(text):
+    """Count physical text lines without building a line list."""
+
+    if not text:
+        return 0
+    return text.count("\n") + (0 if text.endswith("\n") else 1)
+
+
+def _iter_output_lines(text):
+    """Yield physical lines without materializing the complete output."""
+
+    start = 0
+    while start < len(text):
+        newline = text.find("\n", start)
+        if newline < 0:
+            yield text[start:].removesuffix("\r")
+            break
+        yield text[start:newline].removesuffix("\r")
+        start = newline + 1
 
 
 def _redact_command_args(args):
