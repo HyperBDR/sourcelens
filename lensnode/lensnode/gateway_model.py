@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import re
 import threading
 import time
 from collections import Counter, deque
@@ -50,6 +51,24 @@ LOOP_WARNING = (
 LOOP_STOP = (
     "Repeated tool calls reached the runtime safety limit. New tool calls "
     "were suppressed; this answer must use the results already collected."
+)
+USER_INPUT_BEGIN = "--- BEGIN USER INPUT ---"
+USER_INPUT_END = "--- END USER INPUT ---"
+REMOTE_DATA_TOOLS = {
+    "analyze_structured_output",
+    "call_skill_api",
+    "inspect_saved_output",
+    "run_skill_artifact",
+    "run_skill_transform",
+}
+AUTHORITY_TAG_PATTERN = re.compile(
+    r"<\s*/?\s*(?:analysis|ignore|important|instruction|override|prompt|role|"
+    r"system(?:-reminder|_reminder)?)\b[^>]*>",
+    re.IGNORECASE,
+)
+USER_INPUT_BOUNDARY_PATTERN = re.compile(
+    r"---\s*(BEGIN|END)\s+USER INPUT\s*---",
+    re.IGNORECASE,
 )
 
 
@@ -510,11 +529,16 @@ def _message_to_gateway(message):
     if message.type == "system":
         return {"role": "system", "content": _content_to_text(message.content)}
     if message.type == "human":
-        return {"role": "user", "content": _content_to_text(message.content)}
+        content = _content_to_text(message.content)
+        if not (message.additional_kwargs or {}).get("hide_from_ui"):
+            content = _wrap_user_input(content)
+        return {"role": "user", "content": content}
     if message.type == "tool":
+        tool_name = str(getattr(message, "name", "") or "")
+        content = _tool_result_for_gateway(message.content, tool_name)
         return {
             "role": "tool",
-            "content": _content_to_text(message.content),
+            "content": content,
             "tool_call_id": getattr(message, "tool_call_id", ""),
         }
     if message.type == "ai":
@@ -530,6 +554,145 @@ def _message_to_gateway(message):
         "role": message.type,
         "content": _content_to_text(message.content),
     }
+
+
+def _wrap_user_input(content):
+    """Return a neutralized user-input view without mutating the message."""
+
+    if isinstance(content, str):
+        text = _neutralize_untrusted_text(content, neutralize_boundaries=True)
+        return f"{USER_INPUT_BEGIN}\n{text}\n{USER_INPUT_END}"
+    if not isinstance(content, list):
+        return content
+
+    wrapped = [{"type": "text", "text": USER_INPUT_BEGIN}]
+    for item in content:
+        if isinstance(item, str):
+            wrapped.append(
+                _neutralize_untrusted_text(
+                    item,
+                    neutralize_boundaries=True,
+                )
+            )
+            continue
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
+            item = dict(item)
+            item["text"] = _neutralize_untrusted_text(
+                item["text"],
+                neutralize_boundaries=True,
+            )
+        wrapped.append(item)
+    wrapped.append({"type": "text", "text": USER_INPUT_END})
+    return wrapped
+
+
+def _neutralize_untrusted_text(text, *, neutralize_boundaries=False):
+    """Escape prompt-like markup in an untrusted model-facing view."""
+
+    value = str(text)
+    if neutralize_boundaries:
+        value = USER_INPUT_BOUNDARY_PATTERN.sub(
+            lambda match: f"[{match.group(1).upper()} USER INPUT]",
+            value,
+        )
+    return AUTHORITY_TAG_PATTERN.sub(
+        lambda match: match.group(0).replace("<", "&lt;").replace(
+            ">", "&gt;"
+        ),
+        value,
+    )
+
+
+def _tool_result_for_gateway(content, tool_name):
+    """Return a classified, optionally neutralized tool-result view."""
+
+    text = _content_to_text(content)
+    if not isinstance(text, str):
+        return text
+
+    try:
+        result = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        result = None
+    if isinstance(result, dict) and "ok" in result:
+        result = dict(result)
+        result["result_meta"] = _tool_result_metadata(result, tool_name)
+        text = json.dumps(result, ensure_ascii=False)
+    if tool_name in REMOTE_DATA_TOOLS:
+        text = _neutralize_untrusted_text(text)
+    return text
+
+
+def _tool_result_metadata(result, tool_name):
+    """Classify a structured tool result for consistent model recovery."""
+
+    if result.get("ok") is True:
+        return {
+            "status": "success",
+            "source": tool_name,
+        }
+
+    error_code = _tool_error_code(result)
+    if any(
+        marker in error_code
+        for marker in ("AUTH", "CONFIG", "CREDENTIAL", "PERMISSION")
+    ):
+        error_type = "configuration"
+        recoverable = False
+        action = (
+            "Stop retrying this tool and report the configuration or "
+            "authorization requirement."
+        )
+    elif any(
+        marker in error_code
+        for marker in ("HTTP_REQUEST_FAILED", "RATE_LIMIT", "TIMEOUT")
+    ):
+        error_type = "transient"
+        recoverable = True
+        action = (
+            "Retry this tool at most once, then report the failure if it "
+            "persists."
+        )
+    elif any(
+        marker in error_code
+        for marker in ("BUDGET", "LOOP", "REPEATED", "STALLED")
+    ):
+        error_type = "policy"
+        recoverable = False
+        action = (
+            "Stop calling this tool and synthesize the answer from evidence "
+            "already collected."
+        )
+    elif any(
+        marker in error_code
+        for marker in ("INVALID", "NOT_FOUND", "PATH")
+    ):
+        error_type = "request"
+        recoverable = True
+        action = "Correct the tool arguments before retrying."
+    else:
+        error_type = "tool"
+        recoverable = False
+        action = (
+            "Do not repeat the same call; report the tool failure if no "
+            "safer recovery is available."
+        )
+    return {
+        "status": "error",
+        "error_type": error_type,
+        "recoverable_by_model": recoverable,
+        "recommended_next_action": action,
+        "source": tool_name,
+    }
+
+
+def _tool_error_code(result):
+    """Return an uppercase error code from common tool-result shapes."""
+
+    error = result.get("error")
+    if isinstance(error, dict):
+        error = error.get("code") or error.get("type") or error.get("message")
+    return str(error or result.get("code") or "").upper()
 
 
 def _tool_calls_to_gateway(tool_calls):
