@@ -244,9 +244,10 @@
         "stageCompleted": "已完成 {completed}/{total}",
         "stageEnded": "已结束 {completed}/{total}",
         "blockedTitle": "所需能力当前不可用",
+        "executionFailedTitle": "能力执行失败",
         "artifactTitle": "交付文件已生成",
         "outcomePartial": "已返回部分结果，请查看上方缺失能力或未完成事项。",
-        "outcomeBlocked": "当前请求已阻塞，请补充所需能力或输入后重试。",
+        "outcomeBlocked": "当前请求未完成，请查看运行详情后重试。",
         "activity": {
           "analyzingResults": "正在分析已取得的结果",
           "findingCapability": "正在查找所需能力",
@@ -258,11 +259,13 @@
           "usingCapability": "正在执行所需操作"
         },
         "recovery": {
+          "capability": "请改用支持该操作的助手，或联系管理员绑定所需能力。",
           "configuration": "请联系管理员配置或授权该能力，然后重试。",
           "policy": "请基于已有结果继续，或缩小请求范围。",
           "transient": "请稍后重试，或改用其他可用能力。",
           "request": "请修正或补充缺失输入，然后重试。",
-          "tool": "请改用其他可用能力，或联系管理员处理。"
+          "tool": "请改用其他可用能力，或联系管理员处理。",
+          "verification": "本次执行未返回可验证结果，请查看运行详情后重试。"
         },
         "phase": {
           "analyzing": "正在理解请求",

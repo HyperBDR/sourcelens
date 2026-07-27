@@ -448,6 +448,39 @@ class LensServiceTests(TransactionTestCase):
             {"required_capabilities": ["skill"]},
         )
 
+    def test_capability_unavailable_route_is_public(self):
+        event = sanitize_runtime_event({
+            "event_type": "route.selected",
+            "visibility": "user",
+            "payload": {
+                "intent": "action",
+                "complexity": "simple",
+                "route": "capability_unavailable",
+                "evidence_requirement": "tool_result",
+                "required_capabilities": ["skill"],
+            },
+        })
+
+        self.assertEqual(
+            event["payload"]["route"],
+            "capability_unavailable",
+        )
+
+    def test_execution_failure_event_is_distinct(self):
+        event = sanitize_runtime_event({
+            "event_type": "execution.failed",
+            "visibility": "user",
+            "payload": {
+                "reason": "execution_failed",
+                "capability": "skill",
+                "error_type": "transient",
+            },
+        })
+
+        self.assertEqual(event["event_type"], "execution.failed")
+        self.assertEqual(event["payload"]["reason"], "execution_failed")
+        self.assertEqual(event["payload"]["error_type"], "transient")
+
     def test_runtime_event_rejects_unknown_phase_and_status_values(self):
         phase_event = sanitize_runtime_event({
             "agent_event": "secret-token",
