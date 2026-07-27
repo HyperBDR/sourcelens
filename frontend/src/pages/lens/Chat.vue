@@ -159,6 +159,16 @@
                 </div>
 
                 <div class="flex shrink-0 items-center gap-1">
+                  <span
+                    v-if="sessionHasUnreadAnswer(session.uuid)"
+                    class="session-unread-indicator"
+                    :title="t('lens.chat.unreadAnswer')"
+                  >
+                    <Bell :size="14" :stroke-width="2.2" aria-hidden="true" />
+                    <span class="sr-only">
+                      {{ t('lens.chat.unreadAnswer') }}
+                    </span>
+                  </span>
                   <template v-if="deletingSessionUuid === session.uuid">
                     <button
                       type="button"
@@ -966,6 +976,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import {
   ArrowLeft,
+  Bell,
   MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -998,7 +1009,15 @@ import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
 import { useLensStore } from '@/store/lens'
+import { usePreferencesStore } from '@/store/preferences'
 import { useUserStore } from '@/store/user'
+import {
+  clearUnreadSession,
+  handleTerminalRun,
+  pollRunUntilTerminal,
+  readUnreadSessions,
+  UNREAD_STORAGE_KEY
+} from '@/utils/answerCompletionNotifications'
 import {
   activitiesForNode,
   applyRuntimeEvent,
@@ -1033,6 +1052,7 @@ const { t } = useI18n()
 const { showError, showSuccess, showWarning } = useToast()
 const userStore = useUserStore()
 const lensStore = useLensStore()
+const preferencesStore = usePreferencesStore()
 
 const assistants = ref([])
 const sessions = ref([])
@@ -1049,10 +1069,12 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
+const BASE_DOCUMENT_TITLE = 'SourceLens'
 const streamError = ref('')
 const failedRunError = ref(null)
 const queuePosition = ref(null)
 const currentRun = ref(null)
+const unreadSessions = ref(readUnreadSessions(window.localStorage))
 const loading = ref({ run: false })
 const streamController = ref(null)
 const sidebarOpen = ref(false)
@@ -1063,6 +1085,7 @@ const renameDraft = ref('')
 const composerRef = ref(null)
 const scrollRef = ref(null)
 const seenStepEventCounts = new Map()
+const completionTrackers = new Map()
 const runtimeState = ref(createRuntimeState())
 const liveActivityScrollRef = ref(null)
 const elapsedSeconds = ref(0)
@@ -1461,6 +1484,14 @@ watch(isRunActive, (active) => {
   }
 })
 
+watch(
+  [
+    () => preferencesStore.answerCompletionIndicator,
+    () => preferencesStore.currentLanguage
+  ],
+  refreshUnreadSessions
+)
+
 const { isMobile } = useIsMobile()
 
 function authHeaders() {
@@ -1481,6 +1512,74 @@ function resetStreamState() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function refreshUnreadSessions() {
+  unreadSessions.value = readUnreadSessions(window.localStorage)
+  const unreadCount = preferencesStore.answerCompletionIndicator
+    ? Object.keys(unreadSessions.value).length
+    : 0
+  document.title = unreadCount
+    ? t('lens.chat.tabAnswerCompleted', { count: unreadCount })
+    : BASE_DOCUMENT_TITLE
+}
+
+function sessionHasUnreadAnswer(sessionUuid) {
+  return (
+    preferencesStore.answerCompletionIndicator &&
+    selectedSessionUuid.value !== sessionUuid &&
+    Boolean(unreadSessions.value[sessionUuid])
+  )
+}
+
+function handleCompletionStorage(event) {
+  if (event.key === UNREAD_STORAGE_KEY) {
+    refreshUnreadSessions()
+  }
+  if (event.key === 'answerCompletionIndicator') {
+    preferencesStore.answerCompletionIndicator = event.newValue !== 'false'
+    refreshUnreadSessions()
+  }
+}
+
+function handleCompletionVisibility() {
+  if (document.visibilityState !== 'visible') return
+  const sessionUuid = selectedSessionUuid.value
+  if (sessionUuid && unreadSessions.value[sessionUuid]) {
+    void selectSession({ uuid: sessionUuid }, false)
+  }
+}
+
+function startCompletionTracking(run, sessionUuid) {
+  if (!run?.uuid || completionTrackers.has(run.uuid)) {
+    return
+  }
+
+  const tracker = { stopped: false }
+  completionTrackers.set(run.uuid, tracker)
+  void pollRunUntilTerminal({
+    getRun,
+    initialRun: run,
+    isStopped: () => tracker.stopped,
+    maxAttempts: RUN_POLL_MAX_ATTEMPTS,
+    runUuid: run.uuid,
+    sleep: () => sleep(RUN_POLL_INTERVAL_MS)
+  })
+    .then((terminalRun) => {
+      if (!terminalRun || tracker.stopped) return
+      const result = handleTerminalRun({
+        documentRef: document,
+        indicatorEnabled: preferencesStore.answerCompletionIndicator,
+        run: terminalRun,
+        selectedSessionUuid: selectedSessionUuid.value,
+        sessionUuid,
+        storage: window.localStorage
+      })
+      if (result.unreadChanged) {
+        refreshUnreadSessions()
+      }
+    })
+    .finally(() => completionTrackers.delete(run.uuid))
 }
 
 async function waitForRunTerminal(runUuid) {
@@ -1869,7 +1968,10 @@ async function selectSession(session, updateRoute = true) {
     })
   }
   await nextTick(scrollToBottom)
-  maybeResumeActiveRun(session.uuid)
+  await maybeResumeActiveRun(session.uuid)
+  if (clearUnreadSession(window.localStorage, session.uuid)) {
+    refreshUnreadSessions()
+  }
 }
 
 // If the session has a run still in progress (e.g. the user navigated away
@@ -1895,6 +1997,7 @@ async function maybeResumeActiveRun(sessionUuid) {
     return
   }
   if (selectedSessionUuid.value !== sessionUuid) return
+  startCompletionTracking(run, sessionUuid)
   // hand the trailing in-progress assistant placeholder to the live row to
   // avoid showing it twice; the SSE sync replays its content and steps
   const last = messages.value[messages.value.length - 1]
@@ -2063,6 +2166,7 @@ async function submit() {
       enqueue: true,
       attachment_uuids: attachmentUuids
     })
+    startCompletionTracking(run, sessionAtSubmit)
     // switched away between createRun and here — don't bind this run's live
     // state onto the now-current assistant
     if (selectedSessionUuid.value !== sessionAtSubmit) return
@@ -2258,6 +2362,9 @@ async function doDeleteSession(session) {
   try {
     await deleteSession(session.uuid)
     sessions.value = sessions.value.filter((s) => s.uuid !== session.uuid)
+    if (clearUnreadSession(window.localStorage, session.uuid)) {
+      refreshUnreadSessions()
+    }
     if (selectedSessionUuid.value === session.uuid) {
       const next = sessions.value[0]
       if (next) {
@@ -2288,6 +2395,9 @@ watch(
 )
 
 onMounted(async () => {
+  window.addEventListener('storage', handleCompletionStorage)
+  document.addEventListener('visibilitychange', handleCompletionVisibility)
+  refreshUnreadSessions()
   if (window.innerWidth < 1024) {
     sidebarOpen.value = false
   }
@@ -2299,6 +2409,13 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('storage', handleCompletionStorage)
+  document.removeEventListener('visibilitychange', handleCompletionVisibility)
+  document.title = BASE_DOCUMENT_TITLE
+  completionTrackers.forEach((tracker) => {
+    tracker.stopped = true
+  })
+  completionTrackers.clear()
   streamController.value?.abort()
   clearInterval(elapsedTimer)
 })
@@ -2419,6 +2536,11 @@ onBeforeUnmount(() => {
 .session-title {
   @apply truncate text-sm font-medium;
   color: #111827;
+}
+
+.session-unread-indicator {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-full;
+  @apply bg-primary-50 text-primary-600;
 }
 
 .session-delete-btn,

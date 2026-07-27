@@ -2,12 +2,16 @@ import { defineStore } from 'pinia'
 import { detectTimezone, detectLanguage } from '@/utils/timezone'
 import i18n, { normalizeUiLanguage } from '@/i18n'
 
+const COMPLETION_INDICATOR_KEY = 'answerCompletionIndicator'
+const UNREAD_STORAGE_KEY = 'sourcelens.answerCompletion.unreadSessions'
+
 export const usePreferencesStore = defineStore('preferences', {
   state: () => ({
     language: detectLanguage(),
     timezone: detectTimezone(),
     detectedLanguage: detectLanguage(),
     detectedTimezone: detectTimezone(),
+    answerCompletionIndicator: true,
     isLoaded: false
   }),
 
@@ -46,9 +50,18 @@ export const usePreferencesStore = defineStore('preferences', {
       localStorage.setItem('userTimezone', timezone)
     },
 
+    setAnswerCompletionIndicator(enabled) {
+      this.answerCompletionIndicator = enabled
+      localStorage.setItem(COMPLETION_INDICATOR_KEY, String(enabled))
+      if (!enabled) {
+        localStorage.removeItem(UNREAD_STORAGE_KEY)
+      }
+    },
+
     loadFromLocalStorage() {
       const savedLanguage = localStorage.getItem('userLanguage')
       const savedTimezone = localStorage.getItem('userTimezone')
+      const savedIndicator = localStorage.getItem(COMPLETION_INDICATOR_KEY)
 
       if (savedLanguage) {
         const normalizedLanguage = normalizeUiLanguage(savedLanguage)
@@ -63,7 +76,9 @@ export const usePreferencesStore = defineStore('preferences', {
       if (savedTimezone) {
         this.timezone = savedTimezone
       }
-
+      if (savedIndicator !== null) {
+        this.answerCompletionIndicator = savedIndicator === 'true'
+      }
       this.isLoaded = true
     },
 
@@ -86,10 +101,13 @@ export const usePreferencesStore = defineStore('preferences', {
       const normalizedLanguage = normalizeUiLanguage(this.detectedLanguage)
       this.language = normalizedLanguage
       this.timezone = this.detectedTimezone
+      this.answerCompletionIndicator = true
       i18n.global.locale.value = normalizedLanguage
       document.documentElement.lang = normalizedLanguage
       localStorage.removeItem('userLanguage')
       localStorage.removeItem('userTimezone')
+      localStorage.removeItem(COMPLETION_INDICATOR_KEY)
+      localStorage.removeItem(UNREAD_STORAGE_KEY)
     }
   }
 })
