@@ -15,7 +15,8 @@ import {
   selectLiveProgressText,
   selectStructuredProgress,
   summarizeStageProgress,
-  summarizePlanProgress
+  summarizePlanProgress,
+  workflowProgressSource
 } from '../src/pages/lens/runtimeEvents.js'
 
 test('waits for the conversation to render before scrolling to the bottom', async () => {
@@ -425,6 +426,7 @@ test('records and completes a replayable real order-query activity', () => {
       status: 'completed',
       startDate: '2026-07-20',
       endDate: '2026-07-26',
+      planRevision: 0,
       structured: true
     }
   ])
@@ -621,6 +623,217 @@ test('keeps non-order assistants on their actual generic operation path', () => 
   assert.equal(
     tasks[0].stages.some((stage) => stage.kind === 'order_query'),
     false
+  )
+})
+
+test('coalesces repeated steps with the same public operation context', () => {
+  let state = createRuntimeState()
+  for (const payload of [
+    {
+      id: 'order-get-help',
+      stage_kind: 'preparation',
+      kind: 'reading_order_commands',
+      status: 'completed'
+    },
+    {
+      id: 'order-list-help',
+      stage_kind: 'preparation',
+      kind: 'reading_order_commands',
+      status: 'completed'
+    }
+  ]) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload
+    })
+  }
+
+  const steps = buildWorkflowTree([], state.activities)[0].stages[0].steps
+
+  assert.equal(steps.length, 1)
+  assert.equal(steps[0].kind, 'reading_order_commands')
+  assert.equal(steps[0].status, 'completed')
+})
+
+test('coalesces a failed step with a successful semantic retry', () => {
+  let state = createRuntimeState()
+  for (const payload of [
+    {
+      id: 'analysis-attempt-1',
+      stage_kind: 'result_analysis',
+      kind: 'analyzing_results',
+      status: 'in_progress'
+    },
+    {
+      id: 'analysis-attempt-1',
+      stage_kind: 'result_analysis',
+      kind: 'analyzing_results',
+      status: 'failed'
+    },
+    {
+      id: 'analysis-attempt-2',
+      stage_kind: 'result_analysis',
+      kind: 'analyzing_results',
+      status: 'in_progress'
+    },
+    {
+      id: 'analysis-attempt-2',
+      stage_kind: 'result_analysis',
+      kind: 'analyzing_results',
+      status: 'completed'
+    }
+  ]) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload
+    })
+  }
+
+  const steps = buildWorkflowTree([], state.activities)[0].stages[0].steps
+
+  assert.equal(steps.length, 1)
+  assert.equal(steps[0].status, 'completed')
+})
+
+test('attaches final summary to the last real plan task', () => {
+  let state = applyRuntimeEvent(createRuntimeState(), {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 1,
+      steps: [
+        { id: 'step-1', title: '查询订单', status: 'completed' },
+        { id: 'step-2', title: '生成报告', status: 'completed' }
+      ]
+    }
+  })
+  state = applyRuntimeEvent(state, {
+    event_type: 'activity.recorded',
+    visibility: 'user',
+    payload: {
+      id: 'summarize-results',
+      stage_kind: 'result_analysis',
+      kind: 'summarizing_results',
+      status: 'completed'
+    }
+  })
+
+  const tasks = buildWorkflowTree(state.plan, state.activities)
+
+  assert.equal(tasks.length, 2)
+  assert.equal(tasks[1].stages[0].steps[0].kind, 'summarizing_results')
+})
+
+test('uses plan tasks for the progress count when a plan exists', () => {
+  const tasks = [
+    { id: 'step-1', status: 'completed', stages: [{}] },
+    { id: 'step-2', status: 'completed', stages: [{}] },
+    { id: 'step-3', status: 'completed', stages: [{}] },
+    { id: 'step-4', status: 'in_progress', stages: [] }
+  ]
+
+  const source = workflowProgressSource(tasks, true)
+  const progress = summarizePlanProgress(source.items)
+
+  assert.equal(source.kind, 'plan')
+  assert.equal(progress.completed, 3)
+  assert.equal(progress.total, 4)
+})
+
+test('keeps plan task titles stable across later revisions', () => {
+  let state = createRuntimeState()
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 1,
+      steps: [
+        {
+          id: 'step-1',
+          title: '查询订单',
+          status: 'in_progress'
+        }
+      ]
+    }
+  })
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 2,
+      steps: [
+        {
+          id: 'step-1',
+          title: '重新命名后的任务',
+          status: 'completed'
+        }
+      ]
+    }
+  })
+
+  assert.equal(state.plan[0].title, '查询订单')
+  assert.equal(state.plan[0].status, 'completed')
+})
+
+test('moves trailing stages to tasks completed by a batched revision', () => {
+  let state = applyRuntimeEvent(createRuntimeState(), {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 2,
+      steps: [
+        { id: 'step-1', title: '登录', status: 'completed' },
+        { id: 'step-2', title: '查询订单', status: 'in_progress' },
+        { id: 'step-3', title: '统计订单', status: 'pending' },
+        { id: 'step-4', title: '生成报告', status: 'pending' }
+      ]
+    }
+  })
+  for (const payload of [
+    {
+      id: 'query-orders',
+      stage_kind: 'order_query',
+      kind: 'query_orders',
+      status: 'completed'
+    },
+    {
+      id: 'count-orders',
+      stage_kind: 'result_analysis',
+      kind: 'count_results',
+      status: 'completed'
+    }
+  ]) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload
+    })
+  }
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 3,
+      steps: [
+        { id: 'step-1', title: '登录', status: 'completed' },
+        { id: 'step-2', title: '查询订单', status: 'completed' },
+        { id: 'step-3', title: '统计订单', status: 'completed' },
+        { id: 'step-4', title: '生成报告', status: 'in_progress' }
+      ]
+    }
+  })
+
+  const tasks = buildWorkflowTree(state.plan, state.activities)
+
+  assert.deepEqual(
+    tasks[1].stages.map((stage) => stage.kind),
+    ['order_query']
+  )
+  assert.deepEqual(
+    tasks[2].stages.map((stage) => stage.kind),
+    ['result_analysis']
   )
 })
 

@@ -728,6 +728,81 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertIsNone(event)
 
+    def test_order_help_is_preparation_not_a_business_query(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "runtime_scope": "general_chat",
+            "invocation_id": "order-list-help",
+            "args_redacted": ["order", "list", "--help"],
+        })
+
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "order-list-help",
+                "kind": "reading_order_commands",
+                "stage_kind": "preparation",
+                "status": "in_progress",
+            },
+        )
+
+    def test_order_view_is_an_order_detail_operation(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "runtime_scope": "general_chat",
+            "invocation_id": "order-view",
+            "args_redacted": [
+                "order",
+                "view",
+                "HWINSTAD2025071509",
+            ],
+        })
+
+        self.assertEqual(event["payload"]["kind"], "get_order_detail")
+        self.assertEqual(
+            event["payload"]["order_ref"],
+            "HWINSTAD2025071509",
+        )
+
+    def test_general_chat_does_not_guess_summary_before_later_tools(self):
+        detail = public_step_detail({
+            "events": [
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-query",
+                    "args_redacted": [
+                        "order",
+                        "get",
+                        "HWINSTAD2025071509",
+                    ],
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.done",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-query",
+                },
+                {
+                    "agent_event": "model.round.start",
+                    "runtime_scope": "general_chat",
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-help",
+                    "args_redacted": ["order", "--help"],
+                },
+            ]
+        })
+
+        kinds = [
+            item["payload"]["kind"]
+            for item in detail["events"]
+            if item.get("event_type") == "activity.recorded"
+        ]
+
+        self.assertNotIn("summarizing_results", kinds)
+
     def test_general_chat_public_path_uses_real_operation_stages(self):
         detail = public_step_detail({
             "events": [
@@ -786,6 +861,11 @@ class LensServiceTests(TransactionTestCase):
                     "invocation_id": "model-round-4",
                     "round": 4,
                 },
+                {
+                    "agent_event": "deepagents.runtime.done",
+                    "runtime_scope": "general_chat",
+                    "answer_chars": 120,
+                },
             ]
         })
 
@@ -823,7 +903,7 @@ class LensServiceTests(TransactionTestCase):
                 "result_analysis",
             ],
         )
-        self.assertEqual(activities[-1]["status"], "in_progress")
+        self.assertEqual(activities[-1]["status"], "completed")
         self.assertEqual(
             activities[-1]["order_ref"],
             "HWINSTAD2025071509",

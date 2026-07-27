@@ -233,6 +233,8 @@ def _order_reference_argument(arguments):
 
     value = _argument_after(arguments, "order", "get")
     if not value:
+        value = _argument_after(arguments, "order", "view")
+    if not value:
         value = _argument_after(arguments, "--code")
     return _safe_order_reference(value)
 
@@ -260,8 +262,6 @@ def _tool_activity_kind(tool_name, item):
             return "authenticating"
         if _contains_command(arguments, "version"):
             return "checking_tool"
-        if _contains_command(arguments, "order", "list"):
-            return "query_orders"
         if (
             _contains_command(arguments, "order")
             and isinstance(arguments, list)
@@ -271,7 +271,11 @@ def _tool_activity_kind(tool_name, item):
             )
         ):
             return "reading_order_commands"
-        if _contains_command(arguments, "order", "get"):
+        if _contains_command(arguments, "order", "list"):
+            return "query_orders"
+        if _contains_command(
+            arguments, "order", "get"
+        ) or _contains_command(arguments, "order", "view"):
             return "get_order_detail"
         return "querying_data"
     if tool_name == "analyze_structured_output":
@@ -517,20 +521,8 @@ def public_step_detail(detail):
     activity_by_id = {}
     has_business_result = False
     summary_context = {}
-    summary_started = False
     for item in detail.get("events") or []:
         agent_event = _text(item.get("agent_event"), 128)
-        if (
-            item.get("runtime_scope") == "general_chat"
-            and agent_event == "model.round.start"
-            and has_business_result
-            and not summary_started
-        ):
-            events.append(
-                _summary_activity_event("in_progress", summary_context)
-            )
-            summary_started = True
-            continue
         if (
             item.get("runtime_scope") == "general_chat"
             and agent_event == "deepagents.runtime.done"

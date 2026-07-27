@@ -393,7 +393,7 @@
                       {{
                         progressTitle(
                           structuredProgress(message._runtimeState).kind,
-                          structuredProgress(message._runtimeState).items
+                          structuredProgress(message._runtimeState).hasPlan
                         )
                       }}
                     </span>
@@ -422,8 +422,15 @@
                         .tasks"
                       :key="task.id"
                       class="runtime-workflow-task"
+                      :class="{
+                        'is-direct': !structuredProgress(message._runtimeState)
+                          .hasPlan
+                      }"
                     >
-                      <div class="runtime-plan-step runtime-task-row">
+                      <div
+                        v-if="structuredProgress(message._runtimeState).hasPlan"
+                        class="runtime-plan-step runtime-task-row"
+                      >
                         <span
                           class="runtime-plan-status"
                           :class="`is-${task.status}`"
@@ -789,7 +796,7 @@
                     {{
                       progressTitle(
                         liveStructuredProgress.kind,
-                        liveStructuredProgress.items
+                        liveStructuredProgress.hasPlan
                       )
                     }}
                   </div>
@@ -801,8 +808,14 @@
                       v-for="task in liveStructuredProgress.tasks"
                       :key="task.id"
                       class="runtime-workflow-task"
+                      :class="{
+                        'is-direct': !liveStructuredProgress.hasPlan
+                      }"
                     >
-                      <div class="runtime-plan-step runtime-task-row">
+                      <div
+                        v-if="liveStructuredProgress.hasPlan"
+                        class="runtime-plan-step runtime-task-row"
+                      >
                         <span
                           class="runtime-plan-status"
                           :class="`is-${task.status}`"
@@ -1249,11 +1262,11 @@ import {
   createRuntimeState,
   getMessageTimestamp,
   scrollConversationToBottomAfterRender,
-  selectCurrentWorkflowStage,
   selectLiveProgressText,
   selectStructuredProgress,
   summarizePlanProgress,
-  summarizeStageProgress
+  summarizeStageProgress,
+  workflowProgressSource
 } from '@/pages/lens/runtimeEvents'
 import {
   cancelRun,
@@ -1550,8 +1563,11 @@ function structuredProgressText(
     return stageProgressText(progress.items, durationSeconds, terminal)
   }
   if (progress.kind === 'workflow') {
-    const stages = progress.tasks.flatMap((task) => task.stages || [])
-    return stageProgressText(stages, durationSeconds, terminal)
+    const source = workflowProgressSource(progress.tasks, progress.hasPlan)
+    if (source.kind === 'plan') {
+      return planProgressText(source.items, durationSeconds, terminal)
+    }
+    return stageProgressText(source.items, durationSeconds, terminal)
   }
   if (progress.kind === 'activity') {
     const count = progress.items.reduce(
@@ -1568,14 +1584,13 @@ function structuredProgressText(
   return ''
 }
 
-function progressTitle(kind, items = []) {
+function progressTitle(kind, hasPlan = false) {
   if (kind === 'plan') return t('lens.chat.runtime.planTitle')
   if (kind === 'activity') return t('lens.chat.agentActivity')
   if (kind === 'workflow') {
-    const stage = selectCurrentWorkflowStage(items)
-    return stage
-      ? workflowStageTitle(stage.kind)
-      : t('lens.chat.runtime.planTitle')
+    return t(
+      hasPlan ? 'lens.chat.runtime.planTitle' : 'lens.chat.runtime.stageTitle'
+    )
   }
   return t('lens.chat.runtime.stageTitle')
 }
@@ -3282,6 +3297,10 @@ onBeforeUnmount(() => {
   margin-left: 1.45rem;
   border-left: 1px solid #dbe3ec;
   padding-left: 0.65rem;
+}
+
+.runtime-workflow-task.is-direct .runtime-workflow-stage {
+  margin-left: 0;
 }
 
 .runtime-stage-row {

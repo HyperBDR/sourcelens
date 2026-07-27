@@ -189,17 +189,30 @@ function appendStructuredActivity(state, payload) {
   if (!WORKFLOW_STAGE_KINDS.has(payload.stage_kind)) return state
   if (!ACTIVITY_STATUSES.has(payload.status)) return state
 
-  const existing = state.activities.find(
+  const exactExisting = state.activities.find(
     (item) => item.structured && item.id === id
   )
   const startDate = normalizeActivityDate(payload.start_date)
   const endDate = normalizeActivityDate(payload.end_date)
   const orderRef = normalizeOrderReference(payload.order_ref)
   const activeTask = state.plan.find((item) => item.status === 'in_progress')
-  const taskId = existing?.taskId || activeTask?.id || 'task-execute'
+  const currentTaskId =
+    activeTask?.id || state.plan.at(-1)?.id || 'task-execute'
+  const semanticExisting = state.activities.find(
+    (item) =>
+      item.structured &&
+      item.taskId === currentTaskId &&
+      item.stageKind === payload.stage_kind &&
+      item.kind === payload.kind &&
+      (item.startDate || '') === startDate &&
+      (item.endDate || '') === endDate &&
+      (item.orderRef || '') === orderRef
+  )
+  const existing = exactExisting || semanticExisting
+  const taskId = existing?.taskId || currentTaskId
   const stageKind = existing?.stageKind || payload.stage_kind
   const activity = {
-    id,
+    id: existing?.id || id,
     taskId,
     stageId: `${taskId}:${stageKind}`,
     stageKind,
@@ -220,11 +233,12 @@ function appendStructuredActivity(state, payload) {
     ...(existing?.orderRef || orderRef
       ? { orderRef: existing?.orderRef || orderRef }
       : {}),
+    planRevision: existing?.planRevision ?? state.planRevision,
     structured: true
   }
   const activities = existing
     ? state.activities.map((item) =>
-        item.structured && item.id === id ? activity : item
+        item.structured && item.id === existing.id ? activity : item
       )
     : [...state.activities, activity]
   return {
@@ -301,6 +315,59 @@ export function normalizePlanSteps(steps) {
         status
       }
     ]
+  })
+}
+
+// A batched revision can complete pending tasks after their work already ran.
+function alignBatchedPlanActivities(state, plan) {
+  const previousPlanById = new Map(state.plan.map((item) => [item.id, item]))
+  const advancedTasks = plan.filter(
+    (item) =>
+      item.status === 'completed' &&
+      previousPlanById.get(item.id)?.status === 'pending'
+  )
+  const previousActive = state.plan.find(
+    (item) => item.status === 'in_progress'
+  )
+  if (!previousActive || advancedTasks.length === 0) {
+    return state.activities
+  }
+
+  const stageKinds = []
+  for (const item of state.activities) {
+    if (
+      !item.structured ||
+      item.taskId !== previousActive.id ||
+      item.planRevision !== state.planRevision ||
+      stageKinds.includes(item.stageKind)
+    ) {
+      continue
+    }
+    stageKinds.push(item.stageKind)
+  }
+  if (stageKinds.length < advancedTasks.length) return state.activities
+
+  const trailingKinds = stageKinds.slice(-advancedTasks.length)
+  const targetTaskByStage = new Map(
+    trailingKinds.map((stageKind, index) => [
+      stageKind,
+      advancedTasks[index].id
+    ])
+  )
+  return state.activities.map((item) => {
+    const taskId = targetTaskByStage.get(item.stageKind)
+    if (
+      !taskId ||
+      item.taskId !== previousActive.id ||
+      item.planRevision !== state.planRevision
+    ) {
+      return item
+    }
+    return {
+      ...item,
+      taskId,
+      stageId: `${taskId}:${item.stageKind}`
+    }
   })
 }
 
@@ -453,6 +520,16 @@ export function buildWorkflowTree(plan, activities) {
   return tasks
 }
 
+export function workflowProgressSource(tasks, hasPlan = false) {
+  if (hasPlan) return { kind: 'plan', items: tasks }
+  return {
+    kind: 'stage',
+    items: (Array.isArray(tasks) ? tasks : []).flatMap(
+      (task) => task.stages || []
+    )
+  }
+}
+
 export function selectStructuredProgress({
   route,
   plan,
@@ -555,10 +632,16 @@ export function applyRuntimeEvent(state, event) {
   if (event.event_type === 'plan.updated') {
     const revision = Math.max(Number(payload.revision || 0), 0)
     if (revision < current.planRevision) return current
+    const currentPlanById = new Map(current.plan.map((item) => [item.id, item]))
+    const plan = normalizePlanSteps(payload.steps).map((item) => {
+      const existing = currentPlanById.get(item.id)
+      return existing ? { ...item, title: existing.title } : item
+    })
     return {
       ...current,
-      plan: normalizePlanSteps(payload.steps),
-      planRevision: revision
+      plan,
+      planRevision: revision,
+      activities: alignBatchedPlanActivities(current, plan)
     }
   }
   if (event.event_type === 'stage.updated') {
