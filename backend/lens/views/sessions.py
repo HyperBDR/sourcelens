@@ -130,7 +130,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Create an execution run for a session."""
 
         session = self.get_object()
-        if not session.assistant.is_accessible_by(request.user):
+        if not session.assistant.is_runnable_by(request.user):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
@@ -153,7 +153,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Upload one image attachment for a session question."""
 
         session = self.get_object()
-        if not session.assistant.is_accessible_by(request.user):
+        if not session.assistant.is_runnable_by(request.user):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )

@@ -640,7 +640,14 @@
         "title": "Assistants",
         "description": "Configure public capabilities, execution nodes, tasks, and workspace directories.",
         "label": "Assistant",
-        "action": "Create Assistant"
+        "action": "Create Assistant",
+        "viewSelector": "Assistant lifecycle view",
+        "active": "Active",
+        "archived": "Archived",
+        "archive": "Archive",
+        "restore": "Restore",
+        "emptyActive": "No active assistants",
+        "emptyArchived": "No archived assistants"
       },
       "lensnodes": {
         "title": "Nodes",
@@ -1346,6 +1353,10 @@
       "loadFailed": "Failed to load Lens admin data",
       "saveSuccess": "Saved successfully",
       "saveFailed": "Save failed",
+      "archiveSuccess": "Assistant archived",
+      "archiveFailed": "Failed to archive assistant",
+      "restoreSuccess": "Assistant restored",
+      "restoreFailed": "Failed to restore assistant",
       "deleteSuccess": "Deleted successfully",
       "deleteFailed": "Delete failed",
       "confirmDelete": "Delete this record?",

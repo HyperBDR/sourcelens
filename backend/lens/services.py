@@ -523,6 +523,8 @@ def validate_run_dispatch(run):
 
     assistant = run.session.assistant
     lensnode = run.lensnode
+    if assistant.status != Assistant.Status.ACTIVE:
+        raise LensNodeDispatchError("ASSISTANT_ARCHIVED")
     if lensnode is None:
         raise LensNodeDispatchError("LENSNODE_REQUIRED")
     if lensnode.status == LensNode.Status.DRAINING:

@@ -640,7 +640,14 @@
         "title": "助手",
         "description": "配置对外能力、执行节点、任务和工作区目录。",
         "label": "Assistant",
-        "action": "新建 Assistant"
+        "action": "新建 Assistant",
+        "viewSelector": "助手生命周期视图",
+        "active": "启用中",
+        "archived": "已归档",
+        "archive": "归档",
+        "restore": "恢复",
+        "emptyActive": "暂无启用中的助手",
+        "emptyArchived": "暂无已归档助手"
       },
       "lensnodes": {
         "title": "节点",
@@ -1346,6 +1353,10 @@
       "loadFailed": "加载 Lens 管理数据失败",
       "saveSuccess": "保存成功",
       "saveFailed": "保存失败",
+      "archiveSuccess": "助手已归档",
+      "archiveFailed": "助手归档失败",
+      "restoreSuccess": "助手已恢复",
+      "restoreFailed": "助手恢复失败",
       "deleteSuccess": "删除成功",
       "deleteFailed": "删除失败",
       "confirmDelete": "确定删除这条记录？",

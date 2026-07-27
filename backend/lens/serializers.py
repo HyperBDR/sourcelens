@@ -1950,7 +1950,7 @@ class SessionCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         assistant = Assistant.objects.get(uuid=validated_data["assistant_uuid"])
         request = self.context["request"]
-        if not assistant.is_accessible_by(request.user):
+        if not assistant.is_runnable_by(request.user):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )

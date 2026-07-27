@@ -310,6 +310,62 @@ class LensApiTests(TestCase):
             "Updated assistant description.",
         )
 
+    def test_assistant_archive_moves_it_to_archived_list(self):
+        response = self.client.post(
+            f"/api/lens/assistants/{self.assistant.uuid}/archive/",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "archived")
+        self.assistant.refresh_from_db()
+        self.assertEqual(self.assistant.status, "archived")
+
+        active_response = self.client.get("/api/lens/assistants/")
+        active_slugs = [
+            assistant["slug"] for assistant in active_response.data["results"]
+        ]
+        self.assertNotIn(self.assistant.slug, active_slugs)
+
+        archived_response = self.client.get(
+            "/api/lens/assistants/",
+            {"archived": "true"},
+        )
+        archived_slugs = [
+            assistant["slug"]
+            for assistant in archived_response.data["results"]
+        ]
+        self.assertIn(self.assistant.slug, archived_slugs)
+
+    def test_assistant_restore_returns_it_to_active_list(self):
+        self.assistant.status = "archived"
+        self.assistant.save(update_fields=["status"])
+
+        response = self.client.post(
+            f"/api/lens/assistants/{self.assistant.uuid}/restore/",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "active")
+        self.assistant.refresh_from_db()
+        self.assertEqual(self.assistant.status, "active")
+        active_slugs = [
+            assistant["slug"]
+            for assistant in self.client.get(
+                "/api/lens/assistants/"
+            ).data["results"]
+        ]
+        self.assertIn(self.assistant.slug, active_slugs)
+
+    def test_assistant_delete_is_not_available(self):
+        response = self.client.delete(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+        )
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(
+            Assistant.objects.filter(uuid=self.assistant.uuid).exists()
+        )
+
     def test_assistant_create_saves_workspace_guide_skill(self):
         payload = {
             "name": "Workspace Aware",
@@ -1601,6 +1657,23 @@ class LensApiTests(TestCase):
             build_loaded_skills(self.assistant)
         )
         self.assertEqual(runtime[0]["environment"], {})
+
+    def test_dispatch_rejects_run_queued_before_assistant_was_archived(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Question", enqueue=False)
+        self.assistant.status = Assistant.Status.ARCHIVED
+        self.assistant.save(update_fields=["status"])
+        run = run.__class__.objects.select_related(
+            "session__assistant"
+        ).get(pk=run.pk)
+
+        with self.assertRaises(LensNodeDispatchError) as context:
+            validate_run_dispatch(run)
+
+        self.assertEqual(str(context.exception), "ASSISTANT_ARCHIVED")
 
     def test_runtime_resolves_environment_without_snapshot_plaintext(self):
         self.skill.definition = {
@@ -2936,6 +3009,20 @@ class AssistantAccessTests(TestCase):
         )
         self.assertEqual(run.status_code, 403)
 
+    def test_archived_assistant_cannot_start_new_conversations(self):
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.status = "archived"
+        self.assistant.save(update_fields=["visibility", "status"])
+        client = self._client(self.member)
+
+        response = client.post(
+            "/api/lens/sessions/",
+            {"assistant_uuid": str(self.assistant.uuid)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_public_qa_requires_login_for_private_assistant(self):
         share = SharedQA.objects.create(
             token="tok-private",
@@ -3009,3 +3096,8 @@ class AssistantAccessTests(TestCase):
             format="json",
         )
         self.assertEqual(create.status_code, 403)
+
+        archive = client.post(
+            f"/api/lens/assistants/{self.assistant.uuid}/archive/",
+        )
+        self.assertEqual(archive.status_code, 403)
