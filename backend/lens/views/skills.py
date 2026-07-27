@@ -1,14 +1,17 @@
 """Skill and MCP server management views."""
 
+import json
 import shutil
 
 from django.db import transaction
 from django.http import FileResponse
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
+from lens.environment_variables import validate_environment_schema
 from lens.models import AssistantSkill, MCPServer, Skill
 from lens.serializers import MCPServerSerializer, SkillSerializer
 from lens.skill_generation import (
@@ -105,10 +108,12 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
+            environment_override = self._environment_override(request)
             skill = update_skill_zip(
                 skill,
                 file_obj=file_obj,
                 original_name=getattr(file_obj, "name", ""),
+                environment_override=environment_override,
             )
         except SkillPackageError as exc:
             return Response(
@@ -181,9 +186,11 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
+            environment_override = self._environment_override(request)
             skill = import_skill_zip(
                 file_obj=file_obj,
                 original_name=getattr(file_obj, "name", ""),
+                environment_override=environment_override,
             )
         except SkillPackageError as exc:
             return Response(
@@ -191,6 +198,25 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(self.get_serializer(skill).data)
+
+    @staticmethod
+    def _environment_override(request):
+        """Parse an optional JSON environment declaration from multipart data."""
+
+        if "environment" not in request.data:
+            return None
+        try:
+            payload = json.loads(request.data.get("environment"))
+            return validate_environment_schema(payload)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise SkillPackageError(
+                "Environment variables must be valid JSON."
+            ) from exc
+        except ValidationError as exc:
+            detail = exc.detail
+            if isinstance(detail, list) and detail:
+                raise SkillPackageError(str(detail[0])) from exc
+            raise SkillPackageError(str(detail)) from exc
 
     @action(detail=False, methods=["post"], url_path="import-github")
     def import_github(self, request):

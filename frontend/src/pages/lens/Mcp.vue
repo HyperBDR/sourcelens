@@ -7,23 +7,13 @@
         <div
           class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
         >
-          <div class="min-w-0 space-y-2">
+          <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="text-xl font-semibold text-ink-900">
                 {{ t('lensAdmin.pages.mcp.title') }}
               </h1>
               <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs font-medium text-ink-500"
-              >
-                {{ t('lensAdmin.pages.mcp.label') }}
-              </span>
-            </div>
-            <p class="max-w-3xl text-sm leading-6 text-ink-500">
-              {{ t('lensAdmin.pages.mcp.description') }}
-            </p>
-            <div class="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-              <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs text-ink-500"
               >
                 {{
                   t('lensAdmin.total', {
@@ -31,11 +21,6 @@
                     count: mcps.length
                   })
                 }}
-              </span>
-              <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
-              >
-                {{ t('lensAdmin.pages.mcp.action') }}
               </span>
             </div>
           </div>

@@ -741,6 +741,12 @@ function onYearChange() {
   fetchStats()
 }
 
+function lastDayOfMonth(ym) {
+  const [y, m] = ym.split('-').map(Number)
+  const last = new Date(y, m, 0).getDate()
+  return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`
+}
+
 function selectGranularity(g) {
   granularity.value = g
   setDefaultDates()

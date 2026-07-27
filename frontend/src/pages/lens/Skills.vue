@@ -7,23 +7,13 @@
         <div
           class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
         >
-          <div class="min-w-0 space-y-2">
+          <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <h1 class="text-xl font-semibold text-ink-900">
                 {{ t('lensAdmin.pages.skills.title') }}
               </h1>
               <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs font-medium text-ink-500"
-              >
-                {{ t('lensAdmin.pages.skills.label') }}
-              </span>
-            </div>
-            <p class="max-w-3xl text-sm leading-6 text-ink-500">
-              {{ t('lensAdmin.pages.skills.description') }}
-            </p>
-            <div class="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-              <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs text-ink-500"
               >
                 {{
                   t('lensAdmin.total', {
@@ -31,11 +21,6 @@
                     count: skills.length
                   })
                 }}
-              </span>
-              <span
-                class="rounded-md border border-line bg-surface-sunken px-2 py-1"
-              >
-                {{ t('lensAdmin.pages.skills.action') }}
               </span>
             </div>
           </div>
@@ -70,13 +55,23 @@
             v-else
             class="relative overflow-x-auto rounded-lg border border-line bg-surface"
           >
-            <table class="min-w-full divide-y divide-line">
+            <table
+              class="w-full min-w-[56rem] table-fixed divide-y divide-line"
+            >
+              <colgroup>
+                <col />
+                <col class="w-44" />
+                <col class="w-28" />
+                <col class="w-24" />
+                <col class="w-52" />
+              </colgroup>
               <thead class="bg-surface-sunken">
                 <tr>
                   <th
                     v-for="column in columns"
                     :key="column"
                     class="table-head"
+                    scope="col"
                   >
                     {{ column }}
                   </th>
@@ -91,7 +86,8 @@
                   <td class="table-cell">
                     <button
                       type="button"
-                      class="text-left font-medium text-ink-900 hover:text-primary-700 hover:underline"
+                      class="block max-w-full truncate text-left font-medium text-ink-900 hover:text-primary-700 hover:underline"
+                      :title="row.name"
                       @click="openDetail(row)"
                     >
                       {{ row.name }}
@@ -104,9 +100,11 @@
                     </div>
                   </td>
                   <td class="table-cell font-mono text-ink-500">
-                    {{ row.slug }}
+                    <span class="block truncate" :title="row.slug">
+                      {{ row.slug }}
+                    </span>
                   </td>
-                  <td class="table-cell">
+                  <td class="table-cell text-center">
                     <span
                       v-if="isWorkspaceGuideSkill(row)"
                       class="inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
@@ -118,13 +116,15 @@
                       {{ t('lensAdmin.pages.skills.label') }}
                     </span>
                   </td>
-                  <td class="table-cell">
+                  <td class="table-cell text-center">
                     <StatusBadge
                       :status="row.enabled ? 'enabled' : 'disabled'"
                     />
                   </td>
                   <td class="table-cell">
-                    <div class="flex flex-wrap items-center gap-2">
+                    <div
+                      class="flex flex-nowrap items-center justify-center gap-2"
+                    >
                       <BaseButton
                         size="sm"
                         variant="outline"
@@ -208,59 +208,10 @@
                 :placeholder="t('lensAdmin.placeholders.skillDescription')"
               />
             </FormRow>
-            <FormRow :label="t('lensAdmin.skills.environmentVariables')">
-              <div
-                class="overflow-hidden rounded-lg border border-line bg-surface"
-              >
-                <div
-                  class="flex items-center justify-between gap-3 border-b border-line bg-surface-sunken px-3 py-2.5"
-                >
-                  <p class="text-xs leading-5 text-ink-500">
-                    {{ t('lensAdmin.skills.environmentVariablesHelp') }}
-                  </p>
-                  <BaseButton
-                    size="sm"
-                    variant="outline"
-                    @click="addEnvironment"
-                  >
-                    {{ t('common.add') }}
-                  </BaseButton>
-                </div>
-                <div
-                  v-if="!form.environment.length"
-                  class="px-3 py-4 text-sm text-ink-400"
-                >
-                  {{ t('lensAdmin.skills.noEnvironmentVariables') }}
-                </div>
-                <div
-                  v-for="(item, index) in form.environment"
-                  :key="index"
-                  class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2 border-b border-line p-3 last:border-b-0"
-                >
-                  <input
-                    v-model.trim="item.name"
-                    class="form-input min-w-0 font-mono"
-                    pattern="[A-Z_][A-Z0-9_]*"
-                    :placeholder="t('lensAdmin.skills.environmentKey')"
-                    required
-                  />
-                  <input
-                    v-model="item.description"
-                    class="form-input min-w-0"
-                    :placeholder="t('lensAdmin.skills.environmentDescription')"
-                  />
-                  <button
-                    type="button"
-                    class="inline-flex h-9 w-9 items-center justify-center rounded-md text-danger-600 transition-colors hover:bg-danger-50 hover:text-danger-700"
-                    :aria-label="t('common.delete')"
-                    :title="t('common.delete')"
-                    @click="removeEnvironment(index)"
-                  >
-                    <MinusIcon class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            </FormRow>
+            <SkillEnvironmentEditor
+              v-model="form.environment"
+              @change="markEnvironmentChanged"
+            />
             <FormRow :label="t('lensAdmin.fields.content')">
               <div class="mb-2 flex items-center justify-between gap-2">
                 <span class="text-xs text-ink-400">
@@ -286,7 +237,34 @@
           </template>
 
           <template v-else-if="activeMethod === 'upload'">
-            <FormRow :label="t('lensAdmin.skills.packageFile')" required>
+            <details
+              class="rounded-lg border border-primary-200 bg-primary-50/60"
+            >
+              <summary
+                class="cursor-pointer px-3 py-2 text-left marker:text-primary-500"
+              >
+                <span class="block text-sm font-medium text-primary-800">
+                  {{ t('lensAdmin.skills.packageGuideTitle') }}
+                </span>
+                <span
+                  class="mt-1 block pr-4 text-xs leading-5 text-primary-700"
+                >
+                  {{ t('lensAdmin.skills.packageGuideSummary') }}
+                </span>
+              </summary>
+              <div class="border-t border-primary-200 p-3">
+                <pre
+                  tabindex="0"
+                  :aria-label="t('lensAdmin.skills.packageGuideTitle')"
+                  class="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface p-3 font-mono text-xs leading-5 text-ink-700"
+                  >{{ tm('lensAdmin.skills.packageGuidePrompt') }}</pre
+                >
+              </div>
+            </details>
+            <FormRow
+              :label="t('lensAdmin.skills.packageFile')"
+              :required="mode === 'create'"
+            >
               <input
                 ref="packageInput"
                 class="hidden"
@@ -339,9 +317,17 @@
                 </button>
               </div>
               <p class="mt-1 text-xs leading-5 text-ink-500">
-                {{ t('lensAdmin.skills.packageFileHelp') }}
+                {{
+                  mode === 'create'
+                    ? t('lensAdmin.skills.packageFileHelp')
+                    : t('lensAdmin.skills.packageFileOptionalHelp')
+                }}
               </p>
             </FormRow>
+            <SkillEnvironmentEditor
+              v-model="form.environment"
+              @change="markEnvironmentChanged"
+            />
           </template>
 
           <template v-else-if="activeMethod === 'github'">
@@ -542,11 +528,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  Minus as MinusIcon,
-  UploadCloud as UploadCloudIcon,
-  X as XIcon
-} from '@lucide/vue'
+import { UploadCloud as UploadCloudIcon, X as XIcon } from '@lucide/vue'
 
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
@@ -576,9 +558,11 @@ import { extractErrorMessage } from '@/utils/api'
 import BooleanRow from './components/BooleanRow.vue'
 import FormRow from './components/FormRow.vue'
 import RowActions from './components/RowActions.vue'
+import SkillEnvironmentEditor from './components/SkillEnvironmentEditor.vue'
 import { normalizeList } from './adminHelpers'
+import { buildSkillEnvironment, skillEnvironmentForm } from './skillEnvironment'
 
-const { t } = useI18n()
+const { t, tm } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const MAX_SKILL_PACKAGE_BYTES = 20 * 1024 * 1024
@@ -601,6 +585,7 @@ const editSourceType = ref('manual')
 const packageFile = ref(null)
 const packageInput = ref(null)
 const packageDragging = ref(false)
+const environmentChanged = ref(false)
 const deleteTarget = ref(null)
 const deleteImpact = ref({})
 const deleteConfirmation = ref('')
@@ -763,18 +748,16 @@ function defaultForm() {
 }
 
 function formFromRow(row) {
+  const originalDefinition =
+    row?.definition && typeof row.definition === 'object' ? row.definition : {}
   return {
     uuid: row.uuid,
     name: row.name || '',
     slug: row.slug || '',
     description: skillDescription(row),
     content: skillContent(row),
-    environment: (row?.definition?.environment || []).map((item) => ({
-      name: item.name || '',
-      description: item.description || '',
-      required: true,
-      secret: !!item.secret || isSensitiveEnvironmentName(item.name)
-    })),
+    environment: skillEnvironmentForm(originalDefinition.environment),
+    originalDefinition,
     enabled: row.enabled !== false
   }
 }
@@ -782,12 +765,7 @@ function formFromRow(row) {
 function buildPayload() {
   const definition = {
     content: form.value.content || '',
-    environment: (form.value.environment || []).map((item) => ({
-      name: (item.name || '').trim(),
-      description: (item.description || '').trim(),
-      required: true,
-      secret: !!item.secret || isSensitiveEnvironmentName(item.name)
-    }))
+    environment: buildSkillEnvironment(form.value.environment)
   }
   const description = (form.value.description || '').trim()
   if (description) {
@@ -801,23 +779,17 @@ function buildPayload() {
   }
 }
 
-function addEnvironment() {
-  form.value.environment.push({
-    name: '',
-    description: '',
-    required: true,
-    secret: false
-  })
+function buildEnvironmentPayload() {
+  return {
+    definition: {
+      ...(form.value.originalDefinition || {}),
+      environment: buildSkillEnvironment(form.value.environment)
+    }
+  }
 }
 
-function removeEnvironment(index) {
-  form.value.environment.splice(index, 1)
-}
-
-function isSensitiveEnvironmentName(value) {
-  return /(?:PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|PRIVATE_KEY)$/i.test(
-    String(value || '')
-  )
+function markEnvironmentChanged() {
+  environmentChanged.value = true
 }
 
 async function load() {
@@ -882,6 +854,7 @@ function startCreate() {
   form.value = defaultForm()
   githubUrl.value = ''
   packageFile.value = null
+  environmentChanged.value = false
   showModal.value = true
 }
 
@@ -893,6 +866,7 @@ function startEdit(row) {
   form.value = formFromRow(row)
   githubUrl.value = row?.source_url || ''
   packageFile.value = null
+  environmentChanged.value = false
   showModal.value = true
 }
 
@@ -903,6 +877,7 @@ function closeModal() {
   githubUrl.value = ''
   editSourceType.value = 'manual'
   packageFile.value = null
+  environmentChanged.value = false
 }
 
 function openDetail(row) {
@@ -957,16 +932,27 @@ async function save() {
       if (!packageFile.value) {
         throw new Error(t('lensAdmin.skills.packageFileRequired'))
       }
-      await uploadSkill(packageFile.value)
+      const environment = environmentChanged.value
+        ? buildSkillEnvironment(form.value.environment)
+        : undefined
+      await uploadSkill(packageFile.value, environment)
       showSuccess(t('lensAdmin.skills.uploadSuccess'))
     } else if (mode.value === 'create' && createMethod.value === 'github') {
       await importSkillFromGithub(githubUrl.value)
       showSuccess(t('lensAdmin.skills.importSuccess'))
     } else if (mode.value === 'edit' && activeMethod.value === 'upload') {
-      if (!packageFile.value) {
-        throw new Error(t('lensAdmin.skills.packageFileRequired'))
+      if (packageFile.value) {
+        const environment = environmentChanged.value
+          ? buildSkillEnvironment(form.value.environment)
+          : undefined
+        await updateUploadedSkill(
+          form.value.uuid,
+          packageFile.value,
+          environment
+        )
+      } else {
+        await updateSkill(form.value.uuid, buildEnvironmentPayload())
       }
-      await updateUploadedSkill(form.value.uuid, packageFile.value)
       showSuccess(t('lensAdmin.messages.saveSuccess'))
     } else if (mode.value === 'edit' && activeMethod.value === 'github') {
       await updateGithubSkill(form.value.uuid, githubUrl.value)
@@ -1065,7 +1051,7 @@ onMounted(load)
 }
 
 .table-head {
-  @apply border-b border-line px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
+  @apply border-b border-line px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-ink-500;
 }
 
 .table-cell {

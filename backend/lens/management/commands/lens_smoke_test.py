@@ -12,7 +12,6 @@ EXPECTED_MODELS = {
     "AssistantMCP",
     "DataSource",
     "DataSourceCredential",
-    "EnvironmentVariableSet",
     "GlobalSetting",
     "MCPServer",
     "Message",

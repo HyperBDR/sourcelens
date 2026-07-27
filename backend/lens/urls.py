@@ -1,5 +1,5 @@
-from rest_framework.routers import DefaultRouter
 from django.urls import path
+from rest_framework.routers import DefaultRouter
 
 from .views import (
     AdminRunDetailView,
@@ -11,12 +11,13 @@ from .views import (
     EnvironmentVariableSetViewSet,
     GlobalSettingViewSet,
     LensAttachmentView,
-    MCPServerViewSet,
     LensNodeAIGatewayView,
     LensNodeDeliverableUploadView,
     LensNodeSkillPackageView,
     LensNodeViewSet,
+    MCPServerViewSet,
     PublicAssistantView,
+    PublicSharedQAFileView,
     PublicSharedQAListView,
     PublicSharedQAView,
     RunOutputFileDownloadView,
@@ -80,6 +81,11 @@ urlpatterns = [
         "public/qa/<str:token>/",
         PublicSharedQAView.as_view(),
         name="lens-public-qa",
+    ),
+    path(
+        "public/qa/<str:token>/files/<uuid:uuid>/",
+        PublicSharedQAFileView.as_view(),
+        name="lens-public-qa-file",
     ),
     path(
         "runs/<uuid:uuid>/stream/",

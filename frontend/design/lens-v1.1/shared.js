@@ -1,4 +1,3 @@
-/* eslint-disable no-unused-vars */
 // Shared mock data and utilities for Lens prototype v1.1
 
 const MOCK = {

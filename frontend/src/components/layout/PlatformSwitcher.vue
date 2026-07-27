@@ -112,11 +112,15 @@ const buttonClasses = computed(() =>
 )
 
 const panelClasses = computed(() =>
-  isDark.value ? 'border-line bg-surface' : 'border-line bg-surface'
+  isDark.value
+    ? 'border-line bg-surface'
+    : 'border-line bg-surface'
 )
 
 const headerClasses = computed(() =>
-  isDark.value ? 'border-line text-ink-500' : 'border-line text-ink-500'
+  isDark.value
+    ? 'border-line text-ink-500'
+    : 'border-line text-ink-500'
 )
 
 const itemClasses = computed(() =>

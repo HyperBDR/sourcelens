@@ -1,6 +1,11 @@
 <template>
   <div :class="containerClass">
-    <img v-if="showMark" :src="markSrc" :alt="altText" :class="markClass" />
+    <img
+      v-if="showMark"
+      :src="markSrc"
+      :alt="altText"
+      :class="markClass"
+    />
     <img
       v-if="showWordmark"
       :src="wordmarkSrc"

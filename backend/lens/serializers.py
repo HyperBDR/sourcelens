@@ -8,6 +8,7 @@ from django.urls import reverse
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
+from .attachments import ATTACHMENT_MAX_PER_MESSAGE
 from .datasource_services import (
     DataSourceDispatchError,
     DataSourcePathError,
@@ -30,10 +31,10 @@ from .models import (
     DataSourceCredential,
     EnvironmentVariableSet,
     GlobalSetting,
+    LensNode,
     MCPServer,
     Message,
     MessageAttachment,
-    LensNode,
     Run,
     RunExecution,
     RunOutputFile,
@@ -41,9 +42,9 @@ from .models import (
     ScheduledTask,
     Session,
     SharedQA,
+    SharedQAFile,
     Skill,
 )
-from .attachments import ATTACHMENT_MAX_PER_MESSAGE
 from .services import create_execution_run
 from .skill_generation import (
     get_workspace_guide_payload,
@@ -1963,14 +1964,40 @@ def _answer_snippet(text, limit=160):
     return " ".join((text or "").split())[:limit]
 
 
-class SharedQAPublicSerializer(serializers.ModelSerializer):
-    """Public single shared Q&A (anonymous, read-only).
+class SharedQAFileSerializer(serializers.ModelSerializer):
+    """Share-scoped metadata for one immutable file snapshot."""
 
-    Intentionally a text-only snapshot: it must NOT include output_files
-    or any deliverable download URL. Deliverables are owner/staff-only
-    (see RunOutputFileDownloadView); exposing them here would leak
-    private files to anyone holding the public share token.
-    """
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SharedQAFile
+        fields = [
+            "uuid",
+            "url",
+            "filename",
+            "content_type",
+            "byte_size",
+            "order",
+        ]
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        """Return a path authorized by both share token and file UUID."""
+
+        return reverse(
+            "lens-public-qa-file",
+            kwargs={
+                "token": obj.share.token,
+                "uuid": obj.uuid,
+            },
+        )
+
+
+class SharedQAPublicSerializer(serializers.ModelSerializer):
+    """Authenticated, read-only snapshot of one shared Q&A turn."""
+
+    input_attachments = serializers.SerializerMethodField()
+    output_files = serializers.SerializerMethodField()
 
     class Meta:
         model = SharedQA
@@ -1978,13 +2005,27 @@ class SharedQAPublicSerializer(serializers.ModelSerializer):
             "token",
             "title",
             "question",
+            "input_attachments",
             "answer",
+            "output_files",
             "assistant_name",
             "assistant_slug",
             "view_count",
             "published_at",
         ]
         read_only_fields = fields
+
+    def get_input_attachments(self, obj):
+        """Return snapshotted files submitted with the question."""
+
+        files = obj.files.filter(kind=SharedQAFile.Kind.INPUT)
+        return SharedQAFileSerializer(files, many=True).data
+
+    def get_output_files(self, obj):
+        """Return snapshotted final files delivered with the answer."""
+
+        files = obj.files.filter(kind=SharedQAFile.Kind.OUTPUT)
+        return SharedQAFileSerializer(files, many=True).data
 
 
 class SharedQAListSerializer(serializers.ModelSerializer):

@@ -7,13 +7,10 @@
         <div
           class="flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-4"
         >
-          <div class="space-y-2">
+          <div>
             <h1 class="text-xl font-semibold text-ink-900">
               {{ t('lensAdmin.pages.environmentVariables.title') }}
             </h1>
-            <p class="max-w-3xl text-sm leading-6 text-ink-500">
-              {{ t('lensAdmin.pages.environmentVariables.description') }}
-            </p>
           </div>
           <BaseButton variant="primary" size="sm" @click="startCreate">
             {{ t('lensAdmin.pages.environmentVariables.action') }}
@@ -116,7 +113,7 @@
                 <input
                   v-model.trim="item.key"
                   class="form-input font-mono"
-                  pattern="[A-Z_][A-Z0-9_]*"
+                  :pattern="SHELL_ENVIRONMENT_NAME_PATTERN"
                   :placeholder="t('lensAdmin.skills.environmentKey')"
                   required
                 />
@@ -184,6 +181,7 @@ import { extractErrorMessage } from '@/utils/api'
 
 import FormRow from './components/FormRow.vue'
 import { normalizeList } from './adminHelpers'
+import { SHELL_ENVIRONMENT_NAME_PATTERN } from './skillEnvironment'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()

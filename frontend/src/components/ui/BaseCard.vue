@@ -21,7 +21,7 @@
 <script setup>
 import { computed } from 'vue'
 
-const props = defineProps({
+  const props = defineProps({
   title: {
     type: String,
     default: ''
@@ -73,7 +73,9 @@ const cardClasses = computed(() => {
 
 const headerClasses = computed(() => {
   const base = 'border-b border-line px-5 py-4'
-  const muted = props.headerMuted ? 'bg-line-soft' : ''
+  const muted = props.headerMuted
+    ? 'bg-line-soft'
+    : ''
   return [base, muted, props.headerClass].filter(Boolean).join(' ')
 })
 </script>

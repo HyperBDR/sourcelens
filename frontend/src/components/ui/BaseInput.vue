@@ -12,7 +12,6 @@
     <div class="relative">
       <input
         :id="inputId"
-        :name="name"
         :type="type"
         :value="modelValue"
         :placeholder="placeholder"
@@ -95,10 +94,6 @@ const props = defineProps({
   type: {
     type: String,
     default: 'text'
-  },
-  name: {
-    type: String,
-    default: ''
   },
   label: {
     type: String,

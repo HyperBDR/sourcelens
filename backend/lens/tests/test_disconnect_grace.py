@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
-from django.test import TransactionTestCase, override_settings
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from core.asgi import application
@@ -26,13 +26,6 @@ from lens.tasks import check_lensnode_disconnect_grace_period
 User = get_user_model()
 
 
-@override_settings(
-    CHANNEL_LAYERS={
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer",
-        }
-    }
-)
 class LensNodeDisconnectGraceTests(TransactionTestCase):
     """Grace-period handling for LensNode WebSocket disconnects.
 

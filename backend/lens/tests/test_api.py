@@ -1,7 +1,9 @@
+import hashlib
 import io
 import json
 import tempfile
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
@@ -18,9 +20,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_task.adapters.django.models import TaskExecution
 
-from lens.datasource_services import (
-    test_datasource_connection as run_datasource_connection_test,
-)
+from lens.datasource_services import test_datasource_connection
 from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
     Assistant,
@@ -45,6 +45,7 @@ from lens.services import (
     resolve_loaded_skill_environment,
     validate_run_dispatch,
 )
+from lens.skill_packages import package_zip_bytes
 from lens.tasks import acquire_datasource_lock, release_datasource_lock
 
 User = get_user_model()
@@ -95,7 +96,14 @@ def bearer_header(user):
     return f"Bearer {AccessToken.for_user(user)}"
 
 
-def skill_zip_upload(name, body, environment=None, api=None):
+def skill_zip_upload(
+    name,
+    body,
+    environment=None,
+    api=None,
+    artifacts=None,
+    package_files=None,
+):
     """Return an uploaded zip containing one SKILL.md."""
 
     buffer = io.BytesIO()
@@ -108,16 +116,44 @@ def skill_zip_upload(name, body, environment=None, api=None):
     )
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr(f"{name}/SKILL.md", skill_md)
-        if environment is not None or api is not None:
+        for path, content in (package_files or {}).items():
+            archive.writestr(f"{name}/{path}", content)
+        if any(
+            value is not None for value in (environment, api, artifacts)
+        ):
             config = {}
             if environment is not None:
                 config["environment"] = environment
             if api is not None:
                 config["api"] = api
+            if artifacts is not None:
+                config["artifacts"] = artifacts
             archive.writestr(
                 f"{name}/sourcelens.json",
                 json.dumps(config),
             )
+    buffer.seek(0)
+    return SimpleUploadedFile(
+        f"{name}.zip",
+        buffer.read(),
+        content_type="application/zip",
+    )
+
+
+def skill_zip_upload_with_file(name, file_size):
+    """Return a compressed Skill zip containing one generated package file."""
+
+    buffer = io.BytesIO()
+    skill_md = (
+        "---\n"
+        f"name: {name}\n"
+        f"description: {name} description\n"
+        "---\n"
+        "Use the bundled executable.\n"
+    )
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{name}/SKILL.md", skill_md)
+        archive.writestr(f"{name}/bin/tool", b"\0" * file_size)
     buffer.seek(0)
     return SimpleUploadedFile(
         f"{name}.zip",
@@ -480,6 +516,96 @@ class LensApiTests(TestCase):
             environment,
         )
 
+    def test_uploaded_skill_accepts_ten_megabyte_package_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload_with_file(
+                            "binary-skill",
+                            10 * 1024 * 1024,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_uploaded_skill_rejects_package_file_over_ten_megabytes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload_with_file(
+                            "oversized-binary-skill",
+                            10 * 1024 * 1024 + 1,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Skill package contains an oversized file.",
+        )
+
+    def test_uploaded_skill_accepts_environment_schema_override(self):
+        environment = [
+            {
+                "name": "JIRA_API_TOKEN",
+                "description": "Jira token",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "jira-connector",
+                            "Use the Jira API.",
+                        ),
+                        "environment": json.dumps(environment),
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["definition"]["environment"],
+            environment,
+        )
+
+    def test_uploaded_skill_rejects_invalid_environment_schema_json(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "jira-connector",
+                            "Use the Jira API.",
+                        ),
+                        "environment": "{invalid",
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Environment variables must be valid JSON.",
+        )
+        self.assertFalse(
+            Skill.objects.filter(slug="jira-connector").exists()
+        )
+
     def test_uploaded_skill_reads_api_access_policy(self):
         environment = [
             {
@@ -516,6 +642,163 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["definition"]["api"], api)
+
+    def test_uploaded_skill_reads_and_enables_declared_artifact(self):
+        artifact_content = b"#!/bin/sh\nprintf artifact-ok\\n"
+        artifact_hash = hashlib.sha256(artifact_content).hexdigest()
+        artifacts = {
+            "income": {
+                "type": "executable",
+                "entrypoints": [
+                    {
+                        "os": "linux",
+                        "arch": "arm64",
+                        "path": "bin/linux-arm64/income",
+                        "sha256": artifact_hash,
+                    }
+                ],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "income-cli",
+                            "Run the declared Income artifact.",
+                            artifacts=artifacts,
+                            package_files={
+                                "bin/linux-arm64/income": artifact_content,
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.data["definition"]["artifacts"],
+                    artifacts,
+                )
+                skill = Skill.objects.get(slug="income-cli")
+                artifact_path = (
+                    Path(skill.package_path)
+                    / "bin"
+                    / "linux-arm64"
+                    / "income"
+                )
+                self.assertEqual(artifact_path.stat().st_mode & 0o777, 0o755)
+                with zipfile.ZipFile(package_zip_bytes(skill)) as archive:
+                    info = archive.getinfo(
+                        "income-cli/bin/linux-arm64/income"
+                    )
+                    self.assertEqual(
+                        (info.external_attr >> 16) & 0o777,
+                        0o755,
+                    )
+
+    def test_uploaded_skill_recursively_enables_scripts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "script-permissions",
+                            "Run the bundled script.",
+                            package_files={
+                                "scripts/nested/run": b"#!/bin/sh\n",
+                                "scripts/helper.py": b"print('ok')\n",
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+                self.assertEqual(response.status_code, 200)
+                skill = Skill.objects.get(slug="script-permissions")
+                package_root = Path(skill.package_path)
+                self.assertEqual(
+                    (package_root / "scripts/nested/run").stat().st_mode
+                    & 0o777,
+                    0o755,
+                )
+                self.assertEqual(
+                    (package_root / "scripts/helper.py").stat().st_mode
+                    & 0o777,
+                    0o755,
+                )
+
+    def test_uploaded_skill_rejects_artifact_outside_bin(self):
+        content = b"#!/bin/sh\n"
+        artifacts = {
+            "income": {
+                "type": "executable",
+                "entrypoints": [
+                    {
+                        "os": "linux",
+                        "arch": "arm64",
+                        "path": "scripts/income",
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                    }
+                ],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "unsafe-artifact",
+                            "Run an artifact.",
+                            artifacts=artifacts,
+                            package_files={"scripts/income": content},
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("bin/", response.data["detail"])
+
+    def test_uploaded_skill_rejects_artifact_hash_mismatch(self):
+        artifacts = {
+            "income": {
+                "type": "executable",
+                "entrypoints": [
+                    {
+                        "os": "linux",
+                        "arch": "arm64",
+                        "path": "bin/linux-arm64/income",
+                        "sha256": "0" * 64,
+                    }
+                ],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "tampered-artifact",
+                            "Run an artifact.",
+                            artifacts=artifacts,
+                            package_files={
+                                "bin/linux-arm64/income": b"unexpected",
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("SHA-256", response.data["detail"])
 
     def test_manual_skill_rejects_api_route_with_path_traversal(self):
         response = self.client.post(
@@ -580,6 +863,42 @@ class LensApiTests(TestCase):
                 assistant=self.assistant,
                 skill=skill,
             ).exists()
+        )
+
+    def test_uploaded_skill_update_accepts_environment_schema_override(self):
+        skill = Skill.objects.create(
+            name="package-skill",
+            slug="package-skill",
+            definition={"content": "old", "environment": []},
+            source_type="upload",
+        )
+        environment = [
+            {
+                "name": "PACKAGE_TOKEN",
+                "description": "Package token",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    f"/api/lens/admin/skills/{skill.uuid}/update-upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "package-skill",
+                            "new body",
+                        ),
+                        "environment": json.dumps(environment),
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["definition"]["environment"],
+            environment,
         )
 
     def test_assistant_create_rejects_unreported_task(self):
@@ -2232,7 +2551,7 @@ class LensApiTests(TestCase):
                 return_value={"status": "success"},
             ),
         ):
-            run_datasource_connection_test(
+            test_datasource_connection(
                 self.lensnode,
                 "git",
                 config={

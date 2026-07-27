@@ -32,10 +32,7 @@
         class="flex flex-1 items-center justify-start"
         @click="isMobile && $emit('close')"
       >
-        <BrandLogo
-          variant="responsive"
-          wrapperClass="origin-left scale-[0.62]"
-        />
+        <BrandLogo variant="responsive" wrapperClass="origin-left scale-[0.62]" />
       </router-link>
       <button
         v-if="isMobile"
@@ -126,7 +123,7 @@ import { useIsMobile } from '@/composables/useIsMobile'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import SidebarQuickMenu from '@/components/layout/SidebarQuickMenu.vue'
 
-defineProps({
+const props = defineProps({
   showMobileMenu: {
     type: Boolean,
     default: false

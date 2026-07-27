@@ -1,5 +1,7 @@
 import api from '@/api'
 
+import { collectPaginatedResults } from './pagination'
+
 function unwrapResponse(response) {
   return response?.data?.data ?? response?.data ?? null
 }
@@ -199,8 +201,12 @@ export async function deleteDataSource(uuid) {
 }
 
 export async function listCredentials(params = {}) {
-  const response = await api.get('/lens/admin/credentials/', { params })
-  return unwrapList(unwrapResponse(response))
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/admin/credentials/', {
+      params: { page_size: 10000, ...params, page }
+    })
+    return unwrapResponse(response)
+  })
 }
 
 export async function createCredential(payload) {
@@ -320,18 +326,24 @@ export async function forceDeleteSkill(uuid, confirmationName) {
   return unwrapResponse(response)
 }
 
-export async function uploadSkill(file) {
+export async function uploadSkill(file, environment) {
   const payload = new FormData()
   payload.append('file', file)
+  if (environment !== undefined) {
+    payload.append('environment', JSON.stringify(environment))
+  }
   const response = await api.post('/lens/admin/skills/upload/', payload, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
   return unwrapResponse(response)
 }
 
-export async function updateUploadedSkill(uuid, file) {
+export async function updateUploadedSkill(uuid, file, environment) {
   const payload = new FormData()
   payload.append('file', file)
+  if (environment !== undefined) {
+    payload.append('environment', JSON.stringify(environment))
+  }
   const response = await api.post(
     `/lens/admin/skills/${uuid}/update-upload/`,
     payload,

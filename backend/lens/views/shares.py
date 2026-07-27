@@ -3,17 +3,20 @@
 import secrets
 
 from django.db.models import F
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from lens.models import Assistant, SharedQA
+from lens.models import Assistant, SharedQA, SharedQAFile
 from lens.serializers import (
     SharedQAAdminSerializer,
     SharedQAListSerializer,
     SharedQAMineSerializer,
     SharedQAPublicSerializer,
 )
+from lens.shared_qa_files import snapshot_shared_qa_files
 from .admin_runs import _admin_safe_int
 from .base import BaseAdminViewSet, BaseAuthenticatedViewSet
 
@@ -102,11 +105,51 @@ class PublicSharedQAView(APIView):
         access_error = _shared_qa_access_error(share.assistant, request.user)
         if access_error is not None:
             return access_error
+        snapshot_shared_qa_files(share, strict=False)
         SharedQA.objects.filter(pk=share.pk).update(
             view_count=F("view_count") + 1
         )
         share.refresh_from_db(fields=["view_count"])
         return Response(SharedQAPublicSerializer(share).data)
+
+
+class PublicSharedQAFileView(APIView):
+    """Serve one immutable file through shared-Q&A authorization."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, token, uuid):
+        """Return shared bytes only to eligible authenticated viewers."""
+
+        share = (
+            SharedQA.objects.select_related("assistant")
+            .filter(token=token, status=SharedQA.Status.PUBLISHED)
+            .first()
+        )
+        if share is None or share.assistant is None:
+            raise Http404
+        access_error = _shared_qa_access_error(share.assistant, request.user)
+        if access_error is not None:
+            return access_error
+        snapshot = get_object_or_404(
+            SharedQAFile,
+            share=share,
+            uuid=uuid,
+        )
+        try:
+            file_handle = snapshot.file.open("rb")
+        except Exception as exc:
+            raise Http404 from exc
+        response = FileResponse(
+            file_handle,
+            as_attachment=True,
+            filename=snapshot.filename,
+            content_type=snapshot.content_type or "application/octet-stream",
+        )
+        response["Cache-Control"] = "private, max-age=0, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "sandbox"
+        return response
 
 
 def _shared_qa_visible_to_user(share, user):

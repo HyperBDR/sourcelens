@@ -1,4 +1,4 @@
-import { formatDistanceToNow } from 'date-fns'
+import { format, formatDistanceToNow } from 'date-fns'
 import { formatInTimeZone, toZonedTime } from 'date-fns-tz'
 import { zhCN } from 'date-fns/locale/zh-CN'
 import { enUS } from 'date-fns/locale/en-US'

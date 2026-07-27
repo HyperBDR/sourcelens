@@ -1982,6 +1982,10 @@ function updateProject(projectId, updater) {
   })
 }
 
+function createTimerBucket() {
+  return new Set()
+}
+
 function schedule(bucket, callback, delay) {
   const id = window.setTimeout(() => {
     bucket.delete(id)

@@ -5,6 +5,7 @@ import io
 import json
 import re
 import shutil
+import stat
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -13,6 +14,7 @@ from urllib import parse, request
 
 from django.conf import settings
 from django.db import transaction
+from rest_framework.exceptions import ValidationError
 
 from .environment_variables import (
     validate_environment_schema,
@@ -22,13 +24,17 @@ from .models import Skill
 
 MAX_ZIP_SIZE = 20 * 1024 * 1024
 MAX_UNPACKED_SIZE = 50 * 1024 * 1024
-MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_FILE_SIZE = 10 * 1024 * 1024
 MAX_SKILL_MD_SIZE = 256 * 1024
 MAX_FILE_COUNT = 300
 MAX_GITHUB_DOWNLOAD_SIZE = MAX_ZIP_SIZE
 GITHUB_TIMEOUT_SECONDS = 30
 BLOCKED_PARTS = {".git", ".ssh", "__pycache__", "node_modules", ".venv"}
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,179}$")
+ARTIFACT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+SUPPORTED_ARTIFACT_OS = {"darwin", "linux", "windows"}
+SUPPORTED_ARTIFACT_ARCH = {"amd64", "arm64"}
 
 
 class SkillPackageError(ValueError):
@@ -41,6 +47,7 @@ def import_skill_zip(
     original_name="",
     source_type="upload",
     source_url="",
+    environment_override=None,
 ):
     """Validate and persist a Skill zip package."""
 
@@ -61,6 +68,7 @@ def import_skill_zip(
         skill_md = skill_root / "SKILL.md"
         metadata = _parse_skill_md(skill_md)
         metadata.update(_parse_sourcelens_config(skill_root))
+        _apply_environment_override(metadata, environment_override)
         slug = _slug_from_metadata(metadata)
         manifest = _package_manifest(skill_root)
         package_root = skill_package_root(slug, digest)
@@ -96,6 +104,7 @@ def import_skill_zip(
                             "skill_md": metadata["skill_md"],
                             "environment": metadata["environment"],
                             "api": metadata["api"],
+                            "artifacts": metadata["artifacts"],
                         },
                         "version": digest[:12],
                         "enabled": True,
@@ -122,6 +131,7 @@ def update_skill_zip(
     original_name="",
     source_type="upload",
     source_url="",
+    environment_override=None,
 ):
     """Validate a Skill zip package and replace an existing Skill snapshot."""
 
@@ -145,6 +155,7 @@ def update_skill_zip(
         skill_root = _find_skill_root(extract_root)
         metadata = _parse_skill_md(skill_root / "SKILL.md")
         metadata.update(_parse_sourcelens_config(skill_root))
+        _apply_environment_override(metadata, environment_override)
         slug = _slug_from_metadata(metadata)
         if slug != skill.slug:
             raise SkillPackageError(
@@ -173,6 +184,7 @@ def update_skill_zip(
                     "skill_md": metadata["skill_md"],
                     "environment": metadata["environment"],
                     "api": metadata["api"],
+                    "artifacts": metadata["artifacts"],
                 }
                 skill.version = digest[:12]
                 skill.enabled = True
@@ -301,10 +313,13 @@ def package_zip_bytes(skill):
             definition = skill.definition or {}
             environment = definition.get("environment") or []
             api = definition.get("api") or {}
-            if environment or api:
+            artifacts = definition.get("artifacts") or {}
+            if environment or api or artifacts:
                 config = {"environment": environment}
                 if api:
                     config["api"] = api
+                if artifacts:
+                    config["artifacts"] = artifacts
                 archive.writestr(
                     f"{skill.slug}/sourcelens.json",
                     json.dumps(
@@ -357,12 +372,23 @@ def _safe_extract_zip(data, destination):
                 raise SkillPackageError("Skill package unpacks over 50 MB.")
             _validate_zip_member(info)
         archive.extractall(destination)
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            relative_path = Path(
+                *PurePosixPath(info.filename.replace("\\", "/")).parts
+            )
+            target = destination / relative_path
+            source_mode = (info.external_attr >> 16) & 0o777
+            target.chmod(0o755 if source_mode & 0o111 else 0o644)
 
 
 def _validate_zip_member(info):
     """Reject unsafe zip member names or unsupported entries."""
 
-    name = info.filename.replace("\\", "/")
+    if "\\" in info.filename:
+        raise SkillPackageError("Skill package contains unsafe paths.")
+    name = info.filename
     path = PurePosixPath(name)
     if name.startswith("/") or not name.strip() or ".." in path.parts:
         raise SkillPackageError("Skill package contains unsafe paths.")
@@ -424,7 +450,8 @@ def _parse_sourcelens_config(skill_root):
 
     path = skill_root / "sourcelens.json"
     if not path.exists():
-        return {"environment": [], "api": {}}
+        _enable_skill_scripts(skill_root)
+        return {"environment": [], "api": {}, "artifacts": {}}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -438,9 +465,196 @@ def _parse_sourcelens_config(skill_root):
     try:
         environment = validate_environment_schema(payload.get("environment"))
         api = validate_skill_api_policy(payload.get("api"), environment)
-        return {"environment": environment, "api": api}
+        artifacts = _validate_skill_artifacts(
+            payload.get("artifacts"),
+            skill_root,
+        )
+        _enable_skill_scripts(skill_root)
+        _enable_declared_artifacts(skill_root, artifacts)
+        return {
+            "environment": environment,
+            "api": api,
+            "artifacts": artifacts,
+        }
     except Exception as exc:
         raise SkillPackageError(str(exc)) from exc
+
+
+def _apply_environment_override(metadata, environment_override):
+    """Apply an optional admin-provided environment declaration."""
+
+    if environment_override is None:
+        return
+    try:
+        environment = validate_environment_schema(environment_override)
+        api = validate_skill_api_policy(metadata.get("api"), environment)
+    except ValidationError as exc:
+        detail = exc.detail[0] if isinstance(exc.detail, list) else exc.detail
+        raise SkillPackageError(str(detail)) from exc
+    metadata["environment"] = environment
+    metadata["api"] = api
+
+
+def _validate_skill_artifacts(value, skill_root):
+    """Validate and normalize executable Artifact declarations."""
+
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, dict):
+        raise SkillPackageError("Skill artifacts must be an object.")
+    if len(value) > 32:
+        raise SkillPackageError("A Skill may declare at most 32 artifacts.")
+
+    normalized = {}
+    for raw_name, raw_artifact in value.items():
+        name = str(raw_name or "").strip()
+        if not ARTIFACT_NAME_RE.fullmatch(name):
+            raise SkillPackageError(
+                "Artifact names must use lowercase letters, numbers, '-' "
+                "or '_'."
+            )
+        if name in normalized:
+            raise SkillPackageError("Artifact names must be unique.")
+        if not isinstance(raw_artifact, dict):
+            raise SkillPackageError(
+                f"Artifact '{name}' must be an object."
+            )
+        artifact_type = str(raw_artifact.get("type") or "").strip().lower()
+        if artifact_type != "executable":
+            raise SkillPackageError(
+                f"Artifact '{name}' must use type 'executable'."
+            )
+        raw_entrypoints = raw_artifact.get("entrypoints")
+        if not isinstance(raw_entrypoints, list) or not raw_entrypoints:
+            raise SkillPackageError(
+                f"Artifact '{name}' requires at least one entrypoint."
+            )
+        if len(raw_entrypoints) > 16:
+            raise SkillPackageError(
+                f"Artifact '{name}' may have at most 16 entrypoints."
+            )
+
+        entrypoints = []
+        platforms = set()
+        for raw_entrypoint in raw_entrypoints:
+            entrypoint = _validate_artifact_entrypoint(
+                name,
+                raw_entrypoint,
+                skill_root,
+            )
+            platform_key = (entrypoint["os"], entrypoint["arch"])
+            if platform_key in platforms:
+                raise SkillPackageError(
+                    f"Artifact '{name}' has duplicate entrypoints for "
+                    f"{entrypoint['os']}/{entrypoint['arch']}."
+                )
+            platforms.add(platform_key)
+            entrypoints.append(entrypoint)
+        normalized[name] = {
+            "type": "executable",
+            "entrypoints": entrypoints,
+        }
+    return normalized
+
+
+def _validate_artifact_entrypoint(name, value, skill_root):
+    """Validate one platform-specific executable Artifact entrypoint."""
+
+    if not isinstance(value, dict):
+        raise SkillPackageError(
+            f"Artifact '{name}' entrypoints must be objects."
+        )
+    os_name = str(value.get("os") or "").strip().lower()
+    arch = str(value.get("arch") or "").strip().lower()
+    if os_name not in SUPPORTED_ARTIFACT_OS:
+        raise SkillPackageError(
+            f"Artifact '{name}' uses an unsupported operating system."
+        )
+    if arch not in SUPPORTED_ARTIFACT_ARCH:
+        raise SkillPackageError(
+            f"Artifact '{name}' uses an unsupported CPU architecture."
+        )
+
+    path_text = str(value.get("path") or "").replace("\\", "/").strip()
+    relative_path = PurePosixPath(path_text)
+    if (
+        not path_text
+        or path_text.startswith("/")
+        or ".." in relative_path.parts
+        or len(relative_path.parts) < 2
+        or relative_path.parts[0] != "bin"
+    ):
+        raise SkillPackageError(
+            f"Artifact '{name}' path must be a safe path under bin/."
+        )
+    artifact_path = skill_root.joinpath(*relative_path.parts)
+    bin_root = (skill_root / "bin").resolve()
+    try:
+        resolved = artifact_path.resolve(strict=True)
+        resolved.relative_to(bin_root)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise SkillPackageError(
+            f"Artifact '{name}' path must reference a file under bin/."
+        ) from exc
+    if _path_contains_symlink(skill_root, artifact_path):
+        raise SkillPackageError(
+            f"Artifact '{name}' path must not contain symbolic links."
+        )
+    if not stat.S_ISREG(artifact_path.lstat().st_mode):
+        raise SkillPackageError(
+            f"Artifact '{name}' path must reference a regular file."
+        )
+
+    expected_hash = str(value.get("sha256") or "").strip().lower()
+    if not SHA256_RE.fullmatch(expected_hash):
+        raise SkillPackageError(
+            f"Artifact '{name}' requires a lowercase SHA-256 digest."
+        )
+    actual_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+    if actual_hash != expected_hash:
+        raise SkillPackageError(
+            f"Artifact '{name}' SHA-256 does not match its packaged file."
+        )
+    return {
+        "os": os_name,
+        "arch": arch,
+        "path": relative_path.as_posix(),
+        "sha256": expected_hash,
+    }
+
+
+def _path_contains_symlink(root, path):
+    """Return whether a path below root contains a symbolic link."""
+
+    relative = path.relative_to(root)
+    current = root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _enable_skill_scripts(skill_root):
+    """Grant sanitized execute permission to regular files under scripts/."""
+
+    scripts_root = skill_root / "scripts"
+    if not scripts_root.is_dir() or scripts_root.is_symlink():
+        return
+    for path in scripts_root.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            path.chmod(0o755)
+
+
+def _enable_declared_artifacts(skill_root, artifacts):
+    """Grant sanitized execute permission to declared Artifact files."""
+
+    for artifact in artifacts.values():
+        for entrypoint in artifact["entrypoints"]:
+            path = skill_root.joinpath(
+                *PurePosixPath(entrypoint["path"]).parts
+            )
+            path.chmod(0o755)
 
 
 def _parse_simple_frontmatter(frontmatter):

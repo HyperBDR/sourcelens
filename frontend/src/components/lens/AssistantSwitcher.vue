@@ -117,10 +117,7 @@
     </Transition>
   </div>
 
-  <div
-    v-if="mode === 'embedded' && isVisible"
-    class="assistant-switcher-embedded"
-  >
+  <div v-if="mode === 'embedded' && isVisible" class="assistant-switcher-embedded">
     <div v-if="loading" class="assistant-switcher-empty">
       {{ t('settings.modal.assistantLoading') }}
     </div>
@@ -140,7 +137,9 @@
         "
         :title="assistant.name || assistant.slug"
         :aria-label="assistant.name || assistant.slug"
-        :disabled="Boolean(switchingSlug) && switchingSlug !== assistant.slug"
+        :disabled="
+          Boolean(switchingSlug) && switchingSlug !== assistant.slug
+        "
         @click="selectAssistant(assistant.slug)"
       >
         <span class="assistant-switcher-embedded-avatar">
@@ -156,11 +155,7 @@
           stroke-width="2.75"
           aria-hidden="true"
         >
-          <path
-            d="M20 6 9 17l-5-5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
+          <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         <svg
           v-else
@@ -171,11 +166,7 @@
           stroke-width="2.5"
           aria-hidden="true"
         >
-          <path
-            d="m10 6 6 6-6 6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
+          <path d="m10 6 6 6-6 6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
     </div>
@@ -428,13 +419,10 @@ function assistantToneClass(assistant) {
   return tones[hash]
 }
 
-const assistantCollator = new Intl.Collator(
-  ['zh-Hans-u-co-pinyin', 'zh-Hans', 'en'],
-  {
-    sensitivity: 'base',
-    numeric: true
-  }
-)
+const assistantCollator = new Intl.Collator(['zh-Hans-u-co-pinyin', 'zh-Hans', 'en'], {
+  sensitivity: 'base',
+  numeric: true
+})
 
 const sortedAssistants = computed(() =>
   [...assistants.value].sort((left, right) => {

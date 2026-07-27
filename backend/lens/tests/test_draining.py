@@ -1,6 +1,6 @@
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
-from django.test import TransactionTestCase, override_settings
+from django.test import TransactionTestCase
 
 from core.asgi import application
 from lens.lensnode_auth import issue_lensnode_token
@@ -19,13 +19,6 @@ from lens.services import (
 User = get_user_model()
 
 
-@override_settings(
-    CHANNEL_LAYERS={
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer",
-        }
-    }
-)
 class LensNodeDrainingTests(TransactionTestCase):
     """A draining LensNode is excluded from new-run dispatch.
 
