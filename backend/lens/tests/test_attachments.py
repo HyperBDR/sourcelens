@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from PIL import Image
 from rest_framework.test import APIClient
 
+from agentcore_metering.adapters.django.models import LLMUsage
 from lens.llm import LensLLMResult
 from lens.models import (
     Assistant,
@@ -198,6 +199,126 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(counts["prompt_tokens"], 400)
         self.assertEqual(counts["completion_tokens"], 100)
         self.assertEqual(counts["total_cost"], 0.02)
+
+    def test_admin_run_step_counts_includes_artifact_calls(self):
+        from lens.models import RunStep
+        from lens.views import _admin_run_step_counts
+        from lens.views.admin_runs import _admin_run_detail
+
+        run = create_execution_run(
+            session=self.session,
+            question="q",
+            enqueue=False,
+        )
+        RunStep.objects.create(
+            run=run,
+            sequence=0,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            status=RunStep.Status.DONE,
+            detail={
+                "events": [
+                    {
+                        "agent_event": (
+                            "tool.run_skill_artifact.start"
+                        )
+                    },
+                    {
+                        "agent_event": (
+                            "tool.run_skill_artifact.budget_exceeded"
+                        )
+                    },
+                    {
+                        "agent_event": (
+                            "tool.analyze_structured_output.start"
+                        )
+                    },
+                    {
+                        "agent_event": (
+                            "tool.analyze_structured_output.budget_exceeded"
+                        )
+                    },
+                    {
+                        "agent_event": "tool.run_skill_transform.start"
+                    },
+                    {
+                        "agent_event": (
+                            "tool.run_skill_transform.budget_exceeded"
+                        )
+                    },
+                    {"agent_event": "tool.task.invoke"},
+                    {"agent_event": "tool.task.denied"},
+                ]
+            },
+        )
+
+        counts = _admin_run_step_counts(run)
+
+        self.assertEqual(counts["artifact_calls"], 1)
+        self.assertEqual(counts["artifact_call_limit_hits"], 1)
+        self.assertEqual(counts["structured_analysis_calls"], 1)
+        self.assertEqual(counts["structured_analysis_limit_hits"], 1)
+        self.assertEqual(counts["transform_calls"], 1)
+        self.assertEqual(counts["transform_call_limit_hits"], 1)
+        self.assertEqual(counts["subagent_count"], 0)
+        self.assertEqual(counts["subagent_denied_count"], 1)
+
+        detail = _admin_run_detail(run)
+
+        self.assertEqual(detail["artifact_calls"], 1)
+        self.assertEqual(detail["artifact_call_limit_hits"], 1)
+        self.assertEqual(detail["structured_analysis_calls"], 1)
+        self.assertEqual(detail["structured_analysis_limit_hits"], 1)
+        self.assertEqual(detail["transform_calls"], 1)
+        self.assertEqual(detail["transform_call_limit_hits"], 1)
+        self.assertEqual(detail["subagent_denied_count"], 1)
+
+    def test_admin_run_detail_uses_metered_calls_including_subagents(self):
+        from lens.views.admin_runs import _admin_run_detail
+
+        run = create_execution_run(
+            session=self.session,
+            question="q",
+            enqueue=False,
+        )
+        LLMUsage.objects.create(
+            user=self.user,
+            model="deepseek-v4-flash",
+            prompt_tokens=100,
+            completion_tokens=20,
+            total_tokens=120,
+            cached_tokens=80,
+            reasoning_tokens=5,
+            metadata={
+                "run_uuid": str(run.uuid),
+                "is_subagent": False,
+                "source_type": "lensnode_agent",
+            },
+        )
+        LLMUsage.objects.create(
+            user=self.user,
+            model="deepseek-v4-flash",
+            prompt_tokens=200,
+            completion_tokens=30,
+            total_tokens=230,
+            cached_tokens=160,
+            reasoning_tokens=10,
+            metadata={
+                "run_uuid": str(run.uuid),
+                "is_subagent": True,
+                "source_type": "lensnode_agent",
+            },
+        )
+
+        detail = _admin_run_detail(run)
+
+        self.assertEqual(detail["llm_calls"], 2)
+        self.assertEqual(detail["subagent_model_calls"], 1)
+        self.assertEqual(detail["total_tokens"], 350)
+        self.assertEqual(detail["cached_tokens"], 240)
+        self.assertEqual(detail["reasoning_tokens"], 15)
+        self.assertEqual(len(detail["model_calls"]), 2)
+        self.assertFalse(detail["model_calls"][0]["is_subagent"])
+        self.assertTrue(detail["model_calls"][1]["is_subagent"])
 
     def test_analyze_multimodal_intent_passthrough_without_model(self):
         self.assistant.multimodal_model_ref = None

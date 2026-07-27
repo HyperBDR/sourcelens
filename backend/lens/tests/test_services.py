@@ -37,11 +37,19 @@ from lens.periodic_tasks import (
     ensure_datasource_periodic_task,
     register_periodic_tasks,
 )
+from lens.runtime_events import (
+    sanitize_runtime_event,
+    sanitize_termination_detail,
+)
+from lens.serializers import RunSerializer
 from lens.services import (
+    _build_sync_event,
     _step_sequence,
     append_lensnode_output,
     build_run_history,
+    create_run_execution_snapshot,
     create_execution_run,
+    dispatch_run_to_lensnode,
     finish_lensnode_run,
     rewrite_query,
 )
@@ -213,6 +221,8 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(self.session.message_set.count(), 2)
 
     def test_execute_answer_run_creates_execution_snapshot(self):
+        self.assistant.token_budget_profile = "deep"
+        self.assistant.save(update_fields=["token_budget_profile"])
         run = create_execution_run(
             session=self.session,
             question="How does SSE work?",
@@ -228,6 +238,44 @@ class LensServiceTests(TransactionTestCase):
         self.assertTrue(run.output_message.content)
         self.assertEqual(run.execution.task, "knowledge_qa")
         self.assertEqual(run.execution.target_dirs, [{"path": "/workspace/repo"}])
+        self.assertEqual(run.execution.token_budget_profile, "deep")
+        self.assertEqual(run.execution.token_budget_max_tokens, 500000)
+        self.assertEqual(
+            run.execution.token_budget_final_reserve_tokens,
+            75000,
+        )
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_uses_token_budget_execution_snapshot(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        self.assistant.token_budget_profile = "deep"
+        self.assistant.save(update_fields=["token_budget_profile"])
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze everything",
+            enqueue=False,
+        )
+        execution = create_run_execution_snapshot(run)
+
+        self.assistant.token_budget_profile = "standard"
+        self.assistant.save(update_fields=["token_budget_profile"])
+        dispatch_run_to_lensnode(run, "Analyze everything")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            payload["token_budget"],
+            {
+                "profile": "deep",
+                "max_tokens": 500000,
+                "final_reserve_tokens": 75000,
+            },
+        )
+        self.assertEqual(execution.token_budget_profile, "deep")
 
     def test_execute_answer_run_fails_when_lensnode_offline(self):
         self.lensnode.status = LensNode.Status.OFFLINE
@@ -260,6 +308,251 @@ class LensServiceTests(TransactionTestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, Run.Status.CANCELLED)
         self.assertEqual(run.output_message.content, "")
+
+    def test_finish_lensnode_run_persists_business_outcome(self):
+        run = create_execution_run(
+            session=self.session,
+            question="Use the configured Skill",
+            enqueue=False,
+        )
+
+        finish_lensnode_run(
+            run.uuid,
+            Run.Status.DONE,
+            outcome=Run.Outcome.BLOCKED,
+            termination_detail={
+                "reason": "capability_unavailable",
+                "capability": "skill",
+            },
+        )
+
+        run.refresh_from_db()
+        self.assertEqual(run.outcome, Run.Outcome.BLOCKED)
+        self.assertEqual(
+            run.termination_detail,
+            {
+                "reason": "capability_unavailable",
+                "capability": "skill",
+            },
+        )
+
+    def test_sync_event_exposes_safe_runtime_fields_only(self):
+        run = create_execution_run(
+            session=self.session,
+            question="Plan this task",
+            enqueue=False,
+        )
+        RunStep.objects.create(
+            run=run,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            sequence=3,
+            status=RunStep.Status.RUNNING,
+            detail={
+                "secret": "do-not-expose",
+                "events": [
+                    {
+                        "agent_event": "tool.call_skill_api.invoke",
+                        "activity": "running_tool",
+                        "summary": "Authorization: secret-token",
+                    },
+                    {
+                        "agent_event": "workflow.route.selected",
+                        "activity": "running",
+                        "event_type": "route.selected",
+                        "visibility": "user",
+                        "payload": {
+                            "route": "plan_execute",
+                            "complexity": "complex",
+                            "evidence_requirement": "none",
+                        },
+                    },
+                    {
+                        "agent_event": "workflow.plan.updated",
+                        "activity": "running",
+                        "event_type": "plan.updated",
+                        "visibility": "user",
+                        "payload": {
+                            "revision": 1,
+                            "steps": [
+                                {
+                                    "id": "step-1",
+                                    "title": "Inspect configuration",
+                                    "status": "in_progress",
+                                    "secret": "hidden",
+                                }
+                            ],
+                            "secret": "hidden",
+                        },
+                    },
+                    {
+                        "agent_event": "workflow.stage.updated",
+                        "activity": "running",
+                        "event_type": "stage.updated",
+                        "visibility": "user",
+                        "payload": {
+                            "id": "fetch-orders",
+                            "title": "Fetch order data",
+                            "status": "in_progress",
+                            "summary": "Fetched 93 orders",
+                            "order": 2,
+                            "revision": 4,
+                            "secret": "hidden",
+                        },
+                    },
+                ],
+            },
+        )
+
+        event = _build_sync_event(run)
+        detail = event["steps"][0]["detail"]
+
+        self.assertNotIn("secret", str(detail))
+        self.assertNotIn("Authorization", str(detail))
+        self.assertEqual(
+            detail["events"][2]["payload"]["steps"][0]["title"],
+            "Inspect configuration",
+        )
+        self.assertEqual(
+            detail["events"][1]["payload"]["evidence_requirement"],
+            "none",
+        )
+        self.assertEqual(
+            detail["events"][3]["payload"],
+            {
+                "id": "fetch-orders",
+                "title": "Fetch order data",
+                "status": "in_progress",
+                "summary": "Fetched 93 orders",
+                "order": 2,
+                "revision": 4,
+            },
+        )
+
+    def test_route_event_rejects_unknown_contract_values(self):
+        event = sanitize_runtime_event({
+            "agent_event": "workflow.route.selected",
+            "activity": "running",
+            "event_type": "route.selected",
+            "visibility": "user",
+            "payload": {
+                "intent": "secret-intent",
+                "complexity": "oversized",
+                "route": "arbitrary-route",
+                "evidence_requirement": "secret-token",
+                "required_capabilities": ["skill", "secret-token"],
+            },
+        })
+
+        self.assertEqual(
+            event["payload"],
+            {"required_capabilities": ["skill"]},
+        )
+
+    def test_runtime_event_rejects_unknown_phase_and_status_values(self):
+        phase_event = sanitize_runtime_event({
+            "agent_event": "secret-token",
+            "activity": "Authorization: secret-token",
+            "event_type": "phase.changed",
+            "visibility": "user",
+            "payload": {"phase": "secret-token"},
+        })
+        plan_event = sanitize_runtime_event({
+            "event_type": "plan.updated",
+            "visibility": "user",
+            "payload": {
+                "steps": [
+                    {
+                        "id": "step-1",
+                        "title": "Inspect configuration",
+                        "status": "secret-token",
+                    }
+                ]
+            },
+        })
+
+        self.assertNotIn("secret-token", str(phase_event))
+        self.assertEqual(phase_event["payload"], {})
+        self.assertEqual(
+            plan_event["payload"]["steps"][0]["status"],
+            "pending",
+        )
+
+    def test_stage_event_bounds_public_fields(self):
+        event = sanitize_runtime_event({
+            "event_type": "stage.updated",
+            "visibility": "user",
+            "payload": {
+                "id": "stage-" + ("x" * 100),
+                "title": "T" * 300,
+                "status": "completed",
+                "summary": "S" * 300,
+                "order": 99,
+                "revision": "7",
+                "secret": "hidden",
+            },
+        })
+
+        self.assertEqual(len(event["payload"]["id"]), 64)
+        self.assertEqual(len(event["payload"]["title"]), 240)
+        self.assertEqual(len(event["payload"]["summary"]), 240)
+        self.assertEqual(event["payload"]["status"], "completed")
+        self.assertEqual(event["payload"]["order"], 12)
+        self.assertEqual(event["payload"]["revision"], 7)
+        self.assertNotIn("secret", str(event))
+
+    def test_stage_event_rejects_invalid_status(self):
+        event = sanitize_runtime_event({
+            "event_type": "stage.updated",
+            "visibility": "user",
+            "payload": {
+                "id": "fetch-orders",
+                "title": "Fetch order data",
+                "status": "secret-token",
+            },
+        })
+
+        self.assertEqual(event["payload"], {})
+        self.assertNotIn("secret-token", str(event))
+
+    def test_termination_detail_uses_fixed_public_contract(self):
+        detail = sanitize_termination_detail({
+            "reason": "secret-token",
+            "capability": "mcp",
+            "error_type": "secret-token",
+            "tool": "Authorization: secret-token",
+            "recovery": "Authorization: secret-token",
+            "code": "secret-token",
+        })
+
+        self.assertEqual(detail, {"capability": "mcp"})
+        self.assertNotIn("secret-token", str(detail))
+
+    def test_run_serializer_hides_runtime_credentials(self):
+        run = create_execution_run(
+            session=self.session,
+            question="Use the connector",
+            enqueue=False,
+        )
+        execution = create_run_execution_snapshot(run)
+        execution.loaded_mcps = [
+            {
+                "mcp_uuid": "mcp-1",
+                "mcp_name": "Orders",
+                "transport": "streamable_http",
+                "endpoint": "https://example.test/mcp",
+                "config": {"headers": {"Authorization": "secret-token"}},
+            }
+        ]
+        execution.save(update_fields=["loaded_mcps"])
+
+        payload = RunSerializer(run).data
+
+        self.assertNotIn("secret-token", str(payload))
+        self.assertNotIn("endpoint", payload["execution"]["loaded_mcps"][0])
+        self.assertEqual(
+            payload["execution"]["loaded_mcps"][0]["mcp_name"],
+            "Orders",
+        )
 
     def test_append_lensnode_output_ignores_terminal_run(self):
         run = create_execution_run(

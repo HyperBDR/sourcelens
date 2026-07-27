@@ -158,6 +158,9 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
                         except StopIteration as exc:
                             result = exc.value or {}
                             tool_calls = result.pop("_tool_calls", None) or []
+                            finish_reason = result.pop(
+                                "_finish_reason", None
+                            )
                             _log.debug(
                                 "gateway stream done: token_count=%d "
                                 "tool_calls=%d",
@@ -171,6 +174,7 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
                                     "usage": result,
                                     "lensnode_uuid": lensnode_uuid_str,
                                     "tool_calls": tool_calls,
+                                    "finish_reason": finish_reason,
                                 }),
                             )
                             return

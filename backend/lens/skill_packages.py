@@ -105,6 +105,7 @@ def import_skill_zip(
                             "environment": metadata["environment"],
                             "api": metadata["api"],
                             "artifacts": metadata["artifacts"],
+                            "transforms": metadata["transforms"],
                         },
                         "version": digest[:12],
                         "enabled": True,
@@ -185,6 +186,7 @@ def update_skill_zip(
                     "environment": metadata["environment"],
                     "api": metadata["api"],
                     "artifacts": metadata["artifacts"],
+                    "transforms": metadata["transforms"],
                 }
                 skill.version = digest[:12]
                 skill.enabled = True
@@ -314,12 +316,22 @@ def package_zip_bytes(skill):
             environment = definition.get("environment") or []
             api = definition.get("api") or {}
             artifacts = definition.get("artifacts") or {}
-            if environment or api or artifacts:
+            transforms = definition.get("transforms") or {}
+            if environment or api or artifacts or transforms:
                 config = {"environment": environment}
                 if api:
                     config["api"] = api
                 if artifacts:
                     config["artifacts"] = artifacts
+                if transforms:
+                    config["transforms"] = {
+                        name: {
+                            key: value
+                            for key, value in transform.items()
+                            if key != "sha256"
+                        }
+                        for name, transform in transforms.items()
+                    }
                 archive.writestr(
                     f"{skill.slug}/sourcelens.json",
                     json.dumps(
@@ -451,7 +463,12 @@ def _parse_sourcelens_config(skill_root):
     path = skill_root / "sourcelens.json"
     if not path.exists():
         _enable_skill_scripts(skill_root)
-        return {"environment": [], "api": {}, "artifacts": {}}
+        return {
+            "environment": [],
+            "api": {},
+            "artifacts": {},
+            "transforms": {},
+        }
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -469,12 +486,18 @@ def _parse_sourcelens_config(skill_root):
             payload.get("artifacts"),
             skill_root,
         )
+        transforms = _validate_skill_transforms(
+            payload.get("transforms"),
+            skill_root,
+            environment,
+        )
         _enable_skill_scripts(skill_root)
         _enable_declared_artifacts(skill_root, artifacts)
         return {
             "environment": environment,
             "api": api,
             "artifacts": artifacts,
+            "transforms": transforms,
         }
     except Exception as exc:
         raise SkillPackageError(str(exc)) from exc
@@ -491,6 +514,14 @@ def _apply_environment_override(metadata, environment_override):
     except ValidationError as exc:
         detail = exc.detail[0] if isinstance(exc.detail, list) else exc.detail
         raise SkillPackageError(str(detail)) from exc
+    declared_names = {item["name"] for item in environment}
+    for name, transform in (metadata.get("transforms") or {}).items():
+        for variable in transform.get("environment") or []:
+            if variable not in declared_names:
+                raise SkillPackageError(
+                    f"Transform '{name}' references undeclared environment "
+                    f"variable '{variable}'."
+                )
     metadata["environment"] = environment
     metadata["api"] = api
 
@@ -555,6 +586,121 @@ def _validate_skill_artifacts(value, skill_root):
             "entrypoints": entrypoints,
         }
     return normalized
+
+
+def _validate_skill_transforms(value, skill_root, environment):
+    """Validate deterministic JSON Transform declarations."""
+
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, dict):
+        raise SkillPackageError("Skill transforms must be an object.")
+    if len(value) > 32:
+        raise SkillPackageError("A Skill may declare at most 32 transforms.")
+
+    declared_environment = {
+        item["name"] for item in environment if isinstance(item, dict)
+    }
+    normalized = {}
+    for raw_name, raw_transform in value.items():
+        name = str(raw_name or "").strip()
+        if not ARTIFACT_NAME_RE.fullmatch(name):
+            raise SkillPackageError(
+                "Transform names must use lowercase letters, numbers, '-' "
+                "or '_'."
+            )
+        if not isinstance(raw_transform, dict):
+            raise SkillPackageError(
+                f"Transform '{name}' must be an object."
+            )
+        unknown = set(raw_transform) - {
+            "entrypoint",
+            "environment",
+            "input_format",
+        }
+        if unknown:
+            raise SkillPackageError(
+                f"Transform '{name}' contains unsupported fields."
+            )
+        entrypoint, entrypoint_hash = _validate_transform_entrypoint(
+            name,
+            raw_transform.get("entrypoint"),
+            skill_root,
+        )
+        input_format = str(
+            raw_transform.get("input_format") or ""
+        ).strip().lower()
+        if input_format != "json":
+            raise SkillPackageError(
+                f"Transform '{name}' must use input_format 'json'."
+            )
+        raw_environment = raw_transform.get("environment") or []
+        if not isinstance(raw_environment, list) or len(raw_environment) > 32:
+            raise SkillPackageError(
+                f"Transform '{name}' environment must be a list of at "
+                "most 32 declared variable names."
+            )
+        transform_environment = []
+        for raw_variable in raw_environment:
+            variable = str(raw_variable or "").strip()
+            if variable not in declared_environment:
+                raise SkillPackageError(
+                    f"Transform '{name}' references undeclared environment "
+                    f"variable '{variable}'."
+                )
+            if variable in transform_environment:
+                raise SkillPackageError(
+                    f"Transform '{name}' environment names must be unique."
+                )
+            transform_environment.append(variable)
+        normalized[name] = {
+            "entrypoint": entrypoint,
+            "input_format": "json",
+            "environment": transform_environment,
+            "sha256": entrypoint_hash,
+        }
+    return normalized
+
+
+def _validate_transform_entrypoint(name, value, skill_root):
+    """Validate one Python Transform entrypoint below scripts/."""
+
+    path_text = str(value or "").replace("\\", "/").strip()
+    relative_path = PurePosixPath(path_text)
+    if (
+        not path_text
+        or path_text.startswith("/")
+        or ".." in relative_path.parts
+        or len(relative_path.parts) < 2
+        or relative_path.parts[0] != "scripts"
+        or relative_path.suffix.lower() != ".py"
+    ):
+        raise SkillPackageError(
+            f"Transform '{name}' entrypoint must be a safe .py path under "
+            "scripts/."
+        )
+    transform_path = skill_root.joinpath(*relative_path.parts)
+    scripts_root = (skill_root / "scripts").resolve()
+    try:
+        resolved = transform_path.resolve(strict=True)
+        resolved.relative_to(scripts_root)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise SkillPackageError(
+            f"Transform '{name}' entrypoint must reference a file under "
+            "scripts/."
+        ) from exc
+    if _path_contains_symlink(skill_root, transform_path):
+        raise SkillPackageError(
+            f"Transform '{name}' entrypoint must not contain symbolic links."
+        )
+    if not stat.S_ISREG(transform_path.lstat().st_mode):
+        raise SkillPackageError(
+            f"Transform '{name}' entrypoint must reference a regular file."
+        )
+    return (
+        relative_path.as_posix(),
+        hashlib.sha256(transform_path.read_bytes()).hexdigest(),
+    )
 
 
 def _validate_artifact_entrypoint(name, value, skill_root):

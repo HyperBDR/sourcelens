@@ -124,6 +124,10 @@ class Assistant(TimestampedUUIDModel):
         PUBLIC = "public", "Public"
         PRIVATE = "private", "Private"
 
+    class TokenBudgetProfile(models.TextChoices):
+        STANDARD = "standard", "Standard"
+        DEEP = "deep", "Deep"
+
     objects = AssistantQuerySet.as_manager()
 
     name = models.CharField(max_length=160)
@@ -156,6 +160,11 @@ class Assistant(TimestampedUUIDModel):
         max_length=16,
         choices=AgentRounds.choices,
         default=AgentRounds.BALANCED,
+    )
+    token_budget_profile = models.CharField(
+        max_length=16,
+        choices=TokenBudgetProfile.choices,
+        default=TokenBudgetProfile.STANDARD,
     )
     max_concurrency = models.PositiveSmallIntegerField(default=5)
     settings = models.JSONField(default=dict, blank=True)
@@ -645,6 +654,11 @@ class Run(models.Model):
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled"
 
+    class Outcome(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        PARTIAL = "partial", "Partial"
+        BLOCKED = "blocked", "Blocked"
+
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
     status = models.CharField(
@@ -674,6 +688,13 @@ class Run(models.Model):
     )
     metering_ref = models.UUIDField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
+    outcome = models.CharField(
+        max_length=16,
+        choices=Outcome.choices,
+        blank=True,
+        default="",
+    )
+    termination_detail = models.JSONField(default=dict, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     last_activity_at = models.DateTimeField(null=True, blank=True)
@@ -755,6 +776,15 @@ class RunExecution(models.Model):
     loaded_skills = models.JSONField(default=list, blank=True)
     loaded_mcps = models.JSONField(default=list, blank=True)
     target_dirs = models.JSONField(default=list, blank=True)
+    token_budget_profile = models.CharField(
+        max_length=16,
+        choices=Assistant.TokenBudgetProfile.choices,
+        default=Assistant.TokenBudgetProfile.STANDARD,
+    )
+    token_budget_max_tokens = models.PositiveIntegerField(default=200000)
+    token_budget_final_reserve_tokens = models.PositiveIntegerField(
+        default=40000
+    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
