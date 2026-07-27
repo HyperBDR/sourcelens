@@ -243,6 +243,8 @@
         "stageProgressCurrent": "已完成 {completed}/{total} · 当前：{currentTitle}",
         "stageCompleted": "已完成 {completed}/{total}",
         "stageEnded": "已结束 {completed}/{total}",
+        "activityProgress": "已记录 {count} 项活动",
+        "activityCompleted": "已完成 {count} 项活动",
         "blockedTitle": "所需能力当前不可用",
         "executionFailedTitle": "能力执行失败",
         "artifactTitle": "交付文件已生成",
@@ -258,6 +260,39 @@
           "searchingSources": "正在搜索相关资料",
           "usingCapability": "正在执行所需操作"
         },
+        "pathStep": {
+          "query_orders": "查询 {startDate} 至 {endDate} 的订单",
+          "query_orders_ref": "查询订单 {orderRef}",
+          "get_order_detail": "获取订单详情",
+          "get_order_detail_ref": "获取订单 {orderRef} 详情",
+          "reading_order_commands": "读取订单命令说明",
+          "checking_capability": "确认订单查询能力",
+          "checking_tool": "确认执行工具可用",
+          "checking_authentication": "确认登录状态",
+          "authenticating": "登录业务系统",
+          "querying_data": "查询业务数据",
+          "count_results": "统计符合条件的订单",
+          "group_results": "按类型汇总订单",
+          "analyzing_results": "汇总并分析结果",
+          "summarizing_results": "总结处理结果",
+          "summarizing_order": "总结订单 {orderRef} 详情"
+        },
+        "workflow": {
+          "task": {
+            "get_order_detail": "查询订单详情",
+            "get_order_detail_ref": "查询订单 {orderRef} 详情",
+            "query_orders": "查询订单",
+            "query_orders_ref": "查询订单 {orderRef}",
+            "analyze_results": "分析查询结果",
+            "query_data": "查询业务数据"
+          },
+          "stage": {
+            "preparation": "执行准备",
+            "order_query": "订单查询",
+            "data_query": "业务数据查询",
+            "result_analysis": "结果整理"
+          }
+        },
         "recovery": {
           "capability": "请改用支持该操作的助手，或联系管理员绑定所需能力。",
           "configuration": "请联系管理员配置或授权该能力，然后重试。",
@@ -268,7 +303,7 @@
           "verification": "本次执行未返回可验证结果，请查看运行详情后重试。"
         },
         "phase": {
-          "analyzing": "正在理解请求",
+          "analyzing": "正在分析问题",
           "planning": "正在制定计划",
           "executing": "正在执行计划",
           "answering": "正在整理回答",
