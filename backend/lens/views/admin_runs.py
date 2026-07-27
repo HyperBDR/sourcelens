@@ -6,7 +6,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from lens.models import Run
-from lens.serializers import MessageAttachmentSerializer
+from lens.serializers import (
+    MessageAttachmentSerializer,
+    RunOutputFileSerializer,
+)
 
 
 def _admin_safe_int(value, default, *, minimum=1, maximum=None):
@@ -143,12 +146,16 @@ def _admin_run_detail(run):
         if run.input_message
         else []
     )
+    output_files = RunOutputFileSerializer(
+        run.output_files.all(), many=True
+    ).data
     row.update({
         "question": (
             run.input_message.content if run.input_message else ""
         ) or "",
         "attachments": attachments,
         "answer": (out.content if out else "") or "",
+        "output_files": output_files,
         "error": run.error or "",
         "agent_rounds": assistant.agent_rounds if assistant else None,
         "steps": steps,
@@ -230,7 +237,7 @@ class AdminRunDetailView(APIView):
                     "output_message",
                     "lensnode",
                 )
-                .prefetch_related("steps")
+                .prefetch_related("output_files", "steps")
                 .get(uuid=uuid)
             )
         except Run.DoesNotExist:

@@ -1885,7 +1885,7 @@ class LensApiTests(TestCase):
         )
         output.file.delete(save=False)
 
-    def _make_output_file(self):
+    def _make_output_file(self, user=None):
         """Create a delivered output file linked to a fresh run."""
 
         from django.core.files.base import ContentFile
@@ -1893,7 +1893,7 @@ class LensApiTests(TestCase):
         from lens.services import create_execution_run
 
         session = Session.objects.create(
-            assistant=self.assistant, user=self.user
+            assistant=self.assistant, user=user or self.user
         )
         run = create_execution_run(
             session=session, question="q", enqueue=False
@@ -1945,6 +1945,22 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         output.file.delete(save=False)
 
+    def test_output_file_download_returns_attachment_to_admin(self):
+        owner = User.objects.create_user(
+            username="file-owner",
+            email="file-owner@example.com",
+            password="pass12345",
+        )
+        session, run, output = self._make_output_file(owner)
+
+        response = self.client.get(
+            f"/api/lens/output-files/{output.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment", response["Content-Disposition"])
+        output.file.delete(save=False)
+
     def test_session_messages_include_output_files(self):
         session, run, output = self._make_output_file()
 
@@ -1963,6 +1979,44 @@ class LensApiTests(TestCase):
             f"/api/lens/output-files/{output.uuid}/", chip["url"]
         )
         output.file.delete(save=False)
+
+    def test_admin_run_detail_includes_output_files(self):
+        session, run, output = self._make_output_file()
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{run.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["output_files"]), 1)
+        item = response.data["output_files"][0]
+        self.assertEqual(item["uuid"], str(output.uuid))
+        self.assertEqual(item["filename"], "brief.html")
+        self.assertEqual(item["content_type"], "text/html")
+        self.assertEqual(item["byte_size"], 18)
+        self.assertIsNotNone(item["created_at"])
+        self.assertIn(
+            f"/api/lens/output-files/{output.uuid}/", item["url"]
+        )
+        output.file.delete(save=False)
+
+    def test_admin_run_detail_has_empty_output_files(self):
+        from lens.models import Session
+        from lens.services import create_execution_run
+
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{run.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_files"], [])
 
     def test_deleting_session_purges_output_file_bytes(self):
         session, run, output = self._make_output_file()
