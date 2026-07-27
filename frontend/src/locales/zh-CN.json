@@ -258,6 +258,28 @@
           "searchingSources": "正在搜索相关资料",
           "usingCapability": "正在执行所需操作"
         },
+        "pathStep": {
+          "query_orders": "查询 {startDate} 至 {endDate} 的订单",
+          "get_order_detail": "获取订单详情",
+          "reading_order_commands": "读取订单命令说明",
+          "checking_capability": "确认订单查询能力",
+          "querying_data": "查询业务数据",
+          "count_results": "统计符合条件的订单",
+          "group_results": "按类型汇总订单",
+          "analyzing_results": "汇总并分析结果",
+          "analyzing_request": "第 {round} 轮：分析问题并确定下一步"
+        },
+        "workflow": {
+          "task": {
+            "execute_request": "处理当前问题"
+          },
+          "stage": {
+            "order_query": "订单查询",
+            "data_query": "业务数据查询",
+            "result_analysis": "结果分析",
+            "reasoning": "分析处理"
+          }
+        },
         "recovery": {
           "capability": "请改用支持该操作的助手，或联系管理员绑定所需能力。",
           "configuration": "请联系管理员配置或授权该能力，然后重试。",

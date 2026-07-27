@@ -258,6 +258,28 @@
           "searchingSources": "Searching relevant sources",
           "usingCapability": "Running the required operation"
         },
+        "pathStep": {
+          "query_orders": "Query orders from {startDate} to {endDate}",
+          "get_order_detail": "Retrieve order details",
+          "reading_order_commands": "Read order command instructions",
+          "checking_capability": "Confirm order query capability",
+          "querying_data": "Query business data",
+          "count_results": "Count matching orders",
+          "group_results": "Group order results",
+          "analyzing_results": "Summarize and analyze results",
+          "analyzing_request": "Round {round}: analyze and choose the next step"
+        },
+        "workflow": {
+          "task": {
+            "execute_request": "Handle the current request"
+          },
+          "stage": {
+            "order_query": "Order query",
+            "data_query": "Business data query",
+            "result_analysis": "Result analysis",
+            "reasoning": "Analysis"
+          }
+        },
         "recovery": {
           "capability": "Use an assistant that supports this operation or ask an administrator to bind the required capability.",
           "configuration": "Ask an administrator to configure or authorize this capability, then retry.",

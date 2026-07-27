@@ -4,13 +4,14 @@ import test from 'node:test'
 import {
   activitiesForNode,
   applyRuntimeEvent,
+  buildWorkflowTree,
   calculateRunElapsedSeconds,
   createRuntimeState,
   getMessageTimestamp,
-  inferProgressLocale,
   normalizePlanSteps,
   normalizeStages,
   scrollConversationToBottomAfterRender,
+  selectCurrentWorkflowStage,
   selectLiveProgressText,
   selectStructuredProgress,
   summarizeStageProgress,
@@ -60,11 +61,6 @@ test('uses run completion time for assistant messages', () => {
     }),
     createdAt
   )
-})
-
-test('uses the progress node language for nested activity labels', () => {
-  assert.equal(inferProgressLocale('执行并分析所需操作'), 'zh-CN')
-  assert.equal(inferProgressLocale('Execute required operations'), 'en')
 })
 
 test('restores active run elapsed time from its server creation time', () => {
@@ -255,7 +251,7 @@ test('shows real plan completion before lower-level execution details', () => {
   )
 })
 
-test('shows real direct-execution stages before raw tool details', () => {
+test('keeps the legacy stage status for non-General Chat modes', () => {
   assert.equal(
     selectLiveProgressText({
       stageProgressText: 'Completed 1/3 · Execute required operations',
@@ -268,22 +264,301 @@ test('shows real direct-execution stages before raw tool details', () => {
   )
 })
 
-test('uses plans before stages and stages before generic fallback', () => {
+test('isolates General Chat workflow trees from legacy progress modes', () => {
   const stages = [{ id: 'execute', title: 'Execute', status: 'in_progress' }]
   const plan = [{ id: 'step-1', title: 'Inspect', status: 'in_progress' }]
+  const activities = [
+    {
+      id: 'activity-1',
+      taskId: 'step-1',
+      stageId: 'step-1:order_query',
+      stageKind: 'order_query',
+      kind: 'query_orders',
+      status: 'in_progress',
+      startDate: '2026-07-20',
+      endDate: '2026-07-26',
+      structured: true
+    }
+  ]
 
-  assert.deepEqual(selectStructuredProgress({ plan, stages }), {
+  const general = selectStructuredProgress({
+    route: 'plan_execute',
+    plan,
+    activities,
+    stages
+  })
+  assert.equal(general.kind, 'workflow')
+  assert.equal(general.hasPlan, true)
+  assert.equal(general.tasks[0].stages[0].steps[0].id, 'activity-1')
+  assert.deepEqual(selectStructuredProgress({ plan, activities, stages }), {
     kind: 'plan',
     items: plan
   })
-  assert.deepEqual(selectStructuredProgress({ plan: [], stages }), {
+  assert.deepEqual(selectStructuredProgress({ plan: [], activities, stages }), {
     kind: 'stage',
     items: stages
   })
-  assert.deepEqual(selectStructuredProgress({ plan: [], stages: [] }), {
-    kind: null,
-    items: []
+  assert.deepEqual(
+    selectStructuredProgress({ plan: [], activities: [], stages }),
+    {
+      kind: 'stage',
+      items: stages
+    }
+  )
+  assert.deepEqual(
+    selectStructuredProgress({
+      plan: [],
+      activities: [],
+      stages: []
+    }),
+    {
+      kind: null,
+      items: []
+    }
+  )
+})
+
+test('uses the active real operation as the General Chat stage', () => {
+  const tasks = buildWorkflowTree(
+    [],
+    [
+      {
+        id: 'capability-1',
+        taskId: 'task-execute',
+        stageId: 'task-execute:order_query',
+        stageKind: 'order_query',
+        kind: 'checking_capability',
+        status: 'completed',
+        structured: true
+      },
+      {
+        id: 'orders-1',
+        taskId: 'task-execute',
+        stageId: 'task-execute:data_query',
+        stageKind: 'data_query',
+        kind: 'query_orders',
+        status: 'in_progress',
+        structured: true
+      }
+    ]
+  )
+
+  assert.equal(selectCurrentWorkflowStage(tasks).kind, 'data_query')
+})
+
+test('records and completes a replayable real order-query activity', () => {
+  let state = createRuntimeState()
+  state = applyRuntimeEvent(state, {
+    event_type: 'activity.recorded',
+    visibility: 'user',
+    payload: {
+      id: 'activity-123',
+      kind: 'query_orders',
+      stage_kind: 'order_query',
+      status: 'in_progress',
+      start_date: '2026-07-20',
+      end_date: '2026-07-26'
+    }
   })
+  state = applyRuntimeEvent(state, {
+    event_type: 'activity.recorded',
+    visibility: 'user',
+    payload: {
+      id: 'activity-123',
+      kind: 'querying_data',
+      stage_kind: 'data_query',
+      status: 'completed'
+    }
+  })
+
+  assert.deepEqual(state.activities, [
+    {
+      id: 'activity-123',
+      taskId: 'task-execute',
+      stageId: 'task-execute:order_query',
+      stageKind: 'order_query',
+      kind: 'query_orders',
+      status: 'completed',
+      startDate: '2026-07-20',
+      endDate: '2026-07-26',
+      structured: true
+    }
+  ])
+})
+
+test('records each General Chat model round as one nested step', () => {
+  let state = applyRuntimeEvent(createRuntimeState(), {
+    event_type: 'route.selected',
+    visibility: 'user',
+    payload: { route: 'direct_execute' }
+  })
+  for (const status of ['in_progress', 'completed']) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload: {
+        id: 'model-round-1',
+        kind: 'analyzing_request',
+        stage_kind: 'reasoning',
+        status,
+        round: 1
+      }
+    })
+  }
+
+  const progress = selectStructuredProgress({
+    route: state.route,
+    plan: state.plan,
+    stages: state.stages,
+    activities: state.activities
+  })
+  assert.equal(progress.kind, 'workflow')
+  assert.equal(progress.tasks[0].kind, 'execute_request')
+  assert.equal(progress.tasks[0].stages[0].kind, 'reasoning')
+  assert.equal(progress.tasks[0].stages[0].steps[0].round, 1)
+  assert.equal(progress.tasks[0].stages[0].steps[0].status, 'completed')
+})
+
+test('accepts real order-detail and command-discovery activities', () => {
+  let state = createRuntimeState()
+  for (const [id, kind] of [
+    ['help-123', 'reading_order_commands'],
+    ['detail-123', 'get_order_detail']
+  ]) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload: {
+        id,
+        kind,
+        stage_kind: 'order_query',
+        status: 'in_progress'
+      }
+    })
+  }
+
+  assert.deepEqual(
+    state.activities.map((item) => item.kind),
+    ['reading_order_commands', 'get_order_detail']
+  )
+})
+
+test('drops invalid activity dates and fails open work on partial completion', () => {
+  let state = applyRuntimeEvent(createRuntimeState(), {
+    event_type: 'activity.recorded',
+    visibility: 'user',
+    payload: {
+      id: 'activity-123',
+      kind: 'query_orders',
+      stage_kind: 'order_query',
+      status: 'in_progress',
+      start_date: '2026-02-30',
+      end_date: '2026-03-01'
+    }
+  })
+  state = applyRuntimeEvent(state, { type: 'done', outcome: 'partial' })
+
+  assert.equal(state.activities[0].startDate, undefined)
+  assert.equal(state.activities[0].endDate, '2026-03-01')
+  assert.equal(state.activities[0].status, 'failed')
+})
+
+test('closes every legacy and General Chat spinner at terminal failure', () => {
+  let state = createRuntimeState()
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 1,
+      steps: [
+        { id: 'one', title: 'Query orders', status: 'in_progress' },
+        { id: 'two', title: 'Summarize', status: 'pending' }
+      ]
+    }
+  })
+  state = applyRuntimeEvent(state, {
+    event_type: 'stage.updated',
+    visibility: 'user',
+    payload: {
+      id: 'query',
+      title: 'Query orders',
+      status: 'in_progress',
+      order: 1,
+      revision: 1
+    }
+  })
+  state = applyRuntimeEvent(state, {
+    event_type: 'activity.recorded',
+    visibility: 'user',
+    payload: {
+      id: 'model-round-1',
+      kind: 'analyzing_request',
+      stage_kind: 'reasoning',
+      status: 'in_progress',
+      round: 1
+    }
+  })
+  state = applyRuntimeEvent(state, { type: 'error' })
+
+  assert.deepEqual(
+    state.plan.map((item) => item.status),
+    ['failed', 'skipped']
+  )
+  assert.equal(state.stages[0].status, 'failed')
+  assert.equal(state.activities[0].status, 'failed')
+})
+
+test('generic activity cannot evict a real path from the bounded history', () => {
+  let state = applyRuntimeEvent(createRuntimeState(), {
+    event_type: 'activity.recorded',
+    visibility: 'user',
+    payload: {
+      id: 'activity-123',
+      kind: 'get_order_detail',
+      stage_kind: 'order_query',
+      status: 'completed'
+    }
+  })
+  state = applyRuntimeEvent(state, {
+    event_type: 'stage.updated',
+    visibility: 'user',
+    payload: {
+      id: 'execute',
+      title: 'Execute',
+      status: 'in_progress',
+      revision: 1
+    }
+  })
+  for (let index = 0; index < 25; index += 1) {
+    state = applyRuntimeEvent(state, {
+      agent_event:
+        index % 2 === 0
+          ? 'tool.read_file.invoke'
+          : 'tool.search_workspace.invoke'
+    })
+  }
+
+  assert.equal(state.activities.filter((item) => item.structured).length, 1)
+  assert.equal(activitiesForNode(state, 'execute').length, 20)
+})
+
+test('keeps the complete bounded General Chat hierarchy across many rounds', () => {
+  let state = createRuntimeState()
+  for (let index = 1; index <= 30; index += 1) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload: {
+        id: `model-round-${index}`,
+        kind: 'analyzing_request',
+        stage_kind: 'reasoning',
+        status: 'completed',
+        round: index
+      }
+    })
+  }
+
+  assert.equal(state.activities.filter((item) => item.structured).length, 30)
 })
 
 test('keeps raw tool activity out of the primary progress text', () => {

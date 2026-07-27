@@ -392,7 +392,8 @@
                     <span class="runtime-card-title">
                       {{
                         progressTitle(
-                          structuredProgress(message._runtimeState).kind
+                          structuredProgress(message._runtimeState).kind,
+                          structuredProgress(message._runtimeState).items
                         )
                       }}
                     </span>
@@ -410,6 +411,64 @@
                     </span>
                   </summary>
                   <div
+                    v-if="
+                      structuredProgress(message._runtimeState).kind ===
+                      'workflow'
+                    "
+                    class="runtime-workflow"
+                  >
+                    <div
+                      v-for="task in structuredProgress(message._runtimeState)
+                        .tasks"
+                      :key="task.id"
+                      class="runtime-workflow-task"
+                    >
+                      <div class="runtime-plan-step runtime-task-row">
+                        <span
+                          class="runtime-plan-status"
+                          :class="`is-${task.status}`"
+                          aria-hidden="true"
+                        >
+                          {{ progressStatusIcon(task.status) }}
+                        </span>
+                        <span>{{ workflowTaskTitle(task) }}</span>
+                      </div>
+                      <div
+                        v-for="stage in task.stages"
+                        :key="stage.id"
+                        class="runtime-workflow-stage"
+                      >
+                        <div class="runtime-plan-step runtime-stage-row">
+                          <span
+                            class="runtime-plan-status"
+                            :class="`is-${stage.status}`"
+                            aria-hidden="true"
+                          >
+                            {{ progressStatusIcon(stage.status) }}
+                          </span>
+                          <span>{{ workflowStageTitle(stage.kind) }}</span>
+                        </div>
+                        <div class="runtime-workflow-steps">
+                          <div
+                            v-for="step in stage.steps"
+                            :key="step.id"
+                            class="runtime-plan-step runtime-step-row"
+                          >
+                            <span
+                              class="runtime-plan-status"
+                              :class="`is-${step.status}`"
+                              aria-hidden="true"
+                            >
+                              {{ progressStatusIcon(step.status) }}
+                            </span>
+                            <span>{{ workflowStepTitle(step) }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    v-else
                     v-for="item in structuredProgress(message._runtimeState)
                       .items"
                     :key="item.id"
@@ -445,7 +504,7 @@
                         class="runtime-node-activity"
                       >
                         <span class="runtime-activity-indicator">✓</span>
-                        <span>{{ activityLabel(activity.kind, item) }}</span>
+                        <span>{{ activityLabel(activity.kind) }}</span>
                         <span
                           v-if="activity.count > 1"
                           class="runtime-activity-count"
@@ -703,9 +762,75 @@
                   aria-live="polite"
                 >
                   <div class="runtime-card-title">
-                    {{ progressTitle(liveStructuredProgress.kind) }}
+                    {{
+                      progressTitle(
+                        liveStructuredProgress.kind,
+                        liveStructuredProgress.items
+                      )
+                    }}
                   </div>
                   <div
+                    v-if="liveStructuredProgress.kind === 'workflow'"
+                    class="runtime-workflow"
+                  >
+                    <div
+                      v-for="task in liveStructuredProgress.tasks"
+                      :key="task.id"
+                      class="runtime-workflow-task"
+                    >
+                      <div class="runtime-plan-step runtime-task-row">
+                        <span
+                          class="runtime-plan-status"
+                          :class="`is-${task.status}`"
+                          aria-hidden="true"
+                        >
+                          {{ progressStatusIcon(task.status) }}
+                        </span>
+                        <span>{{ workflowTaskTitle(task) }}</span>
+                      </div>
+                      <div
+                        v-for="stage in task.stages"
+                        :key="stage.id"
+                        class="runtime-workflow-stage"
+                      >
+                        <div class="runtime-plan-step runtime-stage-row">
+                          <span
+                            class="runtime-plan-status"
+                            :class="`is-${stage.status}`"
+                            aria-hidden="true"
+                          >
+                            {{ progressStatusIcon(stage.status) }}
+                          </span>
+                          <span>{{ workflowStageTitle(stage.kind) }}</span>
+                        </div>
+                        <div
+                          :ref="
+                            stage.status === 'in_progress'
+                              ? 'liveActivityScrollRef'
+                              : undefined
+                          "
+                          class="runtime-workflow-steps"
+                        >
+                          <div
+                            v-for="step in stage.steps"
+                            :key="step.id"
+                            class="runtime-plan-step runtime-step-row"
+                          >
+                            <span
+                              class="runtime-plan-status"
+                              :class="`is-${step.status}`"
+                              aria-hidden="true"
+                            >
+                              {{ progressStatusIcon(step.status) }}
+                            </span>
+                            <span>{{ workflowStepTitle(step) }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    v-else
                     v-for="item in liveStructuredProgress.items"
                     :key="item.id"
                     class="runtime-plan-node"
@@ -751,7 +876,7 @@
                         >
                           {{ isCurrentActivity(activity, item) ? '' : '✓' }}
                         </span>
-                        <span>{{ activityLabel(activity.kind, item) }}</span>
+                        <span>{{ activityLabel(activity.kind) }}</span>
                         <span
                           v-if="activity.count > 1"
                           class="runtime-activity-count"
@@ -762,7 +887,13 @@
                     </div>
                   </div>
                   <div class="runtime-progress-footer">
-                    <span>{{ liveProgressText }}</span>
+                    <span>
+                      {{
+                        liveStructuredProgress.kind === 'workflow'
+                          ? structuredProgressText(runtimeState)
+                          : liveProgressText
+                      }}
+                    </span>
                     <span v-if="elapsedText"> · {{ elapsedText }}</span>
                   </div>
                 </div>
@@ -1053,8 +1184,8 @@ import {
   calculateRunElapsedSeconds,
   createRuntimeState,
   getMessageTimestamp,
-  inferProgressLocale,
   scrollConversationToBottomAfterRender,
+  selectCurrentWorkflowStage,
   selectLiveProgressText,
   selectStructuredProgress,
   summarizePlanProgress,
@@ -1328,8 +1459,10 @@ function stageProgressText(stages, durationSeconds = null, terminal = false) {
 
 function structuredProgress(state) {
   return selectStructuredProgress({
+    route: state?.route,
     plan: state?.plan,
-    stages: state?.stages
+    stages: state?.stages,
+    activities: state?.activities
   })
 }
 
@@ -1345,13 +1478,64 @@ function structuredProgressText(
   if (progress.kind === 'stage') {
     return stageProgressText(progress.items, durationSeconds, terminal)
   }
+  if (progress.kind === 'workflow') {
+    const stages = progress.tasks.flatMap((task) => task.stages || [])
+    return stageProgressText(stages, durationSeconds, terminal)
+  }
   return ''
 }
 
-function progressTitle(kind) {
-  return kind === 'plan'
-    ? t('lens.chat.runtime.planTitle')
-    : t('lens.chat.runtime.stageTitle')
+function progressTitle(kind, items = []) {
+  if (kind === 'plan') return t('lens.chat.runtime.planTitle')
+  if (kind === 'workflow') {
+    const stage = selectCurrentWorkflowStage(items)
+    return stage
+      ? workflowStageTitle(stage.kind)
+      : t('lens.chat.runtime.planTitle')
+  }
+  return t('lens.chat.runtime.stageTitle')
+}
+
+const PATH_KINDS = new Set([
+  'query_orders',
+  'get_order_detail',
+  'reading_order_commands',
+  'checking_capability',
+  'querying_data',
+  'count_results',
+  'group_results',
+  'analyzing_results',
+  'analyzing_request'
+])
+function safePathKind(item) {
+  let kind = PATH_KINDS.has(item?.kind) ? item.kind : 'querying_data'
+  if (kind === 'query_orders' && (!item.startDate || !item.endDate)) {
+    kind = 'querying_data'
+  }
+  return kind
+}
+
+function workflowTaskTitle(task) {
+  return task.title || t('lens.chat.runtime.workflow.task.execute_request')
+}
+
+function workflowStageTitle(kind) {
+  const known = new Set([
+    'order_query',
+    'data_query',
+    'result_analysis',
+    'reasoning'
+  ])
+  const safeKind = known.has(kind) ? kind : 'data_query'
+  return t(`lens.chat.runtime.workflow.stage.${safeKind}`)
+}
+
+function workflowStepTitle(item) {
+  return t(`lens.chat.runtime.pathStep.${safePathKind(item)}`, {
+    startDate: item?.startDate,
+    endDate: item?.endDate,
+    round: item?.round
+  })
 }
 
 function progressStatusIcon(status) {
@@ -1372,7 +1556,7 @@ function nodeActivities(state, nodeId) {
   return activitiesForNode(state, nodeId)
 }
 
-function activityLabel(kind, item) {
+function activityLabel(kind) {
   const known = new Set([
     'analyzingResults',
     'findingCapability',
@@ -1384,11 +1568,7 @@ function activityLabel(kind, item) {
     'usingCapability'
   ])
   const safeKind = known.has(kind) ? kind : 'usingCapability'
-  return t(
-    `lens.chat.runtime.activity.${safeKind}`,
-    {},
-    { locale: inferProgressLocale(item?.title) }
-  )
+  return t(`lens.chat.runtime.activity.${safeKind}`)
 }
 
 function isCurrentActivity(activity, item) {
@@ -1417,7 +1597,9 @@ const liveStageProgressText = computed(() =>
 const liveProgressText = computed(() =>
   selectLiveProgressText({
     planProgressText: livePlanProgressText.value,
-    stageProgressText: liveStageProgressText.value,
+    stageProgressText: runtimeState.value.route
+      ? ''
+      : liveStageProgressText.value,
     phaseText: runtimePhaseText.value,
     fallbackText: liveStatusText.value
   })
@@ -2099,6 +2281,13 @@ function handleEvent(event) {
     if (event.status !== 'queued') queuePosition.value = null
     if (event.type === 'sync') {
       event.steps?.forEach((step) => handleStepEvent(step, event.ts))
+    }
+    if (isTerminalRunStatus(event.status)) {
+      runtimeState.value = applyRuntimeEvent(runtimeState.value, {
+        type: 'done',
+        outcome: event.outcome,
+        termination_detail: event.termination_detail
+      })
     }
   }
   if (event.type === 'queue_position') {
@@ -2955,6 +3144,39 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.18rem 0;
+}
+
+.runtime-workflow-task + .runtime-workflow-task {
+  margin-top: 0.3rem;
+}
+
+.runtime-task-row {
+  color: #334155;
+  font-weight: 600;
+}
+
+.runtime-workflow-stage {
+  margin-left: 1.45rem;
+  border-left: 1px solid #dbe3ec;
+  padding-left: 0.65rem;
+}
+
+.runtime-stage-row {
+  color: #475569;
+  font-weight: 500;
+}
+
+.runtime-workflow-steps {
+  max-height: 6.5rem;
+  margin-left: 1.35rem;
+  overflow-y: auto;
+  color: #64748b;
+  font-size: 0.72rem;
+  scrollbar-width: thin;
+}
+
+.runtime-step-row {
+  padding: 0.12rem 0;
 }
 
 .runtime-node-activities {
