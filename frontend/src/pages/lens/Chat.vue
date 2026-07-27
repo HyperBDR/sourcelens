@@ -1947,6 +1947,7 @@ async function handlePrimaryAction() {
 }
 
 async function selectSession(session, updateRoute = true) {
+  const sessionChanged = selectedSessionUuid.value !== session.uuid
   mySharesOpen.value = false
   clearAttachments()
   selectedSessionUuid.value = session.uuid
@@ -1958,6 +1959,10 @@ async function selectSession(session, updateRoute = true) {
       return
     }
     throw error
+  }
+  if (sessionChanged) {
+    question.value = ''
+    if (composerRef.value) composerRef.value.style.height = 'auto'
   }
   currentRun.value = null
   resetStreamState()

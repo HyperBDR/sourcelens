@@ -66,6 +66,17 @@ test('mobile session drawer opens, selects sessions, and closes', async ({
 
   await expect.poll(() => sidebarBox(page)).toMatchObject({ x: -320 })
 
+  const composer = page.locator('.composer-input')
+  const initialComposerHeight = await composer.evaluate(
+    (element) => element.getBoundingClientRect().height
+  )
+  await composer.fill('Session A draft\nsecond line\nthird line')
+  await expect
+    .poll(() =>
+      composer.evaluate((element) => element.getBoundingClientRect().height)
+    )
+    .toBeGreaterThan(initialComposerHeight)
+
   await page.getByRole('button', { name: 'Recent' }).click()
   await expect(page.locator('.sidebar')).toHaveClass(/sidebar-open/)
   await expect.poll(() => sidebarBox(page)).toMatchObject({ x: 0, width: 320 })
@@ -77,6 +88,12 @@ test('mobile session drawer opens, selects sessions, and closes', async ({
   await secondSession.click()
   await expect(page).toHaveURL(/session=session-2/)
   await expect(page.getByText('Second session response')).toBeAttached()
+  await expect(composer).toHaveValue('')
+  await expect
+    .poll(() =>
+      composer.evaluate((element) => element.getBoundingClientRect().height)
+    )
+    .toBe(initialComposerHeight)
 
   await page.locator('.sidebar').getByRole('button', { name: 'Close' }).click()
   await expect(page.locator('.sidebar')).not.toHaveClass(/sidebar-open/)
