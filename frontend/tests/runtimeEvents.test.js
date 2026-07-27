@@ -145,6 +145,47 @@ test('reduces route, phase, plan and capability events', () => {
   assert.equal(state.capabilityBlock.capability, 'skill')
 })
 
+test('keeps execution failures separate from capability availability', () => {
+  let state = createRuntimeState()
+  state = applyRuntimeEvent(state, {
+    event_type: 'execution.failed',
+    visibility: 'user',
+    payload: {
+      reason: 'execution_failed',
+      capability: 'skill',
+      error_type: 'transient'
+    }
+  })
+
+  assert.equal(state.capabilityBlock, null)
+  assert.equal(state.executionFailure.reason, 'execution_failed')
+  assert.equal(state.executionFailure.error_type, 'transient')
+})
+
+test('restores the correct block card from terminal run details', () => {
+  const capabilityState = applyRuntimeEvent(createRuntimeState(), {
+    type: 'done',
+    outcome: 'blocked',
+    termination_detail: {
+      reason: 'capability_unavailable',
+      error_type: 'capability'
+    }
+  })
+  const executionState = applyRuntimeEvent(createRuntimeState(), {
+    type: 'done',
+    outcome: 'blocked',
+    termination_detail: {
+      reason: 'execution_failed',
+      error_type: 'transient'
+    }
+  })
+
+  assert.equal(capabilityState.capabilityBlock.error_type, 'capability')
+  assert.equal(capabilityState.executionFailure, null)
+  assert.equal(executionState.capabilityBlock, null)
+  assert.equal(executionState.executionFailure.error_type, 'transient')
+})
+
 test('ignores internal events and applies terminal outcome', () => {
   const initial = createRuntimeState()
   const unchanged = applyRuntimeEvent(initial, {

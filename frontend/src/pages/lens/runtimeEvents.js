@@ -52,6 +52,7 @@ export function createRuntimeState() {
     activities: [],
     activityRevision: 0,
     capabilityBlock: null,
+    executionFailure: null,
     artifacts: [],
     outcome: null,
     terminationDetail: null
@@ -256,10 +257,20 @@ export function applyRuntimeEvent(state, event) {
     event?.type === 'done' ||
     event?.type === 'error'
   ) {
+    const terminationDetail =
+      event.termination_detail || current.terminationDetail
     return {
       ...current,
       outcome: event.outcome || current.outcome,
-      terminationDetail: event.termination_detail || current.terminationDetail
+      terminationDetail,
+      capabilityBlock:
+        terminationDetail?.reason === 'capability_unavailable'
+          ? { ...terminationDetail }
+          : current.capabilityBlock,
+      executionFailure:
+        terminationDetail?.reason === 'execution_failed'
+          ? { ...terminationDetail }
+          : current.executionFailure
     }
   }
   const activityKind = activityKindForEvent(event)
@@ -303,6 +314,9 @@ export function applyRuntimeEvent(state, event) {
   }
   if (event.event_type === 'capability.blocked') {
     return { ...current, capabilityBlock: { ...payload } }
+  }
+  if (event.event_type === 'execution.failed') {
+    return { ...current, executionFailure: { ...payload } }
   }
   if (event.event_type === 'artifact.created') {
     const artifact = {

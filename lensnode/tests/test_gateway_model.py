@@ -75,13 +75,44 @@ def test_streaming_touches_activity_on_every_event(monkeypatch):
     assert message.response_metadata["finish_reason"] == "length"
     assert message.response_metadata["model_length_capped"] is True
     assert model.stop_reason == "model_length_capped"
-    # heartbeat + reasoning + content + done all count as activity,
-    # while only the content token reaches the user-facing stream.
+    # Heartbeat, reasoning, content, and done all count as activity, while
+    # only the completed answer reaches the user-facing stream.
     assert activity["count"] == 4
     assert outputs == ["Hello"]
     assert b'"run_uuid"' in captured["payload"]
     assert b'"is_subagent"' in captured["payload"]
     assert client_options["verify"].verify_mode == ssl.CERT_REQUIRED
+
+
+def test_tool_call_turn_does_not_publish_intermediate_text(monkeypatch):
+    body = (
+        'data: {"type": "token", "kind": "content", '
+        '"content": "I will inspect the order first."}\n\n'
+        'data: {"type": "done", "usage": {"total_tokens": 8}, '
+        '"finish_reason": "tool_calls", "tool_calls": [{"id": "call_1", '
+        '"function": {"name": "query_order", "arguments": "{}"}}]}\n\n'
+    )
+
+    def handler(_request):
+        return httpx.Response(200, content=body.encode("utf-8"))
+
+    _install_transport(monkeypatch, handler)
+    outputs = []
+
+    def emit_output(content, reset=False):
+        outputs.append((content, reset))
+
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=emit_output,
+    )
+
+    result = model._generate([HumanMessage(content="inspect the order")])
+
+    assert result.generations[0].message.tool_calls
+    assert outputs == []
 
 
 def test_cancelled_run_aborts_before_model_call(monkeypatch):
@@ -518,6 +549,42 @@ def test_remote_tool_result_is_neutralized_and_classified():
         ),
         "source": "call_skill_api",
     }
+
+
+def test_artifact_http_500_is_classified_as_transient_execution_failure():
+    message = ToolMessage(
+        content=(
+            '{"ok":false,"returncode":1,'
+            '"stderr":"Income API returned HTTP 500"}'
+        ),
+        name="run_skill_artifact",
+        tool_call_id="call_1",
+        status="error",
+    )
+
+    payload = _message_to_gateway(message)
+    result = json.loads(payload["content"])
+
+    assert result["result_meta"]["error_type"] == "transient"
+    assert result["result_meta"]["recoverable_by_model"] is True
+
+
+def test_skill_api_http_500_is_classified_as_transient_execution_failure():
+    message = ToolMessage(
+        content=(
+            '{"ok":false,"status_code":500,'
+            '"response":{"message":"internal error"}}'
+        ),
+        name="call_skill_api",
+        tool_call_id="call_1",
+        status="error",
+    )
+
+    payload = _message_to_gateway(message)
+    result = json.loads(payload["content"])
+
+    assert result["result_meta"]["error_type"] == "transient"
+    assert result["result_meta"]["recoverable_by_model"] is True
 
 
 def test_local_source_tool_result_is_not_neutralized():

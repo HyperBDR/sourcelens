@@ -244,9 +244,10 @@
         "stageCompleted": "Completed {completed}/{total}",
         "stageEnded": "Ended {completed}/{total}",
         "blockedTitle": "Capability unavailable",
+        "executionFailedTitle": "Capability execution failed",
         "artifactTitle": "Artifact ready",
         "outcomePartial": "Completed with limitations. Review the missing capability or unfinished items above.",
-        "outcomeBlocked": "This request is blocked until the required capability or input is available.",
+        "outcomeBlocked": "This request did not complete. Review the runtime details and retry.",
         "activity": {
           "analyzingResults": "Analyzing collected results",
           "findingCapability": "Finding the required capability",
@@ -258,11 +259,13 @@
           "usingCapability": "Running the required operation"
         },
         "recovery": {
+          "capability": "Use an assistant that supports this operation or ask an administrator to bind the required capability.",
           "configuration": "Ask an administrator to configure or authorize this capability, then retry.",
           "policy": "Continue from the evidence already collected or narrow the request.",
           "transient": "Retry later or use another available capability.",
           "request": "Correct or provide the missing input, then retry.",
-          "tool": "Use another available capability or contact an administrator."
+          "tool": "Use another available capability or contact an administrator.",
+          "verification": "No verified result was returned. Review the runtime details and retry."
         },
         "phase": {
           "analyzing": "Understanding the request",
