@@ -45,6 +45,13 @@ from .models import (
     SharedQAFile,
     Skill,
 )
+from .runtime_events import (
+    public_step_detail,
+    sanitize_loaded_mcps,
+    sanitize_loaded_skills,
+    sanitize_runtime_event,
+    sanitize_termination_detail,
+)
 from .services import create_execution_run
 from .skill_generation import (
     get_workspace_guide_payload,
@@ -388,6 +395,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "multimodal_model_ref",
             "agent_model_ref",
             "agent_rounds",
+            "token_budget_profile",
             "max_concurrency",
             "settings",
             "status",
@@ -1737,6 +1745,7 @@ class MessageSerializer(serializers.ModelSerializer):
 
     run = serializers.UUIDField(source="run.uuid", read_only=True)
     thinking = serializers.SerializerMethodField()
+    completed_at = serializers.SerializerMethodField()
     attachments = MessageAttachmentSerializer(many=True, read_only=True)
     output_files = RunOutputFileSerializer(many=True, read_only=True)
 
@@ -1749,6 +1758,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "sequence",
             "run",
             "thinking",
+            "completed_at",
             "attachments",
             "output_files",
             "created_at",
@@ -1760,43 +1770,69 @@ class MessageSerializer(serializers.ModelSerializer):
             "sequence",
             "run",
             "thinking",
+            "completed_at",
             "attachments",
             "output_files",
             "created_at",
         ]
 
+    def get_completed_at(self, obj):
+        """Return the terminal Run timestamp for assistant messages."""
+
+        if obj.role != Message.Role.ASSISTANT:
+            return None
+        run = self._run_for_message(obj)
+        return run.finished_at if run else None
+
+    @staticmethod
+    def _run_for_message(obj):
+        """Return the Run linked from either side of an output message."""
+
+        if obj.run_id:
+            return obj.run
+        return next(iter(obj.response_runs.all()), None)
+
     def get_thinking(self, obj):
         """Return a persisted reasoning summary for assistant messages.
 
-        Surfaces the run's elapsed time and the accumulated tool-use
-        step events so the frontend can render a collapsed "thought for
-        Xs" panel on historical messages. Only agent_event/activity are
-        included; the friendly wording and grouping happen client-side.
+        Surfaces safe runtime events and the terminal business outcome.
+        Raw tool arguments, model output, and internal trace metadata stay
+        server-side.
         """
 
-        run = obj.run
+        run = self._run_for_message(obj)
         if obj.role != Message.Role.ASSISTANT or run is None:
             return None
         steps = []
         for step in run.steps.all():
             for item in (step.detail or {}).get("events", []):
-                if item.get("agent_event") or item.get("activity"):
-                    steps.append(
-                        {
-                            "agent_event": item.get("agent_event"),
-                            "activity": item.get("activity"),
-                        }
-                    )
-        if not steps:
+                event = sanitize_runtime_event(item)
+                if event is not None:
+                    steps.append(event)
+        if not steps and not run.outcome:
             return None
         duration = None
         if run.started_at and run.finished_at:
             duration = (run.finished_at - run.started_at).total_seconds()
-        return {"duration_seconds": duration, "steps": steps}
+        return {
+            "duration_seconds": duration,
+            "steps": steps,
+            "outcome": run.outcome,
+            "termination_detail": sanitize_termination_detail(
+                run.termination_detail
+            ),
+        }
 
 
 class RunStepSerializer(serializers.ModelSerializer):
     """Run step serializer."""
+
+    detail = serializers.SerializerMethodField()
+
+    def get_detail(self, obj):
+        """Return the user-visible subset of persisted runtime events."""
+
+        return public_step_detail(obj.detail)
 
     class Meta:
         model = RunStep
@@ -1816,6 +1852,18 @@ class RunExecutionSerializer(serializers.ModelSerializer):
     """Run execution snapshot serializer."""
 
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    loaded_skills = serializers.SerializerMethodField()
+    loaded_mcps = serializers.SerializerMethodField()
+
+    def get_loaded_skills(self, obj):
+        """Return Skill identities without definitions or environment data."""
+
+        return sanitize_loaded_skills(obj.loaded_skills)
+
+    def get_loaded_mcps(self, obj):
+        """Return MCP identities without endpoints, headers, or config."""
+
+        return sanitize_loaded_mcps(obj.loaded_mcps)
 
     class Meta:
         model = RunExecution
@@ -1826,6 +1874,9 @@ class RunExecutionSerializer(serializers.ModelSerializer):
             "loaded_skills",
             "loaded_mcps",
             "target_dirs",
+            "token_budget_profile",
+            "token_budget_max_tokens",
+            "token_budget_final_reserve_tokens",
             "status",
             "started_at",
             "finished_at",
@@ -1839,6 +1890,12 @@ class RunSerializer(serializers.ModelSerializer):
     steps = RunStepSerializer(many=True, read_only=True)
     execution = RunExecutionSerializer(read_only=True)
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    termination_detail = serializers.SerializerMethodField()
+
+    def get_termination_detail(self, obj):
+        """Return allowlisted terminal metadata only."""
+
+        return sanitize_termination_detail(obj.termination_detail)
 
     class Meta:
         model = Run
@@ -1850,9 +1907,11 @@ class RunSerializer(serializers.ModelSerializer):
             "lensnode",
             "metering_ref",
             "error",
-            "created_at",
+            "outcome",
+            "termination_detail",
             "started_at",
             "finished_at",
+            "created_at",
             "idempotency_key",
             "steps",
             "execution",

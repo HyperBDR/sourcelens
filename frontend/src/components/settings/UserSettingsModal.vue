@@ -142,6 +142,10 @@
                   </div>
                 </div>
               </div>
+
+              <AnswerNotificationSettings
+                v-if="activeSection === 'notifications'"
+              />
             </div>
           </div>
         </section>
@@ -154,6 +158,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import AnswerNotificationSettings from '@/components/settings/AnswerNotificationSettings.vue'
 import { getUiLanguageOptions } from '@/utils/languages'
 import { usePreferencesStore } from '@/store/preferences'
 import { useUiStore } from '@/store/ui'
@@ -179,10 +184,18 @@ const UserIcon = {
 const GlobeIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" stroke-linecap="round"/></svg>`
 }
+const BellIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 21h4" stroke-linecap="round"/></svg>`
+}
 
 const sections = computed(() => [
   { key: 'profile', label: t('settings.modal.title'), icon: UserIcon },
-  { key: 'language', label: t('settings.modal.language'), icon: GlobeIcon }
+  { key: 'language', label: t('settings.modal.language'), icon: GlobeIcon },
+  {
+    key: 'notifications',
+    label: t('settings.modal.notifications'),
+    icon: BellIcon
+  }
 ])
 
 const displayName = computed(() => {

@@ -11,6 +11,12 @@ LOGGER = logging.getLogger("lensnode")
 WATCHDOG_INTERVAL_S = 5
 
 
+def _wrapup_grace_seconds(timeout_s):
+    """Reserve bounded time for a tool-free answer before hard timeout."""
+
+    return min(60.0, max(5.0, timeout_s * 0.2), timeout_s * 0.5)
+
+
 class RunStalledError(TimeoutError):
     """No transport activity at all for the whole idle window.
 
@@ -21,6 +27,12 @@ class RunStalledError(TimeoutError):
     """
 
     code = "NO_ACTIVITY_TIMEOUT"
+
+
+class RunDeadlineExceededError(TimeoutError):
+    """The run exceeded its configured total wall-clock duration."""
+
+    code = "RUN_TIMEOUT"
 
 
 def _failure_error_code(exc):
@@ -171,6 +183,8 @@ class LensNodeExecutor:
                     "message": start_message,
                     "task": task,
                     "target_dirs": target_dirs,
+                    "request_timeout_s": timeout_s,
+                    "idle_timeout_s": idle_timeout_s,
                 },
             }
         )
@@ -199,7 +213,10 @@ class LensNodeExecutor:
 
             loop = asyncio.get_running_loop()
             activity = {"at": loop.time()}
+            deadline_at = loop.time() + timeout_s
+            wrapup_at = deadline_at - _wrapup_grace_seconds(timeout_s)
             cancel_event = threading.Event()
+            wrapup_event = threading.Event()
 
             def touch_activity():
                 activity["at"] = loop.time()
@@ -252,23 +269,67 @@ class LensNodeExecutor:
                     emit_output=emit_output,
                     on_activity=touch_activity,
                     cancel_event=cancel_event,
+                    wrapup_event=wrapup_event,
                 )
             )
+
+            async def cancel_answer_task():
+                """Stop the coroutine and signal its worker thread."""
+
+                cancel_event.set()
+                answer_task.cancel()
+                try:
+                    await answer_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
             try:
                 while True:
+                    remaining_s = deadline_at - loop.time()
+                    if remaining_s <= 0:
+                        await cancel_answer_task()
+                        raise RunDeadlineExceededError(
+                            "Run exceeded total request timeout of "
+                            f"{format_duration(timeout_s)}."
+                        )
+                    if not wrapup_event.is_set() and loop.time() >= wrapup_at:
+                        wrapup_event.set()
+                        emit_progress(
+                            task_log(
+                                "Soft deadline reached; requesting a "
+                                "best-effort final answer."
+                            ),
+                            {
+                                "agent_event": (
+                                    "deepagents.agent.soft_deadline.requested"
+                                ),
+                                "remaining_s": max(0, int(remaining_s)),
+                            },
+                        )
+                    wait_timeout_s = min(
+                        WATCHDOG_INTERVAL_S,
+                        remaining_s,
+                    )
+                    if not wrapup_event.is_set():
+                        wait_timeout_s = min(
+                            wait_timeout_s,
+                            max(0, wrapup_at - loop.time()),
+                        )
                     done, _ = await asyncio.wait(
-                        {answer_task}, timeout=WATCHDOG_INTERVAL_S
+                        {answer_task},
+                        timeout=wait_timeout_s,
                     )
                     if answer_task in done:
                         result = answer_task.result()
                         break
+                    if loop.time() >= deadline_at:
+                        await cancel_answer_task()
+                        raise RunDeadlineExceededError(
+                            "Run exceeded total request timeout of "
+                            f"{format_duration(timeout_s)}."
+                        )
                     if loop.time() - activity["at"] > idle_timeout_s:
-                        cancel_event.set()
-                        answer_task.cancel()
-                        try:
-                            await answer_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
+                        await cancel_answer_task()
                         raise RunStalledError(
                             "Run saw no gateway activity for "
                             f"{format_duration(idle_timeout_s)}; aborting."
@@ -304,6 +365,8 @@ class LensNodeExecutor:
                         "message": retrieval_done_message,
                         "sample_count": len(samples),
                         "sample_paths": sample_paths,
+                        "stop_reason": result.get("stop_reason"),
+                        "token_usage": result.get("token_usage") or {},
                     },
                 }
             )
@@ -326,6 +389,10 @@ class LensNodeExecutor:
                     "type": "run_done",
                     "run_uuid": run_uuid,
                     "status": "done",
+                    "outcome": result.get("outcome") or "completed",
+                    "termination_detail": (
+                        result.get("termination_detail") or {}
+                    ),
                     "detail": {
                         "message": done_message,
                     },
@@ -363,6 +430,11 @@ class LensNodeExecutor:
                     "run_uuid": run_uuid,
                     "status": "failed",
                     "error": error_code,
+                    "outcome": "blocked",
+                    "termination_detail": {
+                        "reason": "runtime_failure",
+                        "code": error_code,
+                    },
                     "detail": {
                         "message": failed_message,
                     },

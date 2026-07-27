@@ -159,6 +159,16 @@
                 </div>
 
                 <div class="flex shrink-0 items-center gap-1">
+                  <span
+                    v-if="sessionHasUnreadAnswer(session.uuid)"
+                    class="session-unread-indicator"
+                    :title="t('lens.chat.unreadAnswer')"
+                  >
+                    <Bell :size="14" :stroke-width="2.2" aria-hidden="true" />
+                    <span class="sr-only">
+                      {{ t('lens.chat.unreadAnswer') }}
+                    </span>
+                  </span>
                   <template v-if="deletingSessionUuid === session.uuid">
                     <button
                       type="button"
@@ -376,57 +386,108 @@
               </div>
 
               <div class="message-body">
-                <div
-                  v-if="message._thinkingSteps"
-                  class="thinking-panel thinking-panel-done"
+                <details
+                  v-if="structuredProgress(message._runtimeState).items.length"
+                  class="runtime-progress-card"
                 >
-                  <button
-                    type="button"
-                    class="thinking-panel-header"
-                    @click="toggleThinking(message.uuid)"
-                  >
-                    <Sparkles :size="13" class="thinking-done-icon" />
-                    <span class="thinking-panel-status">
+                  <summary class="runtime-progress-summary">
+                    <span class="runtime-card-title">
                       {{
-                        message.thinking.duration_seconds != null
-                          ? t('lens.chat.thinkingDone', {
-                              duration: formatDuration(
-                                message.thinking.duration_seconds
-                              ),
-                              count: message._thinkingSteps.length
-                            })
-                          : t('lens.chat.thinkingDoneSteps', {
-                              count: message._thinkingSteps.length
-                            })
+                        progressTitle(
+                          structuredProgress(message._runtimeState).kind
+                        )
                       }}
                     </span>
-                    <ChevronUp
-                      v-if="expandedThinking.has(message.uuid)"
-                      :size="13"
-                      class="thinking-panel-chevron"
-                    />
-                    <ChevronDown
-                      v-else
-                      :size="13"
-                      class="thinking-panel-chevron"
-                    />
-                  </button>
+                    <span class="runtime-progress-summary-text">
+                      {{
+                        structuredProgressText(
+                          message._runtimeState,
+                          message.thinking.duration_seconds,
+                          true
+                        )
+                      }}
+                    </span>
+                    <span class="runtime-progress-chevron" aria-hidden="true">
+                      ⌄
+                    </span>
+                  </summary>
                   <div
-                    v-if="expandedThinking.has(message.uuid)"
-                    class="thinking-panel-body"
+                    v-for="item in structuredProgress(message._runtimeState)
+                      .items"
+                    :key="item.id"
+                    class="runtime-plan-node"
                   >
-                    <div
-                      v-for="step in message._thinkingSteps"
-                      :key="step.id"
-                      class="thinking-step-item"
-                    >
-                      <span class="thinking-step-bullet">▸</span>
-                      <span class="thinking-step-text">{{ step.message }}</span>
-                      <span v-if="step.count > 1" class="thinking-step-repeat">
-                        ×{{ step.count }}
+                    <div class="runtime-plan-step">
+                      <span
+                        class="runtime-plan-status"
+                        :class="`is-${item.status}`"
+                        aria-hidden="true"
+                      >
+                        {{ progressStatusIcon(item.status) }}
+                      </span>
+                      <span class="runtime-step-content">
+                        <span>{{ item.title }}</span>
+                        <span v-if="item.summary" class="runtime-step-summary">
+                          {{ item.summary }}
+                        </span>
                       </span>
                     </div>
+                    <div
+                      v-if="
+                        nodeActivities(message._runtimeState, item.id).length
+                      "
+                      class="runtime-node-activities"
+                    >
+                      <div
+                        v-for="activity in nodeActivities(
+                          message._runtimeState,
+                          item.id
+                        )"
+                        :key="activity.id"
+                        class="runtime-node-activity"
+                      >
+                        <span class="runtime-activity-indicator">✓</span>
+                        <span>{{ activityLabel(activity.kind, item) }}</span>
+                        <span
+                          v-if="activity.count > 1"
+                          class="runtime-activity-count"
+                        >
+                          ×{{ activity.count }}
+                        </span>
+                      </div>
+                    </div>
                   </div>
+                </details>
+
+                <div
+                  v-if="message._runtimeState?.capabilityBlock"
+                  class="runtime-block-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.blockedTitle') }}
+                  </div>
+                  <div>
+                    {{
+                      capabilityRecovery(message._runtimeState.capabilityBlock)
+                    }}
+                  </div>
+                </div>
+
+                <div
+                  v-if="
+                    ['partial', 'blocked'].includes(
+                      message._runtimeState?.outcome
+                    )
+                  "
+                  class="runtime-outcome-card"
+                  role="status"
+                >
+                  {{
+                    message._runtimeState.outcome === 'blocked'
+                      ? t('lens.chat.runtime.outcomeBlocked')
+                      : t('lens.chat.runtime.outcomePartial')
+                  }}
                 </div>
 
                 <div class="message-card" :class="message.role">
@@ -503,7 +564,7 @@
                 </div>
 
                 <div class="message-time" :class="message.role">
-                  {{ formatTime(message.created_at) }}
+                  {{ formatTime(getMessageTimestamp(message)) }}
                 </div>
 
                 <div
@@ -624,75 +685,130 @@
               </div>
               <div class="message-body">
                 <div
-                  v-if="isRunActive"
-                  class="thinking-panel thinking-panel-live"
+                  v-if="isRunActive && liveStructuredProgress.items.length"
+                  class="runtime-progress-card runtime-progress-live"
+                  role="status"
+                  aria-live="polite"
                 >
-                  <button
-                    type="button"
-                    class="thinking-panel-header"
-                    @click="thinkingPanelOpen = !thinkingPanelOpen"
+                  <div class="runtime-card-title">
+                    {{ progressTitle(liveStructuredProgress.kind) }}
+                  </div>
+                  <div
+                    v-for="item in liveStructuredProgress.items"
+                    :key="item.id"
+                    class="runtime-plan-node"
                   >
-                    <span class="live-progress-dot" />
-                    <span class="thinking-panel-status">
-                      <span class="thinking-panel-status-text">{{
-                        latestLiveStep ||
-                        latestActivityMessage ||
-                        liveStatusText
-                      }}</span>
+                    <div class="runtime-plan-step">
                       <span
-                        v-if="!latestLiveStep && !latestActivityMessage"
-                        class="typing-dots"
+                        class="runtime-plan-status"
+                        :class="`is-${item.status}`"
                         aria-hidden="true"
                       >
-                        <span /><span /><span />
+                        {{ progressStatusIcon(item.status) }}
                       </span>
-                    </span>
-                    <span v-if="elapsedText" class="thinking-elapsed">{{
-                      elapsedText
-                    }}</span>
-                    <span
-                      v-if="thinkingSteps.length > 0"
-                      class="thinking-step-count"
-                    >
-                      {{ thinkingSteps.length }}
-                    </span>
-                    <ChevronUp
-                      v-if="
-                        thinkingPanelOpen &&
-                        (thinkingSteps.length > 0 || thinkingText)
-                      "
-                      :size="13"
-                      class="thinking-panel-chevron"
-                    />
-                    <ChevronDown
-                      v-else-if="thinkingSteps.length > 0 || thinkingText"
-                      :size="13"
-                      class="thinking-panel-chevron"
-                    />
-                  </button>
-                  <div
-                    v-if="
-                      thinkingPanelOpen &&
-                      (thinkingSteps.length > 0 || thinkingText)
-                    "
-                    ref="thinkingPanelRef"
-                    class="thinking-panel-body"
-                  >
-                    <div
-                      v-for="step in thinkingSteps"
-                      :key="step.id"
-                      class="thinking-step-item"
-                    >
-                      <span class="thinking-step-bullet">▸</span>
-                      <span class="thinking-step-text">{{ step.message }}</span>
-                      <span v-if="step.count > 1" class="thinking-step-repeat"
-                        >×{{ step.count }}</span
-                      >
+                      <span class="runtime-step-content">
+                        <span>{{ item.title }}</span>
+                        <span v-if="item.summary" class="runtime-step-summary">
+                          {{ item.summary }}
+                        </span>
+                      </span>
                     </div>
-                    <div v-if="thinkingText" class="thinking-reasoning">
-                      {{ thinkingText }}
+                    <div
+                      v-if="nodeActivities(runtimeState, item.id).length"
+                      :ref="
+                        item.status === 'in_progress'
+                          ? 'liveActivityScrollRef'
+                          : undefined
+                      "
+                      class="runtime-node-activities"
+                    >
+                      <div
+                        v-for="activity in nodeActivities(
+                          runtimeState,
+                          item.id
+                        )"
+                        :key="activity.id"
+                        class="runtime-node-activity"
+                      >
+                        <span
+                          class="runtime-activity-indicator"
+                          :class="{
+                            'is-current': isCurrentActivity(activity, item)
+                          }"
+                          aria-hidden="true"
+                        >
+                          {{ isCurrentActivity(activity, item) ? '' : '✓' }}
+                        </span>
+                        <span>{{ activityLabel(activity.kind, item) }}</span>
+                        <span
+                          v-if="activity.count > 1"
+                          class="runtime-activity-count"
+                        >
+                          ×{{ activity.count }}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  <div class="runtime-progress-footer">
+                    <span>{{ liveProgressText }}</span>
+                    <span v-if="elapsedText"> · {{ elapsedText }}</span>
+                  </div>
+                </div>
+
+                <div
+                  v-else-if="isRunActive"
+                  class="live-status-card"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span class="live-progress-dot" />
+                  <span class="live-status-text">
+                    {{ liveProgressText }}
+                  </span>
+                  <span v-if="elapsedText" class="thinking-elapsed">
+                    {{ elapsedText }}
+                  </span>
+                </div>
+
+                <div
+                  v-if="runtimeState.capabilityBlock"
+                  class="runtime-block-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.blockedTitle') }}
+                  </div>
+                  <div>
+                    {{ capabilityRecovery(runtimeState.capabilityBlock) }}
+                  </div>
+                </div>
+
+                <div
+                  v-if="runtimeState.artifacts.length"
+                  class="runtime-artifact-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.artifactTitle') }}
+                  </div>
+                  <div
+                    v-for="artifact in runtimeState.artifacts"
+                    :key="artifact.filename"
+                  >
+                    {{ artifact.filename }}
+                  </div>
+                </div>
+
+                <div
+                  v-if="['partial', 'blocked'].includes(runtimeState.outcome)"
+                  class="runtime-outcome-card"
+                  role="status"
+                >
+                  {{
+                    runtimeState.outcome === 'blocked'
+                      ? t('lens.chat.runtime.outcomeBlocked')
+                      : t('lens.chat.runtime.outcomePartial')
+                  }}
                 </div>
 
                 <div
@@ -860,17 +976,15 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import {
   ArrowLeft,
+  Bell,
   MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Smile,
-  ChevronDown,
-  ChevronUp,
   Download,
   Eye,
-  FileText,
-  Sparkles
+  FileText
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -891,12 +1005,32 @@ import {
   fetchDeliverableBlob,
   isPreviewable
 } from '@/utils/filePreview'
-import { activeRunElapsedSeconds } from '@/utils/runElapsed'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
 import { useLensStore } from '@/store/lens'
+import { usePreferencesStore } from '@/store/preferences'
 import { useUserStore } from '@/store/user'
+import {
+  clearUnreadSession,
+  handleTerminalRun,
+  pollRunUntilTerminal,
+  readUnreadSessions,
+  UNREAD_STORAGE_KEY
+} from '@/utils/answerCompletionNotifications'
+import {
+  activitiesForNode,
+  applyRuntimeEvent,
+  calculateRunElapsedSeconds,
+  createRuntimeState,
+  getMessageTimestamp,
+  inferProgressLocale,
+  scrollConversationToBottomAfterRender,
+  selectLiveProgressText,
+  selectStructuredProgress,
+  summarizePlanProgress,
+  summarizeStageProgress
+} from '@/pages/lens/runtimeEvents'
 import {
   cancelRun,
   createRun,
@@ -918,6 +1052,7 @@ const { t } = useI18n()
 const { showError, showSuccess, showWarning } = useToast()
 const userStore = useUserStore()
 const lensStore = useLensStore()
+const preferencesStore = usePreferencesStore()
 
 const assistants = ref([])
 const sessions = ref([])
@@ -934,11 +1069,12 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
+const BASE_DOCUMENT_TITLE = 'SourceLens'
 const streamError = ref('')
 const failedRunError = ref(null)
-const streamEvents = ref([])
 const queuePosition = ref(null)
 const currentRun = ref(null)
+const unreadSessions = ref(readUnreadSessions(window.localStorage))
 const loading = ref({ run: false })
 const streamController = ref(null)
 const sidebarOpen = ref(false)
@@ -948,15 +1084,12 @@ const renamingSessionUuid = ref('')
 const renameDraft = ref('')
 const composerRef = ref(null)
 const scrollRef = ref(null)
-const seenActivityKeys = new Set()
 const seenStepEventCounts = new Map()
-const thinkingPanelOpen = ref(false)
-const thinkingPanelRef = ref(null)
-const thinkingText = ref('')
+const completionTrackers = new Map()
+const runtimeState = ref(createRuntimeState())
+const liveActivityScrollRef = ref(null)
 const elapsedSeconds = ref(0)
 let elapsedTimer = null
-let revealTimer = null
-const REVEAL_INTERVAL_MS = 300
 
 const publicAssistant = ref(null)
 const showLoginModal = ref(false)
@@ -1101,127 +1234,17 @@ const liveStatusText = computed(() => {
   return t('lens.chat.waiting')
 })
 
-const activityEvents = computed(() =>
-  streamEvents.value
-    .filter((event) => event.activity)
-    .slice(-5)
-    .reverse()
-)
-
-function toolLabel(name) {
-  const map = {
-    search_workspace: t('lens.chat.activity.searchWorkspace'),
-    read_workspace_file: t('lens.chat.activity.readFile'),
-    find_files: t('lens.chat.activity.findFiles'),
-    git_log: t('lens.chat.activity.gitLog'),
-    git_diff: t('lens.chat.activity.gitDiff'),
-    summarize_recent_changes: t('lens.chat.activity.summarizeChanges'),
-    call_skill_api: t('lens.chat.activity.callSkillApi'),
-    run_skill_script: t('lens.chat.activity.runSkillScript'),
-    run_skill_artifact: t('lens.chat.activity.runSkillArtifact'),
-    write_file: t('lens.chat.activity.writingFile'),
-    read_file: t('lens.chat.activity.readFile'),
-    edit_file: t('lens.chat.activity.editingFile'),
-    ls: t('lens.chat.activity.listFiles'),
-    write_todos: t('lens.chat.activity.planningTasks'),
-    task: t('lens.chat.activity.delegatingTask')
-  }
-  return map[name] || t('lens.chat.activity.callingTool', { name })
-}
-
-function _friendlyActivityMessage(event) {
-  const agentEvent = event.agentEvent || ''
-  const activity = event.activity || ''
-  if (agentEvent.startsWith('tool.')) {
-    const parts = agentEvent.split('.')
-    const action = parts[2]
-    if (action === 'done' || action === 'denied') return null
-    return toolLabel(parts[1])
-  }
-  if (activity === 'thinking') return t('lens.chat.activity.thinking')
-  if (activity === 'loading_resources')
-    return t('lens.chat.activity.loadingResources')
-  return null
-}
-
-// Rich step label: the tool/model action plus the backend-provided summary
-// (search query, result counts, file + line range, model decision).
-function _liveStepLabel(event) {
-  const agentEvent = event.agentEvent || ''
-  const activity = event.activity || ''
-  const summary = event.summary || ''
-  const trim = (s) => s.replace(/[.…\s]+$/, '')
-  if (agentEvent.startsWith('tool.')) {
-    const parts = agentEvent.split('.')
-    const name = parts[1]
-    const action = parts[2]
-    if (action === 'directory' || action === 'denied') return null
-    // a read reports the same file + range on start and done — keep one line
-    if (action === 'done' && name === 'read_workspace_file') return null
-    return summary ? `${trim(toolLabel(name))} · ${summary}` : toolLabel(name)
-  }
-  if (agentEvent === 'llm.response') {
-    return summary
-      ? `${trim(t('lens.chat.activity.thinking'))} · ${summary}`
-      : null
-  }
-  if (activity === 'loading_resources') {
-    return t('lens.chat.activity.loadingResources')
-  }
-  return null
-}
-
-const latestActivityMessage = computed(() => {
-  for (const event of activityEvents.value) {
-    const msg = _friendlyActivityMessage(event)
-    if (msg) return msg
-  }
-  return null
-})
-
-const allLiveSteps = computed(() => {
-  const grouped = []
-  for (const e of streamEvents.value) {
-    const msg = _liveStepLabel(e)
-    if (!msg) continue
-    const last = grouped[grouped.length - 1]
-    if (last && last.message === msg) {
-      last.count++
-    } else {
-      grouped.push({ id: e.id, message: msg, count: 1 })
-    }
-  }
-  return grouped
-})
-
-// Paced reveal: surface buffered steps one at a time for a streaming feel.
-const revealedCount = ref(0)
-const thinkingSteps = computed(() =>
-  allLiveSteps.value.slice(0, revealedCount.value)
-)
-
-// The most recently revealed step — shown in the collapsed header so the
-// status line narrates what is happening, updating at the reveal cadence.
-const latestLiveStep = computed(() => {
-  const steps = thinkingSteps.value
-  return steps.length ? steps[steps.length - 1].message : null
-})
-
-watch(
-  () => thinkingSteps.value.length,
-  async () => {
-    await nextTick()
-    if (thinkingPanelRef.value) {
-      thinkingPanelRef.value.scrollTop = thinkingPanelRef.value.scrollHeight
-    }
-  }
-)
-
-watch(thinkingText, async () => {
-  await nextTick()
-  if (thinkingPanelRef.value) {
-    thinkingPanelRef.value.scrollTop = thinkingPanelRef.value.scrollHeight
-  }
+const runtimePhaseText = computed(() => {
+  const phase = runtimeState.value.phase
+  if (!phase) return null
+  const known = new Set([
+    'analyzing',
+    'planning',
+    'executing',
+    'answering',
+    'completed'
+  ])
+  return known.has(phase) ? t(`lens.chat.runtime.phase.${phase}`) : null
 })
 
 function formatDuration(seconds) {
@@ -1236,35 +1259,163 @@ const elapsedText = computed(() => {
   return formatDuration(elapsedSeconds.value)
 })
 
-function thinkingStepsFor(events) {
-  const grouped = []
-  for (const e of events || []) {
-    const msg = _liveStepLabel({
-      agentEvent: e.agent_event,
-      activity: e.activity,
-      summary: e.summary
-    })
-    if (!msg) continue
-    const last = grouped[grouped.length - 1]
-    if (last && last.message === msg) {
-      last.count++
-    } else {
-      grouped.push({ id: `${grouped.length}`, message: msg, count: 1 })
-    }
+function planProgressText(plan, durationSeconds = null, terminal = false) {
+  const progress = summarizePlanProgress(plan, { terminal })
+  if (!progress) return ''
+  let text
+  if (progress.isComplete) {
+    text = t('lens.chat.runtime.planCompleted', progress)
+  } else if (progress.isTerminal) {
+    text = t('lens.chat.runtime.planEnded', progress)
+  } else if (progress.currentTitle) {
+    text = t('lens.chat.runtime.planProgressCurrent', progress)
+  } else {
+    text = t('lens.chat.runtime.planProgress', progress)
   }
-  return grouped
+  if (durationSeconds != null) {
+    text += ` · ${formatDuration(durationSeconds)}`
+  }
+  return text
 }
 
-const expandedThinking = ref(new Set())
-
-function toggleThinking(uuid) {
-  const next = new Set(expandedThinking.value)
-  if (next.has(uuid)) {
-    next.delete(uuid)
+function stageProgressText(stages, durationSeconds = null, terminal = false) {
+  const progress = summarizeStageProgress(stages, { terminal })
+  if (!progress) return ''
+  let text
+  if (progress.isComplete) {
+    text = t('lens.chat.runtime.stageCompleted', progress)
+  } else if (progress.isTerminal) {
+    text = t('lens.chat.runtime.stageEnded', progress)
+  } else if (progress.currentTitle) {
+    text = t('lens.chat.runtime.stageProgressCurrent', progress)
   } else {
-    next.add(uuid)
+    text = t('lens.chat.runtime.stageProgress', progress)
   }
-  expandedThinking.value = next
+  if (durationSeconds != null) {
+    text += ` · ${formatDuration(durationSeconds)}`
+  }
+  return text
+}
+
+function structuredProgress(state) {
+  return selectStructuredProgress({
+    plan: state?.plan,
+    stages: state?.stages
+  })
+}
+
+function structuredProgressText(
+  state,
+  durationSeconds = null,
+  terminal = false
+) {
+  const progress = structuredProgress(state)
+  if (progress.kind === 'plan') {
+    return planProgressText(progress.items, durationSeconds, terminal)
+  }
+  if (progress.kind === 'stage') {
+    return stageProgressText(progress.items, durationSeconds, terminal)
+  }
+  return ''
+}
+
+function progressTitle(kind) {
+  return kind === 'plan'
+    ? t('lens.chat.runtime.planTitle')
+    : t('lens.chat.runtime.stageTitle')
+}
+
+function progressStatusIcon(status) {
+  return {
+    completed: '✓',
+    in_progress: '●',
+    pending: '○',
+    failed: '×',
+    skipped: '–'
+  }[status]
+}
+
+const liveStructuredProgress = computed(() =>
+  structuredProgress(runtimeState.value)
+)
+
+function nodeActivities(state, nodeId) {
+  return activitiesForNode(state, nodeId)
+}
+
+function activityLabel(kind, item) {
+  const known = new Set([
+    'analyzingResults',
+    'findingCapability',
+    'preparingOutput',
+    'queryingData',
+    'readingContext',
+    'readingSources',
+    'searchingSources',
+    'usingCapability'
+  ])
+  const safeKind = known.has(kind) ? kind : 'usingCapability'
+  return t(
+    `lens.chat.runtime.activity.${safeKind}`,
+    {},
+    { locale: inferProgressLocale(item?.title) }
+  )
+}
+
+function isCurrentActivity(activity, item) {
+  const latest = runtimeState.value.activities.at(-1)
+  return item.status === 'in_progress' && latest?.id === activity.id
+}
+
+watch(
+  () => runtimeState.value.activities.length,
+  async () => {
+    await nextTick()
+    const refs = liveActivityScrollRef.value
+    const target = Array.isArray(refs) ? refs.at(-1) : refs
+    if (target) target.scrollTop = target.scrollHeight
+  }
+)
+
+const livePlanProgressText = computed(() =>
+  planProgressText(runtimeState.value.plan)
+)
+
+const liveStageProgressText = computed(() =>
+  stageProgressText(runtimeState.value.stages)
+)
+
+const liveProgressText = computed(() =>
+  selectLiveProgressText({
+    planProgressText: livePlanProgressText.value,
+    stageProgressText: liveStageProgressText.value,
+    phaseText: runtimePhaseText.value,
+    fallbackText: liveStatusText.value
+  })
+)
+
+function runtimeStateFor(thinking) {
+  let state = createRuntimeState()
+  for (const event of thinking?.steps || []) {
+    state = applyRuntimeEvent(state, event)
+  }
+  return applyRuntimeEvent(state, {
+    type: 'done',
+    outcome: thinking?.outcome,
+    termination_detail: thinking?.termination_detail
+  })
+}
+
+function capabilityRecovery(block) {
+  const known = new Set([
+    'configuration',
+    'policy',
+    'transient',
+    'request',
+    'tool'
+  ])
+  const errorType = known.has(block?.error_type) ? block.error_type : 'tool'
+  return t(`lens.chat.runtime.recovery.${errorType}`)
 }
 
 const decoratedMessages = computed(() =>
@@ -1278,11 +1429,9 @@ const decoratedMessages = computed(() =>
         )
     )
     .map((message) => {
-      if (message.role === 'assistant' && message.thinking?.steps?.length) {
-        const steps = thinkingStepsFor(message.thinking.steps)
-        if (steps.length) {
-          return { ...message, _thinkingSteps: steps }
-        }
+      if (message.role === 'assistant' && message.thinking) {
+        const runtime = runtimeStateFor(message.thinking)
+        return { ...message, _runtimeState: runtime }
       }
       return message
     })
@@ -1322,24 +1471,26 @@ const retryHintMessage = computed(() =>
 
 watch(isRunActive, (active) => {
   if (active) {
-    elapsedSeconds.value = activeRunElapsedSeconds(currentRun.value)
+    const updateElapsedSeconds = () => {
+      elapsedSeconds.value = calculateRunElapsedSeconds(currentRun.value)
+    }
+    updateElapsedSeconds()
     elapsedTimer = setInterval(() => {
-      elapsedSeconds.value = activeRunElapsedSeconds(currentRun.value)
+      updateElapsedSeconds()
     }, 1000)
-    revealTimer = setInterval(() => {
-      if (revealedCount.value < allLiveSteps.value.length) {
-        revealedCount.value++
-      }
-    }, REVEAL_INTERVAL_MS)
   } else {
     clearInterval(elapsedTimer)
     elapsedTimer = null
-    clearInterval(revealTimer)
-    revealTimer = null
-    // flush any buffered steps once the run settles
-    revealedCount.value = allLiveSteps.value.length
   }
 })
+
+watch(
+  [
+    () => preferencesStore.answerCompletionIndicator,
+    () => preferencesStore.currentLanguage
+  ],
+  refreshUnreadSessions
+)
 
 const { isMobile } = useIsMobile()
 
@@ -1348,30 +1499,87 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-function pushStreamEvent(event) {
-  streamEvents.value.push({
-    id: `${Date.now()}-${streamEvents.value.length}`,
-    ...event
-  })
-}
-
 function resetStreamState() {
   streamController.value?.abort()
   partialAnswer.value = ''
   streamError.value = ''
   failedRunError.value = null
-  streamEvents.value = []
   queuePosition.value = null
-  thinkingPanelOpen.value = false
-  thinkingText.value = ''
+  runtimeState.value = createRuntimeState()
   elapsedSeconds.value = 0
-  revealedCount.value = 0
-  seenActivityKeys.clear()
   seenStepEventCounts.clear()
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function refreshUnreadSessions() {
+  unreadSessions.value = readUnreadSessions(window.localStorage)
+  const unreadCount = preferencesStore.answerCompletionIndicator
+    ? Object.keys(unreadSessions.value).length
+    : 0
+  document.title = unreadCount
+    ? t('lens.chat.tabAnswerCompleted', { count: unreadCount })
+    : BASE_DOCUMENT_TITLE
+}
+
+function sessionHasUnreadAnswer(sessionUuid) {
+  return (
+    preferencesStore.answerCompletionIndicator &&
+    selectedSessionUuid.value !== sessionUuid &&
+    Boolean(unreadSessions.value[sessionUuid])
+  )
+}
+
+function handleCompletionStorage(event) {
+  if (event.key === UNREAD_STORAGE_KEY) {
+    refreshUnreadSessions()
+  }
+  if (event.key === 'answerCompletionIndicator') {
+    preferencesStore.answerCompletionIndicator = event.newValue !== 'false'
+    refreshUnreadSessions()
+  }
+}
+
+function handleCompletionVisibility() {
+  if (document.visibilityState !== 'visible') return
+  const sessionUuid = selectedSessionUuid.value
+  if (sessionUuid && unreadSessions.value[sessionUuid]) {
+    void selectSession({ uuid: sessionUuid }, false)
+  }
+}
+
+function startCompletionTracking(run, sessionUuid) {
+  if (!run?.uuid || completionTrackers.has(run.uuid)) {
+    return
+  }
+
+  const tracker = { stopped: false }
+  completionTrackers.set(run.uuid, tracker)
+  void pollRunUntilTerminal({
+    getRun,
+    initialRun: run,
+    isStopped: () => tracker.stopped,
+    maxAttempts: RUN_POLL_MAX_ATTEMPTS,
+    runUuid: run.uuid,
+    sleep: () => sleep(RUN_POLL_INTERVAL_MS)
+  })
+    .then((terminalRun) => {
+      if (!terminalRun || tracker.stopped) return
+      const result = handleTerminalRun({
+        documentRef: document,
+        indicatorEnabled: preferencesStore.answerCompletionIndicator,
+        run: terminalRun,
+        selectedSessionUuid: selectedSessionUuid.value,
+        sessionUuid,
+        storage: window.localStorage
+      })
+      if (result.unreadChanged) {
+        refreshUnreadSessions()
+      }
+    })
+    .finally(() => completionTrackers.delete(run.uuid))
 }
 
 async function waitForRunTerminal(runUuid) {
@@ -1402,24 +1610,8 @@ async function finishSubmittedRun(runUuid, sessionUuid) {
   await nextTick(scrollToBottom)
 }
 
-function pushAgentActivity(item, fallbackTs, fallbackStatus) {
-  if (!item?.message && !item?.agent_event) {
-    return
-  }
-  const key = `${item.agent_event || ''}|${item.summary || item.message || ''}`
-  if (seenActivityKeys.has(key)) {
-    return
-  }
-  seenActivityKeys.add(key)
-  pushStreamEvent({
-    label: t('lens.chat.events.agentActivity'),
-    status: fallbackStatus || 'running',
-    message: item.message || item.agent_event,
-    agentEvent: item.agent_event,
-    activity: item.activity || 'running',
-    summary: item.summary || '',
-    ts: fallbackTs || new Date().toISOString()
-  })
+function pushAgentActivity(item) {
+  runtimeState.value = applyRuntimeEvent(runtimeState.value, item)
 }
 
 function appendAnswerDelta(content) {
@@ -1488,6 +1680,8 @@ async function bootstrap() {
     await loadMyShareState()
     await loadSessions()
     booted.value = true
+    const getScrollContainer = () => scrollRef.value
+    await scrollConversationToBottomAfterRender(getScrollContainer, nextTick)
   } catch {
     showError(t('lens.chat.loadFailed'))
     booted.value = true
@@ -1774,7 +1968,10 @@ async function selectSession(session, updateRoute = true) {
     })
   }
   await nextTick(scrollToBottom)
-  maybeResumeActiveRun(session.uuid)
+  await maybeResumeActiveRun(session.uuid)
+  if (clearUnreadSession(window.localStorage, session.uuid)) {
+    refreshUnreadSessions()
+  }
 }
 
 // If the session has a run still in progress (e.g. the user navigated away
@@ -1800,6 +1997,7 @@ async function maybeResumeActiveRun(sessionUuid) {
     return
   }
   if (selectedSessionUuid.value !== sessionUuid) return
+  startCompletionTracking(run, sessionUuid)
   // hand the trailing in-progress assistant placeholder to the live row to
   // avoid showing it twice; the SSE sync replays its content and steps
   const last = messages.value[messages.value.length - 1]
@@ -1860,18 +2058,13 @@ async function readSse(runUuid) {
 }
 
 function handleEvent(event) {
+  runtimeState.value = applyRuntimeEvent(runtimeState.value, event)
   if (event.type === 'sync' || event.type === 'status') {
     currentRun.value = { ...currentRun.value, status: event.status }
     if (event.status !== 'queued') queuePosition.value = null
     if (event.type === 'sync') {
       event.steps?.forEach((step) => handleStepEvent(step, event.ts))
     }
-    pushStreamEvent({
-      label: t(`lens.chat.events.${event.type}`),
-      status: event.status,
-      message: event.status,
-      ts: event.ts
-    })
   }
   if (event.type === 'queue_position') {
     queuePosition.value = event.position
@@ -1883,63 +2076,26 @@ function handleEvent(event) {
     handleStepEvent(event, event.ts)
   }
   if (event.type === 'token_reset') {
-    if (partialAnswer.value) {
-      thinkingText.value += partialAnswer.value + '\n'
-    }
     partialAnswer.value = ''
   }
   if (event.type === 'token') {
     appendAnswerDelta(event.content)
   }
-  if (event.type === 'ping') {
-    if (!activityEvents.value.length) {
-      pushStreamEvent({
-        label: t('lens.chat.events.ping'),
-        status: currentRun.value?.status || 'processing',
-        message: t('lens.chat.waitingForResult'),
-        ts: event.ts
-      })
-    }
-  }
   if (event.type === 'error') {
     streamError.value = event.error?.code
       ? mapRunError(event.error.code)
       : event.error?.message || event.error || t('lens.chat.events.error')
-    pushStreamEvent({
-      label: t('lens.chat.events.error'),
-      status: 'failed',
-      message: streamError.value,
-      ts: event.ts
-    })
   }
 }
 
-function handleStepEvent(event, ts) {
+function handleStepEvent(event) {
   const events = event.detail?.events || []
   const stepKey = event.sequence || event.step || 'step'
   const seenCount = seenStepEventCounts.get(stepKey) || 0
   const newEvents = events.slice(seenCount)
   seenStepEventCounts.set(stepKey, events.length)
 
-  newEvents.forEach((item) => {
-    pushAgentActivity(item, ts, event.status)
-  })
-
-  if (!newEvents.length && seenCount > 0) {
-    return
-  }
-
-  const timelineItems = newEvents.length ? newEvents : [{ message: event.step }]
-  timelineItems.forEach((item) => {
-    pushStreamEvent({
-      label: t('lens.chat.events.step', { step: event.step }),
-      status: event.status,
-      message: item.message || item.agent_event || event.step,
-      agentEvent: item.agent_event,
-      activity: item.activity,
-      ts
-    })
-  })
+  newEvents.forEach(pushAgentActivity)
 }
 
 async function submit() {
@@ -2010,16 +2166,11 @@ async function submit() {
       enqueue: true,
       attachment_uuids: attachmentUuids
     })
+    startCompletionTracking(run, sessionAtSubmit)
     // switched away between createRun and here — don't bind this run's live
     // state onto the now-current assistant
     if (selectedSessionUuid.value !== sessionAtSubmit) return
     currentRun.value = run
-    pushStreamEvent({
-      label: t('lens.chat.events.submitted'),
-      status: run.status,
-      message: run.uuid,
-      ts: new Date().toISOString()
-    })
     await readSse(run.uuid)
     // switched away while streaming — leave the new assistant untouched
     if (selectedSessionUuid.value !== sessionAtSubmit) return
@@ -2036,12 +2187,6 @@ async function submit() {
     const runUuid = currentRun.value?.uuid
     if (runUuid) {
       try {
-        pushStreamEvent({
-          label: t('lens.chat.events.error'),
-          status: currentRun.value?.status || 'running',
-          message: t('lens.chat.waitingForResult'),
-          ts: new Date().toISOString()
-        })
         const run = await waitForRunTerminal(runUuid)
         if (selectedSessionUuid.value !== sessionAtSubmit) return
         currentRun.value = run
@@ -2217,6 +2362,9 @@ async function doDeleteSession(session) {
   try {
     await deleteSession(session.uuid)
     sessions.value = sessions.value.filter((s) => s.uuid !== session.uuid)
+    if (clearUnreadSession(window.localStorage, session.uuid)) {
+      refreshUnreadSessions()
+    }
     if (selectedSessionUuid.value === session.uuid) {
       const next = sessions.value[0]
       if (next) {
@@ -2247,6 +2395,9 @@ watch(
 )
 
 onMounted(async () => {
+  window.addEventListener('storage', handleCompletionStorage)
+  document.addEventListener('visibilitychange', handleCompletionVisibility)
+  refreshUnreadSessions()
   if (window.innerWidth < 1024) {
     sidebarOpen.value = false
   }
@@ -2258,9 +2409,15 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('storage', handleCompletionStorage)
+  document.removeEventListener('visibilitychange', handleCompletionVisibility)
+  document.title = BASE_DOCUMENT_TITLE
+  completionTrackers.forEach((tracker) => {
+    tracker.stopped = true
+  })
+  completionTrackers.clear()
   streamController.value?.abort()
   clearInterval(elapsedTimer)
-  clearInterval(revealTimer)
 })
 </script>
 
@@ -2379,6 +2536,11 @@ onBeforeUnmount(() => {
 .session-title {
   @apply truncate text-sm font-medium;
   color: #111827;
+}
+
+.session-unread-indicator {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-full;
+  @apply bg-primary-50 text-primary-600;
 }
 
 .session-delete-btn,
@@ -2673,49 +2835,8 @@ onBeforeUnmount(() => {
   @apply mb-2;
 }
 
-.thinking-panel {
-  @apply w-full rounded-lg overflow-hidden;
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
-}
-
-.thinking-panel-done {
-  @apply mb-2;
-  background: #fafafa;
-}
-
-.thinking-panel-live {
-  @apply mb-2;
-}
-
-.thinking-done-icon {
-  @apply shrink-0;
-  color: #9ca3af;
-}
-
-.thinking-panel-header {
-  @apply flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left;
-  background: transparent;
-  border: none;
-}
-
-.thinking-panel-header:hover {
-  background: #f3f4f6;
-}
-
-.thinking-panel-status {
-  @apply flex min-w-0 flex-1 items-center gap-1 text-sm;
-  color: #374151;
-}
-
-.thinking-panel-status-text {
+.live-status-text {
   @apply min-w-0 truncate;
-}
-
-.thinking-step-count {
-  @apply rounded-full px-1.5 py-0.5 text-xs;
-  background: #e5e7eb;
-  color: #6b7280;
 }
 
 .thinking-elapsed {
@@ -2723,42 +2844,200 @@ onBeforeUnmount(() => {
   color: #9ca3af;
 }
 
-.thinking-panel-chevron {
-  @apply shrink-0;
+.runtime-progress-card,
+.runtime-block-card,
+.runtime-artifact-card,
+.runtime-outcome-card {
+  margin-top: 0.5rem;
+  border: 1px solid #ded8cb;
+  border-radius: 0.65rem;
+  background: #faf8f3;
+  padding: 0.65rem 0.75rem;
+  color: #4f4a42;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.runtime-progress-card {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.runtime-progress-live {
+  border-color: #d8dce8;
+  background: #f8f9fc;
+}
+
+.runtime-progress-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.runtime-progress-summary::-webkit-details-marker {
+  display: none;
+}
+
+.runtime-progress-summary .runtime-card-title {
+  margin-bottom: 0;
+}
+
+.runtime-progress-summary-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: #746d62;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-progress-chevron {
+  flex: 0 0 auto;
+  color: #8b8378;
+  font-size: 0.9rem;
+  transition: transform 0.15s ease;
+}
+
+.runtime-progress-card[open] .runtime-progress-summary {
+  margin-bottom: 0.35rem;
+}
+
+.runtime-progress-card[open] .runtime-progress-chevron {
+  transform: rotate(180deg);
+}
+
+.runtime-card-title {
+  margin-bottom: 0.35rem;
+  color: #37332d;
+  font-weight: 600;
+}
+
+.runtime-plan-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.18rem 0;
+}
+
+.runtime-node-activities {
+  max-height: 5.5rem;
+  margin: 0.15rem 0 0.25rem 1.5rem;
+  padding: 0.15rem 0.35rem;
+  overflow-y: auto;
+  border-left: 1px solid #ded8cb;
+  color: #746d62;
+  font-size: 0.71rem;
+  scrollbar-width: thin;
+}
+
+.runtime-node-activity {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.3rem;
+}
+
+.runtime-activity-indicator {
+  display: inline-flex;
+  width: 0.75rem;
+  height: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: #6b8b77;
+  font-size: 0.62rem;
+}
+
+.runtime-activity-indicator.is-current {
+  border: 1.5px solid #d8dce8;
+  border-top-color: #6677a3;
+  border-radius: 9999px;
+  animation: spin 0.75s linear infinite;
+}
+
+.runtime-activity-count {
+  flex: 0 0 auto;
+  color: #9a9388;
+}
+
+.runtime-plan-status {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
+  color: #8b8378;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.runtime-plan-status.is-in_progress {
+  width: 0.85rem;
+  height: 0.85rem;
+  margin: 0.15rem 0.075rem 0;
+  border: 2px solid #ead7b4;
+  border-top-color: #b7791f;
+  border-radius: 9999px;
+  color: transparent;
+  font-size: 0;
+  animation: spin 0.75s linear infinite;
+}
+
+.runtime-plan-status.is-completed {
+  color: #3f7a5c;
+}
+
+.runtime-plan-status.is-failed {
+  color: #b64949;
+}
+
+.runtime-plan-status.is-skipped {
   color: #9ca3af;
 }
 
-.thinking-panel-body {
-  @apply max-h-36 overflow-y-auto px-3 pb-2 pt-1;
-  border-top: 1px solid #e5e7eb;
-  scroll-behavior: smooth;
+.runtime-step-content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
-.thinking-step-item {
-  @apply flex items-start gap-1.5 py-0.5 text-xs;
-  color: #6b7280;
+.runtime-step-summary {
+  margin-top: 0.08rem;
+  color: #7a746a;
+  font-size: 0.72rem;
 }
 
-.thinking-step-bullet {
-  @apply shrink-0;
-  color: #d1d5db;
-  line-height: 1.5;
+.runtime-progress-footer {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed #ded8cb;
+  color: #746d62;
+  font-size: 0.72rem;
 }
 
-.thinking-step-text {
-  @apply min-w-0 flex-1 break-words;
+.live-status-card {
+  @apply mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
 }
 
-.thinking-step-repeat {
-  @apply ml-1 shrink-0 text-xs;
-  color: #9ca3af;
+.runtime-block-card {
+  border-color: #e8c78f;
+  background: #fff8e8;
+  color: #74521e;
 }
 
-.thinking-reasoning {
-  @apply whitespace-pre-wrap break-words text-xs leading-5 mt-1 pt-1;
-  border-top: 1px dashed #e5e7eb;
-  color: #9ca3af;
-  font-style: italic;
+.runtime-outcome-card {
+  border-color: #d5c8ae;
+  background: #f7f1e4;
 }
 
 .live-progress-dot {
@@ -2775,24 +3054,6 @@ onBeforeUnmount(() => {
 .live-thinking {
   @apply flex items-center gap-2 text-sm;
   color: #4b5563;
-}
-
-.typing-dots {
-  @apply inline-flex items-center gap-1;
-}
-
-.typing-dots span {
-  @apply h-1.5 w-1.5 rounded-full;
-  background: #9ca3af;
-  animation: typing-dot 1.2s ease-in-out infinite;
-}
-
-.typing-dots span:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.typing-dots span:nth-child(3) {
-  animation-delay: 0.3s;
 }
 
 .live-markdown.is-streaming :deep(.markdown-content > *:last-child)::after {
@@ -2978,6 +3239,13 @@ onBeforeUnmount(() => {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runtime-plan-status.is-in_progress,
+  .runtime-activity-indicator.is-current {
+    animation: none;
   }
 }
 

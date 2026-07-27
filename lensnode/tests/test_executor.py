@@ -25,12 +25,18 @@ class FakeAgent:
         emit_output=None,
         on_activity=None,
         cancel_event=None,
+        wrapup_event=None,
     ):
-        del command, emit_progress, on_activity, cancel_event
+        del command, emit_progress, on_activity, cancel_event, wrapup_event
         emit_output("streamed")
         return {
             "answer": "streamed final",
             "samples": [],
+            "outcome": "partial",
+            "termination_detail": {
+                "reason": "capability_unavailable",
+                "capability": "skill",
+            },
         }
 
 
@@ -73,6 +79,12 @@ def test_executor_emits_streamed_output_delta():
         "run_uuid": "00000000-0000-0000-0000-000000000001",
         "final_content": "streamed final",
     } in events
+    done = [event for event in events if event["type"] == "run_done"][-1]
+    assert done["outcome"] == "partial"
+    assert done["termination_detail"] == {
+        "reason": "capability_unavailable",
+        "capability": "skill",
+    }
 
 
 class StallingAgent:
@@ -94,8 +106,9 @@ class StallingAgent:
         emit_output=None,
         on_activity=None,
         cancel_event=None,
+        wrapup_event=None,
     ):
-        del command, emit_progress, on_activity
+        del command, emit_progress, on_activity, wrapup_event
         self.cancel_event = cancel_event
         try:
             await asyncio.sleep(3600)
@@ -151,8 +164,9 @@ class HeartbeatOnlyAgent:
         emit_output=None,
         on_activity=None,
         cancel_event=None,
+        wrapup_event=None,
     ):
-        del command, emit_progress, emit_output, cancel_event
+        del command, emit_progress, emit_output, cancel_event, wrapup_event
         for _ in range(10):
             await asyncio.sleep(0.05)
             on_activity()
@@ -181,6 +195,135 @@ def test_executor_watchdog_survives_on_transport_activity(monkeypatch):
 
     done = [event for event in events if event["type"] == "run_done"]
     assert done[-1]["status"] == "done"
+
+
+class DeadlineAgent:
+    """Fake agent that stays active beyond the wall-clock deadline."""
+
+    class Config:
+        request_timeout_s = 0.12
+        run_idle_timeout_s = 1
+
+    config = Config()
+
+    def __init__(self):
+        self.cancel_event = None
+
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+        wrapup_event=None,
+    ):
+        del command, emit_progress, wrapup_event
+        self.cancel_event = cancel_event
+        try:
+            while True:
+                await asyncio.sleep(0.02)
+                on_activity()
+        finally:
+            emit_output("late deadline output")
+
+
+def test_executor_enforces_wall_clock_deadline_and_mutes_late_emits(
+    monkeypatch,
+):
+    monkeypatch.setattr("lensnode.executor.WATCHDOG_INTERVAL_S", 0.02)
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    agent = DeadlineAgent()
+    executor.agent = agent
+    events = []
+
+    asyncio.run(
+        asyncio.wait_for(
+            executor.execute(
+                {
+                    "run_uuid": "00000000-0000-0000-0000-000000000006",
+                    "task": "general_chat",
+                    "target_dirs": [],
+                },
+                events.append,
+            ),
+            timeout=0.5,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"]
+    assert done[-1]["status"] == "failed"
+    assert done[-1]["error"] == "RUN_TIMEOUT"
+    assert agent.cancel_event is not None
+    assert agent.cancel_event.is_set()
+    assert not any(
+        event.get("content_delta") == "late deadline output"
+        for event in events
+    )
+
+
+class GracefulDeadlineAgent:
+    """Fake agent that finishes when the soft deadline requests wrap-up."""
+
+    class Config:
+        request_timeout_s = 0.2
+        run_idle_timeout_s = 1
+
+    config = Config()
+
+    def __init__(self):
+        self.cancel_event = None
+        self.wrapup_event = None
+
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+        wrapup_event=None,
+    ):
+        del command, emit_progress, emit_output
+        self.cancel_event = cancel_event
+        self.wrapup_event = wrapup_event
+        while not wrapup_event.is_set():
+            await asyncio.sleep(0.01)
+            on_activity()
+        return {"answer": "best effort before timeout", "samples": []}
+
+
+def test_executor_requests_wrapup_before_hard_deadline(monkeypatch):
+    monkeypatch.setattr("lensnode.executor.WATCHDOG_INTERVAL_S", 0.02)
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    agent = GracefulDeadlineAgent()
+    executor.agent = agent
+    events = []
+
+    asyncio.run(
+        asyncio.wait_for(
+            executor.execute(
+                {
+                    "run_uuid": "00000000-0000-0000-0000-000000000007",
+                    "task": "general_chat",
+                    "target_dirs": [],
+                },
+                events.append,
+            ),
+            timeout=0.5,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"]
+    assert done[-1]["status"] == "done"
+    assert agent.wrapup_event is not None
+    assert agent.wrapup_event.is_set()
+    assert not agent.cancel_event.is_set()
+    assert any(
+        event.get("detail", {}).get("agent_event")
+        == "deepagents.agent.soft_deadline.requested"
+        for event in events
+    )
 
 
 def test_runtime_resources_collect_context_skill_content(tmp_path):
@@ -217,6 +360,14 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
                             }
                         ],
                     },
+                    "transforms": {
+                        "summarize": {
+                            "entrypoint": "scripts/summarize.py",
+                            "input_format": "json",
+                            "environment": [],
+                            "sha256": "0" * 64,
+                        }
+                    },
                 },
                 "load_config": {"mode": "context", "inject": True},
             },
@@ -239,7 +390,60 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
                 }
             ],
         }
+        assert resources.skill_transforms["repo-guide"] == {
+            "summarize": {
+                "entrypoint": "scripts/summarize.py",
+                "input_format": "json",
+                "environment": [],
+                "sha256": "0" * 64,
+            }
+        }
         assert resources.mcp_config_path.exists()
+    finally:
+        cleanup_runtime_resources(resources)
+
+
+def test_mcp_credentials_are_materialized_only_in_run_directory(tmp_path):
+    config = type(
+        "Config",
+        (),
+        {
+            "workspace_path": str(tmp_path),
+        },
+    )()
+    secret = "Bearer runtime-only-secret"
+    command = {
+        "run_uuid": "00000000-0000-0000-0000-000000000008",
+        "loaded_skills": [],
+        "loaded_mcps": [
+            {
+                "mcp_uuid": "22222222-2222-2222-2222-222222222222",
+                "mcp_name": "Remote API",
+                "content_hash": "sha256:def",
+                "transport": "url",
+                "endpoint": "https://mcp.example.com/api",
+                "config": {"headers": {"Authorization": secret}},
+                "load_config": {},
+            }
+        ],
+    }
+
+    resources = prepare_runtime_resources(config, command)
+
+    try:
+        assert resources.mcp_configs[0]["config"]["headers"] == {
+            "Authorization": secret
+        }
+        runtime_text = resources.mcp_config_path.read_text(encoding="utf-8")
+        assert secret not in runtime_text
+        assert "Authorization" not in runtime_text
+        cache_root = tmp_path / ".sourcelens" / "cache"
+        cached_text = "".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in cache_root.rglob("*")
+            if path.is_file()
+        )
+        assert secret not in cached_text
     finally:
         cleanup_runtime_resources(resources)
 
