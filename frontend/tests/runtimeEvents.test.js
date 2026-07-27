@@ -318,6 +318,50 @@ test('isolates General Chat workflow trees from legacy progress modes', () => {
   )
 })
 
+test('shows standalone legacy activities without plan or stage nodes', () => {
+  let state = createRuntimeState()
+  for (const agent_event of [
+    'tool.search_workspace.start',
+    'tool.read_workspace_file.start'
+  ]) {
+    state = applyRuntimeEvent(state, { agent_event })
+  }
+
+  assert.deepEqual(
+    state.activities.map((item) => ({
+      nodeId: item.nodeId,
+      kind: item.kind
+    })),
+    [
+      { nodeId: 'legacy-runtime', kind: 'searchingSources' },
+      { nodeId: 'legacy-runtime', kind: 'readingSources' }
+    ]
+  )
+  assert.deepEqual(
+    selectStructuredProgress({
+      route: null,
+      plan: [],
+      stages: [],
+      activities: state.activities,
+      standaloneActivities: true
+    }),
+    {
+      kind: 'activity',
+      items: state.activities
+    }
+  )
+  assert.deepEqual(
+    selectStructuredProgress({
+      route: 'direct_execute',
+      plan: [],
+      stages: [],
+      activities: state.activities,
+      standaloneActivities: true
+    }),
+    { kind: null, items: [] }
+  )
+})
+
 test('uses the active real operation as the General Chat stage', () => {
   const tasks = buildWorkflowTree(
     [],

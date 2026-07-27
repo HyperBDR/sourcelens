@@ -125,8 +125,7 @@ function activeNodeId(state) {
 }
 
 function appendActivity(state, kind) {
-  const nodeId = activeNodeId(state)
-  if (!nodeId) return state
+  const nodeId = activeNodeId(state) || 'legacy-runtime'
   const last = state.activities[state.activities.length - 1]
   if (last?.nodeId === nodeId && last.kind === kind) {
     return {
@@ -394,7 +393,13 @@ export function buildWorkflowTree(plan, activities) {
   return tasks
 }
 
-export function selectStructuredProgress({ route, plan, stages, activities }) {
+export function selectStructuredProgress({
+  route,
+  plan,
+  stages,
+  activities,
+  standaloneActivities = false
+}) {
   if (route) {
     const tasks = buildWorkflowTree(plan, activities)
     if (tasks.length > 0) {
@@ -412,6 +417,12 @@ export function selectStructuredProgress({ route, plan, stages, activities }) {
   }
   if (Array.isArray(stages) && stages.length > 0) {
     return { kind: 'stage', items: stages }
+  }
+  if (standaloneActivities) {
+    const items = (Array.isArray(activities) ? activities : []).filter(
+      (item) => !item.structured
+    )
+    if (items.length > 0) return { kind: 'activity', items }
   }
   return { kind: null, items: [] }
 }

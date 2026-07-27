@@ -243,6 +243,8 @@
         "stageProgressCurrent": "已完成 {completed}/{total} · 当前：{currentTitle}",
         "stageCompleted": "已完成 {completed}/{total}",
         "stageEnded": "已结束 {completed}/{total}",
+        "activityProgress": "已记录 {count} 项活动",
+        "activityCompleted": "已完成 {count} 项活动",
         "blockedTitle": "所需能力当前不可用",
         "executionFailedTitle": "能力执行失败",
         "artifactTitle": "交付文件已生成",

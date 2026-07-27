@@ -468,6 +468,30 @@
                     </div>
                   </div>
                   <div
+                    v-else-if="
+                      structuredProgress(message._runtimeState).kind ===
+                      'activity'
+                    "
+                    class="runtime-node-activities runtime-standalone-activities"
+                  >
+                    <div
+                      v-for="activity in structuredProgress(
+                        message._runtimeState
+                      ).items"
+                      :key="activity.id"
+                      class="runtime-node-activity"
+                    >
+                      <span class="runtime-activity-indicator">✓</span>
+                      <span>{{ activityLabel(activity.kind) }}</span>
+                      <span
+                        v-if="activity.count > 1"
+                        class="runtime-activity-count"
+                      >
+                        ×{{ activity.count }}
+                      </span>
+                    </div>
+                  </div>
+                  <div
                     v-else
                     v-for="item in structuredProgress(message._runtimeState)
                       .items"
@@ -830,6 +854,44 @@
                     </div>
                   </div>
                   <div
+                    v-else-if="liveStructuredProgress.kind === 'activity'"
+                    ref="liveActivityScrollRef"
+                    class="runtime-node-activities runtime-standalone-activities"
+                  >
+                    <div
+                      v-for="activity in liveStructuredProgress.items"
+                      :key="activity.id"
+                      class="runtime-node-activity"
+                    >
+                      <span
+                        class="runtime-activity-indicator"
+                        :class="{
+                          'is-current': isCurrentStandaloneActivity(
+                            activity,
+                            liveStructuredProgress.items
+                          )
+                        }"
+                        aria-hidden="true"
+                      >
+                        {{
+                          isCurrentStandaloneActivity(
+                            activity,
+                            liveStructuredProgress.items
+                          )
+                            ? ''
+                            : '✓'
+                        }}
+                      </span>
+                      <span>{{ activityLabel(activity.kind) }}</span>
+                      <span
+                        v-if="activity.count > 1"
+                        class="runtime-activity-count"
+                      >
+                        ×{{ activity.count }}
+                      </span>
+                    </div>
+                  </div>
+                  <div
                     v-else
                     v-for="item in liveStructuredProgress.items"
                     :key="item.id"
@@ -889,7 +951,9 @@
                   <div class="runtime-progress-footer">
                     <span>
                       {{
-                        liveStructuredProgress.kind === 'workflow'
+                        ['workflow', 'activity'].includes(
+                          liveStructuredProgress.kind
+                        )
                           ? structuredProgressText(runtimeState)
                           : liveProgressText
                       }}
@@ -1310,6 +1374,12 @@ const assistantDescription = computed(
     ''
 )
 
+const isGeneralChatAssistant = computed(
+  () =>
+    (selectedAssistant.value || publicAssistant.value)?.selected_task ===
+    'general_chat'
+)
+
 // The top header turns the assistant name into a switcher only when an
 // authenticated user has more than one assistant to choose from. Mirror the
 // switcher's own visibility rule (active assistants only) so the header never
@@ -1462,7 +1532,8 @@ function structuredProgress(state) {
     route: state?.route,
     plan: state?.plan,
     stages: state?.stages,
-    activities: state?.activities
+    activities: state?.activities,
+    standaloneActivities: !isGeneralChatAssistant.value
   })
 }
 
@@ -1482,11 +1553,24 @@ function structuredProgressText(
     const stages = progress.tasks.flatMap((task) => task.stages || [])
     return stageProgressText(stages, durationSeconds, terminal)
   }
+  if (progress.kind === 'activity') {
+    const count = progress.items.reduce(
+      (total, item) => total + Number(item.count || 1),
+      0
+    )
+    return t(
+      terminal
+        ? 'lens.chat.runtime.activityCompleted'
+        : 'lens.chat.runtime.activityProgress',
+      { count }
+    )
+  }
   return ''
 }
 
 function progressTitle(kind, items = []) {
   if (kind === 'plan') return t('lens.chat.runtime.planTitle')
+  if (kind === 'activity') return t('lens.chat.agentActivity')
   if (kind === 'workflow') {
     const stage = selectCurrentWorkflowStage(items)
     return stage
@@ -1574,6 +1658,10 @@ function activityLabel(kind) {
 function isCurrentActivity(activity, item) {
   const latest = runtimeState.value.activities.at(-1)
   return item.status === 'in_progress' && latest?.id === activity.id
+}
+
+function isCurrentStandaloneActivity(activity, items) {
+  return isRunActive.value && items.at(-1)?.id === activity.id
 }
 
 watch(
@@ -3188,6 +3276,10 @@ onBeforeUnmount(() => {
   color: #64748b;
   font-size: 0.71rem;
   scrollbar-width: thin;
+}
+
+.runtime-standalone-activities {
+  margin-left: 0;
 }
 
 .runtime-node-activity {
