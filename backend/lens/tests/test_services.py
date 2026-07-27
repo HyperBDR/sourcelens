@@ -547,6 +547,157 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(event["payload"], {})
         self.assertNotIn("secret-token", str(event))
 
+    def test_order_query_activity_exposes_safe_real_parameters(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "activity-123",
+            "skill": "license-cli",
+            "artifact": "income",
+            "args_redacted": [
+                "--profile",
+                "default",
+                "order",
+                "list",
+                "--start",
+                "2026-07-20T00:00:00+08:00",
+                "--end",
+                "2026-07-26T23:59:59+08:00",
+                "--token",
+                "[REDACTED]",
+            ],
+        })
+
+        self.assertEqual(event["event_type"], "activity.recorded")
+        self.assertEqual(event["visibility"], "user")
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "activity-123",
+                "kind": "query_orders",
+                "stage_kind": "order_query",
+                "status": "in_progress",
+                "start_date": "2026-07-20",
+                "end_date": "2026-07-26",
+            },
+        )
+        self.assertNotIn("token", str(event).lower())
+        self.assertNotIn("profile", str(event).lower())
+        self.assertNotIn("run_skill_artifact", str(event))
+
+    def test_completed_tool_activity_preserves_only_pairing_fields(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.done",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "activity-123",
+            "stdout_ref": "/large_tool_results/private.txt",
+            "summary": "license-cli/income · rc=0",
+        })
+
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "activity-123",
+                "kind": "querying_data",
+                "stage_kind": "data_query",
+                "status": "completed",
+            },
+        )
+        self.assertNotIn("stdout", str(event))
+
+    def test_order_detail_and_command_help_have_real_activity_kinds(self):
+        detail = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "detail-123",
+            "args_redacted": [
+                "--profile",
+                "default",
+                "order",
+                "get",
+                "ORDER-123",
+            ],
+        })
+        command_help = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "help-123",
+            "args_redacted": ["order", "get", "--help"],
+        })
+
+        self.assertEqual(detail["payload"]["kind"], "get_order_detail")
+        self.assertEqual(
+            command_help["payload"]["kind"],
+            "reading_order_commands",
+        )
+        self.assertNotIn("ORDER-123", str(detail))
+
+    def test_structured_analysis_activity_exposes_allowlisted_operation(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.analyze_structured_output.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "analysis-123",
+            "operation": "count",
+            "input_ref": "/large_tool_results/private.txt",
+        })
+
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "analysis-123",
+                "kind": "count_results",
+                "stage_kind": "result_analysis",
+                "status": "in_progress",
+            },
+        )
+        self.assertNotIn("input_ref", str(event))
+
+    def test_non_general_chat_tool_event_keeps_original_public_shape(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "invocation_id": "activity-123",
+            "args_redacted": ["order", "list"],
+        })
+
+        self.assertEqual(
+            event,
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+            },
+        )
+
+    def test_general_chat_model_round_is_a_safe_replayable_step(self):
+        event = sanitize_runtime_event({
+            "agent_event": "model.round.start",
+            "runtime_scope": "general_chat",
+            "invocation_id": "model-round-2",
+            "round": 2,
+            "summary": "private model reasoning",
+        })
+
+        self.assertEqual(
+            event,
+            {
+                "event_type": "activity.recorded",
+                "visibility": "user",
+                "payload": {
+                    "id": "model-round-2",
+                    "kind": "analyzing_request",
+                    "stage_kind": "reasoning",
+                    "status": "in_progress",
+                    "round": 2,
+                },
+            },
+        )
+        self.assertNotIn("private", str(event["payload"]).lower())
+
     def test_termination_detail_uses_fixed_public_contract(self):
         detail = sanitize_termination_detail({
             "reason": "secret-token",

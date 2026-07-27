@@ -31,6 +31,7 @@ from .gateway_model import (
 )
 from .logging_utils import elapsed_since, task_log, utc_now
 from .mcp_tools import build_deferred_mcp_tools, load_mcp_tools
+from .runtime_modes import runtime_mode_for
 from .runtime_resources import (
     cleanup_runtime_resources,
     prepare_runtime_resources,
@@ -50,6 +51,7 @@ class _NoTaskMiddleware(AgentMiddleware):
 
     def __init__(self, emit_event=None):
         self.emit_event = emit_event
+        self.model_round = 0
 
     @staticmethod
     def _filter_tools(tools):
@@ -65,7 +67,14 @@ class _NoTaskMiddleware(AgentMiddleware):
         request = request.override(
             tools=self._filter_tools(request.tools)
         )
-        return handler(request)
+        invocation_id = self._start_model_round()
+        try:
+            result = handler(request)
+        except Exception:
+            self._finish_model_round(invocation_id, "failed")
+            raise
+        self._finish_model_round(invocation_id, "done")
+        return result
 
     async def awrap_model_call(self, request, handler):
         """Filter asynchronous model requests."""
@@ -73,7 +82,42 @@ class _NoTaskMiddleware(AgentMiddleware):
         request = request.override(
             tools=self._filter_tools(request.tools)
         )
-        return await handler(request)
+        invocation_id = self._start_model_round()
+        try:
+            result = await handler(request)
+        except Exception:
+            self._finish_model_round(invocation_id, "failed")
+            raise
+        self._finish_model_round(invocation_id, "done")
+        return result
+
+    def _start_model_round(self):
+        """Emit the start of one real General Chat model round."""
+
+        self.model_round += 1
+        invocation_id = f"model-round-{self.model_round}"
+        if self.emit_event is not None:
+            self.emit_event(
+                "model.round.start",
+                {
+                    "invocation_id": invocation_id,
+                    "round": self.model_round,
+                },
+            )
+        return invocation_id
+
+    def _finish_model_round(self, invocation_id, suffix):
+        """Emit the terminal state for one General Chat model round."""
+
+        if self.emit_event is not None:
+            round_number = int(invocation_id.rsplit("-", 1)[-1])
+            self.emit_event(
+                f"model.round.{suffix}",
+                {
+                    "invocation_id": invocation_id,
+                    "round": round_number,
+                },
+            )
 
     def _deny_task_call(self, request):
         """Return a tool error without executing the subagent handler."""
@@ -574,11 +618,13 @@ class LensDeepAgentRuntime:
         started_at = utc_now()
         question = command.get("question", "")
         scenario = _scenario_for_task(command.get("task"))
+        runtime_mode = runtime_mode_for(command)
         model_ref = command.get("agent_model_ref")
         if not model_ref:
             raise ValueError("agent_model_ref is required for Deep Agents")
 
         def emit_agent_event(event, detail=None):
+            detail = runtime_mode.decorate_event(detail)
             message = task_log(event, details=_detail_lines(detail))
             LOGGER.info(message)
             if emit_progress is not None:
@@ -587,7 +633,7 @@ class LensDeepAgentRuntime:
                     {
                         "agent_event": event,
                         "activity": _activity_from_event(event),
-                        **(detail or {}),
+                        **detail,
                     },
                 )
 
@@ -618,14 +664,13 @@ class LensDeepAgentRuntime:
                 "human_tokens": self.config.offload_human_tokens,
             },
         )
-        if _is_general_chat(command):
+        if runtime_mode.general_chat:
             emit_user_event("phase.changed", {"phase": "analyzing"})
         resources = prepare_runtime_resources(
             self.config,
             command,
             emit_event=emit_agent_event,
         )
-        direct_stage_state = None
         try:
             run_uuid = str(command.get("run_uuid") or "")
             token_budget = _resolve_token_budget(self.config, command)
@@ -654,7 +699,7 @@ class LensDeepAgentRuntime:
                 ),
                 token_budget_wrapup_event=token_budget_wrapup_event,
             )
-            if _is_general_chat(command):
+            if runtime_mode.general_chat:
                 tools = build_general_chat_tools(
                     command,
                     resources,
@@ -696,7 +741,7 @@ class LensDeepAgentRuntime:
             capability_middleware = None
             capability_stop_event = None
             evidence_requirement = "none"
-            if _is_general_chat(command):
+            if runtime_mode.general_chat:
                 route_decision = _select_general_chat_route(
                     model,
                     question,
@@ -754,14 +799,32 @@ class LensDeepAgentRuntime:
                     }
                 if route_decision["route"] == "direct_answer":
                     emit_user_event("phase.changed", {"phase": "answering"})
-                    answer = _answer_general_chat_directly(
-                        model,
-                        command,
-                        _system_prompt(
-                            scenario,
+                    runtime_mode.emit_model_round(
+                        emit_agent_event,
+                        "start",
+                        1,
+                    )
+                    try:
+                        answer = _answer_general_chat_directly(
+                            model,
                             command,
-                            resources.context_skill_contents,
-                        ),
+                            _system_prompt(
+                                scenario,
+                                command,
+                                resources.context_skill_contents,
+                            ),
+                        )
+                    except Exception:
+                        runtime_mode.emit_model_round(
+                            emit_agent_event,
+                            "failed",
+                            1,
+                        )
+                        raise
+                    runtime_mode.emit_model_round(
+                        emit_agent_event,
+                        "done",
+                        1,
                     )
                     if not answer.strip():
                         raise EmptyAgentResponseError(
@@ -779,14 +842,6 @@ class LensDeepAgentRuntime:
                         "outcome": "completed",
                         "termination_detail": {},
                     }
-                if route_decision["route"] == "direct_execute":
-                    direct_stage_state = _create_direct_stage_state(
-                        _detect_answer_language(question)
-                    )
-                    _start_direct_stages(
-                        direct_stage_state,
-                        emit_agent_event,
-                    )
                 capability_stop_event = threading.Event()
                 capability_middleware = CapabilityBoundaryMiddleware(
                     emit_event=emit_agent_event,
@@ -813,12 +868,12 @@ class LensDeepAgentRuntime:
                 ),
                 "subagents": (
                     []
-                    if _is_general_chat(command)
+                    if runtime_mode.general_chat
                     else [_fast_subagent(mcp_middleware)]
                 ),
                 "name": f"lensnode-{command.get('task') or 'agent'}",
             }
-            if resources.skill_paths and not _is_general_chat(command):
+            if resources.skill_paths and not runtime_mode.general_chat:
                 kwargs["skills"] = resources.skill_paths
 
             summarizer = _build_summarization_middleware(
@@ -853,7 +908,7 @@ class LensDeepAgentRuntime:
                     "skill_count": len(resources.skill_paths),
                     "mcp_tool_count": len(mcp_tools),
                     "mcp_deferred": mcp_middleware is not None,
-                    "task_tool_enabled": not _is_general_chat(command),
+                    "task_tool_enabled": not runtime_mode.general_chat,
                     "mcp_config_path": str(resources.mcp_config_path),
                 },
             )
@@ -884,7 +939,6 @@ class LensDeepAgentRuntime:
                 wrapup_event=wrapup_event,
                 token_budget_wrapup_event=token_budget_wrapup_event,
                 capability_stop_event=capability_stop_event,
-                direct_stage_state=direct_stage_state,
             )
             if truncated:
                 emit_agent_event(
@@ -920,12 +974,6 @@ class LensDeepAgentRuntime:
                     question,
                     termination_detail,
                 )
-            if direct_stage_state is not None:
-                _finish_direct_stages(
-                    direct_stage_state,
-                    emit_agent_event,
-                    outcome=outcome,
-                )
             emit_user_event("phase.changed", {"phase": "completed"})
             return {
                 "answer": answer,
@@ -935,13 +983,6 @@ class LensDeepAgentRuntime:
                 "outcome": outcome,
                 "termination_detail": termination_detail,
             }
-        except Exception:
-            if direct_stage_state is not None:
-                _fail_direct_stages(
-                    direct_stage_state,
-                    emit_agent_event,
-                )
-            raise
         finally:
             cleanup_runtime_resources(resources)
 
@@ -1040,156 +1081,6 @@ def _pick_text(zh_text, en_text, answer_language):
     """
 
     return zh_text if answer_language == "Chinese" else en_text
-
-
-def _create_direct_stage_state(answer_language):
-    """Return state for explicit direct-execution progress events."""
-
-    return {
-        "answer_language": answer_language,
-        "revision": 0,
-        "tool_count": 0,
-        "stages": {
-            "understand": {
-                "title": _pick_text(
-                    "理解任务范围",
-                    "Understand request scope",
-                    answer_language,
-                ),
-                "order": 1,
-                "status": "pending",
-            },
-            "execute": {
-                "title": _pick_text(
-                    "执行并分析所需操作",
-                    "Execute and analyze required operations",
-                    answer_language,
-                ),
-                "order": 2,
-                "status": "pending",
-            },
-            "answer": {
-                "title": _pick_text(
-                    "整理最终结果",
-                    "Organize final result",
-                    answer_language,
-                ),
-                "order": 3,
-                "status": "pending",
-            },
-        },
-    }
-
-
-def _emit_direct_stage(state, emit_event, stage_id, status, summary=""):
-    """Emit one revisioned direct-execution stage update."""
-
-    stage = state["stages"][stage_id]
-    stage["status"] = status
-    state["revision"] += 1
-    payload = {
-        "id": stage_id,
-        "title": stage["title"],
-        "status": status,
-        "order": stage["order"],
-        "revision": state["revision"],
-    }
-    if summary:
-        payload["summary"] = summary
-    emit_event(
-        "workflow.stage.updated",
-        {
-            "event_type": "stage.updated",
-            "visibility": "user",
-            "payload": payload,
-        },
-    )
-
-
-def _start_direct_stages(state, emit_event):
-    """Expose the direct-execution stages after routing completes."""
-
-    _emit_direct_stage(state, emit_event, "understand", "completed")
-    _emit_direct_stage(state, emit_event, "execute", "in_progress")
-    _emit_direct_stage(state, emit_event, "answer", "pending")
-
-
-def _record_direct_tool_call(state, emit_event):
-    """Update the execution stage from one observed tool call."""
-
-    state["tool_count"] += 1
-    count = state["tool_count"]
-    summary = _pick_text(
-        f"已开始 {count} 项操作",
-        (
-            "Started 1 operation"
-            if count == 1
-            else f"Started {count} operations"
-        ),
-        state["answer_language"],
-    )
-    _emit_direct_stage(
-        state,
-        emit_event,
-        "execute",
-        "in_progress",
-        summary,
-    )
-
-
-def _finish_direct_stages(state, emit_event, *, outcome):
-    """Record truthful terminal states for a direct execution."""
-
-    language = state["answer_language"]
-    if outcome == "blocked":
-        execution_status = "failed"
-        summary = _pick_text(
-            "未能获得所需的执行证据",
-            "Could not obtain the required execution evidence",
-            language,
-        )
-    elif outcome == "partial":
-        execution_status = "failed"
-        summary = _pick_text(
-            "执行已结束，但结果不完整",
-            "Execution ended with partial results",
-            language,
-        )
-    else:
-        execution_status = "completed"
-        summary = _pick_text(
-            "所需操作已执行",
-            "Required operations were executed",
-            language,
-        )
-    _emit_direct_stage(
-        state,
-        emit_event,
-        "execute",
-        execution_status,
-        summary,
-    )
-    _emit_direct_stage(state, emit_event, "answer", "completed")
-
-
-def _fail_direct_stages(state, emit_event):
-    """Close open direct-execution stages after a runtime exception."""
-
-    language = state["answer_language"]
-    if state["stages"]["execute"]["status"] == "in_progress":
-        _emit_direct_stage(
-            state,
-            emit_event,
-            "execute",
-            "failed",
-            _pick_text(
-                "执行意外中止",
-                "Execution stopped unexpectedly",
-                language,
-            ),
-        )
-    if state["stages"]["answer"]["status"] == "pending":
-        _emit_direct_stage(state, emit_event, "answer", "skipped")
 
 
 def _system_prompt(
@@ -1928,7 +1819,6 @@ def _run_agent_with_turn_limit(
     wrapup_event=None,
     token_budget_wrapup_event=None,
     capability_stop_event=None,
-    direct_stage_state=None,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -1991,7 +1881,6 @@ def _run_agent_with_turn_limit(
                 seen_tool_calls,
                 emit_event,
                 plan_state=plan_state,
-                direct_stage_state=direct_stage_state,
             )
         ai_turns = sum(
             1
@@ -2312,7 +2201,6 @@ def _emit_new_tool_calls(
     emit_event,
     *,
     plan_state=None,
-    direct_stage_state=None,
 ):
     """Emit a progress event for each not-yet-seen agent tool call.
 
@@ -2351,11 +2239,6 @@ def _emit_new_tool_calls(
                     },
                 )
                 continue
-            if direct_stage_state is not None:
-                _record_direct_tool_call(
-                    direct_stage_state,
-                    emit_event,
-                )
             if (
                 plan_state is not None
                 and not plan_state.get("execution_phase_emitted")
