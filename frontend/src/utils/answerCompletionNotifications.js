@@ -34,6 +34,32 @@ export function browserNotificationState({
   return 'disabled'
 }
 
+export async function enableBrowserNotifications({
+  isSecureContext,
+  notificationApi
+}) {
+  const state = browserNotificationState({
+    enabled: false,
+    isSecureContext,
+    notificationApi
+  })
+  if (state === 'unsupported' || state === 'blocked') {
+    return state
+  }
+  if (notificationApi.permission === 'granted') {
+    return 'enabled'
+  }
+
+  try {
+    const permission = await notificationApi.requestPermission()
+    if (permission === 'granted') return 'enabled'
+    if (permission === 'denied') return 'blocked'
+  } catch {
+    return 'disabled'
+  }
+  return 'disabled'
+}
+
 export function readUnreadSessions(storage) {
   return readObject(storage, UNREAD_STORAGE_KEY)
 }
@@ -101,10 +127,7 @@ async function sendBrowserNotification(options) {
   }
 
   if (options.locks?.request) {
-    return options.locks.request(
-      `sourcelens-answer-${options.runUuid}`,
-      send
-    )
+    return options.locks.request(`sourcelens-answer-${options.runUuid}`, send)
   }
   return send()
 }

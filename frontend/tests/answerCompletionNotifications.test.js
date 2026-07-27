@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   browserNotificationState,
   clearUnreadSession,
+  enableBrowserNotifications,
   handleTerminalRun,
   readUnreadSessions
 } from '../src/utils/answerCompletionNotifications.js'
@@ -101,6 +102,45 @@ test('represents unsupported, blocked, disabled, and enabled states', () => {
     }),
     'enabled'
   )
+})
+
+test('requests browser permission only from an explicit enable action', async () => {
+  let requests = 0
+  const notificationApi = {
+    permission: 'default',
+    async requestPermission() {
+      requests += 1
+      this.permission = 'granted'
+      return this.permission
+    }
+  }
+
+  const state = await enableBrowserNotifications({
+    isSecureContext: true,
+    notificationApi
+  })
+
+  assert.equal(state, 'enabled')
+  assert.equal(requests, 1)
+})
+
+test('does not repeat a permission prompt after the browser blocks it', async () => {
+  let requests = 0
+  const notificationApi = {
+    permission: 'denied',
+    async requestPermission() {
+      requests += 1
+      return this.permission
+    }
+  }
+
+  const state = await enableBrowserNotifications({
+    isSecureContext: true,
+    notificationApi
+  })
+
+  assert.equal(state, 'blocked')
+  assert.equal(requests, 0)
 })
 
 test('marks a completed background conversation unread', async () => {
