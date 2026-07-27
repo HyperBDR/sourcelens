@@ -232,8 +232,46 @@
       "running": "正在分析",
       "generating": "正在生成",
       "agentActivity": "Agent 活动",
-      "thinkingDone": "已思考 {duration} · {count} 步",
-      "thinkingDoneSteps": "已思考 {count} 步",
+      "runtime": {
+        "planTitle": "执行计划",
+        "stageTitle": "任务进度",
+        "planProgress": "已完成 {completed}/{total}",
+        "planProgressCurrent": "已完成 {completed}/{total} · 当前：{currentTitle}",
+        "planCompleted": "已完成 {completed}/{total}",
+        "planEnded": "已结束 {completed}/{total}",
+        "stageProgress": "已完成 {completed}/{total}",
+        "stageProgressCurrent": "已完成 {completed}/{total} · 当前：{currentTitle}",
+        "stageCompleted": "已完成 {completed}/{total}",
+        "stageEnded": "已结束 {completed}/{total}",
+        "blockedTitle": "所需能力当前不可用",
+        "artifactTitle": "交付文件已生成",
+        "outcomePartial": "已返回部分结果，请查看上方缺失能力或未完成事项。",
+        "outcomeBlocked": "当前请求已阻塞，请补充所需能力或输入后重试。",
+        "activity": {
+          "analyzingResults": "正在分析已取得的结果",
+          "findingCapability": "正在查找所需能力",
+          "preparingOutput": "正在整理输出内容",
+          "queryingData": "正在查询业务数据",
+          "readingContext": "正在读取任务上下文",
+          "readingSources": "正在读取相关资料",
+          "searchingSources": "正在搜索相关资料",
+          "usingCapability": "正在执行所需操作"
+        },
+        "recovery": {
+          "configuration": "请联系管理员配置或授权该能力，然后重试。",
+          "policy": "请基于已有结果继续，或缩小请求范围。",
+          "transient": "请稍后重试，或改用其他可用能力。",
+          "request": "请修正或补充缺失输入，然后重试。",
+          "tool": "请改用其他可用能力，或联系管理员处理。"
+        },
+        "phase": {
+          "analyzing": "正在理解请求",
+          "planning": "正在制定计划",
+          "executing": "正在执行计划",
+          "answering": "正在整理回答",
+          "completed": "已完成"
+        }
+      },
       "events": {
         "submitted": "已提交",
         "sync": "同步状态",

@@ -310,6 +310,17 @@
                           t('lensRuns.subagents', { n: detail.subagent_count })
                         }}
                       </span>
+                      <span
+                        v-if="detail.subagent_denied_count > 0"
+                        class="text-amber-600"
+                      >
+                        ·
+                        {{
+                          t('lensRuns.subagentsDenied', {
+                            n: detail.subagent_denied_count
+                          })
+                        }}
+                      </span>
                     </dd>
                   </div>
                   <div>
@@ -328,6 +339,48 @@
                         class="text-gray-400"
                       >
                         · ${{ detail.total_cost }}
+                      </span>
+                    </dd>
+                  </div>
+                  <div v-if="detail.artifact_calls">
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.artifactCalls') }}
+                    </dt>
+                    <dd class="mt-0.5 text-gray-900 tabular-nums">
+                      {{ detail.artifact_calls }}
+                      <span
+                        v-if="detail.artifact_call_limit_hits"
+                        class="text-amber-600"
+                      >
+                        · {{ t('lensRuns.artifactCallLimitHit') }}
+                      </span>
+                    </dd>
+                  </div>
+                  <div v-if="detail.structured_analysis_calls">
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.structuredAnalysisCalls') }}
+                    </dt>
+                    <dd class="mt-0.5 text-gray-900 tabular-nums">
+                      {{ detail.structured_analysis_calls }}
+                      <span
+                        v-if="detail.structured_analysis_limit_hits"
+                        class="text-amber-600"
+                      >
+                        · {{ t('lensRuns.callLimitHit') }}
+                      </span>
+                    </dd>
+                  </div>
+                  <div v-if="detail.transform_calls">
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.transformCalls') }}
+                    </dt>
+                    <dd class="mt-0.5 text-gray-900 tabular-nums">
+                      {{ detail.transform_calls }}
+                      <span
+                        v-if="detail.transform_call_limit_hits"
+                        class="text-amber-600"
+                      >
+                        · {{ t('lensRuns.callLimitHit') }}
                       </span>
                     </dd>
                   </div>
@@ -433,8 +486,7 @@
                   </h3>
                   <pre
                     class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap"
-                    >{{ detail.error }}</pre
-                  >
+                    >{{ detail.error }}</pre>
                 </section>
               </div>
 
@@ -460,11 +512,98 @@
                     {{ (detail.prompt_tokens || 0).toLocaleString() }}↑
                     {{ (detail.completion_tokens || 0).toLocaleString() }}↓
                   </div>
+                  <div
+                    v-if="detail.cached_tokens"
+                    class="tabular-nums text-gray-600"
+                  >
+                    cached {{ detail.cached_tokens.toLocaleString() }}
+                  </div>
+                  <div
+                    v-if="detail.reasoning_tokens"
+                    class="tabular-nums text-gray-600"
+                  >
+                    reasoning {{ detail.reasoning_tokens.toLocaleString() }}
+                  </div>
                   <div class="text-gray-600">
                     {{ t('lensRuns.llmCalls', { n: detail.llm_calls }) }}
                   </div>
+                  <div v-if="detail.artifact_calls" class="text-gray-600">
+                    {{
+                      t('lensRuns.artifactCallsCount', {
+                        n: detail.artifact_calls
+                      })
+                    }}
+                  </div>
+                  <div
+                    v-if="detail.structured_analysis_calls"
+                    class="text-gray-600"
+                  >
+                    {{
+                      t('lensRuns.structuredAnalysisCallsCount', {
+                        n: detail.structured_analysis_calls
+                      })
+                    }}
+                  </div>
+                  <div v-if="detail.transform_calls" class="text-gray-600">
+                    {{
+                      t('lensRuns.transformCallsCount', {
+                        n: detail.transform_calls
+                      })
+                    }}
+                  </div>
+                  <div
+                    v-if="detail.subagent_model_calls"
+                    class="text-indigo-600"
+                  >
+                    subagent {{ detail.subagent_model_calls }}
+                  </div>
                   <div v-if="detail.total_cost != null" class="text-gray-600">
                     ${{ detail.total_cost }}
+                  </div>
+                </div>
+
+                <div
+                  v-if="detail.model_calls?.length"
+                  class="overflow-hidden rounded-md border border-gray-200"
+                >
+                  <div
+                    v-for="(call, index) in detail.model_calls"
+                    :key="call.uuid"
+                    class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-100 px-3 py-2 text-xs last:border-b-0"
+                  >
+                    <span class="font-medium text-gray-700"
+                      >#{{ index + 1 }}</span
+                    >
+                    <span
+                      :class="
+                        call.is_subagent ? 'text-indigo-600' : 'text-gray-500'
+                      "
+                      >{{ call.is_subagent ? 'subagent' : 'main' }}</span
+                    >
+                    <span class="max-w-xs truncate text-gray-500">{{
+                      call.model
+                    }}</span>
+                    <span class="tabular-nums text-gray-600">
+                      {{ (call.total_tokens || 0).toLocaleString() }} tokens
+                    </span>
+                    <span
+                      v-if="call.cached_tokens"
+                      class="tabular-nums text-gray-500"
+                    >
+                      cached {{ call.cached_tokens.toLocaleString() }}
+                    </span>
+                    <span
+                      v-if="call.duration_ms != null"
+                      class="tabular-nums text-gray-500"
+                    >
+                      {{ msText(call.duration_ms) }}
+                    </span>
+                    <span
+                      v-if="call.ttft_ms != null"
+                      class="tabular-nums text-gray-400"
+                    >
+                      TTFT {{ msText(call.ttft_ms) }}
+                    </span>
                   </div>
                 </div>
 
@@ -616,6 +755,8 @@ function parseTimelineEvent(e) {
       }
     }
     if (e.latency_ms != null) detailParts.push(msText(e.latency_ms))
+    if (e.cached_tokens) detailParts.push(`cached ${e.cached_tokens}`)
+    if (e.reasoning_tokens) detailParts.push(`reasoning ${e.reasoning_tokens}`)
   } else if (e.agent_event === 'deepagents.summarization.compacted') {
     if (e.before_tokens != null && e.after_tokens != null) {
       detailParts.push(`${kText(e.before_tokens)} → ${kText(e.after_tokens)}`)
@@ -631,6 +772,27 @@ function parseTimelineEvent(e) {
   } else if (e.summary) detailParts.push(e.summary)
   else if (e.path) detailParts.push(e.path)
   else if (e.query) detailParts.push(`"${e.query}"`)
+  if (Array.isArray(e.args_redacted) && e.args_redacted.length) {
+    detailParts.push(e.args_redacted.join(' '))
+  }
+  if (e.input_bytes != null) detailParts.push(`input ${e.input_bytes} B`)
+  if (e.input_sha256) detailParts.push(`in#${e.input_sha256.slice(0, 12)}`)
+  if (e.stdout_bytes != null) {
+    const suffix = e.stdout_truncated ? ' → saved' : ''
+    detailParts.push(`stdout ${e.stdout_bytes} B${suffix}`)
+  }
+  if (e.output_bytes != null) {
+    const suffix = e.output_truncated ? ' → saved' : ''
+    detailParts.push(`output ${e.output_bytes} B${suffix}`)
+  }
+  if (e.output_sha256) detailParts.push(`out#${e.output_sha256.slice(0, 12)}`)
+  if (e.stdout_sha256) {
+    detailParts.push(`stdout#${e.stdout_sha256.slice(0, 12)}`)
+  }
+  if (e.call_count != null && e.max_calls != null) {
+    detailParts.push(`call ${e.call_count}/${e.max_calls}`)
+  }
+  if (e.invocation_id) detailParts.push(`#${e.invocation_id.slice(-8)}`)
   if (e.count > 1 && !e.summary) detailParts.push(`×${e.count}`)
   if (e.duration_ms != null) detailParts.push(msText(e.duration_ms))
   return {

@@ -14,6 +14,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -102,6 +103,7 @@ def skill_zip_upload(
     environment=None,
     api=None,
     artifacts=None,
+    transforms=None,
     package_files=None,
 ):
     """Return an uploaded zip containing one SKILL.md."""
@@ -119,7 +121,8 @@ def skill_zip_upload(
         for path, content in (package_files or {}).items():
             archive.writestr(f"{name}/{path}", content)
         if any(
-            value is not None for value in (environment, api, artifacts)
+            value is not None
+            for value in (environment, api, artifacts, transforms)
         ):
             config = {}
             if environment is not None:
@@ -128,6 +131,8 @@ def skill_zip_upload(
                 config["api"] = api
             if artifacts is not None:
                 config["artifacts"] = artifacts
+            if transforms is not None:
+                config["transforms"] = transforms
             archive.writestr(
                 f"{name}/sourcelens.json",
                 json.dumps(config),
@@ -229,6 +234,7 @@ class LensApiTests(TestCase):
             "lensnode_uuid": str(self.lensnode.uuid),
             "selected_task": "knowledge_qa",
             "selected_dirs": [{"path": "/workspace/repo"}],
+            "token_budget_profile": "deep",
             "skill_bindings": [
                 {
                     "skill_uuid": str(self.skill.uuid),
@@ -253,6 +259,8 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         assistant = Assistant.objects.get(slug="api-explorer")
+        self.assertEqual(assistant.token_budget_profile, "deep")
+        self.assertEqual(response.data["token_budget_profile"], "deep")
         self.assertEqual(assistant.lensnode, self.lensnode)
         self.assertEqual(
             assistant.description,
@@ -266,6 +274,23 @@ class LensApiTests(TestCase):
             assistant.settings["_model_check"]["agent_model_ref"]["status"],
             "skipped",
         )
+
+    def test_assistant_create_rejects_unknown_token_budget_profile(self):
+        response = self.client.post(
+            "/api/lens/assistants/",
+            {
+                "name": "Invalid Budget",
+                "slug": "invalid-budget",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "selected_task": "knowledge_qa",
+                "selected_dirs": [{"path": "/workspace/repo"}],
+                "token_budget_profile": "unlimited",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("token_budget_profile", response.data)
 
     def test_assistant_update_saves_description(self):
         response = self.client.patch(
@@ -730,6 +755,157 @@ class LensApiTests(TestCase):
                     & 0o777,
                     0o755,
                 )
+
+    def test_uploaded_skill_reads_declared_transform(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "scripts/summarize_orders.py",
+                "input_format": "json",
+                "environment": [],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "order-transform",
+                            "Summarize an order result reference.",
+                            transforms=transforms,
+                            package_files={
+                                "scripts/summarize_orders.py": (
+                                    b"import json, sys\n"
+                                ),
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+                self.assertEqual(response.status_code, 200)
+                saved_transform = response.data["definition"][
+                    "transforms"
+                ]["summarize-orders"]
+                self.assertEqual(
+                    saved_transform["entrypoint"],
+                    "scripts/summarize_orders.py",
+                )
+                self.assertEqual(saved_transform["input_format"], "json")
+                self.assertEqual(saved_transform["environment"], [])
+                self.assertEqual(
+                    saved_transform["sha256"],
+                    hashlib.sha256(b"import json, sys\n").hexdigest(),
+                )
+                skill = Skill.objects.get(slug="order-transform")
+                with zipfile.ZipFile(package_zip_bytes(skill)) as archive:
+                    config = json.loads(
+                        archive.read(
+                            "order-transform/sourcelens.json"
+                        ).decode("utf-8")
+                    )
+                self.assertEqual(config["transforms"], transforms)
+
+    def test_uploaded_skill_rejects_transform_outside_scripts(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "bin/summarize_orders.py",
+                "input_format": "json",
+                "environment": [],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "unsafe-transform",
+                            "Run a transform.",
+                            transforms=transforms,
+                            package_files={
+                                "bin/summarize_orders.py": b"print('no')\n",
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("scripts/", response.data["detail"])
+
+    def test_uploaded_skill_rejects_transform_undeclared_environment(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "scripts/summarize_orders.py",
+                "input_format": "json",
+                "environment": ["ORDER_TOKEN"],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "unsafe-transform-env",
+                            "Run a transform.",
+                            transforms=transforms,
+                            package_files={
+                                "scripts/summarize_orders.py": (
+                                    b"print('no')\n"
+                                ),
+                            },
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ORDER_TOKEN", response.data["detail"])
+
+    def test_uploaded_skill_revalidates_transform_environment_override(self):
+        transforms = {
+            "summarize-orders": {
+                "entrypoint": "scripts/summarize_orders.py",
+                "input_format": "json",
+                "environment": ["ORDER_TOKEN"],
+            }
+        }
+        environment = [
+            {
+                "name": "ORDER_TOKEN",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "transform-override",
+                            "Run a transform.",
+                            environment=environment,
+                            transforms=transforms,
+                            package_files={
+                                "scripts/summarize_orders.py": (
+                                    b"print('ok')\n"
+                                ),
+                            },
+                        ),
+                        "environment": json.dumps([]),
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ORDER_TOKEN", response.data["detail"])
 
     def test_uploaded_skill_rejects_artifact_outside_bin(self):
         content = b"#!/bin/sh\n"
@@ -1964,6 +2140,28 @@ class LensApiTests(TestCase):
         )
         output.file.delete(save=False)
 
+    def test_session_messages_use_run_finish_time_for_assistant(self):
+        session, run, output = self._make_output_file()
+        finished_at = timezone.now()
+        run.finished_at = finished_at
+        run.save(update_fields=["finished_at"])
+
+        response = self.client.get(
+            f"/api/lens/sessions/{session.uuid}/messages/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        question = next(m for m in response.data if m["role"] == "user")
+        answer = next(
+            m for m in response.data if m["role"] == "assistant"
+        )
+        self.assertIsNone(question["completed_at"])
+        self.assertEqual(
+            answer["completed_at"],
+            finished_at,
+        )
+        output.file.delete(save=False)
+
     def test_deleting_session_purges_output_file_bytes(self):
         session, run, output = self._make_output_file()
         storage = output.file.storage
@@ -2092,6 +2290,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(run_response.status_code, 201)
         self.assertEqual(run_response.data["status"], "queued")
+        self.assertIsNotNone(run_response.data["created_at"])
 
         cancel_response = self.client.post(
             f"/api/lens/runs/{run_response.data['uuid']}/cancel/"
