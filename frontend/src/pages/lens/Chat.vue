@@ -372,11 +372,9 @@
                   message.role === 'user' ? avatarBgColor : ''
                 ]"
               >
-                <Smile
-                  v-if="message.role === 'user'"
-                  :size="17"
-                  :stroke-width="2"
-                />
+                <span v-if="message.role === 'user'" aria-hidden="true">
+                  {{ userInitials }}
+                </span>
                 <img
                   v-else
                   src="/brand/logo_transparent.png"
@@ -475,10 +473,24 @@
                 </div>
 
                 <div
+                  v-if="message._runtimeState?.executionFailure"
+                  class="runtime-block-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.executionFailedTitle') }}
+                  </div>
+                  <div>
+                    {{ executionFailureRecovery(message._runtimeState) }}
+                  </div>
+                </div>
+
+                <div
                   v-if="
-                    ['partial', 'blocked'].includes(
-                      message._runtimeState?.outcome
-                    )
+                    message._runtimeState?.outcome === 'partial' ||
+                    (message._runtimeState?.outcome === 'blocked' &&
+                      !message._runtimeState?.capabilityBlock &&
+                      !message._runtimeState?.executionFailure)
                   "
                   class="runtime-outcome-card"
                   role="status"
@@ -784,6 +796,19 @@
                 </div>
 
                 <div
+                  v-if="runtimeState.executionFailure"
+                  class="runtime-block-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.executionFailedTitle') }}
+                  </div>
+                  <div>
+                    {{ executionFailureRecovery(runtimeState) }}
+                  </div>
+                </div>
+
+                <div
                   v-if="runtimeState.artifacts.length"
                   class="runtime-artifact-card"
                   role="status"
@@ -800,7 +825,12 @@
                 </div>
 
                 <div
-                  v-if="['partial', 'blocked'].includes(runtimeState.outcome)"
+                  v-if="
+                    runtimeState.outcome === 'partial' ||
+                    (runtimeState.outcome === 'blocked' &&
+                      !runtimeState.capabilityBlock &&
+                      !runtimeState.executionFailure)
+                  "
                   class="runtime-outcome-card"
                   role="status"
                 >
@@ -981,7 +1011,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
-  Smile,
   Download,
   Eye,
   FileText
@@ -1408,14 +1437,20 @@ function runtimeStateFor(thinking) {
 
 function capabilityRecovery(block) {
   const known = new Set([
+    'capability',
     'configuration',
     'policy',
     'transient',
     'request',
-    'tool'
+    'tool',
+    'verification'
   ])
   const errorType = known.has(block?.error_type) ? block.error_type : 'tool'
   return t(`lens.chat.runtime.recovery.${errorType}`)
+}
+
+function executionFailureRecovery(state) {
+  return capabilityRecovery(state?.executionFailure)
 }
 
 const decoratedMessages = computed(() =>
@@ -2690,12 +2725,12 @@ onBeforeUnmount(() => {
 }
 
 .thread {
-  @apply mx-auto w-full max-w-[900px] px-6 py-8;
-  padding-bottom: 240px;
+  @apply mx-auto w-full max-w-[860px] px-5 py-7;
+  padding-bottom: 220px;
 }
 
 .message-row {
-  @apply mb-9 flex items-start gap-4;
+  @apply mb-8 flex items-start gap-3;
 }
 
 .message-row-user {
@@ -2703,7 +2738,7 @@ onBeforeUnmount(() => {
 }
 
 .message-avatar {
-  @apply flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] text-xs font-semibold;
+  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold;
 }
 
 .message-avatar.user {
@@ -2721,7 +2756,7 @@ onBeforeUnmount(() => {
 
 .message-row-user .message-body {
   @apply w-fit flex-none text-right;
-  max-width: min(640px, calc(100% - 46px));
+  max-width: min(620px, calc(100% - 40px));
 }
 
 .message-card {
@@ -2729,7 +2764,7 @@ onBeforeUnmount(() => {
 }
 
 .message-card.user {
-  @apply rounded-2xl px-4 py-3 text-left;
+  @apply rounded-xl px-3.5 py-2.5 text-left;
   background: #f3f4f6;
   overflow-wrap: anywhere;
 }
@@ -2756,7 +2791,7 @@ onBeforeUnmount(() => {
 }
 
 .message-markdown :deep(.markdown-content p) {
-  @apply mb-3 text-[16px] leading-7;
+  @apply mb-2.5 text-[15px] leading-6;
   color: #374151;
 }
 
@@ -2766,7 +2801,7 @@ onBeforeUnmount(() => {
 }
 
 .message-markdown :deep(.markdown-content li) {
-  @apply mb-2 text-[16px] leading-7;
+  @apply mb-1.5 text-[15px] leading-6;
   color: #374151;
 }
 
@@ -2776,12 +2811,12 @@ onBeforeUnmount(() => {
 }
 
 .message-text {
-  @apply whitespace-pre-wrap break-words text-[16px] leading-7;
+  @apply whitespace-pre-wrap break-words text-[15px] leading-6;
   color: #111827;
 }
 
 .message-actions {
-  @apply mt-3 flex gap-1;
+  @apply mt-2 flex gap-1;
 }
 
 .icon-btn {
@@ -2849,11 +2884,11 @@ onBeforeUnmount(() => {
 .runtime-artifact-card,
 .runtime-outcome-card {
   margin-top: 0.5rem;
-  border: 1px solid #ded8cb;
-  border-radius: 0.65rem;
-  background: #faf8f3;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.625rem;
+  background: #f8fafc;
   padding: 0.65rem 0.75rem;
-  color: #4f4a42;
+  color: #475569;
   font-size: 0.78rem;
   line-height: 1.45;
 }
@@ -2888,7 +2923,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  color: #746d62;
+  color: #64748b;
   font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2896,7 +2931,7 @@ onBeforeUnmount(() => {
 
 .runtime-progress-chevron {
   flex: 0 0 auto;
-  color: #8b8378;
+  color: #94a3b8;
   font-size: 0.9rem;
   transition: transform 0.15s ease;
 }
@@ -2911,7 +2946,7 @@ onBeforeUnmount(() => {
 
 .runtime-card-title {
   margin-bottom: 0.35rem;
-  color: #37332d;
+  color: #334155;
   font-weight: 600;
 }
 
@@ -2927,8 +2962,8 @@ onBeforeUnmount(() => {
   margin: 0.15rem 0 0.25rem 1.5rem;
   padding: 0.15rem 0.35rem;
   overflow-y: auto;
-  border-left: 1px solid #ded8cb;
-  color: #746d62;
+  border-left: 1px solid #e2e8f0;
+  color: #64748b;
   font-size: 0.71rem;
   scrollbar-width: thin;
 }
@@ -3017,8 +3052,8 @@ onBeforeUnmount(() => {
 .runtime-progress-footer {
   margin-top: 0.4rem;
   padding-top: 0.4rem;
-  border-top: 1px dashed #ded8cb;
-  color: #746d62;
+  border-top: 1px dashed #e2e8f0;
+  color: #64748b;
   font-size: 0.72rem;
 }
 
@@ -3047,7 +3082,7 @@ onBeforeUnmount(() => {
 }
 
 .live-text {
-  @apply whitespace-pre-wrap text-[16px] leading-7;
+  @apply whitespace-pre-wrap text-[15px] leading-6;
   color: #111827;
 }
 
@@ -3135,7 +3170,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-inner {
-  @apply mx-auto w-full max-w-[900px];
+  @apply mx-auto w-full max-w-[860px];
 }
 
 .composer-shell {
@@ -3143,7 +3178,9 @@ onBeforeUnmount(() => {
 }
 
 .composer {
-  @apply flex items-center gap-3 rounded-2xl border border-line bg-white px-4 py-3 shadow-soft;
+  @apply flex items-center gap-3 rounded-xl border bg-white px-4 py-2.5;
+  border-color: #dbe1e8;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
 .composer:focus-within {
@@ -3385,8 +3422,8 @@ onBeforeUnmount(() => {
   }
 
   .thread {
-    @apply px-4 py-6;
-    padding-bottom: 260px;
+    @apply px-4 py-5;
+    padding-bottom: 220px;
   }
 
   .main-shell {

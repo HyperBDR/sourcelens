@@ -3,6 +3,7 @@
 PUBLIC_EVENT_TYPES = {
     "artifact.created",
     "capability.blocked",
+    "execution.failed",
     "phase.changed",
     "plan.updated",
     "route.selected",
@@ -12,7 +13,12 @@ PUBLIC_EVENT_TYPES = {
 ROUTE_VALUES = {
     "intent": {"informational", "action", "clarification"},
     "complexity": {"simple", "complex"},
-    "route": {"direct_answer", "direct_execute", "plan_execute"},
+    "route": {
+        "capability_unavailable",
+        "direct_answer",
+        "direct_execute",
+        "plan_execute",
+    },
     "evidence_requirement": {
         "none",
         "tool_result",
@@ -49,6 +55,7 @@ PUBLIC_STAGE_STATUSES = {
 
 PUBLIC_TERMINATION_REASONS = {
     "capability_unavailable",
+    "execution_failed",
     "evidence_unavailable",
     "execution_limit",
     "turn_limit",
@@ -63,6 +70,7 @@ PUBLIC_TERMINATION_REASONS = {
 }
 
 PUBLIC_ERROR_TYPES = {
+    "capability",
     "configuration",
     "policy",
     "transient",
@@ -81,14 +89,18 @@ PUBLIC_RUNTIME_CODES = {
 }
 
 RECOVERY_MESSAGES = {
+    "capability": (
+        "Use an assistant with the required operation or ask an "
+        "administrator to bind that capability."
+    ),
     "configuration": "Ask an administrator to configure or authorize it.",
     "policy": "Continue from the evidence already collected.",
     "transient": "Retry later or use another available capability.",
     "request": "Provide the missing or corrected input, then retry.",
     "tool": "Use another available capability or contact an administrator.",
     "verification": (
-        "Confirm the required integration is bound and authorized, then "
-        "retry."
+        "Review the execution details and retry; no verified result was "
+        "returned."
     ),
 }
 
@@ -220,7 +232,7 @@ def _sanitize_payload(event_type, payload):
         if summary:
             output["summary"] = summary
         return output
-    if event_type == "capability.blocked":
+    if event_type in {"capability.blocked", "execution.failed"}:
         return sanitize_termination_detail(payload)
     if event_type == "artifact.created":
         output = {
