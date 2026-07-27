@@ -216,10 +216,11 @@ class LensGatewayChatModel(BaseChatModel):
 
         del stop, run_manager
         self._check_cancelled()
+        control_call = bool(kwargs.get("runtime_control_call"))
         gateway_messages = [
             _message_to_gateway(message) for message in messages
         ]
-        warnings = self._consume_runtime_warnings()
+        warnings = [] if control_call else self._consume_runtime_warnings()
         if warnings:
             gateway_messages.append(
                 {"role": "user", "content": "\n\n".join(warnings)}
@@ -231,16 +232,16 @@ class LensGatewayChatModel(BaseChatModel):
         if self.run_uuid:
             payload["run_uuid"] = self.run_uuid
             payload["is_subagent"] = _in_subagent_context()
-        if kwargs.get("tools") is not None:
+        if not control_call and kwargs.get("tools") is not None:
             payload["tools"] = kwargs["tools"]
-        if kwargs.get("tool_choice") is not None:
+        if not control_call and kwargs.get("tool_choice") is not None:
             payload["tool_choice"] = kwargs["tool_choice"]
         if kwargs.get("temperature") is not None:
             payload["temperature"] = kwargs["temperature"]
         if kwargs.get("max_tokens") is not None:
             payload["max_tokens"] = kwargs["max_tokens"]
 
-        if self.emit_output is not None:
+        if self.emit_output is not None and not control_call:
             return self._generate_streaming(payload)
 
         payload["return_message"] = True
@@ -649,6 +650,23 @@ def _tool_result_metadata(result, tool_name):
         }
 
     error_code = _tool_error_code(result)
+    artifact_diagnostic = (
+        str(result.get("stderr") or "").upper()
+        if tool_name == "run_skill_artifact"
+        else ""
+    )
+    artifact_request_failure = any(
+        marker in artifact_diagnostic
+        for marker in (
+            "404",
+            "NOTFOUND",
+            "NOT FOUND",
+            "UNKNOWN FLAG",
+            "INVALID ARGUMENT",
+            "USAGE:",
+            "数据不存在",
+        )
+    )
     if any(
         marker in error_code
         for marker in ("AUTH", "CONFIG", "CREDENTIAL", "PERMISSION")
@@ -679,7 +697,7 @@ def _tool_result_metadata(result, tool_name):
             "Stop calling this tool and synthesize the answer from evidence "
             "already collected."
         )
-    elif any(
+    elif artifact_request_failure or any(
         marker in error_code
         for marker in ("INVALID", "NOT_FOUND", "PATH")
     ):

@@ -104,6 +104,44 @@ def test_cancelled_run_aborts_before_model_call(monkeypatch):
         model._generate([HumanMessage(content="hi")])
 
 
+def test_runtime_control_call_is_non_streaming_and_hidden(monkeypatch):
+    captured = {}
+    outputs = []
+
+    def handler(request):
+        captured["payload"] = json.loads(request.read())
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "role": "assistant",
+                    "content": '{"route":"direct_answer"}',
+                    "finish_reason": "stop",
+                },
+                "usage": {"total_tokens": 7},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=outputs.append,
+    )
+
+    result = model._generate(
+        [HumanMessage(content="hi")],
+        runtime_control_call=True,
+        tools=[{"type": "function"}],
+    )
+
+    assert result.generations[0].message.content.startswith("{")
+    assert outputs == []
+    assert "stream" not in captured["payload"]
+    assert "tools" not in captured["payload"]
+
+
 def test_https_gateway_request_uses_configured_tls_context(monkeypatch):
     client_options = {}
 

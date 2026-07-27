@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from agentcore_metering.adapters.django.models import LLMUsage
 from lens.models import Run
+from lens.runtime_events import sanitize_loaded_mcps, sanitize_loaded_skills
 from lens.serializers import MessageAttachmentSerializer
 
 
@@ -271,8 +272,10 @@ def _admin_run_detail(run):
         "execution": {
             "task": execution.task,
             "target_dirs": execution.target_dirs,
-            "loaded_skills": execution.loaded_skills,
-            "loaded_mcps": execution.loaded_mcps,
+            "loaded_skills": sanitize_loaded_skills(
+                execution.loaded_skills
+            ),
+            "loaded_mcps": sanitize_loaded_mcps(execution.loaded_mcps),
         } if execution else None,
     })
     if model_usage:

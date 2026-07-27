@@ -1,9 +1,17 @@
+import json
 import threading
 from types import SimpleNamespace
+
+from langchain_core.messages import ToolMessage
 
 from lensnode import agent_runtime
 from lensnode.agent_runtime import (
     _build_initial_messages,
+    _emit_new_tool_calls,
+    _finalize_runtime_outcome,
+    _general_chat_system_prompt,
+    _normalize_plan_steps,
+    _parse_route_decision,
     _pick_text,
     _run_agent_with_turn_limit,
     _strip_dangling_tool_call,
@@ -92,6 +100,571 @@ def test_model_event_records_cache_reasoning_and_latency():
     assert events[0][1]["cached_tokens"] == 80
     assert events[0][1]["reasoning_tokens"] == 5
     assert events[0][1]["latency_ms"] == 1234
+
+
+def test_write_todos_emits_user_visible_normalized_plan():
+    events = []
+    message = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "call-plan",
+                "name": "write_todos",
+                "args": {
+                    "todos": [
+                        {
+                            "content": "Inspect the current flow",
+                            "status": "completed",
+                        },
+                        {
+                            "content": "Implement the event contract",
+                            "status": "in_progress",
+                        },
+                        {"content": "Verify the UI", "status": "pending"},
+                    ]
+                },
+            }
+        ],
+    )
+
+    _emit_new_tool_calls(
+        [message],
+        set(),
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    assert events == [
+        (
+            "workflow.plan.updated",
+            {
+                "event_type": "plan.updated",
+                "visibility": "user",
+                "payload": {
+                    "revision": 1,
+                    "steps": [
+                        {
+                            "id": "step-1",
+                            "title": "Inspect the current flow",
+                            "status": "completed",
+                        },
+                        {
+                            "id": "step-2",
+                            "title": "Implement the event contract",
+                            "status": "in_progress",
+                        },
+                        {
+                            "id": "step-3",
+                            "title": "Verify the UI",
+                            "status": "pending",
+                        },
+                    ],
+                },
+            },
+        )
+    ]
+
+
+def test_direct_execution_stages_start_with_real_runtime_state():
+    events = []
+    state = agent_runtime._create_direct_stage_state("English")
+
+    agent_runtime._start_direct_stages(
+        state,
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    assert [detail["payload"]["status"] for _, detail in events] == [
+        "completed",
+        "in_progress",
+        "pending",
+    ]
+    assert [detail["payload"]["order"] for _, detail in events] == [1, 2, 3]
+    assert [detail["payload"]["revision"] for _, detail in events] == [1, 2, 3]
+    assert all(name == "workflow.stage.updated" for name, _ in events)
+
+
+def test_direct_execution_stage_counts_actual_tool_calls():
+    events = []
+    state = agent_runtime._create_direct_stage_state("English")
+    agent_runtime._start_direct_stages(state, lambda *_args: None)
+    message = _Msg(
+        "ai",
+        tool_calls=[
+            {"id": "call-orders", "name": "call_skill_api", "args": {}},
+        ],
+    )
+
+    _emit_new_tool_calls(
+        [message],
+        set(),
+        lambda name, detail: events.append((name, detail)),
+        direct_stage_state=state,
+    )
+
+    stage_events = [
+        detail for name, detail in events if name == "workflow.stage.updated"
+    ]
+    assert state["tool_count"] == 1
+    assert stage_events[-1]["payload"]["id"] == "execute"
+    assert stage_events[-1]["payload"]["status"] == "in_progress"
+    assert stage_events[-1]["payload"]["summary"] == "Started 1 operation"
+
+
+def test_direct_execution_stages_record_blocked_outcome():
+    events = []
+    state = agent_runtime._create_direct_stage_state("English")
+    agent_runtime._start_direct_stages(state, lambda *_args: None)
+
+    agent_runtime._finish_direct_stages(
+        state,
+        lambda name, detail: events.append((name, detail)),
+        outcome="blocked",
+    )
+
+    payloads = [detail["payload"] for _, detail in events]
+    assert payloads[0]["id"] == "execute"
+    assert payloads[0]["status"] == "failed"
+    assert payloads[1]["id"] == "answer"
+    assert payloads[1]["status"] == "completed"
+
+
+def test_direct_execution_stages_do_not_mark_partial_work_completed():
+    events = []
+    state = agent_runtime._create_direct_stage_state("English")
+    agent_runtime._start_direct_stages(state, lambda *_args: None)
+
+    agent_runtime._finish_direct_stages(
+        state,
+        lambda name, detail: events.append((name, detail)),
+        outcome="partial",
+    )
+
+    payloads = [detail["payload"] for _, detail in events]
+    assert payloads[0]["id"] == "execute"
+    assert payloads[0]["status"] == "failed"
+    assert payloads[0]["summary"] == "Execution ended with partial results"
+    assert payloads[1]["status"] == "completed"
+
+
+def test_route_decision_parses_json_and_uses_safe_fallback():
+    decision = _parse_route_decision(
+        '```json\n{"intent":"action","complexity":"simple",'
+        '"route":"direct_execute","required_capabilities":["skill"]}\n```'
+    )
+
+    assert decision == {
+        "intent": "action",
+        "complexity": "simple",
+        "route": "direct_execute",
+        "required_capabilities": ["skill"],
+        "evidence_requirement": "tool_result",
+    }
+    assert _parse_route_decision("not json")["route"] == "plan_execute"
+
+
+def test_route_decision_requires_execution_for_external_business_facts():
+    decision = _parse_route_decision(
+        '{"intent":"informational","complexity":"simple",'
+        '"route":"direct_answer","required_capabilities":["skill"],'
+        '"evidence_requirement":"tool_result"}'
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["evidence_requirement"] == "tool_result"
+
+
+def test_guidance_route_keeps_plan_execution_without_tool_evidence():
+    decision = _parse_route_decision(
+        '{"intent":"informational","complexity":"complex",'
+        '"route":"plan_execute","required_capabilities":["skill"],'
+        '"evidence_requirement":"none"}'
+    )
+
+    assert decision["route"] == "plan_execute"
+    assert decision["evidence_requirement"] == "none"
+
+
+def test_malformed_route_fails_closed_to_tool_evidence():
+    decision = _parse_route_decision("not json")
+
+    assert decision["route"] == "plan_execute"
+    assert decision["evidence_requirement"] == "tool_result"
+
+
+def test_advisory_missing_capability_does_not_override_skill_success():
+    middleware = SimpleNamespace(
+        success_count=1,
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
+
+
+def test_advisory_missing_capability_blocks_unverified_answer():
+    middleware = SimpleNamespace(
+        success_count=0,
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "blocked"
+    assert termination_detail["reason"] == "evidence_unavailable"
+
+
+def test_guidance_skill_does_not_require_tool_execution():
+    middleware = SimpleNamespace(
+        success_count=0,
+        successful_capabilities=set(),
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="none",
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
+
+
+def test_artifact_requirement_needs_actual_delivery():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"skill"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="artifact",
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "blocked"
+    assert termination_detail["reason"] == "evidence_unavailable"
+
+
+def test_artifact_requirement_completes_after_actual_delivery():
+    middleware = SimpleNamespace(
+        success_count=2,
+        successful_capabilities={"skill", "artifact_delivery"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="artifact",
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
+
+
+def test_blocked_evidence_is_not_downgraded_to_partial_when_truncated():
+    middleware = SimpleNamespace(
+        success_count=0,
+        successful_capabilities=set(),
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        truncated=True,
+        stop_reason="turn_limit",
+    )
+
+    assert outcome == "blocked"
+    assert termination_detail["reason"] == "evidence_unavailable"
+
+
+def test_guidance_becomes_partial_when_execution_is_truncated():
+    middleware = SimpleNamespace(
+        success_count=0,
+        successful_capabilities=set(),
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="none",
+        truncated=True,
+        stop_reason="turn_limit",
+    )
+
+    assert outcome == "partial"
+    assert termination_detail == {"reason": "turn_limit"}
+
+
+def test_plan_steps_are_bounded_and_normalized():
+    todos = [
+        {"content": "x" * 300, "status": "unknown"},
+        {"content": "Valid", "status": "completed"},
+        {"content": "", "status": "pending"},
+        *[
+            {"content": f"Step {index}", "status": "pending"}
+            for index in range(20)
+        ],
+    ]
+
+    steps = _normalize_plan_steps(todos)
+
+    assert len(steps) == 11
+    assert len(steps[0]["title"]) == 240
+    assert steps[0]["status"] == "pending"
+    assert steps[1]["status"] == "completed"
+
+
+def test_general_chat_prompt_forbids_unverified_business_results():
+    prompt = _general_chat_system_prompt(
+        {
+            "question": "查询订单详情",
+            "runtime_route": "direct_execute",
+        }
+    )
+
+    assert "Never claim that a tool was called" in prompt
+    assert "Never invent order" in prompt
+
+
+def test_capability_boundary_stops_configuration_failure_immediately():
+    events = []
+    stop_event = threading.Event()
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        emit_event=lambda name, detail: events.append((name, detail)),
+        stop_event=stop_event,
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="call_skill_api"),
+        tool_call={"name": "call_skill_api", "id": "call-1"},
+    )
+
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"AUTH_REQUIRED"}',
+            name="call_skill_api",
+            tool_call_id="call-1",
+            status="error",
+        ),
+    )
+
+    assert result.status == "error"
+    assert stop_event.is_set()
+    assert middleware.outcome == "blocked"
+    assert middleware.termination_detail["capability"] == "skill"
+    assert events[0][0] == "workflow.capability.blocked"
+
+
+def test_capability_boundary_allows_one_transient_retry():
+    stop_event = threading.Event()
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        stop_event=stop_event
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={"name": "mcp__orders", "id": "call-1"},
+    )
+
+    def fail(_request):
+        return ToolMessage(
+            content='{"ok":false,"error":"HTTP_REQUEST_FAILED"}',
+            name="mcp__orders",
+            tool_call_id="call-1",
+            status="error",
+        )
+
+    middleware.wrap_tool_call(request, fail)
+    assert not stop_event.is_set()
+    middleware.wrap_tool_call(request, fail)
+    assert stop_event.is_set()
+    assert middleware.termination_detail["capability"] == "mcp"
+
+
+def test_capability_boundary_allows_artifact_argument_correction_after_404():
+    stop_event = threading.Event()
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        stop_event=stop_event
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={"name": "run_skill_artifact", "id": "call-1"},
+    )
+
+    def not_found(_request):
+        return ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": False,
+                    "returncode": 5,
+                    "stderr": (
+                        "Income API returned 404: NotFound: "
+                        "data does not exist"
+                    ),
+                }
+            ),
+            name="run_skill_artifact",
+            tool_call_id="call-1",
+            status="error",
+        )
+
+    middleware.wrap_tool_call(request, not_found)
+
+    assert not stop_event.is_set()
+    middleware.wrap_tool_call(request, not_found)
+    assert stop_event.is_set()
+    assert middleware.termination_detail["error_type"] == "request"
+
+
+def test_capability_boundary_counts_raw_mcp_success_as_evidence():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders__lookup"),
+        tool_call={"name": "mcp__orders__lookup", "id": "call-1"},
+    )
+
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"order_id":"HWINSTAD2025071509"}',
+            name="mcp__orders__lookup",
+            tool_call_id="call-1",
+        ),
+    )
+
+    assert middleware.success_count == 1
+    assert middleware.successful_capabilities == {"mcp"}
+
+
+def test_capability_boundary_rejects_raw_mcp_error_as_evidence():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders__lookup"),
+        tool_call={"name": "mcp__orders__lookup", "id": "call-1"},
+    )
+
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content="remote order service failed",
+            name="mcp__orders__lookup",
+            tool_call_id="call-1",
+            status="error",
+        ),
+    )
+
+    assert middleware.success_count == 0
+    assert middleware.termination_detail["capability"] == "mcp"
+
+
+def test_capability_boundary_does_not_count_auxiliary_tools_as_evidence():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+
+    for index, tool_name in enumerate(
+        ("write_todos", "tool_search", "read_file"),
+        start=1,
+    ):
+        request = SimpleNamespace(
+            tool=SimpleNamespace(name=tool_name),
+            tool_call={"name": tool_name, "id": f"call-{index}"},
+        )
+        middleware.wrap_tool_call(
+            request,
+            lambda _request, name=tool_name, call_id=f"call-{index}": (
+                ToolMessage(
+                    content='{"ok":true}',
+                    name=name,
+                    tool_call_id=call_id,
+                )
+            ),
+        )
+
+    assert middleware.success_count == 0
+    assert middleware.successful_capabilities == set()
+
+
+def test_capability_boundary_counts_workspace_summary_as_evidence():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="summarize_recent_changes"),
+        tool_call={"name": "summarize_recent_changes", "id": "call-1"},
+    )
+
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":true,"repositories":[]}',
+            name="summarize_recent_changes",
+            tool_call_id="call-1",
+        ),
+    )
+
+    assert middleware.success_count == 1
+    assert middleware.successful_capabilities == {"workspace"}
+
+
+def test_capability_boundary_marks_partial_after_prior_success():
+    stop_event = threading.Event()
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        stop_event=stop_event
+    )
+    success_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={"name": "run_skill_artifact", "id": "call-success"},
+    )
+    failed_request = SimpleNamespace(
+        tool=SimpleNamespace(name="save_deliverable"),
+        tool_call={"name": "save_deliverable", "id": "call-failed"},
+    )
+
+    middleware.wrap_tool_call(
+        success_request,
+        lambda _request: ToolMessage(
+            content='{"ok":true}',
+            name="run_skill_artifact",
+            tool_call_id="call-success",
+        ),
+    )
+    middleware.wrap_tool_call(
+        failed_request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"DELIVERY_FAILED"}',
+            name="save_deliverable",
+            tool_call_id="call-failed",
+            status="error",
+        ),
+    )
+
+    assert stop_event.is_set()
+    assert middleware.outcome == "partial"
+    assert middleware.successful_capabilities == {"skill"}
+    assert middleware.termination_detail["capability"] == "artifact_delivery"
 
 
 def test_general_chat_middleware_removes_task_tool():

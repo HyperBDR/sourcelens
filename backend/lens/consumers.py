@@ -327,6 +327,8 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             run_uuid,
             status,
             error=content.get("error") or "",
+            outcome=content.get("outcome") or "",
+            termination_detail=content.get("termination_detail") or {},
         )
         LOGGER.info(
             "Finished LensNode run run_uuid=%s status=%s error=%s",

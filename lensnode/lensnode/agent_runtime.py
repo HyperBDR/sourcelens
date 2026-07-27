@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+from collections import defaultdict
 
 from deepagents import create_deep_agent
 from deepagents.backends.filesystem import FilesystemBackend
@@ -11,14 +12,23 @@ from langchain.agents.middleware import (
     AgentMiddleware,
     SummarizationMiddleware,
 )
-from langchain_core.messages import HumanMessage, RemoveMessage, ToolMessage
+from langchain_core.messages import (
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from .agent_tools import (
     SELF_REPORTING_TOOLS,
     build_agent_tools,
     build_general_chat_tools,
 )
-from .gateway_model import LensGatewayChatModel, RunCancelledError
+from .gateway_model import (
+    LensGatewayChatModel,
+    RunCancelledError,
+    _tool_result_metadata,
+)
 from .logging_utils import elapsed_since, task_log, utc_now
 from .mcp_tools import build_deferred_mcp_tools, load_mcp_tools
 from .runtime_resources import (
@@ -115,6 +125,188 @@ class _NoTaskMiddleware(AgentMiddleware):
             return self._deny_task_call(request)
         return await handler(request)
 
+
+class CapabilityBoundaryMiddleware(AgentMiddleware):
+    """Stop a run after bounded recovery from structured tool failures."""
+
+    def __init__(self, emit_event=None, stop_event=None):
+        self.emit_event = emit_event
+        self.stop_event = stop_event or threading.Event()
+        self.blocked_tools = set()
+        self.failure_counts = defaultdict(int)
+        self.success_count = 0
+        self.successful_capabilities = set()
+        self.termination_detail = {}
+
+    @property
+    def outcome(self):
+        """Return the user-facing business outcome for this run."""
+
+        if not self.termination_detail:
+            return "completed"
+        return "partial" if self.success_count else "blocked"
+
+    @staticmethod
+    def _tool_name(request):
+        tool_call = request.tool_call or {}
+        return str(
+            tool_call.get("name")
+            or getattr(request.tool, "name", None)
+            or "tool"
+        )
+
+    @staticmethod
+    def _capability_name(tool_name):
+        if tool_name.startswith("mcp__") or tool_name == "tool_search":
+            return "mcp"
+        if tool_name.startswith("run_skill") or tool_name == "call_skill_api":
+            return "skill"
+        if "workspace" in tool_name or tool_name in {
+            "find_files",
+            "git_diff",
+            "git_log",
+            "summarize_recent_changes",
+        }:
+            return "workspace"
+        if tool_name == "save_deliverable":
+            return "artifact_delivery"
+        return "tool"
+
+    @classmethod
+    def _evidence_capability(cls, tool_name):
+        """Return the business capability proven by a tool result."""
+
+        capability = cls._capability_name(tool_name)
+        if tool_name == "tool_search" or capability == "tool":
+            return None
+        return capability
+
+    @staticmethod
+    def _parse_result(result):
+        content = getattr(result, "content", None)
+        if not isinstance(content, str):
+            return None
+        try:
+            value = json.loads(content)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    @staticmethod
+    def _failure_budget(error_type):
+        return 2 if error_type in {"transient", "request"} else 1
+
+    @staticmethod
+    def _recovery_message(error_type):
+        if error_type == "configuration":
+            return "Ask an administrator to configure or authorize it."
+        if error_type == "policy":
+            return "Continue from the evidence already collected."
+        if error_type == "transient":
+            return "Retry later or use another available capability."
+        if error_type == "request":
+            return "Provide the missing or corrected input, then retry."
+        return "Use another available capability or contact an administrator."
+
+    def _record_result(self, request, result):
+        tool_name = self._tool_name(request)
+        capability = self._evidence_capability(tool_name)
+        payload = self._parse_result(result)
+        if payload is None or "ok" not in payload:
+            if not tool_name.startswith("mcp__"):
+                return result
+            if getattr(result, "status", None) != "error":
+                self.success_count += 1
+                self.successful_capabilities.add("mcp")
+                return result
+            payload = {"ok": False, "error": "MCP_TOOL_FAILED"}
+        if payload.get("ok") is True:
+            if capability is not None:
+                self.success_count += 1
+                self.successful_capabilities.add(capability)
+            return result
+        if capability is None:
+            return result
+
+        metadata = _tool_result_metadata(payload, tool_name)
+        error_type = metadata.get("error_type") or "tool"
+        key = (tool_name, error_type)
+        self.failure_counts[key] += 1
+        if self.failure_counts[key] < self._failure_budget(error_type):
+            return result
+
+        self.blocked_tools.add(tool_name)
+        if not self.termination_detail:
+            self.termination_detail = {
+                "reason": "capability_unavailable",
+                "capability": capability,
+                "error_type": error_type,
+                "tool": tool_name,
+                "recovery": self._recovery_message(error_type),
+            }
+            if self.emit_event is not None:
+                self.emit_event(
+                    "workflow.capability.blocked",
+                    {
+                        "event_type": "capability.blocked",
+                        "visibility": "user",
+                        "payload": dict(self.termination_detail),
+                    },
+                )
+            self.stop_event.set()
+        return result
+
+    def _deny_blocked_call(self, request):
+        tool_call = request.tool_call or {}
+        return ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": False,
+                    "error": "CAPABILITY_BLOCKED",
+                    "message": (
+                        "This capability reached its recovery limit. "
+                        "Use existing evidence and finish the answer."
+                    ),
+                }
+            ),
+            name=self._tool_name(request),
+            status="error",
+            tool_call_id=tool_call.get("id") or "capability-blocked",
+        )
+
+    def _filter_tools(self, tools):
+        return [
+            tool
+            for tool in tools
+            if getattr(tool, "name", None) not in self.blocked_tools
+        ]
+
+    def wrap_model_call(self, request, handler):
+        """Hide exhausted tools from subsequent model requests."""
+
+        request = request.override(tools=self._filter_tools(request.tools))
+        return handler(request)
+
+    async def awrap_model_call(self, request, handler):
+        """Hide exhausted tools from asynchronous model requests."""
+
+        request = request.override(tools=self._filter_tools(request.tools))
+        return await handler(request)
+
+    def wrap_tool_call(self, request, handler):
+        """Classify one synchronous tool result and enforce its budget."""
+
+        if self._tool_name(request) in self.blocked_tools:
+            return self._deny_blocked_call(request)
+        return self._record_result(request, handler(request))
+
+    async def awrap_tool_call(self, request, handler):
+        """Classify one asynchronous tool result and enforce its budget."""
+
+        if self._tool_name(request) in self.blocked_tools:
+            return self._deny_blocked_call(request)
+        result = await handler(request)
+        return self._record_result(request, result)
 
 SCENARIOS = {
     "knowledge_qa": {
@@ -399,6 +591,16 @@ class LensDeepAgentRuntime:
                     },
                 )
 
+        def emit_user_event(event_type, payload):
+            emit_agent_event(
+                f"workflow.{event_type}",
+                {
+                    "event_type": event_type,
+                    "visibility": "user",
+                    "payload": payload,
+                },
+            )
+
         emit_agent_event(
             "deepagents.runtime.start",
             {
@@ -416,11 +618,14 @@ class LensDeepAgentRuntime:
                 "human_tokens": self.config.offload_human_tokens,
             },
         )
+        if _is_general_chat(command):
+            emit_user_event("phase.changed", {"phase": "analyzing"})
         resources = prepare_runtime_resources(
             self.config,
             command,
             emit_event=emit_agent_event,
         )
+        direct_stage_state = None
         try:
             run_uuid = str(command.get("run_uuid") or "")
             token_budget = _resolve_token_budget(self.config, command)
@@ -449,6 +654,65 @@ class LensDeepAgentRuntime:
                 ),
                 token_budget_wrapup_event=token_budget_wrapup_event,
             )
+            capability_middleware = None
+            capability_stop_event = None
+            evidence_requirement = "none"
+            if _is_general_chat(command):
+                route_decision = _select_general_chat_route(model, question)
+                command = {
+                    **command,
+                    "runtime_route": route_decision["route"],
+                }
+                emit_user_event("route.selected", route_decision)
+                evidence_requirement = route_decision[
+                    "evidence_requirement"
+                ]
+                if route_decision["route"] == "direct_answer":
+                    emit_user_event("phase.changed", {"phase": "answering"})
+                    answer = _answer_general_chat_directly(
+                        model,
+                        command,
+                        _system_prompt(
+                            scenario,
+                            command,
+                            resources.context_skill_contents,
+                        ),
+                    )
+                    if not answer.strip():
+                        raise EmptyAgentResponseError(
+                            "Direct route returned no answer."
+                        )
+                    emit_user_event(
+                        "phase.changed",
+                        {"phase": "completed"},
+                    )
+                    return {
+                        "answer": answer,
+                        "samples": [],
+                        "stop_reason": model.stop_reason,
+                        "token_usage": model.token_usage,
+                        "outcome": "completed",
+                        "termination_detail": {},
+                    }
+                if route_decision["route"] == "direct_execute":
+                    direct_stage_state = _create_direct_stage_state(
+                        _detect_answer_language(question)
+                    )
+                    _start_direct_stages(
+                        direct_stage_state,
+                        emit_agent_event,
+                    )
+                capability_stop_event = threading.Event()
+                capability_middleware = CapabilityBoundaryMiddleware(
+                    emit_event=emit_agent_event,
+                    stop_event=capability_stop_event,
+                )
+                phase = (
+                    "planning"
+                    if route_decision["route"] == "plan_execute"
+                    else "executing"
+                )
+                emit_user_event("phase.changed", {"phase": phase})
             if _is_general_chat(command):
                 tools = build_general_chat_tools(
                     command,
@@ -522,6 +786,7 @@ class LensDeepAgentRuntime:
                 command,
                 summarizer,
                 emit_agent_event,
+                capability_middleware=capability_middleware,
                 mcp_middleware=mcp_middleware,
             )
             if middleware:
@@ -572,6 +837,8 @@ class LensDeepAgentRuntime:
                 cancel_event=cancel_event,
                 wrapup_event=wrapup_event,
                 token_budget_wrapup_event=token_budget_wrapup_event,
+                capability_stop_event=capability_stop_event,
+                direct_stage_state=direct_stage_state,
             )
             if truncated:
                 emit_agent_event(
@@ -587,12 +854,48 @@ class LensDeepAgentRuntime:
                     "token_usage": model.token_usage,
                 },
             )
+            outcome, termination_detail = _finalize_runtime_outcome(
+                capability_middleware=capability_middleware,
+                evidence_requirement=evidence_requirement,
+                truncated=truncated,
+                stop_reason=model.stop_reason,
+            )
+            if (
+                outcome == "blocked"
+                and capability_middleware is not None
+                and capability_middleware.success_count == 0
+            ):
+                if not capability_middleware.termination_detail:
+                    emit_user_event(
+                        "capability.blocked",
+                        termination_detail,
+                    )
+                answer = _unverified_execution_answer(
+                    question,
+                    termination_detail,
+                )
+            if direct_stage_state is not None:
+                _finish_direct_stages(
+                    direct_stage_state,
+                    emit_agent_event,
+                    outcome=outcome,
+                )
+            emit_user_event("phase.changed", {"phase": "completed"})
             return {
                 "answer": answer,
                 "samples": [],
                 "stop_reason": model.stop_reason,
                 "token_usage": model.token_usage,
+                "outcome": outcome,
+                "termination_detail": termination_detail,
             }
+        except Exception:
+            if direct_stage_state is not None:
+                _fail_direct_stages(
+                    direct_stage_state,
+                    emit_agent_event,
+                )
+            raise
         finally:
             cleanup_runtime_resources(resources)
 
@@ -693,6 +996,156 @@ def _pick_text(zh_text, en_text, answer_language):
     return zh_text if answer_language == "Chinese" else en_text
 
 
+def _create_direct_stage_state(answer_language):
+    """Return state for explicit direct-execution progress events."""
+
+    return {
+        "answer_language": answer_language,
+        "revision": 0,
+        "tool_count": 0,
+        "stages": {
+            "understand": {
+                "title": _pick_text(
+                    "理解任务范围",
+                    "Understand request scope",
+                    answer_language,
+                ),
+                "order": 1,
+                "status": "pending",
+            },
+            "execute": {
+                "title": _pick_text(
+                    "执行并分析所需操作",
+                    "Execute and analyze required operations",
+                    answer_language,
+                ),
+                "order": 2,
+                "status": "pending",
+            },
+            "answer": {
+                "title": _pick_text(
+                    "整理最终结果",
+                    "Organize final result",
+                    answer_language,
+                ),
+                "order": 3,
+                "status": "pending",
+            },
+        },
+    }
+
+
+def _emit_direct_stage(state, emit_event, stage_id, status, summary=""):
+    """Emit one revisioned direct-execution stage update."""
+
+    stage = state["stages"][stage_id]
+    stage["status"] = status
+    state["revision"] += 1
+    payload = {
+        "id": stage_id,
+        "title": stage["title"],
+        "status": status,
+        "order": stage["order"],
+        "revision": state["revision"],
+    }
+    if summary:
+        payload["summary"] = summary
+    emit_event(
+        "workflow.stage.updated",
+        {
+            "event_type": "stage.updated",
+            "visibility": "user",
+            "payload": payload,
+        },
+    )
+
+
+def _start_direct_stages(state, emit_event):
+    """Expose the direct-execution stages after routing completes."""
+
+    _emit_direct_stage(state, emit_event, "understand", "completed")
+    _emit_direct_stage(state, emit_event, "execute", "in_progress")
+    _emit_direct_stage(state, emit_event, "answer", "pending")
+
+
+def _record_direct_tool_call(state, emit_event):
+    """Update the execution stage from one observed tool call."""
+
+    state["tool_count"] += 1
+    count = state["tool_count"]
+    summary = _pick_text(
+        f"已开始 {count} 项操作",
+        (
+            "Started 1 operation"
+            if count == 1
+            else f"Started {count} operations"
+        ),
+        state["answer_language"],
+    )
+    _emit_direct_stage(
+        state,
+        emit_event,
+        "execute",
+        "in_progress",
+        summary,
+    )
+
+
+def _finish_direct_stages(state, emit_event, *, outcome):
+    """Record truthful terminal states for a direct execution."""
+
+    language = state["answer_language"]
+    if outcome == "blocked":
+        execution_status = "failed"
+        summary = _pick_text(
+            "未能获得所需的执行证据",
+            "Could not obtain the required execution evidence",
+            language,
+        )
+    elif outcome == "partial":
+        execution_status = "failed"
+        summary = _pick_text(
+            "执行已结束，但结果不完整",
+            "Execution ended with partial results",
+            language,
+        )
+    else:
+        execution_status = "completed"
+        summary = _pick_text(
+            "所需操作已执行",
+            "Required operations were executed",
+            language,
+        )
+    _emit_direct_stage(
+        state,
+        emit_event,
+        "execute",
+        execution_status,
+        summary,
+    )
+    _emit_direct_stage(state, emit_event, "answer", "completed")
+
+
+def _fail_direct_stages(state, emit_event):
+    """Close open direct-execution stages after a runtime exception."""
+
+    language = state["answer_language"]
+    if state["stages"]["execute"]["status"] == "in_progress":
+        _emit_direct_stage(
+            state,
+            emit_event,
+            "execute",
+            "failed",
+            _pick_text(
+                "执行意外中止",
+                "Execution stopped unexpectedly",
+                language,
+            ),
+        )
+    if state["stages"]["answer"]["status"] == "pending":
+        _emit_direct_stage(state, emit_event, "answer", "skipped")
+
+
 def _system_prompt(
     scenario,
     command,
@@ -724,6 +1177,235 @@ def _is_general_chat(command):
     """Return whether this command should run as General Chat."""
 
     return command.get("task") == "general_chat"
+
+
+def _parse_route_decision(content):
+    """Parse a bounded runtime route decision with a safe fallback."""
+
+    fallback = {
+        "intent": "action",
+        "complexity": "complex",
+        "route": "plan_execute",
+        "required_capabilities": [],
+        "evidence_requirement": "tool_result",
+    }
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        value = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(value, dict):
+        return fallback
+
+    route = value.get("route")
+    complexity = value.get("complexity")
+    intent = value.get("intent")
+    if route not in {"direct_answer", "direct_execute", "plan_execute"}:
+        return fallback
+    if complexity not in {"simple", "complex"}:
+        complexity = "complex" if route == "plan_execute" else "simple"
+    if intent not in {"informational", "action", "clarification"}:
+        intent = "action" if route != "direct_answer" else "informational"
+    capabilities = value.get("required_capabilities")
+    if not isinstance(capabilities, list):
+        capabilities = []
+    capabilities = [
+        str(item)[:64]
+        for item in capabilities[:8]
+        if isinstance(item, str) and item.strip()
+    ]
+    evidence_requirement = value.get("evidence_requirement")
+    if evidence_requirement not in {
+        "none",
+        "tool_result",
+        "artifact",
+        "user_input",
+    }:
+        if "artifact_delivery" in capabilities:
+            evidence_requirement = "artifact"
+        elif route == "direct_execute" or any(
+            item in {"mcp", "workspace"} for item in capabilities
+        ):
+            evidence_requirement = "tool_result"
+        else:
+            evidence_requirement = "none"
+    if (
+        route == "direct_answer"
+        and evidence_requirement in {"tool_result", "artifact"}
+    ):
+        route = "direct_execute"
+    return {
+        "intent": intent,
+        "complexity": complexity,
+        "route": route,
+        "required_capabilities": capabilities,
+        "evidence_requirement": evidence_requirement,
+    }
+
+
+def _select_general_chat_route(model, question):
+    """Classify one General Chat request without exposing control output."""
+
+    prompt = (
+        "Classify the request for a bounded agent runtime. Return JSON only "
+        "with keys intent, complexity, route, required_capabilities, and "
+        "evidence_requirement. "
+        "intent must be informational, action, or clarification. complexity "
+        "must be simple or complex. route must be direct_answer for a simple "
+        "question needing no external capability, direct_execute for a "
+        "simple action needing tools, or plan_execute for multi-step, risky, "
+        "ambiguous, or failure-prone work. required_capabilities is a short "
+        "advisory array such as skill, mcp, workspace, or "
+        "artifact_delivery; it never proves a capability is unavailable. "
+        "evidence_requirement must be none for planning, writing, reasoning, "
+        "or other guidance that only follows Skill instructions; tool_result "
+        "for current external or business data and actions; artifact when a "
+        "delivered file is required; or user_input when essential input is "
+        "missing. Do not answer the user's request."
+    )
+    try:
+        response = model.invoke(
+            [SystemMessage(content=prompt), HumanMessage(content=question)],
+            runtime_control_call=True,
+        )
+    except RunCancelledError:
+        raise
+    except Exception:
+        LOGGER.exception("General Chat route classification failed")
+        return _parse_route_decision("")
+    return _parse_route_decision(getattr(response, "content", ""))
+
+
+def _capability_termination_detail(capability, tool=""):
+    """Return a secret-safe capability termination contract."""
+
+    return {
+        "reason": "capability_unavailable",
+        "capability": capability,
+        "error_type": "configuration",
+        "tool": tool,
+        "recovery": "Ask an administrator to configure or authorize it.",
+    }
+
+
+def _evidence_termination_detail(evidence_requirement):
+    """Return a secret-safe contract for missing execution evidence."""
+
+    capability = (
+        "artifact_delivery"
+        if evidence_requirement == "artifact"
+        else "tool"
+    )
+    return {
+        "reason": "evidence_unavailable",
+        "capability": capability,
+        "error_type": "verification",
+        "tool": "",
+        "recovery": (
+            "Confirm the required integration is bound and authorized, "
+            "then retry."
+        ),
+    }
+
+
+def _finalize_runtime_outcome(
+    *,
+    capability_middleware,
+    evidence_requirement,
+    truncated,
+    stop_reason,
+):
+    """Resolve a run outcome after observing actual tool execution."""
+
+    outcome = "completed"
+    termination_detail = {}
+    if capability_middleware is not None:
+        outcome = capability_middleware.outcome
+        termination_detail = dict(capability_middleware.termination_detail)
+        missing_tool_result = (
+            evidence_requirement == "tool_result"
+            and capability_middleware.success_count == 0
+        )
+        missing_artifact = (
+            evidence_requirement == "artifact"
+            and "artifact_delivery"
+            not in capability_middleware.successful_capabilities
+        )
+        if outcome == "completed" and (
+            missing_tool_result or missing_artifact
+        ):
+            outcome = "blocked"
+            termination_detail = _evidence_termination_detail(
+                evidence_requirement
+            )
+    if truncated and outcome == "completed":
+        outcome = "partial"
+        termination_detail = {
+            "reason": stop_reason or "execution_limit",
+        }
+    return outcome, termination_detail
+
+
+def _unverified_execution_answer(question, termination_detail):
+    """Return a deterministic answer when no business evidence was obtained."""
+
+    language = _detect_answer_language(question)
+    capability = termination_detail.get("capability") or "tool"
+    return _pick_text(
+        f"本次未能通过已配置的 {capability} 能力取得任何已验证的业务数据，"
+        "因此无法可靠回答该请求，也不会展示未经工具结果证实的订单或客户"
+        "信息。请确认相应 Skill/MCP 已绑定并获得授权后重试。",
+        f"No verified business data was obtained from the configured "
+        f"{capability} capability, so the request cannot be answered "
+        "reliably. Unverified order or customer information will not be "
+        "shown. Confirm that the required Skill or MCP is bound and "
+        "authorized, then retry.",
+        language,
+    )
+
+
+def _route_guidance(route):
+    """Return concise execution guidance for the selected runtime route."""
+
+    if route == "plan_execute":
+        return (
+            "\n\nRuntime route: plan_execute. Before any business tool, call "
+            "write_todos with a concise plan. Keep the plan current as steps "
+            "complete, and stop when the requested outcome is verified."
+        )
+    if route == "direct_execute":
+        return (
+            "\n\nRuntime route: direct_execute. Perform the focused action "
+            "directly. A multi-step plan is not required."
+        )
+    return ""
+
+
+def _answer_general_chat_directly(model, command, system_prompt):
+    """Answer a simple informational request without creating an agent."""
+
+    direct_prompt = (
+        f"{system_prompt}\n\nRuntime route: direct_answer. Do not call any "
+        "tools. Answer the user directly and concisely from the conversation "
+        "and loaded Skill instructions already present in this prompt."
+    )
+    messages = [
+        SystemMessage(content=direct_prompt),
+        *_build_initial_messages(
+            command.get("history"),
+            command.get("question", ""),
+        ),
+    ]
+    response = model.invoke(messages)
+    content = getattr(response, "content", None)
+    return content.strip() if isinstance(content, str) else str(content or "")
 
 
 def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
@@ -892,11 +1574,18 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         "that it is available to download. If required user inputs are "
         "missing, ask a concise clarification "
         "question instead of guessing. If a Skill cannot perform the task, "
-        "say so plainly and explain what capability or input is missing."
+        "say so plainly and explain what capability or input is missing. "
+        "Never claim that a tool was called unless an actual tool result is "
+        "present in this run. Never present proposed tool-call JSON as an "
+        "executed action or result. Never invent order, customer, amount, "
+        "license, authorization, or audit fields. Business facts must come "
+        "from actual tool results in this run; when no such result exists, "
+        "state that the request could not be verified."
         f"{skill_guidance}"
         f"\n\nFINAL REMINDER ON LANGUAGE: The user's question is written "
         f"in {answer_language}. You MUST write your ENTIRE final answer "
         f"in {answer_language}."
+        f"{_route_guidance(command.get('runtime_route'))}"
     )
 
 
@@ -905,6 +1594,7 @@ def _agent_middleware(
     summarizer,
     emit_event=None,
     *,
+    capability_middleware=None,
     mcp_middleware=None,
 ):
     """Return task-specific middleware for one Deep Agent run."""
@@ -914,6 +1604,8 @@ def _agent_middleware(
         middleware.append(summarizer)
     if _is_general_chat(command):
         middleware.append(_NoTaskMiddleware(emit_event))
+        if capability_middleware is not None:
+            middleware.append(capability_middleware)
     if mcp_middleware is not None:
         middleware.append(mcp_middleware)
     return middleware
@@ -1097,6 +1789,8 @@ def _run_agent_with_turn_limit(
     cancel_event=None,
     wrapup_event=None,
     token_budget_wrapup_event=None,
+    capability_stop_event=None,
+    direct_stage_state=None,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -1122,6 +1816,7 @@ def _run_agent_with_turn_limit(
     truncation_reason = None
     seen_tool_calls = set()
     seen_model_calls = set()
+    plan_state = {"revision": 0}
     baseline_ai = sum(1 for m in messages if m.get("role") == "assistant")
     seeded_baseline = False
 
@@ -1153,7 +1848,13 @@ def _run_agent_with_turn_limit(
             seeded_baseline = True
         if emit_event is not None:
             _emit_new_model_calls(current, seen_model_calls, emit_event)
-            _emit_new_tool_calls(current, seen_tool_calls, emit_event)
+            _emit_new_tool_calls(
+                current,
+                seen_tool_calls,
+                emit_event,
+                plan_state=plan_state,
+                direct_stage_state=direct_stage_state,
+            )
         ai_turns = sum(
             1
             for m in current
@@ -1174,13 +1875,26 @@ def _run_agent_with_turn_limit(
             if emit_event is not None:
                 emit_event("deepagents.agent.token_budget", {})
             break
+        if (
+            capability_stop_event is not None
+            and capability_stop_event.is_set()
+        ):
+            truncated = True
+            truncation_reason = "capability_unavailable"
+            if emit_event is not None:
+                emit_event("deepagents.agent.capability_blocked", {})
+            break
         if ai_turns >= max_turns:
             truncated = True
             truncation_reason = "turn_limit"
             break
 
     answer = _extract_final_message(last_state or {})
-    force_wrapup = truncation_reason in {"soft_deadline", "token_budget"}
+    force_wrapup = truncation_reason in {
+        "soft_deadline",
+        "token_budget",
+        "capability_unavailable",
+    }
     needs_wrapup = force_wrapup or not answer.strip()
     if truncated and model is not None and needs_wrapup:
         # The cutoff landed mid-turn (e.g. right after a tool call, before
@@ -1226,6 +1940,15 @@ def _run_agent_with_turn_limit(
                 "\n\n---\n*Reached the investigation token budget. This "
                 "answer was synthesized from collected evidence without "
                 "additional tool calls.*",
+                answer_language,
+            )
+        elif truncation_reason == "capability_unavailable":
+            answer += _pick_text(
+                "\n\n---\n*所需能力当前不可用，以上回答基于已取得的"
+                "信息生成；请按页面提示补充配置或输入后重试。*",
+                "\n\n---\n*The required capability is currently unavailable. "
+                "This answer uses the information already collected; "
+                "follow the recovery guidance and retry.*",
                 answer_language,
             )
         else:
@@ -1300,6 +2023,15 @@ def _synthesize_wrapup_answer(
             "cannot call more tools. Based only on the current conversation "
             "and collected results, write the most complete final answer. "
             "Clearly identify anything unconfirmed or not covered.",
+            answer_language,
+        )
+    elif reason == "capability_unavailable":
+        instruction = _pick_text(
+            "所需能力已达到恢复上限，不能再调用任何工具。请仅基于当前"
+            "对话和已取得的信息给出简洁回答，并明确说明未完成的部分。",
+            "A required capability reached its recovery limit. Do not call "
+            "tools. Give a concise answer from the current conversation and "
+            "collected information, and clearly state what remains undone.",
             answer_language,
         )
     else:
@@ -1435,7 +2167,14 @@ def _response_stop_reason(metadata):
     return None
 
 
-def _emit_new_tool_calls(messages, seen, emit_event):
+def _emit_new_tool_calls(
+    messages,
+    seen,
+    emit_event,
+    *,
+    plan_state=None,
+    direct_stage_state=None,
+):
     """Emit a progress event for each not-yet-seen agent tool call.
 
     The built-in workspace tools emit their own start/done events, but
@@ -1454,6 +2193,43 @@ def _emit_new_tool_calls(messages, seen, emit_event):
                 continue
             seen.add(call_id)
             name = call.get("name") or "tool"
+            if name == "write_todos":
+                state = plan_state if plan_state is not None else {
+                    "revision": 0
+                }
+                state["revision"] = int(state.get("revision") or 0) + 1
+                emit_event(
+                    "workflow.plan.updated",
+                    {
+                        "event_type": "plan.updated",
+                        "visibility": "user",
+                        "payload": {
+                            "revision": state["revision"],
+                            "steps": _normalize_plan_steps(
+                                (call.get("args") or {}).get("todos")
+                            ),
+                        },
+                    },
+                )
+                continue
+            if direct_stage_state is not None:
+                _record_direct_tool_call(
+                    direct_stage_state,
+                    emit_event,
+                )
+            if (
+                plan_state is not None
+                and not plan_state.get("execution_phase_emitted")
+            ):
+                plan_state["execution_phase_emitted"] = True
+                emit_event(
+                    "workflow.phase.changed",
+                    {
+                        "event_type": "phase.changed",
+                        "visibility": "user",
+                        "payload": {"phase": "executing"},
+                    },
+                )
             if name in SELF_REPORTING_TOOLS:
                 # avoids a duplicate trace line; the tool emits its own
                 # .start/.done with a richer argument summary
@@ -1462,6 +2238,32 @@ def _emit_new_tool_calls(messages, seen, emit_event):
                 f"tool.{name}.invoke",
                 {"tool": name, "summary": _tool_call_summary(call)},
             )
+
+
+def _normalize_plan_steps(todos):
+    """Return a bounded user-visible view of Deep Agents todos."""
+
+    if not isinstance(todos, list):
+        return []
+    steps = []
+    allowed_statuses = {"pending", "in_progress", "completed"}
+    for index, item in enumerate(todos[:12], start=1):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("content") or item.get("title") or "").strip()
+        if not title:
+            continue
+        status = str(item.get("status") or "pending")
+        if status not in allowed_statuses:
+            status = "pending"
+        steps.append(
+            {
+                "id": f"step-{index}",
+                "title": title[:240],
+                "status": status,
+            }
+        )
+    return steps
 
 
 def _tool_call_summary(call):

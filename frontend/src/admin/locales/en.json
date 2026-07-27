@@ -661,7 +661,7 @@
         "action": "Create Credential"
       },
       "environmentVariables": {
-        "title": "Environment Variable Sets",
+        "title": "Environment",
         "description": "Store encrypted environment variable values and reuse them across Skills and Assistants.",
         "label": "Variable Set",
         "action": "New variable set"

@@ -654,6 +654,11 @@ class Run(models.Model):
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled"
 
+    class Outcome(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        PARTIAL = "partial", "Partial"
+        BLOCKED = "blocked", "Blocked"
+
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
     status = models.CharField(
@@ -683,6 +688,13 @@ class Run(models.Model):
     )
     metering_ref = models.UUIDField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
+    outcome = models.CharField(
+        max_length=16,
+        choices=Outcome.choices,
+        blank=True,
+        default="",
+    )
+    termination_detail = models.JSONField(default=dict, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     last_activity_at = models.DateTimeField(null=True, blank=True)

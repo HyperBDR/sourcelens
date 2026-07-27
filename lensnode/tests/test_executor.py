@@ -32,6 +32,11 @@ class FakeAgent:
         return {
             "answer": "streamed final",
             "samples": [],
+            "outcome": "partial",
+            "termination_detail": {
+                "reason": "capability_unavailable",
+                "capability": "skill",
+            },
         }
 
 
@@ -74,6 +79,12 @@ def test_executor_emits_streamed_output_delta():
         "run_uuid": "00000000-0000-0000-0000-000000000001",
         "final_content": "streamed final",
     } in events
+    done = [event for event in events if event["type"] == "run_done"][-1]
+    assert done["outcome"] == "partial"
+    assert done["termination_detail"] == {
+        "reason": "capability_unavailable",
+        "capability": "skill",
+    }
 
 
 class StallingAgent:

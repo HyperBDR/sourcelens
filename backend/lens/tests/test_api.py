@@ -14,6 +14,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -2139,6 +2140,28 @@ class LensApiTests(TestCase):
         )
         output.file.delete(save=False)
 
+    def test_session_messages_use_run_finish_time_for_assistant(self):
+        session, run, output = self._make_output_file()
+        finished_at = timezone.now()
+        run.finished_at = finished_at
+        run.save(update_fields=["finished_at"])
+
+        response = self.client.get(
+            f"/api/lens/sessions/{session.uuid}/messages/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        question = next(m for m in response.data if m["role"] == "user")
+        answer = next(
+            m for m in response.data if m["role"] == "assistant"
+        )
+        self.assertIsNone(question["completed_at"])
+        self.assertEqual(
+            answer["completed_at"],
+            finished_at,
+        )
+        output.file.delete(save=False)
+
     def test_deleting_session_purges_output_file_bytes(self):
         session, run, output = self._make_output_file()
         storage = output.file.storage
@@ -2267,6 +2290,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(run_response.status_code, 201)
         self.assertEqual(run_response.data["status"], "queued")
+        self.assertIsNotNone(run_response.data["created_at"])
 
         cancel_response = self.client.post(
             f"/api/lens/runs/{run_response.data['uuid']}/cancel/"

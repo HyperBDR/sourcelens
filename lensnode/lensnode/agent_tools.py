@@ -720,6 +720,18 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
                 "summary": f"{filename} ({len(data)} bytes)",
             },
         )
+        emit(
+            "workflow.artifact.created",
+            {
+                "event_type": "artifact.created",
+                "visibility": "user",
+                "payload": {
+                    "filename": filename,
+                    "byte_size": len(data),
+                    "content_type": content_type,
+                },
+            },
+        )
         return _json(
             {
                 "ok": True,

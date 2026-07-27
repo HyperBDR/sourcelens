@@ -389,6 +389,10 @@ class LensNodeExecutor:
                     "type": "run_done",
                     "run_uuid": run_uuid,
                     "status": "done",
+                    "outcome": result.get("outcome") or "completed",
+                    "termination_detail": (
+                        result.get("termination_detail") or {}
+                    ),
                     "detail": {
                         "message": done_message,
                     },
@@ -426,6 +430,11 @@ class LensNodeExecutor:
                     "run_uuid": run_uuid,
                     "status": "failed",
                     "error": error_code,
+                    "outcome": "blocked",
+                    "termination_detail": {
+                        "reason": "runtime_failure",
+                        "code": error_code,
+                    },
                     "detail": {
                         "message": failed_message,
                     },
