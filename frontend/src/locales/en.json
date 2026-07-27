@@ -262,24 +262,29 @@
         },
         "pathStep": {
           "query_orders": "Query orders from {startDate} to {endDate}",
+          "query_orders_ref": "Query order {orderRef}",
           "get_order_detail": "Retrieve order details",
+          "get_order_detail_ref": "Retrieve order {orderRef} details",
           "reading_order_commands": "Read order command instructions",
           "checking_capability": "Confirm order query capability",
           "querying_data": "Query business data",
           "count_results": "Count matching orders",
           "group_results": "Group order results",
-          "analyzing_results": "Summarize and analyze results",
-          "analyzing_request": "Round {round}: analyze and choose the next step"
+          "analyzing_results": "Summarize and analyze results"
         },
         "workflow": {
           "task": {
-            "execute_request": "Handle the current request"
+            "get_order_detail": "Query order details",
+            "get_order_detail_ref": "Query order {orderRef} details",
+            "query_orders": "Query orders",
+            "query_orders_ref": "Query order {orderRef}",
+            "analyze_results": "Analyze query results",
+            "query_data": "Query business data"
           },
           "stage": {
             "order_query": "Order query",
             "data_query": "Business data query",
-            "result_analysis": "Result analysis",
-            "reasoning": "Analysis"
+            "result_analysis": "Result analysis"
           }
         },
         "recovery": {

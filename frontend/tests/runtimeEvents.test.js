@@ -430,23 +430,46 @@ test('records and completes a replayable real order-query activity', () => {
   ])
 })
 
-test('records each General Chat model round as one nested step', () => {
+test('hides model rounds when real General Chat operations exist', () => {
   let state = applyRuntimeEvent(createRuntimeState(), {
     event_type: 'route.selected',
     visibility: 'user',
     payload: { route: 'direct_execute' }
   })
-  for (const status of ['in_progress', 'completed']) {
+  for (let round = 1; round <= 3; round += 1) {
+    for (const status of ['in_progress', 'completed']) {
+      state = applyRuntimeEvent(state, {
+        event_type: 'activity.recorded',
+        visibility: 'user',
+        payload: {
+          id: `model-round-${round}`,
+          kind: 'analyzing_request',
+          stage_kind: 'reasoning',
+          status,
+          round
+        }
+      })
+    }
+  }
+  for (const payload of [
+    {
+      id: 'capability-1',
+      kind: 'checking_capability',
+      stage_kind: 'order_query',
+      status: 'completed'
+    },
+    {
+      id: 'detail-1',
+      kind: 'get_order_detail',
+      stage_kind: 'order_query',
+      status: 'completed',
+      order_ref: 'HWINSTAD2025071509'
+    }
+  ]) {
     state = applyRuntimeEvent(state, {
       event_type: 'activity.recorded',
       visibility: 'user',
-      payload: {
-        id: 'model-round-1',
-        kind: 'analyzing_request',
-        stage_kind: 'reasoning',
-        status,
-        round: 1
-      }
+      payload
     })
   }
 
@@ -457,10 +480,54 @@ test('records each General Chat model round as one nested step', () => {
     activities: state.activities
   })
   assert.equal(progress.kind, 'workflow')
-  assert.equal(progress.tasks[0].kind, 'execute_request')
-  assert.equal(progress.tasks[0].stages[0].kind, 'reasoning')
-  assert.equal(progress.tasks[0].stages[0].steps[0].round, 1)
-  assert.equal(progress.tasks[0].stages[0].steps[0].status, 'completed')
+  assert.equal(progress.tasks.length, 1)
+  assert.equal(progress.tasks[0].kind, 'get_order_detail')
+  assert.equal(progress.tasks[0].orderRef, 'HWINSTAD2025071509')
+  assert.deepEqual(
+    progress.tasks[0].stages.map((stage) => stage.kind),
+    ['order_query']
+  )
+  assert.deepEqual(
+    progress.tasks[0].stages[0].steps.map((step) => step.kind),
+    ['checking_capability', 'get_order_detail']
+  )
+})
+
+test('does not build placeholder workflow nodes from model rounds', () => {
+  const activities = [1, 2, 3].map((round) => ({
+    id: `model-round-${round}`,
+    taskId: 'task-execute',
+    stageId: 'task-execute:reasoning',
+    stageKind: 'reasoning',
+    kind: 'analyzing_request',
+    status: 'completed',
+    round,
+    structured: true
+  }))
+
+  const tasks = buildWorkflowTree([], activities)
+
+  assert.deepEqual(tasks, [])
+})
+
+test('uses a business task fallback instead of a placeholder task', () => {
+  const tasks = buildWorkflowTree(
+    [],
+    [
+      {
+        id: 'query-1',
+        taskId: 'task-execute',
+        stageId: 'task-execute:data_query',
+        stageKind: 'data_query',
+        kind: 'querying_data',
+        status: 'completed',
+        structured: true
+      }
+    ]
+  )
+
+  assert.equal(tasks.length, 1)
+  assert.equal(tasks[0].kind, 'query_data')
 })
 
 test('accepts real order-detail and command-discovery activities', () => {
@@ -535,11 +602,12 @@ test('closes every legacy and General Chat spinner at terminal failure', () => {
     event_type: 'activity.recorded',
     visibility: 'user',
     payload: {
-      id: 'model-round-1',
-      kind: 'analyzing_request',
-      stage_kind: 'reasoning',
+      id: 'query-1',
+      kind: 'query_orders',
+      stage_kind: 'order_query',
       status: 'in_progress',
-      round: 1
+      start_date: '2026-07-20',
+      end_date: '2026-07-26'
     }
   })
   state = applyRuntimeEvent(state, { type: 'error' })
@@ -586,7 +654,7 @@ test('generic activity cannot evict a real path from the bounded history', () =>
   assert.equal(activitiesForNode(state, 'execute').length, 20)
 })
 
-test('keeps the complete bounded General Chat hierarchy across many rounds', () => {
+test('keeps model rounds out of the bounded General Chat hierarchy', () => {
   let state = createRuntimeState()
   for (let index = 1; index <= 30; index += 1) {
     state = applyRuntimeEvent(state, {
@@ -602,7 +670,7 @@ test('keeps the complete bounded General Chat hierarchy across many rounds', () 
     })
   }
 
-  assert.equal(state.activities.filter((item) => item.structured).length, 30)
+  assert.equal(state.activities.filter((item) => item.structured).length, 0)
 })
 
 test('keeps raw tool activity out of the primary progress text', () => {

@@ -631,10 +631,53 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertEqual(detail["payload"]["kind"], "get_order_detail")
         self.assertEqual(
+            detail["payload"]["order_ref"],
+            "ORDER-123",
+        )
+        self.assertEqual(
             command_help["payload"]["kind"],
             "reading_order_commands",
         )
-        self.assertNotIn("ORDER-123", str(detail))
+
+    def test_order_list_by_code_exposes_only_safe_order_reference(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "lookup-123",
+            "args_redacted": [
+                "--profile",
+                "default",
+                "order",
+                "list",
+                "--code",
+                "HWINSTAD2025071509",
+                "--token",
+                "[REDACTED]",
+            ],
+        })
+
+        self.assertEqual(
+            event["payload"]["order_ref"],
+            "HWINSTAD2025071509",
+        )
+        self.assertNotIn("profile", str(event).lower())
+        self.assertNotIn("token", str(event).lower())
+
+    def test_order_reference_rejects_non_identifier_arguments(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "lookup-unsafe",
+            "args_redacted": [
+                "order",
+                "get",
+                "../../private-order",
+            ],
+        })
+
+        self.assertNotIn("order_ref", event["payload"])
 
     def test_structured_analysis_activity_exposes_allowlisted_operation(self):
         event = sanitize_runtime_event({
@@ -673,7 +716,7 @@ class LensServiceTests(TransactionTestCase):
             },
         )
 
-    def test_general_chat_model_round_is_a_safe_replayable_step(self):
+    def test_general_chat_model_round_is_not_user_visible(self):
         event = sanitize_runtime_event({
             "agent_event": "model.round.start",
             "runtime_scope": "general_chat",
@@ -682,21 +725,7 @@ class LensServiceTests(TransactionTestCase):
             "summary": "private model reasoning",
         })
 
-        self.assertEqual(
-            event,
-            {
-                "event_type": "activity.recorded",
-                "visibility": "user",
-                "payload": {
-                    "id": "model-round-2",
-                    "kind": "analyzing_request",
-                    "stage_kind": "reasoning",
-                    "status": "in_progress",
-                    "round": 2,
-                },
-            },
-        )
-        self.assertNotIn("private", str(event["payload"]).lower())
+        self.assertIsNone(event)
 
     def test_termination_detail_uses_fixed_public_contract(self):
         detail = sanitize_termination_detail({

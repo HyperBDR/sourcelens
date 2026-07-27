@@ -262,24 +262,29 @@
         },
         "pathStep": {
           "query_orders": "查询 {startDate} 至 {endDate} 的订单",
+          "query_orders_ref": "查询订单 {orderRef}",
           "get_order_detail": "获取订单详情",
+          "get_order_detail_ref": "获取订单 {orderRef} 详情",
           "reading_order_commands": "读取订单命令说明",
           "checking_capability": "确认订单查询能力",
           "querying_data": "查询业务数据",
           "count_results": "统计符合条件的订单",
           "group_results": "按类型汇总订单",
-          "analyzing_results": "汇总并分析结果",
-          "analyzing_request": "第 {round} 轮：分析问题并确定下一步"
+          "analyzing_results": "汇总并分析结果"
         },
         "workflow": {
           "task": {
-            "execute_request": "处理当前问题"
+            "get_order_detail": "查询订单详情",
+            "get_order_detail_ref": "查询订单 {orderRef} 详情",
+            "query_orders": "查询订单",
+            "query_orders_ref": "查询订单 {orderRef}",
+            "analyze_results": "分析查询结果",
+            "query_data": "查询业务数据"
           },
           "stage": {
             "order_query": "订单查询",
             "data_query": "业务数据查询",
-            "result_analysis": "结果分析",
-            "reasoning": "分析处理"
+            "result_analysis": "结果分析"
           }
         },
         "recovery": {

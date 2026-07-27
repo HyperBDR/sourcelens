@@ -1588,37 +1588,61 @@ const PATH_KINDS = new Set([
   'querying_data',
   'count_results',
   'group_results',
-  'analyzing_results',
-  'analyzing_request'
+  'analyzing_results'
 ])
 function safePathKind(item) {
   let kind = PATH_KINDS.has(item?.kind) ? item.kind : 'querying_data'
-  if (kind === 'query_orders' && (!item.startDate || !item.endDate)) {
+  if (
+    kind === 'query_orders' &&
+    (!item.startDate || !item.endDate) &&
+    !item.orderRef
+  ) {
     kind = 'querying_data'
   }
   return kind
 }
 
 function workflowTaskTitle(task) {
-  return task.title || t('lens.chat.runtime.workflow.task.execute_request')
+  if (task.title) return task.title
+  if (task.kind === 'get_order_detail') {
+    return t(
+      `lens.chat.runtime.workflow.task.${
+        task.orderRef ? 'get_order_detail_ref' : 'get_order_detail'
+      }`,
+      { orderRef: task.orderRef }
+    )
+  }
+  if (task.kind === 'query_orders') {
+    return t(
+      `lens.chat.runtime.workflow.task.${
+        task.orderRef ? 'query_orders_ref' : 'query_orders'
+      }`,
+      { orderRef: task.orderRef }
+    )
+  }
+  if (task.kind === 'analyze_results') {
+    return t('lens.chat.runtime.workflow.task.analyze_results')
+  }
+  return t('lens.chat.runtime.workflow.task.query_data')
 }
 
 function workflowStageTitle(kind) {
-  const known = new Set([
-    'order_query',
-    'data_query',
-    'result_analysis',
-    'reasoning'
-  ])
+  const known = new Set(['order_query', 'data_query', 'result_analysis'])
   const safeKind = known.has(kind) ? kind : 'data_query'
   return t(`lens.chat.runtime.workflow.stage.${safeKind}`)
 }
 
 function workflowStepTitle(item) {
-  return t(`lens.chat.runtime.pathStep.${safePathKind(item)}`, {
+  let kind = safePathKind(item)
+  if (kind === 'get_order_detail' && item?.orderRef) {
+    kind = 'get_order_detail_ref'
+  } else if (kind === 'query_orders' && item?.orderRef) {
+    kind = 'query_orders_ref'
+  }
+  return t(`lens.chat.runtime.pathStep.${kind}`, {
     startDate: item?.startDate,
     endDate: item?.endDate,
-    round: item?.round
+    orderRef: item?.orderRef
   })
 }
 

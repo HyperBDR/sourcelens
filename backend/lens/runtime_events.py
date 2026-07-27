@@ -63,12 +63,6 @@ TOOL_ACTIVITY_STATUSES = {
     "timeout": "failed",
 }
 
-MODEL_ACTIVITY_STATUSES = {
-    "done": "completed",
-    "failed": "failed",
-    "start": "in_progress",
-}
-
 PUBLIC_TERMINATION_REASONS = {
     "capability_unavailable",
     "execution_failed",
@@ -189,6 +183,51 @@ def _date_argument(arguments, name):
         return ""
 
 
+def _safe_order_reference(value):
+    """Return one allowlisted business reference without raw CLI context."""
+
+    reference = str(value or "").strip()
+    if (
+        not reference
+        or len(reference) > 64
+        or not reference.isascii()
+        or not reference[0].isalnum()
+        or any(
+            not (char.isalnum() or char in "._-")
+            for char in reference
+        )
+    ):
+        return ""
+    return reference
+
+
+def _argument_after(arguments, *parts):
+    """Return the argument after one exact command or option sequence."""
+
+    if not isinstance(arguments, list):
+        return ""
+    normalized = [str(item).strip().lower() for item in arguments]
+    expected = list(parts)
+    width = len(expected)
+    for index in range(len(normalized) - width + 1):
+        if normalized[index : index + width] != expected:
+            continue
+        try:
+            return str(arguments[index + width])
+        except IndexError:
+            return ""
+    return ""
+
+
+def _order_reference_argument(arguments):
+    """Return an allowlisted order reference from supported CLI shapes."""
+
+    value = _argument_after(arguments, "order", "get")
+    if not value:
+        value = _argument_after(arguments, "--code")
+    return _safe_order_reference(value)
+
+
 def _contains_command(arguments, *parts):
     if not isinstance(arguments, list):
         return False
@@ -296,40 +335,16 @@ def _sanitize_tool_activity(item):
             payload["start_date"] = start_date
         if end_date:
             payload["end_date"] = end_date
+    if kind in {"query_orders", "get_order_detail"}:
+        order_reference = _order_reference_argument(
+            item.get("args_redacted")
+        )
+        if order_reference:
+            payload["order_ref"] = order_reference
     return {
         "event_type": "activity.recorded",
         "visibility": "user",
         "payload": payload,
-    }
-
-
-def _sanitize_model_activity(item):
-    """Return one safe, replayable General Chat model-round step."""
-
-    if item.get("runtime_scope") != "general_chat":
-        return None
-    agent_event = _text(item.get("agent_event"), 128)
-    prefix = "model.round."
-    if not agent_event.startswith(prefix):
-        return None
-    status = MODEL_ACTIVITY_STATUSES.get(agent_event[len(prefix) :])
-    activity_id = _safe_activity_id(item.get("invocation_id"))
-    if not activity_id or not status:
-        return None
-    try:
-        round_number = min(max(int(item.get("round") or 1), 1), 100)
-    except (TypeError, ValueError):
-        round_number = 1
-    return {
-        "event_type": "activity.recorded",
-        "visibility": "user",
-        "payload": {
-            "id": activity_id,
-            "kind": "analyzing_request",
-            "stage_kind": "reasoning",
-            "status": status,
-            "round": round_number,
-        },
     }
 
 
@@ -461,13 +476,15 @@ def sanitize_runtime_event(item):
             "visibility": "user",
             "payload": _sanitize_payload(event_type, item.get("payload")),
         }
-    model_activity = _sanitize_model_activity(item)
-    if model_activity is not None:
-        return model_activity
+    agent_event = _text(item.get("agent_event"), 128)
+    if (
+        item.get("runtime_scope") == "general_chat"
+        and agent_event.startswith("model.round.")
+    ):
+        return None
     tool_activity = _sanitize_tool_activity(item)
     if tool_activity is not None:
         return tool_activity
-    agent_event = _text(item.get("agent_event"), 128)
     activity = _text(item.get("activity"), 64)
     if not agent_event and not activity:
         return None

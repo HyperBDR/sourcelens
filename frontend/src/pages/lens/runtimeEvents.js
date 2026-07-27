@@ -15,14 +15,12 @@ const STRUCTURED_ACTIVITY_KINDS = new Set([
   'querying_data',
   'count_results',
   'group_results',
-  'analyzing_results',
-  'analyzing_request'
+  'analyzing_results'
 ])
 const WORKFLOW_STAGE_KINDS = new Set([
   'order_query',
   'data_query',
-  'result_analysis',
-  'reasoning'
+  'result_analysis'
 ])
 
 export function calculateRunElapsedSeconds(run, nowMs = Date.now()) {
@@ -163,6 +161,12 @@ function normalizeActivityDate(value) {
   return parsed.toISOString().slice(0, 10) === date ? date : ''
 }
 
+function normalizeOrderReference(value) {
+  const reference = String(value || '').trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(reference)) return ''
+  return reference
+}
+
 function appendStructuredActivity(state, payload) {
   if (!payload || typeof payload !== 'object') return state
   const id = String(payload.id || '')
@@ -178,7 +182,7 @@ function appendStructuredActivity(state, payload) {
   )
   const startDate = normalizeActivityDate(payload.start_date)
   const endDate = normalizeActivityDate(payload.end_date)
-  const round = Math.min(Math.max(Number(payload.round || 0), 0), 100)
+  const orderRef = normalizeOrderReference(payload.order_ref)
   const activeTask = state.plan.find((item) => item.status === 'in_progress')
   const taskId = existing?.taskId || activeTask?.id || 'task-execute'
   const stageKind = existing?.stageKind || payload.stage_kind
@@ -195,12 +199,14 @@ function appendStructuredActivity(state, payload) {
       existing?.status === 'completed' && payload.status === 'in_progress'
         ? existing.status
         : payload.status,
-    ...(existing?.round || round ? { round: existing?.round || round } : {}),
     ...(existing?.startDate || startDate
       ? { startDate: existing?.startDate || startDate }
       : {}),
     ...(existing?.endDate || endDate
       ? { endDate: existing?.endDate || endDate }
+      : {}),
+    ...(existing?.orderRef || orderRef
+      ? { orderRef: existing?.orderRef || orderRef }
       : {}),
     structured: true
   }
@@ -355,13 +361,19 @@ export function buildWorkflowTree(plan, activities) {
     stages: []
   }))
   const taskById = new Map(tasks.map((item) => [item.id, item]))
-  for (const step of Array.isArray(activities) ? activities : []) {
+  const structuredActivities = (
+    Array.isArray(activities) ? activities : []
+  ).filter((item) => item?.structured)
+  const visibleActivities = structuredActivities.filter(
+    (item) => item.kind !== 'analyzing_request'
+  )
+  for (const step of visibleActivities) {
     if (!step?.structured || !step.taskId || !step.stageId) continue
     let task = taskById.get(step.taskId)
     if (!task) {
       task = {
         id: step.taskId,
-        kind: 'execute_request',
+        kind: 'query_data',
         order: tasks.length + 1,
         status: 'pending',
         stages: []
@@ -388,6 +400,32 @@ export function buildWorkflowTree(plan, activities) {
     }
     if (!task.title) {
       task.status = workflowNodeStatus(task.stages)
+      const steps = task.stages.flatMap((stage) => stage.steps || [])
+      const detailStep = steps.find((step) => step.kind === 'get_order_detail')
+      const queryStep = steps.find((step) => step.kind === 'query_orders')
+      if (detailStep) {
+        task.kind = 'get_order_detail'
+        task.orderRef = detailStep.orderRef || ''
+      } else if (queryStep) {
+        task.kind = 'query_orders'
+        task.orderRef = queryStep.orderRef || ''
+      } else if (
+        steps.some((step) =>
+          ['count_results', 'group_results', 'analyzing_results'].includes(
+            step.kind
+          )
+        )
+      ) {
+        task.kind = 'analyze_results'
+      } else if (
+        steps.some((step) =>
+          ['checking_capability', 'reading_order_commands'].includes(step.kind)
+        )
+      ) {
+        task.kind = 'query_orders'
+      } else {
+        task.kind = 'query_data'
+      }
     }
   }
   return tasks
