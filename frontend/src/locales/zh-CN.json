@@ -267,10 +267,15 @@
           "get_order_detail_ref": "获取订单 {orderRef} 详情",
           "reading_order_commands": "读取订单命令说明",
           "checking_capability": "确认订单查询能力",
+          "checking_tool": "确认执行工具可用",
+          "checking_authentication": "确认登录状态",
+          "authenticating": "登录业务系统",
           "querying_data": "查询业务数据",
           "count_results": "统计符合条件的订单",
           "group_results": "按类型汇总订单",
-          "analyzing_results": "汇总并分析结果"
+          "analyzing_results": "汇总并分析结果",
+          "summarizing_results": "总结处理结果",
+          "summarizing_order": "总结订单 {orderRef} 详情"
         },
         "workflow": {
           "task": {
@@ -282,9 +287,10 @@
             "query_data": "查询业务数据"
           },
           "stage": {
+            "preparation": "执行准备",
             "order_query": "订单查询",
             "data_query": "业务数据查询",
-            "result_analysis": "结果分析"
+            "result_analysis": "结果整理"
           }
         },
         "recovery": {

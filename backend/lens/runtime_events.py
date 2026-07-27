@@ -63,6 +63,15 @@ TOOL_ACTIVITY_STATUSES = {
     "timeout": "failed",
 }
 
+BUSINESS_ACTIVITY_KINDS = {
+    "analyzing_results",
+    "count_results",
+    "get_order_detail",
+    "group_results",
+    "query_orders",
+    "querying_data",
+}
+
 PUBLIC_TERMINATION_REASONS = {
     "capability_unavailable",
     "execution_failed",
@@ -245,6 +254,12 @@ def _tool_activity_kind(tool_name, item):
 
     if tool_name == "run_skill_artifact":
         arguments = item.get("args_redacted")
+        if _contains_command(arguments, "auth", "status"):
+            return "checking_authentication"
+        if _contains_command(arguments, "auth", "login"):
+            return "authenticating"
+        if _contains_command(arguments, "version"):
+            return "checking_tool"
         if _contains_command(arguments, "order", "list"):
             return "query_orders"
         if (
@@ -258,12 +273,6 @@ def _tool_activity_kind(tool_name, item):
             return "reading_order_commands"
         if _contains_command(arguments, "order", "get"):
             return "get_order_detail"
-        if _contains_command(
-            arguments,
-            "auth",
-            "status",
-        ) or _contains_command(arguments, "version"):
-            return "checking_capability"
         return "querying_data"
     if tool_name == "analyze_structured_output":
         operation = str(item.get("operation") or "").strip().lower()
@@ -283,12 +292,17 @@ def _activity_stage_kind(activity_kind):
     """Return the safe stage that owns one General Chat step."""
 
     if activity_kind in {
-        "checking_capability",
         "get_order_detail",
         "query_orders",
-        "reading_order_commands",
     }:
         return "order_query"
+    if activity_kind in {
+        "authenticating",
+        "checking_authentication",
+        "checking_tool",
+        "reading_order_commands",
+    }:
+        return "preparation"
     if activity_kind in {
         "analyzing_results",
         "count_results",
@@ -500,8 +514,88 @@ def public_step_detail(detail):
     if not isinstance(detail, dict):
         return {"events": []}
     events = []
+    activity_by_id = {}
+    has_business_result = False
+    summary_context = {}
+    summary_started = False
     for item in detail.get("events") or []:
+        agent_event = _text(item.get("agent_event"), 128)
+        if (
+            item.get("runtime_scope") == "general_chat"
+            and agent_event == "model.round.start"
+            and has_business_result
+            and not summary_started
+        ):
+            events.append(
+                _summary_activity_event("in_progress", summary_context)
+            )
+            summary_started = True
+            continue
+        if (
+            item.get("runtime_scope") == "general_chat"
+            and agent_event == "deepagents.runtime.done"
+            and has_business_result
+            and _positive_int(item.get("answer_chars"))
+        ):
+            events.append(
+                _summary_activity_event("completed", summary_context)
+            )
+            continue
         event = sanitize_runtime_event(item)
-        if event is not None:
-            events.append(event)
+        if event is None:
+            continue
+        if event.get("event_type") == "activity.recorded":
+            payload = event["payload"]
+            activity_id = payload["id"]
+            previous = activity_by_id.get(activity_id)
+            if previous is not None:
+                for key in (
+                    "kind",
+                    "stage_kind",
+                    "start_date",
+                    "end_date",
+                    "order_ref",
+                ):
+                    if previous.get(key):
+                        payload[key] = previous[key]
+            activity_by_id[activity_id] = dict(payload)
+            if (
+                payload.get("status") == "completed"
+                and payload.get("kind") in BUSINESS_ACTIVITY_KINDS
+            ):
+                has_business_result = True
+                summary_context = {
+                    key: payload[key]
+                    for key in ("order_ref",)
+                    if payload.get(key)
+                }
+        events.append(event)
     return {"events": events}
+
+
+def _positive_int(value):
+    """Return a non-negative int for one internal counter."""
+
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _summary_activity_event(status, context):
+    """Return one generic final-result activity with safe context only."""
+
+    payload = {
+        "id": "summarize-results",
+        "kind": "summarizing_results",
+        "stage_kind": "result_analysis",
+        "status": status,
+    }
+    order_reference = _safe_order_reference(context.get("order_ref"))
+    if order_reference:
+        payload["order_ref"] = order_reference
+    return {
+        "event_type": "activity.recorded",
+        "visibility": "user",
+        "payload": payload,
+    }

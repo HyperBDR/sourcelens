@@ -267,10 +267,15 @@
           "get_order_detail_ref": "Retrieve order {orderRef} details",
           "reading_order_commands": "Read order command instructions",
           "checking_capability": "Confirm order query capability",
+          "checking_tool": "Confirm the execution tool is available",
+          "checking_authentication": "Confirm login status",
+          "authenticating": "Sign in to the business system",
           "querying_data": "Query business data",
           "count_results": "Count matching orders",
           "group_results": "Group order results",
-          "analyzing_results": "Summarize and analyze results"
+          "analyzing_results": "Summarize and analyze results",
+          "summarizing_results": "Summarize the result",
+          "summarizing_order": "Summarize order {orderRef} details"
         },
         "workflow": {
           "task": {
@@ -282,9 +287,10 @@
             "query_data": "Query business data"
           },
           "stage": {
+            "preparation": "Execution preparation",
             "order_query": "Order query",
             "data_query": "Business data query",
-            "result_analysis": "Result analysis"
+            "result_analysis": "Result summary"
           }
         },
         "recovery": {

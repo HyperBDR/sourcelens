@@ -530,6 +530,100 @@ test('uses a business task fallback instead of a placeholder task', () => {
   assert.equal(tasks[0].kind, 'query_data')
 })
 
+test('builds preparation, operation and summary from real activities', () => {
+  let state = createRuntimeState()
+  for (const payload of [
+    {
+      id: 'tool-version',
+      stage_kind: 'preparation',
+      kind: 'checking_tool',
+      status: 'completed'
+    },
+    {
+      id: 'auth-status',
+      stage_kind: 'preparation',
+      kind: 'checking_authentication',
+      status: 'completed'
+    },
+    {
+      id: 'auth-login',
+      stage_kind: 'preparation',
+      kind: 'authenticating',
+      status: 'completed'
+    },
+    {
+      id: 'order-query',
+      stage_kind: 'order_query',
+      kind: 'query_orders',
+      status: 'completed',
+      order_ref: 'HWINSTAD2025071509'
+    },
+    {
+      id: 'summarize-results',
+      stage_kind: 'result_analysis',
+      kind: 'summarizing_results',
+      status: 'completed',
+      order_ref: 'HWINSTAD2025071509'
+    }
+  ]) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload
+    })
+  }
+  const tasks = buildWorkflowTree([], state.activities)
+
+  assert.equal(tasks[0].kind, 'query_orders')
+  assert.deepEqual(
+    tasks[0].stages.map((stage) => stage.kind),
+    ['preparation', 'order_query', 'result_analysis']
+  )
+  assert.deepEqual(
+    tasks[0].stages.map((stage) => stage.steps.map((step) => step.kind)),
+    [
+      ['checking_tool', 'checking_authentication', 'authenticating'],
+      ['query_orders'],
+      ['summarizing_results']
+    ]
+  )
+})
+
+test('keeps non-order assistants on their actual generic operation path', () => {
+  let state = createRuntimeState()
+  for (const payload of [
+    {
+      id: 'ticket-query',
+      stage_kind: 'data_query',
+      kind: 'querying_data',
+      status: 'completed'
+    },
+    {
+      id: 'summarize-results',
+      stage_kind: 'result_analysis',
+      kind: 'summarizing_results',
+      status: 'completed'
+    }
+  ]) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload
+    })
+  }
+  const tasks = buildWorkflowTree([], state.activities)
+
+  assert.equal(tasks[0].kind, 'query_data')
+  assert.deepEqual(
+    tasks[0].stages.map((stage) => stage.kind),
+    ['data_query', 'result_analysis']
+  )
+  assert.equal(
+    tasks[0].stages.some((stage) => stage.kind === 'order_query'),
+    false
+  )
+})
+
 test('accepts real order-detail and command-discovery activities', () => {
   let state = createRuntimeState()
   for (const [id, kind] of [

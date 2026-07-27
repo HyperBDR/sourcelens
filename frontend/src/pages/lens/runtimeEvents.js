@@ -12,16 +12,28 @@ const STRUCTURED_ACTIVITY_KINDS = new Set([
   'get_order_detail',
   'reading_order_commands',
   'checking_capability',
+  'checking_tool',
+  'checking_authentication',
+  'authenticating',
   'querying_data',
   'count_results',
   'group_results',
-  'analyzing_results'
+  'analyzing_results',
+  'summarizing_results'
 ])
 const WORKFLOW_STAGE_KINDS = new Set([
+  'preparation',
   'order_query',
   'data_query',
   'result_analysis'
 ])
+
+const WORKFLOW_STAGE_ORDER = {
+  preparation: 1,
+  order_query: 2,
+  data_query: 2,
+  result_analysis: 3
+}
 
 export function calculateRunElapsedSeconds(run, nowMs = Date.now()) {
   const createdMs = Date.parse(run?.created_at || '')
@@ -398,6 +410,14 @@ export function buildWorkflowTree(plan, activities) {
     for (const stage of task.stages) {
       stage.status = workflowNodeStatus(stage.steps)
     }
+    task.stages.sort(
+      (left, right) =>
+        (WORKFLOW_STAGE_ORDER[left.kind] || 99) -
+        (WORKFLOW_STAGE_ORDER[right.kind] || 99)
+    )
+    task.stages.forEach((stage, index) => {
+      stage.order = index + 1
+    })
     if (!task.title) {
       task.status = workflowNodeStatus(task.stages)
       const steps = task.stages.flatMap((stage) => stage.steps || [])
@@ -409,6 +429,8 @@ export function buildWorkflowTree(plan, activities) {
       } else if (queryStep) {
         task.kind = 'query_orders'
         task.orderRef = queryStep.orderRef || ''
+      } else if (steps.some((step) => step.kind === 'querying_data')) {
+        task.kind = 'query_data'
       } else if (
         steps.some((step) =>
           ['count_results', 'group_results', 'analyzing_results'].includes(

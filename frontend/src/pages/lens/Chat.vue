@@ -1585,10 +1585,14 @@ const PATH_KINDS = new Set([
   'get_order_detail',
   'reading_order_commands',
   'checking_capability',
+  'checking_tool',
+  'checking_authentication',
+  'authenticating',
   'querying_data',
   'count_results',
   'group_results',
-  'analyzing_results'
+  'analyzing_results',
+  'summarizing_results'
 ])
 function safePathKind(item) {
   let kind = PATH_KINDS.has(item?.kind) ? item.kind : 'querying_data'
@@ -1627,7 +1631,12 @@ function workflowTaskTitle(task) {
 }
 
 function workflowStageTitle(kind) {
-  const known = new Set(['order_query', 'data_query', 'result_analysis'])
+  const known = new Set([
+    'preparation',
+    'order_query',
+    'data_query',
+    'result_analysis'
+  ])
   const safeKind = known.has(kind) ? kind : 'data_query'
   return t(`lens.chat.runtime.workflow.stage.${safeKind}`)
 }
@@ -1638,6 +1647,8 @@ function workflowStepTitle(item) {
     kind = 'get_order_detail_ref'
   } else if (kind === 'query_orders' && item?.orderRef) {
     kind = 'query_orders_ref'
+  } else if (kind === 'summarizing_results' && item?.orderRef) {
+    kind = 'summarizing_order'
   }
   return t(`lens.chat.runtime.pathStep.${kind}`, {
     startDate: item?.startDate,
