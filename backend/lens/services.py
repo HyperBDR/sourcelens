@@ -15,6 +15,7 @@ from .attachments import attachment_data_url, bind_attachments_to_message
 from .environment_variables import missing_required_environment
 from .llm import run_completion, run_completion_multimodal
 from .models import (
+    Assistant,
     EnvironmentVariableSet,
     GlobalSetting,
     LensNode,
@@ -24,6 +25,7 @@ from .models import (
     RunExecution,
     RunStep,
 )
+from .runtime_events import public_step_detail, sanitize_termination_detail
 
 logger = logging.getLogger(__name__)
 
@@ -559,11 +561,34 @@ def validate_run_dispatch(run):
             raise LensNodeDispatchError("SKILL_ENVIRONMENT_REQUIRED")
 
 
+TOKEN_BUDGET_PROFILES = {
+    Assistant.TokenBudgetProfile.STANDARD: {
+        "max_tokens": 200000,
+        "final_reserve_tokens": 40000,
+    },
+    Assistant.TokenBudgetProfile.DEEP: {
+        "max_tokens": 500000,
+        "final_reserve_tokens": 75000,
+    },
+}
+
+
+def token_budget_for_profile(profile):
+    """Return the bounded token budget for an Assistant profile."""
+
+    selected = profile if profile in TOKEN_BUDGET_PROFILES else "standard"
+    return {
+        "profile": selected,
+        **TOKEN_BUDGET_PROFILES[selected],
+    }
+
+
 @transaction.atomic
 def create_run_execution_snapshot(run):
     """Create or return the per-run LensNode execution snapshot."""
 
     assistant = run.session.assistant
+    token_budget = token_budget_for_profile(assistant.token_budget_profile)
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
         defaults={
@@ -576,6 +601,11 @@ def create_run_execution_snapshot(run):
                 if assistant.selected_task == "general_chat"
                 else assistant.selected_dirs
             ),
+            "token_budget_profile": token_budget["profile"],
+            "token_budget_max_tokens": token_budget["max_tokens"],
+            "token_budget_final_reserve_tokens": token_budget[
+                "final_reserve_tokens"
+            ],
             "status": RunExecution.Status.DISPATCHED,
         },
     )
@@ -710,6 +740,13 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                     run.session.assistant.agent_rounds, 26
                 ),
                 "agent_rounds": run.session.assistant.agent_rounds,
+                "token_budget": {
+                    "profile": execution.token_budget_profile,
+                    "max_tokens": execution.token_budget_max_tokens,
+                    "final_reserve_tokens": (
+                        execution.token_budget_final_reserve_tokens
+                    ),
+                },
                 "settings": run.session.assistant.settings,
             },
         },
@@ -851,7 +888,13 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
 
 
 @transaction.atomic
-def finish_lensnode_run(run_uuid, status, error=""):
+def finish_lensnode_run(
+    run_uuid,
+    status,
+    error="",
+    outcome="",
+    termination_detail=None,
+):
     """Mark a LensNode-dispatched run finished."""
 
     run = Run.objects.select_related(
@@ -878,7 +921,17 @@ def finish_lensnode_run(run_uuid, status, error=""):
             )
             run.status = Run.Status.QUEUED
             run.error = ""
-            run.save(update_fields=["status", "error", "updated_at"])
+            run.outcome = ""
+            run.termination_detail = {}
+            run.save(
+                update_fields=[
+                    "status",
+                    "error",
+                    "outcome",
+                    "termination_detail",
+                    "updated_at",
+                ]
+            )
             from .tasks import execute_answer_run
             execute_answer_run.apply_async(
                 args=[str(run_uuid)],
@@ -896,13 +949,29 @@ def finish_lensnode_run(run_uuid, status, error=""):
     if status == Run.Status.DONE:
         run.status = Run.Status.DONE
         run.error = ""
+        default_outcome = Run.Outcome.COMPLETED
         execution_status = RunExecution.Status.COMPLETED
     else:
         run.status = Run.Status.FAILED
         run.error = error or "LENS_RUN_FAILED"
+        default_outcome = Run.Outcome.BLOCKED
         execution_status = RunExecution.Status.FAILED
+    valid_outcomes = {choice for choice, _ in Run.Outcome.choices}
+    run.outcome = outcome if outcome in valid_outcomes else default_outcome
+    run.termination_detail = sanitize_termination_detail(
+        termination_detail or {}
+    )
     run.finished_at = now
-    run.save(update_fields=["status", "error", "finished_at", "updated_at"])
+    run.save(
+        update_fields=[
+            "status",
+            "error",
+            "outcome",
+            "termination_detail",
+            "finished_at",
+            "updated_at",
+        ]
+    )
 
     if hasattr(run, "execution"):
         run.execution.status = execution_status
@@ -1000,7 +1069,7 @@ def stream_run_events(run):
                     "type": "step",
                     "step": step.step_type,
                     "status": step.status,
-                    "detail": step.detail,
+                    "detail": public_step_detail(step.detail),
                     "sequence": step.sequence,
                     "ts": timezone.now().isoformat(),
                 }
@@ -1084,7 +1153,7 @@ async def stream_run_events_async(run):
                     "type": "step",
                     "step": step.step_type,
                     "status": step.status,
-                    "detail": step.detail,
+                    "detail": public_step_detail(step.detail),
                     "sequence": step.sequence,
                     "ts": timezone.now().isoformat(),
                 }
@@ -1154,11 +1223,15 @@ def _build_sync_event(run):
     return {
         "type": "sync",
         "status": run.status,
+        "outcome": run.outcome,
+        "termination_detail": sanitize_termination_detail(
+            run.termination_detail
+        ),
         "steps": [
             {
                 "step": step.step_type,
                 "status": step.status,
-                "detail": step.detail,
+                "detail": public_step_detail(step.detail),
                 "sequence": step.sequence,
             }
             for step in run.steps.all()
@@ -1175,6 +1248,10 @@ def _terminal_stream_event(run):
         return {
             "type": "error",
             "status": run.status,
+            "outcome": run.outcome,
+            "termination_detail": sanitize_termination_detail(
+                run.termination_detail
+            ),
             "error": {
                 "code": run.error or "LENS_RUN_FAILED",
                 "message": run.error or "Run failed.",
@@ -1185,6 +1262,10 @@ def _terminal_stream_event(run):
         return {
             "type": "error",
             "status": run.status,
+            "outcome": run.outcome,
+            "termination_detail": sanitize_termination_detail(
+                run.termination_detail
+            ),
             "error": {
                 "code": "LENS_RUN_CANCELLED",
                 "message": "Run was cancelled.",
@@ -1194,5 +1275,9 @@ def _terminal_stream_event(run):
     return {
         "type": "done",
         "status": run.status,
+        "outcome": run.outcome,
+        "termination_detail": sanitize_termination_detail(
+            run.termination_detail
+        ),
         "ts": timezone.now().isoformat(),
     }

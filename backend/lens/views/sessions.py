@@ -105,7 +105,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
 
         session = self.get_object()
         messages = session.message_set.select_related("run").prefetch_related(
-            "run__steps", "attachments", "output_files"
+            "run__steps",
+            "response_runs__steps",
+            "attachments",
+            "output_files",
         )
         serializer = MessageSerializer(messages, many=True)
         return Response(serializer.data)

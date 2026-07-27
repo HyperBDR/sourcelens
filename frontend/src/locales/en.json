@@ -230,8 +230,46 @@
       "running": "Analyzing",
       "generating": "Generating",
       "agentActivity": "Agent activity",
-      "thinkingDone": "Thought for {duration} · {count} steps",
-      "thinkingDoneSteps": "Thought for {count} steps",
+      "runtime": {
+        "planTitle": "Plan",
+        "stageTitle": "Task progress",
+        "planProgress": "Completed {completed}/{total}",
+        "planProgressCurrent": "Completed {completed}/{total} · Current: {currentTitle}",
+        "planCompleted": "Completed {completed}/{total}",
+        "planEnded": "Ended {completed}/{total}",
+        "stageProgress": "Completed {completed}/{total}",
+        "stageProgressCurrent": "Completed {completed}/{total} · Current: {currentTitle}",
+        "stageCompleted": "Completed {completed}/{total}",
+        "stageEnded": "Ended {completed}/{total}",
+        "blockedTitle": "Capability unavailable",
+        "artifactTitle": "Artifact ready",
+        "outcomePartial": "Completed with limitations. Review the missing capability or unfinished items above.",
+        "outcomeBlocked": "This request is blocked until the required capability or input is available.",
+        "activity": {
+          "analyzingResults": "Analyzing collected results",
+          "findingCapability": "Finding the required capability",
+          "preparingOutput": "Preparing the output",
+          "queryingData": "Querying business data",
+          "readingContext": "Reading task context",
+          "readingSources": "Reading relevant sources",
+          "searchingSources": "Searching relevant sources",
+          "usingCapability": "Running the required operation"
+        },
+        "recovery": {
+          "configuration": "Ask an administrator to configure or authorize this capability, then retry.",
+          "policy": "Continue from the evidence already collected or narrow the request.",
+          "transient": "Retry later or use another available capability.",
+          "request": "Correct or provide the missing input, then retry.",
+          "tool": "Use another available capability or contact an administrator."
+        },
+        "phase": {
+          "analyzing": "Understanding the request",
+          "planning": "Planning the work",
+          "executing": "Executing the plan",
+          "answering": "Preparing the answer",
+          "completed": "Completed"
+        }
+      },
       "events": {
         "submitted": "Submitted",
         "sync": "Sync status",

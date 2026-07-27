@@ -5,7 +5,9 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from agentcore_metering.adapters.django.models import LLMUsage
 from lens.models import Run
+from lens.runtime_events import sanitize_loaded_mcps, sanitize_loaded_skills
 from lens.serializers import MessageAttachmentSerializer
 
 
@@ -36,6 +38,13 @@ def _admin_run_step_counts(run):
     counts = {
         "event_count": 0,
         "subagent_count": 0,
+        "subagent_denied_count": 0,
+        "artifact_calls": 0,
+        "artifact_call_limit_hits": 0,
+        "structured_analysis_calls": 0,
+        "structured_analysis_limit_hits": 0,
+        "transform_calls": 0,
+        "transform_call_limit_hits": 0,
         "llm_calls": 0,
         "total_tokens": 0,
         "prompt_tokens": 0,
@@ -50,6 +59,26 @@ def _admin_run_step_counts(run):
             agent_event = event.get("agent_event")
             if agent_event == "tool.task.invoke":
                 counts["subagent_count"] += 1
+            elif agent_event == "tool.task.denied":
+                counts["subagent_denied_count"] += 1
+            elif agent_event == "tool.run_skill_artifact.start":
+                counts["artifact_calls"] += 1
+            elif agent_event == (
+                "tool.run_skill_artifact.budget_exceeded"
+            ):
+                counts["artifact_call_limit_hits"] += 1
+            elif agent_event == "tool.analyze_structured_output.start":
+                counts["structured_analysis_calls"] += 1
+            elif agent_event == (
+                "tool.analyze_structured_output.budget_exceeded"
+            ):
+                counts["structured_analysis_limit_hits"] += 1
+            elif agent_event == "tool.run_skill_transform.start":
+                counts["transform_calls"] += 1
+            elif agent_event == (
+                "tool.run_skill_transform.budget_exceeded"
+            ):
+                counts["transform_call_limit_hits"] += 1
             elif agent_event == "llm.response":
                 counts["llm_calls"] += 1
                 counts["total_tokens"] += event.get("total_tokens") or 0
@@ -73,8 +102,82 @@ def _admin_run_step_counts(run):
             if cost:
                 total_cost += cost
                 has_cost = True
+    counts["subagent_count"] = max(
+        0,
+        counts["subagent_count"] - counts["subagent_denied_count"],
+    )
     counts["total_cost"] = round(total_cost, 6) if has_cost else None
     return counts
+
+
+def _duration_ms(started_at, finished_at):
+    """Return non-negative elapsed milliseconds or None."""
+
+    if not started_at or not finished_at:
+        return None
+    return max(0, round((finished_at - started_at).total_seconds() * 1000))
+
+
+def _admin_run_model_usage(run):
+    """Return metered model calls correlated to one Run UUID."""
+
+    usages = LLMUsage.objects.filter(
+        metadata__run_uuid=str(run.uuid),
+    ).order_by("created_at")
+    calls = []
+    total_cost = 0.0
+    has_cost = False
+    for usage in usages:
+        metadata = usage.metadata or {}
+        if usage.cost is not None:
+            total_cost += float(usage.cost)
+            has_cost = True
+        calls.append({
+            "uuid": str(usage.id),
+            "model": usage.model,
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "cached_tokens": usage.cached_tokens,
+            "reasoning_tokens": usage.reasoning_tokens,
+            "cost": float(usage.cost) if usage.cost is not None else None,
+            "cost_currency": usage.cost_currency,
+            "success": usage.success,
+            "is_streaming": usage.is_streaming,
+            "is_subagent": bool(metadata.get("is_subagent")),
+            "source_type": metadata.get("source_type"),
+            "started_at": (
+                usage.started_at.isoformat() if usage.started_at else None
+            ),
+            "finished_at": usage.created_at.isoformat(),
+            "duration_ms": _duration_ms(
+                usage.started_at,
+                usage.created_at,
+            ),
+            "ttft_ms": _duration_ms(
+                usage.started_at,
+                usage.first_chunk_at,
+            ),
+        })
+    if not calls:
+        return None
+    return {
+        "llm_calls": len(calls),
+        "subagent_model_calls": sum(
+            1 for item in calls if item["is_subagent"]
+        ),
+        "total_tokens": sum(item["total_tokens"] for item in calls),
+        "prompt_tokens": sum(item["prompt_tokens"] for item in calls),
+        "completion_tokens": sum(
+            item["completion_tokens"] for item in calls
+        ),
+        "cached_tokens": sum(item["cached_tokens"] for item in calls),
+        "reasoning_tokens": sum(
+            item["reasoning_tokens"] for item in calls
+        ),
+        "total_cost": round(total_cost, 6) if has_cost else None,
+        "model_calls": calls,
+    }
 
 
 def _admin_run_row(run):
@@ -100,6 +203,19 @@ def _admin_run_row(run):
         "lensnode_name": run.lensnode.name if run.lensnode else None,
         "event_count": counts["event_count"],
         "subagent_count": counts["subagent_count"],
+        "subagent_denied_count": counts["subagent_denied_count"],
+        "artifact_calls": counts["artifact_calls"],
+        "artifact_call_limit_hits": counts[
+            "artifact_call_limit_hits"
+        ],
+        "structured_analysis_calls": counts["structured_analysis_calls"],
+        "structured_analysis_limit_hits": counts[
+            "structured_analysis_limit_hits"
+        ],
+        "transform_calls": counts["transform_calls"],
+        "transform_call_limit_hits": counts[
+            "transform_call_limit_hits"
+        ],
         "llm_calls": counts["llm_calls"],
         "total_tokens": counts["total_tokens"],
         "prompt_tokens": counts["prompt_tokens"],
@@ -116,6 +232,7 @@ def _admin_run_detail(run):
     out = run.output_message
     assistant = run.session.assistant if run.session else None
     execution = run.execution if hasattr(run, "execution") else None
+    model_usage = _admin_run_model_usage(run)
     steps = []
     for step in run.steps.all():
         detail = step.detail or {}
@@ -155,10 +272,21 @@ def _admin_run_detail(run):
         "execution": {
             "task": execution.task,
             "target_dirs": execution.target_dirs,
-            "loaded_skills": execution.loaded_skills,
-            "loaded_mcps": execution.loaded_mcps,
+            "loaded_skills": sanitize_loaded_skills(
+                execution.loaded_skills
+            ),
+            "loaded_mcps": sanitize_loaded_mcps(execution.loaded_mcps),
         } if execution else None,
     })
+    if model_usage:
+        row.update(model_usage)
+    else:
+        row.update({
+            "cached_tokens": 0,
+            "reasoning_tokens": 0,
+            "subagent_model_calls": 0,
+            "model_calls": [],
+        })
     return row
 
 
