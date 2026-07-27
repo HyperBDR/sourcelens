@@ -303,7 +303,7 @@
           "verification": "No verified result was returned. Review the runtime details and retry."
         },
         "phase": {
-          "analyzing": "Understanding the request",
+          "analyzing": "Analyzing the question",
           "planning": "Planning the work",
           "executing": "Executing the plan",
           "answering": "Preparing the answer",

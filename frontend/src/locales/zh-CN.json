@@ -303,7 +303,7 @@
           "verification": "本次执行未返回可验证结果，请查看运行详情后重试。"
         },
         "phase": {
-          "analyzing": "正在理解请求",
+          "analyzing": "正在分析问题",
           "planning": "正在制定计划",
           "executing": "正在执行计划",
           "answering": "正在整理回答",
