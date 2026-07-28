@@ -315,6 +315,45 @@ class TestManagementUsersPagination:
             assignable_user.id
         ]
 
+    def test_users_list_compact_search_returns_selector_fields_only(self):
+        admin = User.objects.create_user(
+            username="admin_for_compact_user_search",
+            password="x",
+            is_staff=True,
+        )
+        user = User.objects.create_user(
+            username="compact-selector-user",
+            email="compact@example.com",
+            first_name="Compact",
+            last_name="User",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {
+                "assignable": "true",
+                "compact": "true",
+                "search": "compact-selector",
+            },
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert data["results"] == [
+            {
+                "id": user.id,
+                "username": "compact-selector-user",
+                "email": "compact@example.com",
+                "first_name": "Compact",
+                "last_name": "User",
+                "display_name": "Compact User",
+            }
+        ]
+
     def test_users_list_search_keeps_management_permission(self):
         user = User.objects.create_user(
             username="partial_search_without_management_access",
@@ -436,6 +475,28 @@ class TestManagementUsersPagination:
 
 @pytest.mark.django_db
 class TestManagementGroupsPagination:
+    def test_groups_list_compact_returns_selector_fields_only(self):
+        admin = User.objects.create_user(
+            username="admin_for_compact_groups",
+            password="x",
+            is_staff=True,
+        )
+        group = Group.objects.create(name="Compact Selector Group")
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/groups/",
+            {"compact": "true"},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert data["results"] == [
+            {"id": group.id, "name": "Compact Selector Group"}
+        ]
+
     def test_groups_list_supports_page_and_page_size(self):
         admin = User.objects.create_user(
             username="admin_for_groups",

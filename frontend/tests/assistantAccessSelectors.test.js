@@ -2,9 +2,29 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  appendUniqueOptions,
   assignmentFirstOptions,
   createLatestRequestRunner
 } from '../src/pages/lens/assistantAccessSelectors.js'
+
+test('appends new options once while preserving loaded order', () => {
+  const options = appendUniqueOptions(
+    [
+      { id: 1, name: 'first' },
+      { id: 2, name: 'second' }
+    ],
+    [
+      { id: 2, name: 'duplicate' },
+      { id: 3, name: 'third' }
+    ]
+  )
+
+  assert.deepEqual(options, [
+    { id: 1, name: 'first' },
+    { id: 2, name: 'second' },
+    { id: 3, name: 'third' }
+  ])
+})
 
 test('pins every assignment before the current result page', () => {
   const cache = new Map([

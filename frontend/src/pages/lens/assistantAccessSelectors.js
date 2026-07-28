@@ -11,6 +11,21 @@ export function assignmentFirstOptions(selectedIds, optionCache, pageOptions) {
   ]
 }
 
+export function appendUniqueOptions(currentOptions, nextOptions) {
+  const options = Array.isArray(currentOptions) ? currentOptions : []
+  const next = Array.isArray(nextOptions) ? nextOptions : []
+  const seen = new Set(options.map((option) => option.id))
+
+  return [
+    ...options,
+    ...next.filter((option) => {
+      if (seen.has(option.id)) return false
+      seen.add(option.id)
+      return true
+    })
+  ]
+}
+
 export function createLatestRequestRunner() {
   let version = 0
 

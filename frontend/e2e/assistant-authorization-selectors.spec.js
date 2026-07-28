@@ -64,13 +64,17 @@ async function mockAssistantsPage(page) {
         results:
           requestedPage === 2
             ? [{ id: 301, name: 'Group From Page Two' }]
-            : [{ id: 1, name: 'Default Group' }]
+            : Array.from({ length: 20 }, (_, index) => ({
+                id: index + 1,
+                name: `Default Group ${index + 1}`
+              }))
       }
     } else if (path === '/api/v1/management/users/') {
       const search = url.searchParams.get('search')
+      const requestedPage = Number(url.searchParams.get('page'))
       payload = {
-        count: 1,
-        page: 1,
+        count: search ? 1 : 21,
+        page: requestedPage,
         page_size: 20,
         results: search
           ? [
@@ -81,14 +85,21 @@ async function mockAssistantsPage(page) {
                 email: 'target@example.com'
               }
             ]
-          : [
-              {
-                id: 1,
-                username: 'default-user',
-                display_name: 'default-user',
-                email: 'default@example.com'
-              }
-            ]
+          : requestedPage === 2
+            ? [
+                {
+                  id: 301,
+                  username: 'user-from-page-two',
+                  display_name: 'user-from-page-two',
+                  email: 'page-two@example.com'
+                }
+              ]
+            : Array.from({ length: 20 }, (_, index) => ({
+                id: index + 1,
+                username: `default-user-${index + 1}`,
+                display_name: `default-user-${index + 1}`,
+                email: `default-${index + 1}@example.com`
+              }))
       }
     }
 
@@ -109,7 +120,7 @@ async function openAccessStep(page) {
   return drawer
 }
 
-test('keeps assignments visible while users search and groups paginate', async ({
+test('keeps assignments visible during incremental loading and search', async ({
   page
 }) => {
   await mockAssistantsPage(page)
@@ -125,18 +136,59 @@ test('keeps assignments visible while users search and groups paginate', async (
 
   const groupSelector = drawer.getByTestId('authorized-groups-selector')
   const userSelector = drawer.getByTestId('authorized-users-selector')
-  await expect(groupSelector.getByTestId('authorized-group-option')).toHaveText(
-    [/Assigned Outside Group Page/, /Default Group/]
+  await expect(
+    groupSelector.getByTestId('authorized-group-option').first()
+  ).toContainText('Assigned Outside Group Page')
+  await expect(
+    groupSelector.getByTestId('authorized-group-option')
+  ).toHaveCount(21)
+  await expect(
+    userSelector.getByTestId('authorized-user-option').first()
+  ).toContainText('assigned-outside-user')
+  await expect(userSelector.getByTestId('authorized-user-option')).toHaveCount(
+    21
   )
-  await expect(userSelector.getByTestId('authorized-user-option')).toHaveText([
-    /assigned-outside-user.*assigned@example.com/s,
-    /default-user.*default@example.com/s
-  ])
+  await expect(
+    groupSelector.getByRole('button', { name: 'Next', exact: true })
+  ).toHaveCount(0)
+  await expect(
+    userSelector.getByRole('button', { name: 'Next', exact: true })
+  ).toHaveCount(0)
 
-  await groupSelector.getByRole('button', { name: 'Next' }).click()
-  await expect(groupSelector.getByTestId('authorized-group-option')).toHaveText(
-    [/Assigned Outside Group Page/, /Group From Page Two/]
-  )
+  const groupNextRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url())
+    return (
+      url.pathname === '/api/v1/management/groups/' &&
+      url.searchParams.get('page') === '2'
+    )
+  })
+  await groupSelector
+    .locator('.overflow-y-auto')
+    .evaluate((element) => element.scrollTo(0, element.scrollHeight))
+  await groupNextRequest
+  await expect(
+    groupSelector.getByTestId('authorized-group-option').last()
+  ).toContainText('Group From Page Two')
+
+  const userNextRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url())
+    return (
+      url.pathname === '/api/v1/management/users/' &&
+      url.searchParams.get('page') === '2' &&
+      !url.searchParams.has('search')
+    )
+  })
+  await userSelector
+    .locator('.overflow-y-auto')
+    .evaluate((element) => element.scrollTo(0, element.scrollHeight))
+  await userNextRequest
+  await expect(
+    userSelector.getByTestId('authorized-user-option').last()
+  ).toContainText('user-from-page-two')
+
+  await expect(
+    userSelector.getByTestId('authorized-user-option').first()
+  ).toContainText('assigned-outside-user')
 
   await userSelector
     .getByTestId('authorized-user-option')
@@ -147,7 +199,10 @@ test('keeps assignments visible while users search and groups paginate', async (
 
   const searchRequest = page.waitForRequest((request) => {
     const url = new URL(request.url())
-    return url.searchParams.get('search') === 'target'
+    return (
+      url.searchParams.get('search') === 'target' &&
+      url.searchParams.get('compact') === 'true'
+    )
   })
   await drawer.getByTestId('authorized-user-search').fill('target')
   await searchRequest
@@ -166,9 +221,11 @@ test('keeps assignments visible while users search and groups paginate', async (
   })
   await drawer.getByTestId('authorized-user-search').fill('')
   await defaultRequest
-  await expect(userSelector.getByTestId('authorized-user-option')).toHaveText([
-    /search-target.*target@example.com/s,
-    /default-user.*default@example.com/s
-  ])
+  await expect(
+    userSelector.getByTestId('authorized-user-option').first()
+  ).toContainText(/search-target.*target@example.com/s)
+  await expect(userSelector.getByTestId('authorized-user-option')).toHaveCount(
+    20
+  )
   await expect(drawer.getByTestId('authorized-users-count')).toHaveText('1')
 })

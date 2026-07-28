@@ -21,6 +21,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_task.adapters.django.models import TaskExecution
 
+from accounts.models import Role
 from lens.datasource_services import test_datasource_connection
 from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
@@ -3039,3 +3040,156 @@ class AssistantAccessTests(TestCase):
             format="json",
         )
         self.assertEqual(create.status_code, 403)
+
+
+class AdminAccessSubjectTests(TestCase):
+    """Admin user/group insights and stable history filters."""
+
+    def setUp(self):
+        self.node = LensNode.objects.create(
+            name="Access detail node",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            tasks=[{"name": "general_chat", "description": "chat"}],
+        )
+        self.admin = User.objects.create_user(
+            username="access-admin",
+            password="x",
+            is_staff=True,
+        )
+        self.user = User.objects.create_user(
+            username="detail-user",
+            email="detail@example.com",
+            password="x",
+        )
+        self.group = Group.objects.create(name="Detail group")
+        self.user.groups.add(self.group)
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _assistant(self, name, slug, visibility="private"):
+        return Assistant.objects.create(
+            name=name,
+            slug=slug,
+            lensnode=self.node,
+            selected_task="general_chat",
+            visibility=visibility,
+        )
+
+    def test_user_detail_combines_access_sources_and_activity(self):
+        direct = self._assistant("Direct", "detail-direct")
+        grouped = self._assistant("Grouped", "detail-grouped")
+        public = self._assistant(
+            "Public",
+            "detail-public",
+            Assistant.Visibility.PUBLIC,
+        )
+        history = self._assistant("History", "detail-history")
+        AssistantAccess.objects.create(assistant=direct, user=self.user)
+        AssistantAccess.objects.create(assistant=grouped, group=self.group)
+        session = Session.objects.create(
+            assistant=history,
+            user=self.user,
+        )
+        create_execution_run(session, "History question", enqueue=False)
+
+        response = self.client.get(
+            f"/api/lens/admin/access/users/{self.user.pk}/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        rows = {item["slug"]: item for item in response.data["assistants"]}
+        self.assertEqual(rows[direct.slug]["access_sources"], ["direct"])
+        self.assertEqual(rows[grouped.slug]["access_sources"], ["group"])
+        self.assertEqual(rows[public.slug]["access_sources"], ["public"])
+        self.assertEqual(rows[history.slug]["access_sources"], ["history"])
+        self.assertEqual(rows[history.slug]["conversations"], 1)
+        self.assertEqual(rows[history.slug]["qa_records"], 1)
+        self.assertEqual(response.data["stats"]["conversations"], 1)
+        self.assertEqual(response.data["stats"]["qa_records"], 1)
+
+    def test_group_detail_paginates_searches_and_counts(self):
+        second = User.objects.create_user(
+            username="another-member",
+            email="another@example.com",
+            password="x",
+        )
+        second.groups.add(self.group)
+        assistant = self._assistant("Group assistant", "group-assistant")
+        AssistantAccess.objects.create(assistant=assistant, group=self.group)
+        role = Role.objects.create(
+            name="Group admin",
+            visible_features=["admin_console"],
+        )
+        role.groups.add(self.group)
+
+        response = self.client.get(
+            f"/api/lens/admin/access/groups/{self.group.pk}/",
+            {"search": "detail@", "page": 1, "page_size": 1},
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["stats"]["members"], 2)
+        self.assertEqual(response.data["stats"]["assigned_assistants"], 1)
+        self.assertEqual(response.data["stats"]["roles"], 1)
+        self.assertEqual(response.data["members"]["count"], 1)
+        self.assertEqual(
+            response.data["members"]["results"][0]["id"],
+            self.user.pk,
+        )
+        self.assertEqual(
+            response.data["assistants"][0]["access_sources"],
+            ["group"],
+        )
+
+    def test_history_filters_by_exact_user_group_and_assistant(self):
+        assistant = self._assistant("Filtered", "filtered-assistant")
+        other = User.objects.create_user(
+            username="other-detail-user",
+            password="x",
+        )
+        other.groups.add(self.group)
+        first_session = Session.objects.create(
+            assistant=assistant,
+            user=self.user,
+        )
+        second_session = Session.objects.create(
+            assistant=assistant,
+            user=other,
+        )
+        first = create_execution_run(
+            first_session,
+            "First question",
+            enqueue=False,
+        )
+        create_execution_run(second_session, "Second question", enqueue=False)
+
+        response = self.client.get(
+            "/api/lens/admin/runs/",
+            {
+                "user_id": self.user.pk,
+                "group_id": self.group.pk,
+                "assistant": assistant.slug,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["total"], 1)
+        self.assertEqual(response.data["results"][0]["uuid"], str(first.uuid))
+
+    def test_role_granted_admin_can_open_detail_and_history(self):
+        role = Role.objects.create(
+            name="Role granted admin",
+            visible_features=["admin_console"],
+        )
+        role.users.add(self.user)
+        client = APIClient()
+        client.force_authenticate(self.user)
+
+        detail = client.get(
+            f"/api/lens/admin/access/users/{self.user.pk}/"
+        )
+        history = client.get("/api/lens/admin/runs/")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(history.status_code, 200)

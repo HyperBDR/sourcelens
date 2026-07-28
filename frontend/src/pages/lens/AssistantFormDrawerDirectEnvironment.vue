@@ -593,6 +593,7 @@
             <div
               v-if="orderedGroups.length"
               class="max-h-52 space-y-1 overflow-y-auto p-2"
+              @scroll.passive="maybeLoadMoreGroups"
             >
               <label
                 v-for="g in orderedGroups"
@@ -640,16 +641,6 @@
             >
               {{ t('lensAdmin.access.noGroups') }}
             </p>
-            <PaginationBar
-              v-if="!groupLoading && !groupFailed"
-              v-model:page-size="groupPageSize"
-              class="px-2 pb-2"
-              :current-page="groupPage"
-              :total="groupTotal"
-              @page-size-change="changeGroupPageSize"
-              @prev="previousGroupPage"
-              @next="nextGroupPage"
-            />
           </div>
 
           <div
@@ -685,6 +676,7 @@
             <div
               v-if="orderedUsers.length"
               class="max-h-52 space-y-1 overflow-y-auto p-2"
+              @scroll.passive="maybeLoadMoreUsers"
             >
               <label
                 v-for="u in orderedUsers"
@@ -745,16 +737,6 @@
                   : t('lensAdmin.access.noUsers')
               }}
             </p>
-            <PaginationBar
-              v-if="!userLoading && !userFailed"
-              v-model:page-size="userPageSize"
-              class="px-2 pb-2"
-              :current-page="userPage"
-              :total="userTotal"
-              @page-size-change="changeUserPageSize"
-              @prev="previousUserPage"
-              @next="nextUserPage"
-            />
           </div>
         </div>
       </div>
@@ -813,7 +795,6 @@ import { useI18n } from 'vue-i18n'
 import { managementApi } from '@/admin/api/management'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
-import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import {
@@ -822,6 +803,7 @@ import {
   formatLLMConfigLabel
 } from './adminHelpers'
 import {
+  appendUniqueOptions,
   assignmentFirstOptions,
   createLatestRequestRunner
 } from './assistantAccessSelectors'
@@ -849,17 +831,16 @@ const { t } = useI18n()
 const emptyValue = EMPTY_VALUE
 const WIZARD_STEP_COUNT = 4
 const ACCESS_PAGE_SIZE = 20
-const SEARCH_DELAY_MS = 300
+const SEARCH_DELAY_MS = 250
+const LOAD_MORE_THRESHOLD_PX = 96
 const wizardStep = ref(1)
 const groupPage = ref(1)
-const groupPageSize = ref(ACCESS_PAGE_SIZE)
 const groupTotal = ref(0)
 const groupResults = ref([])
 const groupOptions = ref(new Map())
 const groupLoading = ref(false)
 const groupFailed = ref(false)
 const userPage = ref(1)
-const userPageSize = ref(ACCESS_PAGE_SIZE)
 const userTotal = ref(0)
 const userResults = ref([])
 const userOptions = ref(new Map())
@@ -869,6 +850,7 @@ const userSearch = ref('')
 const groupRequest = createLatestRequestRunner()
 const userRequest = createLatestRequestRunner()
 let searchTimer = null
+let userAbortController = null
 let resettingAccessSelectors = false
 
 watch(
@@ -888,14 +870,18 @@ watch(
   () => {
     if (!props.show || resettingAccessSelectors) return
     if (searchTimer) clearTimeout(searchTimer)
+    userAbortController?.abort()
     userRequest.invalidate()
+    userPage.value = 1
+    userTotal.value = 0
     userResults.value = []
     userFailed.value = false
     userLoading.value = true
+    const delay = userSearch.value.trim() ? SEARCH_DELAY_MS : 0
     searchTimer = setTimeout(() => {
       searchTimer = null
       loadUsers(1)
-    }, SEARCH_DELAY_MS)
+    }, delay)
   },
   { flush: 'sync' }
 )
@@ -1098,6 +1084,8 @@ function resetPendingAccessRequests() {
     searchTimer = null
   }
   groupRequest.invalidate()
+  userAbortController?.abort()
+  userAbortController = null
   userRequest.invalidate()
   groupLoading.value = false
   userLoading.value = false
@@ -1107,12 +1095,10 @@ function initializeAccessSelectors() {
   resetPendingAccessRequests()
   resettingAccessSelectors = true
   groupPage.value = 1
-  groupPageSize.value = ACCESS_PAGE_SIZE
   groupTotal.value = 0
   groupResults.value = []
   groupFailed.value = false
   userPage.value = 1
-  userPageSize.value = ACCESS_PAGE_SIZE
   userTotal.value = 0
   userResults.value = []
   userFailed.value = false
@@ -1124,11 +1110,16 @@ function initializeAccessSelectors() {
 }
 
 async function loadGroups(page = groupPage.value) {
+  groupPage.value = page
   groupLoading.value = true
   groupFailed.value = false
-  groupResults.value = []
+  if (page === 1) groupResults.value = []
   const result = await groupRequest.run(() =>
-    managementApi.getGroups({ page, page_size: groupPageSize.value })
+    managementApi.getGroups({
+      page,
+      page_size: ACCESS_PAGE_SIZE,
+      compact: true
+    })
   )
   if (!result.current) return
   groupLoading.value = false
@@ -1141,24 +1132,34 @@ async function loadGroups(page = groupPage.value) {
     : (result.value?.results ?? [])
   groupPage.value = Number(result.value?.page) || page
   groupTotal.value = Number(result.value?.count) || rows.length
-  groupResults.value = rows
+  groupResults.value =
+    page === 1 ? rows : appendUniqueOptions(groupResults.value, rows)
   cacheOptions(groupOptions, rows)
 }
 
 async function loadUsers(page = userPage.value) {
+  userPage.value = page
   userLoading.value = true
   userFailed.value = false
-  userResults.value = []
+  if (page === 1) userResults.value = []
   const search = userSearch.value.trim()
+  userAbortController?.abort()
+  const controller = new AbortController()
+  userAbortController = controller
   const result = await userRequest.run(() =>
-    managementApi.getUsers({
-      page,
-      page_size: userPageSize.value,
-      assignable: true,
-      ...(search ? { search } : {})
-    })
+    managementApi.getUsers(
+      {
+        page,
+        page_size: ACCESS_PAGE_SIZE,
+        assignable: true,
+        compact: true,
+        ...(search ? { search } : {})
+      },
+      { signal: controller.signal }
+    )
   )
   if (!result.current) return
+  if (userAbortController === controller) userAbortController = null
   userLoading.value = false
   if (result.error) {
     userFailed.value = true
@@ -1169,36 +1170,39 @@ async function loadUsers(page = userPage.value) {
     : (result.value?.results ?? [])
   userPage.value = Number(result.value?.page) || page
   userTotal.value = Number(result.value?.count) || rows.length
-  userResults.value = rows
+  userResults.value =
+    page === 1 ? rows : appendUniqueOptions(userResults.value, rows)
   cacheOptions(userOptions, rows)
 }
 
-function previousGroupPage() {
-  if (groupPage.value > 1) loadGroups(groupPage.value - 1)
+function isNearListEnd(event) {
+  const list = event.currentTarget
+  return (
+    list.scrollHeight - list.scrollTop - list.clientHeight <=
+    LOAD_MORE_THRESHOLD_PX
+  )
 }
 
-function nextGroupPage() {
-  if (groupPage.value * groupPageSize.value < groupTotal.value) {
+function maybeLoadMoreGroups(event) {
+  if (
+    !groupLoading.value &&
+    !groupFailed.value &&
+    groupResults.value.length < groupTotal.value &&
+    isNearListEnd(event)
+  ) {
     loadGroups(groupPage.value + 1)
   }
 }
 
-function changeGroupPageSize() {
-  loadGroups(1)
-}
-
-function previousUserPage() {
-  if (userPage.value > 1) loadUsers(userPage.value - 1)
-}
-
-function nextUserPage() {
-  if (userPage.value * userPageSize.value < userTotal.value) {
+function maybeLoadMoreUsers(event) {
+  if (
+    !userLoading.value &&
+    !userFailed.value &&
+    userResults.value.length < userTotal.value &&
+    isNearListEnd(event)
+  ) {
     loadUsers(userPage.value + 1)
   }
-}
-
-function changeUserPageSize() {
-  loadUsers(1)
 }
 
 const selectableSkills = computed(() =>

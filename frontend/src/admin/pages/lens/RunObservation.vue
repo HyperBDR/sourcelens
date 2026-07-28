@@ -30,7 +30,7 @@
                 type="text"
                 :placeholder="t('lensRuns.filterUsername')"
                 class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-36 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                @input="onFiltersChanged"
+                @input="onUsernameChanged"
               />
               <select
                 v-model="filters.assistant"
@@ -486,7 +486,8 @@
                   </h3>
                   <pre
                     class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap"
-                    >{{ detail.error }}</pre>
+                    >{{ detail.error }}</pre
+                  >
                 </section>
               </div>
 
@@ -645,6 +646,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
 import { useDebounceFn } from '@vueuse/core'
 import { useToast } from '@/composables/useToast'
@@ -659,6 +661,8 @@ import AuthImage from '@/components/ui/AuthImage.vue'
 
 const { t, locale } = useI18n()
 const { showError } = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const loading = ref(false)
 const runs = ref([])
@@ -676,6 +680,8 @@ const activeDetailTab = ref('overview')
 const filters = ref({
   q: '',
   username: '',
+  user_id: '',
+  group_id: '',
   assistant: '',
   status: '',
   start_date: '',
@@ -873,18 +879,27 @@ function onFiltersChanged() {
   debouncedFetch()
 }
 
+function onUsernameChanged() {
+  filters.value.user_id = ''
+  filters.value.group_id = ''
+  onFiltersChanged()
+}
+
 const debouncedFetch = useDebounceFn(() => fetchRuns(), 300)
 
 function resetFilters() {
   filters.value = {
     q: '',
     username: '',
+    user_id: '',
+    group_id: '',
     assistant: '',
     status: '',
     start_date: '',
     end_date: ''
   }
   page.value = 1
+  router.replace({ path: route.path })
   fetchRuns()
 }
 
@@ -952,6 +967,10 @@ async function fetchDetail() {
 }
 
 onMounted(async () => {
+  filters.value.user_id = String(route.query.user_id || '')
+  filters.value.group_id = String(route.query.group_id || '')
+  filters.value.username = String(route.query.username || '')
+  filters.value.assistant = String(route.query.assistant || '')
   try {
     assistants.value = await listAssistants()
   } catch {
