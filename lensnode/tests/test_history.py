@@ -1,5 +1,6 @@
 import json
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 from langchain_core.messages import ToolMessage
@@ -164,88 +165,6 @@ def test_write_todos_emits_user_visible_normalized_plan():
     ]
 
 
-def test_direct_execution_stages_start_with_real_runtime_state():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-
-    agent_runtime._start_direct_stages(
-        state,
-        lambda name, detail: events.append((name, detail)),
-    )
-
-    assert [detail["payload"]["status"] for _, detail in events] == [
-        "completed",
-        "in_progress",
-        "pending",
-    ]
-    assert [detail["payload"]["order"] for _, detail in events] == [1, 2, 3]
-    assert [detail["payload"]["revision"] for _, detail in events] == [1, 2, 3]
-    assert all(name == "workflow.stage.updated" for name, _ in events)
-
-
-def test_direct_execution_stage_counts_actual_tool_calls():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-    agent_runtime._start_direct_stages(state, lambda *_args: None)
-    message = _Msg(
-        "ai",
-        tool_calls=[
-            {"id": "call-orders", "name": "call_skill_api", "args": {}},
-        ],
-    )
-
-    _emit_new_tool_calls(
-        [message],
-        set(),
-        lambda name, detail: events.append((name, detail)),
-        direct_stage_state=state,
-    )
-
-    stage_events = [
-        detail for name, detail in events if name == "workflow.stage.updated"
-    ]
-    assert state["tool_count"] == 1
-    assert stage_events[-1]["payload"]["id"] == "execute"
-    assert stage_events[-1]["payload"]["status"] == "in_progress"
-    assert stage_events[-1]["payload"]["summary"] == "Started 1 operation"
-
-
-def test_direct_execution_stages_record_blocked_outcome():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-    agent_runtime._start_direct_stages(state, lambda *_args: None)
-
-    agent_runtime._finish_direct_stages(
-        state,
-        lambda name, detail: events.append((name, detail)),
-        outcome="blocked",
-    )
-
-    payloads = [detail["payload"] for _, detail in events]
-    assert payloads[0]["id"] == "execute"
-    assert payloads[0]["status"] == "failed"
-    assert payloads[1]["id"] == "answer"
-    assert payloads[1]["status"] == "completed"
-
-
-def test_direct_execution_stages_do_not_mark_partial_work_completed():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-    agent_runtime._start_direct_stages(state, lambda *_args: None)
-
-    agent_runtime._finish_direct_stages(
-        state,
-        lambda name, detail: events.append((name, detail)),
-        outcome="partial",
-    )
-
-    payloads = [detail["payload"] for _, detail in events]
-    assert payloads[0]["id"] == "execute"
-    assert payloads[0]["status"] == "failed"
-    assert payloads[0]["summary"] == "Execution ended with partial results"
-    assert payloads[1]["status"] == "completed"
-
-
 def test_route_decision_parses_json_and_uses_safe_fallback():
     decision = _parse_route_decision(
         '```json\n{"intent":"action","complexity":"simple",'
@@ -260,6 +179,200 @@ def test_route_decision_parses_json_and_uses_safe_fallback():
         "evidence_requirement": "tool_result",
     }
     assert _parse_route_decision("not json")["route"] == "plan_execute"
+
+
+def test_route_decision_can_reject_an_unmatched_capability_before_execution():
+    decision = _parse_route_decision(
+        '{"intent":"action","complexity":"simple",'
+        '"route":"capability_unavailable",'
+        '"required_capabilities":["skill"],'
+        '"evidence_requirement":"tool_result"}'
+    )
+
+    assert decision["route"] == "capability_unavailable"
+    assert decision["required_capabilities"] == ["skill"]
+    assert decision["evidence_requirement"] == "tool_result"
+
+
+def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
+    class Model:
+        def __init__(self):
+            self.messages = []
+
+        def invoke(self, messages, **_kwargs):
+            self.messages = messages
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"simple",'
+                    '"route":"capability_unavailable",'
+                    '"required_capabilities":["skill"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    model = Model()
+    tool = SimpleNamespace(
+        name="run_skill_artifact",
+        description="Run an Artifact explicitly allowed by a bound Skill.",
+    )
+
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "创建一个订单",
+        context_skill_contents=[
+            "## Income orders\nThis Skill can query existing orders only."
+        ],
+        available_tools=[tool],
+    )
+
+    prompt = model.messages[0].content
+    assert decision["route"] == "capability_unavailable"
+    assert "query existing orders only" in prompt
+    assert "run_skill_artifact" in prompt
+    assert "creating an order" in prompt
+
+
+def test_pure_model_request_remains_direct_answer_without_bound_tools():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational","complexity":"simple",'
+                    '"route":"direct_answer","required_capabilities":[],'
+                    '"evidence_requirement":"none"}'
+                )
+            )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "请解释什么是订单",
+        context_skill_contents=[],
+        available_tools=[],
+    )
+
+    assert decision["route"] == "direct_answer"
+    assert decision["evidence_requirement"] == "none"
+
+
+def test_unmatched_capability_returns_before_any_tool_call(monkeypatch):
+    tool_calls = {"count": 0}
+
+    class Tool:
+        name = "query_orders"
+        description = "Query existing orders only."
+
+        def invoke(self, _arguments):
+            tool_calls["count"] += 1
+
+    class Model:
+        stop_reason = None
+        token_usage = {}
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"simple",'
+                    '"route":"capability_unavailable",'
+                    '"required_capabilities":["skill"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    resources = SimpleNamespace(
+        root=Path("/tmp/sourcelens-route-test"),
+        context_skill_contents=[
+            "## Orders\nThis Skill can query existing orders only."
+        ],
+        mcp_configs=[],
+        skill_paths=[],
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_general_chat_tools",
+        lambda *_args, **_kwargs: [Tool()],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Deep Agent must not be created")
+        ),
+    )
+    runtime = agent_runtime.LensDeepAgentRuntime(config)
+
+    result = runtime._answer_sync(
+        {
+            "run_uuid": "00000000-0000-0000-0000-000000000001",
+            "task": "general_chat",
+            "question": "创建一个订单",
+            "agent_model_ref": "model-ref",
+        }
+    )
+
+    assert result["outcome"] == "blocked"
+    assert result["termination_detail"]["reason"] == (
+        "capability_unavailable"
+    )
+    assert tool_calls["count"] == 0
+
+
+def test_unverified_answer_distinguishes_unavailable_from_execution_failure():
+    unavailable = agent_runtime._unverified_execution_answer(
+        "创建一个订单",
+        {
+            "reason": "capability_unavailable",
+            "capability": "skill",
+            "error_type": "capability",
+        },
+    )
+    failed = agent_runtime._unverified_execution_answer(
+        "查询订单",
+        {
+            "reason": "execution_failed",
+            "capability": "skill",
+            "error_type": "transient",
+        },
+    )
+
+    assert "未调用任何业务工具" in unavailable
+    assert "上游服务暂时异常" in failed
+    assert "能力都无法完成" not in failed
 
 
 def test_route_decision_requires_execution_for_external_business_facts():
@@ -453,7 +566,7 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "Never invent order" in prompt
 
 
-def test_capability_boundary_stops_configuration_failure_immediately():
+def test_execution_boundary_stops_configuration_failure_immediately():
     events = []
     stop_event = threading.Event()
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
@@ -479,7 +592,8 @@ def test_capability_boundary_stops_configuration_failure_immediately():
     assert stop_event.is_set()
     assert middleware.outcome == "blocked"
     assert middleware.termination_detail["capability"] == "skill"
-    assert events[0][0] == "workflow.capability.blocked"
+    assert middleware.termination_detail["reason"] == "execution_failed"
+    assert events[0][0] == "workflow.execution.failed"
 
 
 def test_capability_boundary_allows_one_transient_retry():
@@ -540,6 +654,42 @@ def test_capability_boundary_allows_artifact_argument_correction_after_404():
     middleware.wrap_tool_call(request, not_found)
     assert stop_event.is_set()
     assert middleware.termination_detail["error_type"] == "request"
+
+
+def test_execution_boundary_classifies_artifact_http_500_as_transient():
+    events = []
+    stop_event = threading.Event()
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        emit_event=lambda name, detail: events.append((name, detail)),
+        stop_event=stop_event,
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={"name": "run_skill_artifact", "id": "call-1"},
+    )
+
+    def fail(_request):
+        return ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": False,
+                    "returncode": 1,
+                    "stderr": "Income API returned HTTP 500",
+                }
+            ),
+            name="run_skill_artifact",
+            tool_call_id="call-1",
+            status="error",
+        )
+
+    middleware.wrap_tool_call(request, fail)
+    assert not stop_event.is_set()
+    middleware.wrap_tool_call(request, fail)
+
+    assert stop_event.is_set()
+    assert middleware.termination_detail["reason"] == "execution_failed"
+    assert middleware.termination_detail["error_type"] == "transient"
+    assert events[0][0] == "workflow.execution.failed"
 
 
 def test_capability_boundary_counts_raw_mcp_success_as_evidence():
@@ -684,6 +834,33 @@ def test_general_chat_middleware_removes_task_tool():
     )
 
     assert result == ["run_skill_artifact"]
+
+
+def test_general_chat_middleware_emits_each_model_round_as_one_step():
+    class Request:
+        tools = []
+
+        def override(self, **changes):
+            return SimpleNamespace(**changes)
+
+    events = []
+    middleware = agent_runtime._NoTaskMiddleware(
+        lambda name, detail: events.append((name, detail))
+    )
+
+    result = middleware.wrap_model_call(Request(), lambda _request: "answer")
+
+    assert result == "answer"
+    assert events == [
+        (
+            "model.round.start",
+            {"invocation_id": "model-round-1", "round": 1},
+        ),
+        (
+            "model.round.done",
+            {"invocation_id": "model-round-1", "round": 1},
+        ),
+    ]
 
 
 def test_general_chat_middleware_denies_task_execution():

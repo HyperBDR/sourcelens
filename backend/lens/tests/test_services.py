@@ -38,10 +38,11 @@ from lens.periodic_tasks import (
     register_periodic_tasks,
 )
 from lens.runtime_events import (
+    public_step_detail,
     sanitize_runtime_event,
     sanitize_termination_detail,
 )
-from lens.serializers import RunSerializer
+from lens.serializers import MessageSerializer, RunSerializer
 from lens.services import (
     _build_sync_event,
     _step_sequence,
@@ -448,6 +449,39 @@ class LensServiceTests(TransactionTestCase):
             {"required_capabilities": ["skill"]},
         )
 
+    def test_capability_unavailable_route_is_public(self):
+        event = sanitize_runtime_event({
+            "event_type": "route.selected",
+            "visibility": "user",
+            "payload": {
+                "intent": "action",
+                "complexity": "simple",
+                "route": "capability_unavailable",
+                "evidence_requirement": "tool_result",
+                "required_capabilities": ["skill"],
+            },
+        })
+
+        self.assertEqual(
+            event["payload"]["route"],
+            "capability_unavailable",
+        )
+
+    def test_execution_failure_event_is_distinct(self):
+        event = sanitize_runtime_event({
+            "event_type": "execution.failed",
+            "visibility": "user",
+            "payload": {
+                "reason": "execution_failed",
+                "capability": "skill",
+                "error_type": "transient",
+            },
+        })
+
+        self.assertEqual(event["event_type"], "execution.failed")
+        self.assertEqual(event["payload"]["reason"], "execution_failed")
+        self.assertEqual(event["payload"]["error_type"], "transient")
+
     def test_runtime_event_rejects_unknown_phase_and_status_values(self):
         phase_event = sanitize_runtime_event({
             "agent_event": "secret-token",
@@ -513,6 +547,475 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertEqual(event["payload"], {})
         self.assertNotIn("secret-token", str(event))
+
+    def test_order_query_activity_exposes_safe_real_parameters(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "activity-123",
+            "skill": "license-cli",
+            "artifact": "income",
+            "args_redacted": [
+                "--profile",
+                "default",
+                "order",
+                "list",
+                "--start",
+                "2026-07-20T00:00:00+08:00",
+                "--end",
+                "2026-07-26T23:59:59+08:00",
+                "--token",
+                "[REDACTED]",
+            ],
+        })
+
+        self.assertEqual(event["event_type"], "activity.recorded")
+        self.assertEqual(event["visibility"], "user")
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "activity-123",
+                "kind": "query_orders",
+                "stage_kind": "order_query",
+                "status": "in_progress",
+                "start_date": "2026-07-20",
+                "end_date": "2026-07-26",
+            },
+        )
+        self.assertNotIn("token", str(event).lower())
+        self.assertNotIn("profile", str(event).lower())
+        self.assertNotIn("run_skill_artifact", str(event))
+
+    def test_completed_tool_activity_preserves_only_pairing_fields(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.done",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "activity-123",
+            "stdout_ref": "/large_tool_results/private.txt",
+            "summary": "license-cli/income · rc=0",
+        })
+
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "activity-123",
+                "kind": "querying_data",
+                "stage_kind": "data_query",
+                "status": "completed",
+            },
+        )
+        self.assertNotIn("stdout", str(event))
+
+    def test_order_detail_and_command_help_have_real_activity_kinds(self):
+        detail = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "detail-123",
+            "args_redacted": [
+                "--profile",
+                "default",
+                "order",
+                "get",
+                "ORDER-123",
+            ],
+        })
+        command_help = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "help-123",
+            "args_redacted": ["order", "get", "--help"],
+        })
+
+        self.assertEqual(detail["payload"]["kind"], "get_order_detail")
+        self.assertEqual(
+            detail["payload"]["order_ref"],
+            "ORDER-123",
+        )
+        self.assertEqual(
+            command_help["payload"]["kind"],
+            "reading_order_commands",
+        )
+
+    def test_order_list_by_code_exposes_only_safe_order_reference(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "lookup-123",
+            "args_redacted": [
+                "--profile",
+                "default",
+                "order",
+                "list",
+                "--code",
+                "HWINSTAD2025071509",
+                "--token",
+                "[REDACTED]",
+            ],
+        })
+
+        self.assertEqual(
+            event["payload"]["order_ref"],
+            "HWINSTAD2025071509",
+        )
+        self.assertNotIn("profile", str(event).lower())
+        self.assertNotIn("token", str(event).lower())
+
+    def test_order_reference_rejects_non_identifier_arguments(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "lookup-unsafe",
+            "args_redacted": [
+                "order",
+                "get",
+                "../../private-order",
+            ],
+        })
+
+        self.assertNotIn("order_ref", event["payload"])
+
+    def test_structured_analysis_activity_exposes_allowlisted_operation(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.analyze_structured_output.start",
+            "activity": "running_tool",
+            "runtime_scope": "general_chat",
+            "invocation_id": "analysis-123",
+            "operation": "count",
+            "input_ref": "/large_tool_results/private.txt",
+        })
+
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "analysis-123",
+                "kind": "count_results",
+                "stage_kind": "result_analysis",
+                "status": "in_progress",
+            },
+        )
+        self.assertNotIn("input_ref", str(event))
+
+    def test_non_general_chat_tool_event_keeps_original_public_shape(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "activity": "running_tool",
+            "invocation_id": "activity-123",
+            "args_redacted": ["order", "list"],
+        })
+
+        self.assertEqual(
+            event,
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+            },
+        )
+
+    def test_general_chat_model_round_is_not_user_visible(self):
+        event = sanitize_runtime_event({
+            "agent_event": "model.round.start",
+            "runtime_scope": "general_chat",
+            "invocation_id": "model-round-2",
+            "round": 2,
+            "summary": "private model reasoning",
+        })
+
+        self.assertIsNone(event)
+
+    def test_order_help_is_preparation_not_a_business_query(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "runtime_scope": "general_chat",
+            "invocation_id": "order-list-help",
+            "args_redacted": ["order", "list", "--help"],
+        })
+
+        self.assertEqual(
+            event["payload"],
+            {
+                "id": "order-list-help",
+                "kind": "reading_order_commands",
+                "stage_kind": "preparation",
+                "status": "in_progress",
+            },
+        )
+
+    def test_order_view_is_an_order_detail_operation(self):
+        event = sanitize_runtime_event({
+            "agent_event": "tool.run_skill_artifact.start",
+            "runtime_scope": "general_chat",
+            "invocation_id": "order-view",
+            "args_redacted": [
+                "order",
+                "view",
+                "HWINSTAD2025071509",
+            ],
+        })
+
+        self.assertEqual(event["payload"]["kind"], "get_order_detail")
+        self.assertEqual(
+            event["payload"]["order_ref"],
+            "HWINSTAD2025071509",
+        )
+
+    def test_general_chat_does_not_guess_summary_before_later_tools(self):
+        detail = public_step_detail({
+            "events": [
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-query",
+                    "args_redacted": [
+                        "order",
+                        "get",
+                        "HWINSTAD2025071509",
+                    ],
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.done",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-query",
+                },
+                {
+                    "agent_event": "model.round.start",
+                    "runtime_scope": "general_chat",
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-help",
+                    "args_redacted": ["order", "--help"],
+                },
+            ]
+        })
+
+        kinds = [
+            item["payload"]["kind"]
+            for item in detail["events"]
+            if item.get("event_type") == "activity.recorded"
+        ]
+
+        self.assertNotIn("summarizing_results", kinds)
+
+    def test_general_chat_public_path_uses_real_operation_stages(self):
+        detail = public_step_detail({
+            "events": [
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "tool-version",
+                    "args_redacted": ["version"],
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.done",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "tool-version",
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "auth-status",
+                    "args_redacted": ["auth", "status"],
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.done",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "auth-status",
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "auth-login",
+                    "args_redacted": ["auth", "login"],
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.done",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "auth-login",
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-query",
+                    "args_redacted": [
+                        "order",
+                        "list",
+                        "--code",
+                        "HWINSTAD2025071509",
+                    ],
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.done",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "order-query",
+                },
+                {
+                    "agent_event": "model.round.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "model-round-4",
+                    "round": 4,
+                },
+                {
+                    "agent_event": "deepagents.runtime.done",
+                    "runtime_scope": "general_chat",
+                    "answer_chars": 120,
+                },
+            ]
+        })
+
+        activities = [
+            item["payload"]
+            for item in detail["events"]
+            if item.get("event_type") == "activity.recorded"
+        ]
+
+        self.assertEqual(
+            [item["kind"] for item in activities],
+            [
+                "checking_tool",
+                "checking_tool",
+                "checking_authentication",
+                "checking_authentication",
+                "authenticating",
+                "authenticating",
+                "query_orders",
+                "query_orders",
+                "summarizing_results",
+            ],
+        )
+        self.assertEqual(
+            [item["stage_kind"] for item in activities],
+            [
+                "preparation",
+                "preparation",
+                "preparation",
+                "preparation",
+                "preparation",
+                "preparation",
+                "order_query",
+                "order_query",
+                "result_analysis",
+            ],
+        )
+        self.assertEqual(activities[-1]["status"], "completed")
+        self.assertEqual(
+            activities[-1]["order_ref"],
+            "HWINSTAD2025071509",
+        )
+
+    def test_general_chat_summary_completes_without_order_assumptions(self):
+        detail = public_step_detail({
+            "events": [
+                {
+                    "agent_event": "tool.run_skill_artifact.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "ticket-query",
+                    "args_redacted": ["ticket", "search", "INC-123"],
+                },
+                {
+                    "agent_event": "tool.run_skill_artifact.done",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "ticket-query",
+                },
+                {
+                    "agent_event": "model.round.start",
+                    "runtime_scope": "general_chat",
+                    "invocation_id": "model-round-2",
+                    "round": 2,
+                },
+                {
+                    "agent_event": "deepagents.runtime.done",
+                    "runtime_scope": "general_chat",
+                    "answer_chars": 120,
+                },
+            ]
+        })
+
+        activities = [
+            item["payload"]
+            for item in detail["events"]
+            if item.get("event_type") == "activity.recorded"
+        ]
+
+        self.assertEqual(activities[0]["kind"], "querying_data")
+        self.assertNotIn("order_ref", activities[0])
+        self.assertEqual(
+            activities[-1],
+            {
+                "id": "summarize-results",
+                "kind": "summarizing_results",
+                "stage_kind": "result_analysis",
+                "status": "completed",
+            },
+        )
+
+    def test_message_history_replays_inferred_general_chat_summary(self):
+        run = create_execution_run(
+            session=self.session,
+            question="Find ticket INC-123",
+            enqueue=False,
+        )
+        RunStep.objects.create(
+            run=run,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            sequence=3,
+            status=RunStep.Status.DONE,
+            detail={
+                "events": [
+                    {
+                        "agent_event": (
+                            "tool.run_skill_artifact.start"
+                        ),
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "ticket-query",
+                        "args_redacted": [
+                            "ticket",
+                            "search",
+                            "INC-123",
+                        ],
+                    },
+                    {
+                        "agent_event": (
+                            "tool.run_skill_artifact.done"
+                        ),
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "ticket-query",
+                    },
+                    {
+                        "agent_event": "model.round.start",
+                        "runtime_scope": "general_chat",
+                    },
+                    {
+                        "agent_event": "deepagents.runtime.done",
+                        "runtime_scope": "general_chat",
+                        "answer_chars": 120,
+                    },
+                ]
+            },
+        )
+
+        thinking = MessageSerializer(run.output_message).data["thinking"]
+        activities = [
+            item["payload"]
+            for item in thinking["steps"]
+            if item.get("event_type") == "activity.recorded"
+        ]
+
+        self.assertEqual(
+            activities[-1],
+            {
+                "id": "summarize-results",
+                "kind": "summarizing_results",
+                "stage_kind": "result_analysis",
+                "status": "completed",
+            },
+        )
 
     def test_termination_detail_uses_fixed_public_contract(self):
         detail = sanitize_termination_detail({

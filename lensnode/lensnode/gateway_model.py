@@ -274,17 +274,15 @@ class LensGatewayChatModel(BaseChatModel):
         )
 
     def _generate_streaming(self, payload):
-        """Stream tokens from the gateway, emitting each via emit_output."""
+        """Consume a gateway stream and publish only a final answer turn."""
 
         content_parts = []
         tool_calls = []
         usage = {}
         finish_reason = None
-        # Subagent output must not reach the user-facing answer/thinking
-        # stream. deepagents tags subagent runs via the langsmith tracing
-        # context; when set, collect content/tool_calls normally but stay
-        # silent (no emit_output) so parallel subagents don't interleave
-        # into the main bubble.
+        # Subagent output must not reach the user-facing answer stream.
+        # deepagents tags subagent runs via the langsmith tracing context;
+        # when set, collect content and tool calls normally but stay silent.
         silent = _in_subagent_context()
 
         start = time.monotonic()
@@ -327,8 +325,6 @@ class LensGatewayChatModel(BaseChatModel):
                                 text = data.get("content") or ""
                                 if text and kind == "content":
                                     content_parts.append(text)
-                                    if not silent:
-                                        self.emit_output(text)
                             elif data.get("type") == "done":
                                 done_received = True
                                 usage = data.get("usage") or {}
@@ -349,13 +345,18 @@ class LensGatewayChatModel(BaseChatModel):
 
         content = "".join(content_parts)
 
-        # If this turn issued tool calls, its streamed text was
-        # intermediate reasoning, not the final answer. Reset now so it
-        # moves into the thinking panel before the tools run and never
-        # lingers in the answer bubble. The final turn issues no tool
-        # calls, so its content stays as the answer.
-        if self.emit_output is not None and not silent and tool_calls and content:
-            self.emit_output("", reset=True)
+        # A turn that issues tool calls contains intermediate reasoning, not
+        # the final answer. Buffer the turn until its terminal event reveals
+        # whether tools were requested, then publish only answer turns. This
+        # prevents answer-like text from appearing and suddenly disappearing
+        # when the agent continues with a tool call.
+        if (
+            self.emit_output is not None
+            and not silent
+            and content
+            and not tool_calls
+        ):
+            self.emit_output(content)
 
         gateway_message = {
             "content": content,
@@ -667,6 +668,14 @@ def _tool_result_metadata(result, tool_name):
             "数据不存在",
         )
     )
+    artifact_server_failure = bool(
+        re.search(r"\b(?:HTTP\s*)?5\d{2}\b", artifact_diagnostic)
+    )
+    try:
+        status_code = int(result.get("status_code") or 0)
+    except (TypeError, ValueError):
+        status_code = 0
+    upstream_server_failure = 500 <= status_code < 600
     if any(
         marker in error_code
         for marker in ("AUTH", "CONFIG", "CREDENTIAL", "PERMISSION")
@@ -677,7 +686,7 @@ def _tool_result_metadata(result, tool_name):
             "Stop retrying this tool and report the configuration or "
             "authorization requirement."
         )
-    elif any(
+    elif artifact_server_failure or upstream_server_failure or any(
         marker in error_code
         for marker in ("HTTP_REQUEST_FAILED", "RATE_LIMIT", "TIMEOUT")
     ):

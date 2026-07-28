@@ -1,8 +1,11 @@
 """Sanitize LensNode runtime events before exposing them to end users."""
 
+from datetime import datetime
+
 PUBLIC_EVENT_TYPES = {
     "artifact.created",
     "capability.blocked",
+    "execution.failed",
     "phase.changed",
     "plan.updated",
     "route.selected",
@@ -12,7 +15,12 @@ PUBLIC_EVENT_TYPES = {
 ROUTE_VALUES = {
     "intent": {"informational", "action", "clarification"},
     "complexity": {"simple", "complex"},
-    "route": {"direct_answer", "direct_execute", "plan_execute"},
+    "route": {
+        "capability_unavailable",
+        "direct_answer",
+        "direct_execute",
+        "plan_execute",
+    },
     "evidence_requirement": {
         "none",
         "tool_result",
@@ -47,8 +55,26 @@ PUBLIC_STAGE_STATUSES = {
     "skipped",
 }
 
+TOOL_ACTIVITY_STATUSES = {
+    "done": "completed",
+    "failed": "failed",
+    "invoke": "in_progress",
+    "start": "in_progress",
+    "timeout": "failed",
+}
+
+BUSINESS_ACTIVITY_KINDS = {
+    "analyzing_results",
+    "count_results",
+    "get_order_detail",
+    "group_results",
+    "query_orders",
+    "querying_data",
+}
+
 PUBLIC_TERMINATION_REASONS = {
     "capability_unavailable",
+    "execution_failed",
     "evidence_unavailable",
     "execution_limit",
     "turn_limit",
@@ -63,6 +89,7 @@ PUBLIC_TERMINATION_REASONS = {
 }
 
 PUBLIC_ERROR_TYPES = {
+    "capability",
     "configuration",
     "policy",
     "transient",
@@ -81,14 +108,18 @@ PUBLIC_RUNTIME_CODES = {
 }
 
 RECOVERY_MESSAGES = {
+    "capability": (
+        "Use an assistant with the required operation or ask an "
+        "administrator to bind that capability."
+    ),
     "configuration": "Ask an administrator to configure or authorize it.",
     "policy": "Continue from the evidence already collected.",
     "transient": "Retry later or use another available capability.",
     "request": "Provide the missing or corrected input, then retry.",
     "tool": "Use another available capability or contact an administrator.",
     "verification": (
-        "Confirm the required integration is bound and authorized, then "
-        "retry."
+        "Review the execution details and retry; no verified result was "
+        "returned."
     ),
 }
 
@@ -129,6 +160,210 @@ def sanitize_loaded_mcps(items):
 
 def _text(value, limit=240):
     return str(value or "")[:limit]
+
+
+def _safe_activity_id(value):
+    activity_id = _text(value, 64).strip()
+    if not activity_id:
+        return ""
+    if not activity_id.isascii() or not all(
+        char.isalnum() or char in "-_" for char in activity_id
+    ):
+        return ""
+    return activity_id
+
+
+def _date_argument(arguments, name):
+    """Return one ISO date from an allowlisted command argument."""
+
+    if not isinstance(arguments, list):
+        return ""
+    try:
+        index = arguments.index(name)
+        value = str(arguments[index + 1])
+    except (IndexError, ValueError):
+        return ""
+    if value == "[REDACTED]" or len(value) > 64:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.date().isoformat()
+    except ValueError:
+        return ""
+
+
+def _safe_order_reference(value):
+    """Return one allowlisted business reference without raw CLI context."""
+
+    reference = str(value or "").strip()
+    if (
+        not reference
+        or len(reference) > 64
+        or not reference.isascii()
+        or not reference[0].isalnum()
+        or any(
+            not (char.isalnum() or char in "._-")
+            for char in reference
+        )
+    ):
+        return ""
+    return reference
+
+
+def _argument_after(arguments, *parts):
+    """Return the argument after one exact command or option sequence."""
+
+    if not isinstance(arguments, list):
+        return ""
+    normalized = [str(item).strip().lower() for item in arguments]
+    expected = list(parts)
+    width = len(expected)
+    for index in range(len(normalized) - width + 1):
+        if normalized[index : index + width] != expected:
+            continue
+        try:
+            return str(arguments[index + width])
+        except IndexError:
+            return ""
+    return ""
+
+
+def _order_reference_argument(arguments):
+    """Return an allowlisted order reference from supported CLI shapes."""
+
+    value = _argument_after(arguments, "order", "get")
+    if not value:
+        value = _argument_after(arguments, "order", "view")
+    if not value:
+        value = _argument_after(arguments, "--code")
+    return _safe_order_reference(value)
+
+
+def _contains_command(arguments, *parts):
+    if not isinstance(arguments, list):
+        return False
+    normalized = [str(item).strip().lower() for item in arguments]
+    expected = list(parts)
+    width = len(expected)
+    return any(
+        normalized[index : index + width] == expected
+        for index in range(len(normalized) - width + 1)
+    )
+
+
+def _tool_activity_kind(tool_name, item):
+    """Return a safe semantic kind derived from an observed tool event."""
+
+    if tool_name == "run_skill_artifact":
+        arguments = item.get("args_redacted")
+        if _contains_command(arguments, "auth", "status"):
+            return "checking_authentication"
+        if _contains_command(arguments, "auth", "login"):
+            return "authenticating"
+        if _contains_command(arguments, "version"):
+            return "checking_tool"
+        if (
+            _contains_command(arguments, "order")
+            and isinstance(arguments, list)
+            and any(
+                str(argument).strip().lower() in {"--help", "-h", "help"}
+                for argument in arguments
+            )
+        ):
+            return "reading_order_commands"
+        if _contains_command(arguments, "order", "list"):
+            return "query_orders"
+        if _contains_command(
+            arguments, "order", "get"
+        ) or _contains_command(arguments, "order", "view"):
+            return "get_order_detail"
+        return "querying_data"
+    if tool_name == "analyze_structured_output":
+        operation = str(item.get("operation") or "").strip().lower()
+        if operation == "count":
+            return "count_results"
+        if operation == "group_count":
+            return "group_results"
+        return "analyzing_results"
+    if tool_name in {"inspect_saved_output", "run_skill_transform"}:
+        return "analyzing_results"
+    if tool_name == "call_skill_api":
+        return "querying_data"
+    return ""
+
+
+def _activity_stage_kind(activity_kind):
+    """Return the safe stage that owns one General Chat step."""
+
+    if activity_kind in {
+        "get_order_detail",
+        "query_orders",
+    }:
+        return "order_query"
+    if activity_kind in {
+        "authenticating",
+        "checking_authentication",
+        "checking_tool",
+        "reading_order_commands",
+    }:
+        return "preparation"
+    if activity_kind in {
+        "analyzing_results",
+        "count_results",
+        "group_results",
+    }:
+        return "result_analysis"
+    return "data_query"
+
+
+def _sanitize_tool_activity(item):
+    """Return one replayable activity without raw model/tool arguments."""
+
+    if item.get("runtime_scope") != "general_chat":
+        return None
+    agent_event = _text(item.get("agent_event"), 128)
+    if not agent_event.startswith("tool."):
+        return None
+    body = agent_event[5:]
+    tool_name, separator, suffix = body.rpartition(".")
+    status = TOOL_ACTIVITY_STATUSES.get(suffix)
+    if not separator or not status:
+        return None
+    activity_id = _safe_activity_id(item.get("invocation_id"))
+    kind = _tool_activity_kind(tool_name, item)
+    if not activity_id or not kind:
+        return None
+    payload = {
+        "id": activity_id,
+        "kind": kind,
+        "stage_kind": _activity_stage_kind(kind),
+        "status": status,
+    }
+    if kind == "query_orders" and status == "in_progress":
+        arguments = item.get("args_redacted")
+        start_date = _date_argument(
+            arguments,
+            "--start-time",
+        ) or _date_argument(arguments, "--start")
+        end_date = _date_argument(
+            arguments,
+            "--end-time",
+        ) or _date_argument(arguments, "--end")
+        if start_date:
+            payload["start_date"] = start_date
+        if end_date:
+            payload["end_date"] = end_date
+    if kind in {"query_orders", "get_order_detail"}:
+        order_reference = _order_reference_argument(
+            item.get("args_redacted")
+        )
+        if order_reference:
+            payload["order_ref"] = order_reference
+    return {
+        "event_type": "activity.recorded",
+        "visibility": "user",
+        "payload": payload,
+    }
 
 
 def sanitize_termination_detail(detail):
@@ -220,7 +455,7 @@ def _sanitize_payload(event_type, payload):
         if summary:
             output["summary"] = summary
         return output
-    if event_type == "capability.blocked":
+    if event_type in {"capability.blocked", "execution.failed"}:
         return sanitize_termination_detail(payload)
     if event_type == "artifact.created":
         output = {
@@ -260,6 +495,14 @@ def sanitize_runtime_event(item):
             "payload": _sanitize_payload(event_type, item.get("payload")),
         }
     agent_event = _text(item.get("agent_event"), 128)
+    if (
+        item.get("runtime_scope") == "general_chat"
+        and agent_event.startswith("model.round.")
+    ):
+        return None
+    tool_activity = _sanitize_tool_activity(item)
+    if tool_activity is not None:
+        return tool_activity
     activity = _text(item.get("activity"), 64)
     if not agent_event and not activity:
         return None
@@ -275,8 +518,76 @@ def public_step_detail(detail):
     if not isinstance(detail, dict):
         return {"events": []}
     events = []
+    activity_by_id = {}
+    has_business_result = False
+    summary_context = {}
     for item in detail.get("events") or []:
+        agent_event = _text(item.get("agent_event"), 128)
+        if (
+            item.get("runtime_scope") == "general_chat"
+            and agent_event == "deepagents.runtime.done"
+            and has_business_result
+            and _positive_int(item.get("answer_chars"))
+        ):
+            events.append(
+                _summary_activity_event("completed", summary_context)
+            )
+            continue
         event = sanitize_runtime_event(item)
-        if event is not None:
-            events.append(event)
+        if event is None:
+            continue
+        if event.get("event_type") == "activity.recorded":
+            payload = event["payload"]
+            activity_id = payload["id"]
+            previous = activity_by_id.get(activity_id)
+            if previous is not None:
+                for key in (
+                    "kind",
+                    "stage_kind",
+                    "start_date",
+                    "end_date",
+                    "order_ref",
+                ):
+                    if previous.get(key):
+                        payload[key] = previous[key]
+            activity_by_id[activity_id] = dict(payload)
+            if (
+                payload.get("status") == "completed"
+                and payload.get("kind") in BUSINESS_ACTIVITY_KINDS
+            ):
+                has_business_result = True
+                summary_context = {
+                    key: payload[key]
+                    for key in ("order_ref",)
+                    if payload.get(key)
+                }
+        events.append(event)
     return {"events": events}
+
+
+def _positive_int(value):
+    """Return a non-negative int for one internal counter."""
+
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _summary_activity_event(status, context):
+    """Return one generic final-result activity with safe context only."""
+
+    payload = {
+        "id": "summarize-results",
+        "kind": "summarizing_results",
+        "stage_kind": "result_analysis",
+        "status": status,
+    }
+    order_reference = _safe_order_reference(context.get("order_ref"))
+    if order_reference:
+        payload["order_ref"] = order_reference
+    return {
+        "event_type": "activity.recorded",
+        "visibility": "user",
+        "payload": payload,
+    }

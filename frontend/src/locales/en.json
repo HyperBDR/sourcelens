@@ -243,10 +243,13 @@
         "stageProgressCurrent": "Completed {completed}/{total} · Current: {currentTitle}",
         "stageCompleted": "Completed {completed}/{total}",
         "stageEnded": "Ended {completed}/{total}",
+        "activityProgress": "Recorded {count} activities",
+        "activityCompleted": "Completed {count} activities",
         "blockedTitle": "Capability unavailable",
+        "executionFailedTitle": "Capability execution failed",
         "artifactTitle": "Artifact ready",
         "outcomePartial": "Completed with limitations. Review the missing capability or unfinished items above.",
-        "outcomeBlocked": "This request is blocked until the required capability or input is available.",
+        "outcomeBlocked": "This request did not complete. Review the runtime details and retry.",
         "activity": {
           "analyzingResults": "Analyzing collected results",
           "findingCapability": "Finding the required capability",
@@ -257,15 +260,50 @@
           "searchingSources": "Searching relevant sources",
           "usingCapability": "Running the required operation"
         },
+        "pathStep": {
+          "query_orders": "Query orders from {startDate} to {endDate}",
+          "query_orders_ref": "Query order {orderRef}",
+          "get_order_detail": "Retrieve order details",
+          "get_order_detail_ref": "Retrieve order {orderRef} details",
+          "reading_order_commands": "Read order command instructions",
+          "checking_capability": "Confirm order query capability",
+          "checking_tool": "Confirm the execution tool is available",
+          "checking_authentication": "Confirm login status",
+          "authenticating": "Sign in to the business system",
+          "querying_data": "Query business data",
+          "count_results": "Count matching orders",
+          "group_results": "Group order results",
+          "analyzing_results": "Summarize and analyze results",
+          "summarizing_results": "Summarize the result",
+          "summarizing_order": "Summarize order {orderRef} details"
+        },
+        "workflow": {
+          "task": {
+            "get_order_detail": "Query order details",
+            "get_order_detail_ref": "Query order {orderRef} details",
+            "query_orders": "Query orders",
+            "query_orders_ref": "Query order {orderRef}",
+            "analyze_results": "Analyze query results",
+            "query_data": "Query business data"
+          },
+          "stage": {
+            "preparation": "Execution preparation",
+            "order_query": "Order query",
+            "data_query": "Business data query",
+            "result_analysis": "Result summary"
+          }
+        },
         "recovery": {
+          "capability": "Use an assistant that supports this operation or ask an administrator to bind the required capability.",
           "configuration": "Ask an administrator to configure or authorize this capability, then retry.",
           "policy": "Continue from the evidence already collected or narrow the request.",
           "transient": "Retry later or use another available capability.",
           "request": "Correct or provide the missing input, then retry.",
-          "tool": "Use another available capability or contact an administrator."
+          "tool": "Use another available capability or contact an administrator.",
+          "verification": "No verified result was returned. Review the runtime details and retry."
         },
         "phase": {
-          "analyzing": "Understanding the request",
+          "analyzing": "Analyzing the question",
           "planning": "Planning the work",
           "executing": "Executing the plan",
           "answering": "Preparing the answer",

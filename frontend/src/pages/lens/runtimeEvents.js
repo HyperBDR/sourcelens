@@ -6,6 +6,34 @@ const STAGE_STATUSES = new Set([
   'failed',
   'skipped'
 ])
+const ACTIVITY_STATUSES = new Set(['in_progress', 'completed', 'failed'])
+const STRUCTURED_ACTIVITY_KINDS = new Set([
+  'query_orders',
+  'get_order_detail',
+  'reading_order_commands',
+  'checking_capability',
+  'checking_tool',
+  'checking_authentication',
+  'authenticating',
+  'querying_data',
+  'count_results',
+  'group_results',
+  'analyzing_results',
+  'summarizing_results'
+])
+const WORKFLOW_STAGE_KINDS = new Set([
+  'preparation',
+  'order_query',
+  'data_query',
+  'result_analysis'
+])
+
+const WORKFLOW_STAGE_ORDER = {
+  preparation: 1,
+  order_query: 2,
+  data_query: 2,
+  result_analysis: 3
+}
 
 export function calculateRunElapsedSeconds(run, nowMs = Date.now()) {
   const createdMs = Date.parse(run?.created_at || '')
@@ -22,10 +50,6 @@ export function getMessageTimestamp(message) {
     return message.completed_at
   }
   return message?.created_at || ''
-}
-
-export function inferProgressLocale(title) {
-  return /[\u3400-\u9fff]/.test(String(title || '')) ? 'zh-CN' : 'en'
 }
 
 export async function scrollConversationToBottomAfterRender(
@@ -52,6 +76,7 @@ export function createRuntimeState() {
     activities: [],
     activityRevision: 0,
     capabilityBlock: null,
+    executionFailure: null,
     artifacts: [],
     outcome: null,
     terminationDetail: null
@@ -110,8 +135,7 @@ function activeNodeId(state) {
 }
 
 function appendActivity(state, kind) {
-  const nodeId = activeNodeId(state)
-  if (!nodeId) return state
+  const nodeId = activeNodeId(state) || 'legacy-runtime'
   const last = state.activities[state.activities.length - 1]
   if (last?.nodeId === nodeId && last.kind === kind) {
     return {
@@ -126,11 +150,120 @@ function appendActivity(state, kind) {
   return {
     ...state,
     activityRevision,
-    activities: [
+    activities: capActivities([
       ...state.activities,
       { id: activityRevision, nodeId, kind, count: 1 }
-    ].slice(-20)
+    ])
   }
+}
+
+function capActivities(activities) {
+  const structured = activities.filter((item) => item.structured).slice(-120)
+  const generic = activities.filter((item) => !item.structured).slice(-20)
+  return activities.filter(
+    (item) => structured.includes(item) || generic.includes(item)
+  )
+}
+
+function normalizeActivityDate(value) {
+  const date = String(value || '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return ''
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString().slice(0, 10) === date ? date : ''
+}
+
+function normalizeOrderReference(value) {
+  const reference = String(value || '').trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(reference)) return ''
+  return reference
+}
+
+function appendStructuredActivity(state, payload) {
+  if (!payload || typeof payload !== 'object') return state
+  const id = String(payload.id || '')
+    .trim()
+    .slice(0, 64)
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return state
+  if (!STRUCTURED_ACTIVITY_KINDS.has(payload.kind)) return state
+  if (!WORKFLOW_STAGE_KINDS.has(payload.stage_kind)) return state
+  if (!ACTIVITY_STATUSES.has(payload.status)) return state
+
+  const exactExisting = state.activities.find(
+    (item) => item.structured && item.id === id
+  )
+  const startDate = normalizeActivityDate(payload.start_date)
+  const endDate = normalizeActivityDate(payload.end_date)
+  const orderRef = normalizeOrderReference(payload.order_ref)
+  const activeTask = state.plan.find((item) => item.status === 'in_progress')
+  const currentTaskId =
+    activeTask?.id || state.plan.at(-1)?.id || 'task-execute'
+  const semanticExisting = state.activities.find(
+    (item) =>
+      item.structured &&
+      item.taskId === currentTaskId &&
+      item.stageKind === payload.stage_kind &&
+      item.kind === payload.kind &&
+      (item.startDate || '') === startDate &&
+      (item.endDate || '') === endDate &&
+      (item.orderRef || '') === orderRef
+  )
+  const existing = exactExisting || semanticExisting
+  const taskId = existing?.taskId || currentTaskId
+  const stageKind = existing?.stageKind || payload.stage_kind
+  const activity = {
+    id: existing?.id || id,
+    taskId,
+    stageId: `${taskId}:${stageKind}`,
+    stageKind,
+    kind:
+      existing?.kind && existing.kind !== 'querying_data'
+        ? existing.kind
+        : payload.kind,
+    status:
+      existing?.status === 'completed' && payload.status === 'in_progress'
+        ? existing.status
+        : payload.status,
+    ...(existing?.startDate || startDate
+      ? { startDate: existing?.startDate || startDate }
+      : {}),
+    ...(existing?.endDate || endDate
+      ? { endDate: existing?.endDate || endDate }
+      : {}),
+    ...(existing?.orderRef || orderRef
+      ? { orderRef: existing?.orderRef || orderRef }
+      : {}),
+    planRevision: existing?.planRevision ?? state.planRevision,
+    structured: true
+  }
+  const activities = existing
+    ? state.activities.map((item) =>
+        item.structured && item.id === existing.id ? activity : item
+      )
+    : [...state.activities, activity]
+  return {
+    ...state,
+    activityRevision: state.activityRevision + 1,
+    activities: capActivities(activities)
+  }
+}
+
+function closeRuntimeProgress(state, status) {
+  const activities = state.activities.map((item) => {
+    if (!item.structured || item.status !== 'in_progress') return item
+    return { ...item, status }
+  })
+  const stages = state.stages.map((item) => {
+    if (item.status === 'in_progress') return { ...item, status }
+    if (item.status === 'pending') return { ...item, status: 'skipped' }
+    return item
+  })
+  const plan = state.plan.map((item) => {
+    if (item.status === 'in_progress') return { ...item, status }
+    if (item.status === 'pending') return { ...item, status: 'skipped' }
+    return item
+  })
+  return { ...state, activities, stages, plan }
 }
 
 export function activitiesForNode(state, nodeId) {
@@ -182,6 +315,59 @@ export function normalizePlanSteps(steps) {
         status
       }
     ]
+  })
+}
+
+// A batched revision can complete pending tasks after their work already ran.
+function alignBatchedPlanActivities(state, plan) {
+  const previousPlanById = new Map(state.plan.map((item) => [item.id, item]))
+  const advancedTasks = plan.filter(
+    (item) =>
+      item.status === 'completed' &&
+      previousPlanById.get(item.id)?.status === 'pending'
+  )
+  const previousActive = state.plan.find(
+    (item) => item.status === 'in_progress'
+  )
+  if (!previousActive || advancedTasks.length === 0) {
+    return state.activities
+  }
+
+  const stageKinds = []
+  for (const item of state.activities) {
+    if (
+      !item.structured ||
+      item.taskId !== previousActive.id ||
+      item.planRevision !== state.planRevision ||
+      stageKinds.includes(item.stageKind)
+    ) {
+      continue
+    }
+    stageKinds.push(item.stageKind)
+  }
+  if (stageKinds.length < advancedTasks.length) return state.activities
+
+  const trailingKinds = stageKinds.slice(-advancedTasks.length)
+  const targetTaskByStage = new Map(
+    trailingKinds.map((stageKind, index) => [
+      stageKind,
+      advancedTasks[index].id
+    ])
+  )
+  return state.activities.map((item) => {
+    const taskId = targetTaskByStage.get(item.stageKind)
+    if (
+      !taskId ||
+      item.taskId !== previousActive.id ||
+      item.planRevision !== state.planRevision
+    ) {
+      return item
+    }
+    return {
+      ...item,
+      taskId,
+      stageId: `${taskId}:${item.stageKind}`
+    }
   })
 }
 
@@ -239,14 +425,156 @@ export function selectLiveProgressText({
   )
 }
 
-export function selectStructuredProgress({ plan, stages }) {
+function workflowNodeStatus(items) {
+  if (items.some((item) => item.status === 'in_progress')) {
+    return 'in_progress'
+  }
+  if (items.some((item) => item.status === 'failed')) return 'failed'
+  return items.length > 0 ? 'completed' : 'pending'
+}
+
+export function buildWorkflowTree(plan, activities) {
+  const tasks = (Array.isArray(plan) ? plan : []).map((item, index) => ({
+    ...item,
+    order: index + 1,
+    stages: []
+  }))
+  const taskById = new Map(tasks.map((item) => [item.id, item]))
+  const structuredActivities = (
+    Array.isArray(activities) ? activities : []
+  ).filter((item) => item?.structured)
+  const visibleActivities = structuredActivities.filter(
+    (item) => item.kind !== 'analyzing_request'
+  )
+  for (const step of visibleActivities) {
+    if (!step?.structured || !step.taskId || !step.stageId) continue
+    let task = taskById.get(step.taskId)
+    if (!task) {
+      task = {
+        id: step.taskId,
+        kind: 'query_data',
+        order: tasks.length + 1,
+        status: 'pending',
+        stages: []
+      }
+      tasks.push(task)
+      taskById.set(task.id, task)
+    }
+    let stage = task.stages.find((item) => item.id === step.stageId)
+    if (!stage) {
+      stage = {
+        id: step.stageId,
+        kind: step.stageKind,
+        order: task.stages.length + 1,
+        status: 'pending',
+        steps: []
+      }
+      task.stages.push(stage)
+    }
+    stage.steps.push(step)
+  }
+  for (const task of tasks) {
+    for (const stage of task.stages) {
+      stage.status = workflowNodeStatus(stage.steps)
+    }
+    task.stages.sort(
+      (left, right) =>
+        (WORKFLOW_STAGE_ORDER[left.kind] || 99) -
+        (WORKFLOW_STAGE_ORDER[right.kind] || 99)
+    )
+    task.stages.forEach((stage, index) => {
+      stage.order = index + 1
+    })
+    if (!task.title) {
+      task.status = workflowNodeStatus(task.stages)
+      const steps = task.stages.flatMap((stage) => stage.steps || [])
+      const detailStep = steps.find((step) => step.kind === 'get_order_detail')
+      const queryStep = steps.find((step) => step.kind === 'query_orders')
+      if (detailStep) {
+        task.kind = 'get_order_detail'
+        task.orderRef = detailStep.orderRef || ''
+      } else if (queryStep) {
+        task.kind = 'query_orders'
+        task.orderRef = queryStep.orderRef || ''
+      } else if (steps.some((step) => step.kind === 'querying_data')) {
+        task.kind = 'query_data'
+      } else if (
+        steps.some((step) =>
+          ['count_results', 'group_results', 'analyzing_results'].includes(
+            step.kind
+          )
+        )
+      ) {
+        task.kind = 'analyze_results'
+      } else if (
+        steps.some((step) =>
+          ['checking_capability', 'reading_order_commands'].includes(step.kind)
+        )
+      ) {
+        task.kind = 'query_orders'
+      } else {
+        task.kind = 'query_data'
+      }
+    }
+  }
+  return tasks
+}
+
+export function workflowProgressSource(tasks, hasPlan = false) {
+  if (hasPlan) return { kind: 'plan', items: tasks }
+  return {
+    kind: 'stage',
+    items: (Array.isArray(tasks) ? tasks : []).flatMap(
+      (task) => task.stages || []
+    )
+  }
+}
+
+export function selectStructuredProgress({
+  route,
+  plan,
+  stages,
+  activities,
+  standaloneActivities = false
+}) {
+  if (route) {
+    const tasks = buildWorkflowTree(plan, activities)
+    if (tasks.length > 0) {
+      return {
+        kind: 'workflow',
+        hasPlan: Array.isArray(plan) && plan.length > 0,
+        items: tasks,
+        tasks
+      }
+    }
+    return { kind: null, items: [] }
+  }
   if (Array.isArray(plan) && plan.length > 0) {
     return { kind: 'plan', items: plan }
   }
   if (Array.isArray(stages) && stages.length > 0) {
     return { kind: 'stage', items: stages }
   }
+  if (standaloneActivities) {
+    const items = (Array.isArray(activities) ? activities : []).filter(
+      (item) => !item.structured
+    )
+    if (items.length > 0) return { kind: 'activity', items }
+  }
   return { kind: null, items: [] }
+}
+
+export function selectCurrentWorkflowStage(tasks) {
+  const stages = (Array.isArray(tasks) ? tasks : []).flatMap(
+    (task) => task.stages || []
+  )
+  if (stages.length === 0) return null
+  for (const status of ['in_progress', 'failed']) {
+    for (let index = stages.length - 1; index >= 0; index -= 1) {
+      if (stages[index]?.status === status) return stages[index]
+    }
+  }
+  return stages.at(-1) || null
 }
 
 export function applyRuntimeEvent(state, event) {
@@ -256,11 +584,35 @@ export function applyRuntimeEvent(state, event) {
     event?.type === 'done' ||
     event?.type === 'error'
   ) {
-    return {
+    const terminationDetail =
+      event.termination_detail || current.terminationDetail
+    const terminal = {
       ...current,
       outcome: event.outcome || current.outcome,
-      terminationDetail: event.termination_detail || current.terminationDetail
+      terminationDetail,
+      capabilityBlock:
+        terminationDetail?.reason === 'capability_unavailable'
+          ? { ...terminationDetail }
+          : current.capabilityBlock,
+      executionFailure:
+        terminationDetail?.reason === 'execution_failed'
+          ? { ...terminationDetail }
+          : current.executionFailure
     }
+    if (event.type === 'done') {
+      const status = event.outcome === 'completed' ? 'completed' : 'failed'
+      return closeRuntimeProgress(terminal, status)
+    }
+    if (event.type === 'error') {
+      return closeRuntimeProgress(terminal, 'failed')
+    }
+    return terminal
+  }
+  if (
+    event?.visibility === 'user' &&
+    event.event_type === 'activity.recorded'
+  ) {
+    return appendStructuredActivity(current, event.payload)
   }
   const activityKind = activityKindForEvent(event)
   if (activityKind) return appendActivity(current, activityKind)
@@ -280,10 +632,16 @@ export function applyRuntimeEvent(state, event) {
   if (event.event_type === 'plan.updated') {
     const revision = Math.max(Number(payload.revision || 0), 0)
     if (revision < current.planRevision) return current
+    const currentPlanById = new Map(current.plan.map((item) => [item.id, item]))
+    const plan = normalizePlanSteps(payload.steps).map((item) => {
+      const existing = currentPlanById.get(item.id)
+      return existing ? { ...item, title: existing.title } : item
+    })
     return {
       ...current,
-      plan: normalizePlanSteps(payload.steps),
-      planRevision: revision
+      plan,
+      planRevision: revision,
+      activities: alignBatchedPlanActivities(current, plan)
     }
   }
   if (event.event_type === 'stage.updated') {
@@ -303,6 +661,9 @@ export function applyRuntimeEvent(state, event) {
   }
   if (event.event_type === 'capability.blocked') {
     return { ...current, capabilityBlock: { ...payload } }
+  }
+  if (event.event_type === 'execution.failed') {
+    return { ...current, executionFailure: { ...payload } }
   }
   if (event.event_type === 'artifact.created') {
     const artifact = {

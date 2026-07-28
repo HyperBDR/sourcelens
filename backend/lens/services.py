@@ -822,10 +822,8 @@ def append_lensnode_output(
     """Persist output content streamed back from a LensNode.
 
     When reset is True the accumulated content is replaced by the delta
-    rather than appended. The agent uses this at the start of each model
-    turn so intermediate reasoning is superseded by the next turn,
-    letting the SSE layer emit a token_reset and move prior text into
-    the frontend thinking panel.
+    rather than appended. Reset remains supported for older LensNodes;
+    current nodes buffer tool-call turns and publish only final answers.
     """
 
     run = Run.objects.select_related("output_message").get(uuid=run_uuid)
