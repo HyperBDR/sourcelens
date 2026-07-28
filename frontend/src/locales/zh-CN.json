@@ -62,6 +62,7 @@
       "pending": "等待中",
       "completed": "已完成",
       "active": "启用",
+      "archived": "已归档",
       "enabled": "启用",
       "disabled": "禁用",
       "inactive": "禁用",

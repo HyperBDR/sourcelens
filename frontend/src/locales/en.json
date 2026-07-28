@@ -62,6 +62,7 @@
       "pending": "Pending",
       "completed": "Completed",
       "active": "Active",
+      "archived": "Archived",
       "enabled": "Enabled",
       "disabled": "Disabled",
       "inactive": "Disabled",
