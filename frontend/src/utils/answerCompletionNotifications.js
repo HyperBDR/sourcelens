@@ -20,6 +20,25 @@ export function readUnreadSessions(storage) {
   return readObject(storage, UNREAD_STORAGE_KEY)
 }
 
+export function answerCompletionTitle({
+  baseTitle,
+  completionLabel,
+  hasUnread
+}) {
+  return hasUnread ? `🔔 ${completionLabel} · ${baseTitle}` : baseTitle
+}
+
+export function shouldReviewUnreadSession({
+  documentRef,
+  selectedSessionUuid,
+  unreadSessions
+}) {
+  return (
+    documentRef?.visibilityState === 'visible' &&
+    Boolean(selectedSessionUuid && unreadSessions?.[selectedSessionUuid])
+  )
+}
+
 function markUnreadSession(storage, sessionUuid, runUuid) {
   const unread = readUnreadSessions(storage)
   if (unread[sessionUuid] === runUuid) {

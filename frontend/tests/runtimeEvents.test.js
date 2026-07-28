@@ -8,6 +8,7 @@ import {
   calculateRunElapsedSeconds,
   createRuntimeState,
   getMessageTimestamp,
+  isActiveProgressAncestor,
   normalizePlanSteps,
   normalizeStages,
   scrollConversationToBottomAfterRender,
@@ -16,6 +17,7 @@ import {
   selectStructuredProgress,
   summarizeStageProgress,
   summarizePlanProgress,
+  terminalSyncEvent,
   workflowProgressSource
 } from '../src/pages/lens/runtimeEvents.js'
 
@@ -512,6 +514,39 @@ test('does not build placeholder workflow nodes from model rounds', () => {
   assert.deepEqual(tasks, [])
 })
 
+test('identifies active ancestors without suppressing parallel leaves', () => {
+  const activeSteps = [
+    { id: 'query-primary', status: 'in_progress' },
+    { id: 'query-secondary', status: 'in_progress' }
+  ]
+  const activeStage = {
+    id: 'order-query',
+    status: 'in_progress',
+    steps: activeSteps
+  }
+  const activeTask = {
+    id: 'query-orders',
+    status: 'in_progress',
+    stages: [activeStage]
+  }
+
+  assert.equal(isActiveProgressAncestor(activeTask, activeTask.stages), true)
+  assert.equal(isActiveProgressAncestor(activeStage, activeStage.steps), true)
+  for (const step of activeSteps) {
+    assert.equal(isActiveProgressAncestor(step, []), false)
+  }
+})
+
+test('keeps an active node animated when none of its children are active', () => {
+  const activeStage = { id: 'order-query', status: 'in_progress' }
+  const completedSteps = [
+    { id: 'check-login', status: 'completed' },
+    { id: 'query-orders', status: 'completed' }
+  ]
+
+  assert.equal(isActiveProgressAncestor(activeStage, completedSteps), false)
+})
+
 test('uses a business task fallback instead of a placeholder task', () => {
   const tasks = buildWorkflowTree(
     [],
@@ -697,6 +732,67 @@ test('coalesces a failed step with a successful semantic retry', () => {
   assert.equal(steps[0].status, 'completed')
 })
 
+test('keeps a recoverable semantic failure active until the run ends', () => {
+  let state = createRuntimeState()
+  for (const status of ['in_progress', 'failed']) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload: {
+        id: 'analysis-attempt-1',
+        stage_kind: 'result_analysis',
+        kind: 'analyzing_results',
+        status
+      }
+    })
+  }
+
+  assert.equal(state.activities[0].status, 'in_progress')
+
+  state = applyRuntimeEvent(state, { type: 'done', outcome: 'partial' })
+
+  assert.equal(state.activities[0].status, 'failed')
+})
+
+test('does not downgrade a successful semantic retry after a later failure', () => {
+  let state = createRuntimeState()
+  for (const [id, status] of [
+    ['analysis-attempt-1', 'completed'],
+    ['analysis-attempt-2', 'in_progress'],
+    ['analysis-attempt-2', 'failed']
+  ]) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload: {
+        id,
+        stage_kind: 'result_analysis',
+        kind: 'analyzing_results',
+        status
+      }
+    })
+  }
+
+  assert.equal(state.activities[0].status, 'completed')
+})
+
+test('waits for a terminal SSE payload before closing live progress', () => {
+  assert.equal(terminalSyncEvent({ type: 'status', status: 'done' }), null)
+  assert.deepEqual(
+    terminalSyncEvent({
+      type: 'sync',
+      status: 'done',
+      outcome: 'partial',
+      termination_detail: { reason: 'token_budget_wrapup' }
+    }),
+    {
+      type: 'done',
+      outcome: 'partial',
+      termination_detail: { reason: 'token_budget_wrapup' }
+    }
+  )
+})
+
 test('attaches final summary to the last real plan task', () => {
   let state = applyRuntimeEvent(createRuntimeState(), {
     event_type: 'plan.updated',
@@ -775,6 +871,38 @@ test('keeps plan task titles stable across later revisions', () => {
 
   assert.equal(state.plan[0].title, '查询订单')
   assert.equal(state.plan[0].status, 'completed')
+})
+
+test('keeps the initial plan shape when later revisions append tasks', () => {
+  let state = createRuntimeState()
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 1,
+      steps: [
+        { id: 'step-1', title: 'Query orders', status: 'in_progress' },
+        { id: 'step-2', title: 'Summarize results', status: 'pending' }
+      ]
+    }
+  })
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 2,
+      steps: [
+        { id: 'step-1', title: 'Query orders', status: 'completed' },
+        { id: 'step-2', title: 'Summarize results', status: 'in_progress' },
+        { id: 'step-3', title: 'Check totals', status: 'pending' }
+      ]
+    }
+  })
+
+  assert.deepEqual(state.plan, [
+    { id: 'step-1', title: 'Query orders', status: 'completed' },
+    { id: 'step-2', title: 'Summarize results', status: 'in_progress' }
+  ])
 })
 
 test('moves trailing stages to tasks completed by a batched revision', () => {
