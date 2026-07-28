@@ -68,6 +68,14 @@ export const llmAdminApi = {
       `/v1/admin/llm-config/${encodeURIComponent(configUuid)}/`
     )
   },
+  bulkMutateLLMConfigs(configIds, action) {
+    return apiClient
+      .post('/v1/admin/llm-config/bulk/', {
+        config_ids: configIds,
+        action
+      })
+      .then(extractData)
+  },
 
   /** GET provider schema for dynamic forms. Returns { providers: { [name]: { required, optional, editable_params, default_model, default_api_base } } }. */
   getLLMConfigProviders() {

@@ -88,6 +88,14 @@
             </BaseButton>
           </form>
 
+          <TableBulkActions
+            :actions="bulkActions"
+            :loading-key="bulkLoadingKey"
+            :selected-count="selectedRows.length"
+            @action="runBulkAction"
+            @clear="clearSelection"
+          />
+
           <BaseLoading v-if="loading && !users.length" />
 
           <div
@@ -113,6 +121,16 @@
             <table class="min-w-full divide-y divide-line">
               <thead class="sticky top-0 z-10 bg-surface-sunken">
                 <tr>
+                  <th class="table-head w-12">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                      :aria-label="t('common.selectAll')"
+                      :checked="allSelected"
+                      :indeterminate="someSelected"
+                      @change="setAllSelected($event.target.checked)"
+                    />
+                  </th>
                   <th class="table-head">ID</th>
                   <th class="table-head">{{ t('dashboard.username') }}</th>
                   <th class="table-head">{{ t('dashboard.email') }}</th>
@@ -129,6 +147,17 @@
                   :key="user.id"
                   class="transition-colors hover:bg-line-soft"
                 >
+                  <td class="table-cell">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                      :aria-label="
+                        t('common.selectRow', { name: user.username })
+                      "
+                      :checked="selectedIds.has(user.id)"
+                      @change="setRowSelected(user, $event.target.checked)"
+                    />
+                  </td>
                   <td class="table-cell font-mono text-ink-500">
                     {{ user.id }}
                   </td>
@@ -165,31 +194,11 @@
                   <td class="table-cell text-ink-500">
                     {{ formatDate(user.date_joined) }}
                   </td>
-                  <td class="table-cell">
-                    <div class="flex items-center gap-2">
-                      <BaseButton
-                        variant="outline"
-                        size="sm"
-                        @click="openEditModal(user)"
-                      >
-                        {{ t('common.edit') }}
-                      </BaseButton>
-                      <BaseButton
-                        v-if="user.id !== currentUserId"
-                        :variant="
-                          user.is_active !== false ? 'danger' : 'primary'
-                        "
-                        size="sm"
-                        :loading="togglingId === user.id"
-                        @click="toggleActive(user)"
-                      >
-                        {{
-                          user.is_active !== false
-                            ? t('management.disable')
-                            : t('management.enable')
-                        }}
-                      </BaseButton>
-                    </div>
+                  <td class="table-cell text-right">
+                    <RowActionMenu
+                      :actions="rowActions(user)"
+                      @select="handleRowAction($event, user)"
+                    />
                   </td>
                 </tr>
               </tbody>
@@ -316,18 +325,23 @@
 </template>
 
 <script setup>
+import { Pencil, UserCheck, UserX } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+
+import { managementApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
-import BaseDrawer from '@/components/ui/BaseDrawer.vue'
+import RowActionMenu from '@/components/ui/RowActionMenu.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
+import TableBulkActions from '@/components/ui/TableBulkActions.vue'
+import { useTableSelection } from '@/composables/useTableSelection'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/store/user'
-import { managementApi } from '@/admin/api'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
@@ -337,6 +351,7 @@ const users = ref([])
 const loading = ref(false)
 const error = ref(null)
 const togglingId = ref(null)
+const bulkLoadingKey = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalCount = ref(0)
@@ -346,6 +361,30 @@ const emailFilterInput = ref('')
 const emailFilter = ref('')
 
 const currentUserId = computed(() => userStore.userInfo?.id)
+const {
+  allSelected,
+  clearSelection,
+  selectedIds,
+  selectedRows,
+  setAllSelected,
+  setRowSelected,
+  someSelected
+} = useTableSelection(users)
+
+const bulkActions = computed(() => [
+  {
+    key: 'enable',
+    label: t('management.enable'),
+    icon: UserCheck
+  },
+  {
+    key: 'disable',
+    label: t('management.disable'),
+    icon: UserX,
+    variant: 'danger',
+    confirm: true
+  }
+])
 
 const showModal = ref(false)
 const mode = ref('create')
@@ -496,6 +535,66 @@ async function toggleActive(user) {
     showError(e?.response?.data?.detail || e?.message || t('common.error'))
   } finally {
     togglingId.value = null
+  }
+}
+
+function rowActions(user) {
+  const actions = [
+    {
+      key: 'edit',
+      label: t('common.edit'),
+      icon: Pencil
+    }
+  ]
+  if (user.id !== currentUserId.value) {
+    actions.push({
+      key: 'toggle',
+      label:
+        user.is_active !== false
+          ? t('management.disable')
+          : t('management.enable'),
+      icon: user.is_active !== false ? UserX : UserCheck,
+      variant: user.is_active !== false ? 'danger' : undefined,
+      divider: true,
+      disabled: togglingId.value !== null
+    })
+  }
+  return actions
+}
+
+function handleRowAction(action, user) {
+  if (action === 'edit') {
+    openEditModal(user)
+    return
+  }
+  toggleActive(user)
+}
+
+async function runBulkAction(action) {
+  if (bulkLoadingKey.value) return
+  const isActive = action === 'enable'
+  const targets = selectedRows.value.filter(
+    (user) =>
+      user.is_active !== isActive &&
+      (isActive || user.id !== currentUserId.value)
+  )
+  if (!targets.length) {
+    showError(t('management.noEligibleRows'))
+    return
+  }
+
+  bulkLoadingKey.value = action
+  try {
+    await managementApi.bulkUpdateUsers({
+      user_ids: targets.map((user) => user.id),
+      is_active: isActive
+    })
+    showSuccess(t('management.bulkUpdated', { count: targets.length }))
+    await fetchUsers()
+  } catch (e) {
+    showError(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    bulkLoadingKey.value = ''
   }
 }
 

@@ -24,6 +24,12 @@ export const managementApi = {
       .then(extractData)
   },
 
+  bulkUpdateUsers(body) {
+    return apiClient
+      .post('/v1/management/users/bulk-status/', body)
+      .then(extractData)
+  },
+
   getGroups(params = {}) {
     return apiClient.get('/v1/management/groups/', { params }).then(extractData)
   },
@@ -42,6 +48,14 @@ export const managementApi = {
     return apiClient.delete(`/v1/management/groups/${groupId}/`)
   },
 
+  bulkDeleteGroups(groupIds) {
+    return apiClient
+      .post('/v1/management/groups/bulk-delete/', {
+        group_ids: groupIds
+      })
+      .then(extractData)
+  },
+
   getRoles(params = {}) {
     return apiClient.get('/v1/management/roles/', { params }).then(extractData)
   },
@@ -53,6 +67,12 @@ export const managementApi = {
   updateRole(roleId, body) {
     return apiClient
       .patch(`/v1/management/roles/${roleId}/`, body)
+      .then(extractData)
+  },
+
+  bulkUpdateRoles(body) {
+    return apiClient
+      .post('/v1/management/roles/bulk-status/', body)
       .then(extractData)
   }
 }

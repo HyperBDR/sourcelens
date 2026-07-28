@@ -41,6 +41,14 @@
             </BaseButton>
           </div>
 
+          <TableBulkActions
+            :actions="bulkActions"
+            :loading-key="bulkLoadingKey"
+            :selected-count="selectedRows.length"
+            @action="runBulkDelete"
+            @clear="clearSelection"
+          />
+
           <BaseLoading v-if="loading" />
           <template v-else>
             <div
@@ -71,6 +79,16 @@
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                   <tr>
+                    <th class="w-12 px-4 py-3 text-left">
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        :aria-label="t('common.selectAll')"
+                        :checked="allSelected"
+                        :indeterminate="someSelected"
+                        @change="setAllSelected($event.target.checked)"
+                      />
+                    </th>
                     <th
                       class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
                     >
@@ -109,6 +127,17 @@
                     :key="row.uuid"
                     class="hover:bg-gray-50"
                   >
+                    <td class="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        :aria-label="
+                          t('common.selectRow', { name: row.name || row.uuid })
+                        "
+                        :checked="selectedIds.has(row.uuid)"
+                        @change="setRowSelected(row, $event.target.checked)"
+                      />
+                    </td>
                     <td
                       class="px-4 py-3 whitespace-nowrap text-sm text-gray-900"
                     >
@@ -178,50 +207,10 @@
                       </span>
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap text-right">
-                      <div class="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          :title="t('common.edit')"
-                          class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                          @click="openEditModal(row)"
-                        >
-                          <svg
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          :title="t('common.delete')"
-                          class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600"
-                          @click="confirmDelete(row)"
-                        >
-                          <svg
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
-                      </div>
+                      <RowActionMenu
+                        :actions="rowActions"
+                        @select="handleRowAction($event, row)"
+                      />
                     </td>
                   </tr>
                 </tbody>
@@ -772,15 +761,20 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { Pencil, Trash2 } from '@lucide/vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useToast } from '@/composables/useToast'
+
 import { notificationsAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import RowActionMenu from '@/components/ui/RowActionMenu.vue'
+import TableBulkActions from '@/components/ui/TableBulkActions.vue'
+import { useTableSelection } from '@/composables/useTableSelection'
+import { useToast } from '@/composables/useToast'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
@@ -795,6 +789,7 @@ const editingId = ref(null)
 const saving = ref(false)
 const validating = ref(false)
 const deleting = ref(false)
+const bulkLoadingKey = ref('')
 const deleteTarget = ref(null)
 const formMessage = ref('')
 const formMessageSuccess = ref(false)
@@ -871,6 +866,41 @@ const pagedList = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   return list.value.slice(start, start + pageSize.value)
 })
+
+const {
+  allSelected,
+  clearSelection,
+  selectedIds,
+  selectedRows,
+  setAllSelected,
+  setRowSelected,
+  someSelected
+} = useTableSelection(pagedList, (row) => row.uuid)
+
+const rowActions = computed(() => [
+  {
+    key: 'edit',
+    label: t('common.edit'),
+    icon: Pencil
+  },
+  {
+    key: 'delete',
+    label: t('common.delete'),
+    icon: Trash2,
+    variant: 'danger',
+    divider: true
+  }
+])
+
+const bulkActions = computed(() => [
+  {
+    key: 'delete',
+    label: t('common.delete'),
+    icon: Trash2,
+    variant: 'danger',
+    confirm: true
+  }
+])
 
 function handlePageSizeChange() {
   currentPage.value = 1
@@ -1255,6 +1285,14 @@ function confirmDelete(row) {
   showDeleteConfirm.value = true
 }
 
+function handleRowAction(action, row) {
+  if (action === 'edit') {
+    openEditModal(row)
+    return
+  }
+  confirmDelete(row)
+}
+
 async function doDelete() {
   if (!deleteTarget.value) return
   deleting.value = true
@@ -1272,6 +1310,23 @@ async function doDelete() {
     )
   } finally {
     deleting.value = false
+  }
+}
+
+async function runBulkDelete() {
+  if (bulkLoadingKey.value) return
+  const targets = [...selectedRows.value]
+  bulkLoadingKey.value = 'delete'
+  try {
+    await notificationsAdminApi.bulkDeleteChannels(
+      targets.map((row) => row.uuid)
+    )
+    showSuccess(t('management.bulkDeleted', { count: targets.length }))
+    await loadList()
+  } catch (e) {
+    showError(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    bulkLoadingKey.value = ''
   }
 }
 

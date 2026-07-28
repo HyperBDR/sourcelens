@@ -4,6 +4,7 @@ import en from '../locales/en.json'
 import zhCN from '../locales/zh-CN.json'
 import adminEn from '../admin/locales/en.json'
 import adminZhCN from '../admin/locales/zh-CN.json'
+import tableActionMessages from '../locales/tableActions'
 
 export const SUPPORTED_UI_LANGUAGES = ['en', 'zh-CN']
 
@@ -45,8 +46,14 @@ const i18n = createI18n({
   locale: getStoredLanguage(),
   fallbackLocale: 'en',
   messages: {
-    en: deepMergeMessages(en, adminEn),
-    'zh-CN': deepMergeMessages(zhCN, adminZhCN)
+    en: deepMergeMessages(
+      deepMergeMessages(en, adminEn),
+      tableActionMessages.en
+    ),
+    'zh-CN': deepMergeMessages(
+      deepMergeMessages(zhCN, adminZhCN),
+      tableActionMessages['zh-CN']
+    )
   }
 })
 
