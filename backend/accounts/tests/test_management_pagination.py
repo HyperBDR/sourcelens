@@ -475,6 +475,29 @@ class TestManagementUsersPagination:
 
 @pytest.mark.django_db
 class TestManagementGroupsPagination:
+    def test_groups_list_searches_name_case_insensitively(self):
+        admin = User.objects.create_user(
+            username="admin_for_group_search",
+            password="x",
+            is_staff=True,
+        )
+        matching = Group.objects.create(name="Searchable Finance Team")
+        Group.objects.create(name="Unrelated Engineering Team")
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/groups/",
+            {"compact": "true", "search": "FINANCE"},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert data["results"] == [
+            {"id": matching.id, "name": "Searchable Finance Team"}
+        ]
+
     def test_groups_list_compact_returns_selector_fields_only(self):
         admin = User.objects.create_user(
             username="admin_for_compact_groups",

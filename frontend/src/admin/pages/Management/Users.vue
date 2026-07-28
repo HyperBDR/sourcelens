@@ -127,7 +127,12 @@
                 <tr
                   v-for="user in users"
                   :key="user.id"
-                  class="transition-colors hover:bg-line-soft"
+                  class="cursor-pointer transition-colors hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                  data-testid="user-detail-row"
+                  tabindex="0"
+                  @click="openDetail(user)"
+                  @keydown.enter.self="openDetail(user)"
+                  @keydown.space.self.prevent="openDetail(user)"
                 >
                   <td class="table-cell font-mono text-ink-500">
                     {{ user.id }}
@@ -136,7 +141,7 @@
                     <button
                       class="font-medium text-brand-700 hover:underline"
                       data-testid="user-detail-trigger"
-                      @click="openDetail(user)"
+                      @click.stop="openDetail(user)"
                     >
                       {{ user.username }}
                     </button>
@@ -174,7 +179,7 @@
                       <BaseButton
                         variant="outline"
                         size="sm"
-                        @click="openEditModal(user)"
+                        @click.stop="openEditModal(user)"
                       >
                         {{ t('common.edit') }}
                       </BaseButton>
@@ -185,7 +190,7 @@
                         "
                         size="sm"
                         :loading="togglingId === user.id"
-                        @click="toggleActive(user)"
+                        @click.stop="toggleActive(user)"
                       >
                         {{
                           user.is_active !== false

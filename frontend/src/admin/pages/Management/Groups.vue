@@ -78,7 +78,12 @@
                 <tr
                   v-for="group in groups"
                   :key="group.id"
-                  class="transition-colors hover:bg-line-soft"
+                  class="cursor-pointer transition-colors hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                  data-testid="group-detail-row"
+                  tabindex="0"
+                  @click="openDetail(group)"
+                  @keydown.enter.self="openDetail(group)"
+                  @keydown.space.self.prevent="openDetail(group)"
                 >
                   <td class="table-cell font-mono text-ink-500">
                     {{ group.id }}
@@ -87,7 +92,7 @@
                     <button
                       class="font-medium text-brand-700 hover:underline"
                       data-testid="group-detail-trigger"
-                      @click="openDetail(group)"
+                      @click.stop="openDetail(group)"
                     >
                       {{ group.name }}
                     </button>
@@ -103,14 +108,14 @@
                       <BaseButton
                         variant="outline"
                         size="sm"
-                        @click="openEditModal(group)"
+                        @click.stop="openEditModal(group)"
                       >
                         {{ t('common.edit') }}
                       </BaseButton>
                       <BaseButton
                         variant="danger"
                         size="sm"
-                        @click="askDelete(group)"
+                        @click.stop="askDelete(group)"
                       >
                         {{ t('common.delete') }}
                       </BaseButton>

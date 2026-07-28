@@ -590,6 +590,16 @@
                 {{ form.access_group_ids.length }}
               </span>
             </div>
+            <div class="border-b border-line p-2">
+              <input
+                v-model="groupSearch"
+                type="search"
+                class="form-input"
+                data-testid="authorized-group-search"
+                :aria-label="t('lensAdmin.access.searchGroups')"
+                :placeholder="t('lensAdmin.access.searchGroupsPlaceholder')"
+              />
+            </div>
             <div
               v-if="orderedGroups.length"
               class="max-h-52 space-y-1 overflow-y-auto p-2"
@@ -639,7 +649,11 @@
               v-else-if="!orderedGroups.length"
               class="px-3 py-8 text-center text-xs text-ink-400"
             >
-              {{ t('lensAdmin.access.noGroups') }}
+              {{
+                groupSearch.trim()
+                  ? t('lensAdmin.access.noGroupResults')
+                  : t('lensAdmin.access.noGroups')
+              }}
             </p>
           </div>
 
@@ -840,6 +854,7 @@ const groupResults = ref([])
 const groupOptions = ref(new Map())
 const groupLoading = ref(false)
 const groupFailed = ref(false)
+const groupSearch = ref('')
 const userPage = ref(1)
 const userTotal = ref(0)
 const userResults = ref([])
@@ -849,7 +864,9 @@ const userFailed = ref(false)
 const userSearch = ref('')
 const groupRequest = createLatestRequestRunner()
 const userRequest = createLatestRequestRunner()
-let searchTimer = null
+let groupSearchTimer = null
+let userSearchTimer = null
+let groupAbortController = null
 let userAbortController = null
 let resettingAccessSelectors = false
 
@@ -866,10 +883,31 @@ watch(
 )
 
 watch(
+  groupSearch,
+  () => {
+    if (!props.show || resettingAccessSelectors) return
+    if (groupSearchTimer) clearTimeout(groupSearchTimer)
+    groupAbortController?.abort()
+    groupRequest.invalidate()
+    groupPage.value = 1
+    groupTotal.value = 0
+    groupResults.value = []
+    groupFailed.value = false
+    groupLoading.value = true
+    const delay = groupSearch.value.trim() ? SEARCH_DELAY_MS : 0
+    groupSearchTimer = setTimeout(() => {
+      groupSearchTimer = null
+      loadGroups(1)
+    }, delay)
+  },
+  { flush: 'sync' }
+)
+
+watch(
   userSearch,
   () => {
     if (!props.show || resettingAccessSelectors) return
-    if (searchTimer) clearTimeout(searchTimer)
+    if (userSearchTimer) clearTimeout(userSearchTimer)
     userAbortController?.abort()
     userRequest.invalidate()
     userPage.value = 1
@@ -878,8 +916,8 @@ watch(
     userFailed.value = false
     userLoading.value = true
     const delay = userSearch.value.trim() ? SEARCH_DELAY_MS : 0
-    searchTimer = setTimeout(() => {
-      searchTimer = null
+    userSearchTimer = setTimeout(() => {
+      userSearchTimer = null
       loadUsers(1)
     }, delay)
   },
@@ -1079,10 +1117,16 @@ function seedAssignedOptions() {
 }
 
 function resetPendingAccessRequests() {
-  if (searchTimer) {
-    clearTimeout(searchTimer)
-    searchTimer = null
+  if (groupSearchTimer) {
+    clearTimeout(groupSearchTimer)
+    groupSearchTimer = null
   }
+  if (userSearchTimer) {
+    clearTimeout(userSearchTimer)
+    userSearchTimer = null
+  }
+  groupAbortController?.abort()
+  groupAbortController = null
   groupRequest.invalidate()
   userAbortController?.abort()
   userAbortController = null
@@ -1098,6 +1142,7 @@ function initializeAccessSelectors() {
   groupTotal.value = 0
   groupResults.value = []
   groupFailed.value = false
+  groupSearch.value = ''
   userPage.value = 1
   userTotal.value = 0
   userResults.value = []
@@ -1114,14 +1159,23 @@ async function loadGroups(page = groupPage.value) {
   groupLoading.value = true
   groupFailed.value = false
   if (page === 1) groupResults.value = []
+  const search = groupSearch.value.trim()
+  groupAbortController?.abort()
+  const controller = new AbortController()
+  groupAbortController = controller
   const result = await groupRequest.run(() =>
-    managementApi.getGroups({
-      page,
-      page_size: ACCESS_PAGE_SIZE,
-      compact: true
-    })
+    managementApi.getGroups(
+      {
+        page,
+        page_size: ACCESS_PAGE_SIZE,
+        compact: true,
+        ...(search ? { search } : {})
+      },
+      { signal: controller.signal }
+    )
   )
   if (!result.current) return
+  if (groupAbortController === controller) groupAbortController = null
   groupLoading.value = false
   if (result.error) {
     groupFailed.value = true

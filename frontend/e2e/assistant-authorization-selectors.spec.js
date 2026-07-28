@@ -23,6 +23,7 @@ const assistant = {
 }
 
 async function mockAssistantsPage(page) {
+  await page.setExtraHTTPHeaders({ 'Cache-Control': 'no-cache' })
   await page.addInitScript(() => {
     localStorage.setItem('access_token', 'test-token')
     localStorage.setItem('userLanguage', 'en')
@@ -31,6 +32,10 @@ async function mockAssistantsPage(page) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
+    if (!path.startsWith('/api/')) {
+      await route.continue()
+      return
+    }
     let payload = []
 
     if (path === '/api/v1/auth/user') {
@@ -57,12 +62,14 @@ async function mockAssistantsPage(page) {
       ]
     } else if (path === '/api/v1/management/groups/') {
       const requestedPage = Number(url.searchParams.get('page'))
+      const search = url.searchParams.get('search')
       payload = {
-        count: 21,
+        count: search ? 1 : 21,
         page: requestedPage,
         page_size: 20,
-        results:
-          requestedPage === 2
+        results: search
+          ? [{ id: 401, name: 'Searched Group' }]
+          : requestedPage === 2
             ? [{ id: 301, name: 'Group From Page Two' }]
             : Array.from({ length: 20 }, (_, index) => ({
                 id: index + 1,
@@ -113,7 +120,7 @@ async function mockAssistantsPage(page) {
 async function openAccessStep(page) {
   await page.goto('/management/lens/assistants')
   await page.getByRole('button', { name: 'Edit' }).click()
-  const drawer = page.locator('.fixed.inset-0.z-50')
+  const drawer = page.getByRole('dialog', { name: 'Edit Assistant' })
   await drawer.getByRole('button', { name: 'Next' }).click()
   await drawer.getByRole('button', { name: 'Next' }).click()
   await drawer.getByRole('button', { name: 'Next' }).click()
@@ -169,6 +176,20 @@ test('keeps assignments visible during incremental loading and search', async ({
   await expect(
     groupSelector.getByTestId('authorized-group-option').last()
   ).toContainText('Group From Page Two')
+
+  const groupSearchRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url())
+    return (
+      url.pathname === '/api/v1/management/groups/' &&
+      url.searchParams.get('search') === 'searched' &&
+      url.searchParams.get('compact') === 'true'
+    )
+  })
+  await drawer.getByTestId('authorized-group-search').fill('searched')
+  await groupSearchRequest
+  await expect(
+    groupSelector.getByTestId('authorized-group-option').last()
+  ).toContainText('Searched Group')
 
   const userNextRequest = page.waitForRequest((request) => {
     const url = new URL(request.url())

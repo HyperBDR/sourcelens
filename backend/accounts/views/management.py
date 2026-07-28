@@ -476,6 +476,9 @@ class ManagementGroupListView(APIView):
                 .prefetch_related(role_prefetch)
                 .order_by('name')
             )
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(name__icontains=search)
         total = qs.count()
         start = (page - 1) * page_size
         end = start + page_size
