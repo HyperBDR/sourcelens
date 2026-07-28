@@ -116,6 +116,7 @@
                     <th class="th">{{ t('lensRuns.colAssistant') }}</th>
                     <th class="th">{{ t('lensRuns.colQuestion') }}</th>
                     <th class="th">{{ t('lensRuns.colStatus') }}</th>
+                    <th class="th">{{ t('lensRuns.colFeedback') }}</th>
                     <th class="th">{{ t('lensRuns.colDuration') }}</th>
                     <th class="th">{{ t('lensRuns.colSteps') }}</th>
                   </tr>
@@ -141,6 +142,23 @@
                     </td>
                     <td class="td whitespace-nowrap">
                       <span :class="statusClass(r.status)">{{ r.status }}</span>
+                    </td>
+                    <td class="td whitespace-nowrap">
+                      <span
+                        v-if="r.feedback === 'positive'"
+                        class="feedback-pill feedback-pill-positive"
+                      >
+                        <ThumbsUp :size="13" />
+                        {{ t('lensRuns.feedbackHelpful') }}
+                      </span>
+                      <span
+                        v-else-if="r.feedback === 'negative'"
+                        class="feedback-pill feedback-pill-negative"
+                      >
+                        <ThumbsDown :size="13" />
+                        {{ t('lensRuns.feedbackUnhelpful') }}
+                      </span>
+                      <span v-else class="text-gray-400">—</span>
                     </td>
                     <td class="td text-gray-600 whitespace-nowrap tabular-nums">
                       {{ durationText(r.duration_seconds) }}
@@ -279,6 +297,28 @@
                   <div>
                     <dt class="text-gray-500">{{ t('lensRuns.colUser') }}</dt>
                     <dd class="mt-0.5 text-gray-900">{{ detail.username }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.colFeedback') }}
+                    </dt>
+                    <dd class="mt-1">
+                      <span
+                        v-if="detail.feedback === 'positive'"
+                        class="feedback-pill feedback-pill-positive"
+                      >
+                        <ThumbsUp :size="13" />
+                        {{ t('lensRuns.feedbackHelpful') }}
+                      </span>
+                      <span
+                        v-else-if="detail.feedback === 'negative'"
+                        class="feedback-pill feedback-pill-negative"
+                      >
+                        <ThumbsDown :size="13" />
+                        {{ t('lensRuns.feedbackUnhelpful') }}
+                      </span>
+                      <span v-else class="text-sm text-gray-400">—</span>
+                    </dd>
                   </div>
                   <div>
                     <dt class="text-gray-500">
@@ -647,6 +687,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { format } from 'date-fns'
 import { useDebounceFn } from '@vueuse/core'
+import { ThumbsDown, ThumbsUp } from '@lucide/vue'
 import { useToast } from '@/composables/useToast'
 import { extractErrorMessage } from '@/utils/api'
 import { getAdminRuns, getAdminRun, listAssistants } from '@/api/lens'
@@ -977,6 +1018,18 @@ watch(detailVisible, (visible) => {
 }
 .td {
   @apply px-4 py-3 text-sm;
+}
+
+.feedback-pill {
+  @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+}
+
+.feedback-pill-positive {
+  @apply bg-green-100 text-green-800;
+}
+
+.feedback-pill-negative {
+  @apply bg-red-100 text-red-800;
 }
 
 .detail-tab {

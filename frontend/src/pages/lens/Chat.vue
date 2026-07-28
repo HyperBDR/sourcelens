@@ -692,28 +692,36 @@
                     </svg>
                   </button>
                   <button
+                    v-if="!isAnonymous && message.run && message.content"
                     type="button"
                     class="icon-btn"
-                    @click="retryLastQuestion"
+                    :class="{
+                      'icon-btn-feedback-positive':
+                        message.feedback === 'positive'
+                    }"
+                    :title="t('lens.chat.feedbackHelpful')"
+                    :aria-label="t('lens.chat.feedbackHelpful')"
+                    :aria-pressed="message.feedback === 'positive'"
+                    :disabled="isFeedbackUpdating(message.run)"
+                    @click="setFeedback(message, 'positive')"
                   >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M3 12a9 9 0 1 0 3-6.7L3 8"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                      <path
-                        d="M3 3v5h5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
+                    <ThumbsUp :size="16" />
+                  </button>
+                  <button
+                    v-if="!isAnonymous && message.run && message.content"
+                    type="button"
+                    class="icon-btn"
+                    :class="{
+                      'icon-btn-feedback-negative':
+                        message.feedback === 'negative'
+                    }"
+                    :title="t('lens.chat.feedbackUnhelpful')"
+                    :aria-label="t('lens.chat.feedbackUnhelpful')"
+                    :aria-pressed="message.feedback === 'negative'"
+                    :disabled="isFeedbackUpdating(message.run)"
+                    @click="setFeedback(message, 'negative')"
+                  >
+                    <ThumbsDown :size="16" />
                   </button>
                   <button
                     v-if="!isAnonymous && message.run"
@@ -744,6 +752,42 @@
                       />
                     </svg>
                   </button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    @click="retryLastQuestion"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M3 12a9 9 0 1 0 3-6.7L3 8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M3 3v5h5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <span
+                    v-if="message.feedback"
+                    class="message-feedback-status"
+                    :class="`is-${message.feedback}`"
+                  >
+                    <span class="message-feedback-dot" aria-hidden="true" />
+                    {{
+                      message.feedback === 'positive'
+                        ? t('lens.chat.feedbackRecordedHelpful')
+                        : t('lens.chat.feedbackRecordedUnhelpful')
+                    }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1221,7 +1265,9 @@ import {
   Plus,
   Download,
   Eye,
-  FileText
+  FileText,
+  ThumbsDown,
+  ThumbsUp
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -1280,6 +1326,7 @@ import {
   listMessages,
   listSessions,
   updateSession,
+  updateRunFeedback,
   uploadAttachment
 } from '@/api/lens'
 
@@ -1294,6 +1341,7 @@ const preferencesStore = usePreferencesStore()
 const assistants = ref([])
 const sessions = ref([])
 const messages = ref([])
+const feedbackUpdatingRuns = ref(new Set())
 const selectedAssistantUuid = ref('')
 const selectedSessionUuid = ref('')
 const question = ref('')
@@ -2597,6 +2645,35 @@ async function copyMessage(message) {
   }
 }
 
+function isFeedbackUpdating(runUuid) {
+  return feedbackUpdatingRuns.value.has(runUuid)
+}
+
+async function setFeedback(message, feedback) {
+  const runUuid = message?.run
+  if (!runUuid || isFeedbackUpdating(runUuid)) return
+  const nextFeedback = message.feedback === feedback ? '' : feedback
+  feedbackUpdatingRuns.value = new Set([...feedbackUpdatingRuns.value, runUuid])
+  try {
+    const result = await updateRunFeedback(runUuid, nextFeedback)
+    messages.value = messages.value.map((item) =>
+      item.uuid === message.uuid
+        ? {
+            ...item,
+            feedback: result.feedback,
+            feedback_updated_at: result.feedback_updated_at
+          }
+        : item
+    )
+  } catch {
+    showError(t('lens.chat.feedbackFailed'))
+  } finally {
+    const updating = new Set(feedbackUpdatingRuns.value)
+    updating.delete(runUuid)
+    feedbackUpdatingRuns.value = updating
+  }
+}
+
 const previewFile = ref(null)
 
 function openPreview(file) {
@@ -3143,7 +3220,7 @@ onBeforeUnmount(() => {
 }
 
 .message-actions {
-  @apply mt-2 flex gap-1;
+  @apply mt-2 flex items-center gap-1;
 }
 
 .icon-btn {
@@ -3154,6 +3231,48 @@ onBeforeUnmount(() => {
 .icon-btn:hover {
   background: #f3f4f6;
   color: #374151;
+}
+
+.icon-btn:disabled {
+  @apply cursor-wait opacity-60;
+}
+
+.icon-btn-feedback-positive {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.icon-btn-feedback-positive:hover {
+  background: #bbf7d0;
+  color: #166534;
+}
+
+.icon-btn-feedback-negative {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.icon-btn-feedback-negative:hover {
+  background: #fecaca;
+  color: #991b1b;
+}
+
+.message-feedback-status {
+  @apply ml-2 inline-flex h-7 items-center gap-2 rounded-full px-3 text-xs font-semibold;
+}
+
+.message-feedback-status.is-positive {
+  background: #ecfdf5;
+  color: #15803d;
+}
+
+.message-feedback-status.is-negative {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.message-feedback-dot {
+  @apply h-2 w-2 rounded-full bg-current;
 }
 
 .icon-btn-shared {

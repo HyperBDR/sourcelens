@@ -179,6 +179,13 @@ export async function cancelRun(runUuid) {
   return unwrapResponse(response)
 }
 
+export async function updateRunFeedback(runUuid, feedback) {
+  const response = await api.patch(`/lens/runs/${runUuid}/feedback/`, {
+    feedback
+  })
+  return unwrapResponse(response)
+}
+
 export async function listDataSources(params = {}) {
   const response = await api.get('/lens/admin/datasources/', { params })
   const payload = unwrapResponse(response)

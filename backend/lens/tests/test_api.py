@@ -33,8 +33,9 @@ from lens.models import (
     GlobalSetting,
     LensNode,
     MCPServer,
-    Session,
+    Run,
     ScheduledTask,
+    Session,
     SharedQA,
     Skill,
 )
@@ -2298,6 +2299,118 @@ class LensApiTests(TestCase):
 
         self.assertEqual(cancel_response.status_code, 200)
         self.assertEqual(cancel_response.data["status"], "cancelled")
+
+    def test_completed_run_feedback_is_persisted_and_reported(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session,
+            "Was this answer helpful?",
+            enqueue=False,
+        )
+        run.output_message.content = "Yes, this is the answer."
+        run.output_message.run = run
+        run.output_message.save(update_fields=["content", "run"])
+        run.status = Run.Status.DONE
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "finished_at", "updated_at"])
+
+        response = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.POSITIVE},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["feedback"], "positive")
+        self.assertIsNotNone(response.data["feedback_updated_at"])
+        messages = self.client.get(
+            f"/api/lens/sessions/{session.uuid}/messages/"
+        )
+        assistant_message = next(
+            item for item in messages.data if item["role"] == "assistant"
+        )
+        self.assertEqual(assistant_message["feedback"], "positive")
+        admin_runs = self.client.get(
+            "/api/lens/admin/runs/",
+            {"q": "Was this answer helpful?"},
+        )
+        self.assertEqual(admin_runs.status_code, 200, admin_runs.data)
+        self.assertEqual(
+            admin_runs.data["results"][0]["feedback"],
+            "positive",
+        )
+
+        switched = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.NEGATIVE},
+            format="json",
+        )
+        cleared = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": ""},
+            format="json",
+        )
+
+        self.assertEqual(switched.status_code, 200, switched.data)
+        self.assertEqual(switched.data["feedback"], "negative")
+        self.assertEqual(cleared.status_code, 200, cleared.data)
+        self.assertEqual(cleared.data["feedback"], "")
+
+    def test_run_feedback_rejects_invalid_or_unfinished_runs(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session,
+            "Still running",
+            enqueue=False,
+        )
+
+        unfinished = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.POSITIVE},
+            format="json",
+        )
+        invalid = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": "maybe"},
+            format="json",
+        )
+
+        self.assertEqual(unfinished.status_code, 400, unfinished.data)
+        self.assertEqual(invalid.status_code, 400, invalid.data)
+
+    def test_run_feedback_is_scoped_to_session_owner(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session,
+            "Private feedback",
+            enqueue=False,
+        )
+        run.status = Run.Status.DONE
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "finished_at", "updated_at"])
+        other_user = User.objects.create_user(
+            username="feedback-user-2",
+            email="feedback-user-2@example.com",
+            password="pass12345",
+        )
+        self.client.force_authenticate(other_user)
+
+        response = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.NEGATIVE},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_running_run_stream_returns_sync_and_status(self):
         session_response = self.client.post(
