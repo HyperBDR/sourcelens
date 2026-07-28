@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import threading
@@ -171,16 +172,30 @@ class _NoTaskMiddleware(AgentMiddleware):
 
 
 class CapabilityBoundaryMiddleware(AgentMiddleware):
-    """Stop a run after bounded recovery from structured tool failures."""
+    """Apply bounded recovery without stopping the whole agent run."""
 
-    def __init__(self, emit_event=None, stop_event=None):
+    CAPABILITY_CORRECTION_LIMIT = 4
+
+    def __init__(
+        self,
+        emit_event=None,
+        required_capabilities=None,
+    ):
         self.emit_event = emit_event
-        self.stop_event = stop_event or threading.Event()
+        self.required_capabilities = set(required_capabilities or [])
         self.blocked_tools = set()
+        self.blocked_capabilities = set()
         self.failure_counts = defaultdict(int)
+        self.capability_failure_counts = defaultdict(int)
+        self.capability_correction_counts = defaultdict(int)
         self.success_count = 0
         self.successful_capabilities = set()
+        self.failed_capabilities = set()
+        self.recovered_capabilities = set()
+        self.correction_recovery_count = 0
+        self.alternative_recovery_count = 0
         self.termination_detail = {}
+        self.exhaustion_details = []
 
     @property
     def outcome(self):
@@ -237,8 +252,84 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         return value if isinstance(value, dict) else None
 
     @staticmethod
-    def _failure_budget(error_type):
-        return 2 if error_type in {"transient", "request"} else 1
+    def _normalized_arguments(request):
+        tool_call = request.tool_call or {}
+        arguments = tool_call.get("args") or {}
+        try:
+            normalized = json.dumps(
+                arguments,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError):
+            normalized = str(arguments)
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    def _record_recovery(self, capability):
+        pending = self.failed_capabilities - self.recovered_capabilities
+        recovery_type = None
+        if capability in pending:
+            self.correction_recovery_count += 1
+            self.recovered_capabilities.add(capability)
+            recovery_type = "corrected_request"
+        else:
+            alternatives = (
+                pending & self.required_capabilities
+            ) - {capability}
+            if capability in self.required_capabilities and alternatives:
+                self.alternative_recovery_count += 1
+                self.recovered_capabilities.update(alternatives)
+                recovery_type = "alternative_capability"
+        if recovery_type and self.emit_event is not None:
+            self.emit_event(
+                "deepagents.capability.recovered",
+                {
+                    "capability": capability,
+                    "recovery_type": recovery_type,
+                    "correction_recovery_count": (
+                        self.correction_recovery_count
+                    ),
+                    "alternative_recovery_count": (
+                        self.alternative_recovery_count
+                    ),
+                },
+            )
+
+    def _record_success(self, capability):
+        if capability is None:
+            return
+        self.success_count += 1
+        self.successful_capabilities.add(capability)
+        self._record_recovery(capability)
+
+    @staticmethod
+    def _is_non_idempotent_write(request):
+        metadata = getattr(request.tool, "metadata", None) or {}
+        if not isinstance(metadata, dict):
+            return False
+        is_write = (
+            metadata.get("operation") == "write"
+            or metadata.get("read_only") is False
+            or metadata.get("side_effects") is True
+        )
+        if not is_write:
+            return False
+        arguments = (request.tool_call or {}).get("args") or {}
+        has_idempotency_key = bool(
+            isinstance(arguments, dict)
+            and arguments.get("idempotency_key")
+        )
+        return not (metadata.get("idempotent") or has_idempotency_key)
+
+    def _failure_budget(self, request, error_type):
+        if error_type == "transient" and self._is_non_idempotent_write(
+            request
+        ):
+            return 1
+        if error_type in {"transient", "request", "tool"}:
+            return 2
+        return 1
 
     @staticmethod
     def _recovery_message(error_type):
@@ -260,44 +351,73 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             if not tool_name.startswith("mcp__"):
                 return result
             if getattr(result, "status", None) != "error":
-                self.success_count += 1
-                self.successful_capabilities.add("mcp")
+                self._record_success("mcp")
                 return result
             payload = {"ok": False, "error": "MCP_TOOL_FAILED"}
         if payload.get("ok") is True:
-            if capability is not None:
-                self.success_count += 1
-                self.successful_capabilities.add(capability)
+            self._record_success(capability)
             return result
         if capability is None:
             return result
 
         metadata = _tool_result_metadata(payload, tool_name)
         error_type = metadata.get("error_type") or "tool"
-        key = (tool_name, error_type)
+        key = (
+            tool_name,
+            error_type,
+            self._normalized_arguments(request),
+        )
         self.failure_counts[key] += 1
-        if self.failure_counts[key] < self._failure_budget(error_type):
+        self.capability_failure_counts[capability] += 1
+        self.failed_capabilities.add(capability)
+        self.recovered_capabilities.discard(capability)
+        if error_type in {"request", "tool"}:
+            self.capability_correction_counts[capability] += 1
+        exact_failures = self.failure_counts[key]
+        capability_failures = self.capability_failure_counts[capability]
+        capability_corrections = self.capability_correction_counts[
+            capability
+        ]
+        block_capability = error_type in {"configuration", "policy"}
+        if error_type in {"request", "tool"}:
+            block_capability = block_capability or (
+                capability_corrections
+                >= self.CAPABILITY_CORRECTION_LIMIT
+            )
+        block_tool = exact_failures >= self._failure_budget(
+            request,
+            error_type,
+        )
+        if not block_capability and not block_tool:
             return result
 
-        self.blocked_tools.add(tool_name)
+        if block_capability:
+            self.blocked_capabilities.add(capability)
+            blocked_scope = "capability"
+        else:
+            self.blocked_tools.add(tool_name)
+            blocked_scope = "tool"
+        detail = {
+            "reason": "execution_failed",
+            "capability": capability,
+            "error_type": error_type,
+            "tool": tool_name,
+            "recovery": self._recovery_message(error_type),
+        }
+        self.exhaustion_details.append(detail)
         if not self.termination_detail:
-            self.termination_detail = {
-                "reason": "execution_failed",
-                "capability": capability,
-                "error_type": error_type,
-                "tool": tool_name,
-                "recovery": self._recovery_message(error_type),
-            }
-            if self.emit_event is not None:
-                self.emit_event(
-                    "workflow.execution.failed",
-                    {
-                        "event_type": "execution.failed",
-                        "visibility": "user",
-                        "payload": dict(self.termination_detail),
-                    },
-                )
-            self.stop_event.set()
+            self.termination_detail = detail
+        if self.emit_event is not None:
+            self.emit_event(
+                "deepagents.capability.exhausted",
+                {
+                    **detail,
+                    "blocked_scope": blocked_scope,
+                    "exact_request_failures": exact_failures,
+                    "capability_failures": capability_failures,
+                    "capability_corrections": capability_corrections,
+                },
+            )
         return result
 
     def _deny_blocked_call(self, request):
@@ -323,7 +443,16 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             tool
             for tool in tools
             if getattr(tool, "name", None) not in self.blocked_tools
+            and self._capability_name(getattr(tool, "name", ""))
+            not in self.blocked_capabilities
         ]
+
+    def _is_blocked(self, tool_name):
+        return (
+            tool_name in self.blocked_tools
+            or self._capability_name(tool_name)
+            in self.blocked_capabilities
+        )
 
     def wrap_model_call(self, request, handler):
         """Hide exhausted tools from subsequent model requests."""
@@ -340,17 +469,18 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
     def wrap_tool_call(self, request, handler):
         """Classify one synchronous tool result and enforce its budget."""
 
-        if self._tool_name(request) in self.blocked_tools:
+        if self._is_blocked(self._tool_name(request)):
             return self._deny_blocked_call(request)
         return self._record_result(request, handler(request))
 
     async def awrap_tool_call(self, request, handler):
         """Classify one asynchronous tool result and enforce its budget."""
 
-        if self._tool_name(request) in self.blocked_tools:
+        if self._is_blocked(self._tool_name(request)):
             return self._deny_blocked_call(request)
         result = await handler(request)
         return self._record_result(request, result)
+
 
 SCENARIOS = {
     "knowledge_qa": {
@@ -739,8 +869,8 @@ class LensDeepAgentRuntime:
             )
             tools.extend(registered_mcp_tools)
             capability_middleware = None
-            capability_stop_event = None
             evidence_requirement = "none"
+            required_capabilities = []
             if runtime_mode.general_chat:
                 route_decision = _select_general_chat_route(
                     model,
@@ -757,6 +887,9 @@ class LensDeepAgentRuntime:
                 emit_user_event("route.selected", route_decision)
                 evidence_requirement = route_decision[
                     "evidence_requirement"
+                ]
+                required_capabilities = route_decision[
+                    "required_capabilities"
                 ]
                 if route_decision["route"] == "capability_unavailable":
                     required = route_decision["required_capabilities"]
@@ -842,10 +975,9 @@ class LensDeepAgentRuntime:
                         "outcome": "completed",
                         "termination_detail": {},
                     }
-                capability_stop_event = threading.Event()
                 capability_middleware = CapabilityBoundaryMiddleware(
                     emit_event=emit_agent_event,
-                    stop_event=capability_stop_event,
+                    required_capabilities=required_capabilities,
                 )
                 phase = (
                     "planning"
@@ -928,7 +1060,11 @@ class LensDeepAgentRuntime:
             messages = _build_initial_messages(
                 command.get("history"), question
             )
-            answer, truncated = _run_agent_with_turn_limit(
+            (
+                answer,
+                truncated,
+                termination_reason,
+            ) = _run_agent_with_turn_limit(
                 agent,
                 messages,
                 max_turns,
@@ -938,7 +1074,6 @@ class LensDeepAgentRuntime:
                 cancel_event=cancel_event,
                 wrapup_event=wrapup_event,
                 token_budget_wrapup_event=token_budget_wrapup_event,
-                capability_stop_event=capability_stop_event,
             )
             if truncated:
                 emit_agent_event(
@@ -951,25 +1086,22 @@ class LensDeepAgentRuntime:
                     "actual_duration": elapsed_since(started_at),
                     "answer_chars": len(answer),
                     "stop_reason": model.stop_reason,
+                    "termination_reason": termination_reason,
                     "token_usage": model.token_usage,
                 },
             )
             outcome, termination_detail = _finalize_runtime_outcome(
                 capability_middleware=capability_middleware,
                 evidence_requirement=evidence_requirement,
-                truncated=truncated,
-                stop_reason=model.stop_reason,
+                required_capabilities=required_capabilities,
+                truncated=truncated or bool(termination_reason),
+                stop_reason=termination_reason or model.stop_reason,
             )
-            if (
-                outcome == "blocked"
-                and capability_middleware is not None
-                and capability_middleware.success_count == 0
-            ):
-                if not capability_middleware.termination_detail:
-                    emit_user_event(
-                        "execution.failed",
-                        termination_detail,
-                    )
+            if outcome == "blocked" and capability_middleware is not None:
+                emit_user_event(
+                    "execution.failed",
+                    termination_detail,
+                )
                 answer = _unverified_execution_answer(
                     question,
                     termination_detail,
@@ -1236,7 +1368,10 @@ def _select_general_chat_route(
         "timeouts, HTTP failures, or authorization errors here. "
         "required_capabilities is a short "
         "advisory array such as skill, mcp, workspace, or "
-        "artifact_delivery; it never proves a capability is unavailable. "
+        "artifact_delivery. Include every capability family that can "
+        "perform the exact operation so bounded recovery can recognize "
+        "valid alternatives; the array never proves a capability is "
+        "unavailable. "
         "evidence_requirement must be none for planning, writing, reasoning, "
         "or other guidance that only follows Skill instructions; tool_result "
         "for current external or business data and actions; artifact when a "
@@ -1276,14 +1411,18 @@ def _capability_termination_detail(capability, tool=""):
     }
 
 
-def _evidence_termination_detail(evidence_requirement):
+def _evidence_termination_detail(
+    evidence_requirement,
+    capability="",
+):
     """Return a secret-safe contract for missing execution evidence."""
 
-    capability = (
-        "artifact_delivery"
-        if evidence_requirement == "artifact"
-        else "tool"
-    )
+    if not capability:
+        capability = (
+            "artifact_delivery"
+            if evidence_requirement == "artifact"
+            else "tool"
+        )
     return {
         "reason": "evidence_unavailable",
         "capability": capability,
@@ -1300,38 +1439,109 @@ def _finalize_runtime_outcome(
     *,
     capability_middleware,
     evidence_requirement,
+    required_capabilities=None,
     truncated,
     stop_reason,
 ):
     """Resolve a run outcome after observing actual tool execution."""
 
-    outcome = "completed"
-    termination_detail = {}
-    if capability_middleware is not None:
-        outcome = capability_middleware.outcome
-        termination_detail = dict(capability_middleware.termination_detail)
-        missing_tool_result = (
-            evidence_requirement == "tool_result"
-            and capability_middleware.success_count == 0
+    if capability_middleware is None:
+        if truncated:
+            return "partial", {
+                "reason": stop_reason or "execution_limit",
+            }
+        return "completed", {}
+
+    successful = set(
+        getattr(
+            capability_middleware,
+            "successful_capabilities",
+            set(),
         )
-        missing_artifact = (
-            evidence_requirement == "artifact"
-            and "artifact_delivery"
-            not in capability_middleware.successful_capabilities
+    )
+    required = {
+        capability
+        for capability in required_capabilities or []
+        if capability
+        in {
+            "artifact_delivery",
+            "mcp",
+            "skill",
+            "tool",
+            "workspace",
+        }
+    }
+    relevant_successes = successful & required
+    failed = set(
+        getattr(capability_middleware, "failed_capabilities", set())
+    )
+    recovered = set(
+        getattr(capability_middleware, "recovered_capabilities", set())
+    )
+    unrecovered_failures = (failed - recovered) & required
+    exhaustion_details = getattr(
+        capability_middleware,
+        "exhaustion_details",
+        [],
+    )
+    termination_detail = next(
+        (
+            dict(detail)
+            for detail in exhaustion_details
+            if detail.get("capability") in required
+        ),
+        {},
+    )
+    if not termination_detail:
+        termination_detail = dict(
+            getattr(capability_middleware, "termination_detail", {})
         )
-        if outcome == "completed" and (
-            missing_tool_result or missing_artifact
-        ):
-            outcome = "blocked"
+        if termination_detail.get("capability") not in required:
+            termination_detail = {}
+
+    if evidence_requirement == "tool_result" and not relevant_successes:
+        if not termination_detail:
+            capability = next(iter(sorted(required)), "tool")
+            termination_detail = _evidence_termination_detail(
+                evidence_requirement,
+                capability,
+            )
+        if truncated and stop_reason:
+            termination_detail["trigger"] = stop_reason
+        return "blocked", termination_detail
+
+    if evidence_requirement == "tool_result" and unrecovered_failures:
+        if not termination_detail:
+            termination_detail = {
+                "reason": "execution_failed",
+                "capability": next(iter(sorted(unrecovered_failures))),
+            }
+        if truncated and stop_reason:
+            termination_detail["trigger"] = stop_reason
+        return "partial", termination_detail
+
+    if (
+        evidence_requirement == "artifact"
+        and "artifact_delivery" not in successful
+    ):
+        useful_capabilities = required - {"artifact_delivery"}
+        useful_evidence = bool(successful & useful_capabilities)
+        if not termination_detail:
             termination_detail = _evidence_termination_detail(
                 evidence_requirement
             )
-    if truncated and outcome == "completed":
-        outcome = "partial"
-        termination_detail = {
+        if truncated and stop_reason:
+            termination_detail["trigger"] = stop_reason
+        return (
+            "partial" if useful_evidence else "blocked",
+            termination_detail,
+        )
+
+    if truncated:
+        return "partial", {
             "reason": stop_reason or "execution_limit",
         }
-    return outcome, termination_detail
+    return "completed", {}
 
 
 def _unverified_execution_answer(question, termination_detail):
@@ -1818,7 +2028,6 @@ def _run_agent_with_turn_limit(
     cancel_event=None,
     wrapup_event=None,
     token_budget_wrapup_event=None,
-    capability_stop_event=None,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -1835,8 +2044,9 @@ def _run_agent_with_turn_limit(
     count itself; it is the reason a forced wrap-up (see
     _synthesize_wrapup_answer) matters more than counting precisely.
 
-    Returns (answer, truncated) where truncated=True means the agent
-    was stopped before it finished naturally.
+    Returns (answer, truncated, termination_reason). ``truncated`` is true
+    when the agent was stopped before it finished naturally, and the reason
+    preserves the gate that requested wrap-up.
     """
 
     last_state = None
@@ -1898,18 +2108,9 @@ def _run_agent_with_turn_limit(
             and token_budget_wrapup_event.is_set()
         ):
             truncated = True
-            truncation_reason = "token_budget"
+            truncation_reason = "token_budget_wrapup"
             if emit_event is not None:
                 emit_event("deepagents.agent.token_budget", {})
-            break
-        if (
-            capability_stop_event is not None
-            and capability_stop_event.is_set()
-        ):
-            truncated = True
-            truncation_reason = "execution_failed"
-            if emit_event is not None:
-                emit_event("deepagents.agent.execution_failed", {})
             break
         if ai_turns >= max_turns:
             truncated = True
@@ -1919,8 +2120,7 @@ def _run_agent_with_turn_limit(
     answer = _extract_final_message(last_state or {})
     force_wrapup = truncation_reason in {
         "soft_deadline",
-        "token_budget",
-        "execution_failed",
+        "token_budget_wrapup",
     }
     needs_wrapup = force_wrapup or not answer.strip()
     if truncated and model is not None and needs_wrapup:
@@ -1960,22 +2160,13 @@ def _run_agent_with_turn_limit(
                 "investigation may be incomplete.*",
                 answer_language,
             )
-        elif truncation_reason == "token_budget":
+        elif truncation_reason == "token_budget_wrapup":
             answer += _pick_text(
                 "\n\n---\n*已达到当前 Token 调查预算，以上回答由已有证据"
                 "综合生成，未再执行新的工具调用。*",
                 "\n\n---\n*Reached the investigation token budget. This "
                 "answer was synthesized from collected evidence without "
                 "additional tool calls.*",
-                answer_language,
-            )
-        elif truncation_reason == "execution_failed":
-            answer += _pick_text(
-                "\n\n---\n*能力执行失败，以上回答基于已取得的信息生成；"
-                "请按页面提示处理后重试。*",
-                "\n\n---\n*Capability execution failed. This answer uses the "
-                "information already collected; follow the recovery "
-                "guidance and retry.*",
                 answer_language,
             )
         else:
@@ -1987,7 +2178,18 @@ def _run_agent_with_turn_limit(
                 "tier for a more complete result.*",
                 answer_language,
             )
-    return answer, truncated
+    termination_reason = truncation_reason
+    if termination_reason is None and model is not None:
+        model_reason = getattr(model, "stop_reason", None)
+        if model_reason in {
+            "loop_capped",
+            "model_length_capped",
+            "safety_terminated",
+            "token_budget_wrapup",
+            "token_capped",
+        }:
+            termination_reason = model_reason
+    return answer, truncated, termination_reason
 
 
 def _strip_dangling_tool_call(messages):
@@ -2041,7 +2243,7 @@ def _synthesize_wrapup_answer(
             "results, write the complete answer to the user now.",
             answer_language,
         )
-    elif reason == "token_budget":
+    elif reason == "token_budget_wrapup":
         instruction = _pick_text(
             "你已经达到本次调查的 Token 预算，不能再调用任何工具。请仅基于"
             "当前对话和已取得的结果，直接给出最完整的最终答案；未确认或未覆盖"
