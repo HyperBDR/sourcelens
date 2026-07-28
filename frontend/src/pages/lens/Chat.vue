@@ -1323,6 +1323,7 @@ const composerRef = ref(null)
 const scrollRef = ref(null)
 const seenStepEventCounts = new Map()
 const completionTrackers = new Map()
+let sessionLoadGeneration = 0
 const runtimeState = ref(createRuntimeState())
 const liveActivityScrollRef = ref(null)
 const elapsedSeconds = ref(0)
@@ -2302,17 +2303,30 @@ async function handlePrimaryAction() {
 }
 
 async function selectSession(session, updateRoute = true) {
+  const loadGeneration = ++sessionLoadGeneration
+  const isCurrentLoad = () =>
+    loadGeneration === sessionLoadGeneration &&
+    selectedSessionUuid.value === session.uuid
+  const sessionChanged = selectedSessionUuid.value !== session.uuid
   mySharesOpen.value = false
   clearAttachments()
   selectedSessionUuid.value = session.uuid
+  let loadedMessages
   try {
-    messages.value = await listMessages(session.uuid)
+    loadedMessages = await listMessages(session.uuid)
   } catch (error) {
+    if (!isCurrentLoad()) return
     if ([403, 404].includes(error?.response?.status)) {
       showError(t('lens.chat.sessionAccessDenied'))
       return
     }
     throw error
+  }
+  if (!isCurrentLoad()) return
+  messages.value = loadedMessages
+  if (sessionChanged) {
+    question.value = ''
+    if (composerRef.value) composerRef.value.style.height = 'auto'
   }
   currentRun.value = null
   resetStreamState()
@@ -2323,7 +2337,9 @@ async function selectSession(session, updateRoute = true) {
     })
   }
   await nextTick(scrollToBottom)
+  if (!isCurrentLoad()) return
   await maybeResumeActiveRun(session.uuid)
+  if (!isCurrentLoad()) return
   if (clearUnreadSession(window.localStorage, session.uuid)) {
     refreshUnreadSessions()
   }
