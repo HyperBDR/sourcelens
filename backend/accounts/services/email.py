@@ -292,6 +292,10 @@ class PasswordResetEmailService:
                 'reset_url': reset_url,
                 'uid': uid,
                 'token': token,
+                'expiry_hours': max(
+                    1,
+                    settings.PASSWORD_RESET_TIMEOUT // 3600,
+                ),
             })
 
             translation_code = get_translation_language_code(language)
