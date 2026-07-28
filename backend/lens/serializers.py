@@ -8,6 +8,10 @@ from django.urls import reverse
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
+from .assistant_lifecycle import (
+    AssistantNotRunnableError,
+    create_assistant_session,
+)
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE
 from .datasource_services import (
     DataSourceDispatchError,
@@ -415,6 +419,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "lensnode",
             "skill_summary",
             "mcp_summary",
+            "status",
             "created_at",
             "updated_at",
         ]
@@ -1730,6 +1735,7 @@ class RunOutputFileSerializer(serializers.ModelSerializer):
             "filename",
             "content_type",
             "byte_size",
+            "created_at",
         ]
         read_only_fields = fields
 
@@ -1946,17 +1952,17 @@ class SessionCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
 
     def create(self, validated_data):
-        assistant = Assistant.objects.get(uuid=validated_data["assistant_uuid"])
         request = self.context["request"]
-        if not assistant.is_accessible_by(request.user):
+        try:
+            return create_assistant_session(
+                validated_data["assistant_uuid"],
+                request.user,
+                validated_data.get("title", ""),
+            )
+        except AssistantNotRunnableError:
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
-        return Session.objects.create(
-            assistant=assistant,
-            user=request.user,
-            title=validated_data.get("title", ""),
-        )
 
 
 class RunCreateSerializer(serializers.Serializer):
@@ -1993,17 +1999,26 @@ class RunCreateSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         session = self.context["session"]
+        request = self.context.get("request")
         run_inline = validated_data.get("run_inline", False)
-        run = create_execution_run(
-            session=session,
-            question=validated_data.get("question", ""),
-            idempotency_key=validated_data.get("idempotency_key", ""),
-            enqueue=validated_data.get("enqueue", True) and not run_inline,
-            attachment_uuids=[
-                str(value)
-                for value in validated_data.get("attachment_uuids", [])
-            ],
-        )
+        try:
+            run = create_execution_run(
+                session=session,
+                question=validated_data.get("question", ""),
+                idempotency_key=validated_data.get("idempotency_key", ""),
+                enqueue=(
+                    validated_data.get("enqueue", True) and not run_inline
+                ),
+                attachment_uuids=[
+                    str(value)
+                    for value in validated_data.get("attachment_uuids", [])
+                ],
+                user=request.user if request else None,
+            )
+        except AssistantNotRunnableError:
+            raise PermissionDenied(
+                "You do not have access to this assistant."
+            )
         if run_inline:
             from .execution import execute_answer_run
 

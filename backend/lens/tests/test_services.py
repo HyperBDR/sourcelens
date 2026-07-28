@@ -1019,7 +1019,8 @@ class LensServiceTests(TransactionTestCase):
 
     def test_termination_detail_uses_fixed_public_contract(self):
         detail = sanitize_termination_detail({
-            "reason": "secret-token",
+            "reason": "evidence_unavailable",
+            "trigger": "soft_deadline",
             "capability": "mcp",
             "error_type": "secret-token",
             "tool": "Authorization: secret-token",
@@ -1027,7 +1028,11 @@ class LensServiceTests(TransactionTestCase):
             "code": "secret-token",
         })
 
-        self.assertEqual(detail, {"capability": "mcp"})
+        self.assertEqual(detail, {
+            "reason": "evidence_unavailable",
+            "trigger": "soft_deadline",
+            "capability": "mcp",
+        })
         self.assertNotIn("secret-token", str(detail))
 
     def test_run_serializer_hides_runtime_credentials(self):

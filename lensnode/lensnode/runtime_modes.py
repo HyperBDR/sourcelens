@@ -9,6 +9,7 @@ class RuntimeMode:
 
     name: str
     general_chat: bool = False
+    execution_gates: bool = False
 
     def decorate_event(self, detail):
         """Return internal event details for this runtime mode."""
@@ -28,6 +29,7 @@ class GeneralChatMode(RuntimeMode):
         super().__init__(
             name="general_chat",
             general_chat=True,
+            execution_gates=True,
         )
 
     def decorate_event(self, detail):
