@@ -30,7 +30,7 @@
                 type="text"
                 :placeholder="t('lensRuns.filterUsername')"
                 class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-36 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                @input="onFiltersChanged"
+                @input="onUsernameChanged"
               />
               <select
                 v-model="filters.assistant"
@@ -116,6 +116,7 @@
                     <th class="th">{{ t('lensRuns.colAssistant') }}</th>
                     <th class="th">{{ t('lensRuns.colQuestion') }}</th>
                     <th class="th">{{ t('lensRuns.colStatus') }}</th>
+                    <th class="th">{{ t('lensRuns.colFeedback') }}</th>
                     <th class="th">{{ t('lensRuns.colDuration') }}</th>
                     <th class="th">{{ t('lensRuns.colSteps') }}</th>
                   </tr>
@@ -141,6 +142,23 @@
                     </td>
                     <td class="td whitespace-nowrap">
                       <span :class="statusClass(r.status)">{{ r.status }}</span>
+                    </td>
+                    <td class="td whitespace-nowrap">
+                      <span
+                        v-if="r.feedback === 'positive'"
+                        class="feedback-pill feedback-pill-positive"
+                      >
+                        <ThumbsUp :size="13" />
+                        {{ t('lensRuns.feedbackHelpful') }}
+                      </span>
+                      <span
+                        v-else-if="r.feedback === 'negative'"
+                        class="feedback-pill feedback-pill-negative"
+                      >
+                        <ThumbsDown :size="13" />
+                        {{ t('lensRuns.feedbackUnhelpful') }}
+                      </span>
+                      <span v-else class="text-gray-400">—</span>
                     </td>
                     <td class="td text-gray-600 whitespace-nowrap tabular-nums">
                       {{ durationText(r.duration_seconds) }}
@@ -254,6 +272,19 @@
                     detail.event_count
                   }}</span>
                 </button>
+                <button
+                  class="detail-tab"
+                  data-testid="run-files-tab"
+                  :class="
+                    activeDetailTab === 'files' ? 'detail-tab-active' : ''
+                  "
+                  @click="activeDetailTab = 'files'"
+                >
+                  {{ t('lensRuns.tabFiles') }}
+                  <span class="ml-1 text-xs text-gray-400">{{
+                    (detail.output_files || []).length
+                  }}</span>
+                </button>
               </div>
 
               <!-- Overview tab -->
@@ -279,6 +310,28 @@
                   <div>
                     <dt class="text-gray-500">{{ t('lensRuns.colUser') }}</dt>
                     <dd class="mt-0.5 text-gray-900">{{ detail.username }}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-gray-500">
+                      {{ t('lensRuns.colFeedback') }}
+                    </dt>
+                    <dd class="mt-1">
+                      <span
+                        v-if="detail.feedback === 'positive'"
+                        class="feedback-pill feedback-pill-positive"
+                      >
+                        <ThumbsUp :size="13" />
+                        {{ t('lensRuns.feedbackHelpful') }}
+                      </span>
+                      <span
+                        v-else-if="detail.feedback === 'negative'"
+                        class="feedback-pill feedback-pill-negative"
+                      >
+                        <ThumbsDown :size="13" />
+                        {{ t('lensRuns.feedbackUnhelpful') }}
+                      </span>
+                      <span v-else class="text-sm text-gray-400">—</span>
+                    </dd>
                   </div>
                   <div>
                     <dt class="text-gray-500">
@@ -486,7 +539,8 @@
                   </h3>
                   <pre
                     class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap"
-                    >{{ detail.error }}</pre>
+                    >{{ detail.error }}</pre
+                  >
                 </section>
               </div>
 
@@ -634,10 +688,101 @@
                   {{ t('lensRuns.noTimeline') }}
                 </p>
               </div>
+
+              <!-- Files tab -->
+              <div v-show="activeDetailTab === 'files'" class="px-6 py-5">
+                <div
+                  v-if="detail.output_files && detail.output_files.length"
+                  class="space-y-3"
+                >
+                  <div
+                    v-for="file in detail.output_files"
+                    :key="file.uuid"
+                    class="rounded-lg border border-gray-200 bg-white p-4"
+                  >
+                    <div class="flex items-start gap-3">
+                      <span
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-500"
+                      >
+                        <FileText :size="20" aria-hidden="true" />
+                      </span>
+                      <div class="min-w-0 flex-1">
+                        <p
+                          class="truncate text-sm font-medium text-gray-900"
+                          :title="file.filename"
+                        >
+                          {{ file.filename }}
+                        </p>
+                        <dl
+                          class="mt-2 grid gap-x-4 gap-y-1 text-xs text-gray-500 sm:grid-cols-3"
+                        >
+                          <div>
+                            <dt class="sr-only">
+                              {{ t('lensRuns.fileType') }}
+                            </dt>
+                            <dd>{{ file.content_type || '-' }}</dd>
+                          </div>
+                          <div>
+                            <dt class="sr-only">
+                              {{ t('lensRuns.fileSize') }}
+                            </dt>
+                            <dd>{{ formatBytes(file.byte_size) }}</dd>
+                          </div>
+                          <div>
+                            <dt class="sr-only">
+                              {{ t('lensRuns.fileCreated') }}
+                            </dt>
+                            <dd data-testid="output-file-created">
+                              {{ formatDateTime(file.created_at) }}
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <div class="flex shrink-0 items-center gap-1">
+                        <button
+                          v-if="isPreviewable(file)"
+                          type="button"
+                          data-testid="preview-output-file"
+                          class="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600"
+                          :aria-label="
+                            t('lensRuns.previewFile', { name: file.filename })
+                          "
+                          @click="openPreview(file)"
+                        >
+                          <Eye :size="18" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="download-output-file"
+                          class="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600"
+                          :aria-label="
+                            t('lensRuns.downloadFile', { name: file.filename })
+                          "
+                          @click="downloadOutputFile(file)"
+                        >
+                          <Download :size="18" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p
+                  v-else
+                  class="py-12 text-center text-sm text-gray-400"
+                  data-testid="run-files-empty"
+                >
+                  {{ t('lensRuns.noFiles') }}
+                </p>
+              </div>
             </div>
           </div>
         </div>
       </Transition>
+      <FilePreviewModal
+        :file="previewFile"
+        @close="closePreview"
+        @download="downloadOutputFile"
+      />
     </div>
   </AdminLayout>
 </template>
@@ -645,12 +790,16 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
 import { useDebounceFn } from '@vueuse/core'
+import { Download, Eye, FileText, ThumbsDown, ThumbsUp } from '@lucide/vue'
 import { useToast } from '@/composables/useToast'
 import { extractErrorMessage } from '@/utils/api'
+import { fetchDeliverableBlob, isPreviewable } from '@/utils/filePreview'
 import { getAdminRuns, getAdminRun, listAssistants } from '@/api/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
+import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -659,6 +808,8 @@ import AuthImage from '@/components/ui/AuthImage.vue'
 
 const { t, locale } = useI18n()
 const { showError } = useToast()
+const route = useRoute()
+const router = useRouter()
 
 const loading = ref(false)
 const runs = ref([])
@@ -672,10 +823,13 @@ const detailLoading = ref(false)
 const detail = ref(null)
 const selectedUuid = ref(null)
 const activeDetailTab = ref('overview')
+const previewFile = ref(null)
 
 const filters = ref({
   q: '',
   username: '',
+  user_id: '',
+  group_id: '',
   assistant: '',
   status: '',
   start_date: '',
@@ -860,6 +1014,38 @@ function formatDateTime(val) {
   }
 }
 
+function formatBytes(size) {
+  if (size === null || size === undefined) return '-'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function openPreview(file) {
+  previewFile.value = file
+}
+
+function closePreview() {
+  previewFile.value = null
+}
+
+async function downloadOutputFile(file) {
+  if (!file?.url) return
+  try {
+    const blob = await fetchDeliverableBlob(file)
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = file.filename || 'download'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+  } catch {
+    showError(t('lensRuns.downloadFailed'))
+  }
+}
+
 const queueText = computed(() => {
   const d = detail.value
   if (!d?.created_at || !d?.started_at) return '-'
@@ -873,18 +1059,27 @@ function onFiltersChanged() {
   debouncedFetch()
 }
 
+function onUsernameChanged() {
+  filters.value.user_id = ''
+  filters.value.group_id = ''
+  onFiltersChanged()
+}
+
 const debouncedFetch = useDebounceFn(() => fetchRuns(), 300)
 
 function resetFilters() {
   filters.value = {
     q: '',
     username: '',
+    user_id: '',
+    group_id: '',
     assistant: '',
     status: '',
     start_date: '',
     end_date: ''
   }
   page.value = 1
+  router.replace({ path: route.path })
   fetchRuns()
 }
 
@@ -910,12 +1105,14 @@ function openDetail(uuid) {
   detailVisible.value = true
   detail.value = null
   activeDetailTab.value = 'overview'
+  previewFile.value = null
 }
 
 function closeDetail() {
   detailVisible.value = false
   selectedUuid.value = null
   detail.value = null
+  previewFile.value = null
 }
 
 async function fetchRuns() {
@@ -952,6 +1149,10 @@ async function fetchDetail() {
 }
 
 onMounted(async () => {
+  filters.value.user_id = String(route.query.user_id || '')
+  filters.value.group_id = String(route.query.group_id || '')
+  filters.value.username = String(route.query.username || '')
+  filters.value.assistant = String(route.query.assistant || '')
   try {
     assistants.value = await listAssistants()
   } catch {
@@ -977,6 +1178,18 @@ watch(detailVisible, (visible) => {
 }
 .td {
   @apply px-4 py-3 text-sm;
+}
+
+.feedback-pill {
+  @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+}
+
+.feedback-pill-positive {
+  @apply bg-green-100 text-green-800;
+}
+
+.feedback-pill-negative {
+  @apply bg-red-100 text-red-800;
 }
 
 .detail-tab {

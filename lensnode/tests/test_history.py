@@ -581,6 +581,109 @@ def test_unmatched_capability_returns_before_any_tool_call(monkeypatch):
     assert tool_calls["count"] == 0
 
 
+def test_legacy_runtime_modes_skip_general_chat_execution_gates(
+    monkeypatch,
+    tmp_path,
+):
+    model_options = []
+    run_options = []
+
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 1}
+
+        def __init__(self, **options):
+            model_options.append(options)
+
+    resources = SimpleNamespace(
+        root=tmp_path,
+        context_skill_contents=[],
+        mcp_configs=[],
+        skill_paths=[],
+        mcp_config_path=tmp_path / "mcp.json",
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+        summary_trigger_tokens=0,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _config: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_kwargs: object(),
+    )
+
+    def run_agent(*_args, **options):
+        run_options.append(options)
+        return "legacy answer", False, None
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_run_agent_with_turn_limit",
+        run_agent,
+    )
+    runtime = agent_runtime.LensDeepAgentRuntime(config)
+    wrapup_event = threading.Event()
+
+    for task in ("knowledge_qa", "code_analysis"):
+        result = runtime._answer_sync(
+            {
+                "run_uuid": f"legacy-{task}",
+                "task": task,
+                "question": "Question",
+                "agent_model_ref": "model-ref",
+            },
+            wrapup_event=wrapup_event,
+        )
+
+        assert result["answer"] == "legacy answer"
+        assert result["outcome"] == "completed"
+        assert result["termination_detail"] == {}
+
+    assert all(
+        options["general_chat_execution_gates"] is False
+        for options in model_options
+    )
+    for options in run_options:
+        assert options["wrapup_event"] is None
+        assert options["token_budget_wrapup_event"] is None
+        assert "capability_stop_event" not in options
+
+
 def test_unverified_answer_distinguishes_unavailable_from_execution_failure():
     unavailable = agent_runtime._unverified_execution_answer(
         "创建一个订单",
@@ -658,6 +761,7 @@ def test_malformed_route_fails_closed_to_tool_evidence():
 def test_advisory_missing_capability_does_not_override_skill_success():
     middleware = SimpleNamespace(
         success_count=1,
+        successful_capabilities={"skill"},
         outcome="completed",
         termination_detail={},
     )
@@ -665,6 +769,7 @@ def test_advisory_missing_capability_does_not_override_skill_success():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=middleware,
         evidence_requirement="tool_result",
+        required_capabilities=["skill"],
         truncated=False,
         stop_reason=None,
     )
@@ -691,6 +796,72 @@ def test_advisory_missing_capability_blocks_unverified_answer():
     assert termination_detail["reason"] == "evidence_unavailable"
 
 
+def test_missing_required_capability_fails_closed_despite_global_success():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"mcp"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=[],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "blocked"
+    assert termination_detail["reason"] == "evidence_unavailable"
+
+
+def test_unrelated_success_does_not_satisfy_required_skill_evidence():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"mcp"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "blocked"
+    assert termination_detail["reason"] == "evidence_unavailable"
+    assert termination_detail["capability"] == "skill"
+
+
+def test_alternative_required_capability_can_complete_after_failure():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"mcp"},
+        outcome="partial",
+        termination_detail={
+            "reason": "execution_failed",
+            "capability": "skill",
+            "error_type": "configuration",
+            "tool": "call_skill_api",
+        },
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill", "mcp"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
+
+
 def test_guidance_skill_does_not_require_tool_execution():
     middleware = SimpleNamespace(
         success_count=0,
@@ -710,7 +881,7 @@ def test_guidance_skill_does_not_require_tool_execution():
     assert termination_detail == {}
 
 
-def test_artifact_requirement_needs_actual_delivery():
+def test_artifact_requirement_is_partial_with_relevant_skill_evidence():
     middleware = SimpleNamespace(
         success_count=1,
         successful_capabilities={"skill"},
@@ -721,11 +892,12 @@ def test_artifact_requirement_needs_actual_delivery():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=middleware,
         evidence_requirement="artifact",
+        required_capabilities=["skill", "artifact_delivery"],
         truncated=False,
         stop_reason=None,
     )
 
-    assert outcome == "blocked"
+    assert outcome == "partial"
     assert termination_detail["reason"] == "evidence_unavailable"
 
 
@@ -759,12 +931,77 @@ def test_blocked_evidence_is_not_downgraded_to_partial_when_truncated():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=middleware,
         evidence_requirement="tool_result",
+        required_capabilities=["skill"],
         truncated=True,
-        stop_reason="turn_limit",
+        stop_reason="soft_deadline",
     )
 
     assert outcome == "blocked"
     assert termination_detail["reason"] == "evidence_unavailable"
+    assert termination_detail["trigger"] == "soft_deadline"
+
+
+def test_relevant_evidence_is_partial_at_soft_deadline():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"skill"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=True,
+        stop_reason="soft_deadline",
+    )
+
+    assert outcome == "partial"
+    assert termination_detail == {"reason": "soft_deadline"}
+
+
+def test_relevant_evidence_is_partial_after_unrecovered_failure():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["skill"],
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "call-1",
+            "args": {"query": "orders"},
+        },
+    )
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":true,"orders":[]}',
+            name="run_skill_artifact",
+            tool_call_id="call-1",
+        ),
+    )
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"TIMEOUT"}',
+            name="run_skill_artifact",
+            tool_call_id="call-2",
+            status="error",
+        ),
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "partial"
+    assert termination_detail["reason"] == "execution_failed"
+    assert termination_detail["capability"] == "skill"
 
 
 def test_guidance_becomes_partial_when_execution_is_truncated():
@@ -797,6 +1034,7 @@ def test_validated_bulk_result_completes_after_token_budget_wrapup():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=middleware,
         evidence_requirement="tool_result",
+        required_capabilities=["skill"],
         truncated=True,
         stop_reason="token_capped",
         runtime_evidence={
@@ -814,6 +1052,19 @@ def test_validated_bulk_result_completes_after_token_budget_wrapup():
     assert termination_detail == {}
 
 
+def test_legacy_runtime_ignores_general_chat_outcome_gates():
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=None,
+        evidence_requirement="none",
+        truncated=True,
+        stop_reason="turn_limit",
+        execution_gate_enabled=False,
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
+
+
 def test_validation_without_expected_count_remains_partial_after_wrapup():
     middleware = SimpleNamespace(
         success_count=1,
@@ -825,6 +1076,7 @@ def test_validation_without_expected_count_remains_partial_after_wrapup():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=middleware,
         evidence_requirement="tool_result",
+        required_capabilities=["skill"],
         truncated=True,
         stop_reason="token_capped",
         runtime_evidence={
@@ -853,6 +1105,7 @@ def test_invalid_bulk_result_remains_partial_after_token_budget_wrapup():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=middleware,
         evidence_requirement="tool_result",
+        required_capabilities=["skill"],
         truncated=True,
         stop_reason="token_capped",
         runtime_evidence={"record_validation": {"valid": False}},
@@ -860,8 +1113,6 @@ def test_invalid_bulk_result_remains_partial_after_token_budget_wrapup():
 
     assert outcome == "partial"
     assert termination_detail == {"reason": "token_capped"}
-
-
 def test_plan_steps_are_bounded_and_normalized():
     todos = [
         {"content": "x" * 300, "status": "unknown"},
@@ -909,12 +1160,10 @@ def test_plan_execute_prompt_requires_a_stable_initial_plan():
     assert "may only update statuses" in prompt
 
 
-def test_execution_boundary_stops_configuration_failure_immediately():
+def test_execution_boundary_disables_configuration_failure_capability():
     events = []
-    stop_event = threading.Event()
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
         emit_event=lambda name, detail: events.append((name, detail)),
-        stop_event=stop_event,
     )
     request = SimpleNamespace(
         tool=SimpleNamespace(name="call_skill_api"),
@@ -932,18 +1181,22 @@ def test_execution_boundary_stops_configuration_failure_immediately():
     )
 
     assert result.status == "error"
-    assert stop_event.is_set()
     assert middleware.outcome == "blocked"
+    assert middleware.blocked_capabilities == {"skill"}
+    remaining = middleware._filter_tools(
+        [
+            SimpleNamespace(name="call_skill_api"),
+            SimpleNamespace(name="mcp__orders"),
+        ]
+    )
+    assert [tool.name for tool in remaining] == ["mcp__orders"]
     assert middleware.termination_detail["capability"] == "skill"
     assert middleware.termination_detail["reason"] == "execution_failed"
-    assert events[0][0] == "workflow.execution.failed"
+    assert events[0][0] == "deepagents.capability.exhausted"
 
 
 def test_capability_boundary_allows_one_transient_retry():
-    stop_event = threading.Event()
-    middleware = agent_runtime.CapabilityBoundaryMiddleware(
-        stop_event=stop_event
-    )
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
     request = SimpleNamespace(
         tool=SimpleNamespace(name="mcp__orders"),
         tool_call={"name": "mcp__orders", "id": "call-1"},
@@ -958,17 +1211,244 @@ def test_capability_boundary_allows_one_transient_retry():
         )
 
     middleware.wrap_tool_call(request, fail)
-    assert not stop_event.is_set()
     middleware.wrap_tool_call(request, fail)
-    assert stop_event.is_set()
+    assert middleware.blocked_tools == {"mcp__orders"}
     assert middleware.termination_detail["capability"] == "mcp"
 
 
-def test_capability_boundary_allows_artifact_argument_correction_after_404():
-    stop_event = threading.Event()
-    middleware = agent_runtime.CapabilityBoundaryMiddleware(
-        stop_event=stop_event
+def test_request_failures_are_isolated_by_normalized_arguments():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+
+    def fail(request):
+        return ToolMessage(
+            content='{"ok":false,"error":"INVALID_QUERY"}',
+            name="mcp__orders",
+            tool_call_id=request.tool_call["id"],
+            status="error",
+        )
+
+    first = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={
+            "name": "mcp__orders",
+            "id": "call-1",
+            "args": {"filters": {"status": "open", "year": 2025}},
+        },
     )
+    reordered = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={
+            "name": "mcp__orders",
+            "id": "call-2",
+            "args": {"filters": {"year": 2025, "status": "open"}},
+        },
+    )
+    corrected = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={
+            "name": "mcp__orders",
+            "id": "call-3",
+            "args": {"filters": {"year": 2024, "status": "open"}},
+        },
+    )
+
+    middleware.wrap_tool_call(first, fail)
+    middleware.wrap_tool_call(corrected, fail)
+
+    assert middleware.blocked_tools == set()
+
+    middleware.wrap_tool_call(reordered, fail)
+
+    assert middleware.blocked_tools == {"mcp__orders"}
+
+
+def test_request_corrections_have_a_separate_capability_failure_cap():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+
+    for index in range(4):
+        request = SimpleNamespace(
+            tool=SimpleNamespace(name="mcp__orders"),
+            tool_call={
+                "name": "mcp__orders",
+                "id": f"call-{index}",
+                "args": {"query": f"invalid query {index}"},
+            },
+        )
+        middleware.wrap_tool_call(
+            request,
+            lambda current: ToolMessage(
+                content='{"ok":false,"error":"INVALID_QUERY"}',
+                name="mcp__orders",
+                tool_call_id=current.tool_call["id"],
+                status="error",
+            ),
+        )
+
+    assert middleware.blocked_capabilities == {"mcp"}
+    assert middleware.capability_failure_counts["mcp"] == 4
+
+
+def test_unclassified_tool_failure_allows_one_correction_attempt():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={"name": "mcp__orders", "id": "call-1", "args": {}},
+    )
+
+    def fail(_request):
+        return ToolMessage(
+            content='{"ok":false,"error":"REMOTE_BROKEN"}',
+            name="mcp__orders",
+            tool_call_id="call-1",
+            status="error",
+        )
+
+    middleware.wrap_tool_call(request, fail)
+    assert middleware.blocked_tools == set()
+
+    middleware.wrap_tool_call(request, fail)
+    assert middleware.blocked_tools == {"mcp__orders"}
+
+
+def test_non_idempotent_write_does_not_receive_transient_retry():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(
+            name="mcp__orders__create",
+            metadata={"operation": "write", "idempotent": False},
+        ),
+        tool_call={
+            "name": "mcp__orders__create",
+            "id": "call-1",
+            "args": {"amount": 100},
+        },
+    )
+
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"TIMEOUT"}',
+            name="mcp__orders__create",
+            tool_call_id="call-1",
+            status="error",
+        ),
+    )
+
+    assert middleware.blocked_tools == {"mcp__orders__create"}
+
+
+def test_alternative_capability_recovery_is_counted_without_arguments():
+    events = []
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        emit_event=lambda name, detail: events.append((name, detail)),
+        required_capabilities=["skill", "mcp"],
+    )
+    skill_request = SimpleNamespace(
+        tool=SimpleNamespace(name="call_skill_api"),
+        tool_call={
+            "name": "call_skill_api",
+            "id": "call-1",
+            "args": {"authorization": "must-not-be-emitted"},
+        },
+    )
+    mcp_request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={
+            "name": "mcp__orders",
+            "id": "call-2",
+            "args": {"query": "orders"},
+        },
+    )
+
+    middleware.wrap_tool_call(
+        skill_request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"AUTH_REQUIRED"}',
+            name="call_skill_api",
+            tool_call_id="call-1",
+            status="error",
+        ),
+    )
+    middleware.wrap_tool_call(
+        mcp_request,
+        lambda _request: ToolMessage(
+            content='{"ok":true,"orders":[]}',
+            name="mcp__orders",
+            tool_call_id="call-2",
+        ),
+    )
+
+    recovered = [
+        detail
+        for name, detail in events
+        if name == "deepagents.capability.recovered"
+    ]
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill", "mcp"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert middleware.alternative_recovery_count == 1
+    assert recovered[0]["recovery_type"] == "alternative_capability"
+    assert "must-not-be-emitted" not in str(recovered)
+    assert outcome == "completed"
+    assert termination_detail == {}
+
+
+def test_corrected_request_recovery_is_counted():
+    events = []
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        emit_event=lambda name, detail: events.append((name, detail)),
+        required_capabilities=["mcp"],
+    )
+    failed_request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={
+            "name": "mcp__orders",
+            "id": "call-1",
+            "args": {"query": "invalid"},
+        },
+    )
+    corrected_request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={
+            "name": "mcp__orders",
+            "id": "call-2",
+            "args": {"query": "valid"},
+        },
+    )
+
+    middleware.wrap_tool_call(
+        failed_request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"INVALID_QUERY"}',
+            name="mcp__orders",
+            tool_call_id="call-1",
+            status="error",
+        ),
+    )
+    middleware.wrap_tool_call(
+        corrected_request,
+        lambda _request: ToolMessage(
+            content='{"ok":true,"orders":[]}',
+            name="mcp__orders",
+            tool_call_id="call-2",
+        ),
+    )
+
+    assert middleware.correction_recovery_count == 1
+    assert any(
+        name == "deepagents.capability.recovered"
+        and detail["recovery_type"] == "corrected_request"
+        for name, detail in events
+    )
+
+
+def test_capability_boundary_allows_artifact_argument_correction_after_404():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
     request = SimpleNamespace(
         tool=SimpleNamespace(name="run_skill_artifact"),
         tool_call={"name": "run_skill_artifact", "id": "call-1"},
@@ -993,17 +1473,13 @@ def test_capability_boundary_allows_artifact_argument_correction_after_404():
 
     middleware.wrap_tool_call(request, not_found)
 
-    assert not stop_event.is_set()
     middleware.wrap_tool_call(request, not_found)
-    assert stop_event.is_set()
+    assert middleware.blocked_tools == {"run_skill_artifact"}
     assert middleware.termination_detail["error_type"] == "request"
 
 
 def test_capability_boundary_tracks_distinct_artifact_requests_separately():
-    stop_event = threading.Event()
-    middleware = agent_runtime.CapabilityBoundaryMiddleware(
-        stop_event=stop_event
-    )
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
     get_request = SimpleNamespace(
         tool=SimpleNamespace(name="run_skill_artifact"),
         tool_call={
@@ -1044,16 +1520,14 @@ def test_capability_boundary_tracks_distinct_artifact_requests_separately():
     middleware.wrap_tool_call(get_request, not_found)
     middleware.wrap_tool_call(list_request, not_found)
 
-    assert not stop_event.is_set()
+    assert middleware.blocked_tools == set()
     assert middleware.termination_detail == {}
 
 
 def test_execution_boundary_classifies_artifact_http_500_as_transient():
     events = []
-    stop_event = threading.Event()
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
         emit_event=lambda name, detail: events.append((name, detail)),
-        stop_event=stop_event,
     )
     request = SimpleNamespace(
         tool=SimpleNamespace(name="run_skill_artifact"),
@@ -1075,13 +1549,12 @@ def test_execution_boundary_classifies_artifact_http_500_as_transient():
         )
 
     middleware.wrap_tool_call(request, fail)
-    assert not stop_event.is_set()
     middleware.wrap_tool_call(request, fail)
 
-    assert stop_event.is_set()
+    assert middleware.blocked_tools == {"run_skill_artifact"}
     assert middleware.termination_detail["reason"] == "execution_failed"
     assert middleware.termination_detail["error_type"] == "transient"
-    assert events[0][0] == "workflow.execution.failed"
+    assert events[0][0] == "deepagents.capability.exhausted"
 
 
 def test_capability_boundary_counts_raw_mcp_success_as_evidence():
@@ -1122,6 +1595,18 @@ def test_capability_boundary_rejects_raw_mcp_error_as_evidence():
     )
 
     assert middleware.success_count == 0
+    assert middleware.termination_detail == {}
+
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content="remote order service failed",
+            name="mcp__orders__lookup",
+            tool_call_id="call-1",
+            status="error",
+        ),
+    )
+
     assert middleware.termination_detail["capability"] == "mcp"
 
 
@@ -1172,10 +1657,7 @@ def test_capability_boundary_counts_workspace_summary_as_evidence():
 
 
 def test_capability_boundary_marks_partial_after_prior_success():
-    stop_event = threading.Event()
-    middleware = agent_runtime.CapabilityBoundaryMiddleware(
-        stop_event=stop_event
-    )
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
     success_request = SimpleNamespace(
         tool=SimpleNamespace(name="run_skill_artifact"),
         tool_call={"name": "run_skill_artifact", "id": "call-success"},
@@ -1202,8 +1684,16 @@ def test_capability_boundary_marks_partial_after_prior_success():
             status="error",
         ),
     )
+    middleware.wrap_tool_call(
+        failed_request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"DELIVERY_FAILED"}',
+            name="save_deliverable",
+            tool_call_id="call-failed",
+            status="error",
+        ),
+    )
 
-    assert stop_event.is_set()
     assert middleware.outcome == "partial"
     assert middleware.successful_capabilities == {"skill"}
     assert middleware.termination_detail["capability"] == "artifact_delivery"
@@ -1445,9 +1935,14 @@ def test_turn_limit_excludes_historical_assistant_turns():
     prefix = [_Msg("human", "q1"), _Msg("ai", "a1"), _Msg("human", "q2")]
     agent = _FakeStreamAgent(prefix, new_ai_turns=5)
 
-    answer, truncated = _run_agent_with_turn_limit(agent, messages, max_turns=3)
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=3,
+    )
 
     assert truncated is True
+    assert termination_reason == "turn_limit"
     # stops at the 3rd NEW turn; without baseline it would stop at the 2nd
     assert "answer 3" in answer
 
@@ -1457,10 +1952,33 @@ def test_turn_limit_no_history_runs_to_completion():
     prefix = [_Msg("human", "q")]
     agent = _FakeStreamAgent(prefix, new_ai_turns=2)
 
-    answer, truncated = _run_agent_with_turn_limit(agent, messages, max_turns=5)
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=5,
+    )
 
     assert truncated is False
+    assert termination_reason is None
     assert "answer 2" in answer
+
+
+def test_provider_loop_gate_is_preserved_after_natural_agent_finish():
+    messages = [{"role": "user", "content": "q"}]
+    prefix = [_Msg("human", "q")]
+    agent = _FakeStreamAgent(prefix, new_ai_turns=1)
+    model = SimpleNamespace(stop_reason="loop_capped")
+
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=5,
+        model=model,
+    )
+
+    assert answer == "answer 1"
+    assert truncated is False
+    assert termination_reason == "loop_capped"
 
 
 def test_pick_text_picks_chinese_only_for_chinese():
@@ -1577,7 +2095,7 @@ def test_truncated_run_falls_back_to_wrapup_when_no_answer_text():
 
     model = _FakeWrapupModel("best-effort synthesis")
 
-    answer, truncated = _run_agent_with_turn_limit(
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
         _ToolCallEndingAgent(),
         messages,
         max_turns=3,
@@ -1586,6 +2104,7 @@ def test_truncated_run_falls_back_to_wrapup_when_no_answer_text():
     )
 
     assert truncated is True
+    assert termination_reason == "turn_limit"
     assert "best-effort synthesis" in answer
     assert "Reached the current analysis-depth limit" in answer
     assert model.invoked_with is not None
@@ -1599,7 +2118,7 @@ def test_soft_deadline_forces_wrapup_from_current_evidence():
     wrapup_event = threading.Event()
     wrapup_event.set()
 
-    answer, truncated = _run_agent_with_turn_limit(
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
         agent,
         messages,
         max_turns=5,
@@ -1609,6 +2128,7 @@ def test_soft_deadline_forces_wrapup_from_current_evidence():
     )
 
     assert truncated is True
+    assert termination_reason == "soft_deadline"
     assert "deadline synthesis" in answer
     assert "hard deadline" in answer
     assert model.invoked_with is not None
@@ -1622,7 +2142,7 @@ def test_token_budget_forces_tool_free_wrapup_from_current_evidence():
     token_budget_wrapup_event = threading.Event()
     token_budget_wrapup_event.set()
 
-    answer, truncated = _run_agent_with_turn_limit(
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
         agent,
         messages,
         max_turns=5,
@@ -1632,6 +2152,7 @@ def test_token_budget_forces_tool_free_wrapup_from_current_evidence():
     )
 
     assert truncated is True
+    assert termination_reason == "token_budget_wrapup"
     assert "budget synthesis" in answer
     assert "token budget" not in answer.lower()
     assert "Token 调查预算" not in answer
@@ -1651,7 +2172,7 @@ def test_empty_terminal_response_recovers_once_without_tools():
     model = _FakeWrapupModel("recovered answer")
     events = []
 
-    answer, truncated = _run_agent_with_turn_limit(
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
         _EmptyEndingAgent(),
         [{"role": "user", "content": "q"}],
         max_turns=5,
@@ -1661,6 +2182,7 @@ def test_empty_terminal_response_recovers_once_without_tools():
 
     assert answer == "recovered answer"
     assert truncated is False
+    assert termination_reason is None
     assert model.call_count == 1
     assert any(name == "deepagents.answer.recovery" for name, _ in events)
 

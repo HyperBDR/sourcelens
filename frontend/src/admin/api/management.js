@@ -10,8 +10,10 @@ function extractData(res) {
 }
 
 export const managementApi = {
-  getUsers(params = {}) {
-    return apiClient.get('/v1/management/users/', { params }).then(extractData)
+  getUsers(params = {}, config = {}) {
+    return apiClient
+      .get('/v1/management/users/', { ...config, params })
+      .then(extractData)
   },
 
   createUser(body) {
@@ -24,8 +26,10 @@ export const managementApi = {
       .then(extractData)
   },
 
-  getGroups(params = {}) {
-    return apiClient.get('/v1/management/groups/', { params }).then(extractData)
+  getGroups(params = {}, config = {}) {
+    return apiClient
+      .get('/v1/management/groups/', { ...config, params })
+      .then(extractData)
   },
 
   createGroup(body) {

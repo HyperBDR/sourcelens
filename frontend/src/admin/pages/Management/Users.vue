@@ -127,15 +127,24 @@
                 <tr
                   v-for="user in users"
                   :key="user.id"
-                  class="transition-colors hover:bg-line-soft"
+                  class="cursor-pointer transition-colors hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                  data-testid="user-detail-row"
+                  tabindex="0"
+                  @click="openDetail(user)"
+                  @keydown.enter.self="openDetail(user)"
+                  @keydown.space.self.prevent="openDetail(user)"
                 >
                   <td class="table-cell font-mono text-ink-500">
                     {{ user.id }}
                   </td>
                   <td class="table-cell">
-                    <div class="font-medium text-ink-900">
+                    <button
+                      class="font-medium text-brand-700 hover:underline"
+                      data-testid="user-detail-trigger"
+                      @click.stop="openDetail(user)"
+                    >
                       {{ user.username }}
-                    </div>
+                    </button>
                     <div class="text-xs text-ink-400">
                       {{ user.display_name || '—' }}
                     </div>
@@ -170,7 +179,7 @@
                       <BaseButton
                         variant="outline"
                         size="sm"
-                        @click="openEditModal(user)"
+                        @click.stop="openEditModal(user)"
                       >
                         {{ t('common.edit') }}
                       </BaseButton>
@@ -181,7 +190,7 @@
                         "
                         size="sm"
                         :loading="togglingId === user.id"
-                        @click="toggleActive(user)"
+                        @click.stop="toggleActive(user)"
                       >
                         {{
                           user.is_active !== false
@@ -208,6 +217,14 @@
           />
         </div>
       </section>
+
+      <UserDetailDrawer
+        :show="!!detailUser"
+        :user="detailUser"
+        @close="detailUser = null"
+        @edit="editFromDetail"
+        @history="openUserHistory"
+      />
 
       <BaseDrawer
         :show="showModal"
@@ -318,6 +335,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
@@ -328,10 +346,12 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/store/user'
 import { managementApi } from '@/admin/api'
+import UserDetailDrawer from './UserDetailDrawer.vue'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 const userStore = useUserStore()
+const router = useRouter()
 
 const users = ref([])
 const loading = ref(false)
@@ -344,6 +364,7 @@ const usernameFilterInput = ref('')
 const usernameFilter = ref('')
 const emailFilterInput = ref('')
 const emailFilter = ref('')
+const detailUser = ref(null)
 
 const currentUserId = computed(() => userStore.userInfo?.id)
 
@@ -420,6 +441,28 @@ function openEditModal(user) {
       : []
   }
   showModal.value = true
+}
+
+function openDetail(user) {
+  detailUser.value = user
+}
+
+function editFromDetail(user) {
+  detailUser.value = null
+  openEditModal(user)
+}
+
+function openUserHistory(assistant) {
+  const user = detailUser.value
+  if (!user) return
+  router.push({
+    path: '/management/lens/runs',
+    query: {
+      user_id: String(user.id),
+      username: user.username,
+      ...(assistant?.slug ? { assistant: assistant.slug } : {})
+    }
+  })
 }
 
 async function loadOptions() {

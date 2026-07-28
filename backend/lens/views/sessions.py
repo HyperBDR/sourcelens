@@ -14,8 +14,10 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from lens.assistant_lifecycle import AssistantNotRunnableError
 from lens.attachments import AttachmentError, store_message_attachment
 from lens.models import (
+    Assistant,
     MessageAttachment,
     Run,
     RunOutputFile,
@@ -26,6 +28,7 @@ from lens.serializers import (
     MessageAttachmentSerializer,
     MessageSerializer,
     RunCreateSerializer,
+    RunFeedbackSerializer,
     RunSerializer,
     SessionCreateSerializer,
     SessionSerializer,
@@ -130,13 +133,16 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Create an execution run for a session."""
 
         session = self.get_object()
-        if not session.assistant.is_accessible_by(request.user):
+        if (
+            session.assistant.status != Assistant.Status.ACTIVE
+            or not session.assistant.is_accessible_by(request.user)
+        ):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
         serializer = RunCreateSerializer(
             data=request.data,
-            context={"session": session},
+            context={"session": session, "request": request},
         )
         serializer.is_valid(raise_exception=True)
         run = serializer.save()
@@ -153,7 +159,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Upload one image attachment for a session question."""
 
         session = self.get_object()
-        if not session.assistant.is_accessible_by(request.user):
+        if (
+            session.assistant.status != Assistant.Status.ACTIVE
+            or not session.assistant.is_accessible_by(request.user)
+        ):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
@@ -165,6 +174,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         try:
             attachment = store_message_attachment(
                 session, request.user, uploaded
+            )
+        except AssistantNotRunnableError:
+            raise PermissionDenied(
+                "You do not have access to this assistant."
             )
         except AttachmentError as exc:
             raise ValidationError(str(exc))
@@ -250,6 +263,16 @@ class RunViewSet(BaseAuthenticatedViewSet):
 
         queryset = super().get_queryset()
         return queryset.filter(session__user=self.request.user)
+
+    @action(detail=True, methods=["patch"])
+    def feedback(self, request, uuid=None):
+        """Set, switch, or clear feedback for a completed answer."""
+
+        run = self.get_object()
+        serializer = RunFeedbackSerializer(run, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
     @action(
         detail=True,

@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  answerCompletionTitle,
   clearUnreadSession,
   handleTerminalRun,
   pollRunUntilTerminal,
-  readUnreadSessions
+  readUnreadSessions,
+  shouldReviewUnreadSession
 } from '../src/utils/answerCompletionNotifications.js'
 
 class MemoryStorage {
@@ -36,6 +38,46 @@ function completionOptions(overrides = {}) {
     ...overrides
   }
 }
+
+test('uses a bell instead of an unread count in the browser title', () => {
+  assert.equal(
+    answerCompletionTitle({
+      baseTitle: 'SourceLens',
+      completionLabel: 'Answer completed',
+      hasUnread: true
+    }),
+    '🔔 Answer completed · SourceLens'
+  )
+  assert.equal(
+    answerCompletionTitle({
+      baseTitle: 'SourceLens',
+      completionLabel: 'Answer completed',
+      hasUnread: false
+    }),
+    'SourceLens'
+  )
+})
+
+test('reviews the selected unread conversation once the page is visible', () => {
+  const unreadSessions = { 'session-a': 'run-1' }
+
+  assert.equal(
+    shouldReviewUnreadSession({
+      documentRef: { visibilityState: 'visible' },
+      selectedSessionUuid: 'session-a',
+      unreadSessions
+    }),
+    true
+  )
+  assert.equal(
+    shouldReviewUnreadSession({
+      documentRef: { visibilityState: 'hidden' },
+      selectedSessionUuid: 'session-a',
+      unreadSessions
+    }),
+    false
+  )
+})
 
 test('marks a completed non-selected conversation unread', () => {
   const options = completionOptions()

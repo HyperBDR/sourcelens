@@ -2,6 +2,8 @@ import hashlib
 import io
 import json
 import tempfile
+import threading
+import uuid
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,8 +13,8 @@ from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connection
-from django.test import TestCase, override_settings
+from django.db import close_old_connections, connection
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -21,6 +23,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_task.adapters.django.models import TaskExecution
 
+from accounts.models import Role
 from lens.datasource_services import test_datasource_connection
 from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
@@ -33,8 +36,10 @@ from lens.models import (
     GlobalSetting,
     LensNode,
     MCPServer,
-    Session,
+    MessageAttachment,
+    Run,
     ScheduledTask,
+    Session,
     SharedQA,
     Skill,
 )
@@ -308,6 +313,73 @@ class LensApiTests(TestCase):
         self.assertEqual(
             response.data["description"],
             "Updated assistant description.",
+        )
+
+    def test_assistant_archive_moves_it_to_archived_list(self):
+        response = self.client.post(
+            f"/api/lens/assistants/{self.assistant.uuid}/archive/",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "archived")
+        self.assistant.refresh_from_db()
+        self.assertEqual(self.assistant.status, "archived")
+
+        active_response = self.client.get("/api/lens/assistants/")
+        active_slugs = [
+            assistant["slug"] for assistant in active_response.data["results"]
+        ]
+        self.assertNotIn(self.assistant.slug, active_slugs)
+
+        archived_response = self.client.get(
+            "/api/lens/assistants/",
+            {"archived": "true"},
+        )
+        archived_slugs = [
+            assistant["slug"]
+            for assistant in archived_response.data["results"]
+        ]
+        self.assertIn(self.assistant.slug, archived_slugs)
+
+    def test_assistant_restore_returns_it_to_active_list(self):
+        self.assistant.status = "archived"
+        self.assistant.save(update_fields=["status"])
+
+        response = self.client.post(
+            f"/api/lens/assistants/{self.assistant.uuid}/restore/",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "active")
+        self.assistant.refresh_from_db()
+        self.assertEqual(self.assistant.status, "active")
+        active_slugs = [
+            assistant["slug"]
+            for assistant in self.client.get(
+                "/api/lens/assistants/"
+            ).data["results"]
+        ]
+        self.assertIn(self.assistant.slug, active_slugs)
+
+    def test_assistant_status_cannot_bypass_lifecycle_actions(self):
+        response = self.client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {"status": "archived"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assistant.refresh_from_db()
+        self.assertEqual(self.assistant.status, Assistant.Status.ACTIVE)
+
+    def test_assistant_delete_is_not_available(self):
+        response = self.client.delete(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+        )
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(
+            Assistant.objects.filter(uuid=self.assistant.uuid).exists()
         )
 
     def test_assistant_create_saves_workspace_guide_skill(self):
@@ -1602,6 +1674,23 @@ class LensApiTests(TestCase):
         )
         self.assertEqual(runtime[0]["environment"], {})
 
+    def test_dispatch_rejects_run_queued_before_assistant_was_archived(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Question", enqueue=False)
+        self.assistant.status = Assistant.Status.ARCHIVED
+        self.assistant.save(update_fields=["status"])
+        run = run.__class__.objects.select_related(
+            "session__assistant"
+        ).get(pk=run.pk)
+
+        with self.assertRaises(LensNodeDispatchError) as context:
+            validate_run_dispatch(run)
+
+        self.assertEqual(str(context.exception), "ASSISTANT_ARCHIVED")
+
     def test_runtime_resolves_environment_without_snapshot_plaintext(self):
         self.skill.definition = {
             "environment": [
@@ -2061,7 +2150,7 @@ class LensApiTests(TestCase):
         )
         output.file.delete(save=False)
 
-    def _make_output_file(self):
+    def _make_output_file(self, user=None):
         """Create a delivered output file linked to a fresh run."""
 
         from django.core.files.base import ContentFile
@@ -2069,7 +2158,7 @@ class LensApiTests(TestCase):
         from lens.services import create_execution_run
 
         session = Session.objects.create(
-            assistant=self.assistant, user=self.user
+            assistant=self.assistant, user=user or self.user
         )
         run = create_execution_run(
             session=session, question="q", enqueue=False
@@ -2121,6 +2210,22 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         output.file.delete(save=False)
 
+    def test_output_file_download_returns_attachment_to_admin(self):
+        owner = User.objects.create_user(
+            username="file-owner",
+            email="file-owner@example.com",
+            password="pass12345",
+        )
+        session, run, output = self._make_output_file(owner)
+
+        response = self.client.get(
+            f"/api/lens/output-files/{output.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment", response["Content-Disposition"])
+        output.file.delete(save=False)
+
     def test_session_messages_include_output_files(self):
         session, run, output = self._make_output_file()
 
@@ -2139,6 +2244,44 @@ class LensApiTests(TestCase):
             f"/api/lens/output-files/{output.uuid}/", chip["url"]
         )
         output.file.delete(save=False)
+
+    def test_admin_run_detail_includes_output_files(self):
+        session, run, output = self._make_output_file()
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{run.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["output_files"]), 1)
+        item = response.data["output_files"][0]
+        self.assertEqual(item["uuid"], str(output.uuid))
+        self.assertEqual(item["filename"], "brief.html")
+        self.assertEqual(item["content_type"], "text/html")
+        self.assertEqual(item["byte_size"], 18)
+        self.assertIsNotNone(item["created_at"])
+        self.assertIn(
+            f"/api/lens/output-files/{output.uuid}/", item["url"]
+        )
+        output.file.delete(save=False)
+
+    def test_admin_run_detail_has_empty_output_files(self):
+        from lens.models import Session
+        from lens.services import create_execution_run
+
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{run.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["output_files"], [])
 
     def test_session_messages_use_run_finish_time_for_assistant(self):
         session, run, output = self._make_output_file()
@@ -2213,6 +2356,33 @@ class LensApiTests(TestCase):
         body = collect_stream(stream_response.streaming_content).decode()
         self.assertIn('"type": "sync"', body)
         self.assertIn('"type": "done"', body)
+
+    def test_run_created_at_is_read_only(self):
+        session_response = self.client.post(
+            "/api/lens/sessions/",
+            {"assistant_uuid": str(self.assistant.uuid)},
+            format="json",
+        )
+        run_response = self.client.post(
+            f"/api/lens/sessions/{session_response.data['uuid']}/runs/",
+            {
+                "question": "Can the creation time be changed?",
+                "idempotency_key": "run-created-at-read-only",
+                "enqueue": False,
+            },
+            format="json",
+        )
+        self.assertIn("created_at", run_response.data)
+        created_at = run_response.data["created_at"]
+
+        update_response = self.client.patch(
+            f"/api/lens/runs/{run_response.data['uuid']}/",
+            {"created_at": "2000-01-01T00:00:00Z"},
+            format="json",
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.data["created_at"], created_at)
 
     def test_run_stream_accepts_event_stream_header(self):
         session_response = self.client.post(
@@ -2298,6 +2468,118 @@ class LensApiTests(TestCase):
 
         self.assertEqual(cancel_response.status_code, 200)
         self.assertEqual(cancel_response.data["status"], "cancelled")
+
+    def test_completed_run_feedback_is_persisted_and_reported(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session,
+            "Was this answer helpful?",
+            enqueue=False,
+        )
+        run.output_message.content = "Yes, this is the answer."
+        run.output_message.run = run
+        run.output_message.save(update_fields=["content", "run"])
+        run.status = Run.Status.DONE
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "finished_at", "updated_at"])
+
+        response = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.POSITIVE},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["feedback"], "positive")
+        self.assertIsNotNone(response.data["feedback_updated_at"])
+        messages = self.client.get(
+            f"/api/lens/sessions/{session.uuid}/messages/"
+        )
+        assistant_message = next(
+            item for item in messages.data if item["role"] == "assistant"
+        )
+        self.assertEqual(assistant_message["feedback"], "positive")
+        admin_runs = self.client.get(
+            "/api/lens/admin/runs/",
+            {"q": "Was this answer helpful?"},
+        )
+        self.assertEqual(admin_runs.status_code, 200, admin_runs.data)
+        self.assertEqual(
+            admin_runs.data["results"][0]["feedback"],
+            "positive",
+        )
+
+        switched = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.NEGATIVE},
+            format="json",
+        )
+        cleared = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": ""},
+            format="json",
+        )
+
+        self.assertEqual(switched.status_code, 200, switched.data)
+        self.assertEqual(switched.data["feedback"], "negative")
+        self.assertEqual(cleared.status_code, 200, cleared.data)
+        self.assertEqual(cleared.data["feedback"], "")
+
+    def test_run_feedback_rejects_invalid_or_unfinished_runs(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session,
+            "Still running",
+            enqueue=False,
+        )
+
+        unfinished = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.POSITIVE},
+            format="json",
+        )
+        invalid = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": "maybe"},
+            format="json",
+        )
+
+        self.assertEqual(unfinished.status_code, 400, unfinished.data)
+        self.assertEqual(invalid.status_code, 400, invalid.data)
+
+    def test_run_feedback_is_scoped_to_session_owner(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session,
+            "Private feedback",
+            enqueue=False,
+        )
+        run.status = Run.Status.DONE
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "finished_at", "updated_at"])
+        other_user = User.objects.create_user(
+            username="feedback-user-2",
+            email="feedback-user-2@example.com",
+            password="pass12345",
+        )
+        self.client.force_authenticate(other_user)
+
+        response = self.client.patch(
+            f"/api/lens/runs/{run.uuid}/feedback/",
+            {"feedback": Run.Feedback.NEGATIVE},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_running_run_stream_returns_sync_and_status(self):
         session_response = self.client.post(
@@ -2936,6 +3218,20 @@ class AssistantAccessTests(TestCase):
         )
         self.assertEqual(run.status_code, 403)
 
+    def test_archived_assistant_cannot_start_new_conversations(self):
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.status = "archived"
+        self.assistant.save(update_fields=["visibility", "status"])
+        client = self._client(self.member)
+
+        response = client.post(
+            "/api/lens/sessions/",
+            {"assistant_uuid": str(self.assistant.uuid)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_public_qa_requires_login_for_private_assistant(self):
         share = SharedQA.objects.create(
             token="tok-private",
@@ -2985,6 +3281,36 @@ class AssistantAccessTests(TestCase):
             {"type": "group", "id": group.pk, "name": "grp"}
         ])
 
+    def test_user_access_grants_include_selector_metadata(self):
+        user = User.objects.create_user(
+            username="selector-user",
+            email="selector@example.com",
+            password="x",
+        )
+        client = self._client(self.admin)
+        resp = client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {
+                "visibility": "private",
+                "access_grants": [{"type": "user", "id": user.pk}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.data["access_grants"],
+            [
+                {
+                    "type": "user",
+                    "id": user.pk,
+                    "name": "selector-user",
+                    "username": "selector-user",
+                    "email": "selector@example.com",
+                }
+            ],
+        )
+
     def test_write_requires_admin_console(self):
         self.assistant.visibility = Assistant.Visibility.PUBLIC
         self.assistant.save(update_fields=["visibility"])
@@ -3009,3 +3335,324 @@ class AssistantAccessTests(TestCase):
             format="json",
         )
         self.assertEqual(create.status_code, 403)
+
+        archive = client.post(
+            f"/api/lens/assistants/{self.assistant.uuid}/archive/",
+        )
+        self.assertEqual(archive.status_code, 403)
+
+
+class AdminAccessSubjectTests(TestCase):
+    """Admin user/group insights and stable history filters."""
+
+    def setUp(self):
+        self.node = LensNode.objects.create(
+            name="Access detail node",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            tasks=[{"name": "general_chat", "description": "chat"}],
+        )
+        self.admin = User.objects.create_user(
+            username="access-admin",
+            password="x",
+            is_staff=True,
+        )
+        self.user = User.objects.create_user(
+            username="detail-user",
+            email="detail@example.com",
+            password="x",
+        )
+        self.group = Group.objects.create(name="Detail group")
+        self.user.groups.add(self.group)
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _assistant(self, name, slug, visibility="private"):
+        return Assistant.objects.create(
+            name=name,
+            slug=slug,
+            lensnode=self.node,
+            selected_task="general_chat",
+            visibility=visibility,
+        )
+
+    def test_user_detail_combines_access_sources_and_activity(self):
+        direct = self._assistant("Direct", "detail-direct")
+        grouped = self._assistant("Grouped", "detail-grouped")
+        public = self._assistant(
+            "Public",
+            "detail-public",
+            Assistant.Visibility.PUBLIC,
+        )
+        history = self._assistant("History", "detail-history")
+        AssistantAccess.objects.create(assistant=direct, user=self.user)
+        AssistantAccess.objects.create(assistant=grouped, group=self.group)
+        session = Session.objects.create(
+            assistant=history,
+            user=self.user,
+        )
+        create_execution_run(session, "History question", enqueue=False)
+
+        response = self.client.get(
+            f"/api/lens/admin/access/users/{self.user.pk}/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        rows = {item["slug"]: item for item in response.data["assistants"]}
+        self.assertEqual(rows[direct.slug]["access_sources"], ["direct"])
+        self.assertEqual(rows[grouped.slug]["access_sources"], ["group"])
+        self.assertEqual(rows[public.slug]["access_sources"], ["public"])
+        self.assertEqual(rows[history.slug]["access_sources"], ["history"])
+        self.assertEqual(rows[history.slug]["conversations"], 1)
+        self.assertEqual(rows[history.slug]["qa_records"], 1)
+        self.assertEqual(response.data["stats"]["conversations"], 1)
+        self.assertEqual(response.data["stats"]["qa_records"], 1)
+
+    def test_group_detail_paginates_searches_and_counts(self):
+        second = User.objects.create_user(
+            username="another-member",
+            email="another@example.com",
+            password="x",
+        )
+        second.groups.add(self.group)
+        assistant = self._assistant("Group assistant", "group-assistant")
+        AssistantAccess.objects.create(assistant=assistant, group=self.group)
+        role = Role.objects.create(
+            name="Group admin",
+            visible_features=["admin_console"],
+        )
+        role.groups.add(self.group)
+
+        response = self.client.get(
+            f"/api/lens/admin/access/groups/{self.group.pk}/",
+            {"search": "detail@", "page": 1, "page_size": 1},
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["stats"]["members"], 2)
+        self.assertEqual(response.data["stats"]["assigned_assistants"], 1)
+        self.assertEqual(response.data["stats"]["roles"], 1)
+        self.assertEqual(response.data["members"]["count"], 1)
+        self.assertEqual(
+            response.data["members"]["results"][0]["id"],
+            self.user.pk,
+        )
+        self.assertEqual(
+            response.data["assistants"][0]["access_sources"],
+            ["group"],
+        )
+
+    def test_history_filters_by_exact_user_group_and_assistant(self):
+        assistant = self._assistant("Filtered", "filtered-assistant")
+        other = User.objects.create_user(
+            username="other-detail-user",
+            password="x",
+        )
+        other.groups.add(self.group)
+        first_session = Session.objects.create(
+            assistant=assistant,
+            user=self.user,
+        )
+        second_session = Session.objects.create(
+            assistant=assistant,
+            user=other,
+        )
+        first = create_execution_run(
+            first_session,
+            "First question",
+            enqueue=False,
+        )
+        create_execution_run(second_session, "Second question", enqueue=False)
+
+        response = self.client.get(
+            "/api/lens/admin/runs/",
+            {
+                "user_id": self.user.pk,
+                "group_id": self.group.pk,
+                "assistant": assistant.slug,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["total"], 1)
+        self.assertEqual(response.data["results"][0]["uuid"], str(first.uuid))
+
+    def test_role_granted_admin_can_open_detail_and_history(self):
+        role = Role.objects.create(
+            name="Role granted admin",
+            visible_features=["admin_console"],
+        )
+        role.users.add(self.user)
+        client = APIClient()
+        client.force_authenticate(self.user)
+
+        detail = client.get(
+            f"/api/lens/admin/access/users/{self.user.pk}/"
+        )
+        history = client.get("/api/lens/admin/runs/")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(history.status_code, 200)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class AssistantArchiveConcurrencyTests(TransactionTestCase):
+    """Serialize assistant archival with creation of new work."""
+
+    def setUp(self):
+        self.lensnode = LensNode.objects.create(
+            name="Archive Race Node",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            workspace_path="/workspace",
+        )
+        self.assistant = Assistant.objects.create(
+            name="Archive Race Assistant",
+            slug="archive-race-assistant",
+            lensnode=self.lensnode,
+            selected_task="knowledge_qa",
+            selected_dirs=[{"path": "/workspace/repo"}],
+            visibility=Assistant.Visibility.PUBLIC,
+            multimodal_model_ref=uuid.uuid4(),
+        )
+        self.user = User.objects.create_user(
+            username="archive-race-user",
+            password="x",
+        )
+        self.admin = User.objects.create_user(
+            username="archive-race-admin",
+            password="x",
+            is_staff=True,
+        )
+
+    def _client(self, user):
+        client = APIClient()
+        client.force_authenticate(user)
+        return client
+
+    def _race_new_work_with_archive(self, create_request):
+        check_entered = threading.Event()
+        release_check = threading.Event()
+        archive_finished = threading.Event()
+        responses = {}
+        errors = []
+        original_check = Assistant.is_runnable_by
+
+        def pause_after_check(assistant, user):
+            allowed = original_check(assistant, user)
+            if threading.current_thread().name == "new-assistant-work":
+                check_entered.set()
+                if not release_check.wait(timeout=5):
+                    raise TimeoutError("Timed out waiting to resume creation")
+            return allowed
+
+        def run_create_request():
+            close_old_connections()
+            try:
+                responses["create"] = create_request()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        def run_archive_request():
+            close_old_connections()
+            try:
+                responses["archive"] = self._client(self.admin).post(
+                    f"/api/lens/assistants/{self.assistant.uuid}/archive/"
+                )
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                archive_finished.set()
+                close_old_connections()
+
+        with patch.object(Assistant, "is_runnable_by", pause_after_check):
+            create_thread = threading.Thread(
+                target=run_create_request,
+                name="new-assistant-work",
+            )
+            archive_thread = threading.Thread(
+                target=run_archive_request,
+                name="archive-assistant",
+            )
+            create_thread.start()
+            self.assertTrue(check_entered.wait(timeout=5))
+            archive_thread.start()
+            archive_overtook_creation = archive_finished.wait(timeout=1)
+            release_check.set()
+            create_thread.join(timeout=5)
+            archive_thread.join(timeout=5)
+
+        self.assertFalse(create_thread.is_alive())
+        self.assertFalse(archive_thread.is_alive())
+        if errors:
+            raise errors[0]
+        self.assertFalse(archive_overtook_creation)
+        self.assertEqual(responses["create"].status_code, 201)
+        self.assertEqual(responses["archive"].status_code, 200)
+        self.assistant.refresh_from_db()
+        self.assertEqual(self.assistant.status, Assistant.Status.ARCHIVED)
+
+    def test_archive_waits_for_session_creation(self):
+        initial_count = Session.objects.count()
+
+        self._race_new_work_with_archive(
+            lambda: self._client(self.user).post(
+                "/api/lens/sessions/",
+                {"assistant_uuid": str(self.assistant.uuid)},
+                format="json",
+            )
+        )
+
+        self.assertEqual(Session.objects.count(), initial_count + 1)
+
+    def test_archive_waits_for_run_creation(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        initial_count = Run.objects.count()
+
+        self._race_new_work_with_archive(
+            lambda: self._client(self.user).post(
+                f"/api/lens/sessions/{session.uuid}/runs/",
+                {"question": "Explain the race", "enqueue": False},
+                format="json",
+            )
+        )
+
+        self.assertEqual(Run.objects.count(), initial_count + 1)
+
+    def test_archive_waits_for_attachment_creation(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        initial_count = MessageAttachment.objects.count()
+
+        def upload_attachment():
+            from PIL import Image
+
+            image = io.BytesIO()
+            Image.new("RGB", (2, 2), (120, 200, 80)).save(
+                image,
+                format="PNG",
+            )
+            uploaded = SimpleUploadedFile(
+                "race.png",
+                image.getvalue(),
+                content_type="image/png",
+            )
+            return self._client(self.user).post(
+                f"/api/lens/sessions/{session.uuid}/attachments/",
+                {"file": uploaded},
+                format="multipart",
+            )
+
+        self._race_new_work_with_archive(upload_attachment)
+
+        self.assertEqual(
+            MessageAttachment.objects.count(),
+            initial_count + 1,
+        )

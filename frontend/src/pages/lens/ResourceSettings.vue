@@ -51,7 +51,9 @@
                     {{ grp.title }}
                   </h3>
                 </div>
-                <table class="min-w-full table-fixed divide-y divide-line">
+                <table
+                  class="settings-table min-w-full table-fixed divide-y divide-line"
+                >
                   <colgroup>
                     <col class="w-[48%]" />
                     <col class="w-[52%]" />
@@ -69,23 +71,27 @@
                         <p class="mt-1 text-sm leading-6 text-ink-500">
                           {{ setting.description }}
                         </p>
-                        <p class="mt-1 font-mono text-xs text-ink-400">
+                        <p
+                          class="setting-key mt-1 font-mono text-xs text-ink-400"
+                        >
                           {{ setting.key }}
                         </p>
                       </td>
                       <td class="table-cell">
-                        <div class="flex w-full items-center justify-end gap-3">
+                        <div
+                          class="settings-control flex w-full items-center justify-end gap-3"
+                        >
                           <input
                             v-if="setting.type === 'number'"
                             v-model.number="settingsForm[setting.key]"
                             type="number"
                             min="1"
-                            class="w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            class="settings-input w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           />
                           <select
                             v-else-if="setting.type === 'model_ref'"
                             v-model="settingsForm[setting.key]"
-                            class="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            class="settings-input w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           >
                             <option value="">
                               {{ t('lensAdmin.placeholders.noModel') }}
@@ -102,10 +108,10 @@
                             v-else
                             v-model="settingsForm[setting.key]"
                             type="text"
-                            class="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            class="settings-input w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                             :placeholder="setting.placeholder"
                           />
-                          <span class="w-16 text-sm text-ink-500">
+                          <span class="settings-unit w-16 text-sm text-ink-500">
                             {{ setting.unit }}
                           </span>
                         </div>
@@ -329,5 +335,53 @@ onMounted(load)
 <style scoped>
 .table-cell {
   @apply px-4 py-4 text-sm text-ink-700;
+}
+
+@media (max-width: 767px) {
+  .settings-table,
+  .settings-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .settings-table {
+    min-width: 100% !important;
+    table-layout: auto;
+  }
+
+  .settings-table colgroup {
+    display: none;
+  }
+
+  .settings-table tr,
+  .settings-table .table-cell {
+    display: block;
+    width: 100%;
+  }
+
+  .settings-table .table-cell:first-child {
+    @apply pb-2;
+  }
+
+  .settings-table .table-cell:last-child {
+    @apply pt-0;
+  }
+
+  .setting-key {
+    overflow-wrap: anywhere;
+  }
+
+  .settings-control {
+    @apply flex-col items-stretch gap-2;
+  }
+
+  .settings-control .settings-input {
+    min-width: 0;
+    max-width: none;
+  }
+
+  .settings-unit {
+    @apply w-auto;
+  }
 }
 </style>
