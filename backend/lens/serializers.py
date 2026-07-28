@@ -2196,3 +2196,17 @@ class SharedQAAdminSerializer(serializers.ModelSerializer):
         """Return a short plain-text preview of the answer."""
 
         return _answer_snippet(obj.answer)
+
+
+class SharedQAAdminDetailSerializer(SharedQAAdminSerializer):
+    """Admin moderation detail with the complete Q&A content."""
+
+    class Meta(SharedQAAdminSerializer.Meta):
+        fields = SharedQAAdminSerializer.Meta.fields + [
+            "question",
+            "answer",
+        ]
+        read_only_fields = SharedQAAdminSerializer.Meta.read_only_fields + [
+            "question",
+            "answer",
+        ]

@@ -123,6 +123,7 @@
       "previewFile": "预览 {name}",
       "downloadFile": "下载 {name}",
       "detailTitle": "问答详情",
+      "detailFailed": "问答详情加载失败",
       "assistant": "助手",
       "views": "查看数",
       "ctaTitle": "想问类似问题？",
@@ -159,6 +160,7 @@
       "hide": "下架",
       "restore": "恢复",
       "preview": "预览",
+      "viewDetail": "查看详情",
       "publishedBy": "发布人",
       "publishedAt": "发布时间",
       "actionDone": "已更新"

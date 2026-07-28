@@ -475,6 +475,11 @@ export async function listAdminShares(params = {}) {
   return unwrapResponse(response)
 }
 
+export async function getAdminShare(uuid) {
+  const response = await api.get(`/lens/admin/shares/${uuid}/`)
+  return unwrapResponse(response)
+}
+
 export async function updateAdminShare(uuid, payload) {
   const response = await api.patch(`/lens/admin/shares/${uuid}/`, payload)
   return unwrapResponse(response)

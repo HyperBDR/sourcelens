@@ -123,6 +123,7 @@
       "previewFile": "Preview {name}",
       "downloadFile": "Download {name}",
       "detailTitle": "Q&A detail",
+      "detailFailed": "Failed to load Q&A details",
       "assistant": "Assistant",
       "views": "Views",
       "ctaTitle": "Have a similar question?",
@@ -159,6 +160,7 @@
       "hide": "Take down",
       "restore": "Restore",
       "preview": "Preview",
+      "viewDetail": "View details",
       "publishedBy": "Publisher",
       "publishedAt": "Published",
       "actionDone": "Updated"
