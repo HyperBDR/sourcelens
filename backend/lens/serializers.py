@@ -1728,6 +1728,7 @@ class RunOutputFileSerializer(serializers.ModelSerializer):
             "filename",
             "content_type",
             "byte_size",
+            "created_at",
         ]
         read_only_fields = fields
 
