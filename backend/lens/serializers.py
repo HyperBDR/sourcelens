@@ -49,7 +49,6 @@ from .runtime_events import (
     public_step_detail,
     sanitize_loaded_mcps,
     sanitize_loaded_skills,
-    sanitize_runtime_event,
     sanitize_termination_detail,
 )
 from .services import create_execution_run
@@ -1805,10 +1804,7 @@ class MessageSerializer(serializers.ModelSerializer):
             return None
         steps = []
         for step in run.steps.all():
-            for item in (step.detail or {}).get("events", []):
-                event = sanitize_runtime_event(item)
-                if event is not None:
-                    steps.append(event)
+            steps.extend(public_step_detail(step.detail)["events"])
         if not steps and not run.outcome:
             return None
         duration = None

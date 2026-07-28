@@ -165,88 +165,6 @@ def test_write_todos_emits_user_visible_normalized_plan():
     ]
 
 
-def test_direct_execution_stages_start_with_real_runtime_state():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-
-    agent_runtime._start_direct_stages(
-        state,
-        lambda name, detail: events.append((name, detail)),
-    )
-
-    assert [detail["payload"]["status"] for _, detail in events] == [
-        "completed",
-        "in_progress",
-        "pending",
-    ]
-    assert [detail["payload"]["order"] for _, detail in events] == [1, 2, 3]
-    assert [detail["payload"]["revision"] for _, detail in events] == [1, 2, 3]
-    assert all(name == "workflow.stage.updated" for name, _ in events)
-
-
-def test_direct_execution_stage_counts_actual_tool_calls():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-    agent_runtime._start_direct_stages(state, lambda *_args: None)
-    message = _Msg(
-        "ai",
-        tool_calls=[
-            {"id": "call-orders", "name": "call_skill_api", "args": {}},
-        ],
-    )
-
-    _emit_new_tool_calls(
-        [message],
-        set(),
-        lambda name, detail: events.append((name, detail)),
-        direct_stage_state=state,
-    )
-
-    stage_events = [
-        detail for name, detail in events if name == "workflow.stage.updated"
-    ]
-    assert state["tool_count"] == 1
-    assert stage_events[-1]["payload"]["id"] == "execute"
-    assert stage_events[-1]["payload"]["status"] == "in_progress"
-    assert stage_events[-1]["payload"]["summary"] == "Started 1 operation"
-
-
-def test_direct_execution_stages_record_blocked_outcome():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-    agent_runtime._start_direct_stages(state, lambda *_args: None)
-
-    agent_runtime._finish_direct_stages(
-        state,
-        lambda name, detail: events.append((name, detail)),
-        outcome="blocked",
-    )
-
-    payloads = [detail["payload"] for _, detail in events]
-    assert payloads[0]["id"] == "execute"
-    assert payloads[0]["status"] == "failed"
-    assert payloads[1]["id"] == "answer"
-    assert payloads[1]["status"] == "completed"
-
-
-def test_direct_execution_stages_do_not_mark_partial_work_completed():
-    events = []
-    state = agent_runtime._create_direct_stage_state("English")
-    agent_runtime._start_direct_stages(state, lambda *_args: None)
-
-    agent_runtime._finish_direct_stages(
-        state,
-        lambda name, detail: events.append((name, detail)),
-        outcome="partial",
-    )
-
-    payloads = [detail["payload"] for _, detail in events]
-    assert payloads[0]["id"] == "execute"
-    assert payloads[0]["status"] == "failed"
-    assert payloads[0]["summary"] == "Execution ended with partial results"
-    assert payloads[1]["status"] == "completed"
-
-
 def test_route_decision_parses_json_and_uses_safe_fallback():
     decision = _parse_route_decision(
         '```json\n{"intent":"action","complexity":"simple",'
@@ -916,6 +834,33 @@ def test_general_chat_middleware_removes_task_tool():
     )
 
     assert result == ["run_skill_artifact"]
+
+
+def test_general_chat_middleware_emits_each_model_round_as_one_step():
+    class Request:
+        tools = []
+
+        def override(self, **changes):
+            return SimpleNamespace(**changes)
+
+    events = []
+    middleware = agent_runtime._NoTaskMiddleware(
+        lambda name, detail: events.append((name, detail))
+    )
+
+    result = middleware.wrap_model_call(Request(), lambda _request: "answer")
+
+    assert result == "answer"
+    assert events == [
+        (
+            "model.round.start",
+            {"invocation_id": "model-round-1", "round": 1},
+        ),
+        (
+            "model.round.done",
+            {"invocation_id": "model-round-1", "round": 1},
+        ),
+    ]
 
 
 def test_general_chat_middleware_denies_task_execution():
