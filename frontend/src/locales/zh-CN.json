@@ -222,7 +222,7 @@
       "stop": "停止",
       "runStopped": "已停止执行。",
       "runSubmitted": "Run 已提交。",
-      "tabAnswerCompleted": "({count}) 回答已完成 · SourceLens",
+      "tabAnswerCompleted": "回答已完成",
       "submitFailed": "提交查询失败。",
       "waitingForResult": "仍在等待执行结果。",
       "thinking": "正在分析项目内容",

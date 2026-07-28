@@ -635,13 +635,22 @@ def build_run_history(run):
     current turn, newest-first up to the caps, then returned in
     chronological order. A Message stores only final content (never tool
     traces), so the carried history stays compact and the agent context
-    cannot blow up from a long session.
+    cannot blow up from a long session. Capability-unavailable fallback
+    answers are omitted because their boundary decision applies only to
+    that request; the user message remains available for follow-up context.
     """
 
+    blocked_runs = Run.objects.filter(
+        session=run.session,
+        termination_detail__reason="capability_unavailable",
+        output_message_id__isnull=False,
+    )
     messages = Message.objects.filter(
         session=run.session,
         sequence__lt=run.input_message.sequence,
         role__in=[Message.Role.USER, Message.Role.ASSISTANT],
+    ).exclude(
+        pk__in=blocked_runs.values("output_message_id")
     ).order_by("-sequence")
     history = []
     total_chars = 0

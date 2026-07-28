@@ -430,10 +430,24 @@
                       <div
                         v-if="structuredProgress(message._runtimeState).hasPlan"
                         class="runtime-plan-step runtime-task-row"
+                        :class="{
+                          'is-active-ancestor': isActiveProgressAncestor(
+                            task,
+                            task.stages
+                          )
+                        }"
                       >
                         <span
                           class="runtime-plan-status"
-                          :class="`is-${task.status}`"
+                          :class="[
+                            `is-${task.status}`,
+                            {
+                              'is-active-ancestor': isActiveProgressAncestor(
+                                task,
+                                task.stages
+                              )
+                            }
+                          ]"
                           aria-hidden="true"
                         >
                           {{ progressStatusIcon(task.status) }}
@@ -445,10 +459,26 @@
                         :key="stage.id"
                         class="runtime-workflow-stage"
                       >
-                        <div class="runtime-plan-step runtime-stage-row">
+                        <div
+                          class="runtime-plan-step runtime-stage-row"
+                          :class="{
+                            'is-active-ancestor': isActiveProgressAncestor(
+                              stage,
+                              stage.steps
+                            )
+                          }"
+                        >
                           <span
                             class="runtime-plan-status"
-                            :class="`is-${stage.status}`"
+                            :class="[
+                              `is-${stage.status}`,
+                              {
+                                'is-active-ancestor': isActiveProgressAncestor(
+                                  stage,
+                                  stage.steps
+                                )
+                              }
+                            ]"
                             aria-hidden="true"
                           >
                             {{ progressStatusIcon(stage.status) }}
@@ -815,10 +845,24 @@
                       <div
                         v-if="liveStructuredProgress.hasPlan"
                         class="runtime-plan-step runtime-task-row"
+                        :class="{
+                          'is-active-ancestor': isActiveProgressAncestor(
+                            task,
+                            task.stages
+                          )
+                        }"
                       >
                         <span
                           class="runtime-plan-status"
-                          :class="`is-${task.status}`"
+                          :class="[
+                            `is-${task.status}`,
+                            {
+                              'is-active-ancestor': isActiveProgressAncestor(
+                                task,
+                                task.stages
+                              )
+                            }
+                          ]"
                           aria-hidden="true"
                         >
                           {{ progressStatusIcon(task.status) }}
@@ -830,10 +874,26 @@
                         :key="stage.id"
                         class="runtime-workflow-stage"
                       >
-                        <div class="runtime-plan-step runtime-stage-row">
+                        <div
+                          class="runtime-plan-step runtime-stage-row"
+                          :class="{
+                            'is-active-ancestor': isActiveProgressAncestor(
+                              stage,
+                              stage.steps
+                            )
+                          }"
+                        >
                           <span
                             class="runtime-plan-status"
-                            :class="`is-${stage.status}`"
+                            :class="[
+                              `is-${stage.status}`,
+                              {
+                                'is-active-ancestor': isActiveProgressAncestor(
+                                  stage,
+                                  stage.steps
+                                )
+                              }
+                            ]"
                             aria-hidden="true"
                           >
                             {{ progressStatusIcon(stage.status) }}
@@ -1249,10 +1309,12 @@ import { useLensStore } from '@/store/lens'
 import { usePreferencesStore } from '@/store/preferences'
 import { useUserStore } from '@/store/user'
 import {
+  answerCompletionTitle,
   clearUnreadSession,
   handleTerminalRun,
   pollRunUntilTerminal,
   readUnreadSessions,
+  shouldReviewUnreadSession,
   UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
 import {
@@ -1261,11 +1323,13 @@ import {
   calculateRunElapsedSeconds,
   createRuntimeState,
   getMessageTimestamp,
+  isActiveProgressAncestor,
   scrollConversationToBottomAfterRender,
   selectLiveProgressText,
   selectStructuredProgress,
   summarizePlanProgress,
   summarizeStageProgress,
+  terminalSyncEvent,
   workflowProgressSource
 } from '@/pages/lens/runtimeEvents'
 import {
@@ -1306,7 +1370,7 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
-const BASE_DOCUMENT_TITLE = 'SourceLens'
+const BASE_DOCUMENT_TITLE = document.title || 'SourceLens'
 const streamError = ref('')
 const failedRunError = ref(null)
 const queuePosition = ref(null)
@@ -1328,6 +1392,7 @@ const runtimeState = ref(createRuntimeState())
 const liveActivityScrollRef = ref(null)
 const elapsedSeconds = ref(0)
 let elapsedTimer = null
+let reviewingUnreadSession = false
 
 const publicAssistant = ref(null)
 const showLoginModal = ref(false)
@@ -1872,12 +1937,14 @@ function sleep(ms) {
 
 function refreshUnreadSessions() {
   unreadSessions.value = readUnreadSessions(window.localStorage)
-  const unreadCount = preferencesStore.answerCompletionIndicator
-    ? Object.keys(unreadSessions.value).length
-    : 0
-  document.title = unreadCount
-    ? t('lens.chat.tabAnswerCompleted', { count: unreadCount })
-    : BASE_DOCUMENT_TITLE
+  const hasUnread =
+    preferencesStore.answerCompletionIndicator &&
+    Object.keys(unreadSessions.value).length > 0
+  document.title = answerCompletionTitle({
+    baseTitle: BASE_DOCUMENT_TITLE,
+    completionLabel: t('lens.chat.tabAnswerCompleted'),
+    hasUnread
+  })
 }
 
 function sessionHasUnreadAnswer(sessionUuid) {
@@ -1899,11 +1966,21 @@ function handleCompletionStorage(event) {
 }
 
 function handleCompletionVisibility() {
-  if (document.visibilityState !== 'visible') return
   const sessionUuid = selectedSessionUuid.value
-  if (sessionUuid && unreadSessions.value[sessionUuid]) {
-    void selectSession({ uuid: sessionUuid }, false)
+  if (
+    reviewingUnreadSession ||
+    !shouldReviewUnreadSession({
+      documentRef: document,
+      selectedSessionUuid: sessionUuid,
+      unreadSessions: unreadSessions.value
+    })
+  ) {
+    return
   }
+  reviewingUnreadSession = true
+  void selectSession({ uuid: sessionUuid }, false).finally(() => {
+    reviewingUnreadSession = false
+  })
 }
 
 function startCompletionTracking(run, sessionUuid) {
@@ -2436,12 +2513,9 @@ function handleEvent(event) {
     if (event.type === 'sync') {
       event.steps?.forEach((step) => handleStepEvent(step, event.ts))
     }
-    if (isTerminalRunStatus(event.status)) {
-      runtimeState.value = applyRuntimeEvent(runtimeState.value, {
-        type: 'done',
-        outcome: event.outcome,
-        termination_detail: event.termination_detail
-      })
+    const terminalEvent = terminalSyncEvent(event)
+    if (terminalEvent) {
+      runtimeState.value = applyRuntimeEvent(runtimeState.value, terminalEvent)
     }
   }
   if (event.type === 'queue_position') {
@@ -2774,6 +2848,7 @@ watch(
 
 onMounted(async () => {
   window.addEventListener('storage', handleCompletionStorage)
+  window.addEventListener('focus', handleCompletionVisibility)
   document.addEventListener('visibilitychange', handleCompletionVisibility)
   refreshUnreadSessions()
   if (window.innerWidth < 1024) {
@@ -2788,6 +2863,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('storage', handleCompletionStorage)
+  window.removeEventListener('focus', handleCompletionVisibility)
   document.removeEventListener('visibilitychange', handleCompletionVisibility)
   document.title = BASE_DOCUMENT_TITLE
   completionTrackers.forEach((tracker) => {
@@ -3406,6 +3482,16 @@ onBeforeUnmount(() => {
   color: transparent;
   font-size: 0;
   animation: spin 0.75s linear infinite;
+}
+
+.runtime-plan-step.is-active-ancestor {
+  color: #74521e;
+  font-weight: 600;
+}
+
+.runtime-plan-status.is-in_progress.is-active-ancestor {
+  border: 0;
+  animation: none;
 }
 
 .runtime-plan-status.is-completed {

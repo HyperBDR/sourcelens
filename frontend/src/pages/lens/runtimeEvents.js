@@ -52,6 +52,20 @@ export function getMessageTimestamp(message) {
   return message?.created_at || ''
 }
 
+export function terminalSyncEvent(event) {
+  if (
+    event?.type !== 'sync' ||
+    !['done', 'failed', 'cancelled'].includes(event.status)
+  ) {
+    return null
+  }
+  return {
+    type: event.status === 'done' ? 'done' : 'error',
+    outcome: event.outcome,
+    termination_detail: event.termination_detail
+  }
+}
+
 export async function scrollConversationToBottomAfterRender(
   getElement,
   waitForRender
@@ -75,6 +89,7 @@ export function createRuntimeState() {
     stageRevision: 0,
     activities: [],
     activityRevision: 0,
+    activityAttempts: {},
     capabilityBlock: null,
     executionFailure: null,
     artifacts: [],
@@ -211,8 +226,14 @@ function appendStructuredActivity(state, payload) {
   const existing = exactExisting || semanticExisting
   const taskId = existing?.taskId || currentTaskId
   const stageKind = existing?.stageKind || payload.stage_kind
+  const activityId = existing?.id || id
+  const attempts = {
+    ...(state.activityAttempts[activityId] || {}),
+    [id]: payload.status
+  }
+  const attemptStatuses = Object.values(attempts)
   const activity = {
-    id: existing?.id || id,
+    id: activityId,
     taskId,
     stageId: `${taskId}:${stageKind}`,
     stageKind,
@@ -220,10 +241,7 @@ function appendStructuredActivity(state, payload) {
       existing?.kind && existing.kind !== 'querying_data'
         ? existing.kind
         : payload.kind,
-    status:
-      existing?.status === 'completed' && payload.status === 'in_progress'
-        ? existing.status
-        : payload.status,
+    status: attemptStatuses.includes('completed') ? 'completed' : 'in_progress',
     ...(existing?.startDate || startDate
       ? { startDate: existing?.startDate || startDate }
       : {}),
@@ -244,6 +262,10 @@ function appendStructuredActivity(state, payload) {
   return {
     ...state,
     activityRevision: state.activityRevision + 1,
+    activityAttempts: {
+      ...state.activityAttempts,
+      [activityId]: attempts
+    },
     activities: capActivities(activities)
   }
 }
@@ -251,6 +273,16 @@ function appendStructuredActivity(state, payload) {
 function closeRuntimeProgress(state, status) {
   const activities = state.activities.map((item) => {
     if (!item.structured || item.status !== 'in_progress') return item
+    const attemptStatuses = Object.values(state.activityAttempts[item.id] || {})
+    if (attemptStatuses.includes('completed')) {
+      return { ...item, status: 'completed' }
+    }
+    if (
+      attemptStatuses.length > 0 &&
+      attemptStatuses.every((attemptStatus) => attemptStatus === 'failed')
+    ) {
+      return { ...item, status: 'failed' }
+    }
     return { ...item, status }
   })
   const stages = state.stages.map((item) => {
@@ -431,6 +463,14 @@ function workflowNodeStatus(items) {
   }
   if (items.some((item) => item.status === 'failed')) return 'failed'
   return items.length > 0 ? 'completed' : 'pending'
+}
+
+export function isActiveProgressAncestor(node, children) {
+  return (
+    node?.status === 'in_progress' &&
+    Array.isArray(children) &&
+    children.some((child) => child?.status === 'in_progress')
+  )
 }
 
 export function buildWorkflowTree(plan, activities) {
@@ -632,11 +672,16 @@ export function applyRuntimeEvent(state, event) {
   if (event.event_type === 'plan.updated') {
     const revision = Math.max(Number(payload.revision || 0), 0)
     if (revision < current.planRevision) return current
-    const currentPlanById = new Map(current.plan.map((item) => [item.id, item]))
-    const plan = normalizePlanSteps(payload.steps).map((item) => {
-      const existing = currentPlanById.get(item.id)
-      return existing ? { ...item, title: existing.title } : item
-    })
+    const incomingPlanById = new Map(
+      normalizePlanSteps(payload.steps).map((item) => [item.id, item])
+    )
+    const plan =
+      current.plan.length === 0
+        ? [...incomingPlanById.values()]
+        : current.plan.map((item) => ({
+            ...item,
+            status: incomingPlanById.get(item.id)?.status || item.status
+          }))
     return {
       ...current,
       plan,

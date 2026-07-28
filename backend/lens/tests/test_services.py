@@ -170,6 +170,69 @@ class LensServiceTests(TransactionTestCase):
             ],
         )
 
+    def test_build_run_history_skips_capability_unavailable_answer(self):
+        blocked = create_execution_run(
+            session=self.session,
+            question="Create an order",
+            enqueue=False,
+        )
+        blocked.output_message.content = "Capability unavailable"
+        blocked.output_message.save(update_fields=["content"])
+        finish_lensnode_run(
+            blocked.uuid,
+            Run.Status.DONE,
+            outcome=Run.Outcome.BLOCKED,
+            termination_detail={
+                "reason": "capability_unavailable",
+                "capability": "skill",
+            },
+        )
+        current = create_execution_run(
+            session=self.session,
+            question="List orders",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        self.assertEqual(
+            history,
+            [{"role": "user", "content": "Create an order"}],
+        )
+
+    def test_build_run_history_ignores_blocked_run_without_output(self):
+        answered = create_execution_run(
+            session=self.session,
+            question="Explain order states",
+            enqueue=False,
+        )
+        answered.output_message.content = "Order states explained"
+        answered.output_message.save(update_fields=["content"])
+        blocked = create_execution_run(
+            session=self.session,
+            question="Create an order",
+            enqueue=False,
+        )
+        blocked.termination_detail = {"reason": "capability_unavailable"}
+        blocked.save(update_fields=["termination_detail"])
+        blocked.output_message.delete()
+        current = create_execution_run(
+            session=self.session,
+            question="Continue",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": "Explain order states"},
+                {"role": "assistant", "content": "Order states explained"},
+                {"role": "user", "content": "Create an order"},
+            ],
+        )
+
     def test_rewrite_query_passthrough_without_preprocess_model(self):
         run = create_execution_run(
             session=self.session, question="how to deploy?", enqueue=False
