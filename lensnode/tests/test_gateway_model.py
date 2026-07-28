@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from lensnode.agent_runtime import _build_summarization_middleware
 from lensnode.gateway_model import (
@@ -113,6 +113,101 @@ def test_tool_call_turn_does_not_publish_intermediate_text(monkeypatch):
 
     assert result.generations[0].message.tool_calls
     assert outputs == []
+
+
+def test_final_synthesis_streams_content_chunks_as_they_arrive(monkeypatch):
+    body = (
+        'data: {"type": "token", "kind": "content", '
+        '"content": "Final "}\n\n'
+        'data: {"type": "token", "kind": "content", '
+        '"content": "answer"}\n\n'
+        'data: {"type": "done", "usage": {"total_tokens": 8}, '
+        '"finish_reason": "stop", "tool_calls": []}\n\n'
+    )
+
+    def handler(_request):
+        return httpx.Response(200, content=body.encode("utf-8"))
+
+    _install_transport(monkeypatch, handler)
+    outputs = []
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=outputs.append,
+    )
+
+    result = model._generate(
+        [HumanMessage(content="summarize")],
+        runtime_final_synthesis=True,
+    )
+
+    assert result.generations[0].message.content == "Final answer"
+    assert outputs == ["Final ", "answer"]
+
+
+def test_completed_plan_followup_repeats_hidden_draft_and_streams(
+    monkeypatch,
+):
+    captured = {}
+
+    def handler(request):
+        captured["payload"] = json.loads(request.read())
+        instruction = captured["payload"]["messages"][-1]["content"]
+        content = (
+            "Full order list"
+            if "not shown to the user" in instruction
+            else "The answer is above"
+        )
+        body = (
+            'data: {"type": "token", "kind": "content", '
+            f'"content": "{content}"}}\n\n'
+            'data: {"type": "done", "usage": {"total_tokens": 8}, '
+            '"finish_reason": "stop", "tool_calls": []}\n\n'
+        )
+        return httpx.Response(200, content=body.encode("utf-8"))
+
+    _install_transport(monkeypatch, handler)
+    outputs = []
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=outputs.append,
+    )
+    messages = [
+        HumanMessage(content="query orders"),
+        AIMessage(
+            content="Full order list draft",
+            tool_calls=[
+                {
+                    "id": "call-plan",
+                    "name": "write_todos",
+                    "args": {
+                        "todos": [
+                            {"content": "Query", "status": "completed"},
+                            {"content": "Answer", "status": "completed"},
+                        ]
+                    },
+                    "type": "tool_call",
+                }
+            ],
+        ),
+        ToolMessage(
+            content="Updated todo list",
+            name="write_todos",
+            tool_call_id="call-plan",
+        ),
+    ]
+
+    result = model._generate(
+        messages,
+        tools=[{"type": "function", "function": {"name": "query_order"}}],
+    )
+
+    assert result.generations[0].message.content == "Full order list"
+    assert "tools" not in captured["payload"]
+    assert outputs == ["Full order list"]
 
 
 def test_cancelled_run_aborts_before_model_call(monkeypatch):

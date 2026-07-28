@@ -107,6 +107,37 @@ def _in_subagent_context():
         return False
 
 
+def _follows_completed_plan(messages):
+    """Return whether the last resolved tool call completed the plan."""
+
+    if not messages or getattr(messages[-1], "type", "") != "tool":
+        return False
+    tool_call_id = str(getattr(messages[-1], "tool_call_id", "") or "")
+    for message in reversed(messages[:-1]):
+        if getattr(message, "type", "") != "ai":
+            continue
+        for call in getattr(message, "tool_calls", None) or []:
+            if str(call.get("id") or "") != tool_call_id:
+                continue
+            if call.get("name") != "write_todos":
+                return False
+            todos = (call.get("args") or {}).get("todos") or []
+            return bool(todos) and all(
+                item.get("status") == "completed" for item in todos
+            )
+        return False
+    return False
+
+
+_COMPLETED_PLAN_FINAL_INSTRUCTION = (
+    "The substantive text in your previous write_todos turn was not shown "
+    "to the user because that turn also invoked a tool. Repeat the entire "
+    "final answer now, including every requested record and verification "
+    "result. Do not refer to an answer above, summarize it away, call a "
+    "tool, or update the plan again."
+)
+
+
 class LensGatewayChatModel(BaseChatModel):
     """LangChain chat model that delegates calls to the control plane."""
 
@@ -243,13 +274,29 @@ class LensGatewayChatModel(BaseChatModel):
             payload["tools"] = kwargs["tools"]
         if not control_call and kwargs.get("tool_choice") is not None:
             payload["tool_choice"] = kwargs["tool_choice"]
+        completed_plan_followup = _follows_completed_plan(messages)
+        if completed_plan_followup:
+            payload.pop("tools", None)
+            payload.pop("tool_choice", None)
+            payload["messages"].append(
+                {
+                    "role": "user",
+                    "content": _COMPLETED_PLAN_FINAL_INSTRUCTION,
+                }
+            )
         if kwargs.get("temperature") is not None:
             payload["temperature"] = kwargs["temperature"]
         if kwargs.get("max_tokens") is not None:
             payload["max_tokens"] = kwargs["max_tokens"]
 
         if self.emit_output is not None and not control_call:
-            return self._generate_streaming(payload)
+            return self._generate_streaming(
+                payload,
+                publish_tokens=(
+                    bool(kwargs.get("runtime_final_synthesis"))
+                    or completed_plan_followup
+                ),
+            )
 
         payload["return_message"] = True
         start = time.monotonic()
@@ -280,7 +327,7 @@ class LensGatewayChatModel(BaseChatModel):
             llm_output={"usage": data.get("usage") or {}},
         )
 
-    def _generate_streaming(self, payload):
+    def _generate_streaming(self, payload, *, publish_tokens=False):
         """Consume a gateway stream and publish only a final answer turn."""
 
         content_parts = []
@@ -332,6 +379,12 @@ class LensGatewayChatModel(BaseChatModel):
                                 text = data.get("content") or ""
                                 if text and kind == "content":
                                     content_parts.append(text)
+                                    if (
+                                        publish_tokens
+                                        and self.emit_output is not None
+                                        and not silent
+                                    ):
+                                        self.emit_output(text)
                             elif data.get("type") == "done":
                                 done_received = True
                                 usage = data.get("usage") or {}
@@ -362,6 +415,7 @@ class LensGatewayChatModel(BaseChatModel):
             and not silent
             and content
             and not tool_calls
+            and not publish_tokens
         ):
             self.emit_output(content)
 
