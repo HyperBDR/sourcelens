@@ -2,7 +2,11 @@
   <div class="space-y-4">
     <EmailCodeLogin v-if="mode === 'code'" @success="$emit('success')" />
 
-    <form v-else class="space-y-4" @submit.prevent="handleLogin">
+    <form
+      v-else-if="mode === 'password'"
+      class="space-y-4"
+      @submit.prevent="handleLogin"
+    >
       <div>
         <label class="mb-1 block text-sm font-medium text-ink-700">
           {{ t('auth.username') }}
@@ -31,6 +35,16 @@
         :disabled="loading"
       />
 
+      <div class="text-right">
+        <button
+          type="button"
+          class="text-sm text-primary-600 hover:underline"
+          @click="mode = 'forgot'"
+        >
+          {{ passwordText.forgot.link }}
+        </button>
+      </div>
+
       <TurnstileWidget
         ref="pwTurnstileRef"
         @verified="onPwVerified"
@@ -56,7 +70,10 @@
       </BaseButton>
     </form>
 
+    <ForgotPasswordForm v-else @back="mode = 'password'" />
+
     <button
+      v-if="mode !== 'forgot'"
       type="button"
       class="block w-full text-center text-sm text-ink-500 hover:underline"
       @click="toggleMode"
@@ -71,18 +88,21 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import EmailCodeLogin from '@/components/auth/EmailCodeLogin.vue'
+import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
+import { getPasswordManagementText } from '@/locales/passwordManagement'
 
 const emit = defineEmits(['success'])
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const userStore = useUserStore()
+const passwordText = computed(() => getPasswordManagementText(locale.value))
 
 const mode = ref('code')
 const loading = ref(false)
