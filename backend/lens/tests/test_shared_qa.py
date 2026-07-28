@@ -658,12 +658,62 @@ class SharedQAApiTests(TestCase):
         token = self._share().data["token"]
         share = SharedQA.objects.get(token=token)
         self.client.force_authenticate(self.owner)
+        detail = self.client.get(
+            f"/api/lens/admin/shares/{share.uuid}/",
+        )
         resp = self.client.patch(
             f"/api/lens/admin/shares/{share.uuid}/",
             {"is_listed": True},
             format="json",
         )
+        self.assertEqual(detail.status_code, 403)
         self.assertEqual(resp.status_code, 403)
+
+    def test_admin_detail_returns_complete_content_for_all_states(self):
+        token = self._share().data["token"]
+        share = SharedQA.objects.get(token=token)
+        self.client.force_authenticate(self.admin)
+
+        states = [
+            (False, SharedQA.Status.PUBLISHED),
+            (True, SharedQA.Status.PUBLISHED),
+            (False, SharedQA.Status.HIDDEN),
+            (True, SharedQA.Status.HIDDEN),
+        ]
+        for is_listed, share_status in states:
+            with self.subTest(
+                is_listed=is_listed,
+                status=share_status,
+            ):
+                SharedQA.objects.filter(pk=share.pk).update(
+                    is_listed=is_listed,
+                    status=share_status,
+                )
+                before_views = share.view_count
+                resp = self.client.get(
+                    f"/api/lens/admin/shares/{share.uuid}/",
+                )
+
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(resp.data["question"], "What is X?")
+                self.assertEqual(resp.data["answer"], "X is a thing.")
+                self.assertEqual(resp.data["published_by"], "qa-owner")
+                self.assertEqual(resp.data["is_listed"], is_listed)
+                self.assertEqual(resp.data["status"], share_status)
+                share.refresh_from_db()
+                self.assertEqual(share.view_count, before_views)
+
+    def test_admin_list_omits_complete_content(self):
+        self._share()
+        self.client.force_authenticate(self.admin)
+
+        resp = self.client.get("/api/lens/admin/shares/")
+
+        self.assertEqual(resp.status_code, 200)
+        row = _results(resp.data)[0]
+        self.assertIn("answer_snippet", row)
+        self.assertNotIn("question", row)
+        self.assertNotIn("answer", row)
 
     def test_owner_can_rename_share(self):
         token = self._share().data["token"]
