@@ -23,6 +23,13 @@ from accounts.access import (
 )
 from accounts.models import Profile, Role
 from accounts.permissions import HasRequiredFeature
+from accounts.services.management_bulk import (
+    BulkMutationError,
+    delete_groups,
+    normalize_bulk_ids,
+    set_roles_active,
+    set_users_active,
+)
 
 User = get_user_model()
 
@@ -405,6 +412,37 @@ class ManagementUserDetailView(APIView):
         return Response(_user_payload(user), status=HTTP_200_OK)
 
 
+class ManagementUserBulkView(APIView):
+    """Atomically enable or disable a bounded user selection."""
+
+    permission_classes = [HasRequiredFeature]
+    required_feature = 'admin_console'
+
+    def post(self, request):
+        is_active = request.data.get('is_active')
+        if not isinstance(is_active, bool):
+            return Response(
+                {'detail': 'is_active must be a boolean.'},
+                status=HTTP_400_BAD_REQUEST,
+            )
+        try:
+            user_ids = normalize_bulk_ids(
+                request.data.get('user_ids'),
+                'user_ids',
+            )
+            count = set_users_active(
+                user_ids,
+                is_active,
+                request.user.pk,
+            )
+        except BulkMutationError as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=HTTP_400_BAD_REQUEST,
+            )
+        return Response({'count': count}, status=HTTP_200_OK)
+
+
 def _group_payload(g):
     direct_roles = getattr(g, 'ordered_roles', None)
     if direct_roles is None:
@@ -581,6 +619,27 @@ class ManagementGroupDetailView(APIView):
         return Response(status=HTTP_204_NO_CONTENT)
 
 
+class ManagementGroupBulkDeleteView(APIView):
+    """Atomically delete a bounded group selection."""
+
+    permission_classes = [HasRequiredFeature]
+    required_feature = 'admin_console'
+
+    def post(self, request):
+        try:
+            group_ids = normalize_bulk_ids(
+                request.data.get('group_ids'),
+                'group_ids',
+            )
+            count = delete_groups(group_ids)
+        except BulkMutationError as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=HTTP_400_BAD_REQUEST,
+            )
+        return Response({'count': count}, status=HTTP_200_OK)
+
+
 def _role_summary_payload(role):
     """Serialize a role in compact form for nested payloads."""
     return {
@@ -712,6 +771,33 @@ class ManagementRoleDetailView(APIView):
             role.save(update_fields=update_fields)
 
         return Response(_role_payload(role), status=HTTP_200_OK)
+
+
+class ManagementRoleBulkView(APIView):
+    """Atomically enable or disable a bounded role selection."""
+
+    permission_classes = [HasRequiredFeature]
+    required_feature = 'admin_console'
+
+    def post(self, request):
+        is_active = request.data.get('is_active')
+        if not isinstance(is_active, bool):
+            return Response(
+                {'detail': 'is_active must be a boolean.'},
+                status=HTTP_400_BAD_REQUEST,
+            )
+        try:
+            role_ids = normalize_bulk_ids(
+                request.data.get('role_ids'),
+                'role_ids',
+            )
+            count = set_roles_active(role_ids, is_active)
+        except BulkMutationError as exc:
+            return Response(
+                {'detail': str(exc)},
+                status=HTTP_400_BAD_REQUEST,
+            )
+        return Response({'count': count}, status=HTTP_200_OK)
 
 
 def _get_user_or_404(user_id):

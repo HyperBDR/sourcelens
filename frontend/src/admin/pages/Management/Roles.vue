@@ -31,6 +31,14 @@
             </div>
           </div>
 
+          <TableBulkActions
+            :actions="bulkActions"
+            :loading-key="bulkLoadingKey"
+            :selected-count="selectedRows.length"
+            @action="runBulkAction"
+            @clear="clearSelection"
+          />
+
           <BaseLoading v-if="loading && !roles.length" />
 
           <div
@@ -56,6 +64,16 @@
             <table class="min-w-full divide-y divide-gray-200">
               <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
                 <tr>
+                  <th class="table-head w-12">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      :aria-label="t('common.selectAll')"
+                      :checked="allSelected"
+                      :indeterminate="someSelected"
+                      @change="setAllSelected($event.target.checked)"
+                    />
+                  </th>
                   <th class="table-head">ID</th>
                   <th class="table-head">{{ t('management.roleName') }}</th>
                   <th class="table-head">
@@ -78,6 +96,15 @@
                   :key="role.id"
                   class="transition-colors duration-150 hover:bg-gray-50"
                 >
+                  <td class="table-cell">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      :aria-label="t('common.selectRow', { name: role.name })"
+                      :checked="selectedIds.has(role.id)"
+                      @change="setRowSelected(role, $event.target.checked)"
+                    />
+                  </td>
                   <td class="table-cell text-gray-900">{{ role.id }}</td>
                   <td class="table-cell font-medium text-gray-900">
                     {{ role.name }}
@@ -103,14 +130,11 @@
                       {{ role.is_active ? t('common.yes') : t('common.no') }}
                     </span>
                   </td>
-                  <td class="table-cell">
-                    <BaseButton
-                      variant="outline"
-                      size="sm"
-                      @click="openEditModal(role)"
-                    >
-                      {{ t('common.edit') }}
-                    </BaseButton>
+                  <td class="table-cell text-right">
+                    <RowActionMenu
+                      :actions="rowActions"
+                      @select="handleRowAction($event, role)"
+                    />
                   </td>
                 </tr>
               </tbody>
@@ -275,16 +299,23 @@
 </template>
 
 <script setup>
+import { Pencil, Power, PowerOff } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+
+import { managementApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
-import { managementApi } from '@/admin/api'
+import RowActionMenu from '@/components/ui/RowActionMenu.vue'
+import TableBulkActions from '@/components/ui/TableBulkActions.vue'
+import { useTableSelection } from '@/composables/useTableSelection'
+import { useToast } from '@/composables/useToast'
 import { FEATURE_DEFINITIONS } from '@/utils/platformAccess'
 
 const { t } = useI18n()
+const { showError, showSuccess } = useToast()
 
 const roles = ref([])
 const loading = ref(false)
@@ -292,6 +323,39 @@ const error = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalCount = ref(0)
+const bulkLoadingKey = ref('')
+const {
+  allSelected,
+  clearSelection,
+  selectedIds,
+  selectedRows,
+  setAllSelected,
+  setRowSelected,
+  someSelected
+} = useTableSelection(roles)
+
+const rowActions = computed(() => [
+  {
+    key: 'edit',
+    label: t('common.edit'),
+    icon: Pencil
+  }
+])
+
+const bulkActions = computed(() => [
+  {
+    key: 'enable',
+    label: t('management.enable'),
+    icon: Power
+  },
+  {
+    key: 'disable',
+    label: t('management.disable'),
+    icon: PowerOff,
+    variant: 'danger',
+    confirm: true
+  }
+])
 
 const showModal = ref(false)
 const mode = ref('create')
@@ -394,6 +458,10 @@ function openEditModal(role) {
   showModal.value = true
 }
 
+function handleRowAction(action, role) {
+  if (action === 'edit') openEditModal(role)
+}
+
 async function submitRole() {
   submitError.value = null
   const name = (form.value.name || '').trim()
@@ -428,6 +496,32 @@ async function submitRole() {
     }
   } finally {
     submitLoading.value = false
+  }
+}
+
+async function runBulkAction(action) {
+  if (bulkLoadingKey.value) return
+  const isActive = action === 'enable'
+  const targets = selectedRows.value.filter(
+    (role) => role.is_active !== isActive
+  )
+  if (!targets.length) {
+    showError(t('management.noEligibleRows'))
+    return
+  }
+
+  bulkLoadingKey.value = action
+  try {
+    await managementApi.bulkUpdateRoles({
+      role_ids: targets.map((role) => role.id),
+      is_active: isActive
+    })
+    showSuccess(t('management.bulkUpdated', { count: targets.length }))
+    await fetchRoles()
+  } catch (e) {
+    showError(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    bulkLoadingKey.value = ''
   }
 }
 

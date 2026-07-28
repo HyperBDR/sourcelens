@@ -3,6 +3,10 @@ from django.http import JsonResponse
 from django.urls import path, include
 
 from accounts.views import OAuthCallbackRedirectView
+from core.views.admin_bulk import (
+    LLMConfigBulkView,
+    NotificationChannelBulkDeleteView,
+)
 from .swagger import schema_view, swagger_view, redoc_view
 
 # Define project URL routing configuration
@@ -38,6 +42,18 @@ urlpatterns = [
 
     # Lens MVP API
     path('api/lens/', include('lens.urls')),
+
+    # SourceLens atomic adapters for agentcore admin resources
+    path(
+        'api/v1/admin/notifications/channels/bulk-delete/',
+        NotificationChannelBulkDeleteView.as_view(),
+        name='notification_channels_bulk_delete',
+    ),
+    path(
+        'api/v1/admin/llm-config/bulk/',
+        LLMConfigBulkView.as_view(),
+        name='llm_configs_bulk',
+    ),
 
     # Notifier admin API (agentcore-notifier: must be before admin/ to match)
     path(

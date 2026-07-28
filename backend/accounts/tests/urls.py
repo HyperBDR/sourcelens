@@ -6,7 +6,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.views.management import (
+    ManagementGroupBulkDeleteView,
     ManagementGroupListView,
+    ManagementRoleBulkView,
+    ManagementUserBulkView,
     ManagementUserListView,
 )
 from accounts.views.password import (
@@ -44,5 +47,17 @@ urlpatterns = [
     path(
         "api/v1/management/groups/",
         ManagementGroupListView.as_view(),
+    ),
+    path(
+        "api/v1/management/users/bulk-status/",
+        ManagementUserBulkView.as_view(),
+    ),
+    path(
+        "api/v1/management/groups/bulk-delete/",
+        ManagementGroupBulkDeleteView.as_view(),
+    ),
+    path(
+        "api/v1/management/roles/bulk-status/",
+        ManagementRoleBulkView.as_view(),
     ),
 ]

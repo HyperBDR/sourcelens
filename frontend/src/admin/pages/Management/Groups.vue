@@ -38,6 +38,14 @@
         </div>
 
         <div class="px-5 py-4">
+          <TableBulkActions
+            :actions="bulkActions"
+            :loading-key="bulkLoadingKey"
+            :selected-count="selectedRows.length"
+            @action="runBulkDelete"
+            @clear="clearSelection"
+          />
+
           <BaseLoading v-if="loading && !groups.length" />
 
           <div
@@ -63,6 +71,16 @@
             <table class="min-w-full divide-y divide-line">
               <thead class="bg-surface-sunken">
                 <tr>
+                  <th class="table-head w-12">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                      :aria-label="t('common.selectAll')"
+                      :checked="allSelected"
+                      :indeterminate="someSelected"
+                      @change="setAllSelected($event.target.checked)"
+                    />
+                  </th>
                   <th class="table-head">ID</th>
                   <th class="table-head">{{ t('management.groupName') }}</th>
                   <th class="table-head">
@@ -85,6 +103,15 @@
                   @keydown.enter.self="openDetail(group)"
                   @keydown.space.self.prevent="openDetail(group)"
                 >
+                  <td class="table-cell" @click.stop>
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                      :aria-label="t('common.selectRow', { name: group.name })"
+                      :checked="selectedIds.has(group.id)"
+                      @change="setRowSelected(group, $event.target.checked)"
+                    />
+                  </td>
                   <td class="table-cell font-mono text-ink-500">
                     {{ group.id }}
                   </td>
@@ -103,23 +130,11 @@
                   <td class="table-cell text-ink-600">
                     {{ group.permission_count ?? 0 }}
                   </td>
-                  <td class="table-cell">
-                    <div class="flex items-center gap-2">
-                      <BaseButton
-                        variant="outline"
-                        size="sm"
-                        @click.stop="openEditModal(group)"
-                      >
-                        {{ t('common.edit') }}
-                      </BaseButton>
-                      <BaseButton
-                        variant="danger"
-                        size="sm"
-                        @click.stop="askDelete(group)"
-                      >
-                        {{ t('common.delete') }}
-                      </BaseButton>
-                    </div>
+                  <td class="table-cell text-right" @click.stop>
+                    <RowActionMenu
+                      :actions="rowActions"
+                      @select="handleRowAction($event, group)"
+                    />
                   </td>
                 </tr>
               </tbody>
@@ -257,18 +272,23 @@
 </template>
 
 <script setup>
+import { Pencil, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+
+import { managementApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
-import PaginationBar from '@/components/ui/PaginationBar.vue'
-import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
+import RowActionMenu from '@/components/ui/RowActionMenu.vue'
+import TableBulkActions from '@/components/ui/TableBulkActions.vue'
+import { useTableSelection } from '@/composables/useTableSelection'
 import { useToast } from '@/composables/useToast'
-import { managementApi } from '@/admin/api'
 import GroupDetailDrawer from './GroupDetailDrawer.vue'
 
 const { t } = useI18n()
@@ -284,7 +304,42 @@ const totalCount = ref(0)
 const userOptions = ref([])
 const deleteTarget = ref(null)
 const deletingId = ref(null)
+const bulkLoadingKey = ref('')
 const detailGroup = ref(null)
+const {
+  allSelected,
+  clearSelection,
+  selectedIds,
+  selectedRows,
+  setAllSelected,
+  setRowSelected,
+  someSelected
+} = useTableSelection(groups)
+
+const rowActions = computed(() => [
+  {
+    key: 'edit',
+    label: t('common.edit'),
+    icon: Pencil
+  },
+  {
+    key: 'delete',
+    label: t('common.delete'),
+    icon: Trash2,
+    variant: 'danger',
+    divider: true
+  }
+])
+
+const bulkActions = computed(() => [
+  {
+    key: 'delete',
+    label: t('common.delete'),
+    icon: Trash2,
+    variant: 'danger',
+    confirm: true
+  }
+])
 
 const showModal = ref(false)
 const mode = ref('create')
@@ -371,6 +426,14 @@ function askDelete(group) {
   deleteTarget.value = group
 }
 
+function handleRowAction(action, group) {
+  if (action === 'edit') {
+    openEditModal(group)
+    return
+  }
+  askDelete(group)
+}
+
 async function confirmDelete() {
   const group = deleteTarget.value
   if (!group) return
@@ -384,6 +447,21 @@ async function confirmDelete() {
     showError(e?.response?.data?.detail || e?.message || t('common.error'))
   } finally {
     deletingId.value = null
+  }
+}
+
+async function runBulkDelete() {
+  if (bulkLoadingKey.value) return
+  const targets = [...selectedRows.value]
+  bulkLoadingKey.value = 'delete'
+  try {
+    await managementApi.bulkDeleteGroups(targets.map((group) => group.id))
+    showSuccess(t('management.bulkDeleted', { count: targets.length }))
+    await Promise.all([fetchGroups(), loadUsers()])
+  } catch (e) {
+    showError(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    bulkLoadingKey.value = ''
   }
 }
 

@@ -64,6 +64,13 @@ export const notificationsAdminApi = {
   deleteChannel(id) {
     return apiClient.delete(`/v1/admin/notifications/channels/${id}/`)
   },
+  bulkDeleteChannels(channelIds) {
+    return apiClient
+      .post('/v1/admin/notifications/channels/bulk-delete/', {
+        channel_ids: channelIds
+      })
+      .then(extractResponseData)
+  },
   /**
    * Validate channel config (webhook: send test message; email: SMTP connect).
    * Body: { channel_type: 'webhook'|'email', config: { ... } }

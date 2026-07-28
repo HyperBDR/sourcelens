@@ -42,6 +42,14 @@
             </BaseButton>
           </div>
 
+          <TableBulkActions
+            :actions="bulkActions"
+            :loading-key="bulkLoadingKey"
+            :selected-count="selectedRows.length"
+            @action="runBulkAction"
+            @clear="clearSelection"
+          />
+
           <BaseLoading v-if="loading" />
           <template v-else>
             <div
@@ -73,6 +81,18 @@
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
                   <tr>
+                    <th
+                      class="w-12 border-b border-gray-200 px-4 py-3 text-left"
+                    >
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        :aria-label="t('common.selectAll')"
+                        :checked="allSelected"
+                        :indeterminate="someSelected"
+                        @change="setAllSelected($event.target.checked)"
+                      />
+                    </th>
                     <th
                       class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
                     >
@@ -136,6 +156,19 @@
                     :key="row.uuid || row.id"
                     class="hover:bg-gray-50 transition-colors duration-150"
                   >
+                    <td class="px-4 py-4">
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        :aria-label="
+                          t('common.selectRow', {
+                            name: row.config?.model || row.uuid || row.id
+                          })
+                        "
+                        :checked="selectedIds.has(row.uuid || row.id)"
+                        @change="setRowSelected(row, $event.target.checked)"
+                      />
+                    </td>
                     <td
                       class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
                     >
@@ -235,28 +268,6 @@
                           />
                         </svg>
                       </span>
-                      <button
-                        v-else-if="row.scope === 'global'"
-                        type="button"
-                        class="inline-flex items-center rounded p-1 text-gray-400 hover:bg-primary-50 hover:text-primary-600"
-                        :title="t('llm.config.setAsDefault')"
-                        @click="setAsDefault(row)"
-                      >
-                        <svg
-                          class="h-5 w-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
-                          />
-                        </svg>
-                      </button>
                       <span v-else class="text-gray-300">–</span>
                     </td>
                     <td class="px-4 py-4 whitespace-nowrap text-sm">
@@ -302,174 +313,10 @@
                       </span>
                     </td>
                     <td class="px-4 py-4 whitespace-nowrap text-right">
-                      <div class="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          :title="t('llm.config.testCall')"
-                          class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-sky-50 hover:text-sky-600"
-                          @click="openTestModal(row)"
-                        >
-                          <svg
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M8 8h8"
-                            />
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M12 8v8"
-                            />
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          :title="
-                            row.is_active
-                              ? t('llm.config.disable')
-                              : t('llm.config.enable')
-                          "
-                          :class="
-                            row.is_active
-                              ? 'inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600'
-                              : 'inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-green-50 hover:text-green-600'
-                          "
-                          @click="setActive(row, !row.is_active)"
-                        >
-                          <svg
-                            v-if="row.is_active"
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M5.636 5.636a9 9 0 1012.728 0M12 3v9"
-                            />
-                          </svg>
-                          <svg
-                            v-else
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          :title="t('common.edit')"
-                          class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                          @click="editConfig(row)"
-                        >
-                          <svg
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                            />
-                          </svg>
-                        </button>
-                        <template
-                          v-if="pendingDeleteId === (row.uuid || row.id)"
-                        >
-                          <button
-                            type="button"
-                            :title="t('common.confirm')"
-                            class="inline-flex items-center justify-center rounded p-1.5 text-red-600 hover:bg-red-50"
-                            @click="confirmDeleteConfig(row)"
-                          >
-                            <svg
-                              class="h-4 w-4"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                              aria-hidden="true"
-                            >
-                              <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M5 13l4 4L19 7"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            :title="t('common.cancel')"
-                            class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-gray-100"
-                            @click="pendingDeleteId = null"
-                          >
-                            <svg
-                              class="h-4 w-4"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                              aria-hidden="true"
-                            >
-                              <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M6 18L18 6M6 6l12 12"
-                              />
-                            </svg>
-                          </button>
-                        </template>
-                        <button
-                          v-else
-                          type="button"
-                          :title="t('common.delete')"
-                          class="inline-flex items-center justify-center rounded p-1.5 text-gray-500 hover:bg-red-50 hover:text-red-600"
-                          @click="pendingDeleteId = row.uuid || row.id"
-                        >
-                          <svg
-                            class="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
-                      </div>
+                      <RowActionMenu
+                        :actions="rowActions(row)"
+                        @select="handleRowAction($event, row)"
+                      />
                     </td>
                   </tr>
                 </tbody>
@@ -486,6 +333,26 @@
           </template>
         </div>
       </div>
+
+      <BaseModal
+        :show="!!deleteTarget"
+        :title="t('common.delete')"
+        @close="deleteTarget = null"
+      >
+        <p class="text-sm text-gray-700">
+          {{ t('llm.config.confirmDeleteConfig') }}
+        </p>
+        <template #footer>
+          <div class="flex flex-row-reverse gap-2">
+            <BaseButton variant="danger" @click="confirmDeleteConfig">
+              {{ t('common.delete') }}
+            </BaseButton>
+            <BaseButton variant="outline" @click="deleteTarget = null">
+              {{ t('common.cancel') }}
+            </BaseButton>
+          </div>
+        </template>
+      </BaseModal>
 
       <BaseModal
         :show="showTestModal"
@@ -995,8 +862,10 @@
  * LLM Configuration: Provider -> Model selection with capability tags.
  * API Base URL below model selection; defaults to official URL for the provider.
  */
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { CirclePlay, Pencil, Power, PowerOff, Star, Trash2 } from '@lucide/vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+
 import { llmAdminApi } from '@/admin/api'
 import { DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS } from '@/admin/api/llmTimeout'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
@@ -1006,6 +875,10 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import RowActionMenu from '@/components/ui/RowActionMenu.vue'
+import TableBulkActions from '@/components/ui/TableBulkActions.vue'
+import { useTableSelection } from '@/composables/useTableSelection'
+import { useToast } from '@/composables/useToast'
 
 const PROVIDER_LABELS = {
   openai: 'OpenAI',
@@ -1068,12 +941,14 @@ function maskApiKey(value) {
 }
 
 const { t } = useI18n()
+const { showError, showSuccess } = useToast()
 
 const loading = ref(true)
 const configList = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
-const pendingDeleteId = ref(null)
+const bulkLoadingKey = ref('')
+const deleteTarget = ref(null)
 const userList = ref([])
 const modelsData = ref({ providers: [], capability_labels: {} })
 const providerSchemas = ref({})
@@ -1213,6 +1088,38 @@ const pagedConfigList = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   return configList.value.slice(start, start + pageSize.value)
 })
+
+const {
+  allSelected,
+  clearSelection,
+  selectedIds,
+  selectedRows,
+  setAllSelected,
+  setRowSelected,
+  someSelected
+} = useTableSelection(pagedConfigList, (row) => row.uuid || row.id)
+
+const bulkActions = computed(() => [
+  {
+    key: 'enable',
+    label: t('llm.config.enable'),
+    icon: Power
+  },
+  {
+    key: 'disable',
+    label: t('llm.config.disable'),
+    icon: PowerOff,
+    variant: 'danger',
+    confirm: true
+  },
+  {
+    key: 'delete',
+    label: t('common.delete'),
+    icon: Trash2,
+    variant: 'danger',
+    confirm: true
+  }
+])
 
 function handlePageSizeChange() {
   currentPage.value = 1
@@ -1759,18 +1666,67 @@ async function submitConfigForm() {
 async function setActive(row, value) {
   if (!(row?.uuid || row?.id)) return
   try {
-    const data = await llmAdminApi.getLLMConfigDetail(row.uuid || row.id)
-    const c = data?.config || {}
-    const body = {
-      provider: (data?.provider || row.provider || 'openai').toLowerCase(),
-      config: { ...c },
-      is_active: value
-    }
-    await llmAdminApi.putLLMConfigDetail(row.uuid || row.id, body)
+    await updateActive(row, value)
     await loadAll()
   } catch (e) {
-    console.error(e)
+    showError(e?.response?.data?.detail || e?.message || t('common.error'))
   }
+}
+
+async function updateActive(row, value) {
+  const id = row.uuid || row.id
+  const data = await llmAdminApi.getLLMConfigDetail(id)
+  const body = {
+    provider: (data?.provider || row.provider || 'openai').toLowerCase(),
+    config: { ...(data?.config || {}) },
+    is_active: value
+  }
+  return llmAdminApi.putLLMConfigDetail(id, body)
+}
+
+function rowActions(row) {
+  return [
+    {
+      key: 'test',
+      label: t('llm.config.testCall'),
+      icon: CirclePlay
+    },
+    ...(row.scope === 'global' && !row.is_default
+      ? [
+          {
+            key: 'default',
+            label: t('llm.config.setAsDefault'),
+            icon: Star
+          }
+        ]
+      : []),
+    {
+      key: 'toggle',
+      label: row.is_active ? t('llm.config.disable') : t('llm.config.enable'),
+      icon: row.is_active ? PowerOff : Power,
+      variant: row.is_active ? 'danger' : undefined
+    },
+    {
+      key: 'edit',
+      label: t('common.edit'),
+      icon: Pencil
+    },
+    {
+      key: 'delete',
+      label: t('common.delete'),
+      icon: Trash2,
+      variant: 'danger',
+      divider: true
+    }
+  ]
+}
+
+function handleRowAction(action, row) {
+  if (action === 'test') openTestModal(row)
+  else if (action === 'default') setAsDefault(row)
+  else if (action === 'toggle') setActive(row, !row.is_active)
+  else if (action === 'edit') editConfig(row)
+  else deleteTarget.value = row
 }
 
 async function setAsDefault(row) {
@@ -1793,17 +1749,47 @@ async function setAsDefault(row) {
 
 async function deleteConfig(row) {
   if (!(row?.uuid || row?.id)) return
+  await llmAdminApi.deleteLLMConfigDetail(row.uuid || row.id)
+}
+
+async function confirmDeleteConfig() {
+  const row = deleteTarget.value
+  if (!row) return
   try {
-    await llmAdminApi.deleteLLMConfigDetail(row.uuid || row.id)
+    await deleteConfig(row)
+    deleteTarget.value = null
+    showSuccess(t('management.bulkDeleted', { count: 1 }))
     await loadAll()
   } catch (e) {
-    console.error(e)
+    showError(e?.response?.data?.detail || e?.message || t('common.error'))
   }
 }
 
-function confirmDeleteConfig(row) {
-  pendingDeleteId.value = null
-  deleteConfig(row)
+async function runBulkAction(action) {
+  if (bulkLoadingKey.value) return
+  const targets = selectedRows.value.filter(
+    (row) => action === 'delete' || row.is_active !== (action === 'enable')
+  )
+  if (!targets.length) {
+    showError(t('management.noEligibleRows'))
+    return
+  }
+
+  bulkLoadingKey.value = action
+  try {
+    await llmAdminApi.bulkMutateLLMConfigs(
+      targets.map((row) => row.uuid || row.id),
+      action
+    )
+    const messageKey =
+      action === 'delete' ? 'management.bulkDeleted' : 'management.bulkUpdated'
+    showSuccess(t(messageKey, { count: targets.length }))
+    await loadAll()
+  } catch (e) {
+    showError(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    bulkLoadingKey.value = ''
+  }
 }
 
 onMounted(() => {

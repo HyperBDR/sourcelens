@@ -24,10 +24,13 @@ from accounts.views import (
     VerifyRegistrationTokenView,
 )
 from accounts.views.management import (
+    ManagementGroupBulkDeleteView,
     ManagementGroupListView,
     ManagementGroupDetailView,
+    ManagementRoleBulkView,
     ManagementRoleDetailView,
     ManagementRoleListView,
+    ManagementUserBulkView,
     ManagementUserDetailView,
     ManagementUserListView,
 )
@@ -161,6 +164,11 @@ urlpatterns = [
         name='management_users'
     ),
     path(
+        'api/v1/management/users/bulk-status/',
+        ManagementUserBulkView.as_view(),
+        name='management_users_bulk_status'
+    ),
+    path(
         'api/v1/management/users/<int:user_id>/',
         ManagementUserDetailView.as_view(),
         name='management_user_detail'
@@ -171,6 +179,11 @@ urlpatterns = [
         name='management_groups'
     ),
     path(
+        'api/v1/management/groups/bulk-delete/',
+        ManagementGroupBulkDeleteView.as_view(),
+        name='management_groups_bulk_delete'
+    ),
+    path(
         'api/v1/management/groups/<int:group_id>/',
         ManagementGroupDetailView.as_view(),
         name='management_group_detail'
@@ -179,6 +192,11 @@ urlpatterns = [
         'api/v1/management/roles/',
         ManagementRoleListView.as_view(),
         name='management_roles'
+    ),
+    path(
+        'api/v1/management/roles/bulk-status/',
+        ManagementRoleBulkView.as_view(),
+        name='management_roles_bulk_status'
     ),
     path(
         'api/v1/management/roles/<int:role_id>/',
