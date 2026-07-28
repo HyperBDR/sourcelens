@@ -3,6 +3,7 @@ import json
 import tracemalloc
 from pathlib import Path
 
+from lensnode import agent_tools
 from lensnode.agent_tools import _saved_output_synopsis
 from lensnode.agent_tools import build_general_chat_tools
 from lensnode.runtime_resources import RuntimeResources
@@ -216,6 +217,149 @@ def test_analyze_structured_output_supports_bounded_operations(tmp_path):
     assert sample["result"] == [{"id": "a"}, {"id": "b"}]
 
 
+def test_analyze_structured_output_validates_record_completeness(tmp_path):
+    resources = _resources(tmp_path)
+    ref, _path = _write_result(
+        resources,
+        {
+            "results": [
+                {"id": "a", "enterprise": "Acme", "quantity": 10},
+                {"id": "b", "enterprise": "", "quantity": 20},
+                {"id": "b", "enterprise": "Beta", "quantity": None},
+                {"enterprise": "Gamma", "quantity": 30},
+            ]
+        },
+    )
+
+    payload = json.loads(
+        _tool(resources, "analyze_structured_output").invoke(
+            {
+                "ref": ref,
+                "operation": "validate_records",
+                "path": "results",
+                "expected_count": 4,
+                "unique_by": ["id"],
+                "fields": ["enterprise", "quantity"],
+            }
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["result"] == {
+        "valid": False,
+        "total_count": 4,
+        "expected_count": 4,
+        "count_matches": True,
+        "unique_by": ["id"],
+        "duplicate_count": 1,
+        "missing_unique_key_count": 1,
+        "missing_required": {"enterprise": 1, "quantity": 1},
+    }
+
+
+def test_validate_records_is_a_dedicated_tool_and_records_evidence(tmp_path):
+    resources = _resources(tmp_path)
+    ref, _path = _write_result(
+        resources,
+        {
+            "total": 2,
+            "items": [
+                {"code": "ORDER-1"},
+                {"code": "ORDER-2"},
+            ],
+        },
+    )
+    runtime_evidence = {}
+    tools = build_general_chat_tools(
+        {},
+        resources,
+        runtime_evidence=runtime_evidence,
+    )
+    validate_records = next(
+        item for item in tools if item.name == "validate_records"
+    )
+
+    payload = json.loads(
+        validate_records.invoke(
+            {
+                "ref": ref,
+                "unique_by": ["code"],
+                "fields": ["code"],
+            }
+        )
+    )
+
+    assert payload["result"]["valid"] is True
+    assert runtime_evidence["record_validation"] == payload["result"]
+
+
+def test_analyze_structured_output_verifies_all_276_records(tmp_path):
+    resources = _resources(tmp_path)
+    ref, _path = _write_result(
+        resources,
+        {
+            "results": [
+                {
+                    "id": f"order-{index}",
+                    "enterprise": f"enterprise-{index}",
+                    "quantity": index + 1,
+                }
+                for index in range(276)
+            ]
+        },
+    )
+
+    payload = json.loads(
+        _tool(resources, "analyze_structured_output").invoke(
+            {
+                "ref": ref,
+                "operation": "validate_records",
+                "path": "results",
+                "expected_count": 276,
+                "unique_by": ["id"],
+                "fields": ["enterprise", "quantity"],
+            }
+        )
+    )
+
+    assert payload["result"]["valid"] is True
+    assert payload["result"]["total_count"] == 276
+    assert payload["result"]["duplicate_count"] == 0
+    assert payload["result"]["missing_required"] == {
+        "enterprise": 0,
+        "quantity": 0,
+    }
+
+
+def test_validate_records_rejects_an_unbounded_collection(
+    tmp_path,
+    monkeypatch,
+):
+    resources = _resources(tmp_path)
+    ref, _path = _write_result(
+        resources,
+        [{"id": 1}, {"id": 2}, {"id": 3}],
+    )
+    monkeypatch.setattr(
+        agent_tools,
+        "_STRUCTURED_VALIDATION_MAX_ITEMS",
+        2,
+    )
+
+    payload = json.loads(
+        _tool(resources, "analyze_structured_output").invoke(
+            {
+                "ref": ref,
+                "operation": "validate_records",
+                "unique_by": ["id"],
+            }
+        )
+    )
+
+    assert payload["ok"] is False
+    assert payload["error"] == "VALIDATION_ITEM_LIMIT_EXCEEDED"
+
+
 def test_analyze_structured_output_rejects_unsafe_or_invalid_input(tmp_path):
     resources = _resources(tmp_path)
     outside = resources.root / "outside.json"
@@ -279,6 +423,83 @@ def test_analyze_structured_output_enforces_call_budget(tmp_path):
     assert second["call_count"] == 2
     assert second["max_calls"] == 1
     assert events[-1][0] == "tool.analyze_structured_output.budget_exceeded"
+
+
+def test_record_validation_has_reserved_budget_and_understands_wrapper(
+    tmp_path,
+):
+    resources = _resources(tmp_path)
+    ref, _path = _write_result(
+        resources,
+        {
+            "total": 2,
+            "items": [
+                {"code": "ORDER-1", "status": "approved"},
+                {"code": "ORDER-2", "status": "pending"},
+            ],
+        },
+    )
+    command = {
+        "settings": {
+            "tool_policy": {
+                "structured_analysis_max_calls": 1,
+                "structured_validation_max_calls": 1,
+            }
+        }
+    }
+    events = []
+    tool = _tool(
+        resources,
+        "analyze_structured_output",
+        command=command,
+        events=events,
+    )
+
+    first = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
+    exhausted = json.loads(
+        tool.invoke({"ref": ref, "operation": "count"})
+    )
+    validated = json.loads(
+        tool.invoke(
+            {
+                "ref": ref,
+                "operation": "validate_records",
+                "unique_by": ["code"],
+                "fields": ["code", "status"],
+            }
+        )
+    )
+    repeated = json.loads(
+        tool.invoke(
+            {
+                "ref": ref,
+                "operation": "validate_records",
+                "unique_by": ["code"],
+            }
+        )
+    )
+
+    assert first["ok"] is True
+    assert exhausted["error"] == "STRUCTURED_ANALYSIS_CALL_LIMIT"
+    assert validated["result"] == {
+        "valid": True,
+        "total_count": 2,
+        "expected_count": 2,
+        "count_matches": True,
+        "unique_by": ["code"],
+        "duplicate_count": 0,
+        "missing_unique_key_count": 0,
+        "missing_required": {"code": 0, "status": 0},
+    }
+    assert repeated["error"] == "STRUCTURED_VALIDATION_CALL_LIMIT"
+    completed = [
+        detail
+        for name, detail in events
+        if name == "tool.analyze_structured_output.done"
+        and detail["operation"] == "validate_records"
+    ]
+    assert completed[-1]["call_count"] == 1
+    assert completed[-1]["max_calls"] == 1
 
 
 def test_inspect_saved_output_summarizes_csv_and_reads_bounded_window(

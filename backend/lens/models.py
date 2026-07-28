@@ -118,7 +118,7 @@ class Assistant(TimestampedUUIDModel):
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
-        DISABLED = "disabled", "Disabled"
+        ARCHIVED = "archived", "Archived"
 
     class Visibility(models.TextChoices):
         PUBLIC = "public", "Public"
@@ -200,6 +200,14 @@ class Assistant(TimestampedUUIDModel):
         return self.access_grants.filter(
             group__in=user.groups.all()
         ).exists()
+
+    def is_runnable_by(self, user):
+        """Return True when the user may start work with this assistant."""
+
+        return (
+            self.status == Assistant.Status.ACTIVE
+            and self.is_accessible_by(user)
+        )
 
 
 class AssistantAccess(TimestampedUUIDModel):
@@ -659,6 +667,10 @@ class Run(models.Model):
         PARTIAL = "partial", "Partial"
         BLOCKED = "blocked", "Blocked"
 
+    class Feedback(models.TextChoices):
+        POSITIVE = "positive", "Positive"
+        NEGATIVE = "negative", "Negative"
+
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
     status = models.CharField(
@@ -695,6 +707,13 @@ class Run(models.Model):
         default="",
     )
     termination_detail = models.JSONField(default=dict, blank=True)
+    feedback = models.CharField(
+        max_length=16,
+        choices=Feedback.choices,
+        blank=True,
+        default="",
+    )
+    feedback_updated_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     last_activity_at = models.DateTimeField(null=True, blank=True)

@@ -2,8 +2,8 @@
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.db.models import Count, Prefetch, Q
 from django.http import Http404
-from django.db.models import Count, Prefetch
 from rest_framework.status import HTTP_200_OK
 from rest_framework.response import Response
 from rest_framework.status import (
@@ -129,6 +129,24 @@ def _user_payload(u):
     }
 
 
+def _user_selector_payload(user):
+    """Build the lightweight user payload used by assignment selectors."""
+    display_name = (
+        f'{user.first_name or ""} {user.last_name or ""}'.strip()
+        or user.username
+        or user.email
+        or str(user.pk)
+    )
+    return {
+        'id': user.pk,
+        'username': user.username or user.email or str(user.pk),
+        'email': user.email or '',
+        'first_name': user.first_name or '',
+        'last_name': user.last_name or '',
+        'display_name': display_name,
+    }
+
+
 class ManagementUserListView(APIView):
     """
     GET: List all users for management console (with profile and groups).
@@ -145,37 +163,67 @@ class ManagementUserListView(APIView):
             request.query_params.get('page_size'),
             default=20,
         )
-        user_role_prefetch = Prefetch(
-            'platform_roles',
-            queryset=Role.objects.filter(is_active=True).order_by('name', 'id'),
-            to_attr='ordered_roles',
-        )
-        group_role_prefetch = Prefetch(
-            'platform_roles',
-            queryset=Role.objects.filter(is_active=True).order_by('name', 'id'),
-            to_attr='ordered_roles',
-        )
-        groups_prefetch = Prefetch(
-            'groups',
-            queryset=Group.objects.order_by('name').prefetch_related(
-                group_role_prefetch
-            ),
-            to_attr='ordered_groups',
-        )
-        qs = User.objects.select_related('profile').prefetch_related(
-            groups_prefetch,
-            user_role_prefetch,
-        ).order_by('id')
+        compact = str(
+            request.query_params.get('compact') or ''
+        ).lower() in {'1', 'true', 'yes'}
+        if compact:
+            qs = User.objects.only(
+                'id',
+                'username',
+                'email',
+                'first_name',
+                'last_name',
+            ).order_by('id')
+        else:
+            user_role_prefetch = Prefetch(
+                'platform_roles',
+                queryset=Role.objects.filter(is_active=True).order_by(
+                    'name',
+                    'id',
+                ),
+                to_attr='ordered_roles',
+            )
+            group_role_prefetch = Prefetch(
+                'platform_roles',
+                queryset=Role.objects.filter(is_active=True).order_by(
+                    'name',
+                    'id',
+                ),
+                to_attr='ordered_roles',
+            )
+            groups_prefetch = Prefetch(
+                'groups',
+                queryset=Group.objects.order_by('name').prefetch_related(
+                    group_role_prefetch
+                ),
+                to_attr='ordered_groups',
+            )
+            qs = User.objects.select_related('profile').prefetch_related(
+                groups_prefetch,
+                user_role_prefetch,
+            ).order_by('id')
         username = request.query_params.get('username')
         if username:
             qs = qs.filter(username=username)
         email = request.query_params.get('email')
         if email:
             qs = qs.filter(email=email)
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(username__icontains=search)
+                | Q(email__icontains=search)
+            )
+        assignable = str(
+            request.query_params.get('assignable') or ''
+        ).lower()
+        if assignable in {'1', 'true', 'yes'}:
+            qs = qs.filter(is_staff=False, is_superuser=False)
         total = qs.count()
         start = (page - 1) * page_size
         end = start + page_size
-        items = [_user_payload(u) for u in qs[start:end]]
+        payload_builder = _user_selector_payload if compact else _user_payload
+        items = [payload_builder(u) for u in qs[start:end]]
         return Response(_paginated_payload(items, total, page, page_size))
 
     def post(self, request):
@@ -402,6 +450,12 @@ def _group_payload(g):
             'name',
             'id',
         )
+    assistant_grant_count = getattr(g, 'assistant_grant_count', None)
+    if assistant_grant_count is None:
+        assistant_grants = getattr(g, 'assistant_grants', None)
+        assistant_grant_count = (
+            assistant_grants.count() if assistant_grants is not None else 0
+        )
     return {
         'id': g.pk,
         'name': g.name,
@@ -411,11 +465,7 @@ def _group_payload(g):
             'permission_count',
             g.permissions.count(),
         ),
-        'assistant_grant_count': getattr(
-            g,
-            'assistant_grant_count',
-            g.assistant_grants.count(),
-        ),
+        'assistant_grant_count': assistant_grant_count,
         'roles': [_role_summary_payload(role) for role in direct_roles],
     }
 
@@ -436,20 +486,47 @@ class ManagementGroupListView(APIView):
             request.query_params.get('page_size'),
             default=20,
         )
-        role_prefetch = Prefetch(
-            'platform_roles',
-            queryset=Role.objects.filter(is_active=True).order_by('name', 'id'),
-            to_attr='ordered_roles',
-        )
-        qs = Group.objects.annotate(
-            user_count=Count('user', distinct=True),
-            permission_count=Count('permissions', distinct=True),
-            assistant_grant_count=Count('assistant_grants', distinct=True),
-        ).prefetch_related(role_prefetch).order_by('name')
+        compact = str(
+            request.query_params.get('compact') or ''
+        ).lower() in {'1', 'true', 'yes'}
+        if compact:
+            qs = Group.objects.order_by('name')
+        else:
+            role_prefetch = Prefetch(
+                'platform_roles',
+                queryset=Role.objects.filter(is_active=True).order_by(
+                    'name',
+                    'id',
+                ),
+                to_attr='ordered_roles',
+            )
+            annotations = {
+                'user_count': Count('user', distinct=True),
+                'permission_count': Count('permissions', distinct=True),
+            }
+            if hasattr(Group, 'assistant_grants'):
+                annotations['assistant_grant_count'] = Count(
+                    'assistant_grants',
+                    distinct=True,
+                )
+            qs = (
+                Group.objects.annotate(**annotations)
+                .prefetch_related(role_prefetch)
+                .order_by('name')
+            )
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(name__icontains=search)
         total = qs.count()
         start = (page - 1) * page_size
         end = start + page_size
-        items = [_group_payload(g) for g in qs[start:end]]
+        if compact:
+            items = [
+                {'id': group.pk, 'name': group.name}
+                for group in qs[start:end]
+            ]
+        else:
+            items = [_group_payload(group) for group in qs[start:end]]
         return Response(_paginated_payload(items, total, page, page_size))
 
     def post(self, request):

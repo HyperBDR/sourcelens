@@ -375,6 +375,9 @@ def sanitize_termination_detail(detail):
     reason = detail.get("reason")
     if reason in PUBLIC_TERMINATION_REASONS:
         output["reason"] = reason
+    trigger = detail.get("trigger")
+    if trigger in PUBLIC_TERMINATION_REASONS:
+        output["trigger"] = trigger
     capability = detail.get("capability")
     if capability in PUBLIC_CAPABILITIES:
         output["capability"] = capability

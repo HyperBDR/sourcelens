@@ -272,6 +272,95 @@ test.describe('Management: create drawers', () => {
     })
   }
 
+  test('group member rows stay contained on compact phones', async ({
+    page,
+    request
+  }) => {
+    const usersResponse = await request.get(
+      '/api/v1/management/users/?page_size=1000',
+      { headers: ADMIN }
+    )
+    const originalUser = data(await usersResponse.json()).results.find(
+      (user) => user.id === USER_ID
+    )
+    const longUsername = `compact_member_${'x'.repeat(72)}`
+    const longEmail = `compact.${'long'.repeat(20)}@example.com`
+    let group
+
+    try {
+      const update = await request.patch(
+        `/api/v1/management/users/${USER_ID}/`,
+        {
+          headers: ADMIN,
+          data: { username: longUsername, email: longEmail }
+        }
+      )
+      expect(update.ok()).toBeTruthy()
+      group = await createGroup(request, [USER_ID])
+
+      await page.setViewportSize({ width: 320, height: 568 })
+      await page.goto('/management/groups')
+      await page.getByRole('button', { name: 'Create Group' }).click()
+
+      const createDialog = page.getByRole('dialog', { name: 'Create Group' })
+      const createSelector = createDialog.getByTestId('group-member-selector')
+      const createRow = createSelector.locator('label').filter({
+        hasText: longEmail
+      })
+      const checkbox = createRow.getByRole('checkbox')
+
+      await expect(createRow).toContainText(longUsername)
+      await expect(createRow).toContainText(longEmail)
+      await expect(createRow).toBeVisible()
+      await expect(createSelector).toBeVisible()
+      expect(
+        await createSelector.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth
+        )
+      ).toBe(true)
+
+      await checkbox.focus()
+      await page.keyboard.press('Space')
+      await expect(checkbox).toBeChecked()
+      await page.keyboard.press('Space')
+      await expect(checkbox).not.toBeChecked()
+
+      const checkboxes = createSelector.getByRole('checkbox')
+      await checkbox.check()
+      await checkboxes.nth(1).check()
+      await expect(checkbox).toBeChecked()
+      await expect(checkboxes.nth(1)).toBeChecked()
+
+      await createDialog.getByRole('button', { name: 'Cancel' }).click()
+      const groupRow = page.locator('tbody tr').filter({ hasText: group.name })
+      await groupRow.getByRole('button', { name: 'Edit' }).click()
+
+      const editDialog = page.getByRole('dialog', { name: 'Edit Group' })
+      const editSelector = editDialog.getByTestId('group-member-selector')
+      const editRow = editSelector.locator('label').filter({
+        hasText: longEmail
+      })
+
+      await expect(editRow.getByRole('checkbox')).toBeChecked()
+      expect(
+        await editSelector.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth
+        )
+      ).toBe(true)
+    } finally {
+      if (group) await deleteGroup(request, group.id)
+      if (originalUser) {
+        await request.patch(`/api/v1/management/users/${USER_ID}/`, {
+          headers: ADMIN,
+          data: {
+            username: originalUser.username,
+            email: originalUser.email
+          }
+        })
+      }
+    }
+  })
+
   test('shared drawer supports every dismissal action', async ({ page }) => {
     await page.goto('/management/lens/assistants')
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-wrap items-center gap-2">
+  <div class="flex flex-wrap items-center justify-end gap-2">
     <template v-if="confirming">
       <BaseButton size="sm" variant="danger" @click="confirmDelete">
         {{ t('common.confirm') }}

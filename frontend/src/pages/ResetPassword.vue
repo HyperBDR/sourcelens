@@ -36,6 +36,7 @@
       <form
         v-if="!resetComplete"
         class="space-y-4"
+        novalidate
         @submit.prevent="handleSubmit"
       >
         <BaseInput
@@ -90,6 +91,7 @@ import { useI18n } from 'vue-i18n'
 import { authApi } from '@/api/auth'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
+import { getFirstApiError, getPasswordPolicyError } from '@/utils/password'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -132,18 +134,14 @@ const validateForm = () => {
     return false
   }
 
-  if (form.newPassword1.length < 8) {
-    fieldErrors.newPassword1 = t('password.reset.passwordTooShort')
-    return false
-  }
-
-  if (form.newPassword1.length > 32) {
-    fieldErrors.newPassword1 = t('password.reset.passwordTooLong')
-    return false
-  }
-
-  if (!/[a-zA-Z]/.test(form.newPassword1) || !/[0-9]/.test(form.newPassword1)) {
-    fieldErrors.newPassword1 = t('password.reset.passwordRequirements')
+  const policyError = getPasswordPolicyError(form.newPassword1)
+  if (policyError) {
+    const policyKeys = {
+      tooShort: 'password.reset.passwordTooShort',
+      tooLong: 'password.reset.passwordTooLong',
+      requirements: 'password.reset.passwordRequirements'
+    }
+    fieldErrors.newPassword1 = t(policyKeys[policyError])
     return false
   }
 
@@ -166,18 +164,13 @@ const handleSubmit = async () => {
       newPassword2: form.newPassword2
     })
 
+    const responseData = response?.data?.data || response?.data || response
     successMessage.value =
-      response?.data?.message ||
-      response?.message ||
-      t('password.reset.successMessage')
+      responseData?.message || t('password.reset.successMessage')
     resetComplete.value = true
   } catch (error) {
-    const responseData = error.response?.data
     errorMessage.value =
-      responseData?.error ||
-      responseData?.detail ||
-      responseData?.message ||
-      t('password.reset.unknownError')
+      getFirstApiError(error) || t('password.reset.unknownError')
   } finally {
     submitting.value = false
   }

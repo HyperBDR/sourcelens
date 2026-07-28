@@ -16,8 +16,8 @@ function unwrapList(payload) {
   return []
 }
 
-export async function listAssistants() {
-  const response = await api.get('/lens/assistants/')
+export async function listAssistants(params = {}) {
+  const response = await api.get('/lens/assistants/', { params })
   return unwrapList(unwrapResponse(response))
 }
 
@@ -41,8 +41,13 @@ export async function updateAssistant(uuid, payload) {
   return unwrapResponse(response)
 }
 
-export async function deleteAssistant(uuid) {
-  const response = await api.delete(`/lens/assistants/${uuid}/`)
+export async function archiveAssistant(uuid) {
+  const response = await api.post(`/lens/assistants/${uuid}/archive/`)
+  return unwrapResponse(response)
+}
+
+export async function restoreAssistant(uuid) {
+  const response = await api.post(`/lens/assistants/${uuid}/restore/`)
   return unwrapResponse(response)
 }
 
@@ -58,6 +63,18 @@ export async function getAdminRuns(params = {}) {
 
 export async function getAdminRun(uuid) {
   const response = await api.get(`/lens/admin/runs/${uuid}/`)
+  return unwrapResponse(response)
+}
+
+export async function getAdminUserAccessDetail(userId) {
+  const response = await api.get(`/lens/admin/access/users/${userId}/`)
+  return unwrapResponse(response)
+}
+
+export async function getAdminGroupAccessDetail(groupId, params = {}) {
+  const response = await api.get(`/lens/admin/access/groups/${groupId}/`, {
+    params
+  })
   return unwrapResponse(response)
 }
 
@@ -176,6 +193,13 @@ export async function getRun(uuid) {
 
 export async function cancelRun(runUuid) {
   const response = await api.post(`/lens/runs/${runUuid}/cancel/`)
+  return unwrapResponse(response)
+}
+
+export async function updateRunFeedback(runUuid, feedback) {
+  const response = await api.patch(`/lens/runs/${runUuid}/feedback/`, {
+    feedback
+  })
   return unwrapResponse(response)
 }
 
@@ -467,6 +491,11 @@ export async function getPublicAssistantQa(slug, params = {}) {
 
 export async function listAdminShares(params = {}) {
   const response = await api.get('/lens/admin/shares/', { params })
+  return unwrapResponse(response)
+}
+
+export async function getAdminShare(uuid) {
+  const response = await api.get(`/lens/admin/shares/${uuid}/`)
   return unwrapResponse(response)
 }
 

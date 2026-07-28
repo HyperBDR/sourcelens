@@ -3,12 +3,17 @@ import re
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.http import urlsafe_base64_decode
 from django.utils.translation import gettext_lazy as _
 
 from rest_framework import serializers
 
 from allauth.socialaccount import providers
 from allauth.socialaccount.models import SocialAccount
+from dj_rest_auth.serializers import PasswordChangeSerializer
 
 from accounts.access import (
     get_access_profile,
@@ -75,6 +80,44 @@ def check_username_uniqueness(username):
     Can be extended to check EmailAlias if needed.
     """
     return not User.objects.filter(username=username).exists()
+
+
+def validate_password_policy(value, user=None):
+    """Validate the shared product and Django password policies."""
+    errors = []
+
+    if len(value) < 8:
+        errors.append(_("Password must be at least 8 characters long"))
+    if len(value) > 32:
+        errors.append(_("Password cannot exceed 32 characters"))
+    if not re.search(r'[a-zA-Z]', value) or not re.search(r'[0-9]', value):
+        errors.append(_("Password must contain both letters and numbers"))
+
+    if not errors:
+        try:
+            validate_password(value, user=user)
+        except DjangoValidationError as error:
+            errors.extend(error.messages)
+
+    if errors:
+        raise serializers.ValidationError(errors)
+
+    return value
+
+
+def normalize_password_fields(data):
+    """Normalize number-suffixed fields produced by the camel-case parser."""
+    normalized = data.copy()
+    aliases = {
+        'new_password_1': 'new_password1',
+        'new_password_2': 'new_password2',
+    }
+
+    for alias, field_name in aliases.items():
+        if field_name not in normalized and alias in normalized:
+            normalized[field_name] = normalized[alias]
+
+    return normalized
 
 
 class SuccessResponseSerializer(serializers.Serializer):
@@ -728,40 +771,59 @@ class UserDetailsSerializer(serializers.ModelSerializer):
 
 
 class CustomPasswordResetSerializer(serializers.Serializer):
-    """
-    Custom password reset serializer that only allows email-registered users.
-    OAuth users are rejected with appropriate error message.
-    """
+    """Validate reset request input without revealing account state."""
     email = serializers.EmailField()
 
-    def validate_email(self, value):
-        """
-        Validate that the email belongs to an email-registered user.
-        """
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Validate a reset token and replacement password."""
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password1 = serializers.CharField(write_only=True)
+    new_password2 = serializers.CharField(write_only=True)
+
+    def to_internal_value(self, data):
+        """Accept the documented camelCase API fields."""
+        return super().to_internal_value(normalize_password_fields(data))
+
+    def validate(self, attrs):
+        """Resolve the user and enforce reset requirements."""
+        if attrs['new_password1'] != attrs['new_password2']:
+            raise serializers.ValidationError(
+                {'new_password2': _("Passwords do not match")}
+            )
+
         try:
-            user = User.objects.get(email=value)
-        except User.DoesNotExist:
+            user_id = urlsafe_base64_decode(attrs['uid']).decode()
+            user = User.objects.get(pk=user_id)
+        except (
+            TypeError,
+            ValueError,
+            OverflowError,
+            UnicodeDecodeError,
+            User.DoesNotExist,
+        ):
             raise serializers.ValidationError(
-                _("No user found with this email address")
+                {'token': _("Invalid or expired reset link")}
             )
 
-        if not user.has_usable_password():
+        if not default_token_generator.check_token(user, attrs['token']):
             raise serializers.ValidationError(
-                _(
-                    "OAuth users cannot reset password. "
-                    "Please login with your OAuth provider."
-                )
+                {'token': _("Invalid or expired reset link")}
             )
 
-        try:
-            profile = user.profile
-            if not profile.registration_completed:
-                raise serializers.ValidationError(
-                    _("Please complete registration first")
-                )
-        except Profile.DoesNotExist:
-            raise serializers.ValidationError(
-                _("User profile not found")
-            )
+        validate_password_policy(attrs['new_password1'], user=user)
+        attrs['user'] = user
+        return attrs
 
-        return value
+
+class CustomPasswordChangeSerializer(PasswordChangeSerializer):
+    """Require the current password and enforce the product password policy."""
+
+    def to_internal_value(self, data):
+        """Accept the documented camelCase API fields."""
+        return super().to_internal_value(normalize_password_fields(data))
+
+    def custom_validation(self, attrs):
+        """Validate the new password before the form saves it."""
+        validate_password_policy(attrs['new_password1'], user=self.user)

@@ -25,6 +25,28 @@
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
+            <div
+              class="flex items-center gap-1 rounded-lg border border-line bg-surface-sunken p-1"
+              role="group"
+              :aria-label="t('lensAdmin.pages.assistants.viewSelector')"
+            >
+              <BaseButton
+                :variant="showArchived ? 'ghost' : 'secondary'"
+                size="sm"
+                :aria-pressed="!showArchived"
+                @click="switchArchiveView(false)"
+              >
+                {{ t('lensAdmin.pages.assistants.active') }}
+              </BaseButton>
+              <BaseButton
+                :variant="showArchived ? 'secondary' : 'ghost'"
+                size="sm"
+                :aria-pressed="showArchived"
+                @click="switchArchiveView(true)"
+              >
+                {{ t('lensAdmin.pages.assistants.archived') }}
+              </BaseButton>
+            </div>
             <BaseButton
               variant="outline"
               size="sm"
@@ -33,7 +55,12 @@
             >
               {{ t('common.refresh') }}
             </BaseButton>
-            <BaseButton variant="primary" size="sm" @click="startCreate">
+            <BaseButton
+              v-if="!showArchived"
+              variant="primary"
+              size="sm"
+              @click="startCreate"
+            >
               {{ t('lensAdmin.pages.assistants.action') }}
             </BaseButton>
           </div>
@@ -47,7 +74,13 @@
             class="rounded-lg border border-line bg-surface-sunken py-16 text-center"
           >
             <p class="text-sm font-medium text-ink-500">
-              {{ t('common.noData') }}
+              {{
+                t(
+                  showArchived
+                    ? 'lensAdmin.pages.assistants.emptyArchived'
+                    : 'lensAdmin.pages.assistants.emptyActive'
+                )
+              }}
             </p>
           </div>
 
@@ -153,7 +186,56 @@
                     <span v-else class="text-ink-400">{{ emptyValue }}</span>
                   </td>
                   <td class="table-cell">
-                    <RowActions :row="row" @edit="startEdit" @delete="remove" />
+                    <div class="flex flex-wrap items-center gap-2">
+                      <BaseButton
+                        v-if="row.status === 'active'"
+                        size="sm"
+                        variant="outline"
+                        @click="startEdit(row)"
+                      >
+                        {{ t('common.edit') }}
+                      </BaseButton>
+                      <template
+                        v-if="
+                          row.status === 'active' &&
+                          archiveConfirmUuid === row.uuid
+                        "
+                      >
+                        <BaseButton
+                          size="sm"
+                          variant="secondary"
+                          :loading="actionUuid === row.uuid"
+                          @click="archive(row)"
+                        >
+                          {{ t('common.confirm') }}
+                        </BaseButton>
+                        <BaseButton
+                          size="sm"
+                          variant="ghost"
+                          :disabled="actionUuid === row.uuid"
+                          @click="archiveConfirmUuid = ''"
+                        >
+                          {{ t('common.cancel') }}
+                        </BaseButton>
+                      </template>
+                      <BaseButton
+                        v-else-if="row.status === 'active'"
+                        size="sm"
+                        variant="ghost"
+                        @click="archiveConfirmUuid = row.uuid"
+                      >
+                        {{ t('lensAdmin.pages.assistants.archive') }}
+                      </BaseButton>
+                      <BaseButton
+                        v-else
+                        size="sm"
+                        variant="outline"
+                        :loading="actionUuid === row.uuid"
+                        @click="restore(row)"
+                      >
+                        {{ t('lensAdmin.pages.assistants.restore') }}
+                      </BaseButton>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -181,8 +263,6 @@
         :environment-variable-sets="environmentVariableSets"
         :mcps="mcps"
         :llm-config-options="llmConfigOptions"
-        :groups="groups"
-        :users="users"
         :saving="saving"
         :form-error="formError"
         :refreshing-dirs="refreshingDirs"
@@ -200,20 +280,20 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
-import { managementApi } from '@/admin/api/management'
 import { copyToClipboard } from '@/utils/clipboard'
 import { extractErrorMessage } from '@/utils/api'
 import { assistantChatUrl } from '@/utils/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
+  archiveAssistant,
   createAssistant,
-  deleteAssistant,
   listAssistants,
   listGlobalSettings,
   listLensNodes,
   listMcpServers,
   listEnvironmentVariableSets,
   listSkills,
+  restoreAssistant,
   updateAssistant
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
@@ -224,7 +304,6 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import AssistantFormDrawer from './AssistantFormDrawerDirectEnvironment.vue'
 import { buildSkillEnvironmentBinding } from './assistantEnvironment'
-import RowActions from './components/RowActions.vue'
 import {
   EMPTY_VALUE as emptyValue,
   formatAssistantType,
@@ -244,6 +323,9 @@ const showDrawer = ref(false)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
+const showArchived = ref(false)
+const archiveConfirmUuid = ref('')
+const actionUuid = ref('')
 
 const assistants = ref([])
 const currentPage = ref(1)
@@ -254,8 +336,6 @@ const environmentVariableSets = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
-const groups = ref([])
-const users = ref([])
 
 const activeColumns = computed(() =>
   [
@@ -330,19 +410,15 @@ async function load() {
       environmentVariableSetRows,
       mcpRows,
       settingRows,
-      llmRows,
-      groupRows,
-      userRows
+      llmRows
     ] = await Promise.all([
-      listAssistants(),
+      listAssistants(showArchived.value ? { archived: true } : {}),
       listLensNodes(),
       listSkills(),
       listEnvironmentVariableSets(),
       listMcpServers(),
       listGlobalSettings(),
-      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => []),
-      managementApi.getGroups({ page_size: 1000 }).catch(() => []),
-      managementApi.getUsers({ page_size: 1000 }).catch(() => [])
+      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
     ])
 
     assistants.value = normalizeList(assistantRows)
@@ -352,13 +428,20 @@ async function load() {
     mcps.value = normalizeList(mcpRows)
     globalSettings.value = normalizeList(settingRows)
     llmConfigOptions.value = normalizeList(llmRows)
-    groups.value = normalizeList(groupRows)
-    users.value = normalizeList(userRows)
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
     loading.value = false
   }
+}
+
+async function switchArchiveView(archived) {
+  if (showArchived.value === archived) return
+  showArchived.value = archived
+  archiveConfirmUuid.value = ''
+  currentPage.value = 1
+  assistants.value = []
+  await load()
 }
 
 function startCreate() {
@@ -418,6 +501,7 @@ function defaultForm() {
     visibility: 'private',
     access_group_ids: [],
     access_user_ids: [],
+    access_grant_options: [],
     settings: {},
     status: 'active'
   }
@@ -490,6 +574,7 @@ function formFromRow(row) {
     access_user_ids: (row.access_grants || [])
       .filter((g) => g.type === 'user')
       .map((g) => g.id),
+    access_grant_options: row.access_grants || [],
     settings: { ...(row.settings || {}) },
     status: row.status || 'active'
   }
@@ -621,13 +706,30 @@ function buildSelectedDirs() {
   })
 }
 
-async function remove(row) {
+async function archive(row) {
+  actionUuid.value = row.uuid
   try {
-    await deleteAssistant(row.uuid)
-    showSuccess(t('lensAdmin.messages.deleteSuccess'))
+    await archiveAssistant(row.uuid)
+    showSuccess(t('lensAdmin.messages.archiveSuccess'))
+    archiveConfirmUuid.value = ''
     await load()
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.messages.deleteFailed')))
+    showError(extractErrorMessage(error, t('lensAdmin.messages.archiveFailed')))
+  } finally {
+    actionUuid.value = ''
+  }
+}
+
+async function restore(row) {
+  actionUuid.value = row.uuid
+  try {
+    await restoreAssistant(row.uuid)
+    showSuccess(t('lensAdmin.messages.restoreSuccess'))
+    await load()
+  } catch (error) {
+    showError(extractErrorMessage(error, t('lensAdmin.messages.restoreFailed')))
+  } finally {
+    actionUuid.value = ''
   }
 }
 

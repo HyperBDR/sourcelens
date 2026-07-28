@@ -5,9 +5,14 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
+from .assistant_lifecycle import (
+    AssistantNotRunnableError,
+    create_assistant_session,
+)
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE
 from .datasource_services import (
     DataSourceDispatchError,
@@ -339,6 +344,8 @@ class AccessGrantsField(serializers.Field):
                         "type": "user",
                         "id": grant.user_id,
                         "name": grant.user.get_username(),
+                        "username": grant.user.get_username(),
+                        "email": grant.user.email or "",
                     }
                 )
         return result
@@ -413,6 +420,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "lensnode",
             "skill_summary",
             "mcp_summary",
+            "status",
             "created_at",
             "updated_at",
         ]
@@ -1728,6 +1736,7 @@ class RunOutputFileSerializer(serializers.ModelSerializer):
             "filename",
             "content_type",
             "byte_size",
+            "created_at",
         ]
         read_only_fields = fields
 
@@ -1745,6 +1754,8 @@ class MessageSerializer(serializers.ModelSerializer):
     run = serializers.UUIDField(source="run.uuid", read_only=True)
     thinking = serializers.SerializerMethodField()
     completed_at = serializers.SerializerMethodField()
+    feedback = serializers.SerializerMethodField()
+    feedback_updated_at = serializers.SerializerMethodField()
     attachments = MessageAttachmentSerializer(many=True, read_only=True)
     output_files = RunOutputFileSerializer(many=True, read_only=True)
 
@@ -1758,6 +1769,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "run",
             "thinking",
             "completed_at",
+            "feedback",
+            "feedback_updated_at",
             "attachments",
             "output_files",
             "created_at",
@@ -1770,6 +1783,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "run",
             "thinking",
             "completed_at",
+            "feedback",
+            "feedback_updated_at",
             "attachments",
             "output_files",
             "created_at",
@@ -1782,6 +1797,22 @@ class MessageSerializer(serializers.ModelSerializer):
             return None
         run = self._run_for_message(obj)
         return run.finished_at if run else None
+
+    def get_feedback(self, obj):
+        """Return the current feedback for an assistant response."""
+
+        if obj.role != Message.Role.ASSISTANT:
+            return None
+        run = self._run_for_message(obj)
+        return run.feedback if run else None
+
+    def get_feedback_updated_at(self, obj):
+        """Return when feedback for an assistant response last changed."""
+
+        if obj.role != Message.Role.ASSISTANT:
+            return None
+        run = self._run_for_message(obj)
+        return run.feedback_updated_at if run else None
 
     @staticmethod
     def _run_for_message(obj):
@@ -1905,6 +1936,8 @@ class RunSerializer(serializers.ModelSerializer):
             "error",
             "outcome",
             "termination_detail",
+            "feedback",
+            "feedback_updated_at",
             "started_at",
             "finished_at",
             "created_at",
@@ -1913,6 +1946,45 @@ class RunSerializer(serializers.ModelSerializer):
             "execution",
         ]
         read_only_fields = fields
+
+
+class RunFeedbackSerializer(serializers.ModelSerializer):
+    """Validate and persist one user's feedback for a completed run."""
+
+    feedback = serializers.ChoiceField(
+        choices=Run.Feedback.choices,
+        allow_blank=True,
+    )
+
+    class Meta:
+        model = Run
+        fields = ["feedback", "feedback_updated_at"]
+        read_only_fields = ["feedback_updated_at"]
+
+    def validate(self, attrs):
+        """Only completed runs with an answer can receive feedback."""
+
+        run = self.instance
+        if run.status != Run.Status.DONE or run.output_message is None:
+            raise serializers.ValidationError("RUN_NOT_FEEDBACK_ELIGIBLE")
+        return attrs
+
+    def update(self, instance, validated_data):
+        """Update feedback without changing its timestamp on no-op calls."""
+
+        feedback = validated_data["feedback"]
+        if feedback == instance.feedback:
+            return instance
+        instance.feedback = feedback
+        instance.feedback_updated_at = timezone.now()
+        instance.save(
+            update_fields=[
+                "feedback",
+                "feedback_updated_at",
+                "updated_at",
+            ]
+        )
+        return instance
 
 
 class SessionSerializer(serializers.ModelSerializer):
@@ -1944,17 +2016,17 @@ class SessionCreateSerializer(serializers.Serializer):
     title = serializers.CharField(required=False, allow_blank=True)
 
     def create(self, validated_data):
-        assistant = Assistant.objects.get(uuid=validated_data["assistant_uuid"])
         request = self.context["request"]
-        if not assistant.is_accessible_by(request.user):
+        try:
+            return create_assistant_session(
+                validated_data["assistant_uuid"],
+                request.user,
+                validated_data.get("title", ""),
+            )
+        except AssistantNotRunnableError:
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
-        return Session.objects.create(
-            assistant=assistant,
-            user=request.user,
-            title=validated_data.get("title", ""),
-        )
 
 
 class RunCreateSerializer(serializers.Serializer):
@@ -1991,17 +2063,26 @@ class RunCreateSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         session = self.context["session"]
+        request = self.context.get("request")
         run_inline = validated_data.get("run_inline", False)
-        run = create_execution_run(
-            session=session,
-            question=validated_data.get("question", ""),
-            idempotency_key=validated_data.get("idempotency_key", ""),
-            enqueue=validated_data.get("enqueue", True) and not run_inline,
-            attachment_uuids=[
-                str(value)
-                for value in validated_data.get("attachment_uuids", [])
-            ],
-        )
+        try:
+            run = create_execution_run(
+                session=session,
+                question=validated_data.get("question", ""),
+                idempotency_key=validated_data.get("idempotency_key", ""),
+                enqueue=(
+                    validated_data.get("enqueue", True) and not run_inline
+                ),
+                attachment_uuids=[
+                    str(value)
+                    for value in validated_data.get("attachment_uuids", [])
+                ],
+                user=request.user if request else None,
+            )
+        except AssistantNotRunnableError:
+            raise PermissionDenied(
+                "You do not have access to this assistant."
+            )
         if run_inline:
             from .execution import execute_answer_run
 
@@ -2181,3 +2262,17 @@ class SharedQAAdminSerializer(serializers.ModelSerializer):
         """Return a short plain-text preview of the answer."""
 
         return _answer_snippet(obj.answer)
+
+
+class SharedQAAdminDetailSerializer(SharedQAAdminSerializer):
+    """Admin moderation detail with the complete Q&A content."""
+
+    class Meta(SharedQAAdminSerializer.Meta):
+        fields = SharedQAAdminSerializer.Meta.fields + [
+            "question",
+            "answer",
+        ]
+        read_only_fields = SharedQAAdminSerializer.Meta.read_only_fields + [
+            "question",
+            "answer",
+        ]

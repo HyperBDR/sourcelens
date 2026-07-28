@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import Max, Q
 from django.utils import timezone
 
+from .assistant_lifecycle import lock_assistant_for_new_work
 from .attachments import attachment_data_url, bind_attachments_to_message
 from .environment_variables import missing_required_environment
 from .llm import run_completion, run_completion_multimodal
@@ -271,8 +272,13 @@ def create_execution_run(
     idempotency_key="",
     enqueue=True,
     attachment_uuids=None,
+    user=None,
 ):
     """Create a queued run for LensNode execution."""
+
+    assistant = lock_assistant_for_new_work(session.assistant, user)
+    session = session.__class__.objects.select_for_update().get(pk=session.pk)
+    session.assistant = assistant
 
     if idempotency_key:
         existing = (
@@ -286,7 +292,6 @@ def create_execution_run(
         if existing:
             return existing
 
-    session = session.__class__.objects.select_for_update().get(pk=session.pk)
     input_message = Message.objects.create(
         session=session,
         role=Message.Role.USER,
@@ -523,6 +528,8 @@ def validate_run_dispatch(run):
 
     assistant = run.session.assistant
     lensnode = run.lensnode
+    if assistant.status != Assistant.Status.ACTIVE:
+        raise LensNodeDispatchError("ASSISTANT_ARCHIVED")
     if lensnode is None:
         raise LensNodeDispatchError("LENSNODE_REQUIRED")
     if lensnode.status == LensNode.Status.DRAINING:
@@ -628,13 +635,22 @@ def build_run_history(run):
     current turn, newest-first up to the caps, then returned in
     chronological order. A Message stores only final content (never tool
     traces), so the carried history stays compact and the agent context
-    cannot blow up from a long session.
+    cannot blow up from a long session. Capability-unavailable fallback
+    answers are omitted because their boundary decision applies only to
+    that request; the user message remains available for follow-up context.
     """
 
+    blocked_runs = Run.objects.filter(
+        session=run.session,
+        termination_detail__reason="capability_unavailable",
+        output_message_id__isnull=False,
+    )
     messages = Message.objects.filter(
         session=run.session,
         sequence__lt=run.input_message.sequence,
         role__in=[Message.Role.USER, Message.Role.ASSISTANT],
+    ).exclude(
+        pk__in=blocked_runs.values("output_message_id")
     ).order_by("-sequence")
     history = []
     total_chars = 0

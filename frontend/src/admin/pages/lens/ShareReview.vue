@@ -73,7 +73,8 @@
                 <tr
                   v-for="row in pagedRows"
                   :key="row.uuid"
-                  class="transition-colors hover:bg-gray-50"
+                  class="cursor-pointer transition-colors hover:bg-gray-50"
+                  @click="openDetail(row)"
                 >
                   <td class="table-cell">
                     <div
@@ -130,8 +131,15 @@
                     {{ formatDate(row.published_at, 'yyyy-MM-dd HH:mm') }}
                   </td>
                   <td class="table-cell text-gray-500">{{ row.view_count }}</td>
-                  <td class="table-cell">
+                  <td class="table-cell" @click.stop>
                     <div class="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        class="text-xs text-gray-500 hover:text-primary-600"
+                        @click="openDetail(row)"
+                      >
+                        {{ t('lens.qa.viewDetail') }}
+                      </button>
                       <a
                         :href="qaShareUrl(row.token)"
                         target="_blank"
@@ -189,6 +197,104 @@
           />
         </div>
       </div>
+
+      <BaseDrawer
+        :show="drawerOpen"
+        :title="t('lens.qa.detailTitle')"
+        :subtitle="detail?.title || ''"
+        width="2xl"
+        @close="closeDetail"
+      >
+        <BaseLoading v-if="detailLoading" />
+        <div v-else-if="detail" class="space-y-6 pt-1">
+          <dl class="grid grid-cols-1 gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="text-gray-500">{{ t('lens.qa.assistant') }}</dt>
+              <dd class="mt-0.5 text-gray-900">
+                {{ detail.assistant_name || '-' }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">{{ t('lens.qa.publishedBy') }}</dt>
+              <dd class="mt-0.5 text-gray-900">
+                {{ detail.published_by || '-' }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">{{ t('lens.qa.publishedAt') }}</dt>
+              <dd class="mt-0.5 text-gray-900">
+                {{ formatDate(detail.published_at, 'yyyy-MM-dd HH:mm') }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">{{ t('lens.qa.views') }}</dt>
+              <dd class="mt-0.5 text-gray-900">{{ detail.view_count }}</dd>
+            </div>
+          </dl>
+
+          <section>
+            <h3 class="mb-2 text-sm font-semibold text-gray-900">
+              {{ t('lens.qa.question') }}
+            </h3>
+            <div
+              class="whitespace-pre-wrap rounded-lg bg-gray-50 p-4 text-sm text-gray-800"
+            >
+              {{ detail.question || '-' }}
+            </div>
+          </section>
+
+          <section>
+            <h3 class="mb-2 text-sm font-semibold text-gray-900">
+              {{ t('lens.qa.answer') }}
+            </h3>
+            <MarkdownRenderer :content="detail.answer || ''" />
+          </section>
+        </div>
+
+        <template v-if="detail" #footer>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <BaseButton
+              v-if="!detail.is_listed && detail.status === 'published'"
+              variant="primary"
+              size="sm"
+              :loading="actionLoading"
+              @click="apply(detail, { is_listed: true })"
+            >
+              {{ t('lens.qa.approve') }}
+            </BaseButton>
+            <BaseButton
+              v-if="detail.is_listed && detail.status === 'published'"
+              variant="outline"
+              size="sm"
+              :loading="actionLoading"
+              @click="apply(detail, { is_listed: false })"
+            >
+              {{ t('lens.qa.unlist') }}
+            </BaseButton>
+            <BaseButton
+              v-if="detail.status === 'published'"
+              variant="danger"
+              size="sm"
+              :loading="actionLoading"
+              @click="apply(detail, { status: 'hidden' })"
+            >
+              {{ t('lens.qa.hide') }}
+            </BaseButton>
+            <BaseButton
+              v-if="detail.status === 'hidden'"
+              variant="outline"
+              size="sm"
+              :loading="actionLoading"
+              @click="apply(detail, { status: 'published' })"
+            >
+              {{ t('lens.qa.restore') }}
+            </BaseButton>
+            <BaseButton variant="secondary" size="sm" @click="closeDetail">
+              {{ t('lens.qa.done') }}
+            </BaseButton>
+          </div>
+        </template>
+      </BaseDrawer>
     </div>
   </AdminLayout>
 </template>
@@ -200,9 +306,11 @@ import { useI18n } from 'vue-i18n'
 
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
-import { listAdminShares, updateAdminShare } from '@/api/lens'
+import { getAdminShare, listAdminShares, updateAdminShare } from '@/api/lens'
 import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
 import { useToast } from '@/composables/useToast'
@@ -215,6 +323,11 @@ const loading = ref(true)
 const activeTab = ref('pending')
 const currentPage = ref(1)
 const pageSize = ref(20)
+const drawerOpen = ref(false)
+const selectedUuid = ref(null)
+const detail = ref(null)
+const detailLoading = ref(false)
+const actionLoading = ref(false)
 
 const tabs = computed(() => [
   { key: 'pending', label: t('lens.qa.tabPending') },
@@ -275,13 +388,45 @@ function setTab(key) {
   load()
 }
 
+async function openDetail(row) {
+  selectedUuid.value = row.uuid
+  drawerOpen.value = true
+  detail.value = null
+  await loadDetail()
+}
+
+function closeDetail() {
+  drawerOpen.value = false
+  selectedUuid.value = null
+  detail.value = null
+}
+
+async function loadDetail() {
+  if (!selectedUuid.value) return
+  detailLoading.value = true
+  try {
+    detail.value = await getAdminShare(selectedUuid.value)
+  } catch {
+    detail.value = null
+    showError(t('lens.qa.detailFailed'))
+  } finally {
+    detailLoading.value = false
+  }
+}
+
 async function apply(row, payload) {
+  actionLoading.value = true
   try {
     await updateAdminShare(row.uuid, payload)
     showSuccess(t('lens.qa.actionDone'))
-    load()
+    await load()
+    if (drawerOpen.value && selectedUuid.value === row.uuid) {
+      await loadDetail()
+    }
   } catch {
     showError(t('lens.qa.shareFailed'))
+  } finally {
+    actionLoading.value = false
   }
 }
 

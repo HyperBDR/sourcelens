@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from lens.models import Assistant, SharedQA, SharedQAFile
 from lens.serializers import (
+    SharedQAAdminDetailSerializer,
     SharedQAAdminSerializer,
     SharedQAListSerializer,
     SharedQAMineSerializer,
@@ -69,6 +70,13 @@ class AdminSharedQAViewSet(BaseAdminViewSet):
     queryset = SharedQA.objects.all().select_related("published_by")
     serializer_class = SharedQAAdminSerializer
     http_method_names = ["get", "patch", "head", "options"]
+
+    def get_serializer_class(self):
+        """Return complete Q&A content only for the detail endpoint."""
+
+        if self.action == "retrieve":
+            return SharedQAAdminDetailSerializer
+        return SharedQAAdminSerializer
 
     def get_queryset(self):
         """Filter by listed/status for the moderation queue."""

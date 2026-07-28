@@ -12,6 +12,7 @@ def test_runtime_modes_keep_general_chat_features_isolated():
     code = runtime_mode_for({"task": "code_analysis"})
 
     assert isinstance(general, GeneralChatMode)
+    assert general.execution_gates is True
     assert general.decorate_event({"value": 1}) == {
         "value": 1,
         "runtime_scope": "general_chat",
@@ -32,6 +33,7 @@ def test_runtime_modes_keep_general_chat_features_isolated():
     assert isinstance(document, DocumentQAMode)
     assert isinstance(code, CodeAnalysisMode)
     for legacy in (document, code):
+        assert legacy.execution_gates is False
         assert legacy.decorate_event({"value": 1}) == {"value": 1}
         legacy.emit_model_round(
             lambda name, detail: events.append((name, detail)),
