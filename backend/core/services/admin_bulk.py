@@ -5,6 +5,7 @@ from uuid import UUID
 from agentcore_metering.adapters.django.models import LLMConfig
 from agentcore_notifier.adapters.django.models import NotificationChannel
 from django.db import transaction
+from django.utils import timezone
 
 MAX_BULK_ITEMS = 100
 LLM_CONFIG_ACTIONS = {"enable", "disable", "delete"}
@@ -77,5 +78,8 @@ def mutate_llm_configs(raw_uuids, action):
     if action == "delete":
         queryset.delete()
     else:
-        queryset.update(is_active=action == "enable")
+        queryset.update(
+            is_active=action == "enable",
+            updated_at=timezone.now(),
+        )
     return len(configs)

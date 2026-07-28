@@ -1,9 +1,12 @@
 """Atomic admin batch API tests."""
 
+from datetime import timedelta
+
 import pytest
 from agentcore_metering.adapters.django.models import LLMConfig
 from agentcore_notifier.adapters.django.models import NotificationChannel
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 
@@ -105,6 +108,31 @@ class TestLLMConfigBulk:
             pk__in=[config.pk for config in configs],
             is_active=True,
         ).exists()
+
+    def test_status_change_updates_modified_timestamp(self, admin_client):
+        config = LLMConfig.objects.create(
+            scope=LLMConfig.Scope.GLOBAL,
+            provider="openai",
+            config={"model": "timestamped"},
+            is_active=True,
+        )
+        previous_timestamp = timezone.now() - timedelta(days=1)
+        LLMConfig.objects.filter(pk=config.pk).update(
+            updated_at=previous_timestamp
+        )
+
+        response = admin_client.post(
+            "/api/v1/admin/llm-config/bulk/",
+            {
+                "config_ids": [str(config.uuid)],
+                "action": "disable",
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200
+        config.refresh_from_db()
+        assert config.updated_at > previous_timestamp
 
     def test_missing_config_changes_none(self, admin_client):
         config = LLMConfig.objects.create(

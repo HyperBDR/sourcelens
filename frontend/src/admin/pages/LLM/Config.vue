@@ -268,28 +268,6 @@
                           />
                         </svg>
                       </span>
-                      <button
-                        v-else-if="row.scope === 'global'"
-                        type="button"
-                        class="inline-flex items-center rounded p-1 text-gray-400 hover:bg-primary-50 hover:text-primary-600"
-                        :title="t('llm.config.setAsDefault')"
-                        @click="setAsDefault(row)"
-                      >
-                        <svg
-                          class="h-5 w-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
-                          />
-                        </svg>
-                      </button>
                       <span v-else class="text-gray-300">–</span>
                     </td>
                     <td class="px-4 py-4 whitespace-nowrap text-sm">
@@ -884,7 +862,7 @@
  * LLM Configuration: Provider -> Model selection with capability tags.
  * API Base URL below model selection; defaults to official URL for the provider.
  */
-import { CirclePlay, Pencil, Power, PowerOff, Trash2 } from '@lucide/vue'
+import { CirclePlay, Pencil, Power, PowerOff, Star, Trash2 } from '@lucide/vue'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -1713,6 +1691,15 @@ function rowActions(row) {
       label: t('llm.config.testCall'),
       icon: CirclePlay
     },
+    ...(row.scope === 'global' && !row.is_default
+      ? [
+          {
+            key: 'default',
+            label: t('llm.config.setAsDefault'),
+            icon: Star
+          }
+        ]
+      : []),
     {
       key: 'toggle',
       label: row.is_active ? t('llm.config.disable') : t('llm.config.enable'),
@@ -1736,6 +1723,7 @@ function rowActions(row) {
 
 function handleRowAction(action, row) {
   if (action === 'test') openTestModal(row)
+  else if (action === 'default') setAsDefault(row)
   else if (action === 'toggle') setActive(row, !row.is_active)
   else if (action === 'edit') editConfig(row)
   else deleteTarget.value = row
