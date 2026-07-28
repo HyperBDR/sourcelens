@@ -111,7 +111,38 @@
     "selectGroups": "Select groups",
     "selectRoles": "Select roles",
     "followRolePreference": "Follow role preference",
-    "noDefaultPlatform": "No default platform"
+    "noDefaultPlatform": "No default platform",
+    "details": {
+      "userTitle": "User Details",
+      "groupTitle": "Group Details",
+      "overview": "Overview",
+      "assistantsActivity": "Assistants & activity",
+      "assistants": "Assistants",
+      "members": "Members",
+      "assignedAssistants": "Assigned assistants",
+      "conversations": "Conversations",
+      "qaRecords": "Q&A records",
+      "lastActive": "Last active",
+      "lastUsed": "Last used",
+      "accountOverview": "Account overview",
+      "groupOverview": "Group overview",
+      "accountType": "Account type",
+      "staffUser": "Staff user",
+      "regularUser": "Regular user",
+      "relatedAssistants": "Related assistants",
+      "viewAllHistory": "View all history",
+      "assistant": "Assistant",
+      "access": "Access",
+      "rolesPermissions": "Roles / permissions",
+      "groupSummary": "Membership, roles, and assistant access",
+      "searchMembers": "Search username or email",
+      "accessSources": {
+        "direct": "Direct",
+        "group": "Group",
+        "public": "Public",
+        "history": "History"
+      }
+    }
   },
   "platforms": {
     "switchPlatform": "Switch view",
@@ -1394,7 +1425,18 @@
       "groups": "Authorized groups",
       "users": "Authorized users",
       "noGroups": "No groups available",
-      "noUsers": "No users available"
+      "noUsers": "No users available",
+      "searchUsers": "Search authorized users",
+      "searchUsersPlaceholder": "Search by username or email",
+      "searchGroups": "Search authorized groups",
+      "searchGroupsPlaceholder": "Search by group name",
+      "loadingGroups": "Loading groups...",
+      "loadingUsers": "Loading users...",
+      "noGroupResults": "No matching groups",
+      "noUserResults": "No matching users",
+      "groupsFailed": "Failed to load groups.",
+      "usersFailed": "Failed to load users.",
+      "retry": "Retry"
     }
   }
 }

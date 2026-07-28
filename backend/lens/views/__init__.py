@@ -1,5 +1,9 @@
 """Views for LensNode workers, assistants, sessions, and sharing."""
 
+from .admin_access_subjects import (
+    AdminGroupAccessDetailView,
+    AdminUserAccessDetailView,
+)
 from .admin_runs import (
     AdminRunDetailView,
     AdminRunListView,
@@ -33,8 +37,10 @@ from .shares import (
 from .skills import MCPServerViewSet, SkillViewSet
 
 __all__ = [
+    "AdminGroupAccessDetailView",
     "AdminRunDetailView",
     "AdminRunListView",
+    "AdminUserAccessDetailView",
     "AdminSharedQAViewSet",
     "AssistantViewSet",
     "DataSourceCredentialViewSet",

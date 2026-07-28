@@ -78,13 +78,24 @@
                 <tr
                   v-for="group in groups"
                   :key="group.id"
-                  class="transition-colors hover:bg-line-soft"
+                  class="cursor-pointer transition-colors hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                  data-testid="group-detail-row"
+                  tabindex="0"
+                  @click="openDetail(group)"
+                  @keydown.enter.self="openDetail(group)"
+                  @keydown.space.self.prevent="openDetail(group)"
                 >
                   <td class="table-cell font-mono text-ink-500">
                     {{ group.id }}
                   </td>
-                  <td class="table-cell font-medium text-ink-900">
-                    {{ group.name }}
+                  <td class="table-cell">
+                    <button
+                      class="font-medium text-brand-700 hover:underline"
+                      data-testid="group-detail-trigger"
+                      @click.stop="openDetail(group)"
+                    >
+                      {{ group.name }}
+                    </button>
                   </td>
                   <td class="table-cell text-ink-600">
                     {{ group.user_count ?? 0 }}
@@ -97,14 +108,14 @@
                       <BaseButton
                         variant="outline"
                         size="sm"
-                        @click="openEditModal(group)"
+                        @click.stop="openEditModal(group)"
                       >
                         {{ t('common.edit') }}
                       </BaseButton>
                       <BaseButton
                         variant="danger"
                         size="sm"
-                        @click="askDelete(group)"
+                        @click.stop="askDelete(group)"
                       >
                         {{ t('common.delete') }}
                       </BaseButton>
@@ -126,6 +137,14 @@
           />
         </div>
       </section>
+
+      <GroupDetailDrawer
+        :show="!!detailGroup"
+        :group="detailGroup"
+        @close="detailGroup = null"
+        @edit="editFromDetail"
+        @history="openGroupHistory"
+      />
 
       <BaseDrawer
         :show="showModal"
@@ -240,6 +259,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
@@ -249,9 +269,11 @@ import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import { useToast } from '@/composables/useToast'
 import { managementApi } from '@/admin/api'
+import GroupDetailDrawer from './GroupDetailDrawer.vue'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
+const router = useRouter()
 
 const groups = ref([])
 const loading = ref(false)
@@ -262,6 +284,7 @@ const totalCount = ref(0)
 const userOptions = ref([])
 const deleteTarget = ref(null)
 const deletingId = ref(null)
+const detailGroup = ref(null)
 
 const showModal = ref(false)
 const mode = ref('create')
@@ -312,6 +335,27 @@ function openEditModal(group) {
     user_ids: memberIdsForGroup(group.id)
   }
   showModal.value = true
+}
+
+function openDetail(group) {
+  detailGroup.value = group
+}
+
+function editFromDetail(group) {
+  detailGroup.value = null
+  openEditModal(group)
+}
+
+function openGroupHistory(assistant) {
+  const group = detailGroup.value
+  if (!group) return
+  router.push({
+    path: '/management/lens/runs',
+    query: {
+      group_id: String(group.id),
+      ...(assistant?.slug ? { assistant: assistant.slug } : {})
+    }
+  })
 }
 
 async function loadUsers() {

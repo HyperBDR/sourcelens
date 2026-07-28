@@ -66,6 +66,18 @@ export async function getAdminRun(uuid) {
   return unwrapResponse(response)
 }
 
+export async function getAdminUserAccessDetail(userId) {
+  const response = await api.get(`/lens/admin/access/users/${userId}/`)
+  return unwrapResponse(response)
+}
+
+export async function getAdminGroupAccessDetail(groupId, params = {}) {
+  const response = await api.get(`/lens/admin/access/groups/${groupId}/`, {
+    params
+  })
+  return unwrapResponse(response)
+}
+
 export async function createLensNode(payload) {
   const response = await api.post('/lens/admin/lensnodes/', payload)
   return unwrapResponse(response)

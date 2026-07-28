@@ -263,8 +263,6 @@
         :environment-variable-sets="environmentVariableSets"
         :mcps="mcps"
         :llm-config-options="llmConfigOptions"
-        :groups="groups"
-        :users="users"
         :saving="saving"
         :form-error="formError"
         :refreshing-dirs="refreshingDirs"
@@ -282,7 +280,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmAdminApi } from '@/admin/api/llmAdmin'
-import { managementApi } from '@/admin/api/management'
 import { copyToClipboard } from '@/utils/clipboard'
 import { extractErrorMessage } from '@/utils/api'
 import { assistantChatUrl } from '@/utils/lens'
@@ -339,8 +336,6 @@ const environmentVariableSets = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
-const groups = ref([])
-const users = ref([])
 
 const activeColumns = computed(() =>
   [
@@ -415,9 +410,7 @@ async function load() {
       environmentVariableSetRows,
       mcpRows,
       settingRows,
-      llmRows,
-      groupRows,
-      userRows
+      llmRows
     ] = await Promise.all([
       listAssistants(showArchived.value ? { archived: true } : {}),
       listLensNodes(),
@@ -425,9 +418,7 @@ async function load() {
       listEnvironmentVariableSets(),
       listMcpServers(),
       listGlobalSettings(),
-      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => []),
-      managementApi.getGroups({ page_size: 1000 }).catch(() => []),
-      managementApi.getUsers({ page_size: 1000 }).catch(() => [])
+      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
     ])
 
     assistants.value = normalizeList(assistantRows)
@@ -437,8 +428,6 @@ async function load() {
     mcps.value = normalizeList(mcpRows)
     globalSettings.value = normalizeList(settingRows)
     llmConfigOptions.value = normalizeList(llmRows)
-    groups.value = normalizeList(groupRows)
-    users.value = normalizeList(userRows)
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
@@ -512,6 +501,7 @@ function defaultForm() {
     visibility: 'private',
     access_group_ids: [],
     access_user_ids: [],
+    access_grant_options: [],
     settings: {},
     status: 'active'
   }
@@ -584,6 +574,7 @@ function formFromRow(row) {
     access_user_ids: (row.access_grants || [])
       .filter((g) => g.type === 'user')
       .map((g) => g.id),
+    access_grant_options: row.access_grants || [],
     settings: { ...(row.settings || {}) },
     status: row.status || 'active'
   }

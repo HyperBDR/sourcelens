@@ -2,8 +2,10 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AdminGroupAccessDetailView,
     AdminRunDetailView,
     AdminRunListView,
+    AdminUserAccessDetailView,
     AdminSharedQAViewSet,
     AssistantViewSet,
     DataSourceCredentialViewSet,
@@ -67,6 +69,16 @@ router.register(
 )
 
 urlpatterns = [
+    path(
+        "admin/access/users/<int:user_id>/",
+        AdminUserAccessDetailView.as_view(),
+        name="lens-admin-user-access-detail",
+    ),
+    path(
+        "admin/access/groups/<int:group_id>/",
+        AdminGroupAccessDetailView.as_view(),
+        name="lens-admin-group-access-detail",
+    ),
     path(
         "public/assistants/<slug:slug>/",
         PublicAssistantView.as_view(),

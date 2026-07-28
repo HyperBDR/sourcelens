@@ -1,11 +1,13 @@
 """Admin observability views and helpers for Q&A runs."""
 
 from django.utils.dateparse import parse_date
-from rest_framework import permissions, status
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from agentcore_metering.adapters.django.models import LLMUsage
+
+from accounts.permissions import HasRequiredFeature
 from lens.models import Run
 from lens.runtime_events import sanitize_loaded_mcps, sanitize_loaded_skills
 from lens.serializers import (
@@ -300,7 +302,8 @@ def _admin_run_detail(run):
 class AdminRunListView(APIView):
     """Admin-only cross-user list of Q&A runs for observability."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [HasRequiredFeature]
+    required_feature = "admin_console"
 
     def get(self, request):
         """Return a filtered, paginated list of runs."""
@@ -321,6 +324,12 @@ class AdminRunListView(APIView):
         username = (params.get("username") or "").strip()
         if username:
             qs = qs.filter(session__user__username__icontains=username)
+        user_id = (params.get("user_id") or "").strip()
+        if user_id:
+            qs = qs.filter(session__user_id=user_id)
+        group_id = (params.get("group_id") or "").strip()
+        if group_id:
+            qs = qs.filter(session__user__groups__id=group_id).distinct()
         assistant = (params.get("assistant") or "").strip()
         if assistant:
             qs = qs.filter(session__assistant__slug=assistant)
@@ -351,7 +360,8 @@ class AdminRunListView(APIView):
 class AdminRunDetailView(APIView):
     """Admin-only full trace of a single Q&A run."""
 
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [HasRequiredFeature]
+    required_feature = "admin_console"
 
     def get(self, request, uuid):
         """Return the full trace for one run."""
