@@ -7,6 +7,7 @@ from langchain_core.messages import ToolMessage
 
 from lensnode import agent_runtime
 from lensnode.agent_runtime import (
+    _answer_general_chat_directly,
     _build_initial_messages,
     _emit_new_tool_calls,
     _finalize_runtime_outcome,
@@ -165,6 +166,112 @@ def test_write_todos_emits_user_visible_normalized_plan():
     ]
 
 
+def test_write_todos_keeps_the_initial_plan_shape_during_execution():
+    events = []
+    seen = set()
+    plan_state = {"revision": 0}
+    initial = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "call-plan-1",
+                "name": "write_todos",
+                "args": {
+                    "todos": [
+                        {"content": "Query orders", "status": "in_progress"},
+                        {"content": "Summarize results", "status": "pending"},
+                    ]
+                },
+            }
+        ],
+    )
+    appended = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "call-plan-2",
+                "name": "write_todos",
+                "args": {
+                    "todos": [
+                        {"content": "Query orders", "status": "completed"},
+                        {
+                            "content": "Summarize results",
+                            "status": "in_progress",
+                        },
+                        {"content": "Check totals", "status": "pending"},
+                    ]
+                },
+            }
+        ],
+    )
+
+    for message in (initial, appended):
+        _emit_new_tool_calls(
+            [message],
+            seen,
+            lambda name, detail: events.append((name, detail)),
+            plan_state=plan_state,
+        )
+
+    assert events[-1][1]["payload"]["steps"] == [
+        {"id": "step-1", "title": "Query orders", "status": "completed"},
+        {
+            "id": "step-2",
+            "title": "Summarize results",
+            "status": "in_progress",
+        },
+    ]
+
+
+def test_write_todos_defers_full_completion_until_run_terminal():
+    events = []
+    seen = set()
+    plan_state = {"revision": 0}
+    initial = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "call-plan-1",
+                "name": "write_todos",
+                "args": {
+                    "todos": [
+                        {"content": "Query orders", "status": "completed"},
+                        {"content": "Return answer", "status": "in_progress"},
+                    ]
+                },
+            }
+        ],
+    )
+    completed = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "call-plan-2",
+                "name": "write_todos",
+                "args": {
+                    "todos": [
+                        {"content": "Query orders", "status": "completed"},
+                        {"content": "Return answer", "status": "completed"},
+                    ]
+                },
+            }
+        ],
+    )
+
+    for message in (initial, completed):
+        _emit_new_tool_calls(
+            [message],
+            seen,
+            lambda name, detail: events.append((name, detail)),
+            plan_state=plan_state,
+        )
+
+    assert events[-1][1]["payload"]["steps"] == [
+        {"id": "step-1", "title": "Query orders", "status": "completed"},
+        {"id": "step-2", "title": "Return answer", "status": "in_progress"},
+    ]
+
+
 def test_route_decision_parses_json_and_uses_safe_fallback():
     decision = _parse_route_decision(
         '```json\n{"intent":"action","complexity":"simple",'
@@ -232,6 +339,59 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert "creating an order" in prompt
 
 
+def test_route_selection_uses_history_to_resolve_an_action_follow_up():
+    class Model:
+        def __init__(self):
+            self.messages = []
+
+        def invoke(self, messages, **_kwargs):
+            self.messages = messages
+            contents = [
+                message.get("content", "")
+                if isinstance(message, dict)
+                else message.content
+                for message in messages
+            ]
+            route = (
+                "direct_execute"
+                if any("读取全部276条订单" in item for item in contents)
+                else "direct_answer"
+            )
+            evidence = "tool_result" if route == "direct_execute" else "none"
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "intent": "action",
+                        "complexity": "simple",
+                        "route": route,
+                        "required_capabilities": ["skill"],
+                        "evidence_requirement": evidence,
+                    }
+                )
+            )
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "那就只保留企业用户名和授权数量，继续读取。",
+        history=[
+            {"role": "user", "content": "读取全部276条订单。"},
+            {
+                "role": "assistant",
+                "content": "详细字段查询达到预算，未能完成。",
+            },
+        ],
+        context_skill_contents=["This Skill can query Income orders."],
+        available_tools=[],
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["evidence_requirement"] == "tool_result"
+    assert model.messages[-1]["content"] == (
+        "那就只保留企业用户名和授权数量，继续读取。"
+    )
+
+
 def test_pure_model_request_remains_direct_answer_without_bound_tools():
     class Model:
         def invoke(self, _messages, **_kwargs):
@@ -252,6 +412,75 @@ def test_pure_model_request_remains_direct_answer_without_bound_tools():
 
     assert decision["route"] == "direct_answer"
     assert decision["evidence_requirement"] == "none"
+
+
+def test_direct_answer_recovers_an_unfulfilled_action_promise():
+    class Model:
+        def __init__(self):
+            self.calls = []
+            self.responses = iter(
+                [
+                    (
+                        "精简字段会降低数据量。\n\n"
+                        "我先完成身份验证，然后拉取全部记录。"
+                    ),
+                    (
+                        "有条件可以。如果必需字段支持列表或批量查询，"
+                        "就能读取全部记录；否则仍可能超过预算。"
+                    ),
+                ]
+            )
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return SimpleNamespace(content=next(self.responses))
+
+    model = Model()
+    events = []
+    output = []
+
+    answer = _answer_general_chat_directly(
+        model,
+        {
+            "question": "精简字段后能否读取全部276条记录？",
+            "history": [],
+        },
+        "system prompt",
+        emit_event=lambda name, detail: events.append((name, detail)),
+        emit_output=output.append,
+    )
+
+    assert answer.startswith("有条件可以")
+    assert len(model.calls) == 2
+    assert all(call[1]["runtime_control_call"] for call in model.calls)
+    assert events == [("deepagents.answer.promise_recovery", {})]
+    assert output == [answer]
+
+
+def test_direct_answer_does_not_recover_a_completed_explanation():
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, _messages, **_kwargs):
+            self.calls += 1
+            return SimpleNamespace(
+                content=(
+                    "可以。我先说明原因：减少返回字段会降低输出量，"
+                    "但是否完整仍取决于接口能否批量返回必需字段。"
+                )
+            )
+
+    model = Model()
+
+    answer = _answer_general_chat_directly(
+        model,
+        {"question": "精简字段后是否可行？", "history": []},
+        "system prompt",
+    )
+
+    assert answer.startswith("可以")
+    assert model.calls == 1
 
 
 def test_unmatched_capability_returns_before_any_tool_call(monkeypatch):
@@ -383,6 +612,28 @@ def test_route_decision_requires_execution_for_external_business_facts():
     )
 
     assert decision["route"] == "direct_execute"
+    assert decision["evidence_requirement"] == "tool_result"
+
+
+def test_direct_execution_cannot_disable_tool_evidence():
+    decision = _parse_route_decision(
+        '{"intent":"action","complexity":"simple",'
+        '"route":"direct_execute","required_capabilities":["skill"],'
+        '"evidence_requirement":"none"}'
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["evidence_requirement"] == "tool_result"
+
+
+def test_action_plan_cannot_disable_tool_evidence():
+    decision = _parse_route_decision(
+        '{"intent":"action","complexity":"complex",'
+        '"route":"plan_execute","required_capabilities":["skill"],'
+        '"evidence_requirement":"none"}'
+    )
+
+    assert decision["route"] == "plan_execute"
     assert decision["evidence_requirement"] == "tool_result"
 
 
@@ -535,6 +786,82 @@ def test_guidance_becomes_partial_when_execution_is_truncated():
     assert termination_detail == {"reason": "turn_limit"}
 
 
+def test_validated_bulk_result_completes_after_token_budget_wrapup():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"skill"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        truncated=True,
+        stop_reason="token_capped",
+        runtime_evidence={
+            "record_validation": {
+                "valid": True,
+                "total_count": 38,
+                "expected_count": 38,
+                "count_matches": True,
+                "unique_by": ["code"],
+            }
+        },
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
+
+
+def test_validation_without_expected_count_remains_partial_after_wrapup():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"skill"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        truncated=True,
+        stop_reason="token_capped",
+        runtime_evidence={
+            "record_validation": {
+                "valid": True,
+                "total_count": 38,
+                "expected_count": None,
+                "count_matches": None,
+                "unique_by": ["code"],
+            }
+        },
+    )
+
+    assert outcome == "partial"
+    assert termination_detail == {"reason": "token_capped"}
+
+
+def test_invalid_bulk_result_remains_partial_after_token_budget_wrapup():
+    middleware = SimpleNamespace(
+        success_count=1,
+        successful_capabilities={"skill"},
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        truncated=True,
+        stop_reason="token_capped",
+        runtime_evidence={"record_validation": {"valid": False}},
+    )
+
+    assert outcome == "partial"
+    assert termination_detail == {"reason": "token_capped"}
+
+
 def test_plan_steps_are_bounded_and_normalized():
     todos = [
         {"content": "x" * 300, "status": "unknown"},
@@ -564,6 +891,22 @@ def test_general_chat_prompt_forbids_unverified_business_results():
 
     assert "Never claim that a tool was called" in prompt
     assert "Never invent order" in prompt
+    assert "Never invent flags" in prompt
+    assert "validate_records" in prompt
+    assert "Do not fan out per-record detail calls" in prompt
+
+
+def test_plan_execute_prompt_requires_a_stable_initial_plan():
+    prompt = _general_chat_system_prompt(
+        {
+            "question": "Query and summarize orders",
+            "runtime_route": "plan_execute",
+        }
+    )
+
+    assert "complete concise high-level plan" in prompt
+    assert "task count, order, and wording fixed" in prompt
+    assert "may only update statuses" in prompt
 
 
 def test_execution_boundary_stops_configuration_failure_immediately():
@@ -654,6 +997,55 @@ def test_capability_boundary_allows_artifact_argument_correction_after_404():
     middleware.wrap_tool_call(request, not_found)
     assert stop_event.is_set()
     assert middleware.termination_detail["error_type"] == "request"
+
+
+def test_capability_boundary_tracks_distinct_artifact_requests_separately():
+    stop_event = threading.Event()
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        stop_event=stop_event
+    )
+    get_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "call-1",
+            "args": {
+                "artifact": "income",
+                "args": ["order", "get", "ORDER-CODE"],
+            },
+        },
+    )
+    list_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "call-2",
+            "args": {
+                "artifact": "income",
+                "args": ["order", "list", "--code", "ORDER-CODE"],
+            },
+        },
+    )
+
+    def not_found(request):
+        return ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": False,
+                    "returncode": 5,
+                    "stderr": "Income API returned 404: NotFound",
+                }
+            ),
+            name="run_skill_artifact",
+            tool_call_id=request.tool_call["id"],
+            status="error",
+        )
+
+    middleware.wrap_tool_call(get_request, not_found)
+    middleware.wrap_tool_call(list_request, not_found)
+
+    assert not stop_event.is_set()
+    assert middleware.termination_detail == {}
 
 
 def test_execution_boundary_classifies_artifact_http_500_as_transient():
@@ -884,6 +1276,72 @@ def test_general_chat_middleware_denies_task_execution():
     assert result.tool_call_id == "call-1"
     assert "SUBAGENT_DISABLED" in result.content
     assert events[0][0] == "tool.task.denied"
+
+
+def test_general_chat_middleware_denies_direct_large_result_access():
+    events = []
+    handler_calls = []
+    middleware = agent_runtime._NoTaskMiddleware(
+        lambda name, detail: events.append((name, detail))
+    )
+    requests = [
+        SimpleNamespace(
+            tool=SimpleNamespace(name="read_file"),
+            tool_call={
+                "name": "read_file",
+                "id": "call-read",
+                "args": {
+                    "file_path": "/large_tool_results/orders.json"
+                },
+            },
+        ),
+        SimpleNamespace(
+            tool=SimpleNamespace(name="grep"),
+            tool_call={
+                "name": "grep",
+                "id": "call-grep",
+                "args": {"path": "/large_tool_results"},
+            },
+        ),
+    ]
+
+    results = [
+        middleware.wrap_tool_call(
+            request,
+            lambda _request: handler_calls.append(True),
+        )
+        for request in requests
+    ]
+
+    assert handler_calls == []
+    assert all(result.status == "error" for result in results)
+    assert all(
+        "LARGE_RESULT_DIRECT_ACCESS_DENIED" in result.content
+        for result in results
+    )
+    assert [name for name, _detail in events] == [
+        "tool.read_file.denied",
+        "tool.grep.denied",
+    ]
+
+
+def test_general_chat_middleware_allows_skill_reference_reads():
+    middleware = agent_runtime._NoTaskMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="read_file"),
+        tool_call={
+            "name": "read_file",
+            "id": "call-read",
+            "args": {"file_path": "/skills/orders/SKILL.md"},
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _request: "allowed",
+    )
+
+    assert result == "allowed"
 
 
 def test_general_chat_uses_no_task_middleware():
@@ -1175,7 +1633,8 @@ def test_token_budget_forces_tool_free_wrapup_from_current_evidence():
 
     assert truncated is True
     assert "budget synthesis" in answer
-    assert "token budget" in answer
+    assert "token budget" not in answer.lower()
+    assert "Token 调查预算" not in answer
     assert model.invoked_kwargs == {"runtime_final_synthesis": True}
 
 
