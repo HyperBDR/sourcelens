@@ -199,6 +199,137 @@ class TestManagementUsersPagination:
 
         assert response.status_code == 403
 
+    def test_users_list_searches_username_and_email_case_insensitively(self):
+        admin = User.objects.create_user(
+            username="admin_for_partial_search",
+            password="x",
+            is_staff=True,
+        )
+        username_match = User.objects.create_user(
+            username="MixedCaseSelectorUser",
+            email="other@example.com",
+            password="x",
+        )
+        email_match = User.objects.create_user(
+            username="email-selector-user",
+            email="Person.MixedCase@Example.com",
+            password="x",
+        )
+        User.objects.create_user(
+            username="unrelated-user",
+            email="unrelated@example.net",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+
+        username_response = client.get(
+            "/api/v1/management/users/",
+            {"search": "caseSelector"},
+        )
+        email_response = client.get(
+            "/api/v1/management/users/",
+            {"search": "mixedcase@example"},
+        )
+
+        assert username_response.status_code == 200
+        assert email_response.status_code == 200
+        assert [
+            user["id"] for user in _payload(username_response)["results"]
+        ] == [username_match.id]
+        assert [
+            user["id"] for user in _payload(email_response)["results"]
+        ] == [email_match.id]
+
+    def test_users_list_applies_pagination_after_partial_search(self):
+        admin = User.objects.create_user(
+            username="admin_for_partial_search_pagination",
+            password="x",
+            is_staff=True,
+        )
+        first_user = User.objects.create_user(
+            username="partial-page-one",
+            password="x",
+        )
+        second_user = User.objects.create_user(
+            username="partial-page-two",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"search": "PARTIAL-PAGE", "page": 2, "page_size": 1},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 2
+        assert data["page"] == 2
+        assert data["page_size"] == 1
+        assert first_user.id < second_user.id
+        assert [user["id"] for user in data["results"]] == [second_user.id]
+
+    def test_users_list_assignable_filter_excludes_admin_accounts(self):
+        admin = User.objects.create_user(
+            username="admin_for_assignable_filter",
+            password="x",
+            is_staff=True,
+        )
+        assignable_user = User.objects.create_user(
+            username="assignable-selector-user",
+            password="x",
+        )
+        User.objects.create_user(
+            username="assignable-selector-staff",
+            password="x",
+            is_staff=True,
+        )
+        User.objects.create_user(
+            username="assignable-selector-superuser",
+            password="x",
+            is_superuser=True,
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        default_response = client.get(
+            "/api/v1/management/users/",
+            {"assignable": "true"},
+        )
+        response = client.get(
+            "/api/v1/management/users/",
+            {"search": "assignable-selector", "assignable": "true"},
+        )
+
+        assert default_response.status_code == 200
+        assert [
+            user["id"] for user in _payload(default_response)["results"]
+        ] == [assignable_user.id]
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 1
+        assert [user["id"] for user in data["results"]] == [
+            assignable_user.id
+        ]
+
+    def test_users_list_search_keeps_management_permission(self):
+        user = User.objects.create_user(
+            username="partial_search_without_management_access",
+            password="x",
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"search": "partial"},
+        )
+
+        assert response.status_code == 403
+
     def test_users_list_supports_page_and_page_size(self):
         admin = User.objects.create_user(
             username="admin_for_users",

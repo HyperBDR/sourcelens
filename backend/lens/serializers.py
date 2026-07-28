@@ -339,6 +339,8 @@ class AccessGrantsField(serializers.Field):
                         "type": "user",
                         "id": grant.user_id,
                         "name": grant.user.get_username(),
+                        "username": grant.user.get_username(),
+                        "email": grant.user.email or "",
                     }
                 )
         return result

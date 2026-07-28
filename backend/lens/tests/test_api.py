@@ -2985,6 +2985,36 @@ class AssistantAccessTests(TestCase):
             {"type": "group", "id": group.pk, "name": "grp"}
         ])
 
+    def test_user_access_grants_include_selector_metadata(self):
+        user = User.objects.create_user(
+            username="selector-user",
+            email="selector@example.com",
+            password="x",
+        )
+        client = self._client(self.admin)
+        resp = client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {
+                "visibility": "private",
+                "access_grants": [{"type": "user", "id": user.pk}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.data["access_grants"],
+            [
+                {
+                    "type": "user",
+                    "id": user.pk,
+                    "name": "selector-user",
+                    "username": "selector-user",
+                    "email": "selector@example.com",
+                }
+            ],
+        )
+
     def test_write_requires_admin_console(self):
         self.assistant.visibility = Assistant.Visibility.PUBLIC
         self.assistant.save(update_fields=["visibility"])

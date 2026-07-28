@@ -1375,7 +1375,15 @@
       "groups": "授权组",
       "users": "授权用户",
       "noGroups": "暂无可选组",
-      "noUsers": "暂无可选用户"
+      "noUsers": "暂无可选用户",
+      "searchUsers": "搜索授权用户",
+      "searchUsersPlaceholder": "按用户名或邮箱搜索",
+      "loadingGroups": "正在加载组...",
+      "loadingUsers": "正在加载用户...",
+      "noUserResults": "没有匹配的用户",
+      "groupsFailed": "组加载失败。",
+      "usersFailed": "用户加载失败。",
+      "retry": "重试"
     }
   }
 }

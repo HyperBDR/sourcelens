@@ -2,8 +2,8 @@
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.db.models import Count, Prefetch, Q
 from django.http import Http404
-from django.db.models import Count, Prefetch
 from rest_framework.status import HTTP_200_OK
 from rest_framework.response import Response
 from rest_framework.status import (
@@ -165,6 +165,17 @@ class ManagementUserListView(APIView):
         email = request.query_params.get('email')
         if email:
             qs = qs.filter(email=email)
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(username__icontains=search)
+                | Q(email__icontains=search)
+            )
+        assignable = str(
+            request.query_params.get('assignable') or ''
+        ).lower()
+        if assignable in {'1', 'true', 'yes'}:
+            qs = qs.filter(is_staff=False, is_superuser=False)
         total = qs.count()
         start = (page - 1) * page_size
         end = start + page_size

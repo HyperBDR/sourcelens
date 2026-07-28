@@ -570,7 +570,10 @@
           <span>{{ t('lensAdmin.access.hint') }}</span>
         </div>
         <div class="grid gap-4 md:grid-cols-2">
-          <div class="overflow-hidden rounded-lg border border-line">
+          <div
+            class="overflow-hidden rounded-lg border border-line"
+            data-testid="authorized-groups-selector"
+          >
             <div
               class="flex items-center justify-between border-b border-line bg-surface-sunken px-3 py-2"
             >
@@ -581,18 +584,20 @@
                 {{ t('lensAdmin.access.groups') }}
               </div>
               <span
+                data-testid="authorized-groups-count"
                 class="rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-ink-500"
               >
                 {{ form.access_group_ids.length }}
               </span>
             </div>
             <div
-              v-if="groups.length"
+              v-if="orderedGroups.length"
               class="max-h-52 space-y-1 overflow-y-auto p-2"
             >
               <label
-                v-for="g in groups"
+                v-for="g in orderedGroups"
                 :key="g.id"
+                data-testid="authorized-group-option"
                 class="flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-sm transition-colors"
                 :class="
                   form.access_group_ids.includes(g.id)
@@ -610,12 +615,47 @@
                 <span class="truncate">{{ g.name }}</span>
               </label>
             </div>
-            <p v-else class="px-3 py-8 text-center text-xs text-ink-400">
+            <p
+              v-if="groupLoading"
+              class="px-3 py-3 text-center text-xs text-ink-400"
+            >
+              {{ t('lensAdmin.access.loadingGroups') }}
+            </p>
+            <p
+              v-else-if="groupFailed"
+              class="px-3 py-3 text-center text-xs text-danger-700"
+            >
+              {{ t('lensAdmin.access.groupsFailed') }}
+              <button
+                type="button"
+                class="ml-1 font-medium underline"
+                @click="loadGroups()"
+              >
+                {{ t('lensAdmin.access.retry') }}
+              </button>
+            </p>
+            <p
+              v-else-if="!orderedGroups.length"
+              class="px-3 py-8 text-center text-xs text-ink-400"
+            >
               {{ t('lensAdmin.access.noGroups') }}
             </p>
+            <PaginationBar
+              v-if="!groupLoading && !groupFailed"
+              v-model:page-size="groupPageSize"
+              class="px-2 pb-2"
+              :current-page="groupPage"
+              :total="groupTotal"
+              @page-size-change="changeGroupPageSize"
+              @prev="previousGroupPage"
+              @next="nextGroupPage"
+            />
           </div>
 
-          <div class="overflow-hidden rounded-lg border border-line">
+          <div
+            class="overflow-hidden rounded-lg border border-line"
+            data-testid="authorized-users-selector"
+          >
             <div
               class="flex items-center justify-between border-b border-line bg-surface-sunken px-3 py-2"
             >
@@ -626,18 +666,30 @@
                 {{ t('lensAdmin.access.users') }}
               </div>
               <span
+                data-testid="authorized-users-count"
                 class="rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-ink-500"
               >
                 {{ form.access_user_ids.length }}
               </span>
             </div>
+            <div class="border-b border-line p-2">
+              <input
+                v-model="userSearch"
+                type="search"
+                class="form-input"
+                data-testid="authorized-user-search"
+                :aria-label="t('lensAdmin.access.searchUsers')"
+                :placeholder="t('lensAdmin.access.searchUsersPlaceholder')"
+              />
+            </div>
             <div
-              v-if="selectableUsers.length"
+              v-if="orderedUsers.length"
               class="max-h-52 space-y-1 overflow-y-auto p-2"
             >
               <label
-                v-for="u in selectableUsers"
+                v-for="u in orderedUsers"
                 :key="u.id"
+                data-testid="authorized-user-option"
                 class="flex cursor-pointer items-center gap-2.5 rounded-md border px-2.5 py-2 text-sm transition-colors"
                 :class="
                   form.access_user_ids.includes(u.id)
@@ -664,9 +716,45 @@
                 </div>
               </label>
             </div>
-            <p v-else class="px-3 py-8 text-center text-xs text-ink-400">
-              {{ t('lensAdmin.access.noUsers') }}
+            <p
+              v-if="userLoading"
+              class="px-3 py-3 text-center text-xs text-ink-400"
+            >
+              {{ t('lensAdmin.access.loadingUsers') }}
             </p>
+            <p
+              v-else-if="userFailed"
+              class="px-3 py-3 text-center text-xs text-danger-700"
+            >
+              {{ t('lensAdmin.access.usersFailed') }}
+              <button
+                type="button"
+                class="ml-1 font-medium underline"
+                @click="loadUsers()"
+              >
+                {{ t('lensAdmin.access.retry') }}
+              </button>
+            </p>
+            <p
+              v-else-if="!orderedUsers.length"
+              class="px-3 py-8 text-center text-xs text-ink-400"
+            >
+              {{
+                userSearch.trim()
+                  ? t('lensAdmin.access.noUserResults')
+                  : t('lensAdmin.access.noUsers')
+              }}
+            </p>
+            <PaginationBar
+              v-if="!userLoading && !userFailed"
+              v-model:page-size="userPageSize"
+              class="px-2 pb-2"
+              :current-page="userPage"
+              :total="userTotal"
+              @page-size-change="changeUserPageSize"
+              @prev="previousUserPage"
+              @next="nextUserPage"
+            />
           </div>
         </div>
       </div>
@@ -719,11 +807,13 @@ import {
   User as UserIcon,
   Users as UsersIcon
 } from '@lucide/vue'
-import { computed, defineComponent, h, ref, watch } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { managementApi } from '@/admin/api/management'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import {
@@ -731,6 +821,10 @@ import {
   formatAssistantType,
   formatLLMConfigLabel
 } from './adminHelpers'
+import {
+  assignmentFirstOptions,
+  createLatestRequestRunner
+} from './assistantAccessSelectors'
 
 const props = defineProps({
   show: Boolean,
@@ -743,8 +837,6 @@ const props = defineProps({
   environmentVariableSets: { type: Array, default: () => [] },
   mcps: { type: Array, default: () => [] },
   llmConfigOptions: { type: Array, default: () => [] },
-  groups: { type: Array, default: () => [] },
-  users: { type: Array, default: () => [] },
   saving: Boolean,
   formError: { type: String, default: '' },
   refreshingDirs: Boolean
@@ -756,16 +848,59 @@ const { t } = useI18n()
 
 const emptyValue = EMPTY_VALUE
 const WIZARD_STEP_COUNT = 4
+const ACCESS_PAGE_SIZE = 20
+const SEARCH_DELAY_MS = 300
 const wizardStep = ref(1)
+const groupPage = ref(1)
+const groupPageSize = ref(ACCESS_PAGE_SIZE)
+const groupTotal = ref(0)
+const groupResults = ref([])
+const groupOptions = ref(new Map())
+const groupLoading = ref(false)
+const groupFailed = ref(false)
+const userPage = ref(1)
+const userPageSize = ref(ACCESS_PAGE_SIZE)
+const userTotal = ref(0)
+const userResults = ref([])
+const userOptions = ref(new Map())
+const userLoading = ref(false)
+const userFailed = ref(false)
+const userSearch = ref('')
+const groupRequest = createLatestRequestRunner()
+const userRequest = createLatestRequestRunner()
+let searchTimer = null
+let resettingAccessSelectors = false
 
 watch(
   () => props.show,
   (show) => {
     if (show) {
       wizardStep.value = 1
+      initializeAccessSelectors()
+    } else {
+      resetPendingAccessRequests()
     }
   }
 )
+
+watch(
+  userSearch,
+  () => {
+    if (!props.show || resettingAccessSelectors) return
+    if (searchTimer) clearTimeout(searchTimer)
+    userRequest.invalidate()
+    userResults.value = []
+    userFailed.value = false
+    userLoading.value = true
+    searchTimer = setTimeout(() => {
+      searchTimer = null
+      loadUsers(1)
+    }, SEARCH_DELAY_MS)
+  },
+  { flush: 'sync' }
+)
+
+onBeforeUnmount(resetPendingAccessRequests)
 
 const FormRow = defineComponent({
   props: {
@@ -915,9 +1050,156 @@ function userInitial(user) {
   return (userLabel(user).trim()[0] || '?').toUpperCase()
 }
 
-const selectableUsers = computed(() =>
-  props.users.filter((user) => !user.is_staff && !user.is_superuser)
+const orderedGroups = computed(() =>
+  assignmentFirstOptions(
+    props.form.access_group_ids,
+    groupOptions.value,
+    groupResults.value
+  )
 )
+
+const orderedUsers = computed(() =>
+  assignmentFirstOptions(
+    props.form.access_user_ids,
+    userOptions.value,
+    userResults.value
+  )
+)
+
+function cacheOptions(cache, options) {
+  const next = new Map(cache.value)
+  options.forEach((option) => next.set(option.id, option))
+  cache.value = next
+}
+
+function seedAssignedOptions() {
+  const groups = new Map()
+  const users = new Map()
+  for (const grant of props.form.access_grant_options || []) {
+    if (grant.type === 'group') {
+      groups.set(grant.id, { id: grant.id, name: grant.name })
+    } else if (grant.type === 'user') {
+      users.set(grant.id, {
+        id: grant.id,
+        name: grant.name,
+        username: grant.username || grant.name,
+        display_name: grant.username || grant.name,
+        email: grant.email || ''
+      })
+    }
+  }
+  groupOptions.value = groups
+  userOptions.value = users
+}
+
+function resetPendingAccessRequests() {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  groupRequest.invalidate()
+  userRequest.invalidate()
+  groupLoading.value = false
+  userLoading.value = false
+}
+
+function initializeAccessSelectors() {
+  resetPendingAccessRequests()
+  resettingAccessSelectors = true
+  groupPage.value = 1
+  groupPageSize.value = ACCESS_PAGE_SIZE
+  groupTotal.value = 0
+  groupResults.value = []
+  groupFailed.value = false
+  userPage.value = 1
+  userPageSize.value = ACCESS_PAGE_SIZE
+  userTotal.value = 0
+  userResults.value = []
+  userFailed.value = false
+  userSearch.value = ''
+  resettingAccessSelectors = false
+  seedAssignedOptions()
+  loadGroups(1)
+  loadUsers(1)
+}
+
+async function loadGroups(page = groupPage.value) {
+  groupLoading.value = true
+  groupFailed.value = false
+  groupResults.value = []
+  const result = await groupRequest.run(() =>
+    managementApi.getGroups({ page, page_size: groupPageSize.value })
+  )
+  if (!result.current) return
+  groupLoading.value = false
+  if (result.error) {
+    groupFailed.value = true
+    return
+  }
+  const rows = Array.isArray(result.value)
+    ? result.value
+    : (result.value?.results ?? [])
+  groupPage.value = Number(result.value?.page) || page
+  groupTotal.value = Number(result.value?.count) || rows.length
+  groupResults.value = rows
+  cacheOptions(groupOptions, rows)
+}
+
+async function loadUsers(page = userPage.value) {
+  userLoading.value = true
+  userFailed.value = false
+  userResults.value = []
+  const search = userSearch.value.trim()
+  const result = await userRequest.run(() =>
+    managementApi.getUsers({
+      page,
+      page_size: userPageSize.value,
+      assignable: true,
+      ...(search ? { search } : {})
+    })
+  )
+  if (!result.current) return
+  userLoading.value = false
+  if (result.error) {
+    userFailed.value = true
+    return
+  }
+  const rows = Array.isArray(result.value)
+    ? result.value
+    : (result.value?.results ?? [])
+  userPage.value = Number(result.value?.page) || page
+  userTotal.value = Number(result.value?.count) || rows.length
+  userResults.value = rows
+  cacheOptions(userOptions, rows)
+}
+
+function previousGroupPage() {
+  if (groupPage.value > 1) loadGroups(groupPage.value - 1)
+}
+
+function nextGroupPage() {
+  if (groupPage.value * groupPageSize.value < groupTotal.value) {
+    loadGroups(groupPage.value + 1)
+  }
+}
+
+function changeGroupPageSize() {
+  loadGroups(1)
+}
+
+function previousUserPage() {
+  if (userPage.value > 1) loadUsers(userPage.value - 1)
+}
+
+function nextUserPage() {
+  if (userPage.value * userPageSize.value < userTotal.value) {
+    loadUsers(userPage.value + 1)
+  }
+}
+
+function changeUserPageSize() {
+  loadUsers(1)
+}
 
 const selectableSkills = computed(() =>
   props.skills.filter(

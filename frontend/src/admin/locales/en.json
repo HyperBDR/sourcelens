@@ -1375,7 +1375,15 @@
       "groups": "Authorized groups",
       "users": "Authorized users",
       "noGroups": "No groups available",
-      "noUsers": "No users available"
+      "noUsers": "No users available",
+      "searchUsers": "Search authorized users",
+      "searchUsersPlaceholder": "Search by username or email",
+      "loadingGroups": "Loading groups...",
+      "loadingUsers": "Loading users...",
+      "noUserResults": "No matching users",
+      "groupsFailed": "Failed to load groups.",
+      "usersFailed": "Failed to load users.",
+      "retry": "Retry"
     }
   }
 }
