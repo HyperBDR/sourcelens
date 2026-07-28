@@ -41,6 +41,7 @@ SELF_REPORTING_TOOLS = {
     "git_diff",
     "summarize_recent_changes",
     "call_skill_api",
+    "validate_records",
     "analyze_structured_output",
     "inspect_saved_output",
     "run_skill_script",
@@ -50,6 +51,7 @@ SELF_REPORTING_TOOLS = {
 
 _STRUCTURED_INPUT_MAX_BYTES = 50 * 1024 * 1024
 _STRUCTURED_GROUP_MAX_ITEMS = 1000
+_STRUCTURED_VALIDATION_MAX_ITEMS = 1_000_000
 _SAVED_OUTPUT_LINE_MAX_CHARS = 500
 _STRUCTURED_OPERATIONS = {
     "count",
@@ -61,6 +63,7 @@ _STRUCTURED_OPERATIONS = {
     "sample",
     "sort",
     "sum",
+    "validate_records",
 }
 
 
@@ -516,7 +519,7 @@ class _AnalyzeStructuredOutputArgs(BaseModel):
     operation: str = Field(
         description=(
             "One of count, project, group_count, sum, min, max, sort, "
-            "sample, or paginate."
+            "sample, paginate, or validate_records."
         )
     )
     path: str = Field(
@@ -539,12 +542,59 @@ class _AnalyzeStructuredOutputArgs(BaseModel):
         max_length=32,
         description=(
             "Optional dotted fields returned by project, sort, sample, "
-            "or paginate."
+            "or paginate; required fields for validate_records."
         ),
+    )
+    expected_count: int | None = Field(
+        default=None,
+        ge=0,
+        le=1000000,
+        description="Expected item count for validate_records.",
+    )
+    unique_by: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="One to three unique-key fields for validate_records.",
     )
     offset: int = Field(default=0, ge=0, le=1000000)
     limit: int = Field(default=100, ge=1, le=1000)
     descending: bool = Field(default=False)
+
+
+class _ValidateRecordsArgs(BaseModel):
+    """Args schema for completeness validation of saved JSON records."""
+
+    ref: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Input reference below /large_tool_results/.",
+    )
+    path: str = Field(
+        default="",
+        max_length=512,
+        description=(
+            "Optional record-list path. Leave empty for {total, items}."
+        ),
+    )
+    expected_count: int | None = Field(
+        default=None,
+        ge=0,
+        le=1000000,
+        description=(
+            "Expected record count. Leave empty to use wrapper total."
+        ),
+    )
+    unique_by: list[str] = Field(
+        default_factory=list,
+        min_length=1,
+        max_length=3,
+        description="One to three fields that uniquely identify a record.",
+    )
+    fields: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Required fields that must be present on every record.",
+    )
 
 
 class _InspectSavedOutputArgs(BaseModel):
@@ -908,8 +958,17 @@ def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
     return call_skill_api
 
 
-def build_general_chat_tools(command, resources, config=None, emit_event=None):
+def build_general_chat_tools(
+    command,
+    resources,
+    config=None,
+    emit_event=None,
+    runtime_evidence=None,
+):
     """Build tools for General Chat without workspace retrieval tools."""
+
+    if runtime_evidence is None:
+        runtime_evidence = {}
 
     settings = command.get("settings") or {}
     tool_policy = settings.get("tool_policy") or {}
@@ -961,6 +1020,13 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         ),
         20,
     )
+    structured_validation_max_calls = min(
+        _positive_int(
+            tool_policy.get("structured_validation_max_calls"),
+            default=1,
+        ),
+        3,
+    )
     structured_analysis_output_limit = min(
         _positive_int(
             tool_policy.get("structured_analysis_output_limit"),
@@ -969,6 +1035,7 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         100000,
     )
     structured_analysis_calls = {"count": 0}
+    structured_validation_calls = {"count": 0}
     saved_output_inspection_max_calls = min(
         _positive_int(
             tool_policy.get("saved_output_inspection_max_calls"),
@@ -1003,6 +1070,8 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         field: str = "",
         group_by: list[str] | None = None,
         fields: list[str] | None = None,
+        expected_count: int | None = None,
+        unique_by: list[str] | None = None,
         offset: int = 0,
         limit: int = 100,
         descending: bool = False,
@@ -1019,15 +1088,31 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
         started = time.monotonic()
         invocation_id = uuid.uuid4().hex
         normalized_operation = str(operation or "").strip().lower()
-        structured_analysis_calls["count"] += 1
-        call_count = structured_analysis_calls["count"]
-        if call_count > structured_analysis_max_calls:
+        is_validation = normalized_operation == "validate_records"
+        call_counter = (
+            structured_validation_calls
+            if is_validation
+            else structured_analysis_calls
+        )
+        max_calls = (
+            structured_validation_max_calls
+            if is_validation
+            else structured_analysis_max_calls
+        )
+        limit_error = (
+            "STRUCTURED_VALIDATION_CALL_LIMIT"
+            if is_validation
+            else "STRUCTURED_ANALYSIS_CALL_LIMIT"
+        )
+        call_counter["count"] += 1
+        call_count = call_counter["count"]
+        if call_count > max_calls:
             detail = {
                 "invocation_id": invocation_id,
                 "input_ref": str(ref or "")[:512],
                 "operation": normalized_operation,
                 "call_count": call_count,
-                "max_calls": structured_analysis_max_calls,
+                "max_calls": max_calls,
                 "summary": "structured analysis · call budget exceeded",
             }
             emit(
@@ -1037,10 +1122,10 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             return _json(
                 {
                     "ok": False,
-                    "error": "STRUCTURED_ANALYSIS_CALL_LIMIT",
+                    "error": limit_error,
                     "invocation_id": invocation_id,
                     "call_count": call_count,
-                    "max_calls": structured_analysis_max_calls,
+                    "max_calls": max_calls,
                 }
             )
 
@@ -1052,11 +1137,13 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             "field": str(field or "")[:512],
             "group_by": [str(item)[:512] for item in (group_by or [])],
             "fields": [str(item)[:512] for item in (fields or [])],
+            "expected_count": expected_count,
+            "unique_by": [str(item)[:512] for item in (unique_by or [])],
             "offset": offset,
             "limit": limit,
             "descending": bool(descending),
             "call_count": call_count,
-            "max_calls": structured_analysis_max_calls,
+            "max_calls": max_calls,
             "summary": f"{normalized_operation} · {_basename(ref)}",
         }
         emit("tool.analyze_structured_output.start", request_detail)
@@ -1112,6 +1199,8 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 field=field,
                 group_by=group_by or [],
                 fields=fields or [],
+                expected_count=expected_count,
+                unique_by=unique_by or [],
                 offset=offset,
                 limit=limit,
                 descending=descending,
@@ -1126,6 +1215,9 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 str(exc),
                 raw=raw,
             )
+
+        if normalized_operation == "validate_records":
+            runtime_evidence["record_validation"] = result
 
         duration_ms = int((time.monotonic() - started) * 1000)
         output = _persist_json_analysis_output(
@@ -1149,7 +1241,7 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             "output_truncated": output["output_truncated"],
             "output_ref": output["output_ref"],
             "call_count": call_count,
-            "max_calls": structured_analysis_max_calls,
+            "max_calls": max_calls,
             "summary": (
                 f"{normalized_operation} · {result_count} result"
                 f"{'s' if result_count != 1 else ''} · {duration_ms}ms"
@@ -1167,6 +1259,34 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
                 "duration_ms": duration_ms,
                 "result_count": result_count,
                 **output,
+            }
+        )
+
+    @tool("validate_records", args_schema=_ValidateRecordsArgs)
+    def validate_records(
+        ref: str,
+        path: str = "",
+        expected_count: int | None = None,
+        unique_by: list[str] | None = None,
+        fields: list[str] | None = None,
+    ) -> str:
+        """Validate a complete bulk JSON result before other analysis.
+
+        Call this immediately after a bulk Artifact returns a JSON
+        ``stdout_ref``. It checks total count, duplicate or missing unique
+        keys, and required fields in one bounded pass. For a common
+        ``{total, items}`` result, leave ``path`` and ``expected_count``
+        empty so they are derived automatically.
+        """
+
+        return analyze_structured_output.invoke(
+            {
+                "ref": ref,
+                "operation": "validate_records",
+                "path": path,
+                "expected_count": expected_count,
+                "unique_by": unique_by or [],
+                "fields": fields or [],
             }
         )
 
@@ -2062,6 +2182,7 @@ def build_general_chat_tools(command, resources, config=None, emit_event=None):
             ),
             emit_event=emit_event,
         ),
+        validate_records,
         analyze_structured_output,
         inspect_saved_output,
         run_skill_transform,
@@ -2228,6 +2349,91 @@ def _structured_sort_key(value):
         raise ValueError("FIELD_NOT_SORTABLE") from exc
 
 
+def _validate_structured_records(
+    target,
+    *,
+    expected_count,
+    unique_by,
+    required_fields,
+):
+    """Return bounded completeness statistics for a record collection."""
+
+    if not isinstance(target, list):
+        raise ValueError("OPERATION_INPUT_INVALID")
+    if len(target) > _STRUCTURED_VALIDATION_MAX_ITEMS:
+        raise ValueError("VALIDATION_ITEM_LIMIT_EXCEEDED")
+    for names in (unique_by, required_fields):
+        if (
+            any(not str(item).strip() for item in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError("OPERATION_INPUT_INVALID")
+
+    missing_required = {field: 0 for field in required_fields}
+    seen_keys = set()
+    duplicate_count = 0
+    missing_unique_key_count = 0
+    for item in target:
+        for item_field in required_fields:
+            try:
+                value = _structured_record_value(item, item_field)
+            except ValueError:
+                value = None
+            if value is None or (
+                isinstance(value, str) and not value.strip()
+            ):
+                missing_required[item_field] += 1
+
+        if not unique_by:
+            continue
+        key_values = []
+        for item_field in unique_by:
+            try:
+                value = _structured_record_value(item, item_field)
+            except ValueError:
+                value = None
+            if value is None or (
+                isinstance(value, str) and not value.strip()
+            ):
+                key_values = []
+                break
+            key_values.append(value)
+        if not key_values:
+            missing_unique_key_count += 1
+            continue
+        key = json.dumps(
+            key_values,
+            ensure_ascii=False,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        if key in seen_keys:
+            duplicate_count += 1
+        else:
+            seen_keys.add(key)
+
+    total_count = len(target)
+    count_matches = (
+        None if expected_count is None else total_count == expected_count
+    )
+    valid = (
+        count_matches is not False
+        and duplicate_count == 0
+        and missing_unique_key_count == 0
+        and not any(missing_required.values())
+    )
+    return {
+        "valid": valid,
+        "total_count": total_count,
+        "expected_count": expected_count,
+        "count_matches": count_matches,
+        "unique_by": unique_by,
+        "duplicate_count": duplicate_count,
+        "missing_unique_key_count": missing_unique_key_count,
+        "missing_required": missing_required,
+    }
+
+
 def _apply_structured_operation(
     payload,
     operation,
@@ -2236,6 +2442,8 @@ def _apply_structured_operation(
     field,
     group_by,
     fields,
+    expected_count,
+    unique_by,
     offset,
     limit,
     descending,
@@ -2249,6 +2457,22 @@ def _apply_structured_operation(
         if not isinstance(target, (dict, list)):
             raise ValueError("OPERATION_INPUT_INVALID")
         return len(target)
+    if operation == "validate_records":
+        if isinstance(payload, dict):
+            if not path and isinstance(payload.get("items"), list):
+                target = payload["items"]
+            if (
+                expected_count is None
+                and isinstance(payload.get("total"), int)
+                and not isinstance(payload.get("total"), bool)
+            ):
+                expected_count = payload["total"]
+        return _validate_structured_records(
+            target,
+            expected_count=expected_count,
+            unique_by=unique_by,
+            required_fields=fields,
+        )
     if operation == "project":
         if (
             not isinstance(target, list)
