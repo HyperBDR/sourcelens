@@ -123,6 +123,7 @@ class LensGatewayChatModel(BaseChatModel):
     on_activity: Optional[Any] = None
     cancel_event: Optional[Any] = None
     run_uuid: str = ""
+    general_chat_execution_gates: bool = False
     token_budget_max_tokens: int = 200000
     token_budget_final_reserve_tokens: int = 40000
     token_budget_warn_ratio: float = 0.8
@@ -218,7 +219,13 @@ class LensGatewayChatModel(BaseChatModel):
         self._check_cancelled()
         control_call = bool(kwargs.get("runtime_control_call"))
         gateway_messages = [
-            _message_to_gateway(message) for message in messages
+            _message_to_gateway(
+                message,
+                include_recovery_metadata=(
+                    self.general_chat_execution_gates
+                ),
+            )
+            for message in messages
         ]
         warnings = [] if control_call else self._consume_runtime_warnings()
         if warnings:
@@ -421,7 +428,11 @@ class LensGatewayChatModel(BaseChatModel):
             self._run_token_usage["completion_tokens"] += completion_tokens
             self._run_token_usage["total_tokens"] += total_tokens
             cumulative = dict(self._run_token_usage)
-            limit = max(int(self.token_budget_max_tokens or 0), 0)
+            limit = (
+                max(int(self.token_budget_max_tokens or 0), 0)
+                if self.general_chat_execution_gates
+                else 0
+            )
             warn_ratio = min(
                 max(float(self.token_budget_warn_ratio or 0), 0.0),
                 1.0,
@@ -477,6 +488,8 @@ class LensGatewayChatModel(BaseChatModel):
     def _apply_loop_detection(self, message):
         """Warn on repeated tool activity and stop persistent loops."""
 
+        if not self.general_chat_execution_gates:
+            return message
         calls = list(message.tool_calls or [])
         if not calls:
             return message
@@ -541,7 +554,7 @@ class LensGatewayChatModel(BaseChatModel):
         )
 
 
-def _message_to_gateway(message):
+def _message_to_gateway(message, *, include_recovery_metadata=False):
     """Convert a LangChain message to OpenAI-compatible payload."""
 
     if message.type == "system":
@@ -553,7 +566,11 @@ def _message_to_gateway(message):
         return {"role": "user", "content": content}
     if message.type == "tool":
         tool_name = str(getattr(message, "name", "") or "")
-        content = _tool_result_for_gateway(message.content, tool_name)
+        content = _tool_result_for_gateway(
+            message.content,
+            tool_name,
+            include_recovery_metadata=include_recovery_metadata,
+        )
         return {
             "role": "tool",
             "content": content,
@@ -621,8 +638,13 @@ def neutralize_untrusted_text(text, *, neutralize_boundaries=False):
     )
 
 
-def _tool_result_for_gateway(content, tool_name):
-    """Return a classified, optionally neutralized tool-result view."""
+def _tool_result_for_gateway(
+    content,
+    tool_name,
+    *,
+    include_recovery_metadata=False,
+):
+    """Return a mode-scoped, neutralized tool-result view."""
 
     text = _content_to_text(content)
     if not isinstance(text, str):
@@ -632,7 +654,11 @@ def _tool_result_for_gateway(content, tool_name):
         result = json.loads(text)
     except (TypeError, json.JSONDecodeError):
         result = None
-    if isinstance(result, dict) and "ok" in result:
+    if (
+        include_recovery_metadata
+        and isinstance(result, dict)
+        and "ok" in result
+    ):
         result = dict(result)
         result["result_meta"] = _tool_result_metadata(result, tool_name)
         text = json.dumps(result, ensure_ascii=False)

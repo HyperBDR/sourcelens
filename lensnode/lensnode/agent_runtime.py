@@ -804,7 +804,9 @@ class LensDeepAgentRuntime:
         try:
             run_uuid = str(command.get("run_uuid") or "")
             token_budget = _resolve_token_budget(self.config, command)
-            token_budget_wrapup_event = threading.Event()
+            token_budget_wrapup_event = (
+                threading.Event() if runtime_mode.execution_gates else None
+            )
             model = LensGatewayChatModel(
                 model_ref=str(model_ref),
                 ai_gateway_url=self.config.ai_gateway_url,
@@ -818,6 +820,7 @@ class LensDeepAgentRuntime:
                 on_activity=on_activity,
                 cancel_event=cancel_event,
                 run_uuid=run_uuid,
+                general_chat_execution_gates=runtime_mode.execution_gates,
                 token_budget_max_tokens=token_budget["max_tokens"],
                 token_budget_final_reserve_tokens=token_budget[
                     "final_reserve_tokens"
@@ -871,7 +874,7 @@ class LensDeepAgentRuntime:
             capability_middleware = None
             evidence_requirement = "none"
             required_capabilities = []
-            if runtime_mode.general_chat:
+            if runtime_mode.execution_gates:
                 route_decision = _select_general_chat_route(
                     model,
                     question,
@@ -1046,16 +1049,22 @@ class LensDeepAgentRuntime:
             )
             agent = create_deep_agent(**kwargs)
             max_turns = command.get("max_agent_turns", 26)
+            invoke_detail = {"max_agent_turns": max_turns}
+            if runtime_mode.execution_gates:
+                invoke_detail.update(
+                    {
+                        "token_budget_profile": token_budget["profile"],
+                        "token_budget_max_tokens": token_budget[
+                            "max_tokens"
+                        ],
+                        "token_budget_final_reserve_tokens": token_budget[
+                            "final_reserve_tokens"
+                        ],
+                    }
+                )
             emit_agent_event(
                 "deepagents.agent.invoke",
-                {
-                    "max_agent_turns": max_turns,
-                    "token_budget_profile": token_budget["profile"],
-                    "token_budget_max_tokens": token_budget["max_tokens"],
-                    "token_budget_final_reserve_tokens": token_budget[
-                        "final_reserve_tokens"
-                    ],
-                },
+                invoke_detail,
             )
             messages = _build_initial_messages(
                 command.get("history"), question
@@ -1072,7 +1081,9 @@ class LensDeepAgentRuntime:
                 emit_event=emit_agent_event,
                 answer_language=_detect_answer_language(question),
                 cancel_event=cancel_event,
-                wrapup_event=wrapup_event,
+                wrapup_event=(
+                    wrapup_event if runtime_mode.execution_gates else None
+                ),
                 token_budget_wrapup_event=token_budget_wrapup_event,
             )
             if truncated:
@@ -1096,6 +1107,7 @@ class LensDeepAgentRuntime:
                 required_capabilities=required_capabilities,
                 truncated=truncated or bool(termination_reason),
                 stop_reason=termination_reason or model.stop_reason,
+                execution_gate_enabled=runtime_mode.execution_gates,
             )
             if outcome == "blocked" and capability_middleware is not None:
                 emit_user_event(
@@ -1106,7 +1118,8 @@ class LensDeepAgentRuntime:
                     question,
                     termination_detail,
                 )
-            emit_user_event("phase.changed", {"phase": "completed"})
+            if runtime_mode.general_chat:
+                emit_user_event("phase.changed", {"phase": "completed"})
             return {
                 "answer": answer,
                 "samples": [],
@@ -1442,9 +1455,12 @@ def _finalize_runtime_outcome(
     required_capabilities=None,
     truncated,
     stop_reason,
+    execution_gate_enabled=True,
 ):
     """Resolve a run outcome after observing actual tool execution."""
 
+    if not execution_gate_enabled:
+        return "completed", {}
     if capability_middleware is None:
         if truncated:
             return "partial", {

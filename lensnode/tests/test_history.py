@@ -352,6 +352,109 @@ def test_unmatched_capability_returns_before_any_tool_call(monkeypatch):
     assert tool_calls["count"] == 0
 
 
+def test_legacy_runtime_modes_skip_general_chat_execution_gates(
+    monkeypatch,
+    tmp_path,
+):
+    model_options = []
+    run_options = []
+
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 1}
+
+        def __init__(self, **options):
+            model_options.append(options)
+
+    resources = SimpleNamespace(
+        root=tmp_path,
+        context_skill_contents=[],
+        mcp_configs=[],
+        skill_paths=[],
+        mcp_config_path=tmp_path / "mcp.json",
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+        summary_trigger_tokens=0,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _config: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_kwargs: object(),
+    )
+
+    def run_agent(*_args, **options):
+        run_options.append(options)
+        return "legacy answer", False, None
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_run_agent_with_turn_limit",
+        run_agent,
+    )
+    runtime = agent_runtime.LensDeepAgentRuntime(config)
+    wrapup_event = threading.Event()
+
+    for task in ("knowledge_qa", "code_analysis"):
+        result = runtime._answer_sync(
+            {
+                "run_uuid": f"legacy-{task}",
+                "task": task,
+                "question": "Question",
+                "agent_model_ref": "model-ref",
+            },
+            wrapup_event=wrapup_event,
+        )
+
+        assert result["answer"] == "legacy answer"
+        assert result["outcome"] == "completed"
+        assert result["termination_detail"] == {}
+
+    assert all(
+        options["general_chat_execution_gates"] is False
+        for options in model_options
+    )
+    for options in run_options:
+        assert options["wrapup_event"] is None
+        assert options["token_budget_wrapup_event"] is None
+        assert "capability_stop_event" not in options
+
+
 def test_unverified_answer_distinguishes_unavailable_from_execution_failure():
     unavailable = agent_runtime._unverified_execution_answer(
         "创建一个订单",
@@ -667,6 +770,19 @@ def test_guidance_becomes_partial_when_execution_is_truncated():
 
     assert outcome == "partial"
     assert termination_detail == {"reason": "turn_limit"}
+
+
+def test_legacy_runtime_ignores_general_chat_outcome_gates():
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=None,
+        evidence_requirement="none",
+        truncated=True,
+        stop_reason="turn_limit",
+        execution_gate_enabled=False,
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
 
 
 def test_plan_steps_are_bounded_and_normalized():
