@@ -656,6 +656,10 @@ def _tool_result_metadata(result, tool_name):
         if tool_name == "run_skill_artifact"
         else ""
     )
+    diagnostic = " ".join(
+        str(result.get(key) or "")
+        for key in ("error", "code", "message", "detail", "stderr")
+    ).upper()
     artifact_request_failure = any(
         marker in artifact_diagnostic
         for marker in (
@@ -698,7 +702,13 @@ def _tool_result_metadata(result, tool_name):
         )
     elif any(
         marker in error_code
-        for marker in ("BUDGET", "LOOP", "REPEATED", "STALLED")
+        for marker in (
+            "BUDGET",
+            "LOOP",
+            "POLICY",
+            "REPEATED",
+            "STALLED",
+        )
     ):
         error_type = "policy"
         recoverable = False
@@ -708,17 +718,38 @@ def _tool_result_metadata(result, tool_name):
         )
     elif artifact_request_failure or any(
         marker in error_code
-        for marker in ("INVALID", "NOT_FOUND", "PATH")
+        for marker in (
+            "INVALID",
+            "MALFORMED",
+            "NOT_FOUND",
+            "PARSE",
+            "PATH",
+            "SCHEMA",
+            "SYNTAX",
+            "VALIDATION",
+        )
+    ) or any(
+        marker in diagnostic
+        for marker in (
+            "INVALID QUERY",
+            "INVALID EXPRESSION",
+            "SQL SYNTAX",
+            "SYNTAX ERROR",
+            "UNKNOWN FLAG",
+            "USAGE:",
+            "VALIDATION ERROR",
+            "RESPONSE VALIDATION",
+        )
     ):
         error_type = "request"
         recoverable = True
         action = "Correct the tool arguments before retrying."
     else:
         error_type = "tool"
-        recoverable = False
+        recoverable = True
         action = (
-            "Do not repeat the same call; report the tool failure if no "
-            "safer recovery is available."
+            "Correct the request once or use another available capability; "
+            "do not repeat the same failing call beyond that."
         )
     return {
         "status": "error",

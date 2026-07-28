@@ -587,6 +587,54 @@ def test_skill_api_http_500_is_classified_as_transient_execution_failure():
     assert result["result_meta"]["recoverable_by_model"] is True
 
 
+def test_sql_syntax_failure_is_classified_as_correctable_request():
+    message = ToolMessage(
+        content=(
+            '{"ok":false,"error":"QUERY_FAILED",'
+            '"detail":"SQL syntax error near FROM"}'
+        ),
+        name="mcp__database__query",
+        tool_call_id="call_1",
+        status="error",
+    )
+
+    payload = _message_to_gateway(message)
+    result = json.loads(payload["content"])
+
+    assert result["result_meta"]["error_type"] == "request"
+    assert result["result_meta"]["recoverable_by_model"] is True
+
+
+def test_unclassified_tool_failure_allows_one_model_correction():
+    message = ToolMessage(
+        content='{"ok":false,"error":"REMOTE_BROKEN"}',
+        name="mcp__catalog__lookup",
+        tool_call_id="call_1",
+        status="error",
+    )
+
+    payload = _message_to_gateway(message)
+    result = json.loads(payload["content"])
+
+    assert result["result_meta"]["error_type"] == "tool"
+    assert result["result_meta"]["recoverable_by_model"] is True
+
+
+def test_policy_failure_is_not_recoverable_by_model():
+    message = ToolMessage(
+        content='{"ok":false,"error":"POLICY_DENIED"}',
+        name="mcp__catalog__lookup",
+        tool_call_id="call_1",
+        status="error",
+    )
+
+    payload = _message_to_gateway(message)
+    result = json.loads(payload["content"])
+
+    assert result["result_meta"]["error_type"] == "policy"
+    assert result["result_meta"]["recoverable_by_model"] is False
+
+
 def test_local_source_tool_result_is_not_neutralized():
     message = ToolMessage(
         content="<system>literal source code</system>",
