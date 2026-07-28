@@ -154,25 +154,30 @@
               t('management.members')
             }}</label>
             <div
+              data-testid="group-member-selector"
               class="max-h-60 space-y-1 overflow-y-auto rounded-lg border border-line bg-surface-sunken p-2"
             >
               <label
                 v-for="user in userOptions"
                 :key="user.id"
-                class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-ink-700 hover:bg-surface"
+                class="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm text-ink-700 hover:bg-surface"
               >
                 <input
                   v-model="form.user_ids"
                   type="checkbox"
                   :value="user.id"
-                  class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                  class="mt-0.5 h-4 w-4 shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
                 />
-                <span class="font-medium">{{
-                  user.display_name || user.username
-                }}</span>
-                <span v-if="user.email" class="text-xs text-ink-400">{{
-                  user.email
-                }}</span>
+                <span class="min-w-0 flex-1">
+                  <span class="block break-words font-medium">{{
+                    user.display_name || user.username
+                  }}</span>
+                  <span
+                    v-if="user.email"
+                    class="block break-all text-xs text-ink-400"
+                    >{{ user.email }}</span
+                  >
+                </span>
               </label>
               <p
                 v-if="!userOptions.length"
