@@ -17,6 +17,9 @@ services:
       LENSNODE_NAME: ${LENSNODE_NAME:-local-dev-lensnode}
       LENSNODE_TOKEN: ${LENSNODE_TOKEN:-dev-lensnode-token}
       LENSNODE_WORKSPACE_PATH: /workspace
+      # Development login must not depend on the external Turnstile service.
+      TURNSTILE_ENABLED: "false"
+      TURNSTILE_SECRET_KEY: ""
     build:
       context: .
       dockerfile: Dockerfile
@@ -212,6 +215,9 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.dev
+    environment:
+      # Keep the development login flow aligned with the backend bypass.
+      VITE_TURNSTILE_SITE_KEY: ""
     volumes:
       - ./frontend/src:/app/src:ro
       - ./frontend/public:/app/public:ro
