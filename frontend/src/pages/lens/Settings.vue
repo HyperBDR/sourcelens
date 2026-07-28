@@ -51,7 +51,9 @@
                     {{ grp.title }}
                   </h3>
                 </div>
-                <table class="min-w-full table-fixed divide-y divide-line">
+                <table
+                  class="settings-table min-w-full table-fixed divide-y divide-line"
+                >
                   <colgroup>
                     <col class="w-[48%]" />
                     <col class="w-[52%]" />
@@ -69,23 +71,27 @@
                         <p class="mt-1 text-sm leading-6 text-ink-500">
                           {{ setting.description }}
                         </p>
-                        <p class="mt-1 font-mono text-xs text-ink-400">
+                        <p
+                          class="setting-key mt-1 font-mono text-xs text-ink-400"
+                        >
                           {{ setting.key }}
                         </p>
                       </td>
                       <td class="table-cell">
-                        <div class="flex w-full items-center justify-end gap-3">
+                        <div
+                          class="settings-control flex w-full items-center justify-end gap-3"
+                        >
                           <input
                             v-if="setting.type === 'number'"
                             v-model.number="settingsForm[setting.key]"
                             type="number"
                             min="1"
-                            class="w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            class="settings-input w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           />
                           <select
                             v-else-if="setting.type === 'model_ref'"
                             v-model="settingsForm[setting.key]"
-                            class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            class="settings-input min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           >
                             <option value="">
                               {{ t('lensAdmin.placeholders.noModel') }}
@@ -103,9 +109,9 @@
                             v-model="settingsForm[setting.key]"
                             type="text"
                             :placeholder="setting.placeholder"
-                            class="min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            class="settings-input min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           />
-                          <span class="w-16 text-sm text-ink-500">
+                          <span class="settings-unit w-16 text-sm text-ink-500">
                             {{ setting.unit }}
                           </span>
                         </div>
@@ -116,7 +122,9 @@
               </div>
             </div>
 
-            <div class="mt-6 overflow-hidden rounded-lg border border-line">
+            <div
+              class="scheduled-tasks mt-6 overflow-hidden rounded-lg border border-line"
+            >
               <div class="border-b border-line px-4 py-3">
                 <h3 class="text-sm font-semibold text-ink-900">
                   {{ t('lensAdmin.tasks.title') }}
@@ -125,7 +133,9 @@
                   {{ t('lensAdmin.tasks.description') }}
                 </p>
               </div>
-              <table class="min-w-full divide-y divide-line">
+              <table
+                class="scheduled-tasks-table min-w-full divide-y divide-line"
+              >
                 <thead class="bg-surface-sunken">
                   <tr>
                     <th class="table-head">
@@ -155,11 +165,14 @@
                       <p class="mt-1 text-sm leading-6 text-ink-500">
                         {{ task.description }}
                       </p>
-                      <p class="mt-1 font-mono text-xs text-ink-400">
+                      <p class="task-key mt-1 font-mono text-xs text-ink-400">
                         {{ task.task_type }}
                       </p>
                     </td>
-                    <td class="table-cell">
+                    <td
+                      class="task-detail table-cell"
+                      :data-label="t('lensAdmin.tasks.enabled')"
+                    >
                       <label class="inline-flex items-center gap-2">
                         <input
                           :checked="task.enabled"
@@ -182,10 +195,16 @@
                         </span>
                       </label>
                     </td>
-                    <td class="table-cell text-sm text-ink-600">
+                    <td
+                      class="task-detail table-cell text-sm text-ink-600"
+                      :data-label="t('lensAdmin.tasks.lastRun')"
+                    >
                       {{ formatDateTime(task.last_run_at) }}
                     </td>
-                    <td class="table-cell">
+                    <td
+                      class="task-detail table-cell"
+                      :data-label="t('lensAdmin.tasks.lastStatus')"
+                    >
                       <StatusBadge :status="task.last_status || 'unknown'" />
                     </td>
                   </tr>
@@ -493,5 +512,90 @@ onMounted(load)
 
 .table-cell {
   @apply px-4 py-4 text-sm text-ink-700;
+}
+
+@media (max-width: 767px) {
+  .settings-table,
+  .settings-table tbody,
+  .scheduled-tasks-table,
+  .scheduled-tasks-table tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .settings-table,
+  .scheduled-tasks-table {
+    min-width: 100% !important;
+    table-layout: auto;
+  }
+
+  .settings-table colgroup {
+    display: none;
+  }
+
+  .scheduled-tasks-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .settings-table tr,
+  .settings-table .table-cell,
+  .scheduled-tasks-table tr {
+    display: block;
+    width: 100%;
+  }
+
+  .settings-table .table-cell:first-child {
+    @apply pb-2;
+  }
+
+  .settings-table .table-cell:last-child {
+    @apply pt-0;
+  }
+
+  .setting-key,
+  .task-key {
+    overflow-wrap: anywhere;
+  }
+
+  .settings-control {
+    @apply flex-col items-stretch gap-2;
+  }
+
+  .settings-control .settings-input {
+    min-width: 0;
+    max-width: none;
+  }
+
+  .settings-unit {
+    @apply w-auto;
+  }
+
+  .scheduled-tasks {
+    @apply overflow-x-hidden;
+  }
+
+  .scheduled-tasks-table .table-cell {
+    display: block;
+    width: 100%;
+  }
+
+  .scheduled-tasks-table .task-detail {
+    display: grid;
+    grid-template-columns: minmax(5rem, 36%) minmax(0, 1fr);
+    @apply gap-3 border-t border-line py-3;
+  }
+
+  .scheduled-tasks-table .task-detail::before {
+    content: attr(data-label);
+    @apply text-xs font-semibold uppercase tracking-wide text-ink-500;
+  }
 }
 </style>

@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("lens", "0025_run_outcome_termination_detail"),
+        ("lens", "0026_archive_assistants"),
     ]
 
     operations = [

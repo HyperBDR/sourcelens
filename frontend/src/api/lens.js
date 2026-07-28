@@ -16,8 +16,8 @@ function unwrapList(payload) {
   return []
 }
 
-export async function listAssistants() {
-  const response = await api.get('/lens/assistants/')
+export async function listAssistants(params = {}) {
+  const response = await api.get('/lens/assistants/', { params })
   return unwrapList(unwrapResponse(response))
 }
 
@@ -41,8 +41,13 @@ export async function updateAssistant(uuid, payload) {
   return unwrapResponse(response)
 }
 
-export async function deleteAssistant(uuid) {
-  const response = await api.delete(`/lens/assistants/${uuid}/`)
+export async function archiveAssistant(uuid) {
+  const response = await api.post(`/lens/assistants/${uuid}/archive/`)
+  return unwrapResponse(response)
+}
+
+export async function restoreAssistant(uuid) {
+  const response = await api.post(`/lens/assistants/${uuid}/restore/`)
   return unwrapResponse(response)
 }
 

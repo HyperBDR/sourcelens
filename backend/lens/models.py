@@ -118,7 +118,7 @@ class Assistant(TimestampedUUIDModel):
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
-        DISABLED = "disabled", "Disabled"
+        ARCHIVED = "archived", "Archived"
 
     class Visibility(models.TextChoices):
         PUBLIC = "public", "Public"
@@ -200,6 +200,14 @@ class Assistant(TimestampedUUIDModel):
         return self.access_grants.filter(
             group__in=user.groups.all()
         ).exists()
+
+    def is_runnable_by(self, user):
+        """Return True when the user may start work with this assistant."""
+
+        return (
+            self.status == Assistant.Status.ACTIVE
+            and self.is_accessible_by(user)
+        )
 
 
 class AssistantAccess(TimestampedUUIDModel):

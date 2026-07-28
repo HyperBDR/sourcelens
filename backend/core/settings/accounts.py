@@ -156,9 +156,15 @@ OTP_SEND_MAX_PER_IP_HOUR = int(os.getenv('OTP_SEND_MAX_PER_IP_HOUR', '20'))
 # Cloudflare Turnstile
 # ============================
 
-# Server-side secret used to verify Turnstile tokens. Empty disables the
-# check (development bypass).
+# Server-side secret used to verify Turnstile tokens. Required when the
+# check is enabled outside debug mode.
 TURNSTILE_SECRET_KEY = os.getenv('TURNSTILE_SECRET_KEY', '')
+
+# Explicit switch for local development. Only "false" disables the check.
+TURNSTILE_ENABLED = os.getenv(
+    'TURNSTILE_ENABLED',
+    'true',
+).strip().lower() != 'false'
 
 TURNSTILE_VERIFY_URL = (
     'https://challenges.cloudflare.com/turnstile/v0/siteverify'
@@ -167,7 +173,7 @@ TURNSTILE_VERIFY_URL = (
 # Fail fast in production: an empty secret silently bypasses human
 # verification on every login entry, so refuse to start without it unless
 # explicitly in debug mode.
-if not TURNSTILE_SECRET_KEY and (
+if TURNSTILE_ENABLED and not TURNSTILE_SECRET_KEY and (
     os.getenv('DJANGO_DEBUG', 'false').lower() != 'true'
 ):
     raise ImproperlyConfigured(

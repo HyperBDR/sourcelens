@@ -141,7 +141,7 @@
             data-testid="credentials-list"
           >
             <table
-              class="credentials-table min-w-[66rem] table-fixed divide-y divide-line"
+              class="credentials-table w-full min-w-[66rem] table-fixed divide-y divide-line"
             >
               <colgroup>
                 <col class="w-44" />

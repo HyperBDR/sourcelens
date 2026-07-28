@@ -457,6 +457,17 @@ class SharedQAApiTests(TestCase):
         self.assertEqual(peer.data["question"], "What is X?")
         self.assertEqual(peer.data["view_count"], 2)
 
+    def test_archiving_assistant_preserves_shared_qa_snapshot_access(self):
+        token = self._share().data["token"]
+        self.assistant.status = Assistant.Status.ARCHIVED
+        self.assistant.save(update_fields=["status"])
+        self.client.force_authenticate(self.other)
+
+        response = self.client.get(f"/api/lens/public/qa/{token}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["question"], "What is X?")
+
     def test_unlisted_single_allows_authenticated_session_user(self):
         token = self._share().data["token"]
         self.client.force_authenticate(user=None)

@@ -31,6 +31,12 @@ def verify_token(token, remote_ip=None):
             - (True, []) when verification passes or is bypassed.
             - (False, [..]) with Cloudflare error codes on failure.
     """
+    if not getattr(settings, 'TURNSTILE_ENABLED', True):
+        logger.info(
+            "Turnstile verification is disabled by configuration."
+        )
+        return True, []
+
     secret = getattr(settings, 'TURNSTILE_SECRET_KEY', '')
     if not secret:
         logger.warning(
