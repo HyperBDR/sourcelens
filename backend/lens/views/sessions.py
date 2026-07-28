@@ -28,6 +28,7 @@ from lens.serializers import (
     MessageAttachmentSerializer,
     MessageSerializer,
     RunCreateSerializer,
+    RunFeedbackSerializer,
     RunSerializer,
     SessionCreateSerializer,
     SessionSerializer,
@@ -262,6 +263,16 @@ class RunViewSet(BaseAuthenticatedViewSet):
 
         queryset = super().get_queryset()
         return queryset.filter(session__user=self.request.user)
+
+    @action(detail=True, methods=["patch"])
+    def feedback(self, request, uuid=None):
+        """Set, switch, or clear feedback for a completed answer."""
+
+        run = self.get_object()
+        serializer = RunFeedbackSerializer(run, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
     @action(
         detail=True,

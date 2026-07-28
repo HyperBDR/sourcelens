@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
@@ -1753,6 +1754,8 @@ class MessageSerializer(serializers.ModelSerializer):
     run = serializers.UUIDField(source="run.uuid", read_only=True)
     thinking = serializers.SerializerMethodField()
     completed_at = serializers.SerializerMethodField()
+    feedback = serializers.SerializerMethodField()
+    feedback_updated_at = serializers.SerializerMethodField()
     attachments = MessageAttachmentSerializer(many=True, read_only=True)
     output_files = RunOutputFileSerializer(many=True, read_only=True)
 
@@ -1766,6 +1769,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "run",
             "thinking",
             "completed_at",
+            "feedback",
+            "feedback_updated_at",
             "attachments",
             "output_files",
             "created_at",
@@ -1778,6 +1783,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "run",
             "thinking",
             "completed_at",
+            "feedback",
+            "feedback_updated_at",
             "attachments",
             "output_files",
             "created_at",
@@ -1790,6 +1797,22 @@ class MessageSerializer(serializers.ModelSerializer):
             return None
         run = self._run_for_message(obj)
         return run.finished_at if run else None
+
+    def get_feedback(self, obj):
+        """Return the current feedback for an assistant response."""
+
+        if obj.role != Message.Role.ASSISTANT:
+            return None
+        run = self._run_for_message(obj)
+        return run.feedback if run else None
+
+    def get_feedback_updated_at(self, obj):
+        """Return when feedback for an assistant response last changed."""
+
+        if obj.role != Message.Role.ASSISTANT:
+            return None
+        run = self._run_for_message(obj)
+        return run.feedback_updated_at if run else None
 
     @staticmethod
     def _run_for_message(obj):
@@ -1913,6 +1936,8 @@ class RunSerializer(serializers.ModelSerializer):
             "error",
             "outcome",
             "termination_detail",
+            "feedback",
+            "feedback_updated_at",
             "started_at",
             "finished_at",
             "created_at",
@@ -1921,6 +1946,45 @@ class RunSerializer(serializers.ModelSerializer):
             "execution",
         ]
         read_only_fields = fields
+
+
+class RunFeedbackSerializer(serializers.ModelSerializer):
+    """Validate and persist one user's feedback for a completed run."""
+
+    feedback = serializers.ChoiceField(
+        choices=Run.Feedback.choices,
+        allow_blank=True,
+    )
+
+    class Meta:
+        model = Run
+        fields = ["feedback", "feedback_updated_at"]
+        read_only_fields = ["feedback_updated_at"]
+
+    def validate(self, attrs):
+        """Only completed runs with an answer can receive feedback."""
+
+        run = self.instance
+        if run.status != Run.Status.DONE or run.output_message is None:
+            raise serializers.ValidationError("RUN_NOT_FEEDBACK_ELIGIBLE")
+        return attrs
+
+    def update(self, instance, validated_data):
+        """Update feedback without changing its timestamp on no-op calls."""
+
+        feedback = validated_data["feedback"]
+        if feedback == instance.feedback:
+            return instance
+        instance.feedback = feedback
+        instance.feedback_updated_at = timezone.now()
+        instance.save(
+            update_fields=[
+                "feedback",
+                "feedback_updated_at",
+                "updated_at",
+            ]
+        )
+        return instance
 
 
 class SessionSerializer(serializers.ModelSerializer):

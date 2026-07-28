@@ -667,6 +667,10 @@ class Run(models.Model):
         PARTIAL = "partial", "Partial"
         BLOCKED = "blocked", "Blocked"
 
+    class Feedback(models.TextChoices):
+        POSITIVE = "positive", "Positive"
+        NEGATIVE = "negative", "Negative"
+
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
     status = models.CharField(
@@ -703,6 +707,13 @@ class Run(models.Model):
         default="",
     )
     termination_detail = models.JSONField(default=dict, blank=True)
+    feedback = models.CharField(
+        max_length=16,
+        choices=Feedback.choices,
+        blank=True,
+        default="",
+    )
+    feedback_updated_at = models.DateTimeField(null=True, blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     last_activity_at = models.DateTimeField(null=True, blank=True)

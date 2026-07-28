@@ -200,6 +200,12 @@ def _admin_run_row(run):
         "assistant_name": assistant.name if assistant else None,
         "assistant_slug": assistant.slug if assistant else None,
         "question": question[:160],
+        "feedback": run.feedback,
+        "feedback_updated_at": (
+            run.feedback_updated_at.isoformat()
+            if run.feedback_updated_at
+            else None
+        ),
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "finished_at": (
             run.finished_at.isoformat() if run.finished_at else None
