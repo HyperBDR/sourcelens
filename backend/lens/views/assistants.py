@@ -1,5 +1,6 @@
 """Assistant CRUD and public assistant metadata views."""
 
+from django.db import transaction
 from rest_framework import permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -60,19 +61,23 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
         return queryset.filter(status=Assistant.Status.ACTIVE)
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def archive(self, request, *args, **kwargs):
         """Archive an active assistant without deleting its data."""
 
         assistant = self.get_object()
+        assistant = Assistant.objects.select_for_update().get(pk=assistant.pk)
         assistant.status = Assistant.Status.ARCHIVED
         assistant.save(update_fields=["status", "updated_at"])
         return Response(self.get_serializer(assistant).data)
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def restore(self, request, *args, **kwargs):
         """Restore an archived assistant to active use."""
 
         assistant = self.get_object()
+        assistant = Assistant.objects.select_for_update().get(pk=assistant.pk)
         assistant.status = Assistant.Status.ACTIVE
         assistant.save(update_fields=["status", "updated_at"])
         return Response(self.get_serializer(assistant).data)

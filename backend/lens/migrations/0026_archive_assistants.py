@@ -19,7 +19,7 @@ def disable_archived_assistants(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("lens", "0023_sharedqafile"),
+        ("lens", "0025_run_outcome_termination_detail"),
     ]
 
     operations = [
