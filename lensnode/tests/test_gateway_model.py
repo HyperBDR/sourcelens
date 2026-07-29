@@ -84,6 +84,63 @@ def test_streaming_touches_activity_on_every_event(monkeypatch):
     assert client_options["verify"].verify_mode == ssl.CERT_REQUIRED
 
 
+def test_gateway_calls_reuse_injected_http_client(monkeypatch):
+    requests = []
+
+    def handler(request):
+        payload = json.loads(request.read())
+        requests.append(payload)
+        if payload.get("stream"):
+            return httpx.Response(200, content=SSE_BODY.encode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "message": {"content": "Hello"},
+                "usage": {"total_tokens": 5},
+            },
+        )
+
+    shared_client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(
+        "lensnode.gateway_model.httpx.Client",
+        lambda *args, **kwargs: pytest.fail(
+            "Gateway call created a per-request HTTP client"
+        ),
+    )
+    try:
+        sync_model = LensGatewayChatModel(
+            model_ref="model-ref",
+            ai_gateway_url="http://gateway/ai/",
+            token="token",
+            http_client=shared_client,
+        )
+        stream_model = LensGatewayChatModel(
+            model_ref="model-ref",
+            ai_gateway_url="http://gateway/ai/",
+            token="token",
+            emit_output=lambda _content: None,
+            http_client=shared_client,
+        )
+
+        sync_model._generate([HumanMessage(content="sync")])
+        stream_model._generate([HumanMessage(content="stream")])
+        image_result = describe_image_result(
+            b"image",
+            "Describe this image.",
+            "image/png",
+            model_ref="vision-model",
+            ai_gateway_url="http://gateway/ai/",
+            token="token",
+            http_client=shared_client,
+        )
+
+        assert len(requests) == 3
+        assert image_result["content"] == "Hello"
+        assert not shared_client.is_closed
+    finally:
+        shared_client.close()
+
+
 def test_tool_call_turn_does_not_publish_intermediate_text(monkeypatch):
     body = (
         'data: {"type": "token", "kind": "content", '
@@ -882,7 +939,7 @@ def test_image_gateway_request_uses_configured_tls_context(monkeypatch):
     assert client_options["verify"].verify_mode == ssl.CERT_NONE
 
 
-def test_summarization_model_receives_tls_configuration():
+def test_summarization_model_receives_gateway_client_and_tls_configuration():
     config = SimpleNamespace(
         summary_trigger_tokens=1000,
         summary_keep_tokens=500,
@@ -893,11 +950,17 @@ def test_summarization_model_receives_tls_configuration():
         tls_ca_file="/ignored/ca.crt",
     )
 
-    middleware = _build_summarization_middleware(
-        config,
-        "summary-model",
-        lambda *args: None,
-    )
+    shared_client = httpx.Client(transport=httpx.MockTransport(lambda _: None))
+    try:
+        middleware = _build_summarization_middleware(
+            config,
+            "summary-model",
+            lambda *args: None,
+            http_client=shared_client,
+        )
 
-    assert middleware.model.tls_skip_verify is True
-    assert middleware.model.tls_ca_file == "/ignored/ca.crt"
+        assert middleware.model.http_client is shared_client
+        assert middleware.model.tls_skip_verify is True
+        assert middleware.model.tls_ca_file == "/ignored/ca.crt"
+    finally:
+        shared_client.close()

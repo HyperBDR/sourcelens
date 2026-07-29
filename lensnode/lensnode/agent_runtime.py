@@ -678,7 +678,12 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
 
 
 def _build_summarization_middleware(
-    config, model_ref, emit_event, cancel_event=None, run_uuid=""
+    config,
+    model_ref,
+    emit_event,
+    cancel_event=None,
+    run_uuid="",
+    http_client=None,
 ):
     """Build context-compaction middleware, or None when disabled.
 
@@ -703,6 +708,7 @@ def _build_summarization_middleware(
         request_timeout_s=config.request_timeout_s,
         tls_skip_verify=getattr(config, "tls_skip_verify", False),
         tls_ca_file=getattr(config, "tls_ca_file", None),
+        http_client=http_client,
         cancel_event=cancel_event,
         run_uuid=run_uuid,
     )
@@ -767,8 +773,9 @@ def _apply_offload_thresholds(config):
 class LensDeepAgentRuntime:
     """Run a real LangChain Deep Agents execution for one LensNode command."""
 
-    def __init__(self, config):
+    def __init__(self, config, http_client=None):
         self.config = config
+        self.http_client = http_client
 
     async def answer(
         self,
@@ -874,6 +881,7 @@ class LensDeepAgentRuntime:
                     self.config, "tls_skip_verify", False
                 ),
                 tls_ca_file=getattr(self.config, "tls_ca_file", None),
+                http_client=self.http_client,
                 emit_output=emit_output,
                 on_activity=on_activity,
                 cancel_event=cancel_event,
@@ -1079,6 +1087,7 @@ class LensDeepAgentRuntime:
                 emit_agent_event,
                 cancel_event,
                 run_uuid=run_uuid,
+                http_client=self.http_client,
             )
             middleware = _agent_middleware(
                 command,

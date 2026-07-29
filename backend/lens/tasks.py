@@ -837,6 +837,7 @@ def lensnode_cleanup_task():
     RunExecution.objects.filter(
         run__status=Run.Status.FAILED,
         status__in=[
+            RunExecution.Status.QUEUED,
             RunExecution.Status.DISPATCHED,
             RunExecution.Status.RUNNING,
         ],

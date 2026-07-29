@@ -245,6 +245,7 @@ def _sync_context(command, target):
         ),
         "ai_gateway_url": command.get("ai_gateway_url") or "",
         "lensnode_token": command.get("lensnode_token") or "",
+        "gateway_http_client": command.get("gateway_http_client"),
         "tls_skip_verify": bool(command.get("tls_skip_verify", False)),
         "tls_ca_file": command.get("tls_ca_file") or None,
         "vision_model_ref": conversion.get("vision_model_ref") or "",

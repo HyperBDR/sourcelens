@@ -66,6 +66,7 @@ def test_drain_lets_in_flight_run_finish_then_stops():
         assert client.draining.is_set()
         assert client.stopping.is_set()
         assert ws.closed
+        assert client.gateway_http_client.is_closed
         # Draining was announced so the control plane stops routing here.
         assert "node_draining" in _sent_types(ws)
 

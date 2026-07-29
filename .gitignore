@@ -274,6 +274,9 @@ requirements-dev.txt
 # Stoneforge internal tooling
 .stoneforge/
 
+# Serena local project state
+.serena/
+
 # uv lock file (project uses pip)
 uv.lock
 /.stoneforge/.worktrees/

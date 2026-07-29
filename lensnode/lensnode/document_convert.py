@@ -1708,6 +1708,7 @@ def describe_image_bytes(image_bytes, mime_type, context):
         token=token,
         tls_skip_verify=context.get("tls_skip_verify", False),
         tls_ca_file=context.get("tls_ca_file"),
+        http_client=context.get("gateway_http_client"),
     )
     return result.get("content") or "", result.get("usage") or {}
 

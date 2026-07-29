@@ -70,10 +70,15 @@ use English comments and docstrings with a 79-character line limit.
 
 ## Boundaries
 
-- Always: snapshot the resolved duration and keep existing Runs immutable.
+- Always: snapshot the resolved duration when the Run is created and keep
+  that timeout immutable.
 - Always: retain an eventual hard wall-clock deadline for runaway execution.
 - Never: use `LENSNODE_REQUEST_TIMEOUT_S` as the Run wall-clock fallback.
-- Never: let later Assistant edits change an in-flight Run.
+- Never: let later Assistant analysis-level edits change an existing Run's
+  timeout.
+- Compatibility: refresh Skill package metadata immediately before dispatch.
+  SourceLens does not retain historical Skill packages, so a package hash
+  frozen while queued could no longer be downloadable after a Skill update.
 - Out of scope: transport timeout renaming, retry policy, and timeout UI error
   copy.
 
