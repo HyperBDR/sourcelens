@@ -9,7 +9,7 @@ test('reveals loaded chat before waiting for active run recovery', async () => {
   const source = await chatSource()
   const messagesLoaded = source.indexOf('messages.value = loadedMessages')
   const resumeActiveRun = source.indexOf(
-    'await maybeResumeActiveRun(session.uuid)',
+    'await maybeResumeActiveRun(session.uuid, isCurrentLoad)',
     messagesLoaded
   )
   const chatRevealed = source.indexOf('booted.value = true', messagesLoaded)
@@ -18,4 +18,17 @@ test('reveals loaded chat before waiting for active run recovery', async () => {
   assert.notEqual(resumeActiveRun, -1)
   assert.ok(chatRevealed > messagesLoaded)
   assert.ok(chatRevealed < resumeActiveRun)
+})
+
+test('guards restored run state with the current session load', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /await maybeResumeActiveRun\(session\.uuid, isCurrentLoad\)/
+  )
+  assert.match(
+    source,
+    /async function maybeResumeActiveRun\(sessionUuid, isCurrentLoad\)/
+  )
 })
