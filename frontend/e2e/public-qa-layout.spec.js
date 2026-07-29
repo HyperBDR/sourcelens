@@ -35,7 +35,8 @@ test('wide shared Q&A tables scroll without widening the page', async ({
     page.getByRole('heading', { name: 'Wide table layout' })
   ).toBeVisible()
 
-  const tableScroll = page.locator('.markdown-table-scroll')
+  const screen = page.locator('.qa-screen-view')
+  const tableScroll = screen.locator('.markdown-table-scroll')
   await expect(tableScroll).toHaveCount(1)
 
   const layout = await page.evaluate(() => {
@@ -124,6 +125,8 @@ async function routeCompleteShare(page, outputFiles) {
           ],
           answer: 'It shows the deployment flow.',
           output_files: outputFiles,
+          assistant_name: 'Deployment Agent',
+          assistant_slug: 'deployment-agent',
           published_at: '2026-07-25T00:00:00Z',
           view_count: 1
         }
@@ -141,15 +144,52 @@ test('shared page keeps question attachments and output files in context', async
 
   await page.goto(`/lens/qa/${SHARE_TOKEN}`)
 
+  const screen = page.locator('.qa-screen-view')
+
   await expect(
-    page.getByRole('heading', { name: 'Complete shared turn' })
+    screen.getByRole('heading', { name: 'Complete shared turn' })
   ).toBeVisible()
   await expect(
-    page.getByText('What does the attached diagram show?')
+    screen.getByText('What does the attached diagram show?')
   ).toBeVisible()
-  await expect(page.getByText('diagram.png')).toBeVisible()
-  await expect(page.getByText('It shows the deployment flow.')).toBeVisible()
-  await expect(page.getByText('report.html')).toBeVisible()
+  await expect(screen.getByText('diagram.png')).toBeVisible()
+  await expect(screen.getByText('It shows the deployment flow.')).toBeVisible()
+  await expect(screen.getByText('report.html')).toBeVisible()
+})
+
+test('shared Q&A identifies the Agent and prints the complete turn', async ({
+  page
+}) => {
+  await routeCompleteShare(page, [
+    sharedFile(HTML_UUID, 'report.html', 'text/html')
+  ])
+  await page.goto(`/lens/qa/${SHARE_TOKEN}`)
+
+  const screen = page.locator('.qa-screen-view')
+  await expect(screen.getByText('AI Agent Q&A', { exact: true })).toBeVisible()
+  await expect(
+    screen.getByText('Answer from AI Agent “Deployment Agent”', { exact: true })
+  ).toBeVisible()
+
+  await page.evaluate(() => {
+    window.print = () => {
+      document.documentElement.dataset.printRequested = 'true'
+    }
+  })
+  await page.getByRole('button', { name: 'Export PDF' }).click()
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-print-requested',
+    'true'
+  )
+
+  await page.emulateMedia({ media: 'print' })
+  await expect(screen).toBeHidden()
+  const printable = page.locator('.qa-print-view')
+  await expect(printable).toBeVisible()
+  await expect(printable).toContainText('What does the attached diagram show?')
+  await expect(printable).toContainText('It shows the deployment flow.')
+  await expect(printable).toContainText('diagram.png')
+  await expect(printable).toContainText('report.html')
 })
 
 test('shared HTML preview uses a blob URL and an empty sandbox', async ({

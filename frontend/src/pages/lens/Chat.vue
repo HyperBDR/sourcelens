@@ -1,5 +1,5 @@
 <template>
-  <div class="lens-chat-page">
+  <div class="lens-chat-page qa-screen-view">
     <Transition
       enter-active-class="transition-opacity duration-200"
       enter-from-class="opacity-0"
@@ -730,6 +730,16 @@
                     </svg>
                   </button>
                   <button
+                    v-if="message.content"
+                    type="button"
+                    class="icon-btn"
+                    :title="t('lens.qa.exportPdf')"
+                    :aria-label="t('lens.qa.exportPdf')"
+                    @click="exportQa(message)"
+                  >
+                    <Download :size="16" aria-hidden="true" />
+                  </button>
+                  <button
                     v-if="!isAnonymous && message.run && message.content"
                     type="button"
                     class="icon-btn"
@@ -1303,6 +1313,7 @@
       :open="shareOpen"
       :run-uuid="shareRunUuid"
       :existing-share="shareExisting"
+      :assistant-name="assistantName"
       :question="shareQuestion"
       :answer-preview="shareAnswer"
       @close="shareOpen = false"
@@ -1316,6 +1327,7 @@
       @download="downloadOutputFile"
     />
   </div>
+  <QaPrintView v-if="printQa" v-bind="printQa" />
 </template>
 
 <script setup>
@@ -1345,6 +1357,7 @@ import UserDock from '@/components/lens/UserDock.vue'
 import MySharesPanel from '@/components/lens/MySharesPanel.vue'
 import AssistantEmptyState from '@/components/lens/AssistantEmptyState.vue'
 import LoginModal from '@/components/auth/LoginModal.vue'
+import QaPrintView from '@/components/lens/QaPrintView.vue'
 import QaShareModal from '@/components/lens/QaShareModal.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import {
@@ -1457,6 +1470,7 @@ const shareQuestion = ref('')
 const shareExisting = ref(null)
 const sharesByRun = ref({})
 const mySharesOpen = ref(false)
+const printQa = ref(null)
 // False until the current bootstrap settles, so the view can distinguish
 // "still loading" from "loaded, but no assistant to show".
 const booted = ref(false)
@@ -2825,6 +2839,22 @@ function openShare(message) {
   shareOpen.value = true
 }
 
+async function exportQa(message) {
+  const sourceQuestion = userMessageForMessage(message)
+  const questionText = sourceQuestion?.content || ''
+  printQa.value = {
+    title: questionText.replace(/\s+/g, ' ').trim().slice(0, 80),
+    question: questionText,
+    answer: message.content || '',
+    assistantName: assistantName.value,
+    publishedAt: getMessageTimestamp(message),
+    inputAttachments: sourceQuestion?.attachments || [],
+    outputFiles: message.output_files || []
+  }
+  await nextTick()
+  window.print()
+}
+
 function isMessageShared(message) {
   return Boolean(message.run && sharesByRun.value[message.run])
 }
@@ -2851,14 +2881,18 @@ function handleShareRemoved(share) {
 }
 
 function questionForMessage(message) {
+  return userMessageForMessage(message)?.content || ''
+}
+
+function userMessageForMessage(message) {
   const list = messages.value
   const idx = list.findIndex((item) => item.uuid === message.uuid)
   for (let i = idx - 1; i >= 0; i -= 1) {
     if (list[i].role === 'user') {
-      return list[i].content || ''
+      return list[i]
     }
   }
-  return ''
+  return null
 }
 
 function retryLastQuestion() {

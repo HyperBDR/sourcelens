@@ -1,6 +1,28 @@
 <template>
   <BaseModal :show="open" :title="t('lens.qa.shareTitle')" @close="emitClose">
     <div class="space-y-4">
+      <div
+        class="flex items-start gap-3 rounded-lg border border-primary-200 bg-primary-50 px-3 py-3"
+      >
+        <Bot
+          class="mt-0.5 shrink-0 text-primary-600"
+          :size="18"
+          aria-hidden="true"
+        />
+        <div>
+          <p class="text-sm font-medium text-ink-800">
+            {{ t('lens.qa.shareAgentTitle') }}
+          </p>
+          <p class="mt-1 text-xs leading-relaxed text-ink-500">
+            {{
+              t('lens.qa.shareAgentDescription', {
+                name: assistantName || t('lens.qa.genericAgent')
+              })
+            }}
+          </p>
+        </div>
+      </div>
+
       <p class="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
         {{ t('lens.qa.shareWarning') }}
       </p>
@@ -52,6 +74,16 @@
           </button>
         </div>
         <p class="mt-2 text-xs text-ink-400">{{ t('lens.qa.listNote') }}</p>
+        <BaseButton
+          class="mt-3"
+          variant="secondary"
+          size="sm"
+          block
+          @click="copyInvitation"
+        >
+          <Copy :size="14" :stroke-width="2" aria-hidden="true" />
+          {{ t('lens.qa.copyInvitation') }}
+        </BaseButton>
       </div>
     </div>
 
@@ -83,7 +115,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Copy } from '@lucide/vue'
+import { Bot, Copy } from '@lucide/vue'
 
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -96,6 +128,7 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   runUuid: { type: String, default: '' },
   existingShare: { type: Object, default: null },
+  assistantName: { type: String, default: '' },
   question: { type: String, default: '' },
   answerPreview: { type: String, default: '' }
 })
@@ -115,6 +148,14 @@ const saving = ref(false)
 
 const shareLink = computed(() =>
   share.value ? qaShareUrl(share.value.token) : ''
+)
+
+const invitationText = computed(() =>
+  t('lens.qa.shareInvitation', {
+    name: props.assistantName || t('lens.qa.genericAgent'),
+    title: title.value.trim() || defaultTitle(props.question),
+    url: shareLink.value
+  })
 )
 
 const titleDirty = computed(
@@ -192,6 +233,14 @@ async function saveTitle() {
 async function copy() {
   if (await copyToClipboard(shareLink.value)) {
     showSuccess(t('lens.qa.copied'))
+  } else {
+    showError(t('lens.qa.copyFailed'))
+  }
+}
+
+async function copyInvitation() {
+  if (await copyToClipboard(invitationText.value)) {
+    showSuccess(t('lens.qa.invitationCopied'))
   } else {
     showError(t('lens.qa.copyFailed'))
   }
