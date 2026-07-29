@@ -994,7 +994,10 @@ async function fetchStats() {
   }
   loading.value = true
   try {
-    const params = { granularity: granularity.value }
+    const params = {
+      granularity: granularity.value,
+      my_tasks: 'false'
+    }
     if (startDate.value) params.start_date = startDate.value
     if (endDate.value) params.end_date = endDate.value
     if (userScope.value) params.created_by = userScope.value
