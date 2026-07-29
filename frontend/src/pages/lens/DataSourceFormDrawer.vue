@@ -1814,23 +1814,23 @@ function clearGitSelectionConfig() {
 function hasGitSelectionConfig() {
   return Boolean(
     props.config.branch ||
-      props.config.scope_type ||
-      (Array.isArray(props.config.git_repositories) &&
-        props.config.git_repositories.length) ||
-      (Array.isArray(props.config.repositories) &&
-        props.config.repositories.length)
+    props.config.scope_type ||
+    (Array.isArray(props.config.git_repositories) &&
+      props.config.git_repositories.length) ||
+    (Array.isArray(props.config.repositories) &&
+      props.config.repositories.length)
   )
 }
 
 function shouldConfirmCredentialChange(nextUuid, previousUuid) {
   return Boolean(
     props.mode === 'edit' &&
-      props.show &&
-      previousUuid &&
-      nextUuid &&
-      nextUuid !== previousUuid &&
-      isGitSourceType(props.form.source_type) &&
-      hasGitSelectionConfig()
+    props.show &&
+    previousUuid &&
+    nextUuid &&
+    nextUuid !== previousUuid &&
+    isGitSourceType(props.form.source_type) &&
+    hasGitSelectionConfig()
   )
 }
 

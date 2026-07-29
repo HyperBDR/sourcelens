@@ -1,6 +1,6 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
+    <div class="w-full max-w-full p-0 md:p-6">
       <div class="mb-4">
         <h1 class="text-lg font-semibold text-gray-900">
           {{ t('llm.config.title') }}
@@ -10,9 +10,13 @@
         </p>
       </div>
 
-      <div class="bg-white rounded-lg border border-gray-200 shadow-sm">
-        <div class="p-6">
-          <div class="flex flex-wrap items-center justify-end gap-3 mb-6">
+      <div
+        class="rounded-lg border-0 border-gray-200 bg-transparent shadow-none md:border md:bg-white md:shadow-sm"
+      >
+        <div class="p-0 md:p-6">
+          <div
+            class="mb-4 flex items-center justify-end gap-3 rounded-lg border border-gray-200 bg-white p-3 md:mb-6 md:border-0 md:p-0"
+          >
             <BaseButton
               variant="outline"
               size="sm"
@@ -74,89 +78,44 @@
               </p>
             </div>
 
-            <div
-              v-else
-              class="overflow-x-auto relative rounded-lg border border-gray-200 bg-white shadow-sm"
-            >
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
-                  <tr>
-                    <th
-                      class="w-12 border-b border-gray-200 px-4 py-3 text-left"
-                    >
-                      <input
-                        type="checkbox"
-                        class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        :aria-label="t('common.selectAll')"
-                        :checked="allSelected"
-                        :indeterminate="someSelected"
-                        @change="setAllSelected($event.target.checked)"
-                      />
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.scopeLabel') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.user') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.provider') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.model') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.modelParameters') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.apiBase') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.apiKey') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.capabilities') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.default') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.active') }}
-                    </th>
-                    <th
-                      class="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
-                    >
-                      {{ t('llm.config.actions') }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-100">
-                  <tr
-                    v-for="row in pagedConfigList"
-                    :key="row.uuid || row.id"
-                    class="hover:bg-gray-50 transition-colors duration-150"
+            <template v-else>
+              <div
+                data-testid="mobile-llm-config-list"
+                class="space-y-3 md:hidden"
+              >
+                <div
+                  data-testid="mobile-llm-config-select-all"
+                  class="flex min-h-11 items-center rounded-lg border border-gray-200 bg-white px-3 shadow-sm"
+                >
+                  <label
+                    class="inline-flex min-h-11 cursor-pointer items-center gap-3 text-sm font-medium text-gray-700"
                   >
-                    <td class="px-4 py-4">
+                    <input
+                      type="checkbox"
+                      class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      :aria-label="t('common.selectAll')"
+                      :checked="allSelected"
+                      :indeterminate="someSelected"
+                      @change="setAllSelected($event.target.checked)"
+                    />
+                    <span>{{ t('common.selectAll') }}</span>
+                  </label>
+                </div>
+
+                <article
+                  v-for="row in pagedConfigList"
+                  :key="`mobile-${row.uuid || row.id}`"
+                  class="rounded-lg border bg-white p-3 shadow-sm transition-colors"
+                  :class="
+                    selectedIds.has(row.uuid || row.id)
+                      ? 'border-primary-300 ring-1 ring-primary-100'
+                      : 'border-gray-200'
+                  "
+                >
+                  <div class="flex items-start gap-2">
+                    <label
+                      class="-ml-2 inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg focus-within:ring-2 focus-within:ring-primary-500/20"
+                    >
                       <input
                         type="checkbox"
                         class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
@@ -168,160 +127,406 @@
                         :checked="selectedIds.has(row.uuid || row.id)"
                         @change="setRowSelected(row, $event.target.checked)"
                       />
-                    </td>
-                    <td
-                      class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
-                    >
-                      {{
-                        row.scope === 'global'
-                          ? t('llm.config.scopeGlobal')
-                          : t('llm.config.scopeUser')
-                      }}
-                    </td>
-                    <td
-                      class="px-4 py-4 whitespace-nowrap text-sm text-gray-600"
-                    >
-                      {{
-                        row.scope === 'user'
-                          ? row.username || row.user_id || '–'
-                          : '–'
-                      }}
-                    </td>
-                    <td
-                      class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
-                    >
-                      <ProviderIcon :provider="row.provider" size="sm">
-                        <span class="text-gray-900">{{
-                          providerLabel(row.provider)
-                        }}</span>
-                      </ProviderIcon>
-                    </td>
-                    <td
-                      class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
-                    >
-                      {{ row.config?.model || '–' }}
-                    </td>
-                    <td class="px-4 py-4 text-sm text-gray-700">
-                      <div
-                        v-if="getRowModelParameters(row).length"
-                        class="space-y-1 whitespace-nowrap"
-                      >
-                        <div
-                          v-for="parameter in getRowModelParameters(row)"
-                          :key="parameter.name"
+                    </label>
+
+                    <div class="min-w-0 flex-1 pt-1">
+                      <div class="flex min-w-0 items-center gap-2">
+                        <ProviderIcon :provider="row.provider" size="sm" />
+                        <h2
+                          class="min-w-0 break-words text-sm font-semibold text-gray-900"
                         >
-                          <span class="text-gray-500"
-                            >{{ parameter.name }}:</span
-                          >
-                          {{ parameter.value }}
-                          <span
-                            v-if="parameter.isDefault"
-                            class="text-xs text-gray-400"
-                          >
-                            ({{ t('llm.config.defaultParameterValue') }})
-                          </span>
-                        </div>
+                          {{ row.config?.model || '–' }}
+                        </h2>
                       </div>
-                      <span v-else class="text-gray-400">–</span>
-                    </td>
-                    <td
-                      class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
+                      <p class="mt-1 text-xs text-gray-500">
+                        {{ providerLabel(row.provider) }}
+                        <span aria-hidden="true"> · </span>
+                        {{
+                          row.scope === 'global'
+                            ? t('llm.config.scopeGlobal')
+                            : t('llm.config.scopeUser')
+                        }}
+                        <template v-if="row.scope === 'user'">
+                          <span aria-hidden="true"> · </span>
+                          {{ row.username || row.user_id || '–' }}
+                        </template>
+                      </p>
+                    </div>
+
+                    <RowActionMenu
+                      class="shrink-0"
+                      :actions="rowActions(row)"
+                      @select="handleRowAction($event, row)"
+                    />
+                  </div>
+
+                  <div class="mt-3 flex flex-wrap gap-2 pl-9">
+                    <span
+                      class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+                      :class="
+                        row.is_active
+                          ? 'bg-green-50 text-green-700'
+                          : 'bg-gray-100 text-gray-600'
+                      "
                     >
-                      {{ row.config?.api_base || '–' }}
-                    </td>
-                    <td
-                      class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
-                    >
-                      {{ maskApiKey(row.config?.api_key || row.config?.key) }}
-                    </td>
-                    <td class="px-4 py-4 text-sm">
                       <span
-                        v-if="getRowCapabilities(row).length"
-                        class="flex flex-wrap gap-1"
-                      >
-                        <span
-                          v-for="cap in getRowCapabilities(row)"
-                          :key="cap"
-                          class="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-700"
-                        >
-                          {{ capabilityLabel(cap) }}
-                        </span>
-                      </span>
-                      <span v-else class="text-gray-400">–</span>
-                    </td>
-                    <td class="px-4 py-4 whitespace-nowrap text-sm">
-                      <span
-                        v-if="row.is_default"
-                        class="inline-flex items-center text-primary-600"
-                        :title="t('llm.config.testUseDefault')"
-                      >
-                        <svg
-                          class="h-5 w-5"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                          aria-hidden="true"
-                        >
-                          <path
-                            fill-rule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                            clip-rule="evenodd"
-                          />
-                        </svg>
-                      </span>
-                      <span v-else class="text-gray-300">–</span>
-                    </td>
-                    <td class="px-4 py-4 whitespace-nowrap text-sm">
-                      <span
-                        v-if="row.is_active"
-                        class="inline-flex items-center text-green-600"
-                        :title="t('common.yes')"
-                      >
-                        <svg
-                          class="h-4 w-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                      </span>
-                      <span
-                        v-else
-                        class="inline-flex items-center text-gray-400"
-                        :title="t('common.no')"
-                      >
-                        <svg
-                          class="h-4 w-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"
-                          />
-                        </svg>
-                      </span>
-                    </td>
-                    <td class="px-4 py-4 whitespace-nowrap text-right">
-                      <RowActionMenu
-                        :actions="rowActions(row)"
-                        @select="handleRowAction($event, row)"
+                        class="h-1.5 w-1.5 rounded-full"
+                        :class="row.is_active ? 'bg-green-500' : 'bg-gray-400'"
                       />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                      {{ t('llm.config.active') }}:
+                      {{ row.is_active ? t('common.yes') : t('common.no') }}
+                    </span>
+                    <span
+                      class="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-700"
+                    >
+                      {{ t('llm.config.default') }}:
+                      {{ row.is_default ? t('common.yes') : t('common.no') }}
+                    </span>
+                  </div>
+
+                  <details class="group mt-3 border-t border-gray-100 pt-1">
+                    <summary
+                      class="flex min-h-11 cursor-pointer list-none items-center justify-between rounded-md px-2 text-sm font-medium text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/20"
+                    >
+                      <span>{{ t('common.viewDetails') }}</span>
+                      <svg
+                        class="h-4 w-4 transition-transform group-open:rotate-180"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 9l-7 7-7-7"
+                        />
+                      </svg>
+                    </summary>
+
+                    <dl class="space-y-3 px-2 pb-2 pt-1 text-sm">
+                      <div>
+                        <dt class="text-xs font-medium text-gray-500">
+                          {{ t('llm.config.modelParameters') }}
+                        </dt>
+                        <dd
+                          v-if="getRowModelParameters(row).length"
+                          class="mt-1 space-y-1 text-gray-800"
+                        >
+                          <div
+                            v-for="parameter in getRowModelParameters(row)"
+                            :key="parameter.name"
+                            class="flex flex-wrap gap-x-1"
+                          >
+                            <span class="text-gray-500"
+                              >{{ parameter.name }}:</span
+                            >
+                            <span>{{ parameter.value }}</span>
+                            <span
+                              v-if="parameter.isDefault"
+                              class="text-xs text-gray-400"
+                            >
+                              ({{ t('llm.config.defaultParameterValue') }})
+                            </span>
+                          </div>
+                        </dd>
+                        <dd v-else class="mt-1 text-gray-400">–</dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs font-medium text-gray-500">
+                          {{ t('llm.config.apiBase') }}
+                        </dt>
+                        <dd class="mt-1 break-all text-gray-800">
+                          {{ row.config?.api_base || '–' }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs font-medium text-gray-500">
+                          {{ t('llm.config.apiKey') }}
+                        </dt>
+                        <dd class="mt-1 break-all text-gray-800">
+                          {{
+                            maskApiKey(row.config?.api_key || row.config?.key)
+                          }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs font-medium text-gray-500">
+                          {{ t('llm.config.capabilities') }}
+                        </dt>
+                        <dd
+                          v-if="getRowCapabilities(row).length"
+                          class="mt-1 flex flex-wrap gap-1"
+                        >
+                          <span
+                            v-for="cap in getRowCapabilities(row)"
+                            :key="cap"
+                            class="rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-700"
+                          >
+                            {{ capabilityLabel(cap) }}
+                          </span>
+                        </dd>
+                        <dd v-else class="mt-1 text-gray-400">–</dd>
+                      </div>
+                    </dl>
+                  </details>
+                </article>
+              </div>
+
+              <div
+                data-testid="desktop-llm-config-table"
+                class="relative hidden overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm md:block"
+              >
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
+                    <tr>
+                      <th
+                        class="sticky left-0 z-20 w-12 border-b border-gray-200 bg-gray-50 px-4 py-3 text-left"
+                      >
+                        <input
+                          type="checkbox"
+                          class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          :aria-label="t('common.selectAll')"
+                          :checked="allSelected"
+                          :indeterminate="someSelected"
+                          @change="setAllSelected($event.target.checked)"
+                        />
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.scopeLabel') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.user') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.provider') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.model') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.modelParameters') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.apiBase') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.apiKey') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.capabilities') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.default') }}
+                      </th>
+                      <th
+                        class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b border-gray-200"
+                      >
+                        {{ t('llm.config.active') }}
+                      </th>
+                      <th
+                        class="sticky right-0 z-20 border-b border-gray-200 bg-gray-100 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-700 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]"
+                      >
+                        {{ t('llm.config.actions') }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-100">
+                    <tr
+                      v-for="row in pagedConfigList"
+                      :key="row.uuid || row.id"
+                      class="group transition-colors duration-150 hover:bg-gray-50"
+                    >
+                      <td
+                        class="sticky left-0 z-10 bg-white px-4 py-4 group-hover:bg-gray-50"
+                      >
+                        <input
+                          type="checkbox"
+                          class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          :aria-label="
+                            t('common.selectRow', {
+                              name: row.config?.model || row.uuid || row.id
+                            })
+                          "
+                          :checked="selectedIds.has(row.uuid || row.id)"
+                          @change="setRowSelected(row, $event.target.checked)"
+                        />
+                      </td>
+                      <td
+                        class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
+                      >
+                        {{
+                          row.scope === 'global'
+                            ? t('llm.config.scopeGlobal')
+                            : t('llm.config.scopeUser')
+                        }}
+                      </td>
+                      <td
+                        class="px-4 py-4 whitespace-nowrap text-sm text-gray-600"
+                      >
+                        {{
+                          row.scope === 'user'
+                            ? row.username || row.user_id || '–'
+                            : '–'
+                        }}
+                      </td>
+                      <td
+                        class="px-4 py-4 whitespace-nowrap text-sm text-gray-900"
+                      >
+                        <ProviderIcon :provider="row.provider" size="sm">
+                          <span class="text-gray-900">{{
+                            providerLabel(row.provider)
+                          }}</span>
+                        </ProviderIcon>
+                      </td>
+                      <td
+                        class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
+                      >
+                        {{ row.config?.model || '–' }}
+                      </td>
+                      <td class="px-4 py-4 text-sm text-gray-700">
+                        <div
+                          v-if="getRowModelParameters(row).length"
+                          class="space-y-1 whitespace-nowrap"
+                        >
+                          <div
+                            v-for="parameter in getRowModelParameters(row)"
+                            :key="parameter.name"
+                          >
+                            <span class="text-gray-500"
+                              >{{ parameter.name }}:</span
+                            >
+                            {{ parameter.value }}
+                            <span
+                              v-if="parameter.isDefault"
+                              class="text-xs text-gray-400"
+                            >
+                              ({{ t('llm.config.defaultParameterValue') }})
+                            </span>
+                          </div>
+                        </div>
+                        <span v-else class="text-gray-400">–</span>
+                      </td>
+                      <td
+                        class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
+                      >
+                        {{ row.config?.api_base || '–' }}
+                      </td>
+                      <td
+                        class="px-4 py-4 whitespace-nowrap text-sm text-gray-700"
+                      >
+                        {{ maskApiKey(row.config?.api_key || row.config?.key) }}
+                      </td>
+                      <td class="px-4 py-4 text-sm">
+                        <span
+                          v-if="getRowCapabilities(row).length"
+                          class="flex flex-wrap gap-1"
+                        >
+                          <span
+                            v-for="cap in getRowCapabilities(row)"
+                            :key="cap"
+                            class="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-700"
+                          >
+                            {{ capabilityLabel(cap) }}
+                          </span>
+                        </span>
+                        <span v-else class="text-gray-400">–</span>
+                      </td>
+                      <td class="px-4 py-4 whitespace-nowrap text-sm">
+                        <span
+                          v-if="row.is_default"
+                          class="inline-flex items-center text-primary-600"
+                          :title="t('llm.config.testUseDefault')"
+                        >
+                          <svg
+                            class="h-5 w-5"
+                            fill="currentColor"
+                            viewBox="0 0 20 20"
+                            aria-hidden="true"
+                          >
+                            <path
+                              fill-rule="evenodd"
+                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                              clip-rule="evenodd"
+                            />
+                          </svg>
+                        </span>
+                        <span v-else class="text-gray-300">–</span>
+                      </td>
+                      <td class="px-4 py-4 whitespace-nowrap text-sm">
+                        <span
+                          v-if="row.is_active"
+                          class="inline-flex items-center text-green-600"
+                          :title="t('common.yes')"
+                        >
+                          <svg
+                            class="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        </span>
+                        <span
+                          v-else
+                          class="inline-flex items-center text-gray-400"
+                          :title="t('common.no')"
+                        >
+                          <svg
+                            class="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        </span>
+                      </td>
+                      <td
+                        class="sticky right-0 z-10 whitespace-nowrap bg-white px-4 py-4 text-right shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)] group-hover:bg-gray-50"
+                      >
+                        <RowActionMenu
+                          :actions="rowActions(row)"
+                          @select="handleRowAction($event, row)"
+                        />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
             <PaginationBar
               v-model:page-size="pageSize"
               :current-page="currentPage"

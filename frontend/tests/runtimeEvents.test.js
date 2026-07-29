@@ -7,6 +7,7 @@ import {
   buildWorkflowTree,
   calculateRunElapsedSeconds,
   createRuntimeState,
+  formatActivityProgressText,
   getMessageTimestamp,
   isActiveProgressAncestor,
   normalizePlanSteps,
@@ -98,6 +99,16 @@ test('returns zero for missing, invalid or future run timestamps', () => {
     calculateRunElapsedSeconds({ created_at: '2026-07-27T05:00:01.000Z' }, now),
     0
   )
+})
+
+test('includes total time in completed agent activity summaries', () => {
+  const text = formatActivityProgressText([{ count: 5 }, { count: 6 }], {
+    durationSeconds: 74.4,
+    terminal: true,
+    translate: (_key, { count }) => `Completed ${count} activities`
+  })
+
+  assert.equal(text, 'Completed 11 activities · 1m 14s')
 })
 
 test('reduces route, phase, plan and capability events', () => {

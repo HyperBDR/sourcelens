@@ -2,16 +2,16 @@
   <header
     class="layout-admin-header z-30 flex-shrink-0 border-b border-ink-800 bg-ink-900/95 shadow-sm backdrop-blur"
   >
-    <div class="px-4 sm:px-6 lg:px-8">
+    <div class="px-2 sm:px-6 lg:px-8">
       <div class="flex justify-between items-center h-16">
-        <div class="flex min-w-0 flex-1 items-center gap-3">
+        <div class="flex min-w-0 flex-1 items-center gap-1 sm:gap-3">
           <button
             type="button"
             aria-controls="admin-sidebar"
             :aria-expanded="showMobileMenu"
             :aria-label="`${t('common.expand')} ${t('management.logoTitle')}`"
             @click="$emit('open-menu')"
-            class="lg:hidden p-2 rounded-md text-slate-400 hover:text-slate-100 hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            class="h-11 w-11 shrink-0 rounded-md p-2 text-slate-400 hover:bg-slate-700 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 lg:hidden"
           >
             <svg
               class="w-6 h-6"
@@ -28,18 +28,22 @@
             </svg>
           </button>
           <h1
-            class="min-w-0 truncate whitespace-nowrap text-base font-semibold text-white lg:hidden sm:text-lg"
+            class="min-w-0 truncate whitespace-nowrap text-sm font-semibold text-white lg:hidden sm:text-lg"
           >
             {{ pageTitle }}
           </h1>
         </div>
 
-        <div class="ml-2 flex shrink-0 items-center space-x-1 sm:space-x-4">
-          <LanguageSwitcher variant="dark" />
+        <div
+          class="ml-1 flex shrink-0 items-center space-x-0.5 sm:ml-2 sm:space-x-4"
+        >
+          <div class="hidden min-[430px]:block">
+            <LanguageSwitcher variant="dark" />
+          </div>
           <router-link
             to="/"
             :aria-label="t('management.backToUserPlatform')"
-            class="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-sm font-medium text-slate-100 shadow-sm transition-colors hover:border-slate-500 hover:bg-slate-700 sm:px-3"
+            class="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-sm font-medium text-slate-100 shadow-sm transition-colors hover:border-slate-500 hover:bg-slate-700 sm:px-3"
           >
             <svg
               class="h-4 w-4"
@@ -61,7 +65,7 @@
           <div class="relative" ref="userMenuRef">
             <button
               @click="toggleUserMenu"
-              class="flex items-center gap-2 rounded-lg px-2 py-1 text-sm text-ink-300 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              class="flex min-h-11 items-center gap-2 rounded-lg px-2 py-1 text-sm text-ink-300 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             >
               <div
                 :class="avatarBgColor"
@@ -98,7 +102,7 @@
             >
               <div
                 v-if="showUserMenu"
-                class="absolute right-0 z-50 mt-2 w-80 rounded-lg border border-line bg-surface py-2 shadow-lg"
+                class="absolute right-2 z-50 mt-2 w-[calc(100vw-2rem)] max-w-80 rounded-lg border border-line bg-surface py-2 shadow-lg sm:right-0"
               >
                 <div class="border-b border-line px-4 py-2">
                   <div class="truncate font-semibold text-ink-900">
@@ -108,7 +112,7 @@
                 <div class="px-4 py-2">
                   <button
                     type="button"
-                    class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink-700 transition-colors hover:bg-line-soft hover:text-ink-900"
+                    class="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink-700 transition-colors hover:bg-line-soft hover:text-ink-900"
                     @click="openSettings"
                   >
                     <svg
@@ -133,10 +137,13 @@
                     <span>{{ t('common.settings') }}</span>
                   </button>
                 </div>
+                <div class="border-t border-line px-4 py-2 min-[430px]:hidden">
+                  <LanguageSwitcher />
+                </div>
                 <div class="my-1 border-t border-line"></div>
                 <button
                   @click="handleLogout"
-                  class="block w-full px-4 py-2 text-left text-sm text-ink-700 hover:bg-line-soft"
+                  class="block min-h-11 w-full px-4 py-2 text-left text-sm text-ink-700 hover:bg-line-soft"
                 >
                   {{ t('common.logout') }}
                 </button>
@@ -188,9 +195,12 @@ const pageTitle = computed(() => {
     LensMcp: t('lensAdmin.pages.mcp.title'),
     LensResourceSettings: t('lensAdmin.pages.resourceSettings.title'),
     LensSettings: t('lensAdmin.pages.settings.title'),
+    LensRunObservation: t('lensRuns.title'),
+    LensShareReview: t('lens.qa.adminTitle'),
     LLMStats: t('llm.stats.title'),
     LLMUsage: t('llm.usage.title'),
     LLMConfig: t('llm.config.title'),
+    LLMDataSettings: t('llm.dataSettings.title'),
     TaskManagementList: t('taskManagement.list.title'),
     TaskManagementStats: t('taskManagement.stats.title'),
     TaskManagementSettings: t('taskManagement.settings.title'),

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.contrib.auth.tokens import default_token_generator
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
@@ -17,6 +17,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from accounts.models import Profile
 
 
+@override_settings(ROOT_URLCONF="accounts.tests.urls")
 class PasswordRecoveryTests(TestCase):
     """Cover password reset privacy, validation, and token behavior."""
 
@@ -215,6 +216,7 @@ class PasswordRecoveryTests(TestCase):
         )
 
 
+@override_settings(ROOT_URLCONF="accounts.tests.urls")
 class AuthenticatedPasswordChangeTests(TestCase):
     """Cover current-password checks and JWT session continuity."""
 

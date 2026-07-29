@@ -1381,6 +1381,8 @@ import {
   applyRuntimeEvent,
   calculateRunElapsedSeconds,
   createRuntimeState,
+  formatActivityProgressText,
+  formatDuration,
   getMessageTimestamp,
   isActiveProgressAncestor,
   scrollConversationToBottomAfterRender,
@@ -1618,13 +1620,6 @@ const runtimePhaseText = computed(() => {
   return known.has(phase) ? t(`lens.chat.runtime.phase.${phase}`) : null
 })
 
-function formatDuration(seconds) {
-  if (seconds == null) return ''
-  const s = Math.round(seconds)
-  if (s < 60) return `${s}s`
-  return `${Math.floor(s / 60)}m ${s % 60}s`
-}
-
 const elapsedText = computed(() => {
   if (elapsedSeconds.value === 0) return null
   return formatDuration(elapsedSeconds.value)
@@ -1698,16 +1693,11 @@ function structuredProgressText(
     return stageProgressText(source.items, durationSeconds, terminal)
   }
   if (progress.kind === 'activity') {
-    const count = progress.items.reduce(
-      (total, item) => total + Number(item.count || 1),
-      0
-    )
-    return t(
-      terminal
-        ? 'lens.chat.runtime.activityCompleted'
-        : 'lens.chat.runtime.activityProgress',
-      { count }
-    )
+    return formatActivityProgressText(progress.items, {
+      durationSeconds,
+      terminal,
+      translate: t
+    })
   }
   return ''
 }

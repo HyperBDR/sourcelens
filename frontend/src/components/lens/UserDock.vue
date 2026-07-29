@@ -66,10 +66,7 @@
           </router-link>
         </div>
 
-        <div
-          class="dock-section"
-          :class="{ 'border-t border-line': isAdmin }"
-        >
+        <div class="dock-section" :class="{ 'border-t border-line': isAdmin }">
           <button type="button" class="dock-link" @click="openMyShares">
             <Share2 :size="18" :stroke-width="2" aria-hidden="true" />
             <span class="truncate">{{ t('lens.qa.mineEntry') }}</span>

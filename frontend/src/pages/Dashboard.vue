@@ -17,9 +17,10 @@ const lensStore = useLensStore()
 async function redirectToChat() {
   try {
     const assistants = await lensStore.loadAssistants()
-    const nextAssistant = assistants.find(
-      (assistant) => assistant?.slug && assistant.status === 'active'
-    ) || assistants.find((assistant) => assistant?.slug)
+    const nextAssistant =
+      assistants.find(
+        (assistant) => assistant?.slug && assistant.status === 'active'
+      ) || assistants.find((assistant) => assistant?.slug)
 
     if (nextAssistant?.slug) {
       await router.replace(`/lens/assistants/${nextAssistant.slug}/chat`)

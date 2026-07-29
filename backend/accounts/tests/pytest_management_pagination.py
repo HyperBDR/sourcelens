@@ -1,3 +1,5 @@
+"""Pytest-only management pagination API tests."""
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
