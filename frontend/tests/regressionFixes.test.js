@@ -17,6 +17,19 @@ test('active chat run exposes a localized stop action', async () => {
   assert.equal(chinese.common.stop, '停止')
 })
 
+test('task statistics request all users unless a user is selected', async () => {
+  const stats = await source('admin/pages/TaskManagement/Stats.vue')
+  const fetchStart = stats.indexOf('async function fetchStats')
+  const fetchEnd = stats.indexOf(
+    'const res = await taskManagementApi.getStats(params)',
+    fetchStart
+  )
+  const requestSetup = stats.slice(fetchStart, fetchEnd)
+
+  assert.match(requestSetup, /my_tasks: 'false'/)
+  assert.match(requestSetup, /params\.created_by = userScope\.value/)
+})
+
 test('drawer leave transition completes when animations are suspended', async () => {
   const drawer = await source('components/ui/BaseDrawer.vue')
   const { runDrawerTransition } =
