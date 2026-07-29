@@ -11,10 +11,12 @@
       </div>
 
       <section
-        class="w-full bg-white rounded-2xl border border-gray-200 shadow-sm p-4 sm:p-5 flex flex-wrap items-end justify-between gap-6 mb-6"
+        class="mb-6 flex w-full flex-col items-stretch gap-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-5"
         aria-label="Filters"
       >
-        <div class="flex flex-wrap items-end gap-6 flex-1 min-w-0">
+        <div
+          class="flex w-full flex-none flex-wrap items-end gap-6 sm:w-auto sm:min-w-0 sm:flex-1"
+        >
           <div class="flex flex-col gap-1.5">
             <label
               class="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1"
@@ -118,7 +120,7 @@
             </div>
           </div>
         </div>
-        <div class="flex items-end shrink-0">
+        <div class="flex w-full shrink-0 items-end sm:w-auto">
           <BaseButton
             variant="outline"
             size="sm"

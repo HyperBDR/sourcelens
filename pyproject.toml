@@ -56,6 +56,7 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
+python_files = ["test_*.py", "pytest_*.py"]
 markers = [
     "unit: App-level unit tests (domain logic, services, model methods).",
 ]

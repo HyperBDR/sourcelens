@@ -41,7 +41,7 @@
         type="button"
         :aria-label="`${t('common.close')} ${t('management.logoTitle')}`"
         @click="$emit('close')"
-        class="rounded-md p-2 text-ink-400 hover:bg-white/10 hover:text-white"
+        class="h-11 w-11 rounded-md p-2 text-ink-400 hover:bg-white/10 hover:text-white"
       >
         <svg
           class="w-5 h-5"
@@ -1148,7 +1148,7 @@ const preloadRoute = (path) => {
 
 <style scoped>
 .admin-nav-item {
-  @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
+  @apply flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
 }
 
 .admin-nav-item-active {

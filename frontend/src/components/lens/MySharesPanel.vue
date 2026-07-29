@@ -42,9 +42,13 @@
               </span>
               <span>{{ row.assistant_name }}</span>
               <span aria-hidden="true">·</span>
-              <span>{{ formatDate(row.published_at, 'yyyy-MM-dd HH:mm') }}</span>
+              <span>{{
+                formatDate(row.published_at, 'yyyy-MM-dd HH:mm')
+              }}</span>
               <span aria-hidden="true">·</span>
-              <span>{{ t('lens.qa.viewCount', { count: row.view_count }) }}</span>
+              <span>{{
+                t('lens.qa.viewCount', { count: row.view_count })
+              }}</span>
             </div>
           </div>
           <ChevronRight
@@ -183,7 +187,8 @@ const editTitle = ref('')
 const savingTitle = ref(false)
 
 const titleDirty = computed(
-  () => !!current.value && editTitle.value.trim() !== (current.value.title || '')
+  () =>
+    !!current.value && editTitle.value.trim() !== (current.value.title || '')
 )
 
 function openDetail(row) {
@@ -215,9 +220,7 @@ function statusLabel(row) {
   if (row.status === 'hidden') {
     return t('lens.qa.statusHidden')
   }
-  return row.is_listed
-    ? t('lens.qa.statusListed')
-    : t('lens.qa.statusLinkOnly')
+  return row.is_listed ? t('lens.qa.statusListed') : t('lens.qa.statusLinkOnly')
 }
 
 function statusHint(row) {

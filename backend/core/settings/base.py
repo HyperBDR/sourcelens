@@ -216,6 +216,7 @@ MIDDLEWARE += [
 ]
 
 ROOT_URLCONF = 'core.urls'
+TEST_RUNNER = 'core.test_runner.ProjectDiscoverRunner'
 
 TEMPLATES = [
     {
