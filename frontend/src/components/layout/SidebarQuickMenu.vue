@@ -43,7 +43,9 @@
     >
       <div v-if="open" class="quick-menu-panel">
         <div class="quick-menu-section">
-          <div class="quick-menu-label">{{ t('platforms.switchPlatform') }}</div>
+          <div class="quick-menu-label">
+            {{ t('platforms.switchPlatform') }}
+          </div>
           <div class="space-y-1">
             <router-link
               v-for="platform in platforms"
@@ -53,7 +55,10 @@
               @click="open = false"
             >
               <span class="truncate">{{ platform.label }}</span>
-              <span v-if="platform.key === currentPlatformKey" class="quick-pill">
+              <span
+                v-if="platform.key === currentPlatformKey"
+                class="quick-pill"
+              >
                 {{ t('common.current') }}
               </span>
             </router-link>
@@ -73,11 +78,7 @@
               <span class="truncate">{{ t('platforms.adminConsole') }}</span>
             </router-link>
           </div>
-          <button
-            type="button"
-            class="quick-menu-link"
-            @click="openSettings"
-          >
+          <button type="button" class="quick-menu-link" @click="openSettings">
             <span class="truncate">{{ t('common.settings') }}</span>
           </button>
           <button type="button" class="quick-menu-link" @click="handleLogout">
@@ -111,9 +112,7 @@ const uiStore = useUiStore()
 const open = ref(false)
 const menuRef = ref(null)
 
-const platforms = computed(() =>
-  getAvailablePlatforms(userStore.userInfo, t)
-)
+const platforms = computed(() => getAvailablePlatforms(userStore.userInfo, t))
 const currentPlatformKey = computed(() => getCurrentPlatformKey(route.path))
 const currentPlatform = computed(() =>
   getPlatformByKey(currentPlatformKey.value, t)

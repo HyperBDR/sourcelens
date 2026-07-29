@@ -1,6 +1,8 @@
 <template>
   <AdminLayout>
-    <div class="flex h-full min-h-0 w-full max-w-full flex-col p-6">
+    <div
+      class="flex h-auto min-h-0 w-full max-w-full flex-col p-0 md:h-full md:p-6"
+    >
       <div class="mb-4 flex-shrink-0">
         <h1 class="text-lg font-semibold text-gray-900">
           {{ t('llm.usage.title') }}
@@ -11,19 +13,21 @@
       </div>
 
       <div
-        class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+        class="flex min-h-0 flex-col overflow-visible rounded-lg border-0 border-gray-200 bg-transparent shadow-none md:overflow-hidden md:border md:bg-white md:shadow-sm"
       >
-        <div class="flex min-h-0 flex-col p-6">
+        <div class="flex min-h-0 flex-col p-0 md:p-6">
           <div
-            class="mb-6 flex flex-shrink-0 flex-wrap items-center justify-between gap-3"
+            class="mb-4 flex flex-shrink-0 flex-col items-stretch gap-3 rounded-lg border border-gray-200 bg-white p-3 md:mb-6 md:flex-row md:flex-wrap md:items-center md:justify-between md:border-0 md:p-0"
           >
-            <div class="flex flex-wrap items-center gap-3">
+            <div
+              class="flex w-full flex-col items-stretch gap-3 md:w-auto md:flex-1 md:flex-row md:flex-wrap md:items-center"
+            >
               <span class="text-sm text-gray-600 whitespace-nowrap">{{
                 t('llm.usage.filterByUser')
               }}</span>
               <select
                 v-model="selectedUserId"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-56 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-56"
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('llm.usage.allUsers') }}</option>
@@ -35,43 +39,52 @@
                 v-model="filters.model"
                 type="text"
                 :placeholder="t('llm.usage.filterModel')"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-44 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-44"
                 @input="onModelInput"
               />
               <select
                 v-model="filters.success"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-28 focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 bg-white"
+                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-28"
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('llm.usage.filterSuccess') }}</option>
                 <option value="true">{{ t('common.yes') }}</option>
                 <option value="false">{{ t('common.no') }}</option>
               </select>
-              <span class="text-sm text-gray-600 whitespace-nowrap">{{
-                t('llm.usage.dateRange')
-              }}</span>
-              <input
-                v-model="filters.startDate"
-                type="date"
-                :lang="locale"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
-                @change="onFiltersChanged"
-              />
-              <span class="text-gray-400">–</span>
-              <input
-                v-model="filters.endDate"
-                type="date"
-                :lang="locale"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
-                @change="onFiltersChanged"
-              />
+              <div
+                class="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center"
+              >
+                <span class="whitespace-nowrap text-sm text-gray-600">{{
+                  t('llm.usage.dateRange')
+                }}</span>
+                <div
+                  class="flex flex-col gap-2 md:flex-row md:items-center"
+                  data-testid="usage-date-range"
+                >
+                  <input
+                    v-model="filters.startDate"
+                    type="date"
+                    :lang="locale"
+                    class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
+                    @change="onFiltersChanged"
+                  />
+                  <span class="hidden text-gray-400 md:inline">–</span>
+                  <input
+                    v-model="filters.endDate"
+                    type="date"
+                    :lang="locale"
+                    class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
+                    @change="onFiltersChanged"
+                  />
+                </div>
+              </div>
             </div>
             <BaseButton
               variant="outline"
               size="sm"
               :loading="loading"
               :title="t('common.refresh')"
-              class="flex items-center gap-1 shadow-sm hover:shadow-md transition-shadow"
+              class="w-full shadow-sm transition-shadow hover:shadow-md md:w-auto"
               @click="fetchList"
             >
               <svg
@@ -105,10 +118,136 @@
 
           <div
             v-if="!loading && items.length > 0"
-            class="flex min-h-0 flex-col"
+            class="flex flex-col md:min-h-0"
           >
             <div
-              class="relative max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm"
+              data-testid="mobile-llm-usage-list"
+              class="space-y-3 md:hidden"
+            >
+              <button
+                v-for="u in items"
+                :key="`mobile-${u.id}`"
+                type="button"
+                class="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-primary-200 hover:bg-primary-50/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30"
+                :aria-label="`${t('common.viewDetails')}: ${u.model || '–'}`"
+                @click="openDetail(u)"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <h2 class="break-words text-sm font-semibold text-gray-900">
+                      {{ u.model || '–' }}
+                    </h2>
+                    <p class="mt-1 text-xs text-gray-500">
+                      {{ formatDate(u.created_at) }}
+                      <span aria-hidden="true"> · </span>
+                      {{ u.username || u.user_id || '-' }}
+                    </p>
+                  </div>
+                  <span
+                    class="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium"
+                    :class="
+                      u.success
+                        ? 'bg-green-50 text-green-700'
+                        : 'bg-red-50 text-red-700'
+                    "
+                  >
+                    <span
+                      class="h-1.5 w-1.5 rounded-full"
+                      :class="u.success ? 'bg-green-500' : 'bg-red-500'"
+                    />
+                    {{ u.success ? t('common.yes') : t('common.no') }}
+                  </span>
+                </div>
+
+                <dl
+                  class="mt-4 grid grid-cols-3 divide-x divide-gray-100 rounded-lg bg-gray-50 py-3 text-center"
+                >
+                  <div class="px-2">
+                    <dt class="text-[11px] text-gray-500">
+                      {{ t('llm.usage.promptTokens') }}
+                    </dt>
+                    <dd class="mt-1 text-sm font-semibold text-gray-900">
+                      {{ formatNum(u.prompt_tokens) }}
+                    </dd>
+                  </div>
+                  <div class="px-2">
+                    <dt class="text-[11px] text-gray-500">
+                      {{ t('llm.usage.completionTokens') }}
+                    </dt>
+                    <dd class="mt-1 text-sm font-semibold text-gray-900">
+                      {{ formatNum(u.completion_tokens) }}
+                    </dd>
+                  </div>
+                  <div class="px-2">
+                    <dt class="text-[11px] text-gray-500">
+                      {{ t('llm.usage.totalTokens') }}
+                    </dt>
+                    <dd class="mt-1 text-sm font-semibold text-gray-900">
+                      {{ formatNum(u.total_tokens) }}
+                    </dd>
+                  </div>
+                </dl>
+
+                <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('llm.usage.e2eLatency') }}
+                    </dt>
+                    <dd class="mt-0.5 font-medium text-gray-800">
+                      {{ formatE2eLatency(u.e2e_latency_sec) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('llm.usage.ttftSec') }}
+                    </dt>
+                    <dd class="mt-0.5 font-medium text-gray-800">
+                      {{ formatTtft(u.ttft_sec) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('llm.usage.outputTps') }}
+                    </dt>
+                    <dd class="mt-0.5 font-medium text-gray-800">
+                      {{ formatOutputTps(u.output_tps) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('llm.usage.costUsd') }}
+                    </dt>
+                    <dd class="mt-0.5 font-medium text-amber-700">
+                      {{ formatCost(u.cost, u.cost_currency) }}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div
+                  class="mt-4 flex min-h-11 items-center justify-between border-t border-gray-100 pt-2 text-sm font-medium text-primary-700"
+                >
+                  <span>{{ t('common.viewDetails') }}</span>
+                  <svg
+                    class="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </div>
+              </button>
+            </div>
+
+            <div
+              data-testid="desktop-llm-usage-table"
+              class="relative hidden max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm md:block"
             >
               <table class="min-w-full divide-y divide-gray-200">
                 <thead
@@ -486,8 +625,7 @@
               >
                 <pre
                   class="text-xs font-mono text-red-800 whitespace-pre-wrap break-words"
-                  >{{ selectedDetail.error }}</pre
-                >
+                  >{{ selectedDetail.error }}</pre>
               </div>
             </div>
             <div
@@ -505,8 +643,7 @@
               >
                 <pre
                   class="text-xs font-mono text-gray-800 whitespace-pre-wrap break-words"
-                  >{{ JSON.stringify(selectedDetail.metadata, null, 2) }}</pre
-                >
+                  >{{ JSON.stringify(selectedDetail.metadata, null, 2) }}</pre>
               </div>
             </div>
           </div>

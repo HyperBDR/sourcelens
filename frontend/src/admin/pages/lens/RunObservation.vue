@@ -1,6 +1,8 @@
 <template>
   <AdminLayout>
-    <div class="flex h-full min-h-0 w-full max-w-full flex-col p-6">
+    <div
+      class="flex h-auto min-h-0 w-full max-w-full flex-col p-0 md:h-full md:p-6"
+    >
       <div class="mb-4 flex-shrink-0">
         <h1 class="text-lg font-semibold text-gray-900">
           {{ t('lensRuns.title') }}
@@ -11,30 +13,32 @@
       </div>
 
       <div
-        class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+        class="flex min-h-0 flex-col overflow-visible rounded-lg border-0 border-gray-200 bg-transparent shadow-none md:overflow-hidden md:border md:bg-white md:shadow-sm"
       >
-        <div class="flex min-h-0 flex-col p-6">
+        <div class="flex min-h-0 flex-col p-0 md:p-6">
           <div
-            class="mb-6 flex flex-shrink-0 flex-wrap items-center justify-between gap-3"
+            class="mb-4 flex flex-shrink-0 flex-col items-stretch gap-3 rounded-lg border border-gray-200 bg-white p-3 md:mb-6 md:flex-row md:flex-wrap md:items-center md:justify-between md:border-0 md:p-0"
           >
-            <div class="flex flex-wrap items-center gap-3">
+            <div
+              class="flex w-full flex-col items-stretch gap-3 md:w-auto md:flex-1 md:flex-row md:flex-wrap md:items-center"
+            >
               <input
                 v-model="filters.q"
                 type="text"
                 :placeholder="t('lensRuns.filterKeyword')"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-52 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-52"
                 @input="onFiltersChanged"
               />
               <input
                 v-model="filters.username"
                 type="text"
                 :placeholder="t('lensRuns.filterUsername')"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-36 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-36"
                 @input="onUsernameChanged"
               />
               <select
                 v-model="filters.assistant"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-40 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-40"
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('lensRuns.assistantAll') }}</option>
@@ -44,7 +48,7 @@
               </select>
               <select
                 v-model="filters.status"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-32 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-32"
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('lensRuns.statusAll') }}</option>
@@ -63,31 +67,36 @@
                 type="date"
                 :lang="locale"
                 :max="filters.end_date || undefined"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
                 @change="onFiltersChanged"
               />
-              <span class="text-gray-400">–</span>
+              <span class="hidden text-gray-400 md:inline">–</span>
               <input
                 v-model="filters.end_date"
                 type="date"
                 :lang="locale"
                 :min="filters.start_date || undefined"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
                 @change="onFiltersChanged"
               />
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex w-full items-center gap-2 md:w-auto">
               <BaseButton
                 variant="outline"
                 size="sm"
                 :loading="loading"
                 :title="t('common.refresh')"
-                class="flex items-center gap-1"
+                class="flex-1 md:flex-none"
                 @click="fetchRuns"
               >
                 {{ t('common.refresh') }}
               </BaseButton>
-              <BaseButton variant="outline" size="sm" @click="resetFilters">
+              <BaseButton
+                variant="outline"
+                size="sm"
+                class="flex-1 md:flex-none"
+                @click="resetFilters"
+              >
                 {{ t('lensRuns.resetFilters') }}
               </BaseButton>
             </div>
@@ -104,9 +113,120 @@
             </p>
           </div>
 
-          <div v-else class="flex min-h-0 flex-col">
+          <div v-else class="flex flex-col md:min-h-0">
             <div
-              class="relative max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm"
+              data-testid="mobile-run-observation-list"
+              class="space-y-3 md:hidden"
+            >
+              <button
+                v-for="r in runs"
+                :key="`mobile-${r.uuid}`"
+                type="button"
+                class="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-primary-200 hover:bg-primary-50/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30"
+                :aria-label="`${t('common.viewDetails')}: ${r.question || '-'}`"
+                @click="openDetail(r.uuid)"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <h2
+                      class="line-clamp-3 text-sm font-semibold leading-5 text-gray-900"
+                    >
+                      {{ r.question || '-' }}
+                    </h2>
+                    <p class="mt-2 text-xs text-gray-500">
+                      {{ formatDate(r.created_at) }}
+                    </p>
+                  </div>
+                  <span :class="statusClass(r.status)">{{ r.status }}</span>
+                </div>
+
+                <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('lensRuns.colUser') }}
+                    </dt>
+                    <dd class="mt-0.5 truncate font-medium text-gray-800">
+                      {{ r.username || '-' }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('lensRuns.colAssistant') }}
+                    </dt>
+                    <dd class="mt-0.5 truncate font-medium text-gray-800">
+                      {{ r.assistant_name || '-' }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('lensRuns.colDuration') }}
+                    </dt>
+                    <dd class="mt-0.5 font-medium tabular-nums text-gray-800">
+                      {{ durationText(r.duration_seconds) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs text-gray-500">
+                      {{ t('lensRuns.colSteps') }}
+                    </dt>
+                    <dd class="mt-0.5 font-medium tabular-nums text-gray-800">
+                      {{ r.event_count }}
+                      <span
+                        v-if="r.subagent_count > 0"
+                        class="text-xs text-indigo-600"
+                      >
+                        · {{ t('lensRuns.subagents', { n: r.subagent_count }) }}
+                      </span>
+                    </dd>
+                  </div>
+                </dl>
+
+                <div
+                  class="mt-4 flex min-h-11 items-center justify-between border-t border-gray-100 pt-2"
+                >
+                  <span
+                    v-if="r.feedback === 'positive'"
+                    class="feedback-pill feedback-pill-positive"
+                  >
+                    <ThumbsUp :size="13" />
+                    {{ t('lensRuns.feedbackHelpful') }}
+                  </span>
+                  <span
+                    v-else-if="r.feedback === 'negative'"
+                    class="feedback-pill feedback-pill-negative"
+                  >
+                    <ThumbsDown :size="13" />
+                    {{ t('lensRuns.feedbackUnhelpful') }}
+                  </span>
+                  <span v-else class="text-xs text-gray-400">
+                    {{ t('lensRuns.colFeedback') }}: —
+                  </span>
+                  <span
+                    class="inline-flex items-center gap-1 text-sm font-medium text-primary-700"
+                  >
+                    {{ t('common.viewDetails') }}
+                    <svg
+                      class="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            <div
+              data-testid="desktop-run-observation-table"
+              class="relative hidden max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm md:block"
             >
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="sticky top-0 z-10 bg-gray-50">
@@ -539,8 +659,7 @@
                   </h3>
                   <pre
                     class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap"
-                    >{{ detail.error }}</pre
-                  >
+                    >{{ detail.error }}</pre>
                 </section>
               </div>
 

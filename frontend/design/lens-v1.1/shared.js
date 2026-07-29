@@ -412,55 +412,6 @@ function modelValidationBadge(mv) {
   return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">未校验</span>`
 }
 
-// D4: sync task status badge (6 states)
-function syncTaskStatusBadge(status) {
-  const cfg = {
-    PENDING: { cls: 'bg-blue-100 text-blue-700', label: '排队中', spin: true },
-    STARTED: {
-      cls: 'bg-indigo-100 text-indigo-700',
-      label: '同步中…',
-      spin: true
-    },
-    RETRY: {
-      cls: 'bg-yellow-100 text-yellow-700',
-      label: '重试中…',
-      spin: true
-    },
-    SUCCESS: {
-      cls: 'bg-green-100 text-green-700',
-      label: '已完成',
-      spin: false
-    },
-    FAILURE: { cls: 'bg-red-100 text-red-700', label: '失败', spin: false },
-    REVOKED: {
-      cls: 'bg-amber-100 text-amber-700',
-      label: '已撤销',
-      spin: false
-    }
-  }
-  const c = cfg[status] || {
-    cls: 'bg-gray-100 text-gray-600',
-    label: status,
-    spin: false
-  }
-  const spinner = c.spin
-    ? `<svg class="animate-spin w-3 h-3 mr-1 flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>`
-    : ''
-  return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${c.cls}">${spinner}${c.label}</span>`
-}
-
-function calcDuration(started_at, finished_at) {
-  if (!started_at) return '—'
-  const s = new Date(started_at)
-  const f = finished_at ? new Date(finished_at) : null
-  if (!f) return '<span class="text-indigo-600">进行中…</span>'
-  const secs = Math.round((f - s) / 1000)
-  if (secs < 60) return `${secs}s`
-  const m = Math.floor(secs / 60),
-    r = secs % 60
-  return r > 0 ? `${m}m ${r}s` : `${m}m`
-}
-
 function showToast(msg, type = 'success') {
   const el = document.createElement('div')
   const color =
@@ -512,3 +463,14 @@ function getAssistantDatasourceSummary(assistant) {
     disabled
   }
 }
+
+Object.assign(window, {
+  MOCK_ASSISTANT_MCP_BINDINGS,
+  closeModal,
+  engineBadge,
+  getAssistantDatasourceSummary,
+  modelValidationBadge,
+  openModal,
+  showToast,
+  statusBadge
+})

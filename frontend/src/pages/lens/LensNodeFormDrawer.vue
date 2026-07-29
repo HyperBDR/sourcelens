@@ -105,8 +105,7 @@
               v-else
               key="compose"
               class="max-h-96 overflow-auto rounded-md border border-line bg-ink-900 p-3 font-mono text-xs leading-relaxed text-ink-100"
-              >{{ composeText }}</pre
-            >
+              >{{ composeText }}</pre>
           </Transition>
         </div>
 

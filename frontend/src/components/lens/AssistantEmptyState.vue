@@ -1,7 +1,10 @@
 <template>
   <div class="onboarding">
     <!-- Admin: a three-step setup guide instead of a bare empty frame. -->
-    <div v-if="variant === 'admin'" class="onboarding-card onboarding-card-wide">
+    <div
+      v-if="variant === 'admin'"
+      class="onboarding-card onboarding-card-wide"
+    >
       <div class="onboarding-badge badge-admin">
         <Sparkles :size="28" :stroke-width="1.75" aria-hidden="true" />
       </div>

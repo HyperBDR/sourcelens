@@ -1,4 +1,4 @@
-"""Atomic admin batch API tests."""
+"""Pytest-only atomic admin batch API tests."""
 
 from datetime import timedelta
 

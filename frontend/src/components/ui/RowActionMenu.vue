@@ -3,7 +3,7 @@
     <button
       ref="triggerRef"
       type="button"
-      class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-ink-500 transition-colors hover:border-line hover:bg-line-soft hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+      class="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-transparent text-ink-500 transition-colors hover:border-line hover:bg-line-soft hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 md:h-8 md:w-8"
       :aria-label="label || t('common.moreActions')"
       aria-haspopup="menu"
       :aria-expanded="open"
@@ -28,7 +28,7 @@
             <button
               type="button"
               role="menuitem"
-              class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              class="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:opacity-50 md:min-h-0"
               :class="
                 action.variant === 'danger'
                   ? 'text-danger-600 hover:bg-danger-50'
@@ -104,10 +104,11 @@ function openMenu(focusFirst = false) {
   if (!rect) return
 
   const menuWidth = 176
-  const estimatedHeight = props.actions.reduce(
-    (height, action) => height + 40 + (action.divider ? 9 : 0),
-    8
-  )
+  const estimatedItemHeight = window.innerWidth < 768 ? 44 : 40
+  const estimatedHeight = props.actions.reduce((height, action) => {
+    const dividerHeight = action.divider ? 9 : 0
+    return height + estimatedItemHeight + dividerHeight
+  }, 8)
   const opensUpward = rect.bottom + estimatedHeight > window.innerHeight
   menuStyle.value = {
     left: `${Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8))}px`,

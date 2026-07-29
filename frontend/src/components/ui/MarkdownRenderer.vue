@@ -61,8 +61,7 @@ renderer.table = (token) => {
 // chat page. rel="noopener noreferrer" avoids the opened page accessing
 // window.opener. (sanitizeHtml already allows target/rel attributes.)
 renderer.link = function link({ href, title, text, tokens }) {
-  const inner =
-    tokens && tokens.length ? this.parser.parseInline(tokens) : text
+  const inner = tokens && tokens.length ? this.parser.parseInline(tokens) : text
   const titleAttr = title ? ` title="${title}"` : ''
   return (
     `<a href="${href}"${titleAttr} target="_blank" ` +
@@ -104,14 +103,14 @@ const renderedContent = computed(() => {
 
           // Try pattern: /admin/articles/{article_id}/images/{filename}
           const adminMatch = trimmedPath.match(
-            /\/admin\/articles\/([^\/]+)\/images\/([^\/]+)$/
+            /\/admin\/articles\/([^/]+)\/images\/([^/]+)$/
           )
           if (adminMatch) {
             ;[, articleId, filename] = adminMatch
           } else {
             // Try pattern: /media/articles/{article_id}/{filename}
             const mediaMatch = trimmedPath.match(
-              /\/media\/articles\/([^\/]+)\/([^\/]+)$/
+              /\/media\/articles\/([^/]+)\/([^/]+)$/
             )
             if (mediaMatch) {
               ;[, articleId, filename] = mediaMatch
@@ -183,14 +182,14 @@ const renderedContent = computed(() => {
 
           // Try pattern: /admin/articles/{article_id}/images/{filename}
           const adminMatch = trimmedSrc.match(
-            /\/admin\/articles\/([^\/]+)\/images\/([^\/]+)$/
+            /\/admin\/articles\/([^/]+)\/images\/([^/]+)$/
           )
           if (adminMatch) {
             ;[, articleId, filename] = adminMatch
           } else {
             // Try pattern: /media/articles/{article_id}/{filename}
             const mediaMatch = trimmedSrc.match(
-              /\/media\/articles\/([^\/]+)\/([^\/]+)$/
+              /\/media\/articles\/([^/]+)\/([^/]+)$/
             )
             if (mediaMatch) {
               ;[, articleId, filename] = mediaMatch

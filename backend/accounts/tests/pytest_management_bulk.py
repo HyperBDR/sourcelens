@@ -1,4 +1,4 @@
-"""Atomic management bulk action API tests."""
+"""Pytest-only atomic management bulk action API tests."""
 
 import pytest
 from django.contrib.auth import get_user_model

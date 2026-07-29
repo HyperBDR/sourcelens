@@ -3,7 +3,7 @@
     <button
       @click="toggleDropdown"
       :class="[
-        'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors',
+        'flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors md:min-h-0 md:min-w-0',
         variant === 'dark'
           ? 'text-white/80 hover:bg-white/10 hover:text-white'
           : 'text-ink-500 hover:bg-line-soft hover:text-ink-800'
@@ -39,7 +39,7 @@
           v-for="lang in languages"
           :key="lang.value"
           @click="selectLanguage(lang.value)"
-          class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors"
+          class="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors md:min-h-0"
           :class="
             locale === lang.value
               ? 'bg-line-soft font-medium text-ink-900'
@@ -56,7 +56,11 @@
             stroke="currentColor"
             stroke-width="2.5"
           >
-            <path d="M20 6 9 17l-5-5" stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="M20 6 9 17l-5-5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </button>
       </div>
