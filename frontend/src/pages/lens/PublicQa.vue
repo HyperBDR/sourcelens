@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-surface-sunken">
+  <div class="qa-screen-view min-h-screen bg-surface-sunken">
     <PublicLensHeader
       :assistant-name="qa?.assistant_name"
       :assistant-slug="qa?.assistant_slug"
@@ -24,6 +24,22 @@
         >
           {{ qa.assistant_name }}
         </router-link>
+
+        <div class="mt-3 flex items-center gap-2">
+          <span
+            class="inline-flex items-center gap-1.5 rounded-full bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary-700"
+          >
+            <Bot :size="14" :stroke-width="2" aria-hidden="true" />
+            {{ t('lens.qa.agentBadge') }}
+          </span>
+          <span class="text-xs text-ink-500">
+            {{
+              t('lens.qa.agentAnswerBy', {
+                name: qa.assistant_name || t('lens.qa.genericAgent')
+              })
+            }}
+          </span>
+        </div>
 
         <h1 class="mt-3 text-xl font-semibold text-ink-900">
           {{ qa.title || qa.question }}
@@ -80,14 +96,24 @@
             <span>{{ formatDate(qa.published_at, 'yyyy-MM-dd HH:mm') }}</span>
             <span>{{ t('lens.qa.viewCount', { count: qa.view_count }) }}</span>
           </div>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-500 transition-colors hover:bg-surface-sunken hover:text-primary-600"
-            @click="copyLink"
-          >
-            <Copy :size="14" :stroke-width="2" aria-hidden="true" />
-            {{ t('lens.share.copyLink') }}
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-500 transition-colors hover:bg-surface-sunken hover:text-primary-600"
+              @click="exportPdf"
+            >
+              <Download :size="14" :stroke-width="2" aria-hidden="true" />
+              {{ t('lens.qa.exportPdf') }}
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-500 transition-colors hover:bg-surface-sunken hover:text-primary-600"
+              @click="copyLink"
+            >
+              <Copy :size="14" :stroke-width="2" aria-hidden="true" />
+              {{ t('lens.share.copyLink') }}
+            </button>
+          </div>
         </div>
 
         <div
@@ -112,17 +138,28 @@
       @download="downloadFile"
     />
   </div>
+  <QaPrintView
+    v-if="qa"
+    :title="qa.title"
+    :question="qa.question"
+    :answer="qa.answer"
+    :assistant-name="qa.assistant_name"
+    :published-at="qa.published_at"
+    :input-attachments="qa.input_attachments || []"
+    :output-files="qa.output_files || []"
+  />
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { Copy } from '@lucide/vue'
+import { Bot, Copy, Download } from '@lucide/vue'
 
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
 import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
+import QaPrintView from '@/components/lens/QaPrintView.vue'
 import SharedQaFileList from '@/components/lens/SharedQaFileList.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -193,6 +230,10 @@ async function copyLink() {
   } else {
     showError(t('lens.qa.copyFailed'))
   }
+}
+
+function exportPdf() {
+  window.print()
 }
 
 function openPreview(file) {
