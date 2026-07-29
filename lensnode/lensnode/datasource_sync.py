@@ -93,6 +93,18 @@ def inspect_datasource_path(command, workspace_path=WORKSPACE_ROOT):
     }
 
     if not target.exists():
+        if source_type == "managed_workspace":
+            result.update(
+                {
+                    "source_compatible": False,
+                    "status": "blocked",
+                    "message_code": "managed_workspace_missing",
+                    "message": (
+                        "Managed workspace directory does not exist."
+                    ),
+                }
+            )
+            return result
         result["will_create"] = True
         result["message_code"] = "will_create"
         result["message"] = "Directory will be created during first sync."
@@ -112,6 +124,10 @@ def inspect_datasource_path(command, workspace_path=WORKSPACE_ROOT):
     children = list(target.iterdir())
     result["is_empty"] = len(children) == 0
     result["is_git_repo"] = (target / ".git").is_dir()
+    if source_type == "managed_workspace":
+        result["message_code"] = "managed_workspace_available"
+        result["message"] = "Managed workspace directory is available."
+        return result
     if result["is_empty"]:
         result["message_code"] = "empty"
         result["message"] = "Directory is empty and can be used."
@@ -245,6 +261,7 @@ def _sync_context(command, target):
         ),
         "ai_gateway_url": command.get("ai_gateway_url") or "",
         "lensnode_token": command.get("lensnode_token") or "",
+        "gateway_http_client": command.get("gateway_http_client"),
         "tls_skip_verify": bool(command.get("tls_skip_verify", False)),
         "tls_ca_file": command.get("tls_ca_file") or None,
         "vision_model_ref": conversion.get("vision_model_ref") or "",

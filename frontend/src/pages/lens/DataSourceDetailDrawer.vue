@@ -132,7 +132,10 @@
           </div>
         </section>
 
-        <section class="border-t border-line pt-6">
+        <section
+          v-if="datasource.source_type !== 'managed_workspace'"
+          class="border-t border-line pt-6"
+        >
           <h3 class="mb-4 text-sm font-semibold text-ink-900">
             {{ t('lensAdmin.datasourceDetail.sync') }}
           </h3>
@@ -153,7 +156,10 @@
           </dl>
         </section>
 
-        <section class="border-t border-line pt-6">
+        <section
+          v-if="datasource.source_type !== 'managed_workspace'"
+          class="border-t border-line pt-6"
+        >
           <h3 class="mb-4 text-sm font-semibold text-ink-900">
             {{ t('lensAdmin.datasourceDetail.retrieval') }}
           </h3>
@@ -680,6 +686,9 @@ function formatSourceType(sourceType) {
   if (sourceType === 'feishu') {
     return t('lensAdmin.datasourceWizard.feishu')
   }
+  if (sourceType === 'managed_workspace') {
+    return t('lensAdmin.datasourceWizard.managedWorkspace')
+  }
   return sourceType || emptyValue
 }
 
@@ -753,6 +762,25 @@ const datasourceConnectionDetails = computed(() => {
   const row = props.datasource
   if (!row) return []
   const config = row.config || {}
+  if (row.source_type === 'managed_workspace') {
+    return [
+      detailItem(t('lensAdmin.fields.type'), formatSourceType(row.source_type)),
+      detailItem(
+        t('lensAdmin.fields.lensnode'),
+        row.lensnode_name || lensNodeName(row.lensnode)
+      ),
+      detailItem(t('lensAdmin.fields.targetPath'), row.target_path, true),
+      detailItem(
+        t('lensAdmin.availability.title'),
+        t(`lensAdmin.availability.${row.availability_status || 'unknown'}`)
+      ),
+      detailItem(
+        t('lensAdmin.availability.checkedAt'),
+        formatDateTime(row.availability_checked_at)
+      ),
+      detailItem(t('lensAdmin.availability.message'), row.availability_message)
+    ]
+  }
   if (row.source_type === 'git') {
     const repositories = dataSourceRepositories(row)
     const items = [

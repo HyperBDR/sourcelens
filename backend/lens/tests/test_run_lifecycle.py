@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
-from lens.models import Assistant, LensNode, Run, Session
+from lens.models import Assistant, LensNode, Run, RunExecution, Session
 from lens.services import (
     create_execution_run,
     reconcile_lensnode_active_runs,
@@ -118,6 +118,22 @@ class RunLifecycleTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, Run.Status.FAILED)
         self.assertEqual(run.error, "LENS_RUN_TIMEOUT")
+
+    def test_idle_reaper_fails_queued_execution_snapshot(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=10),
+            timedelta(minutes=10),
+        )
+        self.assertEqual(run.execution.status, RunExecution.Status.QUEUED)
+
+        lensnode_cleanup_task()
+
+        run.refresh_from_db()
+        run.execution.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.execution.status, RunExecution.Status.FAILED)
+        self.assertIsNotNone(run.execution.finished_at)
 
     def test_idle_reaper_keeps_long_but_active_run(self):
         # Long-running (90 min, past the old 1h cap) but still streaming

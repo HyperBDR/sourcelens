@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from collections import Counter, deque
+from contextlib import nullcontext
 from typing import Any, Optional, Sequence
 
 import httpx
@@ -138,6 +139,23 @@ _COMPLETED_PLAN_FINAL_INSTRUCTION = (
 )
 
 
+def _http_client_context(
+    http_client,
+    *,
+    timeout,
+    tls_skip_verify=False,
+    tls_ca_file=None,
+):
+    """Return an injected shared client or a compatible owned client."""
+
+    if http_client is not None:
+        return nullcontext(http_client)
+    return httpx.Client(
+        timeout=timeout,
+        verify=create_ssl_context(tls_skip_verify, tls_ca_file),
+    )
+
+
 class LensGatewayChatModel(BaseChatModel):
     """LangChain chat model that delegates calls to the control plane."""
 
@@ -147,6 +165,7 @@ class LensGatewayChatModel(BaseChatModel):
     request_timeout_s: int = 120
     tls_skip_verify: bool = False
     tls_ca_file: str | None = None
+    http_client: Optional[Any] = None
     emit_output: Optional[Any] = None
     # Called on EVERY gateway SSE event (reasoning/tool-call tokens,
     # heartbeats, done) to prove transport liveness to the run watchdog.
@@ -300,17 +319,17 @@ class LensGatewayChatModel(BaseChatModel):
 
         payload["return_message"] = True
         start = time.monotonic()
-        with httpx.Client(
+        with _http_client_context(
+            self.http_client,
             timeout=self.request_timeout_s,
-            verify=create_ssl_context(
-                self.tls_skip_verify,
-                self.tls_ca_file,
-            ),
+            tls_skip_verify=self.tls_skip_verify,
+            tls_ca_file=self.tls_ca_file,
         ) as client:
             response = client.post(
                 self.ai_gateway_url,
                 headers={"Authorization": f"Bearer {self.token}"},
                 json=payload,
+                timeout=self.request_timeout_s,
             )
             response.raise_for_status()
             data = response.json()
@@ -341,18 +360,18 @@ class LensGatewayChatModel(BaseChatModel):
 
         start = time.monotonic()
         done_received = False
-        with httpx.Client(
+        with _http_client_context(
+            self.http_client,
             timeout=self.request_timeout_s,
-            verify=create_ssl_context(
-                self.tls_skip_verify,
-                self.tls_ca_file,
-            ),
+            tls_skip_verify=self.tls_skip_verify,
+            tls_ca_file=self.tls_ca_file,
         ) as client:
             with client.stream(
                 "POST",
                 self.ai_gateway_url,
                 headers={"Authorization": f"Bearer {self.token}"},
                 json={**payload, "stream": True},
+                timeout=self.request_timeout_s,
             ) as response:
                 response.raise_for_status()
                 buffer = ""
@@ -1122,6 +1141,7 @@ def describe_image_result(
     token,
     tls_skip_verify=False,
     tls_ca_file=None,
+    http_client=None,
 ):
     """Describe one image and return content plus usage."""
 
@@ -1144,14 +1164,17 @@ def describe_image_result(
             }
         ],
     }
-    with httpx.Client(
+    with _http_client_context(
+        http_client,
         timeout=120,
-        verify=create_ssl_context(tls_skip_verify, tls_ca_file),
+        tls_skip_verify=tls_skip_verify,
+        tls_ca_file=tls_ca_file,
     ) as client:
         response = client.post(
             ai_gateway_url,
             headers={"Authorization": f"Bearer {token}"},
             json=payload,
+            timeout=120,
         )
         response.raise_for_status()
         data = response.json()

@@ -1,5 +1,7 @@
 """LensNode enrollment, token, and datasource-path viewset."""
 
+from pathlib import PurePosixPath
+
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -181,6 +183,7 @@ class LensNodeViewSet(BaseAdminViewSet):
                 lensnode,
                 target_path,
                 request.data.get("datasource_uuid") or None,
+                request.data.get("source_type") or DataSource.SourceType.GIT,
             )
             if conflict is not None:
                 return Response(
@@ -237,7 +240,12 @@ class LensNodeViewSet(BaseAdminViewSet):
         return Response(result)
 
 
-def _datasource_target_path_conflict(lensnode, target_path, datasource_uuid):
+def _datasource_target_path_conflict(
+    lensnode,
+    target_path,
+    datasource_uuid,
+    source_type,
+):
     """Return another datasource using the same target path on this
     LensNode."""
 
@@ -248,16 +256,46 @@ def _datasource_target_path_conflict(lensnode, target_path, datasource_uuid):
         target_path,
         lensnode.workspace_path,
     )
-    for datasource in query.only("uuid", "name", "target_path"):
+    target = PurePosixPath(normalized_target)
+    for datasource in query.only(
+        "uuid",
+        "name",
+        "source_type",
+        "target_path",
+    ):
         if not datasource.target_path:
             continue
         try:
-            existing = normalize_workspace_target_path(
-                datasource.target_path,
-                lensnode.workspace_path,
+            existing = PurePosixPath(
+                normalize_workspace_target_path(
+                    datasource.target_path,
+                    lensnode.workspace_path,
+                )
             )
         except DataSourcePathError:
             continue
-        if existing == normalized_target:
+        managed_overlap = (
+            source_type == DataSource.SourceType.MANAGED_WORKSPACE
+            or datasource.source_type
+            == DataSource.SourceType.MANAGED_WORKSPACE
+        )
+        if existing == target or (
+            managed_overlap and _datasource_paths_overlap(existing, target)
+        ):
             return datasource
     return None
+
+
+def _datasource_paths_overlap(first, second):
+    """Return whether either datasource path contains the other."""
+
+    try:
+        first.relative_to(second)
+        return True
+    except ValueError:
+        pass
+    try:
+        second.relative_to(first)
+        return True
+    except ValueError:
+        return False

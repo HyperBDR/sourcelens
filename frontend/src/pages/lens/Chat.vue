@@ -2457,6 +2457,9 @@ async function selectSession(session, updateRoute = true) {
   }
   if (!isCurrentLoad()) return
   messages.value = loadedMessages
+  // Session history is ready for display. An active run's SSE can stay open
+  // for minutes, so it must not keep the whole chat behind the page loader.
+  booted.value = true
   if (sessionChanged) {
     question.value = ''
     if (composerRef.value) composerRef.value.style.height = 'auto'

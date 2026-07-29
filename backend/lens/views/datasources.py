@@ -10,6 +10,11 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from lens.datasource_services import (
+    DataSourceDispatchError,
+    DataSourcePathError,
+    check_datasource_path,
+)
 from lens.models import DataSource, ScheduledTask
 from lens.periodic_tasks import ensure_datasource_periodic_task
 from lens.serializers import DataSourceSerializer
@@ -137,6 +142,8 @@ class DataSourceViewSet(BaseAdminViewSet):
 
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
+        if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+            return
         if datasource.status == DataSource.Status.DISABLED:
             return
         task_id = uuid_mod.uuid4().hex
@@ -161,6 +168,8 @@ class DataSourceViewSet(BaseAdminViewSet):
     def _enqueue_datasource_sync(datasource, task_id, trigger, user=None):
         """Register and enqueue one datasource sync task."""
 
+        if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+            raise ValueError("DATASOURCE_SYNC_NOT_SUPPORTED")
         if datasource.status == DataSource.Status.DISABLED:
             raise ValueError("DATASOURCE_DISABLED")
         celery_task_id = uuid_mod.uuid4().hex
@@ -185,6 +194,11 @@ class DataSourceViewSet(BaseAdminViewSet):
         """Enqueue datasource synchronization on its LensNode."""
 
         datasource = self.get_object()
+        if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+            return Response(
+                {"detail": "DATASOURCE_SYNC_NOT_SUPPORTED"},
+                status=status.HTTP_409_CONFLICT,
+            )
         if datasource.status == DataSource.Status.DISABLED:
             return Response(
                 {"detail": "DATASOURCE_DISABLED"},
@@ -228,6 +242,50 @@ class DataSourceViewSet(BaseAdminViewSet):
             datasource.status = next_status
             datasource.save(update_fields=["status", "updated_at"])
         ensure_datasource_periodic_task(datasource)
+        return Response(DataSourceSerializer(datasource).data)
+
+    @action(detail=True, methods=["post"], url_path="refresh-availability")
+    def refresh_availability(self, request, uuid=None):
+        """Refresh a managed workspace path without modifying its contents."""
+
+        datasource = self.get_object()
+        if datasource.source_type != DataSource.SourceType.MANAGED_WORKSPACE:
+            return Response(
+                {"detail": "DATASOURCE_AVAILABILITY_NOT_SUPPORTED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        try:
+            result = check_datasource_path(
+                datasource.lensnode,
+                datasource.target_path,
+                datasource.source_type,
+            )
+        except (DataSourcePathError, DataSourceDispatchError) as exc:
+            datasource.availability_status = (
+                DataSource.AvailabilityStatus.ERROR
+            )
+            datasource.availability_message = str(exc)
+        else:
+            is_available = bool(
+                result.get("exists") and result.get("is_directory")
+            )
+            datasource.availability_status = (
+                DataSource.AvailabilityStatus.AVAILABLE
+                if is_available
+                else DataSource.AvailabilityStatus.UNAVAILABLE
+            )
+            datasource.availability_message = str(
+                result.get("message") or ""
+            )
+        datasource.availability_checked_at = timezone.now()
+        datasource.save(
+            update_fields=[
+                "availability_status",
+                "availability_checked_at",
+                "availability_message",
+                "updated_at",
+            ]
+        )
         return Response(DataSourceSerializer(datasource).data)
 
     @action(detail=True, methods=["get"], url_path="sync-tasks")

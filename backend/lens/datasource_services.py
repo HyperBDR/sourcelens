@@ -212,6 +212,8 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
     ).get(
         pk=datasource.pk
     )
+    if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+        raise DataSourceDispatchError("DATASOURCE_SYNC_NOT_SUPPORTED")
     validate_datasource_lensnode(datasource.lensnode)
     config = datasource_runtime_config(datasource)
     sync_policy = datasource.sync_policy or {}

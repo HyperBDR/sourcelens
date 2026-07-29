@@ -6,6 +6,7 @@ import os
 import signal
 from urllib.parse import urlencode
 
+import httpx
 from websockets.asyncio.client import connect
 
 from .config import load_config
@@ -33,7 +34,19 @@ class LensNodeClient:
     def __init__(self, config):
         self.config = config
         self.ssl_context = create_config_ssl_context(config)
-        self.executor = LensNodeExecutor(config)
+        self.gateway_http_client = httpx.Client(
+            timeout=config.request_timeout_s,
+            verify=self.ssl_context,
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=60.0,
+            ),
+        )
+        self.executor = LensNodeExecutor(
+            config,
+            http_client=self.gateway_http_client,
+        )
         self.stopping = asyncio.Event()
         # Set while draining on shutdown/upgrade: stop accepting new runs and
         # stop heartbeating (a heartbeat would flip the node back to ONLINE
@@ -174,18 +187,21 @@ class LensNodeClient:
                 "lensnode_name": self.config.name,
             }
         )
-        await self._drain_running_tasks()
-        await self._flush_outbox()
-        self.stopping.set()
-        if self.websocket is not None:
-            await self.websocket.close()
-        for task in list(self.running_tasks.values()):
-            task.cancel()
-        if self.running_tasks:
-            await asyncio.gather(
-                *self.running_tasks.values(),
-                return_exceptions=True,
-            )
+        try:
+            await self._drain_running_tasks()
+            await self._flush_outbox()
+            self.stopping.set()
+            if self.websocket is not None:
+                await self.websocket.close()
+            for task in list(self.running_tasks.values()):
+                task.cancel()
+            if self.running_tasks:
+                await asyncio.gather(
+                    *self.running_tasks.values(),
+                    return_exceptions=True,
+                )
+        finally:
+            self.gateway_http_client.close()
 
     async def _drain_running_tasks(self):
         """Wait for in-flight runs to finish, bounded by the drain timeout."""
@@ -529,6 +545,7 @@ class LensNodeClient:
                 **message,
                 "ai_gateway_url": self.config.ai_gateway_url,
                 "lensnode_token": self.config.token,
+                "gateway_http_client": self.gateway_http_client,
                 "tls_skip_verify": getattr(
                     self.config, "tls_skip_verify", False
                 ),

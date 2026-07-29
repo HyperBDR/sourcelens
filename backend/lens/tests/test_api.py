@@ -24,7 +24,10 @@ from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_task.adapters.django.models import TaskExecution
 
 from accounts.models import Role
-from lens.datasource_services import test_datasource_connection
+from lens.datasource_services import (
+    DataSourceDispatchError,
+    test_datasource_connection,
+)
 from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
     Assistant,
@@ -2727,6 +2730,30 @@ class LensApiTests(TestCase):
         )
 
     @patch("lens.views.lensnodes.check_datasource_path")
+    def test_check_managed_workspace_path_blocks_nested_datasource(
+        self,
+        check_path,
+    ):
+        response = self.client.post(
+            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/"
+            "check-datasource-path/",
+            {
+                "target_path": "/workspace/repo-cache/restored",
+                "source_type": "managed_workspace",
+                "config": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "blocked")
+        self.assertEqual(
+            response.data["message_code"],
+            "datasource_path_in_use",
+        )
+        check_path.assert_not_called()
+
+    @patch("lens.views.lensnodes.check_datasource_path")
     def test_check_datasource_path_allows_current_datasource_path(
         self,
         check_path,
@@ -2785,6 +2812,236 @@ class LensApiTests(TestCase):
         self.assertEqual(task.status, "PENDING")
         self.assertEqual(task.created_by, self.user)
         self.assertEqual(task.metadata["celery_task_id"], celery_task_id)
+
+    @patch("lens.serializers.check_datasource_path")
+    def test_managed_workspace_create_does_not_enqueue_sync(self, check_path):
+        check_path.return_value = {
+            "status": "available",
+            "exists": True,
+            "is_directory": True,
+            "message": "Managed workspace directory is available.",
+        }
+        payload = {
+            "name": "Restored Snapshot",
+            "source_type": "managed_workspace",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "target_path": "/workspace/restores/finance",
+            "config": {},
+            "sync_policy": {},
+        }
+
+        with patch(
+            "lens.views.datasources.source_sync_task.apply_async"
+        ) as apply_async:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    "/api/lens/admin/datasources/",
+                    payload,
+                    format="json",
+                )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["availability_status"], "available")
+        self.assertNotIn("initial_sync_task_id", response.data)
+        apply_async.assert_not_called()
+        datasource = DataSource.objects.get(uuid=response.data["uuid"])
+        self.assertFalse(
+            ScheduledTask.objects.filter(target_id=datasource.uuid).exists()
+        )
+
+    @patch("lens.serializers.check_datasource_path")
+    def test_managed_workspace_create_requires_existing_directory(
+        self,
+        check_path,
+    ):
+        check_path.return_value = {
+            "status": "blocked",
+            "exists": False,
+            "is_directory": False,
+            "message": "Managed workspace directory does not exist.",
+        }
+
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            {
+                "name": "Missing Snapshot",
+                "source_type": "managed_workspace",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "target_path": "/workspace/restores/missing",
+                "config": {},
+                "sync_policy": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["target_path"][0],
+            "MANAGED_WORKSPACE_DIRECTORY_REQUIRED",
+        )
+
+    def test_managed_workspace_rejects_path_outside_workspace(self):
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            {
+                "name": "Outside Snapshot",
+                "source_type": "managed_workspace",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "target_path": "/etc/data",
+                "config": {},
+                "sync_policy": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["target_path"][0],
+            "LENS_SOURCE_TARGET_PATH_INVALID",
+        )
+
+    @patch("lens.serializers.check_datasource_path")
+    def test_managed_workspace_rejects_overlapping_datasource_path(
+        self,
+        check_path,
+    ):
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            {
+                "name": "Managed Parent",
+                "source_type": "managed_workspace",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "target_path": "/workspace",
+                "config": {},
+                "sync_policy": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        check_path.assert_not_called()
+
+        response = self.client.post(
+            "/api/lens/admin/datasources/",
+            {
+                "name": "Managed Child",
+                "source_type": "managed_workspace",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "target_path": "/workspace/repo-cache/restored",
+                "config": {},
+                "sync_policy": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("overlapping", response.data["target_path"][0])
+        check_path.assert_not_called()
+
+    def test_managed_workspace_manual_sync_is_rejected(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+
+        with patch(
+            "lens.views.datasources.source_sync_task.apply_async"
+        ) as apply_async:
+            response = self.client.post(
+                f"/api/lens/admin/datasources/{datasource.uuid}/sync/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "DATASOURCE_SYNC_NOT_SUPPORTED",
+        )
+        apply_async.assert_not_called()
+
+    @patch("lens.views.datasources.check_datasource_path")
+    def test_managed_workspace_refresh_updates_availability(self, check_path):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+            availability_status=DataSource.AvailabilityStatus.AVAILABLE,
+        )
+        check_path.return_value = {
+            "status": "blocked",
+            "exists": False,
+            "is_directory": False,
+            "message": "Managed workspace directory does not exist.",
+        }
+
+        response = self.client.post(
+            f"/api/lens/admin/datasources/{datasource.uuid}/"
+            "refresh-availability/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["availability_status"], "unavailable")
+        datasource.refresh_from_db()
+        self.assertIsNotNone(datasource.availability_checked_at)
+
+        check_path.side_effect = DataSourceDispatchError("LENSNODE_OFFLINE")
+        response = self.client.post(
+            f"/api/lens/admin/datasources/{datasource.uuid}/"
+            "refresh-availability/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["availability_status"], "error")
+        self.assertEqual(
+            response.data["availability_message"],
+            "LENSNODE_OFFLINE",
+        )
+
+    @patch("lens.serializers.check_datasource_path")
+    def test_managed_workspace_metadata_update_skips_path_check(
+        self,
+        check_path,
+    ):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+
+        response = self.client.patch(
+            f"/api/lens/admin/datasources/{datasource.uuid}/",
+            {"name": "Renamed Snapshot"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        check_path.assert_not_called()
+
+    def test_managed_workspace_delete_only_removes_catalog_record(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+
+        with patch("lens.datasource_services._send_lensnode_command") as send:
+            response = self.client.delete(
+                f"/api/lens/admin/datasources/{datasource.uuid}/"
+            )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(DataSource.objects.filter(pk=datasource.pk).exists())
+        send.assert_not_called()
 
     def test_datasource_manual_sync_registers_task(self):
         with patch(

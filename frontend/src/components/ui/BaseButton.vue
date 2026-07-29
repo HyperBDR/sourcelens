@@ -43,7 +43,14 @@ const props = defineProps({
     type: String,
     default: 'primary',
     validator: (value) =>
-      ['primary', 'secondary', 'danger', 'outline', 'ghost'].includes(value)
+      [
+        'primary',
+        'secondary',
+        'danger',
+        'danger-outline',
+        'outline',
+        'ghost'
+      ].includes(value)
   },
   size: {
     type: String,
@@ -69,6 +76,12 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['click'])
+
+const dangerOutlineClasses = [
+  'border-danger-600 bg-transparent text-danger-700',
+  'hover:border-danger-700 hover:bg-danger-600 hover:text-white',
+  'focus:ring-danger-500/30'
+].join(' ')
 
 const handleClick = (event) => {
   if (!props.disabled && !props.loading) {
@@ -97,6 +110,7 @@ const buttonClasses = computed(() => {
       'border-line bg-surface text-ink-700 hover:border-line/80 hover:bg-line-soft focus:ring-primary-500/20',
     danger:
       'border-danger-600 bg-danger-600 text-white hover:border-danger-700 hover:bg-danger-700 focus:ring-danger-500/30',
+    'danger-outline': dangerOutlineClasses,
     outline:
       'border-line bg-transparent text-ink-700 hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 focus:ring-primary-500/20',
     ghost:

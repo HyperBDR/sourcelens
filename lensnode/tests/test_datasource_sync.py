@@ -6,6 +6,7 @@ import pytest
 from lensnode.datasource_sync import (
     DataSourceSyncError,
     datasource_sync_workers,
+    inspect_datasource_path,
     _default_git_branch,
     _export_feishu_document,
     _export_filename,
@@ -36,6 +37,64 @@ def test_datasource_sync_workers_defaults_to_four():
     assert datasource_sync_workers({}) == 4
     assert datasource_sync_workers({"max_workers": "8"}) == 8
     assert datasource_sync_workers({"max_workers": "invalid"}) == 4
+
+
+def test_managed_workspace_path_must_exist(tmp_path):
+    """Managed workspace inspection never offers to create missing paths."""
+
+    result = inspect_datasource_path(
+        {
+            "source_type": "managed_workspace",
+            "target_path": str(tmp_path / "missing"),
+        },
+        workspace_path=tmp_path,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["message_code"] == "managed_workspace_missing"
+    assert result["will_create"] is False
+
+
+def test_managed_workspace_accepts_non_git_directory(tmp_path):
+    """Managed workspace inspection accepts externally populated content."""
+
+    target = tmp_path / "restored"
+    target.mkdir()
+    (target / "snapshot.txt").write_text("external data")
+
+    result = inspect_datasource_path(
+        {
+            "source_type": "managed_workspace",
+            "target_path": str(target),
+        },
+        workspace_path=tmp_path,
+    )
+
+    assert result["status"] == "available"
+    assert result["message_code"] == "managed_workspace_available"
+    assert result["exists"] is True
+    assert result["is_directory"] is True
+
+
+def test_managed_workspace_rejects_symlink_outside_workspace(tmp_path):
+    """Managed workspace inspection resolves symlinks before validation."""
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    target = tmp_path / "outside-link"
+    target.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(
+        DataSourceSyncError,
+        match="LENS_SOURCE_TARGET_PATH_INVALID",
+    ):
+        inspect_datasource_path(
+            {
+                "source_type": "managed_workspace",
+                "target_path": str(target),
+            },
+            workspace_path=tmp_path,
+        )
 
 
 def test_git_auth_url_uses_inline_access_token():

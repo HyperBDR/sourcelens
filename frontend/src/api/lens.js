@@ -311,6 +311,13 @@ export async function setDataSourceEnabled(uuid, enabled) {
   return unwrapResponse(response)
 }
 
+export async function refreshDataSourceAvailability(uuid) {
+  const response = await api.post(
+    `/lens/admin/datasources/${uuid}/refresh-availability/`
+  )
+  return unwrapResponse(response)
+}
+
 export async function cancelDataSourceSync(uuid) {
   const response = await api.post(
     `/lens/admin/datasources/${uuid}/cancel-sync/`
