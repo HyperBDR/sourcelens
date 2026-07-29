@@ -15,6 +15,7 @@ from .assistant_lifecycle import (
 )
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE
 from .datasource_services import (
+    check_datasource_path,
     DataSourceDispatchError,
     DataSourcePathError,
     normalize_workspace_target_path,
@@ -755,6 +756,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 attrs["target_path"],
                 lensnode,
                 self.instance,
+                source_type,
             )
         except (DataSourcePathError, DataSourceDispatchError) as exc:
             raise serializers.ValidationError({"target_path": str(exc)})
@@ -764,7 +766,45 @@ class DataSourceSerializer(serializers.ModelSerializer):
             if "credential" in attrs
             else getattr(self.instance, "credential", None)
         )
-        if source_type == DataSource.SourceType.GIT:
+        if source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+            if credential is not None:
+                raise serializers.ValidationError(
+                    {
+                        "credential_uuid": (
+                            "Managed workspace does not use credentials"
+                        )
+                    }
+                )
+            if config:
+                raise serializers.ValidationError(
+                    {
+                        "config": (
+                            "Managed workspace does not use connection config"
+                        )
+                    }
+                )
+            if sync_policy:
+                raise serializers.ValidationError(
+                    {
+                        "sync_policy": (
+                            "Managed workspace does not use sync policy"
+                        )
+                    }
+                )
+            if self._managed_workspace_path_changed(
+                lensnode,
+                attrs["target_path"],
+                source_type,
+            ):
+                self._validate_managed_workspace_path(
+                    attrs,
+                    lensnode,
+                    source_type,
+                )
+            attrs["credential"] = None
+            attrs["config"] = {}
+            attrs["sync_policy"] = {}
+        elif source_type == DataSource.SourceType.GIT:
             _validate_datasource_credential_type(
                 credential,
                 {
@@ -789,10 +829,67 @@ class DataSourceSerializer(serializers.ModelSerializer):
             )
         else:
             raise serializers.ValidationError(
-                {"source_type": "source_type must be git or feishu"}
+                {"source_type": "Unsupported datasource source_type"}
             )
 
+        if (
+            source_type != DataSource.SourceType.MANAGED_WORKSPACE
+            and self.instance is not None
+            and self.instance.source_type
+            == DataSource.SourceType.MANAGED_WORKSPACE
+        ):
+            attrs["availability_status"] = (
+                DataSource.AvailabilityStatus.UNKNOWN
+            )
+            attrs["availability_checked_at"] = None
+            attrs["availability_message"] = ""
+
         return attrs
+
+    def _managed_workspace_path_changed(
+        self,
+        lensnode,
+        target_path,
+        source_type,
+    ):
+        """Return whether managed workspace availability must be checked."""
+
+        if self.instance is None:
+            return True
+        if self.instance.source_type != source_type:
+            return True
+        if self.instance.lensnode_id != lensnode.pk:
+            return True
+        try:
+            current_path = normalize_workspace_target_path(
+                self.instance.target_path,
+                lensnode.workspace_path,
+            )
+        except DataSourcePathError:
+            return True
+        return current_path != target_path
+
+    @staticmethod
+    def _validate_managed_workspace_path(attrs, lensnode, source_type):
+        """Require an existing directory for a managed workspace source."""
+
+        try:
+            result = check_datasource_path(
+                lensnode,
+                attrs["target_path"],
+                source_type,
+            )
+        except (DataSourcePathError, DataSourceDispatchError) as exc:
+            raise serializers.ValidationError({"target_path": str(exc)})
+        if not result.get("exists") or not result.get("is_directory"):
+            raise serializers.ValidationError(
+                {"target_path": "MANAGED_WORKSPACE_DIRECTORY_REQUIRED"}
+            )
+        attrs["availability_status"] = (
+            DataSource.AvailabilityStatus.AVAILABLE
+        )
+        attrs["availability_checked_at"] = timezone.now()
+        attrs["availability_message"] = str(result.get("message") or "")
 
     def get_credential_configured(self, datasource):
         """Return whether a datasource has a stored credential."""
@@ -907,6 +1004,9 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "target_path",
             "last_synced_at",
             "last_error",
+            "availability_status",
+            "availability_checked_at",
+            "availability_message",
             "status",
             "created_at",
             "updated_at",
@@ -918,6 +1018,9 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "current_sync",
             "sync_state",
             "last_error",
+            "availability_status",
+            "availability_checked_at",
+            "availability_message",
             "created_at",
             "updated_at",
         ]
@@ -1346,14 +1449,19 @@ def _validate_conversion_policy(conversion):
             )
 
 
-def _validate_unique_datasource_target_path(target_path, lensnode, instance):
-    """Reject an exact target path match on the same LensNode."""
+def _validate_unique_datasource_target_path(
+    target_path,
+    lensnode,
+    instance,
+    source_type,
+):
+    """Reject conflicting datasource paths on the same LensNode."""
 
     query = DataSource.objects.filter(lensnode=lensnode)
     if instance is not None:
         query = query.exclude(pk=instance.pk)
     target = PurePosixPath(target_path)
-    for datasource in query.only("target_path"):
+    for datasource in query.only("source_type", "target_path"):
         if not datasource.target_path:
             continue
         try:
@@ -1365,14 +1473,35 @@ def _validate_unique_datasource_target_path(target_path, lensnode, instance):
             )
         except DataSourcePathError:
             continue
-        if existing == target:
+        managed_overlap = (
+            source_type == DataSource.SourceType.MANAGED_WORKSPACE
+            or datasource.source_type
+            == DataSource.SourceType.MANAGED_WORKSPACE
+        )
+        paths_overlap = _paths_overlap(existing, target)
+        if existing == target or (managed_overlap and paths_overlap):
             raise serializers.ValidationError(
                 {
                     "target_path": (
-                        "Another datasource already uses this target path"
+                        "Another datasource uses an overlapping target path"
                     )
                 }
             )
+
+
+def _paths_overlap(first, second):
+    """Return whether either path contains the other path."""
+
+    try:
+        first.relative_to(second)
+        return True
+    except ValueError:
+        pass
+    try:
+        second.relative_to(first)
+        return True
+    except ValueError:
+        return False
 
 
 def _validate_datasource_credential_type(credential, auth_type):

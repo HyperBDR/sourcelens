@@ -51,6 +51,10 @@ export function syncTagClass(status) {
     running: 'border-warning-200 bg-warning-50 text-warning-700',
     not_synced: 'border-line bg-surface-sunken text-ink-600',
     disabled: 'border-line bg-surface-sunken text-ink-500',
+    available: 'border-success-200 bg-success-50 text-success-700',
+    unavailable: 'border-warning-200 bg-warning-50 text-warning-700',
+    error: 'border-danger-200 bg-danger-50 text-danger-700',
+    unknown: 'border-line bg-surface-sunken text-ink-500',
     policy: 'border-primary-200 bg-primary-50 text-primary-700'
   }
   return classes[status] || classes.not_synced

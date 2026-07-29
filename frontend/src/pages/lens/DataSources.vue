@@ -303,7 +303,18 @@
                     </div>
                   </td>
                   <td class="table-cell">
-                    <div class="space-y-1 text-xs text-ink-500">
+                    <div
+                      v-if="row.source_type === 'managed_workspace'"
+                      class="space-y-1 text-xs text-ink-500"
+                    >
+                      <div class="font-medium text-ink-700">
+                        {{ t('lensAdmin.availability.title') }}
+                      </div>
+                      <div>
+                        {{ formatDateTime(row.availability_checked_at) }}
+                      </div>
+                    </div>
+                    <div v-else class="space-y-1 text-xs text-ink-500">
                       <div class="font-mono text-ink-700">
                         {{ formatDataSourcePolicyLine(row.sync_policy) }}
                       </div>
@@ -320,6 +331,7 @@
                   <td class="table-cell" @click.stop>
                     <div class="flex flex-wrap gap-2">
                       <BaseButton
+                        v-if="row.source_type !== 'managed_workspace'"
                         size="sm"
                         variant="outline"
                         :disabled="
@@ -328,6 +340,14 @@
                         @click="sync(row)"
                       >
                         {{ t('lensAdmin.actions.sync') }}
+                      </BaseButton>
+                      <BaseButton
+                        v-else
+                        size="sm"
+                        variant="outline"
+                        @click="refreshAvailability(row)"
+                      >
+                        {{ t('lensAdmin.actions.refreshAvailability') }}
                       </BaseButton>
                       <BaseButton
                         size="sm"
@@ -428,6 +448,7 @@ import {
   listCredentials,
   listDataSources,
   listLensNodes,
+  refreshDataSourceAvailability,
   setDataSourceEnabled,
   syncDataSource,
   testLensNodeDataSourceConnection,
@@ -688,7 +709,20 @@ function datasourceSyncTags(row) {
       label: t('common.status.disabled'),
       class: syncTagClass('disabled')
     })
-  } else if (isDataSourceSyncing(row)) {
+  }
+  if (row.source_type === 'managed_workspace') {
+    const availability = row.availability_status || 'unknown'
+    tags.push({
+      key: 'availability',
+      label: t(`lensAdmin.availability.${availability}`),
+      class: syncTagClass(availability)
+    })
+    return tags
+  }
+  if (!isDataSourceEnabled(row)) {
+    return tags
+  }
+  if (isDataSourceSyncing(row)) {
     tags.push({
       key: 'running',
       label: t('lensAdmin.table.syncRunning'),
@@ -745,6 +779,9 @@ function formatSourceType(sourceType) {
   }
   if (sourceType === 'feishu') {
     return t('lensAdmin.datasourceWizard.feishu')
+  }
+  if (sourceType === 'managed_workspace') {
+    return t('lensAdmin.datasourceWizard.managedWorkspace')
   }
   return sourceType || emptyValue
 }
@@ -1100,6 +1137,8 @@ function handleDatasourceTypeChange(seed = null) {
       feishu_incremental: true,
       feishu_delete_missing: false
     }
+  } else {
+    datasourceConfig.value = {}
   }
 }
 
@@ -1127,7 +1166,10 @@ async function save() {
   saving.value = true
   formError.value = ''
   try {
-    if (!canSaveDatasource()) {
+    if (
+      form.value.source_type !== 'managed_workspace' &&
+      !canSaveDatasource()
+    ) {
       throw new Error(t('lensAdmin.datasourceWizard.connectionRequired'))
     }
     const uuid = form.value.uuid
@@ -1155,13 +1197,14 @@ async function save() {
 }
 
 function buildPayload() {
+  const managedWorkspace = form.value.source_type === 'managed_workspace'
   return {
     name: form.value.name,
     source_type: normalizedSourceType(form.value.source_type),
     lensnode_uuid: form.value.lensnode_uuid,
     target_path: datasourceTargetPath(),
-    config: buildDatasourceConfig(),
-    sync_policy: buildDatasourceSyncPolicy(),
+    config: managedWorkspace ? {} : buildDatasourceConfig(),
+    sync_policy: managedWorkspace ? {} : buildDatasourceSyncPolicy(),
     status: form.value.status || 'active',
     credential_uuid: shouldUseDatasourceCredential()
       ? form.value.credential_uuid
@@ -1667,6 +1710,16 @@ async function sync(row) {
     await load()
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.syncFailed')))
+  }
+}
+
+async function refreshAvailability(row) {
+  try {
+    await refreshDataSourceAvailability(row.uuid)
+    showSuccess(t('lensAdmin.messages.availabilityRefreshed'))
+    await load()
+  } catch (error) {
+    showError(extractErrorMessage(error, t('lensAdmin.messages.saveFailed')))
   }
 }
 

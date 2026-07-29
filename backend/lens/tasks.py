@@ -137,6 +137,8 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled", task_id=None):
     datasource = DataSource.objects.select_related("lensnode").get(
         uuid=datasource_uuid
     )
+    if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+        return 0
     record = _get_or_create_source_sync_record(datasource)
     if datasource.status == DataSource.Status.DISABLED:
         if record.enabled:

@@ -982,12 +982,22 @@
       "issueToken": "Issue",
       "revokeToken": "Revoke",
       "sync": "Sync",
+      "refreshAvailability": "Check path",
       "enableDatasource": "Enable",
       "disableDatasource": "Disable",
       "cancelSync": "Cancel Sync",
       "viewTask": "View Task",
       "addRow": "Add row",
       "removeRow": "Remove"
+    },
+    "availability": {
+      "title": "Availability",
+      "unknown": "Unknown",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "error": "Error",
+      "checkedAt": "Last checked",
+      "message": "Check result"
     },
     "fields": {
       "name": "Name",
@@ -1169,6 +1179,12 @@
       "gitDesc": "Sync one Git repository into the node workspace.",
       "feishu": "Feishu",
       "feishuDesc": "Sync Feishu documents or Drive folders into the node workspace.",
+      "managedWorkspace": "Managed Workspace",
+      "managedWorkspaceDesc": "Catalog an existing directory managed by an external system without modifying or synchronizing its contents.",
+      "managedNodeDesc": "Select the online LensNode that contains the externally managed directory.",
+      "managedPathDesc": "Select or enter an existing directory. SourceLens will only check and catalog it.",
+      "managedPathHint": "The directory must already exist under the selected node workspace. SourceLens will never create or modify it.",
+      "managedPathPlaceholder": "Existing workspace-relative path, e.g. restores/finance",
       "onlineNodeHint": "Only approved online nodes are shown.",
       "noOnlineNodes": "No online LensNode is available.",
       "gitRepoHint": "Copy the Git HTTPS URL; use HTTPS Token for private repositories.",
@@ -1281,7 +1297,9 @@
         "not_git_repo": "Directory is not empty and is not a Git repo.",
         "remote_mismatch": "Existing Git remote does not match repo URL.",
         "git_update": "Existing Git repository can be updated.",
-        "datasource_path_in_use": "This directory is already used by another datasource. Choose a different directory to avoid source data and incremental manifest conflicts."
+        "datasource_path_in_use": "This directory is already used by another datasource. Choose a different directory to avoid source data and incremental manifest conflicts.",
+        "managed_workspace_available": "Managed workspace directory is available.",
+        "managed_workspace_missing": "Managed workspace directory does not exist."
       },
       "feishuScopeDocuments": "Specific documents",
       "feishuScopeDriveFolder": "Drive folder",
@@ -1431,7 +1449,8 @@
       "syncFailed": "Failed to trigger sync task",
       "datasourceDisabled": "Data source is disabled; sync cannot start",
       "syncCancelled": "Sync task cancelled",
-      "syncCancelFailed": "Failed to cancel sync task"
+      "syncCancelFailed": "Failed to cancel sync task",
+      "availabilityRefreshed": "Path availability refreshed"
     },
     "visibility": {
       "public": "Public",
