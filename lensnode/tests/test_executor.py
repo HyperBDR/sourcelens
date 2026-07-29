@@ -87,6 +87,89 @@ def test_executor_emits_streamed_output_delta():
     }
 
 
+def test_executor_derives_run_timeout_from_agent_rounds():
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    executor.agent = FakeAgent()
+    events = []
+
+    asyncio.run(
+        executor.execute(
+            {
+                "run_uuid": "00000000-0000-0000-0000-000000000008",
+                "task": "general_chat",
+                "agent_rounds": "max",
+                "target_dirs": [],
+            },
+            events.append,
+        )
+    )
+
+    started = next(
+        event
+        for event in events
+        if event.get("type") == "run_event"
+        and event.get("detail", {}).get("task") == "general_chat"
+    )
+    assert started["detail"]["run_timeout_s"] == 3600
+
+
+class SlowFinishingAgent:
+    """Fake agent that outlives the transport request timeout."""
+
+    class Config:
+        request_timeout_s = 0.05
+        run_idle_timeout_s = 1
+
+    config = Config()
+
+    async def answer(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+        wrapup_event=None,
+    ):
+        del command, emit_progress, cancel_event, wrapup_event
+        await asyncio.sleep(0.1)
+        on_activity()
+        emit_output("completed")
+        return {"answer": "completed", "samples": []}
+
+
+def test_executor_run_timeout_is_independent_of_transport_timeout(
+    monkeypatch,
+):
+    monkeypatch.setattr("lensnode.executor.WATCHDOG_INTERVAL_S", 0.01)
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    executor.agent = SlowFinishingAgent()
+    events = []
+
+    asyncio.run(
+        executor.execute(
+            {
+                "run_uuid": "00000000-0000-0000-0000-000000000009",
+                "task": "general_chat",
+                "agent_rounds": "max",
+                "run_timeout_s": 0.3,
+                "target_dirs": [],
+            },
+            events.append,
+        )
+    )
+
+    done = [event for event in events if event["type"] == "run_done"][-1]
+    started = next(
+        event
+        for event in events
+        if event.get("type") == "run_event"
+        and event.get("detail", {}).get("task") == "general_chat"
+    )
+    assert done["status"] == "done"
+    assert started["detail"]["run_timeout_s"] == 0.3
+
+
 class StallingAgent:
     """Fake agent that never produces output until cancelled."""
 
@@ -201,7 +284,7 @@ class DeadlineAgent:
     """Fake agent that stays active beyond the wall-clock deadline."""
 
     class Config:
-        request_timeout_s = 0.12
+        request_timeout_s = 240
         run_idle_timeout_s = 1
 
     config = Config()
@@ -243,6 +326,7 @@ def test_executor_enforces_wall_clock_deadline_and_mutes_late_emits(
                 {
                     "run_uuid": "00000000-0000-0000-0000-000000000006",
                     "task": "general_chat",
+                    "run_timeout_s": 0.12,
                     "target_dirs": [],
                 },
                 events.append,
@@ -266,7 +350,7 @@ class GracefulDeadlineAgent:
     """Fake agent that finishes when the soft deadline requests wrap-up."""
 
     class Config:
-        request_timeout_s = 0.2
+        request_timeout_s = 240
         run_idle_timeout_s = 1
 
     config = Config()
@@ -306,6 +390,7 @@ def test_executor_requests_wrapup_before_hard_deadline(monkeypatch):
                 {
                     "run_uuid": "00000000-0000-0000-0000-000000000007",
                     "task": "general_chat",
+                    "run_timeout_s": 0.2,
                     "target_dirs": [],
                 },
                 events.append,

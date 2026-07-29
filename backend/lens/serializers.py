@@ -1901,6 +1901,8 @@ class RunExecutionSerializer(serializers.ModelSerializer):
             "loaded_skills",
             "loaded_mcps",
             "target_dirs",
+            "agent_rounds",
+            "run_timeout_s",
             "token_budget_profile",
             "token_budget_max_tokens",
             "token_budget_final_reserve_tokens",

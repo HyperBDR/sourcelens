@@ -1,10 +1,12 @@
 from contextlib import contextmanager
 from datetime import timedelta
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TransactionTestCase, override_settings
@@ -24,6 +26,7 @@ from lens.execution import execute_answer_run
 from lens.lensnode_auth import issue_lensnode_token
 from lens.models import (
     Assistant,
+    AssistantSkill,
     DataSource,
     GlobalSetting,
     LensNode,
@@ -32,6 +35,7 @@ from lens.models import (
     RunStep,
     ScheduledTask,
     Session,
+    Skill,
 )
 from lens.periodic_tasks import (
     ensure_datasource_periodic_task,
@@ -53,6 +57,7 @@ from lens.services import (
     dispatch_run_to_lensnode,
     finish_lensnode_run,
     rewrite_query,
+    run_timeout_for_rounds,
 )
 from lens.tasks import (
     acquire_datasource_lock,
@@ -117,6 +122,46 @@ class LensServiceTests(TransactionTestCase):
             title="",
         )
 
+    def test_run_timeout_for_rounds_maps_all_analysis_levels(self):
+        expected = {
+            "flash": 300,
+            "fast": 600,
+            "balanced": 900,
+            "deep": 1800,
+            "max": 3600,
+        }
+
+        for agent_rounds, timeout_s in expected.items():
+            with self.subTest(agent_rounds=agent_rounds):
+                self.assertEqual(
+                    run_timeout_for_rounds(agent_rounds),
+                    timeout_s,
+                )
+
+    def test_timeout_migration_backfills_from_current_assistant(self):
+        self.assistant.agent_rounds = Assistant.AgentRounds.MAX
+        self.assistant.save(update_fields=["agent_rounds"])
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze everything",
+            enqueue=False,
+        )
+        run.execution.agent_rounds = None
+        run.execution.run_timeout_s = None
+        run.execution.save(
+            update_fields=["agent_rounds", "run_timeout_s"]
+        )
+        migration = import_module(
+            "lens.migrations."
+            "0028_runexecution_agent_rounds_runexecution_run_timeout_s"
+        )
+
+        migration.backfill_run_timeout_snapshots(apps, None)
+        run.execution.refresh_from_db()
+
+        self.assertEqual(run.execution.agent_rounds, "max")
+        self.assertEqual(run.execution.run_timeout_s, 3600)
+
     def test_run_step_sequences_are_distinct_for_structured_steps(self):
         step_types = [
             RunStep.StepType.QUERY_REWRITE,
@@ -144,6 +189,9 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(run.input_message.role, Message.Role.USER)
         self.assertEqual(run.output_message.role, Message.Role.ASSISTANT)
         self.assertEqual(self.session.message_set.count(), 2)
+        self.assertEqual(run.execution.status, "queued")
+        self.assertEqual(run.execution.agent_rounds, "balanced")
+        self.assertEqual(run.execution.run_timeout_s, 900)
 
     def test_build_run_history_returns_prior_turns_and_skips_empty(self):
         run1 = create_execution_run(
@@ -285,8 +333,11 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(self.session.message_set.count(), 2)
 
     def test_execute_answer_run_creates_execution_snapshot(self):
+        self.assistant.agent_rounds = "max"
         self.assistant.token_budget_profile = "deep"
-        self.assistant.save(update_fields=["token_budget_profile"])
+        self.assistant.save(
+            update_fields=["agent_rounds", "token_budget_profile"]
+        )
         run = create_execution_run(
             session=self.session,
             question="How does SSE work?",
@@ -302,11 +353,58 @@ class LensServiceTests(TransactionTestCase):
         self.assertTrue(run.output_message.content)
         self.assertEqual(run.execution.task, "knowledge_qa")
         self.assertEqual(run.execution.target_dirs, [{"path": "/workspace/repo"}])
+        self.assertEqual(run.execution.agent_rounds, "max")
+        self.assertEqual(run.execution.run_timeout_s, 3600)
         self.assertEqual(run.execution.token_budget_profile, "deep")
         self.assertEqual(run.execution.token_budget_max_tokens, 500000)
         self.assertEqual(
             run.execution.token_budget_final_reserve_tokens,
             75000,
+        )
+
+    def test_execute_answer_run_creates_missing_legacy_snapshot(self):
+        run = create_execution_run(
+            session=self.session,
+            question="How does SSE work?",
+            enqueue=False,
+        )
+        run.execution.delete()
+        run.refresh_from_db()
+
+        execute_answer_run(run, dispatch=False)
+        run.refresh_from_db()
+
+        self.assertEqual(run.status, Run.Status.DONE)
+        self.assertEqual(run.execution.status, "completed")
+
+    def test_dispatch_refreshes_skill_package_snapshot(self):
+        skill = Skill.objects.create(
+            name="Packaged Skill",
+            slug="packaged-skill",
+            package_hash="sha256:old",
+        )
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=skill,
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Use the Skill",
+            enqueue=False,
+        )
+        self.assertEqual(
+            run.execution.loaded_skills[0]["package_hash"],
+            "sha256:old",
+        )
+        skill.package_hash = "sha256:new"
+        skill.save(update_fields=["package_hash"])
+
+        execute_answer_run(run, dispatch=False)
+        run.refresh_from_db()
+
+        self.assertEqual(
+            run.execution.loaded_skills[0]["package_hash"],
+            "sha256:new",
         )
 
     @patch("lens.services.async_to_sync")
@@ -324,7 +422,7 @@ class LensServiceTests(TransactionTestCase):
             question="Analyze everything",
             enqueue=False,
         )
-        execution = create_run_execution_snapshot(run)
+        execution = run.execution
 
         self.assistant.token_budget_profile = "standard"
         self.assistant.save(update_fields=["token_budget_profile"])
@@ -340,6 +438,34 @@ class LensServiceTests(TransactionTestCase):
             },
         )
         self.assertEqual(execution.token_budget_profile, "deep")
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_uses_run_timeout_execution_snapshot(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        self.assistant.agent_rounds = "max"
+        self.assistant.save(update_fields=["agent_rounds"])
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze everything",
+            enqueue=False,
+        )
+        execution = run.execution
+
+        self.assistant.agent_rounds = "flash"
+        self.assistant.save(update_fields=["agent_rounds"])
+        dispatch_run_to_lensnode(run, "Analyze everything")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(payload["agent_rounds"], "max")
+        self.assertEqual(payload["max_agent_turns"], 100)
+        self.assertEqual(payload["run_timeout_s"], 3600)
+        self.assertEqual(execution.agent_rounds, "max")
+        self.assertEqual(execution.run_timeout_s, 3600)
 
     def test_execute_answer_run_fails_when_lensnode_offline(self):
         self.lensnode.status = LensNode.Status.OFFLINE
@@ -1115,10 +1241,13 @@ class LensServiceTests(TransactionTestCase):
             }
         ]
         execution.save(update_fields=["loaded_mcps"])
+        run.refresh_from_db()
 
         payload = RunSerializer(run).data
 
         self.assertNotIn("secret-token", str(payload))
+        self.assertEqual(payload["execution"]["agent_rounds"], "balanced")
+        self.assertEqual(payload["execution"]["run_timeout_s"], 900)
         self.assertNotIn("endpoint", payload["execution"]["loaded_mcps"][0])
         self.assertEqual(
             payload["execution"]["loaded_mcps"][0]["mcp_name"],

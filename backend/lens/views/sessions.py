@@ -20,6 +20,7 @@ from lens.models import (
     Assistant,
     MessageAttachment,
     Run,
+    RunExecution,
     RunOutputFile,
     Session,
     SharedQA,
@@ -309,9 +310,17 @@ class RunViewSet(BaseAuthenticatedViewSet):
         ]:
             return Response(RunSerializer(run).data)
 
-        run.status = Run.Status.CANCELLED
-        run.finished_at = timezone.now()
-        run.save(update_fields=["status", "finished_at", "updated_at"])
+        now = timezone.now()
+        with transaction.atomic():
+            run.status = Run.Status.CANCELLED
+            run.finished_at = now
+            run.save(update_fields=["status", "finished_at", "updated_at"])
+            if hasattr(run, "execution"):
+                run.execution.status = RunExecution.Status.CANCELLED
+                run.execution.finished_at = now
+                run.execution.save(
+                    update_fields=["status", "finished_at"]
+                )
         cancel_run_on_lensnode(run)
         return Response(RunSerializer(run).data)
 

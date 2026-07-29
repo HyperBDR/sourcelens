@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import threading
 
 from .agent_runtime import LensDeepAgentRuntime
@@ -9,6 +10,32 @@ LOGGER = logging.getLogger("lensnode")
 
 # How often the inactivity watchdog checks for stalled output.
 WATCHDOG_INTERVAL_S = 5
+
+RUN_TIMEOUT_SECONDS_BY_ROUNDS = {
+    "flash": 300,
+    "fast": 600,
+    "balanced": 900,
+    "deep": 1800,
+    "max": 3600,
+}
+
+
+def _run_timeout_seconds(command):
+    """Resolve the Run deadline independently of transport timeouts."""
+
+    value = command.get("run_timeout_s")
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value > 0
+    ):
+        return value
+    agent_rounds = str(command.get("agent_rounds") or "").lower()
+    return RUN_TIMEOUT_SECONDS_BY_ROUNDS.get(
+        agent_rounds,
+        RUN_TIMEOUT_SECONDS_BY_ROUNDS["balanced"],
+    )
 
 
 def _wrapup_grace_seconds(timeout_s):
@@ -152,7 +179,7 @@ class LensNodeExecutor:
         task = command.get("task") or "unknown"
         step_type = _execution_step_type(command)
         target_dirs = command.get("target_dirs") or []
-        timeout_s = getattr(self.agent.config, "request_timeout_s", 120)
+        timeout_s = _run_timeout_seconds(command)
         idle_timeout_s = getattr(
             self.agent.config, "run_idle_timeout_s", 180
         )
@@ -162,7 +189,7 @@ class LensNodeExecutor:
         start_message = task_log(
             (
                 f"Starting to run command: {task}({run_uuid}). "
-                f"Request timeout {format_duration(timeout_s)}, "
+                f"Run timeout {format_duration(timeout_s)}, "
                 f"idle timeout {format_duration(idle_timeout_s)}."
             ),
             started_at,
@@ -183,7 +210,7 @@ class LensNodeExecutor:
                     "message": start_message,
                     "task": task,
                     "target_dirs": target_dirs,
-                    "request_timeout_s": timeout_s,
+                    "run_timeout_s": timeout_s,
                     "idle_timeout_s": idle_timeout_s,
                 },
             }
@@ -289,7 +316,7 @@ class LensNodeExecutor:
                     if remaining_s <= 0:
                         await cancel_answer_task()
                         raise RunDeadlineExceededError(
-                            "Run exceeded total request timeout of "
+                            "Run exceeded total wall-clock timeout of "
                             f"{format_duration(timeout_s)}."
                         )
                     if not wrapup_event.is_set() and loop.time() >= wrapup_at:
@@ -325,7 +352,7 @@ class LensNodeExecutor:
                     if loop.time() >= deadline_at:
                         await cancel_answer_task()
                         raise RunDeadlineExceededError(
-                            "Run exceeded total request timeout of "
+                            "Run exceeded total wall-clock timeout of "
                             f"{format_duration(timeout_s)}."
                         )
                     if loop.time() - activity["at"] > idle_timeout_s:

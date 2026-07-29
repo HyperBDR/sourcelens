@@ -13,7 +13,6 @@ from django.utils import timezone
 
 from .assistant_lifecycle import lock_assistant_for_new_work
 from .attachments import attachment_data_url, bind_attachments_to_message
-from .environment_variables import missing_required_environment
 from .llm import run_completion, run_completion_multimodal
 from .models import (
     Assistant,
@@ -315,6 +314,7 @@ def create_execution_run(
     input_message.run = run
     input_message.save(update_fields=["run"])
     bind_attachments_to_message(session, input_message, attachment_uuids)
+    create_run_execution_snapshot(run)
 
     if enqueue:
         transaction.on_commit(lambda: _enqueue_answer_run(run.uuid))
@@ -524,10 +524,11 @@ def available_dir_paths(lensnode):
 
 
 def validate_run_dispatch(run):
-    """Validate that a run can be dispatched to its selected LensNode."""
+    """Validate current runtime state and the frozen execution snapshot."""
 
     assistant = run.session.assistant
     lensnode = run.lensnode
+    execution = run.execution
     if assistant.status != Assistant.Status.ACTIVE:
         raise LensNodeDispatchError("ASSISTANT_ARCHIVED")
     if lensnode is None:
@@ -540,31 +541,34 @@ def validate_run_dispatch(run):
         raise LensNodeDispatchError("LENSNODE_NOT_APPROVED")
     if lensnode.token_revoked:
         raise LensNodeDispatchError("LENSNODE_TOKEN_REVOKED")
-    if assistant.selected_task not in task_names(lensnode):
+    if execution.task not in task_names(lensnode):
         raise LensNodeDispatchError("LENSNODE_TASK_UNAVAILABLE")
 
-    if assistant.selected_task == "general_chat":
-        if not assistant.skill_bindings.filter(
-            enabled=True,
-            skill__enabled=True,
-        ).exists():
+    runtime_skills = resolve_loaded_skill_environment(
+        execution.loaded_skills
+    )
+    if execution.task == "general_chat":
+        if not runtime_skills:
             raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
     else:
         available = available_dir_paths(lensnode)
-        for item in assistant.selected_dirs or []:
+        for item in execution.target_dirs or []:
             if item.get("path") not in available:
                 raise LensNodeDispatchError("LENSNODE_DIR_UNAVAILABLE")
 
-    for binding in assistant.skill_bindings.select_related(
-        "skill", "environment_variable_set"
-    ).filter(enabled=True, skill__enabled=True):
-        variable_set = binding.environment_variable_set
-        if variable_set is not None and not variable_set.enabled:
-            variable_set = None
-        if missing_required_environment(
-            binding.skill,
-            variable_set,
-        ):
+    for skill in runtime_skills:
+        declarations = (skill.get("definition") or {}).get(
+            "environment"
+        ) or []
+        required = {
+            item["name"]
+            for item in declarations
+            if isinstance(item, dict)
+            and item.get("required")
+            and item.get("name")
+        }
+        values = skill.get("environment") or {}
+        if any(not str(values.get(name) or "") for name in required):
             raise LensNodeDispatchError("SKILL_ENVIRONMENT_REQUIRED")
 
 
@@ -579,6 +583,14 @@ TOKEN_BUDGET_PROFILES = {
     },
 }
 
+RUN_TIMEOUT_SECONDS_BY_ROUNDS = {
+    Assistant.AgentRounds.FLASH: 300,
+    Assistant.AgentRounds.FAST: 600,
+    Assistant.AgentRounds.BALANCED: 900,
+    Assistant.AgentRounds.DEEP: 1800,
+    Assistant.AgentRounds.MAX: 3600,
+}
+
 
 def token_budget_for_profile(profile):
     """Return the bounded token budget for an Assistant profile."""
@@ -588,6 +600,15 @@ def token_budget_for_profile(profile):
         "profile": selected,
         **TOKEN_BUDGET_PROFILES[selected],
     }
+
+
+def run_timeout_for_rounds(agent_rounds):
+    """Return the Run timeout for one Assistant analysis level."""
+
+    return RUN_TIMEOUT_SECONDS_BY_ROUNDS.get(
+        agent_rounds,
+        RUN_TIMEOUT_SECONDS_BY_ROUNDS[Assistant.AgentRounds.BALANCED],
+    )
 
 
 @transaction.atomic
@@ -603,6 +624,10 @@ def create_run_execution_snapshot(run):
             "task": assistant.selected_task,
             "loaded_skills": build_loaded_skills(assistant),
             "loaded_mcps": build_loaded_mcps(assistant),
+            "agent_rounds": assistant.agent_rounds,
+            "run_timeout_s": run_timeout_for_rounds(
+                assistant.agent_rounds
+            ),
             "target_dirs": (
                 []
                 if assistant.selected_task == "general_chat"
@@ -613,7 +638,7 @@ def create_run_execution_snapshot(run):
             "token_budget_final_reserve_tokens": token_budget[
                 "final_reserve_tokens"
             ],
-            "status": RunExecution.Status.DISPATCHED,
+            "status": RunExecution.Status.QUEUED,
         },
     )
     return execution
@@ -732,6 +757,14 @@ def dispatch_run_to_lensnode(run, rewritten_question):
     if channel_layer is None:
         raise LensNodeDispatchError("LENS_CHANNEL_LAYER_UNAVAILABLE")
 
+    agent_rounds = (
+        execution.agent_rounds
+        or run.session.assistant.agent_rounds
+        or Assistant.AgentRounds.BALANCED
+    )
+    run_timeout_s = execution.run_timeout_s or run_timeout_for_rounds(
+        agent_rounds
+    )
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),
         {
@@ -753,9 +786,10 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                     else ""
                 ),
                 "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(
-                    run.session.assistant.agent_rounds, 26
+                    agent_rounds, 26
                 ),
-                "agent_rounds": run.session.assistant.agent_rounds,
+                "agent_rounds": agent_rounds,
+                "run_timeout_s": run_timeout_s,
                 "token_budget": {
                     "profile": execution.token_budget_profile,
                     "max_tokens": execution.token_budget_max_tokens,
