@@ -172,6 +172,23 @@ test('keeps execution failures separate from capability availability', () => {
   assert.equal(state.executionFailure.error_type, 'transient')
 })
 
+test('keeps verification failures separate from tool execution failures', () => {
+  let state = createRuntimeState()
+  state = applyRuntimeEvent(state, {
+    event_type: 'verification.failed',
+    visibility: 'user',
+    payload: {
+      reason: 'evidence_unavailable',
+      capability: 'skill',
+      error_type: 'verification'
+    }
+  })
+
+  assert.equal(state.executionFailure, null)
+  assert.equal(state.verificationFailure.reason, 'evidence_unavailable')
+  assert.equal(state.verificationFailure.error_type, 'verification')
+})
+
 test('restores the correct block card from terminal run details', () => {
   const capabilityState = applyRuntimeEvent(createRuntimeState(), {
     type: 'done',
@@ -189,11 +206,21 @@ test('restores the correct block card from terminal run details', () => {
       error_type: 'transient'
     }
   })
+  const verificationState = applyRuntimeEvent(createRuntimeState(), {
+    type: 'done',
+    outcome: 'blocked',
+    termination_detail: {
+      reason: 'evidence_unavailable',
+      error_type: 'verification'
+    }
+  })
 
   assert.equal(capabilityState.capabilityBlock.error_type, 'capability')
   assert.equal(capabilityState.executionFailure, null)
   assert.equal(executionState.capabilityBlock, null)
   assert.equal(executionState.executionFailure.error_type, 'transient')
+  assert.equal(verificationState.executionFailure, null)
+  assert.equal(verificationState.verificationFailure.error_type, 'verification')
 })
 
 test('ignores internal events and applies terminal outcome', () => {

@@ -119,6 +119,7 @@ export function createRuntimeState() {
     activityAttempts: {},
     capabilityBlock: null,
     executionFailure: null,
+    verificationFailure: null,
     artifacts: [],
     outcome: null,
     terminationDetail: null
@@ -664,7 +665,11 @@ export function applyRuntimeEvent(state, event) {
       executionFailure:
         terminationDetail?.reason === 'execution_failed'
           ? { ...terminationDetail }
-          : current.executionFailure
+          : current.executionFailure,
+      verificationFailure:
+        terminationDetail?.reason === 'evidence_unavailable'
+          ? { ...terminationDetail }
+          : current.verificationFailure
     }
     if (event.type === 'done') {
       const status = event.outcome === 'completed' ? 'completed' : 'failed'
@@ -736,6 +741,9 @@ export function applyRuntimeEvent(state, event) {
   }
   if (event.event_type === 'execution.failed') {
     return { ...current, executionFailure: { ...payload } }
+  }
+  if (event.event_type === 'verification.failed') {
+    return { ...current, verificationFailure: { ...payload } }
   }
   if (event.event_type === 'artifact.created') {
     const artifact = {

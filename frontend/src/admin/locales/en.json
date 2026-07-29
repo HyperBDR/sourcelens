@@ -68,6 +68,8 @@
     "artifactCallLimitHit": "call limit reached",
     "structuredAnalysisCalls": "Structured analysis",
     "structuredAnalysisCallsCount": "{n} structured analyses",
+    "structuredValidationCalls": "Completeness validation",
+    "structuredValidationCallsCount": "{n} completeness validations",
     "transformCalls": "Skill Transforms",
     "transformCallsCount": "{n} Transform calls",
     "callLimitHit": "call limit reached",

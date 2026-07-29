@@ -417,12 +417,21 @@ def test_analyze_structured_output_enforces_call_budget(tmp_path):
 
     first = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
     second = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
+    third = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
 
     assert first["ok"] is True
+    assert first["call_budget_exhausted"] is True
+    assert "finish the final answer" in first["instruction"]
     assert second["error"] == "STRUCTURED_ANALYSIS_CALL_LIMIT"
     assert second["call_count"] == 2
     assert second["max_calls"] == 1
-    assert events[-1][0] == "tool.analyze_structured_output.budget_exceeded"
+    assert "finish the final answer" in second["instruction"]
+    assert third == second
+    assert [
+        name
+        for name, _detail in events
+        if name == "tool.analyze_structured_output.budget_exceeded"
+    ] == ["tool.analyze_structured_output.budget_exceeded"]
 
 
 def test_record_validation_has_reserved_budget_and_understands_wrapper(

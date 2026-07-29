@@ -1036,6 +1036,15 @@ def build_general_chat_tools(
     )
     structured_analysis_calls = {"count": 0}
     structured_validation_calls = {"count": 0}
+    structured_limit_results = {
+        "analysis": None,
+        "validation": None,
+    }
+    structured_budget_instruction = (
+        "The structured analysis budget is exhausted. Do not call this "
+        "tool again. Use existing bounded results and finish the final "
+        "answer."
+    )
     saved_output_inspection_max_calls = min(
         _positive_int(
             tool_policy.get("saved_output_inspection_max_calls"),
@@ -1089,6 +1098,10 @@ def build_general_chat_tools(
         invocation_id = uuid.uuid4().hex
         normalized_operation = str(operation or "").strip().lower()
         is_validation = normalized_operation == "validate_records"
+        limit_key = "validation" if is_validation else "analysis"
+        prior_limit_result = structured_limit_results[limit_key]
+        if prior_limit_result is not None:
+            return _json(prior_limit_result)
         call_counter = (
             structured_validation_calls
             if is_validation
@@ -1119,15 +1132,16 @@ def build_general_chat_tools(
                 "tool.analyze_structured_output.budget_exceeded",
                 detail,
             )
-            return _json(
-                {
-                    "ok": False,
-                    "error": limit_error,
-                    "invocation_id": invocation_id,
-                    "call_count": call_count,
-                    "max_calls": max_calls,
-                }
-            )
+            limit_result = {
+                "ok": False,
+                "error": limit_error,
+                "invocation_id": invocation_id,
+                "call_count": call_count,
+                "max_calls": max_calls,
+                "instruction": structured_budget_instruction,
+            }
+            structured_limit_results[limit_key] = limit_result
+            return _json(limit_result)
 
         request_detail = {
             "invocation_id": invocation_id,
@@ -1227,6 +1241,7 @@ def build_general_chat_tools(
             structured_analysis_output_limit,
         )
         result_count = len(result) if isinstance(result, (dict, list)) else 1
+        call_budget_exhausted = call_count >= max_calls
         input_sha256 = hashlib.sha256(raw).hexdigest()
         detail = {
             "invocation_id": invocation_id,
@@ -1242,6 +1257,7 @@ def build_general_chat_tools(
             "output_ref": output["output_ref"],
             "call_count": call_count,
             "max_calls": max_calls,
+            "call_budget_exhausted": call_budget_exhausted,
             "summary": (
                 f"{normalized_operation} · {result_count} result"
                 f"{'s' if result_count != 1 else ''} · {duration_ms}ms"
@@ -1258,7 +1274,13 @@ def build_general_chat_tools(
                 "input_sha256": input_sha256,
                 "duration_ms": duration_ms,
                 "result_count": result_count,
+                "call_budget_exhausted": call_budget_exhausted,
                 **output,
+                **(
+                    {"instruction": structured_budget_instruction}
+                    if call_budget_exhausted
+                    else {}
+                ),
             }
         )
 

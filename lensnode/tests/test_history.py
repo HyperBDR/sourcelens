@@ -339,6 +339,72 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert "creating an order" in prompt
 
 
+def test_route_selection_recovers_missing_tool_evidence_capabilities():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"complex",'
+                    '"route":"plan_execute",'
+                    '"required_capabilities":[],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "查询订单并生成流程图",
+        context_skill_contents=["This Skill can query Income orders."],
+        available_tools=[
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            ),
+            SimpleNamespace(
+                name="save_deliverable",
+                description="Deliver a generated file.",
+            ),
+        ],
+    )
+
+    assert decision["evidence_requirement"] == "tool_result"
+    assert decision["required_capabilities"] == ["skill"]
+
+
+def test_route_selection_requires_delivery_for_artifact_evidence():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"complex",'
+                    '"route":"plan_execute",'
+                    '"required_capabilities":["skill"],'
+                    '"evidence_requirement":"artifact"}'
+                )
+            )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "生成并交付流程图",
+        context_skill_contents=["This Skill generates flowcharts."],
+        available_tools=[
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            ),
+            SimpleNamespace(
+                name="save_deliverable",
+                description="Deliver a generated file.",
+            ),
+        ],
+    )
+
+    assert decision["required_capabilities"] == [
+        "skill",
+        "artifact_delivery",
+    ]
+
+
 def test_route_selection_uses_history_to_resolve_an_action_follow_up():
     class Model:
         def __init__(self):
@@ -579,6 +645,153 @@ def test_unmatched_capability_returns_before_any_tool_call(monkeypatch):
         "capability_unavailable"
     )
     assert tool_calls["count"] == 0
+
+
+def test_successful_skill_evidence_preserves_the_final_answer(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 1}
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"complex",'
+                    '"route":"plan_execute",'
+                    '"required_capabilities":[],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    resources = SimpleNamespace(
+        root=tmp_path,
+        context_skill_contents=["This Skill can query Income orders."],
+        mcp_configs=[],
+        skill_paths=["skills/income"],
+        mcp_config_path=tmp_path / "mcp.json",
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+        summary_trigger_tokens=0,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _config: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_general_chat_tools",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_summarization_middleware",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def middleware(
+        _command,
+        _summarizer,
+        _emit_event,
+        capability_middleware=None,
+        **_kwargs,
+    ):
+        captured["boundary"] = capability_middleware
+        return [capability_middleware]
+
+    monkeypatch.setattr(agent_runtime, "_agent_middleware", middleware)
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_kwargs: object(),
+    )
+
+    def run_agent(*_args, **_kwargs):
+        captured["boundary"].success_count = 2
+        captured["boundary"].successful_capabilities = {
+            "artifact_delivery",
+            "skill",
+        }
+        return "已生成并交付订单流程图。", True, "token_budget_wrapup"
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_run_agent_with_turn_limit",
+        run_agent,
+    )
+
+    result = agent_runtime.LensDeepAgentRuntime(config)._answer_sync(
+        {
+            "run_uuid": "00000000-0000-0000-0000-000000000002",
+            "task": "general_chat",
+            "question": "查询订单并生成流程图",
+            "agent_model_ref": "model-ref",
+        }
+    )
+
+    assert captured["boundary"].required_capabilities == {"skill"}
+    assert result["answer"] == "已生成并交付订单流程图。"
+    assert result["outcome"] == "completed"
+    assert result["termination_detail"] == {}
+
+
+def test_delivered_artifact_completes_after_token_budget_wrapup():
+    middleware = SimpleNamespace(
+        successful_capabilities={"skill", "artifact_delivery"},
+        failed_capabilities=set(),
+        recovered_capabilities=set(),
+        exhaustion_details=[],
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=True,
+        stop_reason="token_budget_wrapup",
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
 
 
 def test_legacy_runtime_modes_skip_general_chat_execution_gates(
@@ -1214,6 +1427,83 @@ def test_capability_boundary_allows_one_transient_retry():
     middleware.wrap_tool_call(request, fail)
     assert middleware.blocked_tools == {"mcp__orders"}
     assert middleware.termination_detail["capability"] == "mcp"
+
+
+def test_structured_analysis_limit_blocks_only_the_exhausted_tool():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="analyze_structured_output"),
+        tool_call={
+            "name": "analyze_structured_output",
+            "id": "call-1",
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": False,
+                    "error": "STRUCTURED_ANALYSIS_CALL_LIMIT",
+                    "instruction": (
+                        "Use existing bounded results and finish the answer."
+                    ),
+                }
+            ),
+            name="analyze_structured_output",
+            tool_call_id="call-1",
+            status="error",
+        ),
+    )
+
+    assert json.loads(result.content)["error"] == (
+        "STRUCTURED_ANALYSIS_CALL_LIMIT"
+    )
+    assert middleware.blocked_tools == {"analyze_structured_output"}
+    assert middleware.termination_detail == {}
+    assert middleware.failed_capabilities == set()
+
+    denied = middleware.wrap_tool_call(
+        request,
+        lambda _request: (_ for _ in ()).throw(
+            AssertionError("The blocked tool must not execute again")
+        ),
+    )
+
+    assert json.loads(denied.content)["error"] == "CAPABILITY_BLOCKED"
+
+
+def test_last_structured_analysis_call_prevents_an_over_limit_attempt():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="analyze_structured_output"),
+        tool_call={
+            "name": "analyze_structured_output",
+            "id": "call-1",
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": True,
+                    "call_budget_exhausted": True,
+                    "instruction": (
+                        "Use existing bounded results and finish the answer."
+                    ),
+                }
+            ),
+            name="analyze_structured_output",
+            tool_call_id="call-1",
+        ),
+    )
+
+    assert json.loads(result.content)["ok"] is True
+    assert middleware.blocked_tools == {"analyze_structured_output"}
+    assert middleware.termination_detail == {}
 
 
 def test_request_failures_are_isolated_by_normalized_arguments():

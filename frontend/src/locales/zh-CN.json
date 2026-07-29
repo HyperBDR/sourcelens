@@ -264,6 +264,7 @@
         "activityCompleted": "已完成 {count} 项活动",
         "blockedTitle": "所需能力当前不可用",
         "executionFailedTitle": "能力执行失败",
+        "verificationFailedTitle": "结果验证未完成",
         "artifactTitle": "交付文件已生成",
         "outcomePartial": "已返回部分结果，请查看上方缺失能力或未完成事项。",
         "outcomeBlocked": "当前请求未完成，请查看运行详情后重试。",
