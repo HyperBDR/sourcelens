@@ -217,8 +217,6 @@
       "copyFailed": "复制失败。",
       "feedbackHelpful": "有帮助",
       "feedbackUnhelpful": "没有帮助",
-      "feedbackRecordedHelpful": "已记录：有帮助",
-      "feedbackRecordedUnhelpful": "已记录：没有帮助",
       "feedbackFailed": "反馈保存失败，请重试。",
       "downloadFailed": "下载失败，请稍后重试。",
       "preview": "预览",

@@ -43,8 +43,9 @@
           </a>
           <button
             type="button"
-            class="shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-primary-600"
+            class="qa-share-copy shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-primary-600"
             :title="t('lens.share.copyLink')"
+            :aria-label="t('lens.share.copyLink')"
             @click="copy"
           >
             <Copy :size="15" :stroke-width="2" aria-hidden="true" />
@@ -56,10 +57,17 @@
 
     <template #footer>
       <div class="flex justify-end gap-2">
-        <BaseButton v-if="share" variant="danger" size="sm" @click="unshare">
+        <BaseButton
+          v-if="share"
+          class="qa-share-action"
+          variant="danger"
+          size="sm"
+          @click="unshare"
+        >
           {{ t('lens.qa.unshare') }}
         </BaseButton>
         <BaseButton
+          class="qa-share-action"
           variant="primary"
           size="sm"
           :loading="creating || saving"
@@ -204,3 +212,22 @@ async function unshare() {
   }
 }
 </script>
+
+<style scoped>
+@media (max-width: 767px), (hover: none), (pointer: coarse) {
+  .qa-share-copy,
+  :deep(.qa-share-action) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .qa-share-copy {
+    display: flex;
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+}
+</style>

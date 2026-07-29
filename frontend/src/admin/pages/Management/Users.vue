@@ -39,10 +39,10 @@
 
         <div class="flex min-h-0 flex-1 flex-col px-5 py-4">
           <form
-            class="mb-4 flex flex-shrink-0 flex-wrap items-end gap-3"
+            class="mb-4 grid flex-shrink-0 grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end"
             @submit.prevent="applyExactFilters"
           >
-            <label class="min-w-0 flex-1 sm:max-w-xs">
+            <label class="min-w-0 sm:flex-1 sm:max-w-xs">
               <span class="mb-1 block text-sm font-medium text-ink-700">
                 {{ t('management.usernameFilter') }}
               </span>
@@ -50,11 +50,11 @@
                 v-model="usernameFilterInput"
                 data-testid="username-filter-input"
                 type="text"
-                class="form-input"
+                class="form-input user-filter-control"
                 :placeholder="t('management.usernameFilterPlaceholder')"
               />
             </label>
-            <label class="min-w-0 flex-1 sm:max-w-xs">
+            <label class="min-w-0 sm:flex-1 sm:max-w-xs">
               <span class="mb-1 block text-sm font-medium text-ink-700">
                 {{ t('management.emailFilter') }}
               </span>
@@ -62,11 +62,12 @@
                 v-model="emailFilterInput"
                 data-testid="email-filter-input"
                 type="email"
-                class="form-input"
+                class="form-input user-filter-control"
                 :placeholder="t('management.emailFilterPlaceholder')"
               />
             </label>
             <BaseButton
+              class="user-filter-action"
               data-testid="user-filter-submit"
               type="submit"
               :loading="loading"
@@ -74,6 +75,7 @@
               {{ t('common.search') }}
             </BaseButton>
             <BaseButton
+              class="user-filter-action"
               data-testid="user-filter-reset"
               variant="outline"
               :disabled="
@@ -718,5 +720,12 @@ onMounted(async () => {
 
 .form-input {
   @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
+@media (max-width: 767px), (hover: none), (pointer: coarse) {
+  .user-filter-control,
+  :deep(.user-filter-action) {
+    min-height: 44px;
+  }
 }
 </style>
