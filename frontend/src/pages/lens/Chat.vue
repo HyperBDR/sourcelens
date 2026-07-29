@@ -1327,7 +1327,6 @@
       @download="downloadOutputFile"
     />
   </div>
-  <QaPrintView v-if="printQa" v-bind="printQa" />
 </template>
 
 <script setup>
@@ -1357,7 +1356,6 @@ import UserDock from '@/components/lens/UserDock.vue'
 import MySharesPanel from '@/components/lens/MySharesPanel.vue'
 import AssistantEmptyState from '@/components/lens/AssistantEmptyState.vue'
 import LoginModal from '@/components/auth/LoginModal.vue'
-import QaPrintView from '@/components/lens/QaPrintView.vue'
 import QaShareModal from '@/components/lens/QaShareModal.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import {
@@ -1365,6 +1363,7 @@ import {
   fetchDeliverableBlob,
   isPreviewable
 } from '@/utils/filePreview'
+import { downloadQaPdf } from '@/utils/qaPdf'
 import { useToast } from '@/composables/useToast'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
@@ -1405,6 +1404,7 @@ import {
   deleteSession,
   getPublicAssistant,
   getRun,
+  getRunPdf,
   listMyShares,
   listAssistants,
   listMessages,
@@ -1472,7 +1472,6 @@ const shareQuestion = ref('')
 const shareExisting = ref(null)
 const sharesByRun = ref({})
 const mySharesOpen = ref(false)
-const printQa = ref(null)
 // False until the current bootstrap settles, so the view can distinguish
 // "still loading" from "loaded, but no assistant to show".
 const booted = ref(false)
@@ -2864,17 +2863,18 @@ function openShare(message) {
 async function exportQa(message) {
   const sourceQuestion = userMessageForMessage(message)
   const questionText = sourceQuestion?.content || ''
-  printQa.value = {
-    title: questionText.replace(/\s+/g, ' ').trim().slice(0, 80),
-    question: questionText,
-    answer: message.content || '',
-    assistantName: assistantName.value,
-    publishedAt: getMessageTimestamp(message),
-    inputAttachments: sourceQuestion?.attachments || [],
-    outputFiles: message.output_files || []
+  const sessionSummary = sessions.value.find(
+    (session) => session.uuid === selectedSessionUuid.value
+  )?.title
+  try {
+    const response = await getRunPdf(message.run)
+    downloadQaPdf(response, {
+      summary: sessionSummary,
+      question: questionText
+    })
+  } catch {
+    showWarning(t('lens.chat.downloadFailed'))
   }
-  await nextTick()
-  window.print()
 }
 
 function isMessageShared(message) {

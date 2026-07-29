@@ -191,6 +191,10 @@ export async function getRun(uuid) {
   return unwrapResponse(response)
 }
 
+export async function getRunPdf(uuid) {
+  return api.get(`/lens/runs/${uuid}/pdf/`, { responseType: 'blob' })
+}
+
 export async function cancelRun(runUuid) {
   const response = await api.post(`/lens/runs/${runUuid}/cancel/`)
   return unwrapResponse(response)
@@ -487,6 +491,12 @@ export async function deleteShare(uuid) {
 export async function getPublicQa(token) {
   const response = await api.get(`/lens/public/qa/${token}/`)
   return unwrapResponse(response)
+}
+
+export async function getPublicQaPdf(token) {
+  return api.get(`/lens/public/qa/${token}/pdf/`, {
+    responseType: 'blob'
+  })
 }
 
 export async function getPublicAssistantQa(slug, params = {}) {

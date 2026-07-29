@@ -113,6 +113,19 @@ function sharedFile(uuid, filename, contentType, byteSize = 32) {
 }
 
 async function routeCompleteShare(page, outputFiles) {
+  await page.route(
+    `**/api/lens/public/qa/${SHARE_TOKEN}/pdf/`,
+    async (route) => {
+      await route.fulfill({
+        contentType: 'application/pdf',
+        headers: {
+          'Content-Disposition':
+            'attachment; filename="Complete shared turn.pdf"'
+        },
+        body: '%PDF-1.7\n%%EOF'
+      })
+    }
+  )
   await page.route(`**/api/lens/public/qa/${SHARE_TOKEN}/`, async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -157,7 +170,7 @@ test('shared page keeps question attachments and output files in context', async
   await expect(screen.getByText('report.html')).toBeVisible()
 })
 
-test('shared Q&A identifies the Agent and prints the complete turn', async ({
+test('shared Q&A identifies the Agent and downloads the complete turn', async ({
   page
 }) => {
   await routeCompleteShare(page, [
@@ -171,25 +184,11 @@ test('shared Q&A identifies the Agent and prints the complete turn', async ({
     screen.getByText('Answer from AI Agent “Deployment Agent”', { exact: true })
   ).toBeVisible()
 
-  await page.evaluate(() => {
-    window.print = () => {
-      document.documentElement.dataset.printRequested = 'true'
-    }
-  })
+  const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Export PDF' }).click()
-  await expect(page.locator('html')).toHaveAttribute(
-    'data-print-requested',
-    'true'
-  )
+  const download = await downloadPromise
 
-  await page.emulateMedia({ media: 'print' })
-  await expect(screen).toBeHidden()
-  const printable = page.locator('.qa-print-view')
-  await expect(printable).toBeVisible()
-  await expect(printable).toContainText('What does the attached diagram show?')
-  await expect(printable).toContainText('It shows the deployment flow.')
-  await expect(printable).toContainText('diagram.png')
-  await expect(printable).toContainText('report.html')
+  expect(download.suggestedFilename()).toBe('Complete shared turn.pdf')
 })
 
 test('shared HTML preview uses a blob URL and an empty sandbox', async ({

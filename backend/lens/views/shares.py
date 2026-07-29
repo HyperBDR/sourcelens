@@ -3,13 +3,15 @@
 import secrets
 
 from django.db.models import F
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils.http import content_disposition_header
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from lens.models import Assistant, SharedQA, SharedQAFile
+from lens.qa_pdf import build_qa_pdf_filename, render_qa_pdf
 from lens.serializers import (
     SharedQAAdminDetailSerializer,
     SharedQAAdminSerializer,
@@ -119,6 +121,48 @@ class PublicSharedQAView(APIView):
         )
         share.refresh_from_db(fields=["view_count"])
         return Response(SharedQAPublicSerializer(share).data)
+
+
+class PublicSharedQAPdfView(APIView):
+    """Download one shared Q&A as a styled text PDF."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, token):
+        """Return PDF bytes using the shared page's access rules."""
+
+        share = (
+            SharedQA.objects.select_related("assistant")
+            .filter(token=token, status=SharedQA.Status.PUBLISHED)
+            .first()
+        )
+        if share is None or share.assistant is None:
+            raise Http404
+        access_error = _shared_qa_access_error(share.assistant, request.user)
+        if access_error is not None:
+            return access_error
+        snapshot_shared_qa_files(share, strict=False)
+        input_files = share.files.filter(kind=SharedQAFile.Kind.INPUT)
+        output_files = share.files.filter(kind=SharedQAFile.Kind.OUTPUT)
+        pdf_bytes = render_qa_pdf(
+            title=share.title or share.question,
+            question=share.question,
+            answer=share.answer,
+            assistant_name=share.assistant_name,
+            published_at=share.published_at,
+            input_files=input_files,
+            output_files=output_files,
+            language_code=getattr(request, "LANGUAGE_CODE", "en"),
+        )
+        filename = build_qa_pdf_filename(share.title, share.question)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = content_disposition_header(
+            True,
+            filename,
+        )
+        response["Cache-Control"] = "private, max-age=0, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class PublicSharedQAFileView(APIView):

@@ -7,6 +7,7 @@ from django.db import transaction
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.http import content_disposition_header
 from rest_framework import permissions, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -25,6 +26,7 @@ from lens.models import (
     Session,
     SharedQA,
 )
+from lens.qa_pdf import build_qa_pdf_filename, render_qa_pdf
 from lens.serializers import (
     MessageAttachmentSerializer,
     MessageSerializer,
@@ -274,6 +276,38 @@ class RunViewSet(BaseAuthenticatedViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def pdf(self, request, uuid=None):
+        """Download one completed answer as a styled text PDF."""
+
+        run = self.get_object()
+        if run.status != Run.Status.DONE or run.output_message is None:
+            return Response(
+                {"detail": "RUN_NOT_EXPORTABLE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        question = run.input_message.content or ""
+        title = " ".join(question.split())[:80]
+        pdf_bytes = render_qa_pdf(
+            title=title,
+            question=question,
+            answer=run.output_message.content or "",
+            assistant_name=run.session.assistant.name,
+            published_at=run.output_message.created_at,
+            input_files=run.input_message.attachments.all(),
+            output_files=run.output_files.all(),
+            language_code=getattr(request, "LANGUAGE_CODE", "en"),
+        )
+        filename = build_qa_pdf_filename(run.session.title, question)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = content_disposition_header(
+            True,
+            filename,
+        )
+        response["Cache-Control"] = "private, max-age=0, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @action(
         detail=True,
