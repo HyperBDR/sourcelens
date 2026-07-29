@@ -173,7 +173,8 @@
                     <button
                       type="button"
                       class="session-action-btn session-action-confirm"
-                      :aria-label="t('common.confirm')"
+                      :aria-label="t('lens.chat.confirmDelete')"
+                      :title="t('lens.chat.confirmDelete')"
                       @click.stop="doDeleteSession(session)"
                     >
                       <svg
@@ -194,6 +195,7 @@
                       type="button"
                       class="session-action-btn session-action-cancel"
                       :aria-label="t('common.cancel')"
+                      :title="t('common.cancel')"
                       @click.stop="deletingSessionUuid = ''"
                     >
                       <svg
@@ -216,6 +218,7 @@
                       type="button"
                       class="session-rename-btn"
                       :aria-label="t('lens.chat.renameSession')"
+                      :title="t('lens.chat.renameSession')"
                       @click.stop="startRename(session)"
                     >
                       <svg
@@ -241,6 +244,7 @@
                       type="button"
                       class="session-delete-btn"
                       :aria-label="t('lens.chat.deleteSession')"
+                      :title="t('lens.chat.deleteSession')"
                       @click.stop="deletingSessionUuid = session.uuid"
                     >
                       <svg
@@ -678,6 +682,7 @@
                           type="button"
                           class="deliverable-action"
                           :title="t('lens.chat.preview')"
+                          :aria-label="t('lens.chat.preview')"
                           @click="openPreview(file)"
                         >
                           <Eye :size="18" />
@@ -686,6 +691,7 @@
                           type="button"
                           class="deliverable-action"
                           :title="t('lens.chat.download')"
+                          :aria-label="t('lens.chat.download')"
                           @click="downloadOutputFile(file)"
                         >
                           <Download :size="18" />
@@ -706,6 +712,8 @@
                   <button
                     type="button"
                     class="icon-btn"
+                    :title="t('common.copy')"
+                    :aria-label="t('common.copy')"
                     @click="copyMessage(message)"
                   >
                     <svg
@@ -763,6 +771,11 @@
                         ? t('lens.qa.sharedButton')
                         : t('lens.qa.shareButton')
                     "
+                    :aria-label="
+                      isMessageShared(message)
+                        ? t('lens.qa.sharedButton')
+                        : t('lens.qa.shareButton')
+                    "
                     @click="openShare(message)"
                   >
                     <svg
@@ -785,6 +798,8 @@
                   <button
                     type="button"
                     class="icon-btn"
+                    :title="t('lens.chat.retryAction')"
+                    :aria-label="t('lens.chat.retryAction')"
                     @click="retryLastQuestion"
                   >
                     <svg
@@ -806,18 +821,6 @@
                       />
                     </svg>
                   </button>
-                  <span
-                    v-if="message.feedback"
-                    class="message-feedback-status"
-                    :class="`is-${message.feedback}`"
-                  >
-                    <span class="message-feedback-dot" aria-hidden="true" />
-                    {{
-                      message.feedback === 'positive'
-                        ? t('lens.chat.feedbackRecordedHelpful')
-                        : t('lens.chat.feedbackRecordedUnhelpful')
-                    }}
-                  </span>
                 </div>
               </div>
             </div>
@@ -1192,9 +1195,10 @@
                     type="button"
                     class="composer-thumb-remove"
                     :aria-label="t('lens.chat.removeImage')"
+                    :title="t('lens.chat.removeImage')"
                     @click="removeAttachment(item)"
                   >
-                    ×
+                    <span aria-hidden="true">×</span>
                   </button>
                 </div>
               </div>
@@ -3342,24 +3346,6 @@ onBeforeUnmount(() => {
   color: #991b1b;
 }
 
-.message-feedback-status {
-  @apply ml-2 inline-flex h-7 items-center gap-2 rounded-full px-3 text-xs font-semibold;
-}
-
-.message-feedback-status.is-positive {
-  background: #ecfdf5;
-  color: #15803d;
-}
-
-.message-feedback-status.is-negative {
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.message-feedback-dot {
-  @apply h-2 w-2 rounded-full bg-current;
-}
-
 .icon-btn-shared {
   background: rgba(34, 197, 94, 0.1);
   color: #15803d;
@@ -3851,8 +3837,50 @@ onBeforeUnmount(() => {
 }
 
 .composer-thumb-remove {
-  @apply absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center
-    rounded-full bg-black/55 text-sm leading-none text-white;
+  @apply absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center;
+}
+
+.composer-thumb-remove span {
+  @apply flex h-5 w-5 items-center justify-center rounded-full bg-black/55
+    text-sm leading-none text-white;
+}
+
+@media (max-width: 767px), (hover: none), (pointer: coarse) {
+  .sidebar-collapse-btn,
+  .composer-action-btn,
+  .session-delete-btn,
+  .session-action-btn,
+  .session-rename-btn,
+  .icon-btn,
+  .composer-attach-btn,
+  .composer-thumb-remove {
+    @apply h-11 w-11;
+  }
+
+  .deliverable-action,
+  .retry-hint-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .session-delete-btn,
+  .session-rename-btn {
+    @apply opacity-100;
+  }
+
+  .composer-thumb-remove {
+    top: 0;
+    right: 0;
+  }
+
+  .message-actions {
+    flex-wrap: wrap;
+  }
+}
+
+.session-delete-btn:focus-visible,
+.session-rename-btn:focus-visible {
+  @apply opacity-100;
 }
 
 @keyframes spin {

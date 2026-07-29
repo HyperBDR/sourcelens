@@ -216,8 +216,6 @@
       "copyFailed": "Copy failed.",
       "feedbackHelpful": "Helpful",
       "feedbackUnhelpful": "Not helpful",
-      "feedbackRecordedHelpful": "Recorded: Helpful",
-      "feedbackRecordedUnhelpful": "Recorded: Not helpful",
       "feedbackFailed": "Failed to save feedback, please try again.",
       "downloadFailed": "Download failed, please try again.",
       "preview": "Preview",

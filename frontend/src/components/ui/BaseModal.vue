@@ -48,8 +48,9 @@
               </h3>
               <button
                 type="button"
-                class="flex-shrink-0 inline-flex items-center justify-center rounded-md p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1 transition-colors"
-                aria-label="Close"
+                class="modal-close-btn inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1"
+                :aria-label="t('common.close')"
+                :title="t('common.close')"
                 @click="$emit('close')"
               >
                 <svg
@@ -108,6 +109,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import {
   acquireBodyScrollLock,
@@ -116,6 +118,8 @@ import {
   unregisterDialog,
   releaseBodyScrollLock
 } from './dialogScrollLock'
+
+const { t } = useI18n()
 
 const props = defineProps({
   show: {
@@ -250,3 +254,14 @@ onBeforeUnmount(() => {
   if (typeof window !== 'undefined') deactivateDialog()
 })
 </script>
+
+<style scoped>
+@media (max-width: 767px), (hover: none), (pointer: coarse) {
+  .modal-close-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+</style>

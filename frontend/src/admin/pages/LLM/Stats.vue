@@ -17,7 +17,7 @@
         <div
           class="flex w-full flex-none flex-wrap items-end gap-6 sm:w-auto sm:min-w-0 sm:flex-1"
         >
-          <div class="flex flex-col gap-1.5">
+          <div class="stats-user-filter flex flex-col gap-1.5">
             <label
               class="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1"
             >
@@ -25,7 +25,7 @@
             </label>
             <select
               v-model="selectedUserId"
-              class="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 min-w-[140px] hover:border-gray-300 transition-colors"
+              class="stats-filter-control stats-user-select rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 min-w-[140px] hover:border-gray-300 transition-colors"
               @change="fetchStats"
             >
               <option value="">{{ t('llm.stats.allUsers') }}</option>
@@ -46,7 +46,7 @@
                 :key="opt.value"
                 type="button"
                 :class="[
-                  'px-4 py-1.5 text-xs font-semibold rounded-md transition-colors',
+                  'stats-granularity-btn px-4 py-1.5 text-xs font-semibold rounded-md transition-colors',
                   granularity === opt.value
                     ? 'bg-white text-primary-600 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700'
@@ -74,7 +74,7 @@
                 v-model="selectedDate"
                 type="date"
                 :lang="locale"
-                class="rounded-lg border border-gray-200 px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                class="stats-filter-control rounded-lg border border-gray-200 px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
                 @change="fetchStats"
               />
             </template>
@@ -83,14 +83,14 @@
                 v-model="selectedMonth"
                 type="month"
                 :lang="locale"
-                class="rounded-lg border border-gray-200 px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                class="stats-filter-control rounded-lg border border-gray-200 px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
                 @change="fetchStats"
               />
             </template>
             <template v-else-if="granularity === 'year'">
               <select
                 v-model.number="selectedYear"
-                class="rounded-lg border border-gray-200 px-3 py-2 text-sm w-24 bg-white focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                class="stats-filter-control rounded-lg border border-gray-200 px-3 py-2 text-sm w-24 bg-white focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
                 @change="fetchStats"
               >
                 <option v-for="y in yearOptions" :key="y" :value="y">
@@ -104,7 +104,7 @@
           <BaseButton
             variant="outline"
             size="sm"
-            class="flex items-center gap-2 px-4 py-2 bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-lg text-sm font-medium"
+            class="stats-refresh-btn flex items-center gap-2 px-4 py-2 bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-lg text-sm font-medium"
             @click="fetchStats"
           >
             <svg
@@ -793,3 +793,24 @@ onMounted(() => {
   fetchStats()
 })
 </script>
+
+<style scoped>
+@media (max-width: 767px), (hover: none), (pointer: coarse) {
+  .stats-user-filter,
+  .stats-user-select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .stats-filter-control,
+  .stats-granularity-btn,
+  :deep(.stats-refresh-btn) {
+    min-height: 44px;
+  }
+
+  .stats-granularity-btn {
+    min-width: 44px;
+  }
+}
+</style>
