@@ -366,15 +366,22 @@ class MCPServer(TimestampedUUIDModel):
 
 
 class DataSource(TimestampedUUIDModel):
-    """Independent synchronizer for external sources."""
+    """Cataloged external data resource bound to a LensNode."""
 
     class SourceType(models.TextChoices):
         GIT = "git", "Git"
         FEISHU = "feishu", "Feishu"
+        MANAGED_WORKSPACE = "managed_workspace", "Managed Workspace"
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         DISABLED = "disabled", "Disabled"
+
+    class AvailabilityStatus(models.TextChoices):
+        UNKNOWN = "unknown", "Unknown"
+        AVAILABLE = "available", "Available"
+        UNAVAILABLE = "unavailable", "Unavailable"
+        ERROR = "error", "Error"
 
     name = models.CharField(max_length=160)
     source_type = models.CharField(max_length=32, choices=SourceType.choices)
@@ -397,6 +404,13 @@ class DataSource(TimestampedUUIDModel):
     )
     last_synced_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True, default="")
+    availability_status = models.CharField(
+        max_length=16,
+        choices=AvailabilityStatus.choices,
+        default=AvailabilityStatus.UNKNOWN,
+    )
+    availability_checked_at = models.DateTimeField(null=True, blank=True)
+    availability_message = models.TextField(blank=True, default="")
     status = models.CharField(
         max_length=16,
         choices=Status.choices,

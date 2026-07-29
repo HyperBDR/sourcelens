@@ -19,7 +19,10 @@ from core.management.commands.register_periodic_tasks import (
 )
 from core.periodic_registry import TASK_REGISTRY
 from lens.consumers import LensNodeConsumer
-from lens.datasource_services import dispatch_datasource_sync_async
+from lens.datasource_services import (
+    DataSourceDispatchError,
+    dispatch_datasource_sync_async,
+)
 from lens.execution import execute_answer_run
 from lens.lensnode_auth import issue_lensnode_token
 from lens.models import (
@@ -1287,6 +1290,34 @@ class LensServiceTests(TransactionTestCase):
             self.assertGreaterEqual(len(steps), 2)
             self.assertEqual(steps[0]["name"], "prepare")
             self.assertEqual(steps[-1]["name"], "dispatch")
+
+    def test_managed_workspace_sync_is_blocked_at_task_and_dispatch_layers(
+        self,
+    ):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+
+        with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
+            self.assertEqual(source_sync_task(str(datasource.uuid)), 0)
+
+        dispatch.assert_not_called()
+        self.assertFalse(
+            ScheduledTask.objects.filter(target_id=datasource.uuid).exists()
+        )
+        self.assertFalse(
+            TaskExecution.objects.filter(
+                metadata__datasource_uuid=str(datasource.uuid)
+            ).exists()
+        )
+        with self.assertRaises(DataSourceDispatchError):
+            dispatch_datasource_sync_async(
+                datasource,
+                task_id="managed-sync",
+            )
 
     def test_source_sync_task_reuses_registered_task_id(self):
         task_id = "manual-sync"

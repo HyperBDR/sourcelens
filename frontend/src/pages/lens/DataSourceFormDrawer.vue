@@ -39,7 +39,7 @@
       </template>
     </div>
 
-    <div v-if="wizardStep === 1" class="space-y-5">
+    <div v-if="activeStepKey === 'basic'" class="space-y-5">
       <p class="text-sm text-ink-500">
         {{ t('lensAdmin.datasourceWizard.step1Desc') }}
       </p>
@@ -72,9 +72,15 @@
       </FormRow>
     </div>
 
-    <div v-else-if="wizardStep === 2" class="space-y-5">
+    <div v-else-if="activeStepKey === 'node'" class="space-y-5">
       <p class="text-sm text-ink-500">
-        {{ t('lensAdmin.datasourceWizard.step2Desc') }}
+        {{
+          t(
+            isManagedWorkspace
+              ? 'lensAdmin.datasourceWizard.managedNodeDesc'
+              : 'lensAdmin.datasourceWizard.step2Desc'
+          )
+        }}
       </p>
       <FormRow :label="t('lensAdmin.fields.lensnode')" required>
         <select v-model="form.lensnode_uuid" class="form-input" required>
@@ -101,7 +107,7 @@
       </div>
     </div>
 
-    <div v-else-if="wizardStep === 3" class="space-y-5">
+    <div v-else-if="activeStepKey === 'connection'" class="space-y-5">
       <p class="text-sm text-ink-500">
         {{ t('lensAdmin.datasourceWizard.step3Desc') }}
       </p>
@@ -436,12 +442,27 @@
       </div>
     </div>
 
-    <div v-else-if="wizardStep === 4" class="space-y-5">
+    <div v-else-if="activeStepKey === 'sync'" class="space-y-5">
       <p class="text-sm text-ink-500">
-        {{ t('lensAdmin.datasourceWizard.step4Desc') }}
+        {{
+          t(
+            isManagedWorkspace
+              ? 'lensAdmin.datasourceWizard.managedPathDesc'
+              : 'lensAdmin.datasourceWizard.step4Desc'
+          )
+        }}
       </p>
       <FormRow :label="t('lensAdmin.fields.targetPath')" required>
         <div class="space-y-3">
+          <input
+            v-if="isManagedWorkspace"
+            v-model="form.workspace_relative_path"
+            class="form-input font-mono"
+            :placeholder="
+              t('lensAdmin.datasourceWizard.managedPathPlaceholder')
+            "
+            @change="$emit('check-path')"
+          />
           <div
             class="rounded-md border border-line bg-surface-sunken px-3 py-2"
           >
@@ -489,6 +510,7 @@
                 {{ workspaceRoot }}
               </div>
               <button
+                v-if="!isManagedWorkspace"
                 class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
                 type="button"
                 :title="t('lensAdmin.datasourceWizard.createAtWorkspace')"
@@ -499,7 +521,7 @@
             </div>
             <div class="max-h-64 overflow-y-auto p-2">
               <div
-                v-if="creatingDirectoryParent === ''"
+                v-if="!isManagedWorkspace && creatingDirectoryParent === ''"
                 class="flex gap-1 px-2 py-1"
               >
                 <span class="h-7 w-7 shrink-0" />
@@ -572,6 +594,7 @@
                     <span class="truncate">{{ dir.name }}</span>
                   </button>
                   <button
+                    v-if="!isManagedWorkspace"
                     class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
                     type="button"
                     :title="t('lensAdmin.datasourceWizard.createTargetDir')"
@@ -581,7 +604,10 @@
                   </button>
                 </div>
                 <div
-                  v-if="creatingDirectoryParent === dir.relative"
+                  v-if="
+                    !isManagedWorkspace &&
+                    creatingDirectoryParent === dir.relative
+                  "
                   class="ml-5 flex gap-1 border-l border-line pl-10"
                 >
                   <input
@@ -644,6 +670,7 @@
                         <span class="truncate">{{ child.name }}</span>
                       </button>
                       <button
+                        v-if="!isManagedWorkspace"
                         class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
                         type="button"
                         :title="t('lensAdmin.datasourceWizard.createTargetDir')"
@@ -653,7 +680,10 @@
                       </button>
                     </div>
                     <div
-                      v-if="creatingDirectoryParent === child.relative"
+                      v-if="
+                        !isManagedWorkspace &&
+                        creatingDirectoryParent === child.relative
+                      "
                       class="ml-8 flex gap-1"
                     >
                       <input
@@ -690,13 +720,19 @@
         </div>
         <p class="mt-1 text-xs text-ink-500">
           {{
-            isGitOrganizationMode
-              ? t('lensAdmin.datasourceWizard.gitOrganizationPathHint')
-              : t('lensAdmin.datasourceWizard.pathHint')
+            isManagedWorkspace
+              ? t('lensAdmin.datasourceWizard.managedPathHint')
+              : isGitOrganizationMode
+                ? t('lensAdmin.datasourceWizard.gitOrganizationPathHint')
+                : t('lensAdmin.datasourceWizard.pathHint')
           }}
         </p>
       </FormRow>
-      <FormRow :label="t('lensAdmin.fields.syncPolicy')" required>
+      <FormRow
+        v-if="!isManagedWorkspace"
+        :label="t('lensAdmin.fields.syncPolicy')"
+        required
+      >
         <select v-model="syncPolicyMode" class="form-input w-56">
           <option value="interval">
             {{ t('lensAdmin.datasourceWizard.syncPolicyInterval') }}
@@ -707,7 +743,7 @@
         </select>
       </FormRow>
       <FormRow
-        v-if="syncPolicyMode === 'interval'"
+        v-if="!isManagedWorkspace && syncPolicyMode === 'interval'"
         :label="t('lensAdmin.fields.syncInterval')"
         required
       >
@@ -721,7 +757,7 @@
           {{ t('lensAdmin.datasourceWizard.intervalHint') }}
         </p>
       </FormRow>
-      <div v-else class="grid gap-4 md:grid-cols-2">
+      <div v-else-if="!isManagedWorkspace" class="grid gap-4 md:grid-cols-2">
         <FormRow :label="t('lensAdmin.fields.cron')" required>
           <input
             v-model="syncCron"
@@ -786,7 +822,7 @@
       </section>
     </div>
 
-    <div v-else-if="wizardStep === 5" class="space-y-5">
+    <div v-else-if="activeStepKey === 'conversion'" class="space-y-5">
       <p class="text-sm text-ink-500">
         {{ t('lensAdmin.datasourceWizard.step5Desc') }}
       </p>
@@ -1100,10 +1136,10 @@
         </div>
         <div class="flex items-center gap-3">
           <span class="text-xs text-ink-400">
-            {{ wizardStep }} / {{ WIZARD_STEP_COUNT }}
+            {{ wizardStep }} / {{ wizardStepCount }}
           </span>
           <BaseButton
-            v-if="wizardStep < WIZARD_STEP_COUNT"
+            v-if="wizardStep < wizardStepCount"
             variant="primary"
             :disabled="!canProceedWizard"
             @click="nextWizardStep"
@@ -1117,7 +1153,7 @@
             :disabled="
               !canProceedWizard ||
               pathResult?.status === 'blocked' ||
-              connectionResult?.status !== 'success'
+              (!isManagedWorkspace && connectionResult?.status !== 'success')
             "
             @click="$emit('save')"
           >
@@ -1192,7 +1228,6 @@ const emit = defineEmits([
 ])
 
 const { t } = useI18n()
-const WIZARD_STEP_COUNT = 5
 const wizardStep = ref(1)
 const creatingDirectoryParent = ref(null)
 const expandedDirectories = ref(new Set())
@@ -1358,6 +1393,11 @@ const sourceTypes = computed(() => [
     value: 'feishu',
     label: t('lensAdmin.datasourceWizard.feishu'),
     description: t('lensAdmin.datasourceWizard.feishuDesc')
+  },
+  {
+    value: 'managed_workspace',
+    label: t('lensAdmin.datasourceWizard.managedWorkspace'),
+    description: t('lensAdmin.datasourceWizard.managedWorkspaceDesc')
   }
 ])
 
@@ -1368,13 +1408,28 @@ const selectedSourceTypeDescription = computed(() => {
   return selected?.description || ''
 })
 
-const wizardStepsMeta = computed(() => [
-  { key: 'basic', title: t('lensAdmin.datasourceWizard.step1Title') },
-  { key: 'node', title: t('lensAdmin.datasourceWizard.step2Title') },
-  { key: 'connection', title: t('lensAdmin.datasourceWizard.step3Title') },
-  { key: 'sync', title: t('lensAdmin.datasourceWizard.step4Title') },
-  { key: 'conversion', title: t('lensAdmin.datasourceWizard.step5Title') }
-])
+const isManagedWorkspace = computed(
+  () => props.form.source_type === 'managed_workspace'
+)
+
+const wizardStepsMeta = computed(() => {
+  const steps = [
+    { key: 'basic', title: t('lensAdmin.datasourceWizard.step1Title') },
+    { key: 'node', title: t('lensAdmin.datasourceWizard.step2Title') },
+    { key: 'connection', title: t('lensAdmin.datasourceWizard.step3Title') },
+    { key: 'sync', title: t('lensAdmin.datasourceWizard.step4Title') },
+    { key: 'conversion', title: t('lensAdmin.datasourceWizard.step5Title') }
+  ]
+  if (isManagedWorkspace.value) {
+    return steps.filter((step) => ['basic', 'node', 'sync'].includes(step.key))
+  }
+  return steps
+})
+
+const wizardStepCount = computed(() => wizardStepsMeta.value.length)
+const activeStepKey = computed(
+  () => wizardStepsMeta.value[wizardStep.value - 1]?.key || 'basic'
+)
 
 const onlineLensNodes = computed(() =>
   props.lensnodes.filter(
@@ -1473,13 +1528,13 @@ const connectionResultMessage = computed(() => {
 })
 
 const canProceedWizard = computed(() => {
-  if (wizardStep.value === 1) {
+  if (activeStepKey.value === 'basic') {
     return !!props.form.name?.trim() && !!props.form.source_type
   }
-  if (wizardStep.value === 2) {
+  if (activeStepKey.value === 'node') {
     return !!props.form.lensnode_uuid
   }
-  if (wizardStep.value === 3) {
+  if (activeStepKey.value === 'connection') {
     if (props.connectionResult?.status !== 'success') {
       return false
     }
@@ -1499,6 +1554,9 @@ const canProceedWizard = computed(() => {
   }
   if (props.pathResult?.status === 'blocked' || !props.pathResult) {
     return false
+  }
+  if (isManagedWorkspace.value) {
+    return props.pathResult?.status === 'available'
   }
   if (syncPolicyMode.value === 'crontab') {
     return (
@@ -1637,7 +1695,7 @@ function credentialScopeUrl(credential) {
 }
 
 function nextWizardStep() {
-  if (wizardStep.value < WIZARD_STEP_COUNT) wizardStep.value++
+  if (wizardStep.value < wizardStepCount.value) wizardStep.value++
 }
 
 function prevWizardStep() {
