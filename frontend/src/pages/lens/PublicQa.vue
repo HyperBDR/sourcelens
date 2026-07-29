@@ -138,16 +138,6 @@
       @download="downloadFile"
     />
   </div>
-  <QaPrintView
-    v-if="qa"
-    :title="qa.title"
-    :question="qa.question"
-    :answer="qa.answer"
-    :assistant-name="qa.assistant_name"
-    :published-at="qa.published_at"
-    :input-attachments="qa.input_attachments || []"
-    :output-files="qa.output_files || []"
-  />
 </template>
 
 <script setup>
@@ -159,15 +149,15 @@ import { Bot, Copy, Download } from '@lucide/vue'
 import PublicLensHeader from '@/components/lens/PublicLensHeader.vue'
 import PublicQaAccessState from '@/components/lens/PublicQaAccessState.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
-import QaPrintView from '@/components/lens/QaPrintView.vue'
 import SharedQaFileList from '@/components/lens/SharedQaFileList.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
-import { getPublicQa } from '@/api/lens'
+import { getPublicQa, getPublicQaPdf } from '@/api/lens'
 import { copyToClipboard } from '@/utils/clipboard'
 import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
 import { fetchDeliverableBlob } from '@/utils/filePreview'
+import { downloadQaPdf } from '@/utils/qaPdf'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/store/user'
 
@@ -232,8 +222,16 @@ async function copyLink() {
   }
 }
 
-function exportPdf() {
-  window.print()
+async function exportPdf() {
+  try {
+    const response = await getPublicQaPdf(props.token)
+    downloadQaPdf(response, {
+      summary: qa.value?.title,
+      question: qa.value?.question
+    })
+  } catch {
+    showError(t('lens.chat.downloadFailed'))
+  }
 }
 
 function openPreview(file) {

@@ -56,17 +56,23 @@ COPY pyproject.toml /opt/backend/
 
 # Always install agentcore from the bundled, pinned submodules so image builds
 # cannot drift to an unpinned Git ref.
+ARG DEV_MODE=0
 RUN set -eux; \
     sed -i \
         -e 's#agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git#agentcore-metering @ file:///opt/backend/agentcore/agentcore-metering#' \
         -e 's#agentcore-task @ git+https://github.com/cloud2ai/agentcore-task.git#agentcore-task @ file:///opt/backend/agentcore/agentcore-task#' \
         -e 's#agentcore-notifier @ git+https://github.com/cloud2ai/agentcore-notifier.git#agentcore-notifier @ file:///opt/backend/agentcore/agentcore-notifier#' \
         pyproject.toml; \
+    compile_options=(); \
+    if [ "$DEV_MODE" = "1" ]; then \
+        compile_options+=(--extra dev); \
+    fi; \
     uv pip compile \
         pyproject.toml \
         -o requirements.txt \
         --index-url "$PIP_INDEX_URL" \
-        --trusted-host "$PIP_TRUSTED_HOST"; \
+        --trusted-host "$PIP_TRUSTED_HOST" \
+        "${compile_options[@]}"; \
     uv pip install \
         --python /opt/venv/bin/python \
         -r requirements.txt \
@@ -75,7 +81,6 @@ RUN set -eux; \
 
 # In dev mode, overlay editable agentcore installs so volume-mounted source
 # changes are picked up without rebuilding the image.
-ARG DEV_MODE=0
 RUN set -eux; \
     if [ "$DEV_MODE" = "1" ]; then \
         for d in /opt/backend/agentcore/*/; do \
@@ -135,8 +140,14 @@ RUN set -eux; \
         bash \
         ca-certificates \
         curl \
+        fonts-noto-cjk \
         git \
+        libharfbuzz-subset0 \
+        libjpeg62-turbo \
         libmagic1 \
+        libopenjp2-7 \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
         postgresql-client; \
     rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 
