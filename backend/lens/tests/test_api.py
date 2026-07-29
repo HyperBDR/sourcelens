@@ -38,6 +38,7 @@ from lens.models import (
     MCPServer,
     MessageAttachment,
     Run,
+    RunExecution,
     ScheduledTask,
     Session,
     SharedQA,
@@ -1691,6 +1692,53 @@ class LensApiTests(TestCase):
 
         self.assertEqual(str(context.exception), "ASSISTANT_ARCHIVED")
 
+    def test_dispatch_validates_the_frozen_execution_snapshot(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Question", enqueue=False)
+        self.assistant.selected_task = "general_chat"
+        self.assistant.selected_dirs = []
+        self.assistant.save(
+            update_fields=["selected_task", "selected_dirs"]
+        )
+        run = run.__class__.objects.select_related(
+            "execution",
+            "session__assistant",
+        ).get(pk=run.pk)
+
+        validate_run_dispatch(run)
+
+    def test_dispatch_rejects_invalid_frozen_snapshot_after_assistant_edit(self):
+        self.assistant.selected_task = "general_chat"
+        self.assistant.selected_dirs = []
+        self.assistant.save(
+            update_fields=["selected_task", "selected_dirs"]
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Question", enqueue=False)
+        self.assistant.selected_task = "knowledge_qa"
+        self.assistant.selected_dirs = [{"path": "/workspace/repo"}]
+        self.assistant.save(
+            update_fields=["selected_task", "selected_dirs"]
+        )
+        run = run.__class__.objects.select_related(
+            "execution",
+            "session__assistant",
+        ).get(pk=run.pk)
+
+        with self.assertRaises(LensNodeDispatchError) as context:
+            validate_run_dispatch(run)
+
+        self.assertEqual(
+            str(context.exception),
+            "GENERAL_CHAT_SKILL_REQUIRED",
+        )
+
     def test_runtime_resolves_environment_without_snapshot_plaintext(self):
         self.skill.definition = {
             "environment": [
@@ -2283,6 +2331,28 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_files"], [])
 
+    def test_admin_run_detail_uses_agent_rounds_snapshot(self):
+        from lens.models import Session
+        from lens.services import create_execution_run
+
+        self.assistant.agent_rounds = "max"
+        self.assistant.save(update_fields=["agent_rounds"])
+        session = Session.objects.create(
+            assistant=self.assistant, user=self.user
+        )
+        run = create_execution_run(
+            session=session, question="q", enqueue=False
+        )
+        self.assistant.agent_rounds = "flash"
+        self.assistant.save(update_fields=["agent_rounds"])
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{run.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["agent_rounds"], "max")
+
     def test_session_messages_use_run_finish_time_for_assistant(self):
         session, run, output = self._make_output_file()
         finished_at = timezone.now()
@@ -2468,6 +2538,10 @@ class LensApiTests(TestCase):
 
         self.assertEqual(cancel_response.status_code, 200)
         self.assertEqual(cancel_response.data["status"], "cancelled")
+        self.assertEqual(
+            cancel_response.data["execution"]["status"],
+            RunExecution.Status.CANCELLED,
+        )
 
     def test_completed_run_feedback_is_persisted_and_reported(self):
         session = Session.objects.create(

@@ -243,6 +243,9 @@ def _admin_run_detail(run):
     out = run.output_message
     assistant = run.session.assistant if run.session else None
     execution = run.execution if hasattr(run, "execution") else None
+    agent_rounds = execution.agent_rounds if execution else None
+    if agent_rounds is None and assistant:
+        agent_rounds = assistant.agent_rounds
     model_usage = _admin_run_model_usage(run)
     steps = []
     for step in run.steps.all():
@@ -282,7 +285,7 @@ def _admin_run_detail(run):
         "answer": (out.content if out else "") or "",
         "output_files": output_files,
         "error": run.error or "",
-        "agent_rounds": assistant.agent_rounds if assistant else None,
+        "agent_rounds": agent_rounds,
         "steps": steps,
         "execution": {
             "task": execution.task,
