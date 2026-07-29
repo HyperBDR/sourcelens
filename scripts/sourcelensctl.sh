@@ -57,7 +57,7 @@ cmd_status() {
     echo
     docker compose ps \
         "sourcelens-api-${color}" "sourcelens-ui-${color}" \
-        backend-worker backend-scheduler lensnode gotenberg nginx \
+        backend-worker backend-scheduler lensnode nginx \
         2>/dev/null || true
     echo
     if docker exec "sourcelens-api-${color}" \

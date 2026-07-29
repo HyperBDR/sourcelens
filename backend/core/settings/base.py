@@ -448,20 +448,6 @@ FILE_UPLOAD_MAX_NUMBER_FILES = 100
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Server-side Q&A PDF generation
-GOTENBERG_URL = os.getenv("GOTENBERG_URL", "http://gotenberg:3000").rstrip(
-    "/"
-)
-GOTENBERG_CONNECT_TIMEOUT_S = float(
-    os.getenv("GOTENBERG_CONNECT_TIMEOUT_S", "3")
-)
-GOTENBERG_REQUEST_TIMEOUT_S = float(
-    os.getenv("GOTENBERG_REQUEST_TIMEOUT_S", "30")
-)
-GOTENBERG_MAX_PDF_BYTES = int(
-    os.getenv("GOTENBERG_MAX_PDF_BYTES", str(25 * 1024 * 1024))
-)
-
 # ============================
 # Logging Configuration
 # ============================

@@ -31,7 +31,6 @@ from .shares import (
     AdminSharedQAViewSet,
     PublicSharedQAFileView,
     PublicSharedQAListView,
-    PublicSharedQAPdfView,
     PublicSharedQAView,
     SharedQAViewSet,
 )
@@ -57,7 +56,6 @@ __all__ = [
     "PublicAssistantView",
     "PublicSharedQAFileView",
     "PublicSharedQAListView",
-    "PublicSharedQAPdfView",
     "PublicSharedQAView",
     "RunOutputFileDownloadView",
     "RunViewSet",

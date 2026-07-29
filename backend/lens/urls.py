@@ -21,7 +21,6 @@ from .views import (
     PublicAssistantView,
     PublicSharedQAFileView,
     PublicSharedQAListView,
-    PublicSharedQAPdfView,
     PublicSharedQAView,
     RunOutputFileDownloadView,
     RunViewSet,
@@ -94,11 +93,6 @@ urlpatterns = [
         "public/qa/<str:token>/",
         PublicSharedQAView.as_view(),
         name="lens-public-qa",
-    ),
-    path(
-        "public/qa/<str:token>/export-pdf/",
-        PublicSharedQAPdfView.as_view(),
-        name="lens-public-qa-export-pdf",
     ),
     path(
         "public/qa/<str:token>/files/<uuid:uuid>/",
