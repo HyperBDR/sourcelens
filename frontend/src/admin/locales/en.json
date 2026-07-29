@@ -867,7 +867,6 @@
       "retentionDesc": "Delete historical runs older than the retention window."
     },
     "table": {
-      "toolSummary": "Skills {skills} / MCP {mcps}",
       "dirTaskSummary": "Dirs {dirs} / Tasks {tasks}",
       "notRecorded": "Not recorded",
       "intervalSeconds": "{seconds}s",
@@ -1134,6 +1133,23 @@
     "drawer": {
       "createTitle": "Create Assistant",
       "editTitle": "Edit Assistant"
+    },
+    "assistantDetail": {
+      "title": "Assistant details",
+      "overview": "Overview",
+      "workspaceDirectories": "Workspace directories",
+      "capabilities": "Capabilities",
+      "access": "Access",
+      "share": "Share",
+      "noDirectories": "No workspace directories selected",
+      "noSkills": "No Skills bound",
+      "noMcps": "No MCP Servers bound",
+      "noAuthorizedUsers": "No directly authorized users",
+      "noAuthorizedGroups": "No authorized groups",
+      "archiveTitle": "Archive assistant",
+      "archiveMessage": "Archive {name}? Links stop working until restored.",
+      "skillCount": "{count} Skills",
+      "mcpCount": "{count} MCP Servers"
     },
     "datasourceWizard": {
       "createTitle": "Create Data Source",
