@@ -8,6 +8,7 @@ from .models import Run, RunExecution, RunStep
 from .services import (
     LensNodeDispatchError,
     analyze_multimodal_intent,
+    build_loaded_skills,
     create_run_execution_snapshot,
     dispatch_run_to_lensnode,
     finish_lensnode_run,
@@ -106,12 +107,16 @@ def _lensnode_dispatch(state):
         # rather than dispatching an empty query.
         question = "请分析所附图片中的问题"
     with run_step(run, RunStep.StepType.RETRIEVAL, 1) as step:
-        validate_run_dispatch(run)
         execution = create_run_execution_snapshot(run)
-        execution.status = RunExecution.Status.RUNNING
+        execution.loaded_skills = build_loaded_skills(assistant)
+        execution.save(update_fields=["loaded_skills"])
+        validate_run_dispatch(run)
+        execution.status = RunExecution.Status.DISPATCHED
         execution.started_at = timezone.now()
         execution.save(update_fields=["status", "started_at"])
         dispatch_run_to_lensnode(run, question)
+        execution.status = RunExecution.Status.RUNNING
+        execution.save(update_fields=["status"])
         step.detail = {
             "lensnode_uuid": str(run.lensnode.uuid),
             "task": execution.task,

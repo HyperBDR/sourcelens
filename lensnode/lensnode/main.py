@@ -405,11 +405,7 @@ class LensNodeClient:
 
         LOGGER.info(
             task_log(
-                (
-                    "Starting to run command: run_start "
-                    f"{run_uuid}. The timeout is set to "
-                    f"{format_duration(self.config.request_timeout_s)}."
-                ),
+                f"Starting to run command: run_start {run_uuid}.",
                 details=[
                     f"Task: {message.get('task')}",
                     f"TargetDirs: {len(message.get('target_dirs') or [])}",

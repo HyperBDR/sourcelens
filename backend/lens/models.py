@@ -779,10 +779,12 @@ class RunExecution(models.Model):
     """Per-run execution snapshot dispatched to a LensNode."""
 
     class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
         DISPATCHED = "dispatched", "Dispatched"
         RUNNING = "running", "Running"
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
 
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     run = models.OneToOneField(
@@ -795,6 +797,13 @@ class RunExecution(models.Model):
     loaded_skills = models.JSONField(default=list, blank=True)
     loaded_mcps = models.JSONField(default=list, blank=True)
     target_dirs = models.JSONField(default=list, blank=True)
+    agent_rounds = models.CharField(
+        max_length=16,
+        choices=Assistant.AgentRounds.choices,
+        null=True,
+        default=None,
+    )
+    run_timeout_s = models.PositiveIntegerField(null=True, default=None)
     token_budget_profile = models.CharField(
         max_length=16,
         choices=Assistant.TokenBudgetProfile.choices,
@@ -807,7 +816,7 @@ class RunExecution(models.Model):
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
-        default=Status.DISPATCHED,
+        default=Status.QUEUED,
     )
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
