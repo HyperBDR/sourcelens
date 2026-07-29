@@ -1380,6 +1380,7 @@ import {
   shouldReviewUnreadSession,
   UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
+import { shouldShowRetryHint } from '@/pages/lens/chatRetryHint'
 import {
   activitiesForNode,
   applyRuntimeEvent,
@@ -1442,6 +1443,7 @@ const streamError = ref('')
 const failedRunError = ref(null)
 const queuePosition = ref(null)
 const currentRun = ref(null)
+const runStatusResolvingSessionUuid = ref('')
 const unreadSessions = ref(readUnreadSessions(window.localStorage))
 const loading = ref({ run: false })
 const streamController = ref(null)
@@ -1918,9 +1920,12 @@ const decoratedMessages = computed(() =>
 // retry-oriented hint (framed as a temporary hiccup, not a product fault)
 // instead of an empty bubble.
 const showRetryHint = computed(() => {
-  if (isRunActive.value) return false
-  const last = messages.value[messages.value.length - 1]
-  return !!last && last.role === 'assistant' && !(last.content || '').trim()
+  return shouldShowRetryHint({
+    isRunActive: isRunActive.value,
+    messages: messages.value,
+    runStatusResolving:
+      runStatusResolvingSessionUuid.value === selectedSessionUuid.value
+  })
 })
 
 // Map a backend run error code to a clear, blame-clarifying message: a
@@ -2124,6 +2129,7 @@ async function bootstrap() {
   // instead guarded inside submit() by binding to the session it started in.
   question.value = ''
   currentRun.value = null
+  runStatusResolvingSessionUuid.value = ''
   messages.value = []
   mySharesOpen.value = false
   resetStreamState()
@@ -2440,15 +2446,22 @@ async function selectSession(session, updateRoute = true) {
   const isCurrentLoad = () =>
     loadGeneration === sessionLoadGeneration &&
     selectedSessionUuid.value === session.uuid
+  const finishRunStatusResolution = () => {
+    if (isCurrentLoad()) {
+      runStatusResolvingSessionUuid.value = ''
+    }
+  }
   const sessionChanged = selectedSessionUuid.value !== session.uuid
   mySharesOpen.value = false
   clearAttachments()
   selectedSessionUuid.value = session.uuid
+  runStatusResolvingSessionUuid.value = session.uuid
   let loadedMessages
   try {
     loadedMessages = await listMessages(session.uuid)
   } catch (error) {
     if (!isCurrentLoad()) return
+    finishRunStatusResolution()
     if ([403, 404].includes(error?.response?.status)) {
       showError(t('lens.chat.sessionAccessDenied'))
       return
@@ -2474,7 +2487,11 @@ async function selectSession(session, updateRoute = true) {
   }
   await nextTick(scrollToBottom)
   if (!isCurrentLoad()) return
-  await maybeResumeActiveRun(session.uuid)
+  try {
+    await maybeResumeActiveRun(session.uuid, isCurrentLoad)
+  } finally {
+    finishRunStatusResolution()
+  }
   if (!isCurrentLoad()) return
   if (clearUnreadSession(window.localStorage, session.uuid)) {
     refreshUnreadSessions()
@@ -2484,7 +2501,7 @@ async function selectSession(session, updateRoute = true) {
 // If the session has a run still in progress (e.g. the user navigated away
 // mid-answer), re-attach the SSE stream so the live thinking panel and
 // streamed answer resume, then finalize like a normal run.
-async function maybeResumeActiveRun(sessionUuid) {
+async function maybeResumeActiveRun(sessionUuid, isCurrentLoad) {
   // the latest message carrying a run uuid (the user message of the most
   // recent turn) tells us whether that turn is still in progress
   const withRun = [...messages.value].reverse().find((m) => m.run)
@@ -2495,6 +2512,8 @@ async function maybeResumeActiveRun(sessionUuid) {
   } catch {
     return
   }
+  if (!isCurrentLoad()) return
+  runStatusResolvingSessionUuid.value = ''
   if (!['queued', 'running', 'streaming'].includes(run?.status)) {
     // A historically-failed turn keeps its retry hint with the right
     // (blame-clarifying) message after a reload, not just live.
@@ -2503,7 +2522,6 @@ async function maybeResumeActiveRun(sessionUuid) {
     }
     return
   }
-  if (selectedSessionUuid.value !== sessionUuid) return
   startCompletionTracking(run, sessionUuid)
   // hand the trailing in-progress assistant placeholder to the live row to
   // avoid showing it twice; the SSE sync replays its content and steps
@@ -2514,12 +2532,16 @@ async function maybeResumeActiveRun(sessionUuid) {
   currentRun.value = run
   try {
     await readSse(run.uuid)
-    currentRun.value = await getRun(run.uuid)
+    const restoredRun = await getRun(run.uuid)
+    if (!isCurrentLoad()) return
+    currentRun.value = restoredRun
   } catch {
     // stream aborted (e.g. the user switched sessions) — fall through
   }
-  if (selectedSessionUuid.value !== sessionUuid) return
-  messages.value = await listMessages(sessionUuid)
+  if (!isCurrentLoad()) return
+  const restoredMessages = await listMessages(sessionUuid)
+  if (!isCurrentLoad()) return
+  messages.value = restoredMessages
   resetStreamState()
 }
 
