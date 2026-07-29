@@ -540,8 +540,28 @@
                       </dt>
                       <dd class="overview-value tabular-nums">
                         {{ detail.structured_analysis_calls }}
+                        <template v-if="detail.structured_analysis_max_calls">
+                          / {{ detail.structured_analysis_max_calls }}
+                        </template>
                         <span
                           v-if="detail.structured_analysis_limit_hits"
+                          class="font-normal text-amber-600"
+                        >
+                          · {{ t('lensRuns.callLimitHit') }}
+                        </span>
+                      </dd>
+                    </div>
+                    <div v-if="detail.structured_validation_calls">
+                      <dt class="overview-label">
+                        {{ t('lensRuns.structuredValidationCalls') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ detail.structured_validation_calls }}
+                        <template v-if="detail.structured_validation_max_calls">
+                          / {{ detail.structured_validation_max_calls }}
+                        </template>
+                        <span
+                          v-if="detail.structured_validation_limit_hits"
                           class="font-normal text-amber-600"
                         >
                           · {{ t('lensRuns.callLimitHit') }}
@@ -833,6 +853,16 @@
                       {{
                         t('lensRuns.structuredAnalysisCallsCount', {
                           n: detail.structured_analysis_calls
+                        })
+                      }}
+                    </span>
+                    <span
+                      v-if="detail.structured_validation_calls"
+                      class="token-summary-pill"
+                    >
+                      {{
+                        t('lensRuns.structuredValidationCallsCount', {
+                          n: detail.structured_validation_calls
                         })
                       }}
                     </span>

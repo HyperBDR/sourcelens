@@ -68,6 +68,8 @@
     "artifactCallLimitHit": "已触发调用上限",
     "structuredAnalysisCalls": "结构化分析",
     "structuredAnalysisCallsCount": "{n} 次结构化分析",
+    "structuredValidationCalls": "完整性校验",
+    "structuredValidationCallsCount": "{n} 次完整性校验",
     "transformCalls": "Skill Transform",
     "transformCallsCount": "{n} 次 Transform 调用",
     "callLimitHit": "已触发调用上限",

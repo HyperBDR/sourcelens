@@ -48,6 +48,10 @@ def _admin_run_step_counts(run):
         "artifact_call_limit_hits": 0,
         "structured_analysis_calls": 0,
         "structured_analysis_limit_hits": 0,
+        "structured_analysis_max_calls": None,
+        "structured_validation_calls": 0,
+        "structured_validation_limit_hits": 0,
+        "structured_validation_max_calls": None,
         "transform_calls": 0,
         "transform_call_limit_hits": 0,
         "llm_calls": 0,
@@ -73,11 +77,31 @@ def _admin_run_step_counts(run):
             ):
                 counts["artifact_call_limit_hits"] += 1
             elif agent_event == "tool.analyze_structured_output.start":
-                counts["structured_analysis_calls"] += 1
+                if event.get("operation") == "validate_records":
+                    prefix = "structured_validation"
+                else:
+                    prefix = "structured_analysis"
+                counts[f"{prefix}_calls"] += 1
+                try:
+                    max_calls = max(int(event.get("max_calls") or 0), 0)
+                except (TypeError, ValueError):
+                    max_calls = 0
+                if max_calls:
+                    counts[f"{prefix}_max_calls"] = max_calls
             elif agent_event == (
                 "tool.analyze_structured_output.budget_exceeded"
             ):
-                counts["structured_analysis_limit_hits"] += 1
+                if event.get("operation") == "validate_records":
+                    prefix = "structured_validation"
+                else:
+                    prefix = "structured_analysis"
+                counts[f"{prefix}_limit_hits"] += 1
+                try:
+                    max_calls = max(int(event.get("max_calls") or 0), 0)
+                except (TypeError, ValueError):
+                    max_calls = 0
+                if max_calls:
+                    counts[f"{prefix}_max_calls"] = max_calls
             elif agent_event == "tool.run_skill_transform.start":
                 counts["transform_calls"] += 1
             elif agent_event == (
@@ -222,6 +246,18 @@ def _admin_run_row(run):
         "structured_analysis_calls": counts["structured_analysis_calls"],
         "structured_analysis_limit_hits": counts[
             "structured_analysis_limit_hits"
+        ],
+        "structured_analysis_max_calls": counts[
+            "structured_analysis_max_calls"
+        ],
+        "structured_validation_calls": counts[
+            "structured_validation_calls"
+        ],
+        "structured_validation_limit_hits": counts[
+            "structured_validation_limit_hits"
+        ],
+        "structured_validation_max_calls": counts[
+            "structured_validation_max_calls"
         ],
         "transform_calls": counts["transform_calls"],
         "transform_call_limit_hits": counts[

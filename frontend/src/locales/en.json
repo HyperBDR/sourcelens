@@ -264,6 +264,7 @@
         "activityCompleted": "Completed {count} activities",
         "blockedTitle": "Capability unavailable",
         "executionFailedTitle": "Capability execution failed",
+        "verificationFailedTitle": "Result verification incomplete",
         "artifactTitle": "Artifact ready",
         "outcomePartial": "Completed with limitations. Review the missing capability or unfinished items above.",
         "outcomeBlocked": "This request did not complete. Review the runtime details and retry.",

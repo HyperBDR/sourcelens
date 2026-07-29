@@ -230,12 +230,30 @@ class AttachmentServiceTests(TestCase):
                     {
                         "agent_event": (
                             "tool.analyze_structured_output.start"
-                        )
+                        ),
+                        "operation": "count",
+                        "max_calls": 6,
                     },
                     {
                         "agent_event": (
                             "tool.analyze_structured_output.budget_exceeded"
-                        )
+                        ),
+                        "operation": "count",
+                        "max_calls": 6,
+                    },
+                    {
+                        "agent_event": (
+                            "tool.analyze_structured_output.start"
+                        ),
+                        "operation": "validate_records",
+                        "max_calls": 1,
+                    },
+                    {
+                        "agent_event": (
+                            "tool.analyze_structured_output.budget_exceeded"
+                        ),
+                        "operation": "validate_records",
+                        "max_calls": 1,
                     },
                     {
                         "agent_event": "tool.run_skill_transform.start"
@@ -257,6 +275,10 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(counts["artifact_call_limit_hits"], 1)
         self.assertEqual(counts["structured_analysis_calls"], 1)
         self.assertEqual(counts["structured_analysis_limit_hits"], 1)
+        self.assertEqual(counts["structured_analysis_max_calls"], 6)
+        self.assertEqual(counts["structured_validation_calls"], 1)
+        self.assertEqual(counts["structured_validation_limit_hits"], 1)
+        self.assertEqual(counts["structured_validation_max_calls"], 1)
         self.assertEqual(counts["transform_calls"], 1)
         self.assertEqual(counts["transform_call_limit_hits"], 1)
         self.assertEqual(counts["subagent_count"], 0)
@@ -268,6 +290,10 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(detail["artifact_call_limit_hits"], 1)
         self.assertEqual(detail["structured_analysis_calls"], 1)
         self.assertEqual(detail["structured_analysis_limit_hits"], 1)
+        self.assertEqual(detail["structured_analysis_max_calls"], 6)
+        self.assertEqual(detail["structured_validation_calls"], 1)
+        self.assertEqual(detail["structured_validation_limit_hits"], 1)
+        self.assertEqual(detail["structured_validation_max_calls"], 1)
         self.assertEqual(detail["transform_calls"], 1)
         self.assertEqual(detail["transform_call_limit_hits"], 1)
         self.assertEqual(detail["subagent_denied_count"], 1)

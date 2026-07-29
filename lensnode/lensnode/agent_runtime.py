@@ -312,6 +312,10 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
     """Apply bounded recovery without stopping the whole agent run."""
 
     CAPABILITY_CORRECTION_LIMIT = 4
+    TOOL_BUDGET_ERRORS = {
+        "STRUCTURED_ANALYSIS_CALL_LIMIT",
+        "STRUCTURED_VALIDATION_CALL_LIMIT",
+    }
 
     def __init__(
         self,
@@ -493,6 +497,11 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             payload = {"ok": False, "error": "MCP_TOOL_FAILED"}
         if payload.get("ok") is True:
             self._record_success(capability)
+            if payload.get("call_budget_exhausted") is True:
+                self.blocked_tools.add(tool_name)
+            return result
+        if str(payload.get("error") or "") in self.TOOL_BUDGET_ERRORS:
+            self.blocked_tools.add(tool_name)
             return result
         if capability is None:
             return result
@@ -1303,10 +1312,17 @@ class LensDeepAgentRuntime:
                 runtime_evidence=runtime_evidence,
             )
             if outcome == "blocked" and capability_middleware is not None:
-                emit_user_event(
-                    "execution.failed",
-                    termination_detail,
-                )
+                reason = termination_detail.get("reason")
+                if reason == "execution_failed":
+                    emit_user_event(
+                        "execution.failed",
+                        termination_detail,
+                    )
+                elif reason == "evidence_unavailable":
+                    emit_user_event(
+                        "verification.failed",
+                        termination_detail,
+                    )
                 answer = _unverified_execution_answer(
                     question,
                     termination_detail,
@@ -1621,7 +1637,56 @@ def _select_general_chat_route(
     except Exception:
         LOGGER.exception("General Chat route classification failed")
         return _parse_route_decision("")
-    return _parse_route_decision(getattr(response, "content", ""))
+    decision = _parse_route_decision(getattr(response, "content", ""))
+    return _normalize_route_evidence_capabilities(
+        decision,
+        available_tools,
+    )
+
+
+def _normalize_route_evidence_capabilities(decision, available_tools):
+    """Repair incomplete route evidence using available evidence families."""
+
+    normalized = dict(decision)
+    capability_order = (
+        "skill",
+        "mcp",
+        "workspace",
+        "artifact_delivery",
+    )
+    required = [
+        capability
+        for capability in normalized.get("required_capabilities") or []
+        if capability in capability_order
+    ]
+    evidence_requirement = normalized.get("evidence_requirement")
+    if evidence_requirement == "tool_result":
+        required = [
+            capability
+            for capability in required
+            if capability in {"skill", "mcp", "workspace"}
+        ]
+    if evidence_requirement == "tool_result" and not required:
+        available_capabilities = {
+            CapabilityBoundaryMiddleware._evidence_capability(
+                str(getattr(tool, "name", "") or "")
+            )
+            for tool in available_tools or []
+        }
+        required.extend(
+            capability
+            for capability in capability_order
+            if capability in {"skill", "mcp", "workspace"}
+            and capability in available_capabilities
+            and capability not in required
+        )
+    if (
+        evidence_requirement == "artifact"
+        and "artifact_delivery" not in required
+    ):
+        required.append("artifact_delivery")
+    normalized["required_capabilities"] = required
+    return normalized
 
 
 def _capability_termination_detail(capability, tool=""):
@@ -1768,6 +1833,18 @@ def _finalize_runtime_outcome(
             "partial" if useful_evidence else "blocked",
             termination_detail,
         )
+
+    delivered_artifact_wrapup = (
+        truncated
+        and stop_reason in {"token_budget_wrapup", "token_capped"}
+        and "artifact_delivery" in successful
+        and (
+            evidence_requirement == "artifact"
+            or bool(relevant_successes)
+        )
+    )
+    if delivered_artifact_wrapup:
+        return "completed", {}
 
     record_validation = (runtime_evidence or {}).get(
         "record_validation"

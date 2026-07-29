@@ -6,6 +6,7 @@ PUBLIC_EVENT_TYPES = {
     "artifact.created",
     "capability.blocked",
     "execution.failed",
+    "verification.failed",
     "phase.changed",
     "plan.updated",
     "route.selected",
@@ -458,7 +459,11 @@ def _sanitize_payload(event_type, payload):
         if summary:
             output["summary"] = summary
         return output
-    if event_type in {"capability.blocked", "execution.failed"}:
+    if event_type in {
+        "capability.blocked",
+        "execution.failed",
+        "verification.failed",
+    }:
         return sanitize_termination_detail(payload)
     if event_type == "artifact.created":
         output = {

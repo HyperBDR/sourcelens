@@ -610,11 +610,25 @@
                 </div>
 
                 <div
+                  v-if="message._runtimeState?.verificationFailure"
+                  class="runtime-outcome-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.verificationFailedTitle') }}
+                  </div>
+                  <div>
+                    {{ verificationFailureRecovery(message._runtimeState) }}
+                  </div>
+                </div>
+
+                <div
                   v-if="
                     message._runtimeState?.outcome === 'partial' ||
                     (message._runtimeState?.outcome === 'blocked' &&
                       !message._runtimeState?.capabilityBlock &&
-                      !message._runtimeState?.executionFailure)
+                      !message._runtimeState?.executionFailure &&
+                      !message._runtimeState?.verificationFailure)
                   "
                   class="runtime-outcome-card"
                   role="status"
@@ -1134,6 +1148,19 @@
                 </div>
 
                 <div
+                  v-if="runtimeState.verificationFailure"
+                  class="runtime-outcome-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.verificationFailedTitle') }}
+                  </div>
+                  <div>
+                    {{ verificationFailureRecovery(runtimeState) }}
+                  </div>
+                </div>
+
+                <div
                   v-if="runtimeState.artifacts.length"
                   class="runtime-artifact-card"
                   role="status"
@@ -1154,7 +1181,8 @@
                     runtimeState.outcome === 'partial' ||
                     (runtimeState.outcome === 'blocked' &&
                       !runtimeState.capabilityBlock &&
-                      !runtimeState.executionFailure)
+                      !runtimeState.executionFailure &&
+                      !runtimeState.verificationFailure)
                   "
                   class="runtime-outcome-card"
                   role="status"
@@ -1898,6 +1926,10 @@ function capabilityRecovery(block) {
 
 function executionFailureRecovery(state) {
   return capabilityRecovery(state?.executionFailure)
+}
+
+function verificationFailureRecovery(state) {
+  return capabilityRecovery(state?.verificationFailure)
 }
 
 const decoratedMessages = computed(() =>

@@ -708,6 +708,24 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(event["payload"]["reason"], "execution_failed")
         self.assertEqual(event["payload"]["error_type"], "transient")
 
+    def test_verification_failure_event_is_distinct(self):
+        event = sanitize_runtime_event({
+            "event_type": "verification.failed",
+            "visibility": "user",
+            "payload": {
+                "reason": "evidence_unavailable",
+                "capability": "skill",
+                "error_type": "verification",
+            },
+        })
+
+        self.assertEqual(event["event_type"], "verification.failed")
+        self.assertEqual(
+            event["payload"]["reason"],
+            "evidence_unavailable",
+        )
+        self.assertEqual(event["payload"]["error_type"], "verification")
+
     def test_runtime_event_rejects_unknown_phase_and_status_values(self):
         phase_event = sanitize_runtime_event({
             "agent_event": "secret-token",
