@@ -88,6 +88,35 @@ def test_resolve_token_budget_uses_profile_and_clamps_to_node_ceiling():
     }
 
 
+def test_resolve_token_budget_disables_cap_for_unlimited_profile():
+    config = type(
+        "Config",
+        (),
+        {
+            "token_budget_max_tokens": 200000,
+            "token_budget_hard_max_tokens": 500000,
+            "token_budget_final_reserve_tokens": 40000,
+        },
+    )()
+
+    budget = _resolve_token_budget(
+        config,
+        {
+            "token_budget": {
+                "profile": "unlimited",
+                "max_tokens": 500000,
+                "final_reserve_tokens": 75000,
+            }
+        },
+    )
+
+    assert budget == {
+        "profile": "unlimited",
+        "max_tokens": 0,
+        "final_reserve_tokens": 0,
+    }
+
+
 def test_load_config_reads_mcp_runtime_limits(monkeypatch):
     monkeypatch.setenv("LENSNODE_MCP_DISCOVERY_TIMEOUT_S", "12")
     monkeypatch.setenv("LENSNODE_MCP_TOOL_TIMEOUT_S", "45")

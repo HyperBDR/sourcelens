@@ -127,6 +127,7 @@ class Assistant(TimestampedUUIDModel):
     class TokenBudgetProfile(models.TextChoices):
         STANDARD = "standard", "Standard"
         DEEP = "deep", "Deep"
+        UNLIMITED = "unlimited", "Unlimited"
 
     objects = AssistantQuerySet.as_manager()
 

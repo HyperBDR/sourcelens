@@ -441,6 +441,40 @@ class LensServiceTests(TransactionTestCase):
             },
         )
         self.assertEqual(execution.token_budget_profile, "deep")
+        self.assertEqual(payload["trace_context"]["trace_id"], run.uuid.hex)
+        self.assertEqual(
+            len(payload["trace_context"]["root_observation_id"]),
+            32,
+        )
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_disables_token_cap_for_unlimited_profile(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        self.assistant.token_budget_profile = "unlimited"
+        self.assistant.save(update_fields=["token_budget_profile"])
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze without a token cap",
+            enqueue=False,
+        )
+
+        dispatch_run_to_lensnode(run, "Analyze without a token cap")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            payload["token_budget"],
+            {
+                "profile": "unlimited",
+                "max_tokens": 0,
+                "final_reserve_tokens": 0,
+            },
+        )
+        self.assertEqual(run.execution.token_budget_profile, "unlimited")
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")

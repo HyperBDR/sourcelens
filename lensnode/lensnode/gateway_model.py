@@ -4,8 +4,10 @@ import logging
 import re
 import threading
 import time
+import uuid
 from collections import Counter, deque
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
 import httpx
@@ -15,11 +17,17 @@ from langchain_core.messages.tool import invalid_tool_call
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import PrivateAttr
+from pydantic import Field, PrivateAttr
 
 from .tls import create_ssl_context
 
 LOGGER = logging.getLogger("lensnode")
+
+
+def _utc_timestamp():
+    """Return an ingestion-compatible UTC timestamp."""
+
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 SAFETY_FINISH_REASONS = {
     "blocked",
@@ -173,6 +181,9 @@ class LensGatewayChatModel(BaseChatModel):
     on_activity: Optional[Any] = None
     cancel_event: Optional[Any] = None
     run_uuid: str = ""
+    trace_context: dict[str, Any] = Field(default_factory=dict)
+    emit_observation: Optional[Any] = None
+    observation_name: str = "agent"
     general_chat_execution_gates: bool = False
     token_budget_max_tokens: int = 200000
     token_budget_final_reserve_tokens: int = 40000
@@ -286,13 +297,27 @@ class LensGatewayChatModel(BaseChatModel):
             "model_ref": self.model_ref,
             "messages": gateway_messages,
         }
+        observation_name = self._model_observation_name(kwargs)
+        observation_id = self._start_model_observation(observation_name)
         if self.run_uuid:
             payload["run_uuid"] = self.run_uuid
             payload["is_subagent"] = _in_subagent_context()
+        if observation_id:
+            payload["trace_context"] = {
+                "parent_observation_id": observation_id,
+                "generation_name": observation_name.replace(
+                    "model.",
+                    "llm.",
+                    1,
+                ),
+            }
         if not control_call and kwargs.get("tools") is not None:
             payload["tools"] = kwargs["tools"]
         if not control_call and kwargs.get("tool_choice") is not None:
             payload["tool_choice"] = kwargs["tool_choice"]
+        if kwargs.get("runtime_final_synthesis"):
+            payload.pop("tools", None)
+            payload.pop("tool_choice", None)
         completed_plan_followup = _follows_completed_plan(messages)
         if completed_plan_followup:
             payload.pop("tools", None)
@@ -309,30 +334,48 @@ class LensGatewayChatModel(BaseChatModel):
             payload["max_tokens"] = kwargs["max_tokens"]
 
         if self.emit_output is not None and not control_call:
-            return self._generate_streaming(
-                payload,
-                publish_tokens=(
-                    bool(kwargs.get("runtime_final_synthesis"))
-                    or completed_plan_followup
-                ),
-            )
+            try:
+                result = self._generate_streaming(
+                    payload,
+                    publish_tokens=(
+                        bool(kwargs.get("runtime_final_synthesis"))
+                        or completed_plan_followup
+                    ),
+                )
+            except Exception as exc:
+                self._finish_model_observation(
+                    observation_id,
+                    "failed",
+                    exc,
+                )
+                raise
+            self._finish_model_observation(observation_id, "done")
+            return result
 
         payload["return_message"] = True
         start = time.monotonic()
-        with _http_client_context(
-            self.http_client,
-            timeout=self.request_timeout_s,
-            tls_skip_verify=self.tls_skip_verify,
-            tls_ca_file=self.tls_ca_file,
-        ) as client:
-            response = client.post(
-                self.ai_gateway_url,
-                headers={"Authorization": f"Bearer {self.token}"},
-                json=payload,
+        try:
+            with _http_client_context(
+                self.http_client,
                 timeout=self.request_timeout_s,
+                tls_skip_verify=self.tls_skip_verify,
+                tls_ca_file=self.tls_ca_file,
+            ) as client:
+                response = client.post(
+                    self.ai_gateway_url,
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    json=payload,
+                    timeout=self.request_timeout_s,
+                )
+                response.raise_for_status()
+                data = response.json()
+        except Exception as exc:
+            self._finish_model_observation(
+                observation_id,
+                "failed",
+                exc,
             )
-            response.raise_for_status()
-            data = response.json()
+            raise
 
         message = _message_from_gateway(data.get("message") or {})
         message.response_metadata["usage"] = data.get("usage") or {}
@@ -341,10 +384,60 @@ class LensGatewayChatModel(BaseChatModel):
         )
         message = self._apply_token_budget(message, data.get("usage") or {})
         message = self._apply_loop_detection(message)
+        self._finish_model_observation(observation_id, "done")
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": data.get("usage") or {}},
         )
+
+    def _model_observation_name(self, kwargs):
+        """Return the bounded model transport span name for one call."""
+
+        if kwargs.get("runtime_control_call"):
+            suffix = "control"
+        elif kwargs.get("runtime_final_synthesis"):
+            suffix = "final_synthesis"
+        else:
+            suffix = self.observation_name
+        return f"model.{suffix}"
+
+    def _start_model_observation(self, name):
+        """Emit a model transport span start event when tracing is active."""
+
+        root_id = (self.trace_context or {}).get("root_observation_id")
+        if self.emit_observation is None or not root_id:
+            return None
+        observation_id = uuid.uuid4().hex[:16]
+        self.emit_observation(
+            {
+                "action": "start",
+                "id": observation_id,
+                "parent_observation_id": root_id,
+                "name": name,
+                "started_at": _utc_timestamp(),
+            }
+        )
+        return observation_id
+
+    def _finish_model_observation(
+        self,
+        observation_id,
+        status,
+        error=None,
+    ):
+        """Emit a model transport span end event without error text."""
+
+        if self.emit_observation is None or not observation_id:
+            return
+        event = {
+            "action": "end",
+            "id": observation_id,
+            "status": status,
+            "ended_at": _utc_timestamp(),
+        }
+        if error is not None:
+            event["error_type"] = type(error).__name__
+        self.emit_observation(event)
 
     def _generate_streaming(self, payload, *, publish_tokens=False):
         """Consume a gateway stream and publish only a final answer turn."""

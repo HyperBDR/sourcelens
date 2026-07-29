@@ -1421,7 +1421,9 @@
       "standardHint": "200K total · 40K reserved for the final answer",
       "deep": "Deep",
       "deepHint": "500K total · 75K reserved for the final answer",
-      "nodeLimitHint": "The LensNode hard limit remains the final safety ceiling."
+      "unlimited": "Unlimited",
+      "unlimitedHint": "No cumulative token cap · other run safety limits still apply",
+      "nodeLimitHint": "Unlimited only disables the cumulative token cap. Run time, maximum rounds, and other safety limits still apply."
     },
     "messages": {
       "loadFailed": "Failed to load Lens admin data",

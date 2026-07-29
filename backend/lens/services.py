@@ -26,6 +26,11 @@ from .models import (
     RunStep,
 )
 from .runtime_events import public_step_detail, sanitize_termination_detail
+from .trace_context import (
+    root_observation_id_for_run,
+    trace_id_for_run,
+)
+from .trace_export import export_run_trace
 
 logger = logging.getLogger(__name__)
 
@@ -581,6 +586,10 @@ TOKEN_BUDGET_PROFILES = {
         "max_tokens": 500000,
         "final_reserve_tokens": 75000,
     },
+    Assistant.TokenBudgetProfile.UNLIMITED: {
+        "max_tokens": 0,
+        "final_reserve_tokens": 0,
+    },
 }
 
 RUN_TIMEOUT_SECONDS_BY_ROUNDS = {
@@ -790,6 +799,12 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                 ),
                 "agent_rounds": agent_rounds,
                 "run_timeout_s": run_timeout_s,
+                "trace_context": {
+                    "trace_id": trace_id_for_run(run.uuid),
+                    "root_observation_id": root_observation_id_for_run(
+                        run.uuid
+                    ),
+                },
                 "token_budget": {
                     "profile": execution.token_budget_profile,
                     "max_tokens": execution.token_budget_max_tokens,
@@ -1030,8 +1045,26 @@ def finish_lensnode_run(
         run.session.title = run.input_message.content[:160]
         run.session.save(update_fields=["title", "updated_at"])
 
+    if _run_has_trace_observations(run):
+        transaction.on_commit(
+            lambda run_pk=run.pk: export_run_trace(run_pk)
+        )
+
     _promote_next_queued_run(run.session.assistant)
     return run
+
+
+def _run_has_trace_observations(run):
+    """Return whether persisted RunStep events contain an observation."""
+
+    for detail in run.steps.values_list("detail", flat=True):
+        for event in (detail or {}).get("events", []):
+            if isinstance(event, dict) and isinstance(
+                event.get("observation"),
+                dict,
+            ):
+                return True
+    return False
 
 
 def _promote_next_queued_run(assistant):
