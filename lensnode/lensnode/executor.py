@@ -168,8 +168,8 @@ TASKS = [
 class LensNodeExecutor:
     """Translate LensNode protocol commands into Deep Agents execution."""
 
-    def __init__(self, config):
-        self.agent = LensDeepAgentRuntime(config)
+    def __init__(self, config, http_client=None):
+        self.agent = LensDeepAgentRuntime(config, http_client=http_client)
 
     async def execute(self, command, emit):
         """Execute one run_start command and emit protocol frames."""
