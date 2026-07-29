@@ -3,7 +3,10 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("lens", "0027_run_feedback"),
+        (
+            "lens",
+            "0028_runexecution_agent_rounds_runexecution_run_timeout_s",
+        ),
     ]
 
     operations = [
