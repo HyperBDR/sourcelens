@@ -16,6 +16,7 @@
     "previous": "上一页",
     "pageInfo": "第 {current} 页，共 {total} 页",
     "submit": "提交",
+    "stop": "停止",
     "submitting": "提交中…",
     "search": "搜索",
     "filter": "筛选",
