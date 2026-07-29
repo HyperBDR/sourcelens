@@ -810,7 +810,7 @@
                     class="icon-btn"
                     :title="t('lens.chat.retryAction')"
                     :aria-label="t('lens.chat.retryAction')"
-                    @click="retryLastQuestion"
+                    @click="retryLastQuestion(message)"
                   >
                     <svg
                       viewBox="0 0 24 24"
@@ -1379,6 +1379,7 @@ import {
   shouldReviewUnreadSession,
   UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
+import { precedingUserMessage } from '@/pages/lens/chatMessageContext'
 import { shouldShowRetryHint } from '@/pages/lens/chatRetryHint'
 import {
   activitiesForNode,
@@ -2907,24 +2908,17 @@ function questionForMessage(message) {
 }
 
 function userMessageForMessage(message) {
-  const list = messages.value
-  const idx = list.findIndex((item) => item.uuid === message.uuid)
-  for (let i = idx - 1; i >= 0; i -= 1) {
-    if (list[i].role === 'user') {
-      return list[i]
-    }
-  }
-  return null
+  return precedingUserMessage(messages.value, message)
 }
 
-function retryLastQuestion() {
-  const lastUserMessage = [...messages.value]
-    .reverse()
-    .find((message) => message.role === 'user')
-  if (!lastUserMessage) {
+function retryLastQuestion(message = null) {
+  const userMessage = message
+    ? userMessageForMessage(message)
+    : [...messages.value].reverse().find((item) => item.role === 'user')
+  if (!userMessage) {
     return
   }
-  question.value = lastUserMessage.content || ''
+  question.value = userMessage.content || ''
   nextTick(() => {
     composerRef.value?.focus()
   })
