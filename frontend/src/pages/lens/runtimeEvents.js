@@ -45,6 +45,33 @@ export function calculateRunElapsedSeconds(run, nowMs = Date.now()) {
   return Math.max(0, Math.floor((finishedMs - createdMs) / 1000))
 }
 
+export function formatDuration(seconds) {
+  if (seconds == null) return ''
+  const roundedSeconds = Math.round(seconds)
+  if (roundedSeconds < 60) return `${roundedSeconds}s`
+  return `${Math.floor(roundedSeconds / 60)}m ${roundedSeconds % 60}s`
+}
+
+export function formatActivityProgressText(
+  activities,
+  { durationSeconds = null, terminal = false, translate }
+) {
+  const count = activities.reduce(
+    (total, item) => total + Number(item.count || 1),
+    0
+  )
+  let text = translate(
+    terminal
+      ? 'lens.chat.runtime.activityCompleted'
+      : 'lens.chat.runtime.activityProgress',
+    { count }
+  )
+  if (durationSeconds != null) {
+    text += ` · ${formatDuration(durationSeconds)}`
+  }
+  return text
+}
+
 export function getMessageTimestamp(message) {
   if (message?.role === 'assistant' && message.completed_at) {
     return message.completed_at
