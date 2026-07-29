@@ -1,3 +1,11 @@
+export async function resolveRunStatus(getRun, runUuid) {
+  try {
+    return { resolved: true, run: await getRun(runUuid) }
+  } catch {
+    return { resolved: false, run: null }
+  }
+}
+
 export function shouldShowRetryHint({
   isRunActive,
   messages,

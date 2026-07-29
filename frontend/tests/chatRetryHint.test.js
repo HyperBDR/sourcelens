@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { shouldShowRetryHint } from '../src/pages/lens/chatRetryHint.js'
+import {
+  resolveRunStatus,
+  shouldShowRetryHint
+} from '../src/pages/lens/chatRetryHint.js'
 
 const emptyAnswerMessages = [
   { role: 'user', content: 'What changed?' },
@@ -80,4 +83,29 @@ test('does not show retry guidance when the last message has answer text', () =>
     }),
     false
   )
+})
+
+test('keeps retry guidance hidden when run status cannot be loaded', async () => {
+  const resolution = await resolveRunStatus(async () => {
+    throw new Error('temporary network failure')
+  }, 'run-uuid')
+
+  assert.deepEqual(resolution, { resolved: false, run: null })
+  assert.equal(
+    shouldShowRetryHint({
+      isRunActive: false,
+      messages: emptyAnswerMessages,
+      runStatusResolving: !resolution.resolved
+    }),
+    false
+  )
+})
+
+test('returns the resolved run when its status loads', async () => {
+  const run = { uuid: 'run-uuid', status: 'running' }
+
+  assert.deepEqual(await resolveRunStatus(async () => run, run.uuid), {
+    resolved: true,
+    run
+  })
 })
