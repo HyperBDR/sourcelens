@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
+
+const source = () =>
+  readFile(
+    new URL('../src/admin/pages/lens/RunObservation.vue', import.meta.url),
+    'utf8'
+  )
+
+test('run detail title shows the selected task ID', async () => {
+  const contents = await source()
+  const titleIndex = contents.indexOf("t('lensRuns.detailTitle')")
+  const taskIdIndex = contents.indexOf('data-testid="run-detail-id"')
+
+  assert.ok(titleIndex >= 0)
+  assert.ok(taskIdIndex > titleIndex)
+  assert.match(contents.slice(taskIdIndex, taskIdIndex + 200), /selectedUuid/)
+})
+
+test('run task details omit individual model call rows', async () => {
+  const contents = await source()
+
+  assert.doesNotMatch(contents, /detail\.model_calls/)
+  assert.doesNotMatch(
+    contents,
+    /v-for="\(call, index\) in detail\.model_calls"/
+  )
+})
+
+test('run token summary separates totals, token metrics, and call counts', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-token-summary"/)
+  assert.match(contents, /lensRuns\.promptTokens/)
+  assert.match(contents, /lensRuns\.completionTokens/)
+  assert.match(contents, /lensRuns\.cachedTokens/)
+  assert.match(contents, /lensRuns\.reasoningTokens/)
+  assert.doesNotMatch(contents, /toLocaleString\(\) }}↑/)
+})
+
+test('run overview groups related fields and localizes analysis depth', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-overview-summary"/)
+  assert.match(contents, /data-testid="run-overview-execution"/)
+  assert.match(contents, /data-testid="run-overview-timing"/)
+  assert.match(contents, /data-testid="run-overview-resources"/)
+  assert.match(contents, /data-testid="run-analysis-depth"/)
+  assert.match(contents, /lensAdmin\.agentRounds/)
+  assert.doesNotMatch(contents, /· \{\{ detail\.agent_rounds \}\}/)
+})
