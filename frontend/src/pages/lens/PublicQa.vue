@@ -100,10 +100,15 @@
             <button
               type="button"
               class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-ink-500 transition-colors hover:bg-surface-sunken hover:text-primary-600"
+              :disabled="exportingPdf"
               @click="exportPdf"
             >
               <Download :size="14" :stroke-width="2" aria-hidden="true" />
-              {{ t('lens.qa.exportPdf') }}
+              {{
+                exportingPdf
+                  ? t('lens.qa.exportingPdf')
+                  : t('lens.qa.exportPdf')
+              }}
             </button>
             <button
               type="button"
@@ -151,7 +156,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { Bot, Copy, Download } from '@lucide/vue'
@@ -163,11 +168,12 @@ import QaPrintView from '@/components/lens/QaPrintView.vue'
 import SharedQaFileList from '@/components/lens/SharedQaFileList.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
-import { getPublicQa } from '@/api/lens'
+import { exportPublicQaPdf, getPublicQa } from '@/api/lens'
 import { copyToClipboard } from '@/utils/clipboard'
 import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
 import { fetchDeliverableBlob } from '@/utils/filePreview'
+import { downloadResponseBlob } from '@/utils/download'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/store/user'
 
@@ -176,13 +182,14 @@ const props = defineProps({ token: { type: String, required: true } })
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const { showSuccess, showError } = useToast()
+const { showSuccess, showError, showWarning } = useToast()
 const userStore = useUserStore()
 
 const qa = ref(null)
 const loading = ref(true)
 const accessState = ref(null)
 const previewFile = ref(null)
+const exportingPdf = ref(false)
 const isAuthenticated = computed(() => userStore.isAuthenticated)
 
 function accessStateFromError(error) {
@@ -232,8 +239,23 @@ async function copyLink() {
   }
 }
 
-function exportPdf() {
-  window.print()
+async function exportPdf() {
+  exportingPdf.value = true
+  try {
+    const response = await exportPublicQaPdf(props.token)
+    downloadResponseBlob(response, `shared-qa-${props.token}.pdf`)
+  } catch (error) {
+    const status = error?.response?.status
+    if (!status || status >= 500) {
+      await nextTick()
+      window.print()
+      showWarning(t('lens.qa.exportPdfFallback'))
+    } else {
+      showError(t('lens.qa.exportPdfFailed'))
+    }
+  } finally {
+    exportingPdf.value = false
+  }
 }
 
 function openPreview(file) {

@@ -463,6 +463,12 @@ export async function shareRun(runUuid, payload = {}) {
   return unwrapResponse(response)
 }
 
+export function exportRunPdf(runUuid) {
+  return api.get(`/lens/runs/${runUuid}/export-pdf/`, {
+    responseType: 'blob'
+  })
+}
+
 export async function listMyShares() {
   const response = await api.get('/lens/shares/')
   return unwrapList(unwrapResponse(response))
@@ -480,6 +486,12 @@ export async function deleteShare(uuid) {
 export async function getPublicQa(token) {
   const response = await api.get(`/lens/public/qa/${token}/`)
   return unwrapResponse(response)
+}
+
+export function exportPublicQaPdf(token) {
+  return api.get(`/lens/public/qa/${token}/export-pdf/`, {
+    responseType: 'blob'
+  })
 }
 
 export async function getPublicAssistantQa(slug, params = {}) {

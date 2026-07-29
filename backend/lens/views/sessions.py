@@ -24,6 +24,11 @@ from lens.models import (
     Session,
     SharedQA,
 )
+from lens.qa_pdf import (
+    QAPdfGenerationError,
+    generate_qa_pdf,
+    run_pdf_context,
+)
 from lens.serializers import (
     MessageAttachmentSerializer,
     MessageSerializer,
@@ -137,9 +142,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             session.assistant.status != Assistant.Status.ACTIVE
             or not session.assistant.is_accessible_by(request.user)
         ):
-            raise PermissionDenied(
-                "You do not have access to this assistant."
-            )
+            raise PermissionDenied("You do not have access to this assistant.")
         serializer = RunCreateSerializer(
             data=request.data,
             context={"session": session, "request": request},
@@ -163,22 +166,16 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             session.assistant.status != Assistant.Status.ACTIVE
             or not session.assistant.is_accessible_by(request.user)
         ):
-            raise PermissionDenied(
-                "You do not have access to this assistant."
-            )
+            raise PermissionDenied("You do not have access to this assistant.")
         if not session.assistant.multimodal_model_ref:
             raise ValidationError("This assistant does not accept images.")
         uploaded = request.FILES.get("file")
         if uploaded is None:
             raise ValidationError("No file provided.")
         try:
-            attachment = store_message_attachment(
-                session, request.user, uploaded
-            )
+            attachment = store_message_attachment(session, request.user, uploaded)
         except AssistantNotRunnableError:
-            raise PermissionDenied(
-                "You do not have access to this assistant."
-            )
+            raise PermissionDenied("You do not have access to this assistant.")
         except AttachmentError as exc:
             raise ValidationError(str(exc))
         return Response(
@@ -252,10 +249,15 @@ class RunViewSet(BaseAuthenticatedViewSet):
 
     queryset = Run.objects.select_related(
         "session",
+        "session__assistant",
         "input_message",
         "output_message",
         "lensnode",
-    ).prefetch_related("steps")
+    ).prefetch_related(
+        "steps",
+        "input_message__attachments",
+        "output_files",
+    )
     serializer_class = RunSerializer
 
     def get_queryset(self):
@@ -273,6 +275,29 @@ class RunViewSet(BaseAuthenticatedViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="export-pdf")
+    def export_pdf(self, request, uuid=None):
+        """Download a completed owned run as a server-generated PDF."""
+
+        run = self.get_object()
+        if run.status != Run.Status.DONE or run.output_message is None:
+            return Response(
+                {"detail": "RUN_NOT_EXPORTABLE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            pdf = generate_qa_pdf(run_pdf_context(run))
+        except QAPdfGenerationError:
+            return Response(
+                {"detail": "PDF_GENERATION_UNAVAILABLE"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="qa-{run.uuid}.pdf"'
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @action(
         detail=True,

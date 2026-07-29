@@ -3,13 +3,18 @@
 import secrets
 
 from django.db.models import F
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from lens.models import Assistant, SharedQA, SharedQAFile
+from lens.qa_pdf import (
+    QAPdfGenerationError,
+    generate_qa_pdf,
+    shared_qa_pdf_context,
+)
 from lens.serializers import (
     SharedQAAdminDetailSerializer,
     SharedQAAdminSerializer,
@@ -49,9 +54,7 @@ class SharedQAViewSet(BaseAuthenticatedViewSet):
     def get_queryset(self):
         """Restrict to shares published by the current user."""
 
-        return super().get_queryset().filter(
-            published_by=self.request.user
-        )
+        return super().get_queryset().filter(published_by=self.request.user)
 
     def partial_update(self, request, *args, **kwargs):
         """Let the owner edit the share title after publishing."""
@@ -114,9 +117,7 @@ class PublicSharedQAView(APIView):
         if access_error is not None:
             return access_error
         snapshot_shared_qa_files(share, strict=False)
-        SharedQA.objects.filter(pk=share.pk).update(
-            view_count=F("view_count") + 1
-        )
+        SharedQA.objects.filter(pk=share.pk).update(view_count=F("view_count") + 1)
         share.refresh_from_db(fields=["view_count"])
         return Response(SharedQAPublicSerializer(share).data)
 
@@ -160,14 +161,49 @@ class PublicSharedQAFileView(APIView):
         return response
 
 
+class PublicSharedQAPdfView(APIView):
+    """Export one shared Q&A after applying its normal access rules."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, token):
+        """Return a PDF without incrementing the shared-page view count."""
+
+        share = (
+            SharedQA.objects.select_related("assistant")
+            .filter(token=token, status=SharedQA.Status.PUBLISHED)
+            .first()
+        )
+        if share is None or share.assistant is None:
+            raise Http404
+        access_error = _shared_qa_access_error(share.assistant, request.user)
+        if access_error is not None:
+            return access_error
+        snapshot_shared_qa_files(share, strict=False)
+        try:
+            pdf = generate_qa_pdf(shared_qa_pdf_context(share))
+        except QAPdfGenerationError:
+            return Response(
+                {"detail": "PDF_GENERATION_UNAVAILABLE"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = (
+            f'attachment; filename="shared-qa-{share.token}.pdf"'
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
 def _shared_qa_visible_to_user(share, user):
     """Return whether a shared Q&A may be read through its token."""
 
     return bool(
-        user and
-        user.is_authenticated and
-        share.assistant and
-        share.assistant.is_accessible_by(user)
+        user
+        and user.is_authenticated
+        and share.assistant
+        and share.assistant.is_accessible_by(user)
     )
 
 
@@ -223,13 +259,15 @@ class PublicSharedQAListView(APIView):
         ).order_by("-published_at", "-created_at")
         total = queryset.count()
         rows = SharedQAListSerializer(
-            queryset[offset:offset + limit],
+            queryset[offset : offset + limit],
             many=True,
         ).data
         has_more = offset + limit < total
-        return Response({
-            "assistant": {"name": assistant.name, "slug": assistant.slug},
-            "results": rows,
-            "total": total,
-            "next_offset": offset + limit if has_more else None,
-        })
+        return Response(
+            {
+                "assistant": {"name": assistant.name, "slug": assistant.slug},
+                "results": rows,
+                "total": total,
+                "next_offset": offset + limit if has_more else None,
+            }
+        )

@@ -35,7 +35,7 @@ test('wide shared Q&A tables scroll without widening the page', async ({
     page.getByRole('heading', { name: 'Wide table layout' })
   ).toBeVisible()
 
-  const tableScroll = page.locator('.markdown-table-scroll')
+  const tableScroll = page.locator('.qa-screen-view .markdown-table-scroll')
   await expect(tableScroll).toHaveCount(1)
 
   const layout = await page.evaluate(() => {
@@ -143,18 +143,20 @@ test('shared page keeps question attachments and output files in context', async
 
   await page.goto(`/lens/qa/${SHARE_TOKEN}`)
 
+  const screen = page.locator('.qa-screen-view')
+
   await expect(
     page.getByRole('heading', { name: 'Complete shared turn' })
   ).toBeVisible()
   await expect(
-    page.getByText('What does the attached diagram show?')
+    screen.getByText('What does the attached diagram show?')
   ).toBeVisible()
-  await expect(page.getByText('diagram.png')).toBeVisible()
-  await expect(page.getByText('It shows the deployment flow.')).toBeVisible()
-  await expect(page.getByText('report.html')).toBeVisible()
+  await expect(screen.getByText('diagram.png')).toBeVisible()
+  await expect(screen.getByText('It shows the deployment flow.')).toBeVisible()
+  await expect(screen.getByText('report.html')).toBeVisible()
 })
 
-test('shared Q&A identifies the Agent and prints the complete turn', async ({
+test('shared Q&A identifies the Agent and downloads the server PDF', async ({
   page
 }) => {
   await routeCompleteShare(page, [
@@ -168,6 +170,50 @@ test('shared Q&A identifies the Agent and prints the complete turn', async ({
     screen.getByText('Answer from AI Agent “Deployment Agent”', { exact: true })
   ).toBeVisible()
 
+  await page.route(
+    `**/api/lens/public/qa/${SHARE_TOKEN}/export-pdf/`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/pdf',
+        headers: {
+          'Content-Disposition':
+            'attachment; filename="shared-agent-answer.pdf"'
+        },
+        body: Buffer.from('%PDF-1.7\ntest')
+      })
+    }
+  )
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export PDF' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toBe('shared-agent-answer.pdf')
+
+  await page.emulateMedia({ media: 'print' })
+  await expect(screen).toBeHidden()
+  const printable = page.locator('.qa-print-view')
+  await expect(printable).toBeVisible()
+  await expect(printable).toContainText('What does the attached diagram show?')
+  await expect(printable).toContainText('It shows the deployment flow.')
+  await expect(printable).toContainText('diagram.png')
+  await expect(printable).toContainText('report.html')
+})
+
+test('shared PDF export falls back to browser print on service failure', async ({
+  page
+}) => {
+  await routeCompleteShare(page, [])
+  await page.route(
+    `**/api/lens/public/qa/${SHARE_TOKEN}/export-pdf/`,
+    async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'PDF_GENERATION_UNAVAILABLE' })
+      })
+    }
+  )
+  await page.goto(`/lens/qa/${SHARE_TOKEN}`)
   await page.evaluate(() => {
     window.print = () => {
       document.documentElement.dataset.printRequested = 'true'
@@ -178,15 +224,11 @@ test('shared Q&A identifies the Agent and prints the complete turn', async ({
     'data-print-requested',
     'true'
   )
-
-  await page.emulateMedia({ media: 'print' })
-  await expect(screen).toBeHidden()
-  const printable = page.locator('.qa-print-view')
-  await expect(printable).toBeVisible()
-  await expect(printable).toContainText('What does the attached diagram show?')
-  await expect(printable).toContainText('It shows the deployment flow.')
-  await expect(printable).toContainText('diagram.png')
-  await expect(printable).toContainText('report.html')
+  await expect(
+    page.getByText(
+      'Server PDF generation failed. Browser print opened instead.'
+    )
+  ).toBeVisible()
 })
 
 test('shared HTML preview uses a blob URL and an empty sandbox', async ({

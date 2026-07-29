@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ title|default:question|truncatechars:100 }}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        color: #18212f;
+        font-family: Arial, "Noto Sans CJK SC", sans-serif;
+        font-size: 11pt;
+        line-height: 1.55;
+        margin: 0;
+      }
+      header { border-bottom: 1px solid #d8dee8; margin-bottom: 22px; }
+      h1 { font-size: 20pt; line-height: 1.25; margin: 0 0 10px; }
+      h2 { color: #536174; font-size: 9pt; letter-spacing: .08em; margin: 22px 0 8px; text-transform: uppercase; }
+      h3, h4 { break-after: avoid; }
+      .meta { color: #66758a; font-size: 9pt; margin-bottom: 18px; }
+      .question { background: #f5f7fa; border: 1px solid #d8dee8; border-radius: 6px; padding: 14px; white-space: pre-wrap; }
+      .answer { overflow-wrap: anywhere; }
+      pre { background: #f5f7fa; border-radius: 4px; overflow-wrap: anywhere; padding: 10px; white-space: pre-wrap; }
+      code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 9.5pt; }
+      blockquote { border-left: 3px solid #aab5c5; color: #536174; margin-left: 0; padding-left: 12px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ccd4df; padding: 6px 8px; text-align: left; }
+      a { color: #315ea8; overflow-wrap: anywhere; }
+      .files { color: #536174; font-size: 9.5pt; margin: 8px 0 0; padding-left: 20px; }
+      p, li, pre, blockquote, table { break-inside: avoid; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{{ title|default:question }}</h1>
+      <div class="meta">
+        AI Agent Q&amp;A{% if assistant_name %} · {{ assistant_name }}{% endif %}
+        {% if published_at %} · {{ published_at|date:"Y-m-d H:i" }}{% endif %}
+      </div>
+    </header>
+    <main>
+      <h2>Question</h2>
+      <div class="question">{{ question }}</div>
+      {% if input_files %}
+        <ul class="files">
+          {% for filename in input_files %}<li>{{ filename }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+      <h2>Answer</h2>
+      <div class="answer">{{ answer_html|safe }}</div>
+      {% if output_files %}
+        <h2>Generated files</h2>
+        <ul class="files">
+          {% for filename in output_files %}<li>{{ filename }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+    </main>
+  </body>
+</html>

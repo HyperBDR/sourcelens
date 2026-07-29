@@ -213,8 +213,8 @@ bootstrap_runtime_state
 # shellcheck source=./lib/deploy-common.sh
 source "$DEPLOY_PATH/scripts/lib/deploy-common.sh"
 
-log "Ensuring postgresql/redis are up..."
-docker compose up -d postgresql redis
+log "Ensuring postgresql/redis/gotenberg are up..."
+docker compose up -d postgresql redis gotenberg
 
 CURRENT_COLOR="$(current_color)"
 NEXT_COLOR="$(other_color "$CURRENT_COLOR")"

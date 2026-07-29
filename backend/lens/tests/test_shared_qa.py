@@ -1,5 +1,7 @@
 import tempfile
+from unittest.mock import Mock, patch
 
+import requests
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.storage import storages
@@ -247,10 +249,7 @@ class SharedQAApiTests(TestCase):
 
         self.assertEqual(resp.status_code, 201)
         share = SharedQA.objects.get(token=resp.data["token"])
-        files = {
-            item.kind: item
-            for item in share.files.order_by("kind", "order")
-        }
+        files = {item.kind: item for item in share.files.order_by("kind", "order")}
         self.assertEqual(
             files[SharedQAFile.Kind.INPUT].file.read(),
             attachment_bytes,
@@ -302,9 +301,7 @@ class SharedQAApiTests(TestCase):
 
         private_token = self._private_share_token(with_files=True)
         private_share = SharedQA.objects.get(token=private_token)
-        private_snapshot = private_share.files.get(
-            kind=SharedQAFile.Kind.OUTPUT
-        )
+        private_snapshot = private_share.files.get(kind=SharedQAFile.Kind.OUTPUT)
         private_url = self._public_file_url(
             private_token,
             private_snapshot.uuid,
@@ -323,9 +320,7 @@ class SharedQAApiTests(TestCase):
         )
         self.client.force_authenticate(self.other)
 
-        response = self.client.get(
-            self._public_file_url(token, snapshot.uuid)
-        )
+        response = self.client.get(self._public_file_url(token, snapshot.uuid))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(b"".join(response.streaming_content), output_bytes)
@@ -335,9 +330,7 @@ class SharedQAApiTests(TestCase):
         other_run = self._make_done_run()
         self._add_run_files(other_run)
         other_token = self._share(run=other_run).data["token"]
-        mismatched = self.client.get(
-            self._public_file_url(other_token, snapshot.uuid)
-        )
+        mismatched = self.client.get(self._public_file_url(other_token, snapshot.uuid))
         self.assertEqual(mismatched.status_code, 404)
 
     def test_hidden_or_deleted_share_cannot_serve_snapshot_file(self):
@@ -396,9 +389,7 @@ class SharedQAApiTests(TestCase):
         output.file.delete(save=False)
         self.client.force_authenticate(self.other)
 
-        resp = self.client.get(
-            "/api/lens/public/qa/legacy-missing-file/"
-        )
+        resp = self.client.get("/api/lens/public/qa/legacy-missing-file/")
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["answer"], "X is a thing.")
@@ -417,9 +408,7 @@ class SharedQAApiTests(TestCase):
 
         share.delete()
 
-        self.assertTrue(
-            all(not storage.exists(name) for name in storage_names)
-        )
+        self.assertTrue(all(not storage.exists(name) for name in storage_names))
 
     def test_share_is_idempotent_per_run(self):
         first = self._share()
@@ -435,11 +424,114 @@ class SharedQAApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["detail"], "RUN_NOT_SHAREABLE")
 
+    @patch("lens.qa_pdf.requests.post")
+    def test_owner_exports_completed_run_as_safe_pdf(self, post):
+        self._add_run_files()
+        self.run.output_message.content = (
+            "# Result\n<script>alert(1)</script>\n"
+            "![remote](https://example.com/private.png)"
+        )
+        self.run.output_message.save(update_fields=["content"])
+        post.return_value = Mock(status_code=200, content=b"%PDF-1.7\ntest")
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.get(f"/api/lens/runs/{self.run.uuid}/export-pdf/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"%PDF-1.7\ntest")
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("attachment", response["Content-Disposition"])
+        self.assertEqual(response["Cache-Control"], "private, no-store")
+        request_files = post.call_args.kwargs["files"]
+        self.assertEqual(request_files["files"][0], "index.html")
+        html = request_files["files"][1].decode("utf-8")
+        self.assertIn("What is X?", html)
+        self.assertIn("question.png", html)
+        self.assertIn("report.html", html)
+        self.assertNotIn("<script", html)
+        self.assertNotIn("<img", html)
+        self.assertNotIn("https://example.com/private.png", html)
+
+    @patch("lens.qa_pdf.requests.post")
+    def test_run_pdf_requires_ownership_and_completed_answer(self, post):
+        post.return_value = Mock(status_code=200, content=b"%PDF-1.7\ntest")
+        self.client.force_authenticate(self.other)
+        denied = self.client.get(f"/api/lens/runs/{self.run.uuid}/export-pdf/")
+        self.assertEqual(denied.status_code, 404)
+
+        self.run.status = Run.Status.RUNNING
+        self.run.save(update_fields=["status"])
+        self.client.force_authenticate(self.owner)
+        unfinished = self.client.get(f"/api/lens/runs/{self.run.uuid}/export-pdf/")
+        self.assertEqual(unfinished.status_code, 400)
+        self.assertEqual(unfinished.data["detail"], "RUN_NOT_EXPORTABLE")
+        post.assert_not_called()
+
+    @patch("lens.qa_pdf.requests.post")
+    def test_run_pdf_service_failures_return_503(self, post):
+        self.client.force_authenticate(self.owner)
+        url = f"/api/lens/runs/{self.run.uuid}/export-pdf/"
+        post.side_effect = requests.ConnectionError("offline")
+        unavailable = self.client.get(url)
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertEqual(
+            unavailable.data["detail"],
+            "PDF_GENERATION_UNAVAILABLE",
+        )
+
+        post.side_effect = None
+        post.return_value = Mock(status_code=200, content=b"not a pdf")
+        malformed = self.client.get(url)
+        self.assertEqual(malformed.status_code, 503)
+
+    @patch("lens.qa_pdf.requests.post")
+    def test_authorized_shared_pdf_does_not_increment_views(self, post):
+        self._add_run_files()
+        token = self._share().data["token"]
+        post.return_value = Mock(status_code=200, content=b"%PDF-1.7\ntest")
+        self.client.force_authenticate(self.other)
+
+        response = self.client.get(f"/api/lens/public/qa/{token}/export-pdf/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        share = SharedQA.objects.get(token=token)
+        self.assertEqual(share.view_count, 0)
+        html = post.call_args.kwargs["files"]["files"][1].decode("utf-8")
+        self.assertIn("question.png", html)
+        self.assertIn("report.html", html)
+
+    @patch("lens.qa_pdf.requests.post")
+    def test_shared_pdf_enforces_login_access_and_published_state(self, post):
+        token = self._private_share_token()
+        url = f"/api/lens/public/qa/{token}/export-pdf/"
+        post.return_value = Mock(status_code=200, content=b"%PDF-1.7\ntest")
+
+        self.client.force_authenticate(user=None)
+        anonymous = self.client.get(url)
+        self.assertEqual(anonymous.status_code, 403)
+        self.assertEqual(anonymous.data["code"], "AUTHENTICATION_REQUIRED")
+
+        self.client.force_authenticate(self.other)
+        denied = self.client.get(url)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.data["code"], "ASSISTANT_ACCESS_DENIED")
+
+        share = SharedQA.objects.get(token=token)
+        share.status = SharedQA.Status.HIDDEN
+        share.save(update_fields=["status"])
+        self.client.force_authenticate(self.admin)
+        hidden = self.client.get(url)
+        self.assertEqual(hidden.status_code, 404)
+        post.assert_not_called()
+
     def test_share_requires_run_ownership(self):
         resp = self._share(user=self.other)
         self.assertEqual(resp.status_code, 404)
 
-    def test_public_assistant_single_requires_login_then_allows_authenticated_user(self):
+    def test_public_assistant_single_requires_login_then_allows_authenticated_user(
+        self,
+    ):
         token = self._share().data["token"]
         self.client.force_authenticate(user=None)
         anonymous = self.client.get(f"/api/lens/public/qa/{token}/")
@@ -471,9 +563,7 @@ class SharedQAApiTests(TestCase):
     def test_unlisted_single_allows_authenticated_session_user(self):
         token = self._share().data["token"]
         self.client.force_authenticate(user=None)
-        self.assertTrue(
-            self.client.login(username="qa-peer", password="pass12345")
-        )
+        self.assertTrue(self.client.login(username="qa-peer", password="pass12345"))
 
         resp = self.client.get(f"/api/lens/public/qa/{token}/")
 
@@ -615,9 +705,7 @@ class SharedQAApiTests(TestCase):
         share.save(update_fields=["is_listed"])
 
         self.client.force_authenticate(user=None)
-        anonymous = self.client.get(
-            "/api/lens/public/assistants/private-helper/qa/"
-        )
+        anonymous = self.client.get("/api/lens/public/assistants/private-helper/qa/")
         self.assertEqual(anonymous.status_code, 403)
         self.assertEqual(anonymous.data["code"], "AUTHENTICATION_REQUIRED")
 
@@ -627,9 +715,7 @@ class SharedQAApiTests(TestCase):
         self.assertEqual(denied.data["code"], "ASSISTANT_ACCESS_DENIED")
 
         self.client.force_authenticate(self.admin)
-        authorized = self.client.get(
-            "/api/lens/public/assistants/private-helper/qa/"
-        )
+        authorized = self.client.get("/api/lens/public/assistants/private-helper/qa/")
         self.assertEqual(authorized.status_code, 200)
         self.assertEqual(authorized.data["total"], 1)
         self.assertEqual(authorized.data["results"][0]["token"], token)

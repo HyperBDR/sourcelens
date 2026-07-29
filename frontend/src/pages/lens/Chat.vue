@@ -727,6 +727,7 @@
                     class="icon-btn"
                     :title="t('lens.qa.exportPdf')"
                     :aria-label="t('lens.qa.exportPdf')"
+                    :disabled="isPdfExporting(message.run)"
                     @click="exportQa(message)"
                   >
                     <Download :size="16" aria-hidden="true" />
@@ -1398,6 +1399,7 @@ import {
   createRun,
   createSession,
   deleteSession,
+  exportRunPdf,
   getPublicAssistant,
   getRun,
   listMyShares,
@@ -1408,6 +1410,7 @@ import {
   updateRunFeedback,
   uploadAttachment
 } from '@/api/lens'
+import { downloadResponseBlob } from '@/utils/download'
 
 const route = useRoute()
 const router = useRouter()
@@ -1467,6 +1470,7 @@ const shareExisting = ref(null)
 const sharesByRun = ref({})
 const mySharesOpen = ref(false)
 const printQa = ref(null)
+const pdfExportingRuns = ref(new Set())
 // False until the current bootstrap settles, so the view can distinguish
 // "still loading" from "loaded, but no assistant to show".
 const booted = ref(false)
@@ -2832,7 +2836,7 @@ function openShare(message) {
   shareOpen.value = true
 }
 
-async function exportQa(message) {
+function preparePrintQa(message) {
   const sourceQuestion = userMessageForMessage(message)
   const questionText = sourceQuestion?.content || ''
   printQa.value = {
@@ -2844,8 +2848,37 @@ async function exportQa(message) {
     inputAttachments: sourceQuestion?.attachments || [],
     outputFiles: message.output_files || []
   }
-  await nextTick()
-  window.print()
+}
+
+function isPdfExporting(runUuid) {
+  return Boolean(runUuid && pdfExportingRuns.value.has(runUuid))
+}
+
+async function exportQa(message) {
+  preparePrintQa(message)
+  if (!message.run) {
+    await nextTick()
+    window.print()
+    return
+  }
+  pdfExportingRuns.value = new Set(pdfExportingRuns.value).add(message.run)
+  try {
+    const response = await exportRunPdf(message.run)
+    downloadResponseBlob(response, `qa-${message.run}.pdf`)
+  } catch (error) {
+    const status = error?.response?.status
+    if (!status || status >= 500) {
+      await nextTick()
+      window.print()
+      showWarning(t('lens.qa.exportPdfFallback'))
+    } else {
+      showError(t('lens.qa.exportPdfFailed'))
+    }
+  } finally {
+    const next = new Set(pdfExportingRuns.value)
+    next.delete(message.run)
+    pdfExportingRuns.value = next
+  }
 }
 
 function isMessageShared(message) {

@@ -39,6 +39,7 @@ services:
       LENSNODE_NAME: ${LENSNODE_NAME:-local-lensnode}
       LENSNODE_TOKEN: ${LENSNODE_TOKEN:-change-me-lensnode-token}
       LENSNODE_WORKSPACE_PATH: /workspace
+      GOTENBERG_URL: http://gotenberg:3000
     volumes:
       - ./data/django/staticfiles:/opt/backend/core/staticfiles
       - ./data/logs/api:/var/log/gunicorn
@@ -87,6 +88,27 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.17.3
+    container_name: sourcelens-gotenberg
+    restart: unless-stopped
+    command:
+      - "gotenberg"
+      - "--chromium-disable-javascript=true"
+      - "--chromium-allow-list=^file:///tmp/.*"
+      - "--api-disable-download-from=true"
+      - "--webhook-disable=true"
+    expose:
+      - "3000"
+    networks:
+      - backend_network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   backend-worker:
     image: oneprocloud/sourcelens-backend:${APP_VERSION:-latest}
