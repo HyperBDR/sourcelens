@@ -132,7 +132,7 @@
         </div>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.tokenBudget')">
-        <div class="grid gap-3 sm:grid-cols-2">
+        <div class="grid gap-3 sm:grid-cols-3">
           <label
             v-for="profile in tokenBudgetProfiles"
             :key="profile.value"
@@ -994,6 +994,11 @@ const tokenBudgetProfiles = computed(() => [
     value: 'deep',
     label: t('lensAdmin.tokenBudget.deep'),
     hint: t('lensAdmin.tokenBudget.deepHint')
+  },
+  {
+    value: 'unlimited',
+    label: t('lensAdmin.tokenBudget.unlimited'),
+    hint: t('lensAdmin.tokenBudget.unlimitedHint')
   }
 ])
 

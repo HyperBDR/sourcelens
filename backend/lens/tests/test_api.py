@@ -284,12 +284,12 @@ class LensApiTests(TestCase):
             "skipped",
         )
 
-    def test_assistant_create_rejects_unknown_token_budget_profile(self):
+    def test_assistant_create_accepts_unlimited_token_budget_profile(self):
         response = self.client.post(
             "/api/lens/assistants/",
             {
-                "name": "Invalid Budget",
-                "slug": "invalid-budget",
+                "name": "Unlimited Budget",
+                "slug": "unlimited-budget",
                 "lensnode_uuid": str(self.lensnode.uuid),
                 "selected_task": "knowledge_qa",
                 "selected_dirs": [{"path": "/workspace/repo"}],
@@ -298,8 +298,10 @@ class LensApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("token_budget_profile", response.data)
+        self.assertEqual(response.status_code, 201)
+        assistant = Assistant.objects.get(slug="unlimited-budget")
+        self.assertEqual(assistant.token_budget_profile, "unlimited")
+        self.assertEqual(response.data["token_budget_profile"], "unlimited")
 
     def test_assistant_update_saves_description(self):
         response = self.client.patch(
@@ -1934,6 +1936,10 @@ class LensApiTests(TestCase):
                     "messages": [{"role": "user", "content": "hello"}],
                     "run_uuid": str(run.uuid),
                     "is_subagent": True,
+                    "trace_context": {
+                        "parent_observation_id": "a" * 16,
+                        "generation_name": "llm.agent",
+                    },
                 },
                 format="json",
                 HTTP_AUTHORIZATION=f"Bearer {token}",
@@ -1944,6 +1950,74 @@ class LensApiTests(TestCase):
         self.assertEqual(state["user_id"], chat_user.id)
         self.assertEqual(state["metadata"]["run_uuid"], str(run.uuid))
         self.assertTrue(state["metadata"]["is_subagent"])
+        self.assertEqual(
+            state["litellm_metadata"]["session_id"],
+            str(session.uuid),
+        )
+        self.assertEqual(
+            state["litellm_metadata"]["trace_user_id"],
+            str(chat_user.id),
+        )
+        self.assertEqual(
+            state["litellm_metadata"]["trace_name"],
+            "sourcelens.run",
+        )
+        self.assertEqual(
+            state["litellm_metadata"]["trace_id"],
+            run.uuid.hex,
+        )
+        self.assertEqual(
+            state["litellm_metadata"]["existing_trace_id"],
+            run.uuid.hex,
+        )
+        self.assertEqual(
+            state["litellm_metadata"]["parent_observation_id"],
+            "a" * 16,
+        )
+        self.assertEqual(
+            state["litellm_metadata"]["generation_name"],
+            "llm.agent",
+        )
+        self.assertEqual(
+            state["litellm_metadata"]["trace_metadata"],
+            {
+                "run_uuid": str(run.uuid),
+                "is_subagent": True,
+            },
+        )
+        self.assertEqual(
+            state["otel_traceparent"],
+            f"00-{run.uuid.hex}-{'a' * 16}-01",
+        )
+
+    def test_lensnode_ai_gateway_rejects_invalid_trace_context(self):
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(
+            update_fields=["auth_token_hash", "updated_at"]
+        )
+        client = APIClient()
+
+        with patch(
+            "agentcore_metering.adapters.django.LLMTracker.call_and_track"
+        ) as call_and_track:
+            response = client.post(
+                "/api/lens/lensnode/ai-gateway/",
+                {
+                    "model_ref": "016d5cf7-2245-4015-b242-d6323e795b58",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "trace_context": {
+                        "parent_observation_id": "not-an-observation-id",
+                        "generation_name": "llm.agent",
+                    },
+                },
+                format="json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "Invalid trace_context.")
+        call_and_track.assert_not_called()
 
     def test_lensnode_ai_gateway_attributes_every_call_to_run_owner(self):
         from lens.models import Session

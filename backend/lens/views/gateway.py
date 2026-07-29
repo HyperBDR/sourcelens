@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -24,6 +25,8 @@ from .base import EventStreamRenderer, LensNodeAuthMixin
 # prove transport liveness to the LensNode watchdog so it only aborts
 # on a genuinely dead pipe, never on a quiet-but-alive model call.
 GATEWAY_STREAM_HEARTBEAT_S = 10
+OBSERVATION_ID_PATTERN = re.compile(r"^(?!0{16}$)[0-9a-f]{16}$")
+GENERATION_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
@@ -59,6 +62,15 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
         }
         correlation = {}
         run_uuid = request.data.get("run_uuid")
+        trace_context = request.data.get("trace_context")
+        if trace_context is not None and not self._valid_trace_context(
+            trace_context,
+            run_uuid,
+        ):
+            return Response(
+                {"detail": "Invalid trace_context."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if run_uuid:
             try:
                 run = Run.objects.select_related("session").get(
@@ -81,6 +93,20 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
             )
         if correlation:
             tracker_state["metadata"] = correlation
+            tracker_state["litellm_metadata"] = {
+                "session_id": str(run.session.uuid),
+                "trace_user_id": str(run.session.user_id),
+                "trace_name": "sourcelens.run",
+                "trace_id": run.uuid.hex,
+                "existing_trace_id": run.uuid.hex,
+                "trace_metadata": correlation.copy(),
+            }
+            if trace_context is not None:
+                tracker_state["litellm_metadata"].update(trace_context)
+                tracker_state["otel_traceparent"] = (
+                    f"00-{run.uuid.hex}-"
+                    f"{trace_context['parent_observation_id']}-01"
+                )
         if request.data.get("stream"):
             return self._stream_response(
                 lensnode,
@@ -111,6 +137,26 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
         else:
             data["content"] = content
         return Response(data)
+
+    @staticmethod
+    def _valid_trace_context(trace_context, run_uuid):
+        """Validate the bounded LensNode-to-Gateway trace contract."""
+
+        if not run_uuid or not isinstance(trace_context, dict):
+            return False
+        if set(trace_context) != {
+            "parent_observation_id",
+            "generation_name",
+        }:
+            return False
+        parent_id = trace_context.get("parent_observation_id")
+        generation_name = trace_context.get("generation_name")
+        return bool(
+            isinstance(parent_id, str)
+            and OBSERVATION_ID_PATTERN.fullmatch(parent_id)
+            and isinstance(generation_name, str)
+            and GENERATION_NAME_PATTERN.fullmatch(generation_name)
+        )
 
     def _stream_response(
         self,

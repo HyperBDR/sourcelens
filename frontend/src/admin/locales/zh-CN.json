@@ -1421,7 +1421,9 @@
       "standardHint": "总计 20 万 · 为最终回答预留 4 万",
       "deep": "深度",
       "deepHint": "总计 50 万 · 为最终回答预留 7.5 万",
-      "nodeLimitHint": "LensNode 的硬上限仍是最终安全边界。"
+      "unlimited": "无限制",
+      "unlimitedHint": "不设置累计 Token 预算 · 其他运行安全限制仍然生效",
+      "nodeLimitHint": "无限制仅关闭累计 Token 门禁；运行时间、最大轮次和其他安全限制仍然生效。"
     },
     "messages": {
       "loadFailed": "加载 Lens 管理数据失败",

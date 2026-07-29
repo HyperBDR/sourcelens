@@ -80,3 +80,17 @@ test('drawer skips visual transitions in a hidden document', async () => {
   assert.equal(completed, true)
   assert.equal(animationCount, 0)
 })
+
+test('assistant token budget offers an unlimited profile', async () => {
+  const [drawer, english, chinese] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('admin/locales/en.json').then(JSON.parse),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(drawer, /value: 'unlimited'/)
+  assert.equal(english.lensAdmin.tokenBudget.unlimited, 'Unlimited')
+  assert.equal(chinese.lensAdmin.tokenBudget.unlimited, '无限制')
+  assert.match(english.lensAdmin.tokenBudget.unlimitedHint, /token cap/i)
+  assert.match(chinese.lensAdmin.tokenBudget.unlimitedHint, /Token 预算/)
+})

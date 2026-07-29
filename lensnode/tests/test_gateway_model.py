@@ -141,6 +141,74 @@ def test_gateway_calls_reuse_injected_http_client(monkeypatch):
         shared_client.close()
 
 
+def test_gateway_model_parents_generation_under_transport_span(monkeypatch):
+    captured = {}
+    observations = []
+
+    def handler(request):
+        captured["payload"] = json.loads(request.read())
+        return httpx.Response(
+            200,
+            json={
+                "message": {"content": "Hello"},
+                "usage": {"total_tokens": 5},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        run_uuid="00000000-0000-0000-0000-000000000009",
+        trace_context={"root_observation_id": "b" * 32},
+        emit_observation=observations.append,
+        observation_name="agent",
+    )
+
+    result = model._generate([HumanMessage(content="hi")])
+
+    assert result.generations[0].message.content == "Hello"
+    assert [item["action"] for item in observations] == ["start", "end"]
+    assert observations[0]["id"] == observations[1]["id"]
+    assert len(observations[0]["id"]) == 16
+    assert observations[0]["parent_observation_id"] == "b" * 32
+    assert observations[0]["name"] == "model.agent"
+    assert observations[1]["status"] == "done"
+    assert captured["payload"]["trace_context"] == {
+        "parent_observation_id": observations[0]["id"],
+        "generation_name": "llm.agent",
+    }
+
+
+def test_gateway_model_failed_span_excludes_exception_text(monkeypatch):
+    observations = []
+
+    def handler(request):
+        raise httpx.ReadTimeout(
+            "secret provider error",
+            request=request,
+        )
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        run_uuid="00000000-0000-0000-0000-000000000009",
+        trace_context={"root_observation_id": "b" * 32},
+        emit_observation=observations.append,
+    )
+
+    with pytest.raises(httpx.ReadTimeout):
+        model._generate([HumanMessage(content="hi")])
+
+    assert [item["action"] for item in observations] == ["start", "end"]
+    assert observations[1]["status"] == "failed"
+    assert observations[1]["error_type"] == "ReadTimeout"
+    assert "secret provider error" not in str(observations)
+
+
 def test_tool_call_turn_does_not_publish_intermediate_text(monkeypatch):
     body = (
         'data: {"type": "token", "kind": "content", '
@@ -173,6 +241,7 @@ def test_tool_call_turn_does_not_publish_intermediate_text(monkeypatch):
 
 
 def test_final_synthesis_streams_content_chunks_as_they_arrive(monkeypatch):
+    captured = {}
     body = (
         'data: {"type": "token", "kind": "content", '
         '"content": "Final "}\n\n'
@@ -182,7 +251,8 @@ def test_final_synthesis_streams_content_chunks_as_they_arrive(monkeypatch):
         '"finish_reason": "stop", "tool_calls": []}\n\n'
     )
 
-    def handler(_request):
+    def handler(request):
+        captured["payload"] = json.loads(request.read())
         return httpx.Response(200, content=body.encode("utf-8"))
 
     _install_transport(monkeypatch, handler)
@@ -197,10 +267,22 @@ def test_final_synthesis_streams_content_chunks_as_they_arrive(monkeypatch):
     result = model._generate(
         [HumanMessage(content="summarize")],
         runtime_final_synthesis=True,
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "inspect_saved_output",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
+        tool_choice="auto",
     )
 
     assert result.generations[0].message.content == "Final answer"
     assert outputs == ["Final ", "answer"]
+    assert "tools" not in captured["payload"]
+    assert "tool_choice" not in captured["payload"]
 
 
 def test_completed_plan_followup_repeats_hidden_draft_and_streams(

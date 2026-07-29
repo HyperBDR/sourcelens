@@ -1745,6 +1745,40 @@ def test_general_chat_middleware_emits_each_model_round_as_one_step():
     ]
 
 
+def test_trace_observation_middleware_wraps_tool_lifecycle():
+    observations = []
+    middleware = agent_runtime.TraceObservationMiddleware(
+        observations.append,
+        "c" * 32,
+    )
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="search_workspace"),
+        tool_call={
+            "name": "search_workspace",
+            "id": "call-1",
+            "args": {"query": "secret input is not traced"},
+        },
+    )
+
+    result = middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content="result is not traced",
+            name="search_workspace",
+            tool_call_id="call-1",
+        ),
+    )
+
+    assert result.content == "result is not traced"
+    assert [item["action"] for item in observations] == ["start", "end"]
+    assert observations[0]["id"] == observations[1]["id"]
+    assert observations[0]["parent_observation_id"] == "c" * 32
+    assert observations[0]["name"] == "tool.search_workspace"
+    assert observations[1]["status"] == "done"
+    assert "secret input" not in str(observations)
+    assert "result is not traced" not in str(observations)
+
+
 def test_general_chat_middleware_denies_task_execution():
     events = []
     handler_called = []

@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import threading
+import uuid
 from collections import defaultdict
 
 from deepagents import create_deep_agent
@@ -46,6 +47,85 @@ class EmptyAgentResponseError(RuntimeError):
     """The agent and its one recovery attempt both returned no text."""
 
     code = "EMPTY_AGENT_RESPONSE"
+
+
+class TraceObservationMiddleware(AgentMiddleware):
+    """Emit privacy-bounded spans around synchronous and async tool calls."""
+
+    def __init__(self, emit_observation, root_observation_id):
+        self.emit_observation = emit_observation
+        self.root_observation_id = root_observation_id
+
+    def wrap_tool_call(self, request, handler):
+        """Wrap one synchronous tool call in a trace observation."""
+
+        observation_id = self._start(request)
+        try:
+            result = handler(request)
+        except Exception as exc:
+            self._finish(observation_id, "failed", exc)
+            raise
+        status = (
+            "failed"
+            if getattr(result, "status", None) == "error"
+            else "done"
+        )
+        self._finish(observation_id, status)
+        return result
+
+    async def awrap_tool_call(self, request, handler):
+        """Wrap one asynchronous tool call in a trace observation."""
+
+        observation_id = self._start(request)
+        try:
+            result = await handler(request)
+        except Exception as exc:
+            self._finish(observation_id, "failed", exc)
+            raise
+        status = (
+            "failed"
+            if getattr(result, "status", None) == "error"
+            else "done"
+        )
+        self._finish(observation_id, status)
+        return result
+
+    def _start(self, request):
+        """Emit a start event without tool arguments."""
+
+        observation_id = uuid.uuid4().hex
+        tool = getattr(request, "tool", None)
+        raw_name = getattr(tool, "name", None) or "unknown"
+        tool_name = re.sub(r"[^A-Za-z0-9._-]", "_", str(raw_name))[:96]
+        self.emit_observation(
+            {
+                "action": "start",
+                "id": observation_id,
+                "parent_observation_id": self.root_observation_id,
+                "name": f"tool.{tool_name or 'unknown'}",
+                "started_at": _observation_timestamp(),
+            }
+        )
+        return observation_id
+
+    def _finish(self, observation_id, status, error=None):
+        """Emit an end event without tool output or exception text."""
+
+        event = {
+            "action": "end",
+            "id": observation_id,
+            "status": status,
+            "ended_at": _observation_timestamp(),
+        }
+        if error is not None:
+            event["error_type"] = type(error).__name__
+        self.emit_observation(event)
+
+
+def _observation_timestamp():
+    """Return an ingestion-compatible UTC timestamp."""
+
+    return utc_now().isoformat().replace("+00:00", "Z")
 
 
 class _NoTaskMiddleware(AgentMiddleware):
@@ -684,6 +764,8 @@ def _build_summarization_middleware(
     cancel_event=None,
     run_uuid="",
     http_client=None,
+    trace_context=None,
+    emit_observation=None,
 ):
     """Build context-compaction middleware, or None when disabled.
 
@@ -711,6 +793,9 @@ def _build_summarization_middleware(
         http_client=http_client,
         cancel_event=cancel_event,
         run_uuid=run_uuid,
+        trace_context=trace_context or {},
+        emit_observation=emit_observation,
+        observation_name="summarization",
     )
     middleware = LensSummarizationMiddleware(
         model=summary_model,
@@ -816,6 +901,16 @@ class LensDeepAgentRuntime:
         model_ref = command.get("agent_model_ref")
         if not model_ref:
             raise ValueError("agent_model_ref is required for Deep Agents")
+        trace_context = command.get("trace_context")
+        if not isinstance(trace_context, dict):
+            trace_context = {}
+        root_observation_id = trace_context.get("root_observation_id")
+        if not isinstance(root_observation_id, str) or not re.fullmatch(
+            r"[0-9a-f]{32}",
+            root_observation_id,
+        ):
+            trace_context = {}
+            root_observation_id = None
 
         def emit_agent_event(event, detail=None):
             detail = runtime_mode.decorate_event(detail)
@@ -840,6 +935,13 @@ class LensDeepAgentRuntime:
                     "payload": payload,
                 },
             )
+
+        def emit_trace_observation(observation):
+            if emit_progress is not None:
+                emit_progress(
+                    task_log("trace.observation"),
+                    {"observation": observation},
+                )
 
         emit_agent_event(
             "deepagents.runtime.start",
@@ -886,6 +988,9 @@ class LensDeepAgentRuntime:
                 on_activity=on_activity,
                 cancel_event=cancel_event,
                 run_uuid=run_uuid,
+                trace_context=trace_context,
+                emit_observation=emit_trace_observation,
+                observation_name="agent",
                 general_chat_execution_gates=runtime_mode.execution_gates,
                 token_budget_max_tokens=token_budget["max_tokens"],
                 token_budget_final_reserve_tokens=token_budget[
@@ -1058,6 +1163,14 @@ class LensDeepAgentRuntime:
                     else "executing"
                 )
                 emit_user_event("phase.changed", {"phase": phase})
+            trace_middleware = (
+                TraceObservationMiddleware(
+                    emit_trace_observation,
+                    root_observation_id,
+                )
+                if root_observation_id
+                else None
+            )
             kwargs = {
                 "model": model,
                 "tools": tools,
@@ -1074,7 +1187,12 @@ class LensDeepAgentRuntime:
                 "subagents": (
                     []
                     if runtime_mode.general_chat
-                    else [_fast_subagent(mcp_middleware)]
+                    else [
+                        _fast_subagent(
+                            mcp_middleware,
+                            trace_middleware,
+                        )
+                    ]
                 ),
                 "name": f"lensnode-{command.get('task') or 'agent'}",
             }
@@ -1088,6 +1206,8 @@ class LensDeepAgentRuntime:
                 cancel_event,
                 run_uuid=run_uuid,
                 http_client=self.http_client,
+                trace_context=trace_context,
+                emit_observation=emit_trace_observation,
             )
             middleware = _agent_middleware(
                 command,
@@ -1095,6 +1215,7 @@ class LensDeepAgentRuntime:
                 emit_agent_event,
                 capability_middleware=capability_middleware,
                 mcp_middleware=mcp_middleware,
+                trace_middleware=trace_middleware,
             )
             if middleware:
                 kwargs["middleware"] = middleware
@@ -1209,8 +1330,14 @@ def _resolve_token_budget(config, command):
 
     requested = command.get("token_budget") or {}
     profile = str(requested.get("profile") or "standard")
-    if profile not in {"standard", "deep"}:
+    if profile not in {"standard", "deep", "unlimited"}:
         profile = "standard"
+    if profile == "unlimited":
+        return {
+            "profile": profile,
+            "max_tokens": 0,
+            "final_reserve_tokens": 0,
+        }
 
     fallback_max = max(
         int(getattr(config, "token_budget_max_tokens", 200000) or 0),
@@ -2052,6 +2179,7 @@ def _agent_middleware(
     *,
     capability_middleware=None,
     mcp_middleware=None,
+    trace_middleware=None,
 ):
     """Return task-specific middleware for one Deep Agent run."""
 
@@ -2062,12 +2190,14 @@ def _agent_middleware(
         middleware.append(_NoTaskMiddleware(emit_event))
         if capability_middleware is not None:
             middleware.append(capability_middleware)
+    if trace_middleware is not None:
+        middleware.append(trace_middleware)
     if mcp_middleware is not None:
         middleware.append(mcp_middleware)
     return middleware
 
 
-def _fast_subagent(mcp_middleware=None):
+def _fast_subagent(mcp_middleware=None, trace_middleware=None):
     """General-purpose subagent that parallelizes its own tool calls.
 
     By default a delegated subagent runs deepagents' stock prompt and
@@ -2089,8 +2219,13 @@ def _fast_subagent(mcp_middleware=None):
         **GENERAL_PURPOSE_SUBAGENT,
         "system_prompt": parallel + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
     }
-    if mcp_middleware is not None:
-        subagent["middleware"] = [mcp_middleware]
+    middleware = [
+        item
+        for item in (trace_middleware, mcp_middleware)
+        if item is not None
+    ]
+    if middleware:
+        subagent["middleware"] = middleware
     return subagent
 
 
