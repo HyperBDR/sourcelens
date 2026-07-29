@@ -867,7 +867,6 @@
       "retentionDesc": "删除超过保留天数的历史运行记录。"
     },
     "table": {
-      "toolSummary": "技能 {skills} / MCP {mcps}",
       "dirTaskSummary": "{dirs} 目录 / {tasks} 任务",
       "notRecorded": "未记录",
       "intervalSeconds": "{seconds}s",
@@ -1134,6 +1133,23 @@
     "drawer": {
       "createTitle": "新建 Assistant",
       "editTitle": "编辑 Assistant"
+    },
+    "assistantDetail": {
+      "title": "助手详情",
+      "overview": "基本信息",
+      "workspaceDirectories": "工作区目录",
+      "capabilities": "绑定能力",
+      "access": "访问授权",
+      "share": "分享",
+      "noDirectories": "未选择工作区目录",
+      "noSkills": "未绑定 Skill",
+      "noMcps": "未绑定 MCP Server",
+      "noAuthorizedUsers": "暂无直接授权用户",
+      "noAuthorizedGroups": "暂无授权组",
+      "archiveTitle": "归档助手",
+      "archiveMessage": "归档「{name}」？恢复前链接将无法使用。",
+      "skillCount": "{count} 个 Skill",
+      "mcpCount": "{count} 个 MCP Server"
     },
     "datasourceWizard": {
       "createTitle": "新建数据源",

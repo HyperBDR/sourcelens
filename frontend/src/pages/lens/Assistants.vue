@@ -108,9 +108,13 @@
                   class="transition-colors hover:bg-line-soft"
                 >
                   <td class="table-cell">
-                    <div class="font-medium text-ink-900">
+                    <button
+                      type="button"
+                      class="assistant-name-action"
+                      @click="openDetails(row)"
+                    >
                       {{ row.name }}
-                    </div>
+                    </button>
                     <div class="mt-1 font-mono text-xs text-ink-400">
                       {{ row.slug }}
                     </div>
@@ -121,16 +125,34 @@
                   <td class="assistant-type-column table-cell text-ink-600">
                     {{ assistantTypeLabel(row.selected_task) }}
                   </td>
-                  <td class="table-cell font-mono text-xs text-ink-500">
-                    {{ row.selected_dirs?.[0]?.path || emptyValue }}
-                  </td>
                   <td class="table-cell text-ink-600">
-                    {{
-                      t('lensAdmin.table.toolSummary', {
-                        skills: row.skill_summary?.enabled || 0,
-                        mcps: row.mcp_summary?.enabled || 0
-                      })
-                    }}
+                    <div
+                      data-testid="assistant-tool-counts"
+                      class="flex items-center gap-3"
+                    >
+                      <span
+                        class="tool-count"
+                        :class="{
+                          'tool-count-empty': !row.skill_summary?.enabled
+                        }"
+                        :title="skillCountLabel(row)"
+                        :aria-label="skillCountLabel(row)"
+                      >
+                        <BookOpen :size="16" aria-hidden="true" />
+                        {{ row.skill_summary?.enabled || 0 }}
+                      </span>
+                      <span
+                        class="tool-count"
+                        :class="{
+                          'tool-count-empty': !row.mcp_summary?.enabled
+                        }"
+                        :title="mcpCountLabel(row)"
+                        :aria-label="mcpCountLabel(row)"
+                      >
+                        <Server :size="16" aria-hidden="true" />
+                        {{ row.mcp_summary?.enabled || 0 }}
+                      </span>
+                    </div>
                   </td>
                   <td class="table-cell">
                     <span
@@ -163,26 +185,15 @@
                     <StatusBadge :status="row.status" />
                   </td>
                   <td class="table-cell">
-                    <div
+                    <BaseButton
                       v-if="row.status === 'active'"
-                      class="flex items-center gap-1.5"
+                      size="sm"
+                      variant="outline"
+                      @click="copyShareUrl(row)"
                     >
-                      <span
-                        class="max-w-[220px] truncate font-mono text-xs text-ink-500"
-                        :title="shareUrl(row)"
-                      >
-                        {{ shareUrl(row) }}
-                      </span>
-                      <button
-                        type="button"
-                        class="shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-primary-600"
-                        :title="t('lens.share.copyLink')"
-                        :aria-label="t('lens.share.copyLink')"
-                        @click="copyShareUrl(row)"
-                      >
-                        <Copy :size="15" :stroke-width="2" aria-hidden="true" />
-                      </button>
-                    </div>
+                      <Copy :size="15" aria-hidden="true" />
+                      {{ t('lens.share.copyLink') }}
+                    </BaseButton>
                     <span v-else class="text-ink-400">{{ emptyValue }}</span>
                   </td>
                   <td class="table-cell">
@@ -195,34 +206,11 @@
                       >
                         {{ t('common.edit') }}
                       </BaseButton>
-                      <template
-                        v-if="
-                          row.status === 'active' &&
-                          archiveConfirmUuid === row.uuid
-                        "
-                      >
-                        <BaseButton
-                          size="sm"
-                          variant="secondary"
-                          :loading="actionUuid === row.uuid"
-                          @click="archive(row)"
-                        >
-                          {{ t('common.confirm') }}
-                        </BaseButton>
-                        <BaseButton
-                          size="sm"
-                          variant="ghost"
-                          :disabled="actionUuid === row.uuid"
-                          @click="archiveConfirmUuid = ''"
-                        >
-                          {{ t('common.cancel') }}
-                        </BaseButton>
-                      </template>
                       <BaseButton
-                        v-else-if="row.status === 'active'"
+                        v-if="row.status === 'active'"
                         size="sm"
-                        variant="ghost"
-                        @click="archiveConfirmUuid = row.uuid"
+                        variant="danger-outline"
+                        @click="requestArchive(row)"
                       >
                         {{ t('lensAdmin.pages.assistants.archive') }}
                       </BaseButton>
@@ -253,6 +241,16 @@
         </div>
       </section>
 
+      <AssistantDetailDrawer
+        :show="Boolean(detailAssistant)"
+        :assistant="detailAssistant"
+        :lensnode-name="lensNodeName(detailAssistant?.lensnode)"
+        :assistant-type="assistantTypeLabel(detailAssistant?.selected_task)"
+        @close="closeDetails"
+        @copy-share="copyShareUrl"
+        @edit="startEditFromDetail"
+      />
+
       <!-- Assistant Drawer (create wizard + edit) -->
       <AssistantFormDrawer
         :show="showDrawer"
@@ -270,12 +268,50 @@
         @save="save"
         @refresh-dirs="refreshDirs"
       />
+
+      <BaseModal
+        :show="Boolean(archiveConfirmRow)"
+        :title="t('lensAdmin.assistantDetail.archiveTitle')"
+        icon-type="warning"
+        @close="closeArchiveConfirmation"
+      >
+        <p class="text-sm text-ink-600">
+          {{
+            t('lensAdmin.assistantDetail.archiveMessage', {
+              name: archiveConfirmRow?.name || ''
+            })
+          }}
+        </p>
+        <template #footer>
+          <BaseButton
+            variant="danger"
+            :loading="actionUuid === archiveConfirmRow?.uuid"
+            @click="archive(archiveConfirmRow)"
+          >
+            {{ t('common.confirm') }}
+          </BaseButton>
+          <BaseButton
+            variant="outline"
+            class="mr-3"
+            :disabled="actionUuid === archiveConfirmRow?.uuid"
+            @click="closeArchiveConfirmation"
+          >
+            {{ t('common.cancel') }}
+          </BaseButton>
+        </template>
+      </BaseModal>
     </div>
   </AdminLayout>
 </template>
 
 <script setup>
-import { Copy, Globe as GlobeIcon, Lock as LockIcon } from '@lucide/vue'
+import {
+  BookOpen,
+  Copy,
+  Globe as GlobeIcon,
+  Lock as LockIcon,
+  Server
+} from '@lucide/vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -299,9 +335,11 @@ import {
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseModal from '@/components/ui/BaseModal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
+import AssistantDetailDrawer from './AssistantDetailDrawer.vue'
 import AssistantFormDrawer from './AssistantFormDrawerDirectEnvironment.vue'
 import { buildSkillEnvironmentBinding } from './assistantEnvironment'
 import {
@@ -324,8 +362,9 @@ const mode = ref('create')
 const form = ref({})
 const formError = ref('')
 const showArchived = ref(false)
-const archiveConfirmUuid = ref('')
+const archiveConfirmRow = ref(null)
 const actionUuid = ref('')
+const detailAssistant = ref(null)
 
 const assistants = ref([])
 const currentPage = ref(1)
@@ -342,7 +381,6 @@ const activeColumns = computed(() =>
     'assistant',
     'lensnode',
     'type',
-    'dirs',
     'tools',
     'visibility',
     'status',
@@ -385,6 +423,18 @@ function assistantTypeLabel(value) {
 
 function shareUrl(row) {
   return assistantChatUrl(row.slug, globalSettings.value)
+}
+
+function skillCountLabel(row) {
+  return t('lensAdmin.assistantDetail.skillCount', {
+    count: row.skill_summary?.enabled || 0
+  })
+}
+
+function mcpCountLabel(row) {
+  return t('lensAdmin.assistantDetail.mcpCount', {
+    count: row.mcp_summary?.enabled || 0
+  })
 }
 
 async function copyShareUrl(row) {
@@ -438,13 +488,15 @@ async function load() {
 async function switchArchiveView(archived) {
   if (showArchived.value === archived) return
   showArchived.value = archived
-  archiveConfirmUuid.value = ''
+  archiveConfirmRow.value = null
+  detailAssistant.value = null
   currentPage.value = 1
   assistants.value = []
   await load()
 }
 
 function startCreate() {
+  detailAssistant.value = null
   mode.value = 'create'
   formError.value = ''
   form.value = defaultForm()
@@ -456,6 +508,28 @@ function startEdit(row) {
   formError.value = ''
   form.value = formFromRow(row)
   showDrawer.value = true
+}
+
+function openDetails(row) {
+  detailAssistant.value = row
+}
+
+function closeDetails() {
+  detailAssistant.value = null
+}
+
+function startEditFromDetail(row) {
+  closeDetails()
+  startEdit(row)
+}
+
+function requestArchive(row) {
+  archiveConfirmRow.value = row
+}
+
+function closeArchiveConfirmation() {
+  if (actionUuid.value) return
+  archiveConfirmRow.value = null
 }
 
 function closeDrawer() {
@@ -707,11 +781,12 @@ function buildSelectedDirs() {
 }
 
 async function archive(row) {
+  if (!row) return
   actionUuid.value = row.uuid
   try {
     await archiveAssistant(row.uuid)
     showSuccess(t('lensAdmin.messages.archiveSuccess'))
-    archiveConfirmUuid.value = ''
+    archiveConfirmRow.value = null
     await load()
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.archiveFailed')))
@@ -748,5 +823,18 @@ onMounted(load)
 .assistant-type-column {
   white-space: nowrap;
   word-break: keep-all;
+}
+
+.tool-count {
+  @apply inline-flex items-center gap-1 text-xs font-medium text-ink-600;
+}
+
+.tool-count-empty {
+  @apply text-ink-300;
+}
+
+.assistant-name-action {
+  @apply font-medium text-ink-900 transition-colors;
+  @apply hover:text-primary-700 hover:underline;
 }
 </style>
