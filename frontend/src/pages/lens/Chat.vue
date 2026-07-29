@@ -1380,7 +1380,10 @@ import {
   UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
 import { precedingUserMessage } from '@/pages/lens/chatMessageContext'
-import { shouldShowRetryHint } from '@/pages/lens/chatRetryHint'
+import {
+  resolveRunStatus,
+  shouldShowRetryHint
+} from '@/pages/lens/chatRetryHint'
 import {
   activitiesForNode,
   applyRuntimeEvent,
@@ -2487,11 +2490,7 @@ async function selectSession(session, updateRoute = true) {
   }
   await nextTick(scrollToBottom)
   if (!isCurrentLoad()) return
-  try {
-    await maybeResumeActiveRun(session.uuid, isCurrentLoad)
-  } finally {
-    finishRunStatusResolution()
-  }
+  await maybeResumeActiveRun(session.uuid, isCurrentLoad)
   if (!isCurrentLoad()) return
   if (clearUnreadSession(window.localStorage, session.uuid)) {
     refreshUnreadSessions()
@@ -2505,14 +2504,14 @@ async function maybeResumeActiveRun(sessionUuid, isCurrentLoad) {
   // the latest message carrying a run uuid (the user message of the most
   // recent turn) tells us whether that turn is still in progress
   const withRun = [...messages.value].reverse().find((m) => m.run)
-  if (!withRun) return
-  let run
-  try {
-    run = await getRun(withRun.run)
-  } catch {
+  if (!withRun) {
+    runStatusResolvingSessionUuid.value = ''
     return
   }
+  const resolution = await resolveRunStatus(getRun, withRun.run)
   if (!isCurrentLoad()) return
+  if (!resolution.resolved) return
+  const run = resolution.run
   runStatusResolvingSessionUuid.value = ''
   if (!['queued', 'running', 'streaming'].includes(run?.status)) {
     // A historically-failed turn keeps its retry hint with the right
