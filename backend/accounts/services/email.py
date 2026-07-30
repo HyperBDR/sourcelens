@@ -13,8 +13,33 @@ from django.template.loader import render_to_string
 from django.utils import translation
 from django.utils.translation import gettext_lazy as _
 
-
 logger = logging.getLogger(__name__)
+
+
+VERIFICATION_CODE_TEMPLATE_MAP = {
+    'zh-CN': 'emails/login_otp/login_otp_email_zh.html',
+    'en-US': 'emails/login_otp/login_otp_email_en.html',
+}
+
+
+def render_verification_code_email(
+    code,
+    expiry_minutes,
+    frontend_url,
+    language,
+    purpose,
+):
+    """Render the shared verification-code email layout."""
+    template = VERIFICATION_CODE_TEMPLATE_MAP.get(
+        language,
+        VERIFICATION_CODE_TEMPLATE_MAP['en-US'],
+    )
+    return render_to_string(template, {
+        'code': code,
+        'expiry_minutes': expiry_minutes,
+        'frontend_url': frontend_url,
+        'purpose': purpose,
+    })
 
 
 def get_translation_language_code(language):
@@ -162,12 +187,13 @@ class RegistrationEmailService:
             )
             return False
 
+
 class OtpLoginEmailService:
     """
     Service class for sending email verification code (OTP) login emails.
 
-    Sends a plaintext email carrying a short-lived numeric code, reusing
-    the shared delivery options and logging conventions.
+    Sends a multipart email carrying a short-lived numeric code, reusing
+    the shared verification-code layout and delivery options.
     """
 
     @staticmethod
@@ -193,16 +219,13 @@ class OtpLoginEmailService:
                 django_settings, 'FRONTEND_URL', ''
             ).rstrip('/')
 
-            template_map = {
-                'zh-CN': 'emails/login_otp/login_otp_email_zh.html',
-                'en-US': 'emails/login_otp/login_otp_email_en.html',
-            }
-            template = template_map.get(language, template_map['en-US'])
-            html_content = render_to_string(template, {
-                'code': code,
-                'expiry_minutes': expiry_minutes,
-                'frontend_url': frontend_url,
-            })
+            html_content = render_verification_code_email(
+                code=code,
+                expiry_minutes=expiry_minutes,
+                frontend_url=frontend_url,
+                language=language,
+                purpose='login',
+            )
 
             translation_code = get_translation_language_code(language)
             with translation.override(translation_code):
@@ -255,6 +278,18 @@ class PasswordSetupEmailService:
         """Send a short-lived code for first-time password creation."""
         try:
             expiry_minutes = max(1, settings.OTP_CODE_TTL_SECONDS // 60)
+            frontend_url = getattr(
+                settings,
+                "FRONTEND_URL",
+                "",
+            ).rstrip("/")
+            html_content = render_verification_code_email(
+                code=code,
+                expiry_minutes=expiry_minutes,
+                frontend_url=frontend_url,
+                language=language,
+                purpose="password_setup",
+            )
             translation_code = get_translation_language_code(language)
             with translation.override(translation_code):
                 subject = str(_("Your password setup verification code"))
@@ -275,6 +310,7 @@ class PasswordSetupEmailService:
                 to=[email],
                 connection=connection,
             )
+            email_message.attach_alternative(html_content, "text/html")
             email_message.send()
             logger.info("Sent password setup verification email")
             return True
