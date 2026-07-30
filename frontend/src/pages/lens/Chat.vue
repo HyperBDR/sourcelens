@@ -2059,6 +2059,9 @@ function handleCompletionStorage(event) {
     preferencesStore.answerCompletionIndicator = event.newValue !== 'false'
     refreshUnreadSessions()
   }
+  if (event.key === 'nativeBrowserNotifications') {
+    preferencesStore.nativeBrowserNotifications = event.newValue === 'true'
+  }
 }
 
 function handleCompletionVisibility() {
@@ -2099,6 +2102,15 @@ function startCompletionTracking(run, sessionUuid) {
       const result = handleTerminalRun({
         documentRef: document,
         indicatorEnabled: preferencesStore.answerCompletionIndicator,
+        nativeNotification: {
+          body: t('settings.modal.nativeAnswerCompletedBody'),
+          enabled: preferencesStore.nativeBrowserNotifications,
+          NotificationRef: window.Notification,
+          onOpenConversation: (completedSessionUuid) =>
+            selectSession({ uuid: completedSessionUuid }),
+          title: t('settings.modal.nativeAnswerCompletedTitle'),
+          windowRef: window
+        },
         run: terminalRun,
         selectedSessionUuid: selectedSessionUuid.value,
         sessionUuid,
