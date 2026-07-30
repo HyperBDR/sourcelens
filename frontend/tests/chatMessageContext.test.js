@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-import { precedingUserMessage } from '../src/pages/lens/chatMessageContext.js'
+import {
+  precedingUserMessage,
+  retryRunUuid
+} from '../src/pages/lens/chatMessageContext.js'
 
 test('passes the clicked assistant reply to the retry handler', async () => {
   const chat = await readFile(
@@ -37,4 +40,25 @@ test('returns null when the target reply is not in the message list', () => {
   })
 
   assert.equal(question, null)
+})
+
+test('finds the Run for a historical assistant reply', () => {
+  const messages = [
+    { uuid: 'question-1', role: 'user', content: 'First', run: 'run-1' },
+    { uuid: 'answer-1', role: 'assistant', content: 'Answer', run: 'run-1' },
+    { uuid: 'question-2', role: 'user', content: 'Second', run: 'run-2' },
+    { uuid: 'answer-2', role: 'assistant', content: 'Answer', run: 'run-2' }
+  ]
+
+  assert.equal(retryRunUuid(messages, messages[1]), 'run-1')
+})
+
+test('uses the latest user Run for an empty-answer Retry hint', () => {
+  const messages = [
+    { uuid: 'question-1', role: 'user', content: 'First', run: 'run-1' },
+    { uuid: 'answer-1', role: 'assistant', content: 'Answer', run: 'run-1' },
+    { uuid: 'question-2', role: 'user', content: 'Second', run: 'run-2' }
+  ]
+
+  assert.equal(retryRunUuid(messages), 'run-2')
 })

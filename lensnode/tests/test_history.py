@@ -74,6 +74,60 @@ def test_build_initial_messages_without_history():
     ]
 
 
+def test_build_initial_messages_contains_current_retry_question_once():
+    history = [
+        {"role": "user", "content": "context question"},
+        {"role": "assistant", "content": "context answer"},
+    ]
+
+    messages = _build_initial_messages(history, "retried question")
+
+    assert messages.count(
+        {"role": "user", "content": "retried question"}
+    ) == 1
+
+
+def test_build_initial_messages_preserves_intentional_identical_turns():
+    history = [
+        {"role": "user", "content": "query again"},
+        {"role": "assistant", "content": "old fresh result"},
+    ]
+
+    messages = _build_initial_messages(history, "query again")
+
+    assert messages.count(
+        {"role": "user", "content": "query again"}
+    ) == 2
+
+
+def test_historical_assistant_content_is_not_current_tool_evidence():
+    messages = _build_initial_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "The previous tool call succeeded.",
+            }
+        ],
+        "Run the operation again",
+    )
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["skill"]
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert messages[0]["role"] == "assistant"
+    assert middleware.successful_capabilities == set()
+    assert outcome == "blocked"
+    assert termination_detail["reason"] == "evidence_unavailable"
+
+
 def test_model_event_records_cache_reasoning_and_latency():
     events = []
     message = _Msg(
