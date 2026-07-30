@@ -1,4 +1,7 @@
 const UNREAD_STORAGE_KEY = 'sourcelens.answerCompletion.unreadSessions'
+const NATIVE_NOTIFIED_RUNS_KEY =
+  'sourcelens.answerCompletion.nativeNotifiedRuns'
+const MAX_NATIVE_NOTIFIED_RUNS = 100
 const TERMINAL_RUN_STATUSES = new Set(['done', 'failed', 'cancelled'])
 
 function readObject(storage, key) {
@@ -14,6 +17,15 @@ function readObject(storage, key) {
 
 function writeObject(storage, key, value) {
   storage?.setItem(key, JSON.stringify(value))
+}
+
+function readArray(storage, key) {
+  try {
+    const value = JSON.parse(storage?.getItem(key) || '[]')
+    return Array.isArray(value) ? value : []
+  } catch {
+    return []
+  }
 }
 
 export function readUnreadSessions(storage) {
@@ -66,23 +78,94 @@ function isInactive(documentRef) {
   )
 }
 
+function reserveNativeNotification(storage, runUuid) {
+  const notifiedRuns = readArray(storage, NATIVE_NOTIFIED_RUNS_KEY)
+  if (notifiedRuns.includes(runUuid)) {
+    return false
+  }
+  try {
+    storage?.setItem(
+      NATIVE_NOTIFIED_RUNS_KEY,
+      JSON.stringify(
+        [...notifiedRuns, runUuid].slice(-MAX_NATIVE_NOTIFIED_RUNS)
+      )
+    )
+    return Boolean(storage)
+  } catch {
+    return false
+  }
+}
+
+export async function requestNativeNotificationPermission(NotificationRef) {
+  if (!NotificationRef) return null
+  if (NotificationRef.permission !== 'default') {
+    return NotificationRef.permission
+  }
+  try {
+    return await NotificationRef.requestPermission()
+  } catch {
+    return null
+  }
+}
+
+function showNativeCompletionNotification(options) {
+  const nativeNotification = options.nativeNotification
+  const NotificationRef = nativeNotification?.NotificationRef
+  if (
+    !nativeNotification?.enabled ||
+    !isInactive(options.documentRef) ||
+    NotificationRef?.permission !== 'granted' ||
+    !reserveNativeNotification(options.storage, options.run.uuid)
+  ) {
+    return false
+  }
+
+  try {
+    const notification = new NotificationRef(nativeNotification.title, {
+      body: nativeNotification.body,
+      renotify: false,
+      tag: `sourcelens-answer-${options.run.uuid}`
+    })
+    notification.onclick = () => {
+      try {
+        notification.close()
+        nativeNotification.windowRef?.focus?.()
+        const opening = nativeNotification.onOpenConversation?.(
+          options.sessionUuid
+        )
+        opening?.catch?.(() => {})
+      } catch {
+        return
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function handleTerminalRun(options) {
-  if (options.run?.status !== 'done' || !options.indicatorEnabled) {
-    return { unreadChanged: false }
+  if (options.run?.status !== 'done') {
+    return { nativeNotificationShown: false, unreadChanged: false }
   }
 
   const isAnotherConversation =
     options.sessionUuid !== options.selectedSessionUuid
-  if (!isAnotherConversation && !isInactive(options.documentRef)) {
-    return { unreadChanged: false }
-  }
-
-  return {
-    unreadChanged: markUnreadSession(
+  let unreadChanged = false
+  if (
+    options.indicatorEnabled &&
+    (isAnotherConversation || isInactive(options.documentRef))
+  ) {
+    unreadChanged = markUnreadSession(
       options.storage,
       options.sessionUuid,
       options.run.uuid
     )
+  }
+
+  return {
+    nativeNotificationShown: showNativeCompletionNotification(options),
+    unreadChanged
   }
 }
 

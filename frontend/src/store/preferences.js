@@ -3,6 +3,7 @@ import { detectTimezone, detectLanguage } from '@/utils/timezone'
 import i18n, { normalizeUiLanguage } from '@/i18n'
 
 const COMPLETION_INDICATOR_KEY = 'answerCompletionIndicator'
+const NATIVE_BROWSER_NOTIFICATIONS_KEY = 'nativeBrowserNotifications'
 const UNREAD_STORAGE_KEY = 'sourcelens.answerCompletion.unreadSessions'
 
 export const usePreferencesStore = defineStore('preferences', {
@@ -12,6 +13,7 @@ export const usePreferencesStore = defineStore('preferences', {
     detectedLanguage: detectLanguage(),
     detectedTimezone: detectTimezone(),
     answerCompletionIndicator: true,
+    nativeBrowserNotifications: false,
     isLoaded: false
   }),
 
@@ -58,10 +60,18 @@ export const usePreferencesStore = defineStore('preferences', {
       }
     },
 
+    setNativeBrowserNotifications(enabled) {
+      this.nativeBrowserNotifications = enabled
+      localStorage.setItem(NATIVE_BROWSER_NOTIFICATIONS_KEY, String(enabled))
+    },
+
     loadFromLocalStorage() {
       const savedLanguage = localStorage.getItem('userLanguage')
       const savedTimezone = localStorage.getItem('userTimezone')
       const savedIndicator = localStorage.getItem(COMPLETION_INDICATOR_KEY)
+      const savedNativeNotifications = localStorage.getItem(
+        NATIVE_BROWSER_NOTIFICATIONS_KEY
+      )
 
       if (savedLanguage) {
         const normalizedLanguage = normalizeUiLanguage(savedLanguage)
@@ -78,6 +88,9 @@ export const usePreferencesStore = defineStore('preferences', {
       }
       if (savedIndicator !== null) {
         this.answerCompletionIndicator = savedIndicator === 'true'
+      }
+      if (savedNativeNotifications !== null) {
+        this.nativeBrowserNotifications = savedNativeNotifications === 'true'
       }
       this.isLoaded = true
     },
@@ -102,11 +115,13 @@ export const usePreferencesStore = defineStore('preferences', {
       this.language = normalizedLanguage
       this.timezone = this.detectedTimezone
       this.answerCompletionIndicator = true
+      this.nativeBrowserNotifications = false
       i18n.global.locale.value = normalizedLanguage
       document.documentElement.lang = normalizedLanguage
       localStorage.removeItem('userLanguage')
       localStorage.removeItem('userTimezone')
       localStorage.removeItem(COMPLETION_INDICATOR_KEY)
+      localStorage.removeItem(NATIVE_BROWSER_NOTIFICATIONS_KEY)
       localStorage.removeItem(UNREAD_STORAGE_KEY)
     }
   }

@@ -7,6 +7,7 @@ import {
   handleTerminalRun,
   pollRunUntilTerminal,
   readUnreadSessions,
+  requestNativeNotificationPermission,
   shouldReviewUnreadSession
 } from '../src/utils/answerCompletionNotifications.js'
 
@@ -37,6 +38,35 @@ function completionOptions(overrides = {}) {
     storage: new MemoryStorage(),
     ...overrides
   }
+}
+
+function createNotificationApi(permission = 'granted', requested = permission) {
+  class NotificationApi {
+    static instances = []
+
+    static permission = permission
+
+    static requestPermissionCalls = 0
+
+    static async requestPermission() {
+      NotificationApi.requestPermissionCalls += 1
+      NotificationApi.permission = requested
+      return requested
+    }
+
+    constructor(title, options) {
+      this.title = title
+      this.options = options
+      this.closed = false
+      NotificationApi.instances.push(this)
+    }
+
+    close() {
+      this.closed = true
+    }
+  }
+
+  return NotificationApi
 }
 
 test('uses a bell instead of an unread count in the browser title', () => {
@@ -146,9 +176,142 @@ test('does not treat failed or cancelled runs as completed answers', () => {
 
     const result = handleTerminalRun(options)
 
-    assert.deepEqual(result, { unreadChanged: false })
+    assert.deepEqual(result, {
+      nativeNotificationShown: false,
+      unreadChanged: false
+    })
     assert.deepEqual(readUnreadSessions(options.storage), {})
   }
+})
+
+test('requests native notification permission only when it can prompt', async () => {
+  const NotificationApi = createNotificationApi('default', 'granted')
+
+  assert.equal(
+    await requestNativeNotificationPermission(NotificationApi),
+    'granted'
+  )
+  assert.equal(NotificationApi.requestPermissionCalls, 1)
+
+  NotificationApi.permission = 'denied'
+  assert.equal(
+    await requestNativeNotificationPermission(NotificationApi),
+    'denied'
+  )
+  assert.equal(NotificationApi.requestPermissionCalls, 1)
+  assert.equal(await requestNativeNotificationPermission(undefined), null)
+})
+
+test('shows a native notification for an inactive completed run', () => {
+  const NotificationApi = createNotificationApi()
+  const storage = new MemoryStorage()
+  let focused = 0
+  let openedSession = ''
+  const options = completionOptions({
+    documentRef: {
+      hasFocus: () => false,
+      visibilityState: 'hidden'
+    },
+    indicatorEnabled: false,
+    nativeNotification: {
+      body: 'Your answer is ready.',
+      enabled: true,
+      NotificationRef: NotificationApi,
+      onOpenConversation: (sessionUuid) => {
+        openedSession = sessionUuid
+      },
+      title: 'Answer completed',
+      windowRef: {
+        focus: () => {
+          focused += 1
+        }
+      }
+    },
+    selectedSessionUuid: 'session-a',
+    storage
+  })
+
+  const result = handleTerminalRun(options)
+
+  assert.deepEqual(result, {
+    nativeNotificationShown: true,
+    unreadChanged: false
+  })
+  assert.equal(NotificationApi.instances.length, 1)
+  assert.deepEqual(NotificationApi.instances[0].options, {
+    body: 'Your answer is ready.',
+    renotify: false,
+    tag: 'sourcelens-answer-run-1'
+  })
+
+  NotificationApi.instances[0].onclick()
+
+  assert.equal(focused, 1)
+  assert.equal(openedSession, 'session-a')
+  assert.equal(NotificationApi.instances[0].closed, true)
+})
+
+test('does not show a native notification in the active tab', () => {
+  const NotificationApi = createNotificationApi()
+  const options = completionOptions({
+    nativeNotification: {
+      body: 'Your answer is ready.',
+      enabled: true,
+      NotificationRef: NotificationApi,
+      title: 'Answer completed'
+    }
+  })
+
+  const result = handleTerminalRun(options)
+
+  assert.equal(result.nativeNotificationShown, false)
+  assert.equal(NotificationApi.instances.length, 0)
+})
+
+test('deduplicates native notifications for replayed cross-tab events', () => {
+  const NotificationApi = createNotificationApi()
+  const storage = new MemoryStorage()
+  const options = completionOptions({
+    documentRef: {
+      hasFocus: () => false,
+      visibilityState: 'hidden'
+    },
+    nativeNotification: {
+      body: 'Your answer is ready.',
+      enabled: true,
+      NotificationRef: NotificationApi,
+      title: 'Answer completed'
+    },
+    storage
+  })
+
+  const first = handleTerminalRun(options)
+  const replayFromAnotherTab = handleTerminalRun(options)
+
+  assert.equal(first.nativeNotificationShown, true)
+  assert.equal(replayFromAnotherTab.nativeNotificationShown, false)
+  assert.equal(NotificationApi.instances.length, 1)
+})
+
+test('silently falls back when native notifications are unavailable', () => {
+  const options = completionOptions({
+    documentRef: {
+      hasFocus: () => false,
+      visibilityState: 'hidden'
+    },
+    nativeNotification: {
+      body: 'Your answer is ready.',
+      enabled: true,
+      NotificationRef: undefined,
+      title: 'Answer completed'
+    }
+  })
+
+  assert.doesNotThrow(() => handleTerminalRun(options))
+  assert.equal(handleTerminalRun(options).nativeNotificationShown, false)
+  assert.deepEqual(readUnreadSessions(options.storage), {
+    'session-a': 'run-1'
+  })
 })
 
 test('polls server run state until it reaches a terminal status', async () => {
