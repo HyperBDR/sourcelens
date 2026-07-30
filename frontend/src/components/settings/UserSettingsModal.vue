@@ -310,6 +310,7 @@ const handleKeydown = (event) => {
 watch(
   () => props.show,
   (show) => {
+    if (show) activeSection.value = uiStore.settingsTab || 'profile'
     if (typeof document !== 'undefined')
       document.body.style.overflow = show ? 'hidden' : ''
   },

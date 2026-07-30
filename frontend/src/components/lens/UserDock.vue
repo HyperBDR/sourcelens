@@ -13,6 +13,28 @@
 
   <div v-else ref="dockMenuRef" class="dock-menu-wrap">
     <button
+      v-if="needsPasswordSetup"
+      type="button"
+      class="password-setup-prompt"
+      :class="{
+        'password-setup-prompt-collapsed': collapsed && !isMobile
+      }"
+      :aria-label="passwordText.setup.promptAction"
+      :title="passwordText.setup.promptAction"
+      @click="openPasswordSetup"
+    >
+      <KeyRound :size="16" :stroke-width="2" aria-hidden="true" />
+      <span v-if="!collapsed || isMobile" class="min-w-0 text-left">
+        <span class="block truncate text-xs font-medium text-ink-700">
+          {{ passwordText.setup.promptStatus }}
+        </span>
+        <span class="block truncate text-xs text-primary-600">
+          {{ passwordText.setup.promptAction }}
+        </span>
+      </span>
+    </button>
+
+    <button
       class="dock-trigger"
       :class="[
         dockMenuOpen ? 'dock-trigger-open' : '',
@@ -91,8 +113,9 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { onClickOutside } from '@vueuse/core'
-import { LogIn, LogOut, Settings, Share2, Shield } from '@lucide/vue'
+import { KeyRound, LogIn, LogOut, Settings, Share2, Shield } from '@lucide/vue'
 
+import { getPasswordManagementText } from '@/locales/passwordManagement'
 import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
 
@@ -102,7 +125,7 @@ defineProps({
 })
 const emit = defineEmits(['require-login', 'open-my-shares'])
 
-const { t } = useI18n()
+const { locale, t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 const uiStore = useUiStore()
@@ -121,6 +144,12 @@ onClickOutside(dockMenuRef, () => {
 
 const isAnonymous = computed(() => !userStore.isAuthenticated)
 const isAdmin = computed(() => userStore.userHasFeature('admin_console'))
+const needsPasswordSetup = computed(
+  () =>
+    userStore.isAuthenticated &&
+    userStore.userInfo?.auth_info?.can_change_password === false
+)
+const passwordText = computed(() => getPasswordManagementText(locale.value))
 
 const displayName = computed(() => {
   const userInfo = userStore.userInfo
@@ -160,6 +189,11 @@ function openSettings() {
   dockMenuOpen.value = false
 }
 
+function openPasswordSetup() {
+  uiStore.openSettings('security')
+  dockMenuOpen.value = false
+}
+
 async function handleLogout() {
   try {
     await userStore.logout()
@@ -174,7 +208,19 @@ async function handleLogout() {
 
 <style scoped>
 .dock-menu-wrap {
-  @apply relative;
+  @apply relative space-y-2;
+}
+
+.password-setup-prompt {
+  @apply flex w-full items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-left transition-colors;
+}
+
+.password-setup-prompt:hover {
+  @apply border-primary-200 bg-primary-100;
+}
+
+.password-setup-prompt-collapsed {
+  @apply justify-center px-0;
 }
 
 .dock-trigger {

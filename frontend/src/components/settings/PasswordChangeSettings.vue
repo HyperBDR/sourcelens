@@ -6,19 +6,25 @@
     @back="showPasswordReset = false"
   />
 
+  <FirstTimePasswordSetupSettings
+    v-else-if="!canChangePassword"
+    @completed="setupCompleted = true"
+  />
+
   <div v-else class="space-y-5">
     <p class="text-sm text-gray-500">
       {{ t('passwordManagement.security.description') }}
     </p>
 
     <div
-      v-if="!canChangePassword"
-      class="rounded-lg border border-line bg-gray-50 p-4 text-sm text-gray-600"
+      v-if="setupCompleted"
+      class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700"
+      role="status"
     >
-      {{ t('passwordManagement.security.unavailable') }}
+      {{ t('passwordManagement.setup.success') }}
     </div>
 
-    <form v-else class="space-y-4" novalidate @submit.prevent="handleSubmit">
+    <form class="space-y-4" novalidate @submit.prevent="handleSubmit">
       <BaseInput
         v-model="form.currentPassword"
         :label="t('passwordManagement.security.currentPassword')"
@@ -91,6 +97,7 @@ import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authApi } from '@/api/auth'
 import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm.vue'
+import FirstTimePasswordSetupSettings from '@/components/settings/FirstTimePasswordSetupSettings.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import { passwordManagementMessages } from '@/locales/passwordManagement'
@@ -123,6 +130,7 @@ const loading = ref(false)
 const success = ref(false)
 const statusMessage = ref('')
 const showPasswordReset = ref(false)
+const setupCompleted = ref(false)
 
 const validateForm = () => {
   errors.currentPassword = ''

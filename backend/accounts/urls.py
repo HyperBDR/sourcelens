@@ -16,9 +16,11 @@ from accounts.views import (
     CompleteRegistrationView,
     ConfirmPasswordResetView,
     CustomUserDetailsView,
+    FirstTimePasswordSetupView,
     GetAvailableScenesView,
     SendLoginCodeView,
     SendPasswordResetEmailView,
+    SendPasswordSetupCodeView,
     SendRegistrationEmailView,
     VerifyLoginCodeView,
     VerifyRegistrationTokenView,
@@ -113,7 +115,16 @@ urlpatterns = [
         PasswordChangeView.as_view(),
         name='rest_password_change'
     ),
-
+    path(
+        'api/v1/auth/password/setup/send-code',
+        SendPasswordSetupCodeView.as_view(),
+        name='password_setup_send_code',
+    ),
+    path(
+        'api/v1/auth/password/setup',
+        FirstTimePasswordSetupView.as_view(),
+        name='password_setup',
+    ),
     # Custom registration endpoints
     path(
         'api/v1/auth/register/send-email',

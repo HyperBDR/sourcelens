@@ -14,7 +14,9 @@ from accounts.views.management import (
 )
 from accounts.views.password import (
     ConfirmPasswordResetView,
+    FirstTimePasswordSetupView,
     SendPasswordResetEmailView,
+    SendPasswordSetupCodeView,
 )
 
 
@@ -38,6 +40,14 @@ urlpatterns = [
     path(
         "api/v1/auth/password/change",
         PasswordChangeView.as_view(),
+    ),
+    path(
+        "api/v1/auth/password/setup/send-code",
+        SendPasswordSetupCodeView.as_view(),
+    ),
+    path(
+        "api/v1/auth/password/setup",
+        FirstTimePasswordSetupView.as_view(),
     ),
     path("api/v1/auth/probe", AuthenticatedProbeView.as_view()),
     path(
