@@ -7,6 +7,21 @@ export function getPasswordPolicyError(password) {
   return ''
 }
 
+const PASSWORD_SETUP_ERROR_KEYS = {
+  DELIVERY_FAILED: 'deliveryFailed',
+  EXPIRED: 'codeExpired',
+  INVALID: 'codeInvalid',
+  PASSWORD_ALREADY_SET: 'alreadySet',
+  RATE_LIMITED: 'rateLimited',
+  TOO_MANY_ATTEMPTS: 'tooManyAttempts'
+}
+
+export function getPasswordSetupErrorKey(errorCode) {
+  return (
+    PASSWORD_SETUP_ERROR_KEYS[String(errorCode || '').toUpperCase()] || 'error'
+  )
+}
+
 export function getApiErrorData(error) {
   const responseData = error?.response?.data
   return responseData?.data || responseData || {}

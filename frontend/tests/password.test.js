@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
@@ -8,8 +9,12 @@ import {
 import {
   getApiErrorData,
   getFirstApiError,
-  getPasswordPolicyError
+  getPasswordPolicyError,
+  getPasswordSetupErrorKey
 } from '../src/utils/password.js'
+
+const source = (path) =>
+  readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
 test('validates password policy boundaries and character requirements', () => {
   assert.equal(getPasswordPolicyError('A1short'), 'tooShort')
@@ -34,6 +39,16 @@ test('provides complete English and Chinese password messages', () => {
     getPasswordManagementText('zh-CN').security.forgotPassword,
     '忘记当前密码？'
   )
+  assert.equal(
+    getPasswordManagementText('en-US').setup.promptStatus,
+    'No sign-in password set'
+  )
+  assert.equal(
+    getPasswordManagementText('zh-CN').setup.promptAction,
+    '设置密码'
+  )
+  assert.ok(getPasswordManagementText('en-US').setup.codeExpired)
+  assert.ok(getPasswordManagementText('zh-CN').setup.success)
 })
 
 test('unwraps unified API errors and reads the first field error', () => {
@@ -68,4 +83,44 @@ test('reads Django non-field password validation errors', () => {
     getFirstApiError(error),
     'Password is too similar to the username'
   )
+})
+
+test('maps first-time setup API codes to localized message keys', () => {
+  assert.equal(getPasswordSetupErrorKey('RATE_LIMITED'), 'rateLimited')
+  assert.equal(getPasswordSetupErrorKey('EXPIRED'), 'codeExpired')
+  assert.equal(getPasswordSetupErrorKey('TOO_MANY_ATTEMPTS'), 'tooManyAttempts')
+  assert.equal(getPasswordSetupErrorKey('PASSWORD_ALREADY_SET'), 'alreadySet')
+  assert.equal(getPasswordSetupErrorKey('UNKNOWN'), 'error')
+})
+
+test('exposes a passwordless account prompt that opens Security directly', async () => {
+  const [dock, settings] = await Promise.all([
+    source('components/lens/UserDock.vue'),
+    source('components/settings/UserSettingsModal.vue')
+  ])
+
+  assert.match(dock, /can_change_password === false/)
+  assert.match(dock, /openSettings\('security'\)/)
+  assert.match(dock, /passwordText\.setup\.promptStatus/)
+  assert.match(settings, /uiStore\.settingsTab/)
+})
+
+test('first-time setup verifies identity then refreshes account state', async () => {
+  const [component, authApi] = await Promise.all([
+    source('components/settings/FirstTimePasswordSetupSettings.vue'),
+    source('api/auth.js')
+  ])
+
+  assert.match(component, /autocomplete="one-time-code"/)
+  assert.match(component, /autocomplete="new-password"/)
+  assert.match(component, /authApi\.sendPasswordSetupCode/)
+  assert.match(component, /authApi\.setupPassword/)
+  assert.match(component, /authApi\.getProfile/)
+  assert.match(component, /userStore\.setUser/)
+  assert.ok(
+    component.lastIndexOf("emit('completed')") <
+      component.lastIndexOf('await refreshUser()')
+  )
+  assert.match(authApi, /password\/setup\/send-code/)
+  assert.match(authApi, /password\/setup'/)
 })

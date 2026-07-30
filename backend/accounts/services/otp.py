@@ -1,5 +1,5 @@
 """
-Email verification code (OTP) login service.
+Email verification code (OTP) service.
 
 Stores transient login codes and rate-limit counters in the Django
 cache (Redis in production), so no database fields or migrations are
@@ -16,7 +16,11 @@ from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
-_CODE_KEY = 'otp:login:code:{email}'
+LOGIN_PURPOSE = 'login'
+PASSWORD_SETUP_PURPOSE = 'password_setup'
+
+_ALLOWED_PURPOSES = frozenset({LOGIN_PURPOSE, PASSWORD_SETUP_PURPOSE})
+_CODE_KEY = 'otp:{purpose}:code:{email}'
 _COOLDOWN_KEY = 'otp:login:cooldown:{email}'
 _DAILY_KEY = 'otp:login:daily:{email}'
 _IP_KEY = 'otp:login:ip:{ip}'
@@ -28,6 +32,16 @@ _IP_TTL_SECONDS = 3600
 def _normalize_email(email):
     """Return a normalized email used as a cache key component."""
     return (email or '').strip().lower()
+
+
+def _get_code_key(email, purpose):
+    """Return a purpose-bound cache key for a verification code."""
+    if purpose not in _ALLOWED_PURPOSES:
+        raise ValueError('Unsupported OTP purpose')
+    return _CODE_KEY.format(
+        purpose=purpose,
+        email=_normalize_email(email),
+    )
 
 
 def _hash_code(code):
@@ -82,17 +96,21 @@ def can_send(email, ip=None):
     return True, ''
 
 
-def store_code(email, code):
+def store_code(email, code, purpose=LOGIN_PURPOSE):
     """Persist the HMAC of a freshly issued code with attempt counter."""
-    email = _normalize_email(email)
     cache.set(
-        _CODE_KEY.format(email=email),
+        _get_code_key(email, purpose),
         {'code_hash': _hash_code(code), 'attempts': 0},
         settings.OTP_CODE_TTL_SECONDS,
     )
 
 
-def verify_code(email, code):
+def delete_code(email, purpose=LOGIN_PURPOSE):
+    """Delete an issued code after delivery failure or cancellation."""
+    cache.delete(_get_code_key(email, purpose))
+
+
+def verify_code(email, code, purpose=LOGIN_PURPOSE):
     """
     Verify a submitted code against the stored record.
 
@@ -100,8 +118,7 @@ def verify_code(email, code):
         tuple: (ok, reason) where reason is '' on success and one of
         'expired' | 'too_many_attempts' | 'invalid' on failure.
     """
-    email = _normalize_email(email)
-    key = _CODE_KEY.format(email=email)
+    key = _get_code_key(email, purpose)
     record = cache.get(key)
     if not record:
         return False, 'expired'

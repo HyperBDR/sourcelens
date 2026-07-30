@@ -162,7 +162,6 @@ class RegistrationEmailService:
             )
             return False
 
-
 class OtpLoginEmailService:
     """
     Service class for sending email verification code (OTP) login emails.
@@ -244,6 +243,48 @@ class OtpLoginEmailService:
                     'language': language,
                     'service': 'OtpLoginEmailService',
                 }
+            )
+            return False
+
+
+class PasswordSetupEmailService:
+    """Send purpose-specific step-up codes without sensitive logging."""
+
+    @staticmethod
+    def send_password_setup_code_email(email, code, language="en-US"):
+        """Send a short-lived code for first-time password creation."""
+        try:
+            expiry_minutes = max(1, settings.OTP_CODE_TTL_SECONDS // 60)
+            translation_code = get_translation_language_code(language)
+            with translation.override(translation_code):
+                subject = str(_("Your password setup verification code"))
+                text_content = str(
+                    _(
+                        "Your verification code is %(code)s. "
+                        "It expires in %(minutes)s minutes. "
+                        "If you did not request it, ignore this email."
+                    )
+                    % {"code": code, "minutes": expiry_minutes}
+                )
+
+            from_email, connection = get_email_delivery_options()
+            email_message = EmailMultiAlternatives(
+                subject=subject,
+                body=text_content,
+                from_email=from_email,
+                to=[email],
+                connection=connection,
+            )
+            email_message.send()
+            logger.info("Sent password setup verification email")
+            return True
+        except Exception as error:
+            logger.warning(
+                "Failed to send password setup verification email",
+                extra={
+                    "error_type": type(error).__name__,
+                    "service": "PasswordSetupEmailService",
+                },
             )
             return False
 
