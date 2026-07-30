@@ -384,7 +384,7 @@
       "codeSent": "Code sent, please check your email",
       "verifyLogin": "Log in",
       "verifying": "Logging in...",
-      "switchToPassword": "Use account password",
+      "switchToPassword": "Use email and password",
       "switchToCode": "Use email code",
       "turnstileRequired": "Please complete the human verification",
       "sendFailed": "Failed to send the code, please try again later",
@@ -416,8 +416,8 @@
     "signingUp": "Signing up...",
     "loginSuccess": "Login successful",
     "registerSuccess": "Registration successful",
-    "loginError": "Incorrect username or password, please try again",
-    "loginErrorDetail": "Login failed. Please check your username and password, or <a href='/register' class='font-medium underline'>register a new account</a>.",
+    "loginError": "Incorrect email or password, please try again",
+    "loginErrorDetail": "Login failed. Please check your email and password, or <a href='/register' class='font-medium underline'>register a new account</a>.",
     "registerError": "Registration failed, please try again",
     "registerErrorDetail": "Registration failed. This username or email may already be in use. Please try a different one.",
     "tabs": {
@@ -454,7 +454,7 @@
       "passwordTooLong": "Password cannot exceed 32 characters",
       "passwordComplexity": "Password must contain both letters and numbers"
     },
-    "loginFailedMessage": "Login failed. Please check your username and password, or",
+    "loginFailedMessage": "Login failed. Please check your email and password, or",
     "registerNewAccount": "register a new account",
     "period": "."
   },
