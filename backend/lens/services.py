@@ -24,8 +24,10 @@ from .models import (
     Run,
     RunExecution,
     RunStep,
+    Session,
 )
 from .runtime_events import public_step_detail, sanitize_termination_detail
+from .session_titles import fallback_session_title
 from .trace_context import (
     root_observation_id_for_run,
     trace_id_for_run,
@@ -296,6 +298,17 @@ def create_execution_run(
         if existing:
             return existing
 
+    if (
+        not session.title_manually_edited
+        and session.title_generation_status
+        == Session.TitleGenerationStatus.PENDING
+        and not session.message_set.exists()
+    ):
+        fallback_title = fallback_session_title(question)
+        if fallback_title:
+            session.title = fallback_title
+            session.save(update_fields=["title", "updated_at"])
+
     input_message = Message.objects.create(
         session=session,
         role=Message.Role.USER,
@@ -333,6 +346,14 @@ def _enqueue_answer_run(run_uuid):
     from .tasks import execute_answer_run
 
     execute_answer_run.delay(str(run_uuid))
+
+
+def _enqueue_session_title_generation(session_uuid, run_uuid):
+    """Enqueue semantic title generation after the answer is committed."""
+
+    from .tasks import generate_session_title
+
+    generate_session_title.delay(str(session_uuid), str(run_uuid))
 
 
 def analyze_multimodal_intent(run):
@@ -1041,9 +1062,21 @@ def finish_lensnode_run(
         run.execution.finished_at = now
         run.execution.save(update_fields=["status", "finished_at"])
 
-    if not run.session.title:
-        run.session.title = run.input_message.content[:160]
-        run.session.save(update_fields=["title", "updated_at"])
+    should_generate_title = (
+        run.status == Run.Status.DONE
+        and run.outcome != Run.Outcome.BLOCKED
+        and run.output_message is not None
+        and bool((run.output_message.content or "").strip())
+        and not run.session.title_manually_edited
+        and run.session.title_generation_status
+        == Session.TitleGenerationStatus.PENDING
+    )
+    if should_generate_title:
+        transaction.on_commit(
+            lambda run_uuid=run.uuid, session_uuid=run.session.uuid: (
+                _enqueue_session_title_generation(session_uuid, run_uuid)
+            )
+        )
 
     if _run_has_trace_observations(run):
         transaction.on_commit(

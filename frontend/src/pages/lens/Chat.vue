@@ -1476,6 +1476,8 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
+const TITLE_POLL_INTERVAL_MS = 2000
+const TITLE_POLL_MAX_ATTEMPTS = 15
 const BASE_DOCUMENT_TITLE = document.title || 'SourceLens'
 const streamError = ref('')
 const failedRunError = ref(null)
@@ -2105,6 +2107,9 @@ function startCompletionTracking(run, sessionUuid) {
   })
     .then((terminalRun) => {
       if (!terminalRun || tracker.stopped) return
+      if (terminalRun.status === 'done') {
+        void refreshSessionTitleUntilSettled(sessionUuid)
+      }
       const result = handleTerminalRun({
         documentRef: document,
         indicatorEnabled: preferencesStore.answerCompletionIndicator,
@@ -2343,6 +2348,33 @@ function setSessionTitle(uuid, title) {
   }
 }
 
+async function refreshSessionTitleUntilSettled(sessionUuid) {
+  const localSession = sessions.value.find((item) => item.uuid === sessionUuid)
+  const assistantSlug = localSession?.assistant_slug
+  if (
+    !assistantSlug ||
+    !['pending', 'generating'].includes(localSession?.title_generation_status)
+  ) {
+    return
+  }
+
+  for (let attempt = 0; attempt < TITLE_POLL_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const latestSessions = await listSessions(assistantSlug)
+      const latest = latestSessions.find((item) => item.uuid === sessionUuid)
+      const current = sessions.value.find((item) => item.uuid === sessionUuid)
+      if (!latest || !current) return
+      Object.assign(current, latest)
+      if (!['pending', 'generating'].includes(latest.title_generation_status)) {
+        return
+      }
+    } catch {
+      // Keep the completed answer visible while title refresh retries.
+    }
+    await sleep(TITLE_POLL_INTERVAL_MS)
+  }
+}
+
 function deriveSessionTitle(text) {
   const clean = (text || '').replace(/\s+/g, ' ').trim()
   return clean.length > 24 ? `${clean.slice(0, 24)}…` : clean
@@ -2380,7 +2412,8 @@ async function saveRename(session) {
   const previous = session.title || ''
   setSessionTitle(session.uuid, title)
   try {
-    await updateSession(session.uuid, { title })
+    const updated = await updateSession(session.uuid, { title })
+    Object.assign(session, updated)
   } catch {
     setSessionTitle(session.uuid, previous)
     showError(t('lens.chat.renameFailed'))
@@ -2725,8 +2758,8 @@ async function submit() {
   ]
   await nextTick(scrollToBottom)
 
-  // Name a brand-new conversation after its first question (skip if the
-  // user already gave it a title). Optimistic + best-effort persistence.
+  // Show the backend's first-question fallback immediately. The run creation
+  // request persists the same value without treating it as a manual rename.
   const sessionAtSubmitObj = sessions.value.find(
     (item) => item.uuid === sessionAtSubmit
   )
@@ -2738,7 +2771,6 @@ async function submit() {
     const autoTitle = deriveSessionTitle(optimisticText)
     if (autoTitle) {
       setSessionTitle(sessionAtSubmit, autoTitle)
-      updateSession(sessionAtSubmit, { title: autoTitle }).catch(() => {})
     }
   }
   try {

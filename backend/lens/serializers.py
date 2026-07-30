@@ -2133,18 +2133,49 @@ class SessionSerializer(serializers.ModelSerializer):
             "assistant_slug",
             "user",
             "title",
+            "title_manually_edited",
+            "title_generation_status",
             "status",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["uuid", "user", "created_at", "updated_at"]
+        read_only_fields = [
+            "uuid",
+            "user",
+            "title_manually_edited",
+            "title_generation_status",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_title(self, value):
+        """Reject empty manual titles and normalize their whitespace."""
+
+        title = " ".join(value.split())
+        if not title:
+            raise serializers.ValidationError("SESSION_TITLE_REQUIRED")
+        return title
+
+    def update(self, instance, validated_data):
+        """Protect an explicit title from later automatic generation."""
+
+        if "title" in validated_data:
+            instance.title_manually_edited = True
+            instance.title_generation_status = (
+                Session.TitleGenerationStatus.SKIPPED
+            )
+        return super().update(instance, validated_data)
 
 
 class SessionCreateSerializer(serializers.Serializer):
     """Session creation payload."""
 
     assistant_uuid = serializers.UUIDField()
-    title = serializers.CharField(required=False, allow_blank=True)
+    title = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=160,
+    )
 
     def create(self, validated_data):
         request = self.context["request"]
