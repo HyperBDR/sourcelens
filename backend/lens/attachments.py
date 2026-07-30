@@ -10,7 +10,8 @@ The run-flow vision preprocessing that consumes these images lives in
 from django.db import transaction
 
 from .assistant_lifecycle import lock_assistant_for_new_work
-from .models import MessageAttachment, Session
+from .models import MessageAttachment
+from .session_lifecycle import lock_active_session
 
 ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 ATTACHMENT_MAX_PER_MESSAGE = 4
@@ -87,7 +88,7 @@ def store_message_attachment(session, user, uploaded_file):
 
     with transaction.atomic():
         assistant = lock_assistant_for_new_work(session.assistant, user)
-        session = Session.objects.select_for_update().get(pk=session.pk)
+        session = lock_active_session(session)
         session.assistant = assistant
         attachment = MessageAttachment(
             session=session,

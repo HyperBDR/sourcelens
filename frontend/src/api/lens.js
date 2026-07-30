@@ -137,8 +137,11 @@ export async function revokeLensNodeToken(uuid) {
   return unwrapResponse(response)
 }
 
-export async function listSessions(assistantSlug = '') {
-  const params = assistantSlug ? { assistant_slug: assistantSlug } : {}
+export async function listSessions(assistantSlug = '', options = {}) {
+  const params = {
+    ...(assistantSlug ? { assistant_slug: assistantSlug } : {}),
+    ...(options.archived ? { archived: true } : {})
+  }
   const response = await api.get('/lens/sessions/', { params })
   return unwrapList(unwrapResponse(response))
 }
@@ -165,6 +168,26 @@ export async function updateSession(uuid, payload) {
 
 export async function deleteSession(uuid) {
   await api.delete(`/lens/sessions/${uuid}/`)
+}
+
+export async function pinSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/pin/`)
+  return unwrapResponse(response)
+}
+
+export async function unpinSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/unpin/`)
+  return unwrapResponse(response)
+}
+
+export async function archiveSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/archive/`)
+  return unwrapResponse(response)
+}
+
+export async function restoreSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/restore/`)
+  return unwrapResponse(response)
 }
 
 export async function createRun(sessionUuid, payload) {

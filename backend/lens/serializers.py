@@ -2121,8 +2121,15 @@ class RunFeedbackSerializer(serializers.ModelSerializer):
 class SessionSerializer(serializers.ModelSerializer):
     """Session serializer."""
 
-    assistant_name = serializers.CharField(source="assistant.name", read_only=True)
-    assistant_slug = serializers.CharField(source="assistant.slug", read_only=True)
+    assistant_name = serializers.CharField(
+        source="assistant.name",
+        read_only=True,
+    )
+    assistant_slug = serializers.CharField(
+        source="assistant.slug",
+        read_only=True,
+    )
+    has_shareable_answer = serializers.SerializerMethodField()
 
     class Meta:
         model = Session
@@ -2135,6 +2142,8 @@ class SessionSerializer(serializers.ModelSerializer):
             "title",
             "title_manually_edited",
             "title_generation_status",
+            "pinned_at",
+            "has_shareable_answer",
             "status",
             "created_at",
             "updated_at",
@@ -2144,6 +2153,9 @@ class SessionSerializer(serializers.ModelSerializer):
             "user",
             "title_manually_edited",
             "title_generation_status",
+            "pinned_at",
+            "has_shareable_answer",
+            "status",
             "created_at",
             "updated_at",
         ]
@@ -2155,6 +2167,17 @@ class SessionSerializer(serializers.ModelSerializer):
         if not title:
             raise serializers.ValidationError("SESSION_TITLE_REQUIRED")
         return title
+
+    def get_has_shareable_answer(self, obj):
+        """Return the list annotation or calculate the fallback value."""
+
+        annotated = getattr(obj, "has_shareable_answer", None)
+        if annotated is not None:
+            return annotated
+        return obj.run_set.filter(
+            status=Run.Status.DONE,
+            output_message__isnull=False,
+        ).exists()
 
     def update(self, instance, validated_data):
         """Protect an explicit title from later automatic generation."""

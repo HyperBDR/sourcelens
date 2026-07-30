@@ -114,20 +114,38 @@
           class="sessions-section"
         >
           <div class="sessions-head">
-            <h2>{{ t('lens.chat.sessions') }}</h2>
+            <h2 class="sr-only">{{ t('lens.chat.sessionLists') }}</h2>
+            <div
+              class="session-filters"
+              role="group"
+              :aria-label="t('lens.chat.sessionLists')"
+            >
+              <button
+                type="button"
+                :class="{ 'session-filter-active': !showArchivedSessions }"
+                :aria-pressed="!showArchivedSessions"
+                @click="switchSessionView(false)"
+              >
+                {{ t('lens.chat.sessions') }}
+              </button>
+              <button
+                type="button"
+                :class="{ 'session-filter-active': showArchivedSessions }"
+                :aria-pressed="showArchivedSessions"
+                @click="switchSessionView(true)"
+              >
+                {{ t('lens.chat.archivedSessions') }}
+              </button>
+            </div>
           </div>
           <div class="sessions-list">
             <div
               v-for="session in sessions"
               :key="session.uuid"
               class="session-item"
-              :class="[
-                deletingSessionUuid === session.uuid
-                  ? 'session-item-deleting'
-                  : selectedSessionUuid === session.uuid
-                    ? 'session-item-active'
-                    : ''
-              ]"
+              :class="{
+                'session-item-active': selectedSessionUuid === session.uuid
+              }"
             >
               <input
                 v-if="renamingSessionUuid === session.uuid"
@@ -143,18 +161,19 @@
                 <div
                   class="min-w-0 flex-1 cursor-pointer"
                   :title="session.title || t('lens.chat.untitledSession')"
-                  @click="
-                    deletingSessionUuid !== session.uuid &&
-                    selectSession(session)
-                  "
+                  @click="selectSession(session)"
                 >
-                  <div
-                    class="session-title"
-                    :class="
-                      deletingSessionUuid === session.uuid ? 'opacity-40' : ''
-                    "
-                  >
-                    {{ session.title || t('lens.chat.untitledSession') }}
+                  <div class="session-title-row">
+                    <Pin
+                      v-if="session.pinned_at"
+                      class="session-pinned-icon"
+                      :size="13"
+                      :stroke-width="2.2"
+                      :aria-label="t('lens.chat.pinned')"
+                    />
+                    <div class="session-title">
+                      {{ session.title || t('lens.chat.untitledSession') }}
+                    </div>
                   </div>
                 </div>
 
@@ -182,102 +201,27 @@
                       {{ t('lens.chat.unreadAnswer') }}
                     </span>
                   </span>
-                  <template v-if="deletingSessionUuid === session.uuid">
-                    <button
-                      type="button"
-                      class="session-action-btn session-action-confirm"
-                      :aria-label="t('lens.chat.confirmDelete')"
-                      :title="t('lens.chat.confirmDelete')"
-                      @click.stop="doDeleteSession(session)"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M20 6 9 17l-5-5"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      class="session-action-btn session-action-cancel"
-                      :aria-label="t('common.cancel')"
-                      :title="t('common.cancel')"
-                      @click.stop="deletingSessionUuid = ''"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M18 6 6 18M6 6l12 12"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
-                    </button>
-                  </template>
-                  <template v-else>
-                    <button
-                      type="button"
-                      class="session-rename-btn"
-                      :aria-label="t('lens.chat.renameSession')"
-                      :title="t('lens.chat.renameSession')"
-                      @click.stop="startRename(session)"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.8"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M12 20h9"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                        <path
-                          d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      class="session-delete-btn"
-                      :aria-label="t('lens.chat.deleteSession')"
-                      :title="t('lens.chat.deleteSession')"
-                      @click.stop="deletingSessionUuid = session.uuid"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.8"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
-                    </button>
-                  </template>
+                  <RowActionMenu
+                    class="session-overflow"
+                    :actions="sessionActions(session)"
+                    :label="
+                      t('lens.chat.sessionActions', {
+                        title: session.title || t('lens.chat.untitledSession')
+                      })
+                    "
+                    @click.stop
+                    @select="handleSessionAction(session, $event)"
+                  />
                 </div>
               </template>
             </div>
+            <p v-if="!sessions.length" class="session-list-empty">
+              {{
+                showArchivedSessions
+                  ? t('lens.chat.noArchivedSessions')
+                  : t('lens.chat.noRecentSessions')
+              }}
+            </p>
           </div>
         </section>
       </div>
@@ -1233,7 +1177,19 @@
           </div>
         </div>
 
-        <div v-if="hasAssistant" class="composer-wrap">
+        <div
+          v-if="selectedSessionArchived"
+          class="archived-session-notice"
+          role="status"
+        >
+          <Archive :size="18" :stroke-width="2" aria-hidden="true" />
+          <span>{{ t('lens.chat.archivedReadOnly') }}</span>
+          <button type="button" @click="restoreManagedSession(selectedSession)">
+            {{ t('lens.chat.restoreSession') }}
+          </button>
+        </div>
+
+        <div v-else-if="canCompose" class="composer-wrap">
           <div class="composer-inner">
             <div class="composer-shell">
               <div v-if="attachments.length" class="composer-attachments">
@@ -1368,6 +1324,39 @@
       @unshared="handleShareRemoved"
     />
 
+    <BaseModal
+      :show="Boolean(deleteSessionTarget)"
+      :title="t('lens.chat.deleteSessionTitle')"
+      :close-on-backdrop="!deletingSession"
+      @close="closeDeleteSession"
+    >
+      <p class="text-sm text-ink-600">
+        {{
+          t('lens.chat.deleteSessionConfirm', {
+            title: deleteSessionTarget?.title || t('lens.chat.untitledSession')
+          })
+        }}
+      </p>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <BaseButton
+            variant="outline"
+            :disabled="deletingSession"
+            @click="closeDeleteSession"
+          >
+            {{ t('common.cancel') }}
+          </BaseButton>
+          <BaseButton
+            variant="danger"
+            :loading="deletingSession"
+            @click="doDeleteSession"
+          >
+            {{ t('common.delete') }}
+          </BaseButton>
+        </div>
+      </template>
+    </BaseModal>
+
     <FilePreviewModal
       :file="previewFile"
       @close="closePreview"
@@ -1379,6 +1368,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import {
+  Archive,
+  ArchiveRestore,
   ArrowLeft,
   MessagesSquare,
   PanelLeftClose,
@@ -1388,8 +1379,13 @@ import {
   Eye,
   FileText,
   LoaderCircle,
+  Pencil,
+  Pin,
+  PinOff,
+  Share2,
   ThumbsDown,
-  ThumbsUp
+  ThumbsUp,
+  Trash2
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -1397,6 +1393,9 @@ import { useRoute, useRouter } from 'vue-router'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseModal from '@/components/ui/BaseModal.vue'
+import RowActionMenu from '@/components/ui/RowActionMenu.vue'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import AssistantSwitcher from '@/components/lens/AssistantSwitcher.vue'
 import UserDock from '@/components/lens/UserDock.vue'
@@ -1450,6 +1449,7 @@ import {
   workflowProgressSource
 } from '@/pages/lens/runtimeEvents'
 import {
+  archiveSession,
   cancelRun,
   createRun,
   createSession,
@@ -1461,6 +1461,9 @@ import {
   listAssistants,
   listMessages,
   listSessions,
+  pinSession,
+  restoreSession,
+  unpinSession,
   updateSession,
   updateRunFeedback,
   uploadAttachment
@@ -1493,7 +1496,6 @@ const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
 const TITLE_POLL_INTERVAL_MS = 2000
 const TITLE_POLL_MAX_ATTEMPTS = 15
-const BASE_DOCUMENT_TITLE = document.title || 'SourceLens'
 const streamError = ref('')
 const failedRunError = ref(null)
 const queuePosition = ref(null)
@@ -1503,7 +1505,9 @@ const loading = ref({ run: false })
 const streamController = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
-const deletingSessionUuid = ref('')
+const showArchivedSessions = ref(false)
+const deleteSessionTarget = ref(null)
+const deletingSession = ref(false)
 const renamingSessionUuid = ref('')
 const renameDraft = ref('')
 const composerRef = ref(null)
@@ -1536,12 +1540,25 @@ const selectedAssistant = computed(
     ) || null
 )
 
+const selectedSession = computed(
+  () =>
+    sessions.value.find((item) => item.uuid === selectedSessionUuid.value) ||
+    null
+)
+
+const selectedSessionArchived = computed(
+  () => selectedSession.value?.status === 'archived'
+)
+
 const isAnonymous = computed(() => !userStore.isAuthenticated)
 
 // Image upload requires both a multimodal-capable assistant and login (the
 // upload endpoint is authenticated), so anonymous visitors never see it.
 const acceptsImages = computed(
-  () => !isAnonymous.value && !!selectedAssistant.value?.multimodal_model_ref
+  () =>
+    canCompose.value &&
+    !isAnonymous.value &&
+    !!selectedAssistant.value?.multimodal_model_ref
 )
 
 const hasUploadingImage = computed(() =>
@@ -1549,6 +1566,9 @@ const hasUploadingImage = computed(() =>
 )
 
 const canSubmit = computed(() => {
+  if (!canCompose.value) {
+    return false
+  }
   if (hasUploadingImage.value) {
     return false
   }
@@ -1558,6 +1578,12 @@ const canSubmit = computed(() => {
 
 const hasAssistant = computed(() =>
   isAnonymous.value ? !!publicAssistant.value : !!selectedAssistantUuid.value
+)
+
+const canCompose = computed(
+  () =>
+    hasAssistant.value &&
+    (isAnonymous.value || selectedSession.value?.status === 'active')
 )
 
 const emptyVariant = computed(() =>
@@ -2218,6 +2244,7 @@ async function bootstrap() {
   runStatusResolvingSessionUuid.value = ''
   messages.value = []
   mySharesOpen.value = false
+  showArchivedSessions.value = false
   resetStreamState()
   booted.value = false
 
@@ -2300,14 +2327,17 @@ async function loadMyShareState() {
   }
 }
 
-async function loadSessions(selectUuid = '') {
+async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
   if (!selectedAssistant.value) {
     return
   }
 
-  sessions.value = await listSessions(selectedAssistant.value.slug)
+  sessions.value = await listSessions(selectedAssistant.value.slug, {
+    archived: showArchivedSessions.value
+  })
 
-  const requestedUuid = selectUuid || route.query.session || ''
+  const requestedUuid =
+    selectUuid || (useRouteSession ? route.query.session || '' : '')
   let targetUuid = requestedUuid || sessions.value[0]?.uuid
   if (
     requestedUuid &&
@@ -2322,12 +2352,10 @@ async function loadSessions(selectUuid = '') {
       })
     }
   }
-  if (!targetUuid) {
-    const created = await createNewSession(false)
-    targetUuid = created?.uuid
-  }
   if (targetUuid) {
     await selectSession({ uuid: targetUuid })
+  } else {
+    clearSessionSelection()
   }
   await nextTick(() => composerRef.value?.focus())
 }
@@ -2337,6 +2365,11 @@ async function createNewSession(notify = true) {
     return null
   }
   mySharesOpen.value = false
+  const leavingArchivedView = showArchivedSessions.value
+  showArchivedSessions.value = false
+  if (leavingArchivedView) {
+    sessions.value = []
+  }
 
   let session
   try {
@@ -2350,6 +2383,7 @@ async function createNewSession(notify = true) {
   }
 
   sessions.value = [session, ...sessions.value]
+  sortManagedSessions()
   selectedSessionUuid.value = session.uuid
   question.value = ''
   if (composerRef.value) composerRef.value.style.height = 'auto'
@@ -2373,6 +2407,151 @@ function setSessionTitle(uuid, title) {
   const session = sessions.value.find((item) => item.uuid === uuid)
   if (session) {
     session.title = title
+  }
+}
+
+function clearSessionSelection() {
+  sessionLoadGeneration += 1
+  clearAttachments()
+  selectedSessionUuid.value = ''
+  messages.value = []
+  currentRun.value = null
+  question.value = ''
+  resetStreamState()
+  router.replace({ path: route.path })
+}
+
+async function switchSessionView(archived) {
+  if (showArchivedSessions.value === archived) return
+  showArchivedSessions.value = archived
+  cancelRename()
+  closeDeleteSession()
+  await router.replace({ path: route.path })
+  await loadSessions('', {
+    useRouteSession: false
+  })
+}
+
+function sortManagedSessions() {
+  sessions.value = [...sessions.value].sort((left, right) => {
+    const leftPinned = left.pinned_at ? Date.parse(left.pinned_at) : 0
+    const rightPinned = right.pinned_at ? Date.parse(right.pinned_at) : 0
+    if (leftPinned !== rightPinned) return rightPinned - leftPinned
+    return Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0)
+  })
+}
+
+function hasShareableSessionAnswer(session) {
+  if (session.has_shareable_answer) return true
+  if (session.uuid !== selectedSessionUuid.value) return false
+  return messages.value.some(
+    (message) =>
+      message.role === 'assistant' &&
+      message.run &&
+      Boolean((message.content || '').trim())
+  )
+}
+
+function sessionActions(session) {
+  const archived = session.status === 'archived'
+  const shareDisabled = !hasShareableSessionAnswer(session)
+  const actions = [
+    {
+      key: 'share',
+      label: t('common.share'),
+      icon: Share2,
+      disabled: shareDisabled,
+      disabledReason: shareDisabled ? t('lens.chat.shareUnavailable') : ''
+    },
+    {
+      key: 'rename',
+      label: t('lens.chat.renameSession'),
+      icon: Pencil
+    }
+  ]
+  if (archived) {
+    actions.push({
+      key: 'restore',
+      label: t('lens.chat.restoreSession'),
+      icon: ArchiveRestore
+    })
+  } else {
+    actions.push({
+      key: session.pinned_at ? 'unpin' : 'pin',
+      label: session.pinned_at
+        ? t('lens.chat.unpinSession')
+        : t('lens.chat.pinSession'),
+      icon: session.pinned_at ? PinOff : Pin
+    })
+    actions.push({
+      key: 'archive',
+      label: t('lens.chat.archiveSession'),
+      icon: Archive
+    })
+  }
+  actions.push({
+    key: 'delete',
+    label: t('lens.chat.deleteSession'),
+    icon: Trash2,
+    divider: true,
+    variant: 'danger'
+  })
+  return actions
+}
+
+async function handleSessionAction(session, action) {
+  if (action === 'share') await openSessionShare(session)
+  else if (action === 'rename') startRename(session)
+  else if (action === 'pin') await setSessionPinned(session, true)
+  else if (action === 'unpin') await setSessionPinned(session, false)
+  else if (action === 'archive') await archiveManagedSession(session)
+  else if (action === 'restore') await restoreManagedSession(session)
+  else if (action === 'delete') deleteSessionTarget.value = session
+}
+
+async function setSessionPinned(session, pinned) {
+  try {
+    const updated = pinned
+      ? await pinSession(session.uuid)
+      : await unpinSession(session.uuid)
+    Object.assign(session, updated)
+    sortManagedSessions()
+    showSuccess(
+      pinned ? t('lens.chat.sessionPinned') : t('lens.chat.sessionUnpinned')
+    )
+  } catch {
+    showError(t('lens.chat.sessionActionFailed'))
+  }
+}
+
+async function archiveManagedSession(session) {
+  try {
+    await archiveSession(session.uuid)
+    sessions.value = sessions.value.filter((item) => item.uuid !== session.uuid)
+    if (selectedSessionUuid.value === session.uuid) {
+      const next = sessions.value[0]
+      if (next) await selectSession(next)
+      else clearSessionSelection()
+    }
+    showSuccess(t('lens.chat.sessionArchived'))
+  } catch {
+    showError(t('lens.chat.sessionActionFailed'))
+  }
+}
+
+async function restoreManagedSession(session) {
+  if (!session) return
+  try {
+    await restoreSession(session.uuid)
+    sessions.value = sessions.value.filter((item) => item.uuid !== session.uuid)
+    if (selectedSessionUuid.value === session.uuid) {
+      const next = sessions.value[0]
+      if (next) await selectSession(next)
+      else clearSessionSelection()
+    }
+    showSuccess(t('lens.chat.sessionRestored'))
+  } catch {
+    showError(t('lens.chat.sessionActionFailed'))
   }
 }
 
@@ -2409,7 +2588,6 @@ function deriveSessionTitle(text) {
 }
 
 function startRename(session) {
-  deletingSessionUuid.value = ''
   renamingSessionUuid.value = session.uuid
   renameDraft.value = session.title || ''
   nextTick(() => {
@@ -2432,6 +2610,11 @@ async function saveRename(session) {
     return
   }
   const title = renameDraft.value.trim()
+  if (!title) {
+    showError(t('lens.chat.titleRequired'))
+    nextTick(() => document.querySelector('.session-rename-input')?.focus())
+    return
+  }
   renamingSessionUuid.value = ''
   renameDraft.value = ''
   if (title === (session.title || '')) {
@@ -2962,12 +3145,40 @@ function fileTypeLabel(file) {
   return [ext, size].filter(Boolean).join(' · ')
 }
 
-function openShare(message) {
+function openShare(message, sourceMessages = messages.value) {
   shareRunUuid.value = message.run || ''
   shareExisting.value = sharesByRun.value[shareRunUuid.value] || null
   shareAnswer.value = message.content || ''
-  shareQuestion.value = questionForMessage(message)
+  shareQuestion.value =
+    precedingUserMessage(sourceMessages, message)?.content || ''
   shareOpen.value = true
+}
+
+async function openSessionShare(session) {
+  if (!hasShareableSessionAnswer(session)) return
+  try {
+    const sourceMessages =
+      session.uuid === selectedSessionUuid.value
+        ? messages.value
+        : await listMessages(session.uuid)
+    const answer = [...sourceMessages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === 'assistant' &&
+          message.run &&
+          Boolean((message.content || '').trim())
+      )
+    if (!answer) {
+      session.has_shareable_answer = false
+      showWarning(t('lens.chat.shareUnavailable'))
+      return
+    }
+    session.has_shareable_answer = true
+    openShare(answer, sourceMessages)
+  } catch {
+    showError(t('lens.qa.shareFailed'))
+  }
 }
 
 async function exportQa(message) {
@@ -3035,10 +3246,6 @@ function handleShareRemoved(share) {
   shareExisting.value = null
 }
 
-function questionForMessage(message) {
-  return userMessageForMessage(message)?.content || ''
-}
-
 function userMessageForMessage(message) {
   return precedingUserMessage(messages.value, message)
 }
@@ -3065,8 +3272,16 @@ function formatTime(isoString) {
   })
 }
 
-async function doDeleteSession(session) {
-  deletingSessionUuid.value = ''
+function closeDeleteSession() {
+  if (!deletingSession.value) {
+    deleteSessionTarget.value = null
+  }
+}
+
+async function doDeleteSession() {
+  const session = deleteSessionTarget.value
+  if (!session || deletingSession.value) return
+  deletingSession.value = true
   try {
     await deleteSession(session.uuid)
     sessions.value = sessions.value.filter((s) => s.uuid !== session.uuid)
@@ -3078,13 +3293,15 @@ async function doDeleteSession(session) {
       if (next) {
         await selectSession(next)
       } else {
-        selectedSessionUuid.value = ''
-        messages.value = []
+        clearSessionSelection()
       }
     }
+    deleteSessionTarget.value = null
     showSuccess(t('lens.chat.sessionDeleted'))
   } catch {
     showError(t('lens.chat.deleteFailed'))
+  } finally {
+    deletingSession.value = false
   }
 }
 
@@ -3231,9 +3448,17 @@ onBeforeUnmount(() => {
   @apply px-1 pb-2;
 }
 
-.sessions-head h2 {
-  @apply text-[11px] font-semibold tracking-wide;
-  color: #6b7280;
+.session-filters {
+  @apply flex items-center gap-1;
+}
+
+.session-filters button {
+  @apply rounded-md px-2 py-1 text-[11px] font-semibold tracking-wide text-gray-500 transition-colors;
+}
+
+.session-filters button:hover,
+.session-filter-active {
+  @apply bg-gray-100 text-gray-900;
 }
 
 .sessions-list {
@@ -3252,12 +3477,12 @@ onBeforeUnmount(() => {
   background: #e5e7eb;
 }
 
-.session-item-deleting {
-  background: #fff1f2;
+.session-title-row {
+  @apply flex min-w-0 items-center gap-1.5;
 }
 
 .session-title {
-  @apply truncate text-sm font-medium;
+  @apply min-w-0 flex-1 truncate text-sm font-medium;
   color: #111827;
 }
 
@@ -3269,74 +3494,34 @@ onBeforeUnmount(() => {
   animation: spin 0.75s linear infinite;
 }
 
+.session-pinned-icon {
+  @apply shrink-0 text-primary-600;
+}
+
+.session-list-empty {
+  @apply px-3 py-4 text-center text-xs text-gray-400;
+}
+
 .session-unread-indicator {
   @apply h-2.5 w-2.5 shrink-0 rounded-full bg-primary-600;
 }
 
-.session-delete-btn,
-.session-action-btn {
-  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors;
-}
-
-.session-delete-btn svg,
-.session-action-btn svg {
-  @apply h-3.5 w-3.5;
-}
-
-.session-delete-btn {
+.session-overflow {
   @apply opacity-0;
-  color: #9ca3af;
+  transition: opacity 150ms ease;
 }
 
-.session-item:hover .session-delete-btn {
+.session-item:hover .session-overflow,
+.session-item:focus-within .session-overflow,
+.session-item-active .session-overflow,
+.session-overflow.row-action-menu-open {
   @apply opacity-100;
-}
-
-.session-delete-btn:hover {
-  background: #fee2e2;
-  color: #ef4444;
-}
-
-.session-rename-btn {
-  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-md opacity-0 transition-colors;
-  color: #9ca3af;
-}
-
-.session-rename-btn svg {
-  @apply h-3.5 w-3.5;
-}
-
-.session-item:hover .session-rename-btn {
-  @apply opacity-100;
-}
-
-.session-rename-btn:hover {
-  background: #eef2ff;
-  color: #4f46e5;
 }
 
 .session-rename-input {
   @apply w-full rounded-md border px-2 py-1 text-sm font-medium outline-none;
   border-color: #c7d2fe;
   color: #111827;
-}
-
-.session-action-confirm {
-  background: #ef4444;
-  color: #ffffff;
-}
-
-.session-action-confirm:hover {
-  background: #dc2626;
-}
-
-.session-action-cancel {
-  background: #f3f4f6;
-  color: #6b7280;
-}
-
-.session-action-cancel:hover {
-  background: #e5e7eb;
 }
 
 .main-shell {
@@ -3943,6 +4128,14 @@ onBeforeUnmount(() => {
   );
 }
 
+.archived-session-notice {
+  @apply absolute inset-x-4 bottom-5 z-20 mx-auto flex max-w-[860px] items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm;
+}
+
+.archived-session-notice button {
+  @apply rounded-md px-2 py-1 font-semibold text-primary-700 hover:bg-white;
+}
+
 .composer-inner {
   @apply mx-auto w-full max-w-[860px];
 }
@@ -4054,9 +4247,6 @@ onBeforeUnmount(() => {
 @media (max-width: 767px), (hover: none), (pointer: coarse) {
   .sidebar-collapse-btn,
   .composer-action-btn,
-  .session-delete-btn,
-  .session-action-btn,
-  .session-rename-btn,
   .icon-btn,
   .composer-attach-btn,
   .composer-thumb-remove {
@@ -4069,8 +4259,7 @@ onBeforeUnmount(() => {
     min-height: 44px;
   }
 
-  .session-delete-btn,
-  .session-rename-btn {
+  .session-overflow {
     @apply opacity-100;
   }
 
@@ -4082,11 +4271,6 @@ onBeforeUnmount(() => {
   .message-actions {
     flex-wrap: wrap;
   }
-}
-
-.session-delete-btn:focus-visible,
-.session-rename-btn:focus-visible {
-  @apply opacity-100;
 }
 
 @keyframes spin {
