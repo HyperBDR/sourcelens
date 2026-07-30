@@ -20,12 +20,13 @@ class Migration(migrations.Migration):
                     ("failed", "Failed"),
                 ],
                 default="skipped",
+                db_default="skipped",
                 max_length=16,
             ),
         ),
         migrations.AddField(
             model_name="session",
             name="title_manually_edited",
-            field=models.BooleanField(default=False),
+            field=models.BooleanField(db_default=False, default=False),
         ),
     ]

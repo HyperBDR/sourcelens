@@ -2,7 +2,9 @@ import uuid
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.utils import timezone
 
 from lens.assistant_lifecycle import create_assistant_session
 from lens.llm import LensLLMResult
@@ -95,6 +97,41 @@ class SessionTitleTests(TestCase):
             Session.TitleGenerationStatus.SKIPPED,
         )
         self.assertTrue(manual.title_manually_edited)
+
+    def test_database_defaults_support_old_session_inserts(self):
+        session_uuid = uuid.uuid4()
+        timestamp = timezone.now()
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO lens_session (
+                    uuid,
+                    created_at,
+                    updated_at,
+                    title,
+                    status,
+                    assistant_id,
+                    user_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                [
+                    session_uuid.hex,
+                    timestamp,
+                    timestamp,
+                    "Legacy session",
+                    Session.Status.ACTIVE,
+                    self.assistant.pk,
+                    self.user.pk,
+                ],
+            )
+
+        legacy_session = Session.objects.get(uuid=session_uuid)
+        self.assertFalse(legacy_session.title_manually_edited)
+        self.assertEqual(
+            legacy_session.title_generation_status,
+            Session.TitleGenerationStatus.SKIPPED,
+        )
 
     @patch("lens.session_titles.run_completion")
     def test_generated_title_replaces_fallback_once(self, mock_completion):
