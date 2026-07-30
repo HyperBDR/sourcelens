@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test'
 
-async function mockChat(page, messageDelays = {}, language = 'en') {
+async function mockChat(
+  page,
+  messageDelays = {},
+  language = 'en',
+  assistantList = null
+) {
   await page.addInitScript((selectedLanguage) => {
     localStorage.setItem('access_token', 'test-token')
     localStorage.setItem('userLanguage', selectedLanguage)
@@ -19,7 +24,7 @@ async function mockChat(page, messageDelays = {}, language = 'en') {
         features: ['workspace'],
         permissions: []
       },
-      '/api/lens/assistants/': [
+      '/api/lens/assistants/': assistantList || [
         {
           uuid: 'assistant-1',
           slug: 'drawer-test',
@@ -159,6 +164,43 @@ test('mobile session drawer opens, selects sessions, and closes', async ({
     .click({ position: { x: 380, y: 400 } })
   await expect(page.locator('.sidebar')).not.toHaveClass(/sidebar-open/)
   await expect.poll(() => sidebarBox(page)).toMatchObject({ x: -320 })
+})
+
+test('mobile header switches assistants without overflowing', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockChat(page, {}, 'en', [
+    {
+      uuid: 'assistant-1',
+      slug: 'drawer-test',
+      name: 'Drawer Test',
+      status: 'active'
+    },
+    {
+      uuid: 'assistant-2',
+      slug: 'mobile-switch',
+      name: 'Mobile Switch',
+      status: 'active'
+    }
+  ])
+  await page.goto('/lens/assistants/drawer-test/chat')
+
+  const switcher = page.getByRole('button', { name: 'Switch assistant' })
+  await expect(switcher).toBeVisible()
+  await expectMinimumTouchTarget(switcher)
+  await switcher.click()
+
+  const panel = page.locator('.assistant-switcher-panel')
+  await expect(panel).toBeVisible()
+  const panelBox = await panel.boundingBox()
+  expect(panelBox).not.toBeNull()
+  expect(panelBox.x).toBeGreaterThanOrEqual(0)
+  expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(390)
+
+  await panel.getByRole('button', { name: /Mobile Switch/ }).click()
+  await expect(page).toHaveURL('/lens/assistants/mobile-switch/chat')
+  await expect(switcher).toContainText('Mobile Switch')
 })
 
 test('desktop sidebar still expands and collapses', async ({ page }) => {

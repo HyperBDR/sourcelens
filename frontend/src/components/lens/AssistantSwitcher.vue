@@ -668,6 +668,26 @@ onUnmounted(() => {
   @apply mt-0.5 shrink-0 rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700;
 }
 
+@media (max-width: 1023px) {
+  .assistant-switcher-header-trigger {
+    min-height: 44px;
+  }
+
+  .assistant-switcher-header-name {
+    @apply text-sm;
+  }
+
+  .assistant-switcher-panel-down {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 3.5rem);
+    right: 1rem;
+    left: 1rem;
+    width: auto;
+    max-height: calc(100dvh - env(safe-area-inset-top) - 4.5rem);
+    overflow-y: auto;
+  }
+}
+
 .assistant-switcher-embedded {
   @apply w-full;
 }

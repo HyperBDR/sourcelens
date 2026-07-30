@@ -300,7 +300,13 @@
           <PanelLeftOpen :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
         <div class="mobile-topbar-title">
-          {{ mySharesOpen ? t('lens.qa.mineTitle') : assistantName }}
+          <span v-if="mySharesOpen" class="mobile-topbar-title-text">
+            {{ t('lens.qa.mineTitle') }}
+          </span>
+          <AssistantSwitcher v-else-if="switchable" mode="header" />
+          <span v-else class="mobile-topbar-title-text">
+            {{ assistantName }}
+          </span>
         </div>
         <button
           type="button"
@@ -3241,7 +3247,11 @@ onBeforeUnmount(() => {
 }
 
 .mobile-topbar-title {
-  @apply min-w-0 flex-1 truncate text-center text-sm font-semibold text-ink-900;
+  @apply flex min-w-0 flex-1 justify-center;
+}
+
+.mobile-topbar-title-text {
+  @apply min-w-0 truncate text-center text-sm font-semibold text-ink-900;
 }
 
 .chat-header {
