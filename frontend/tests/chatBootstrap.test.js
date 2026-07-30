@@ -32,3 +32,20 @@ test('guards restored run state with the current session load', async () => {
     /async function maybeResumeActiveRun\(sessionUuid, isCurrentLoad\)/
   )
 })
+
+test('selects a conversation when its route query changes', async () => {
+  const source = await chatSource()
+  const queryWatcher = source.indexOf('() => route.query.session')
+  const sessionLookup = source.indexOf(
+    'sessions.value.find((item) => item.uuid === sessionUuid)',
+    queryWatcher
+  )
+  const selectWithoutRouteUpdate = source.indexOf(
+    'void selectSession(session, false)',
+    sessionLookup
+  )
+
+  assert.notEqual(queryWatcher, -1)
+  assert.notEqual(sessionLookup, -1)
+  assert.notEqual(selectWithoutRouteUpdate, -1)
+})
