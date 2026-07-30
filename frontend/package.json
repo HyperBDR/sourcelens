@@ -12,7 +12,12 @@
     "test:unit": "node --test tests/*.test.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:container": "BASE_URL=http://localhost:10080 playwright test --config=playwright.config.cjs"
+    "test:e2e:container": "BASE_URL=http://localhost:10080 playwright test --config=playwright.config.cjs",
+    "test:ui": "playwright test --config=playwright.ui.config.cjs",
+    "test:ui:report": "playwright show-report --host 0.0.0.0 --port 9323",
+    "audit:serve": "node e2e/ui-regression/audit/serve.mjs",
+    "audit": "node e2e/ui-regression/audit/run.mjs",
+    "audit:full": "npm run test:ui && npm run audit"
   },
   "dependencies": {
     "@lucide/vue": "^1.17.0",
