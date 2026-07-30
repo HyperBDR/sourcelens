@@ -2504,6 +2504,147 @@ class LensApiTests(TestCase):
         self.assertIn('"type": "sync"', body)
         self.assertIn('"type": "done"', body)
 
+    def test_explicit_retry_is_linked_and_idempotent(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        original = create_execution_run(
+            session=session,
+            question="Retry this question",
+            idempotency_key="original-submission",
+            enqueue=False,
+        )
+        payload = {
+            "question": "Retry this question",
+            "idempotency_key": "retry-submission",
+            "retry_of_run_uuid": str(original.uuid),
+            "enqueue": False,
+        }
+
+        first_response = self.client.post(
+            f"/api/lens/sessions/{session.uuid}/runs/",
+            payload,
+            format="json",
+        )
+        replay_response = self.client.post(
+            f"/api/lens/sessions/{session.uuid}/runs/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(replay_response.status_code, 201)
+        self.assertEqual(
+            replay_response.data["uuid"],
+            first_response.data["uuid"],
+        )
+        self.assertEqual(
+            first_response.data["retry_of_run_uuid"],
+            str(original.uuid),
+        )
+        self.assertEqual(session.message_set.count(), 4)
+
+    def test_retry_rejects_run_from_another_session(self):
+        source_session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        target_session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        original = create_execution_run(
+            session=source_session,
+            question="Source question",
+            enqueue=False,
+        )
+
+        response = self.client.post(
+            f"/api/lens/sessions/{target_session.uuid}/runs/",
+            {
+                "question": "Source question",
+                "idempotency_key": "cross-session-retry",
+                "retry_of_run_uuid": str(original.uuid),
+                "enqueue": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(target_session.run_set.count(), 0)
+        self.assertEqual(target_session.message_set.count(), 0)
+
+    def test_retry_rejects_inaccessible_run_without_leaking_it(self):
+        other_user = User.objects.create_user(
+            username="retry-owner",
+            email="retry-owner@example.com",
+            password="pass12345",
+        )
+        private_session = Session.objects.create(
+            assistant=self.assistant,
+            user=other_user,
+        )
+        private_run = create_execution_run(
+            session=private_session,
+            question="Private question",
+            enqueue=False,
+        )
+        target_session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+
+        response = self.client.post(
+            f"/api/lens/sessions/{target_session.uuid}/runs/",
+            {
+                "question": "Private question",
+                "idempotency_key": "inaccessible-retry",
+                "retry_of_run_uuid": str(private_run.uuid),
+                "enqueue": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["retry_of_run_uuid"][0],
+            "Invalid Retry Run.",
+        )
+        self.assertEqual(target_session.run_set.count(), 0)
+
+    def test_retry_rejects_an_existing_cycle(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        first = create_execution_run(
+            session=session,
+            question="First attempt",
+            enqueue=False,
+        )
+        second = create_execution_run(
+            session=session,
+            question="Second attempt",
+            retry_of_run=first,
+            enqueue=False,
+        )
+        Run.objects.filter(pk=first.pk).update(retry_of_run=second)
+
+        response = self.client.post(
+            f"/api/lens/sessions/{session.uuid}/runs/",
+            {
+                "question": "Third attempt",
+                "idempotency_key": "cyclic-retry",
+                "retry_of_run_uuid": str(second.uuid),
+                "enqueue": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(session.run_set.count(), 2)
+
     def test_run_created_at_is_read_only(self):
         session_response = self.client.post(
             "/api/lens/sessions/",

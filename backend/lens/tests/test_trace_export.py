@@ -193,6 +193,33 @@ class LangfuseTraceExportTests(TestCase):
         )
         self.assertNotIn("comment", json.dumps(batch_without_summaries))
 
+    def test_trace_metadata_reports_retry_filtering_without_content(self):
+        retry = create_execution_run(
+            session=self.run.session,
+            question="Do not export retried content",
+            idempotency_key="retry-trace",
+            retry_of_run=self.run,
+            enqueue=False,
+        )
+        retry.status = Run.Status.DONE
+        retry.outcome = Run.Outcome.COMPLETED
+        retry.save(update_fields=["status", "outcome"])
+
+        batch = build_ingestion_batch(
+            retry,
+            root_observation_id_for_run(retry.uuid),
+        )
+
+        metadata = batch[0]["body"]["metadata"]
+        self.assertEqual(metadata["retryOfRunUuid"], str(self.run.uuid))
+        self.assertTrue(metadata["explicitRetry"])
+        self.assertEqual(metadata["historyRunsBeforeFiltering"], 1)
+        self.assertEqual(metadata["historyRunsAfterFiltering"], 0)
+        self.assertEqual(metadata["supersededRetryAttemptsRemoved"], 1)
+        self.assertEqual(metadata["nonCompletedAssistantOutputsExcluded"], 0)
+        serialized = json.dumps(metadata)
+        self.assertNotIn("Do not export", serialized)
+
     @patch("lens.trace_export.request.urlopen")
     def test_export_skips_network_without_observation_events(
         self,

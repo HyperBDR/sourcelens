@@ -1413,7 +1413,11 @@ import {
   shouldReviewUnreadSession,
   UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
-import { precedingUserMessage } from '@/pages/lens/chatMessageContext'
+import {
+  precedingUserMessage,
+  retryRunUuid
+} from '@/pages/lens/chatMessageContext'
+import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import {
   resolveRunStatus,
   shouldShowRetryHint
@@ -1481,6 +1485,8 @@ const streamError = ref('')
 const failedRunError = ref(null)
 const queuePosition = ref(null)
 const currentRun = ref(null)
+const pendingRunSubmission = ref(null)
+const retryDraft = ref(null)
 const runStatusResolvingSessionUuid = ref('')
 const unreadSessions = ref(readUnreadSessions(window.localStorage))
 const loading = ref({ run: false })
@@ -2528,6 +2534,7 @@ async function selectSession(session, updateRoute = true) {
   booted.value = true
   if (sessionChanged) {
     question.value = ''
+    retryDraft.value = null
     if (composerRef.value) composerRef.value.style.height = 'auto'
   }
   currentRun.value = null
@@ -2705,6 +2712,15 @@ async function submit() {
     (item) => item.status === 'done'
   )
   const attachmentUuids = pendingImages.map((item) => item.uuid)
+  const retryDraftAtSubmit = retryDraft.value
+  const preparedSubmission = prepareRunSubmission({
+    sessionUuid: sessionAtSubmit,
+    question: optimisticText,
+    attachmentUuids,
+    retryDraft: retryDraftAtSubmit,
+    pendingSubmission: pendingRunSubmission.value
+  })
+  pendingRunSubmission.value = preparedSubmission.submission
   attachments.value = []
   // Revoke the optimistic object URLs on every exit path, unless they are
   // restored to the composer for a retry (set below on real failures).
@@ -2741,13 +2757,16 @@ async function submit() {
       updateSession(sessionAtSubmit, { title: autoTitle }).catch(() => {})
     }
   }
+  currentRun.value = null
   try {
-    const run = await createRun(sessionAtSubmit, {
-      question: optimisticText,
-      run_inline: false,
-      enqueue: true,
-      attachment_uuids: attachmentUuids
-    })
+    const run = await createRun(sessionAtSubmit, preparedSubmission.payload)
+    if (
+      pendingRunSubmission.value?.idempotencyKey ===
+      preparedSubmission.submission.idempotencyKey
+    ) {
+      pendingRunSubmission.value = null
+    }
+    retryDraft.value = null
     startCompletionTracking(run, sessionAtSubmit)
     // switched away between createRun and here — don't bind this run's live
     // state onto the now-current assistant
@@ -2757,6 +2776,13 @@ async function submit() {
     // switched away while streaming — leave the new assistant untouched
     if (selectedSessionUuid.value !== sessionAtSubmit) return
     await finishSubmittedRun(run.uuid, sessionAtSubmit)
+    if (
+      pendingRunSubmission.value?.idempotencyKey ===
+      preparedSubmission.submission.idempotencyKey
+    ) {
+      pendingRunSubmission.value = null
+    }
+    retryDraft.value = null
   } catch (err) {
     // a deliberate stream abort (switch/navigate) or a switch away is not a
     // submit failure — bail silently without touching the current state
@@ -2773,6 +2799,13 @@ async function submit() {
         if (selectedSessionUuid.value !== sessionAtSubmit) return
         currentRun.value = run
         await finishSubmittedRun(runUuid, sessionAtSubmit)
+        if (
+          pendingRunSubmission.value?.idempotencyKey ===
+          preparedSubmission.submission.idempotencyKey
+        ) {
+          pendingRunSubmission.value = null
+        }
+        retryDraft.value = null
         return
       } catch {
         // Fall through to the true submit-failure recovery path.
@@ -2780,6 +2813,7 @@ async function submit() {
     }
     messages.value = messages.value.filter((m) => m.uuid !== '__optimistic__')
     question.value = optimisticText
+    retryDraft.value = retryDraftAtSubmit
     // Restore the uploaded (still-unbound) images so the user can retry;
     // keep their object URLs alive for the composer thumbnails.
     if (pendingImages.length) {
@@ -2968,6 +3002,8 @@ function retryLastQuestion(message = null) {
     return
   }
   question.value = userMessage.content || ''
+  const runUuid = retryRunUuid(messages.value, message)
+  retryDraft.value = runUuid ? { question: question.value, runUuid } : null
   nextTick(() => {
     composerRef.value?.focus()
   })

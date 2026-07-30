@@ -41,6 +41,8 @@ def build_ingestion_batch(
 ):
     """Build one privacy-bounded Langfuse ingestion batch for a run."""
 
+    from .services import build_run_history_metadata
+
     trace_id = trace_id_for_run(run.uuid)
     started_at = _timestamp(run.started_at or run.created_at)
     finished_at = _timestamp(
@@ -50,7 +52,28 @@ def build_ingestion_batch(
         "runUuid": str(run.uuid),
         "status": run.status,
         "outcome": run.outcome,
+        "retryOfRunUuid": (
+            str(run.retry_of_run.uuid) if run.retry_of_run_id else None
+        ),
+        "explicitRetry": bool(run.retry_of_run_id),
     }
+    history_metadata = build_run_history_metadata(run)
+    run_metadata.update(
+        {
+            "historyRunsBeforeFiltering": history_metadata[
+                "history_runs_before_filtering"
+            ],
+            "historyRunsAfterFiltering": history_metadata[
+                "history_runs_after_filtering"
+            ],
+            "supersededRetryAttemptsRemoved": history_metadata[
+                "superseded_retry_attempts_removed"
+            ],
+            "nonCompletedAssistantOutputsExcluded": history_metadata[
+                "non_completed_assistant_outputs_excluded"
+            ],
+        }
+    )
     root_metadata = dict(run_metadata)
     if include_summaries:
         root_metadata["comment"] = ROOT_OBSERVATION_SUMMARY
