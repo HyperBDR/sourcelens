@@ -1,8 +1,12 @@
 const UNREAD_STORAGE_KEY = 'sourcelens.answerCompletion.unreadSessions'
+const IN_APP_NOTIFIED_RUNS_KEY = 'sourcelens.answerCompletion.inAppNotifiedRuns'
 const NATIVE_NOTIFIED_RUNS_KEY =
   'sourcelens.answerCompletion.nativeNotifiedRuns'
-const MAX_NATIVE_NOTIFIED_RUNS = 100
+const NOTIFICATION_SUPPRESSED_RUNS_KEY =
+  'sourcelens.answerCompletion.notificationSuppressedRuns'
+const UNREAD_DECIDED_RUNS_KEY = 'sourcelens.answerCompletion.unreadDecidedRuns'
 const TERMINAL_RUN_STATUSES = new Set(['done', 'failed', 'cancelled'])
+const MAX_NOTIFIED_RUNS = 100
 
 function readObject(storage, key) {
   try {
@@ -61,6 +65,62 @@ function markUnreadSession(storage, sessionUuid, runUuid) {
   return true
 }
 
+function reserveChannelNotification(storage, key, otherKey, runUuid) {
+  const notifiedRuns = readArray(storage, key)
+  if (
+    notifiedRuns.includes(runUuid) ||
+    readArray(storage, otherKey).includes(runUuid) ||
+    readArray(storage, NOTIFICATION_SUPPRESSED_RUNS_KEY).includes(runUuid)
+  ) {
+    return false
+  }
+  try {
+    storage?.setItem(
+      key,
+      JSON.stringify([...notifiedRuns, runUuid].slice(-MAX_NOTIFIED_RUNS))
+    )
+    return Boolean(storage)
+  } catch {
+    return false
+  }
+}
+
+function reserveSuppressedNotification(storage, runUuid) {
+  const suppressedRuns = readArray(storage, NOTIFICATION_SUPPRESSED_RUNS_KEY)
+  if (
+    suppressedRuns.includes(runUuid) ||
+    readArray(storage, IN_APP_NOTIFIED_RUNS_KEY).includes(runUuid) ||
+    readArray(storage, NATIVE_NOTIFIED_RUNS_KEY).includes(runUuid)
+  ) {
+    return false
+  }
+  try {
+    storage?.setItem(
+      NOTIFICATION_SUPPRESSED_RUNS_KEY,
+      JSON.stringify([...suppressedRuns, runUuid].slice(-MAX_NOTIFIED_RUNS))
+    )
+    return Boolean(storage)
+  } catch {
+    return false
+  }
+}
+
+function reserveUnreadDecision(storage, runUuid) {
+  const decidedRuns = readArray(storage, UNREAD_DECIDED_RUNS_KEY)
+  if (decidedRuns.includes(runUuid)) {
+    return false
+  }
+  try {
+    storage?.setItem(
+      UNREAD_DECIDED_RUNS_KEY,
+      JSON.stringify([...decidedRuns, runUuid].slice(-MAX_NOTIFIED_RUNS))
+    )
+    return Boolean(storage)
+  } catch {
+    return false
+  }
+}
+
 export function clearUnreadSession(storage, sessionUuid) {
   const unread = readUnreadSessions(storage)
   if (!(sessionUuid in unread)) {
@@ -76,24 +136,6 @@ function isInactive(documentRef) {
     documentRef?.visibilityState !== 'visible' ||
     documentRef?.hasFocus?.() === false
   )
-}
-
-function reserveNativeNotification(storage, runUuid) {
-  const notifiedRuns = readArray(storage, NATIVE_NOTIFIED_RUNS_KEY)
-  if (notifiedRuns.includes(runUuid)) {
-    return false
-  }
-  try {
-    storage?.setItem(
-      NATIVE_NOTIFIED_RUNS_KEY,
-      JSON.stringify(
-        [...notifiedRuns, runUuid].slice(-MAX_NATIVE_NOTIFIED_RUNS)
-      )
-    )
-    return Boolean(storage)
-  } catch {
-    return false
-  }
 }
 
 export async function requestNativeNotificationPermission(NotificationRef) {
@@ -115,7 +157,12 @@ function showNativeCompletionNotification(options) {
     !nativeNotification?.enabled ||
     !isInactive(options.documentRef) ||
     NotificationRef?.permission !== 'granted' ||
-    !reserveNativeNotification(options.storage, options.run.uuid)
+    !reserveChannelNotification(
+      options.storage,
+      NATIVE_NOTIFIED_RUNS_KEY,
+      IN_APP_NOTIFIED_RUNS_KEY,
+      options.run.uuid
+    )
   ) {
     return false
   }
@@ -146,15 +193,21 @@ function showNativeCompletionNotification(options) {
 
 export function handleTerminalRun(options) {
   if (options.run?.status !== 'done') {
-    return { nativeNotificationShown: false, unreadChanged: false }
+    return {
+      inAppNotificationRequested: false,
+      nativeNotificationShown: false,
+      unreadChanged: false
+    }
   }
 
   const isAnotherConversation =
     options.sessionUuid !== options.selectedSessionUuid
+  const inactive = isInactive(options.documentRef)
   let unreadChanged = false
   if (
+    reserveUnreadDecision(options.storage, options.run.uuid) &&
     options.indicatorEnabled &&
-    (isAnotherConversation || isInactive(options.documentRef))
+    (isAnotherConversation || inactive)
   ) {
     unreadChanged = markUnreadSession(
       options.storage,
@@ -163,10 +216,47 @@ export function handleTerminalRun(options) {
     )
   }
 
+  const nativeNotificationShown = inactive
+    ? showNativeCompletionNotification(options)
+    : false
+  const inAppNotificationRequested =
+    options.indicatorEnabled &&
+    isAnotherConversation &&
+    !inactive &&
+    reserveChannelNotification(
+      options.storage,
+      IN_APP_NOTIFIED_RUNS_KEY,
+      NATIVE_NOTIFIED_RUNS_KEY,
+      options.run.uuid
+    )
+  if (
+    (!isAnotherConversation && !inactive) ||
+    (inactive && !nativeNotificationShown) ||
+    (isAnotherConversation && !inactive && !options.indicatorEnabled)
+  ) {
+    reserveSuppressedNotification(options.storage, options.run.uuid)
+  }
+
   return {
-    nativeNotificationShown: showNativeCompletionNotification(options),
+    inAppNotificationRequested,
+    nativeNotificationShown,
     unreadChanged
   }
+}
+
+export function answerSummary(content, limit = 120) {
+  const summary = String(content || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[#>*_~`|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (summary.length <= limit) {
+    return summary
+  }
+  return `${summary.slice(0, limit).trimEnd()}…`
 }
 
 export async function pollRunUntilTerminal({
@@ -194,4 +284,10 @@ export async function pollRunUntilTerminal({
   return TERMINAL_RUN_STATUSES.has(run?.status) ? run : null
 }
 
-export { UNREAD_STORAGE_KEY }
+export {
+  IN_APP_NOTIFIED_RUNS_KEY,
+  NATIVE_NOTIFIED_RUNS_KEY,
+  NOTIFICATION_SUPPRESSED_RUNS_KEY,
+  UNREAD_DECIDED_RUNS_KEY,
+  UNREAD_STORAGE_KEY
+}

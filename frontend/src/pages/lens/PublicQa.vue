@@ -158,6 +158,7 @@ import { formatDate } from '@/utils/formatting'
 import { qaShareUrl } from '@/utils/lens'
 import { fetchDeliverableBlob } from '@/utils/filePreview'
 import { downloadQaPdf } from '@/utils/qaPdf'
+import { useSessionActivity } from '@/composables/useSessionActivity'
 import { useToast } from '@/composables/useToast'
 import { useUserStore } from '@/store/user'
 
@@ -168,6 +169,7 @@ const route = useRoute()
 const router = useRouter()
 const { showSuccess, showError } = useToast()
 const userStore = useUserStore()
+const sessionActivity = useSessionActivity()
 
 const qa = ref(null)
 const loading = ref(true)
@@ -229,8 +231,21 @@ async function exportPdf() {
       summary: qa.value?.title,
       question: qa.value?.question
     })
+    sessionActivity.notify({
+      duration: 5000,
+      message: t('lens.qa.pdfGenerated', {
+        title: qa.value?.title || t('lens.qa.genericAgent')
+      }),
+      to: route.fullPath,
+      type: 'success'
+    })
   } catch {
-    showError(t('lens.chat.downloadFailed'))
+    sessionActivity.notify({
+      duration: 8000,
+      message: t('lens.qa.pdfGenerationFailed'),
+      to: route.fullPath,
+      type: 'error'
+    })
   }
 }
 

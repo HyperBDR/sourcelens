@@ -31,9 +31,8 @@ test('PDF filename falls back to the current question', async () => {
 })
 
 test('content disposition filename is decoded and sanitized', async () => {
-  const { filenameFromContentDisposition } = await import(
-    '../src/utils/qaPdf.js'
-  )
+  const { filenameFromContentDisposition } =
+    await import('../src/utils/qaPdf.js')
 
   assert.equal(
     filenameFromContentDisposition(
@@ -63,6 +62,10 @@ test('Q&A exports fetch and download a PDF without printing', async () => {
   assert.match(publicQa, /getPublicQaPdf\(props\.token\)/)
   assert.match(chat, /downloadQaPdf/)
   assert.match(publicQa, /downloadQaPdf/)
+  assert.match(chat, /beginActivity\(sessionUuid, activityId\)/)
+  assert.match(chat, /endActivity\(sessionUuid, activityId\)/)
+  assert.match(chat, /pdfGenerated/)
+  assert.match(publicQa, /pdfGenerated/)
   assert.match(pdfUtility, /URL\.createObjectURL/)
   assert.match(pdfUtility, /link\.download = filename/)
   assert.match(pdfUtility, /link\.click\(\)/)
