@@ -284,6 +284,66 @@ test('selects native delivery without an in-app notification when hidden', () =>
   assert.equal(NotificationApi.instances[0].closed, true)
 })
 
+test('keeps native delivery independent from in-app reminders', () => {
+  const NotificationApi = createNotificationApi()
+  const options = completionOptions({
+    documentRef: {
+      hasFocus: () => false,
+      visibilityState: 'hidden'
+    },
+    indicatorEnabled: false,
+    nativeNotification: {
+      body: 'Your answer is ready.',
+      enabled: true,
+      NotificationRef: NotificationApi,
+      title: 'Answer completed'
+    },
+    selectedSessionUuid: 'session-a'
+  })
+
+  assert.deepEqual(handleTerminalRun(options), {
+    inAppNotificationRequested: false,
+    nativeNotificationShown: true,
+    unreadChanged: false
+  })
+  assert.equal(NotificationApi.instances.length, 1)
+})
+
+test('does not show a native notification in the active tab', () => {
+  const NotificationApi = createNotificationApi()
+  const options = completionOptions({
+    nativeNotification: {
+      body: 'Your answer is ready.',
+      enabled: true,
+      NotificationRef: NotificationApi,
+      title: 'Answer completed'
+    }
+  })
+
+  assert.equal(handleTerminalRun(options).nativeNotificationShown, false)
+  assert.equal(NotificationApi.instances.length, 0)
+})
+
+test('deduplicates native notifications for replayed completion events', () => {
+  const NotificationApi = createNotificationApi()
+  const options = completionOptions({
+    documentRef: {
+      hasFocus: () => false,
+      visibilityState: 'hidden'
+    },
+    nativeNotification: {
+      body: 'Your answer is ready.',
+      enabled: true,
+      NotificationRef: NotificationApi,
+      title: 'Answer completed'
+    }
+  })
+
+  assert.equal(handleTerminalRun(options).nativeNotificationShown, true)
+  assert.equal(handleTerminalRun(options).nativeNotificationShown, false)
+  assert.equal(NotificationApi.instances.length, 1)
+})
+
 test('keeps only unread state when hidden native delivery is unavailable', () => {
   const storage = new MemoryStorage()
   const options = completionOptions({

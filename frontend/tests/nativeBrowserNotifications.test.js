@@ -38,6 +38,20 @@ test('uses one route-aware target for native and in-app completion clicks', asyn
   assert.match(source, /to: navigationTarget/)
 })
 
+test('synchronizes completion preferences and unread state across tabs', async () => {
+  const source = await readSource('src/pages/lens/Chat.vue')
+
+  assert.match(source, /function handleCompletionStorage\(event\)/)
+  assert.match(
+    source,
+    /window\.addEventListener\('storage', handleCompletionStorage\)/
+  )
+  assert.match(
+    source,
+    /window\.removeEventListener\('storage', handleCompletionStorage\)/
+  )
+})
+
 test('provides English and Simplified Chinese native notification text', async () => {
   const [english, chinese] = await Promise.all([
     readSource('src/locales/en.json'),

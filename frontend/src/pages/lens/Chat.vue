@@ -313,7 +313,13 @@
           <PanelLeftOpen :size="20" :stroke-width="2.1" aria-hidden="true" />
         </button>
         <div class="mobile-topbar-title">
-          {{ mySharesOpen ? t('lens.qa.mineTitle') : assistantName }}
+          <span v-if="mySharesOpen" class="mobile-topbar-title-text">
+            {{ t('lens.qa.mineTitle') }}
+          </span>
+          <AssistantSwitcher v-else-if="switchable" mode="header" />
+          <span v-else class="mobile-topbar-title-text">
+            {{ assistantName }}
+          </span>
         </div>
         <button
           type="button"
@@ -1417,7 +1423,8 @@ import {
   clearUnreadSession,
   handleTerminalRun,
   readUnreadSessions,
-  shouldReviewUnreadSession
+  shouldReviewUnreadSession,
+  UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
 import { startRunCompletionTracking } from '@/utils/runCompletionTracking'
 import { precedingUserMessage } from '@/pages/lens/chatMessageContext'
@@ -2044,6 +2051,19 @@ function sessionHasUnreadAnswer(sessionUuid) {
     selectedSessionUuid.value !== sessionUuid &&
     Boolean(sessionActivity.state.unreadSessions[sessionUuid])
   )
+}
+
+function handleCompletionStorage(event) {
+  if (event.key === UNREAD_STORAGE_KEY) {
+    refreshUnreadSessions()
+  }
+  if (event.key === 'answerCompletionIndicator') {
+    preferencesStore.answerCompletionIndicator = event.newValue !== 'false'
+    refreshUnreadSessions()
+  }
+  if (event.key === 'nativeBrowserNotifications') {
+    preferencesStore.nativeBrowserNotifications = event.newValue === 'true'
+  }
 }
 
 function handleCompletionVisibility() {
@@ -3068,6 +3088,7 @@ watch(
 )
 
 onMounted(async () => {
+  window.addEventListener('storage', handleCompletionStorage)
   window.addEventListener('focus', handleCompletionVisibility)
   document.addEventListener('visibilitychange', handleCompletionVisibility)
   refreshUnreadSessions()
@@ -3082,6 +3103,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('storage', handleCompletionStorage)
   window.removeEventListener('focus', handleCompletionVisibility)
   document.removeEventListener('visibilitychange', handleCompletionVisibility)
   streamController.value?.abort()
@@ -3295,7 +3317,11 @@ onBeforeUnmount(() => {
 }
 
 .mobile-topbar-title {
-  @apply min-w-0 flex-1 truncate text-center text-sm font-semibold text-ink-900;
+  @apply flex min-w-0 flex-1 justify-center;
+}
+
+.mobile-topbar-title-text {
+  @apply min-w-0 truncate text-center text-sm font-semibold text-ink-900;
 }
 
 .chat-header {
