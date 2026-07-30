@@ -5,6 +5,7 @@ from dj_rest_auth.views import PasswordChangeView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.urls import CustomLoginView
 from accounts.views.management import (
     ManagementGroupBulkDeleteView,
     ManagementGroupListView,
@@ -29,6 +30,7 @@ class AuthenticatedProbeView(APIView):
 
 
 urlpatterns = [
+    path("api/v1/auth/login", CustomLoginView.as_view()),
     path(
         "api/v1/auth/password/reset",
         SendPasswordResetEmailView.as_view(),

@@ -7,21 +7,17 @@
       class="space-y-4"
       @submit.prevent="handleLogin"
     >
-      <div>
-        <label class="mb-1 block text-sm font-medium text-ink-700">
-          {{ t('auth.username') }}
-        </label>
-        <BaseInput
-          v-model="formData.username"
-          type="text"
-          name="username"
-          autocomplete="username"
-          :placeholder="t('auth.username')"
-          required
-          :error="errors.username"
-          :disabled="loading"
-        />
-      </div>
+      <BaseInput
+        v-model="formData.email"
+        :label="t('auth.email')"
+        type="email"
+        name="email"
+        autocomplete="email"
+        :placeholder="t('auth.emailPlaceholder')"
+        required
+        :error="errors.email"
+        :disabled="loading"
+      />
 
       <BaseInput
         v-model="formData.password"
@@ -107,8 +103,8 @@ const passwordText = computed(() => getPasswordManagementText(locale.value))
 const mode = ref('code')
 const loading = ref(false)
 const errorMessage = ref('')
-const formData = reactive({ username: '', password: '' })
-const errors = reactive({ username: '', password: '' })
+const formData = reactive({ email: '', password: '' })
+const errors = reactive({ email: '', password: '' })
 
 const pwTurnstilePassed = ref(false)
 const pwTurnstileToken = ref('')
@@ -125,10 +121,10 @@ const toggleMode = () => {
 }
 
 const validateLogin = () => {
-  errors.username = ''
+  errors.email = ''
   errors.password = ''
-  if (!formData.username.trim()) {
-    errors.username = t('auth.required.username')
+  if (!formData.email.trim()) {
+    errors.email = t('auth.required.email')
     return false
   }
   if (!formData.password) {
@@ -151,7 +147,7 @@ const handleLogin = async () => {
   errorMessage.value = ''
   try {
     await userStore.login({
-      username: formData.username,
+      email: formData.email,
       password: formData.password,
       turnstileToken: pwTurnstileToken.value
     })
