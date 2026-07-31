@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import timedelta
+import hashlib
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
@@ -35,6 +36,7 @@ from lens.models import (
     LensNode,
     Message,
     Run,
+    RunOutputFile,
     RunStep,
     ScheduledTask,
     Session,
@@ -55,6 +57,7 @@ from lens.services import (
     _step_sequence,
     append_lensnode_output,
     build_run_history,
+    build_run_history_artifacts,
     create_run_execution_snapshot,
     create_execution_run,
     dispatch_run_to_lensnode,
@@ -223,6 +226,86 @@ class LensServiceTests(TransactionTestCase):
                 {"role": "user", "content": "q2"},
             ],
         )
+
+    def test_build_run_history_artifacts_returns_trusted_deliverable(self):
+        from django.core.files.base import ContentFile
+
+        content = b"# Original report\nFull source content"
+        prior = create_execution_run(
+            session=self.session,
+            question="Create the report",
+            enqueue=False,
+        )
+        prior.status = Run.Status.DONE
+        prior.outcome = Run.Outcome.COMPLETED
+        prior.save(update_fields=["status", "outcome"])
+        output = RunOutputFile(
+            run=prior,
+            message=prior.output_message,
+            session=self.session,
+            assistant=self.assistant,
+            filename="report.md",
+            content_type="text/markdown",
+            byte_size=len(content),
+            content_hash=hashlib.sha256(content).hexdigest(),
+        )
+        output.file.save(
+            "report.md",
+            ContentFile(content),
+            save=False,
+        )
+        output.save()
+        current = create_execution_run(
+            session=self.session,
+            question="Translate the previous file",
+            enqueue=False,
+        )
+
+        try:
+            artifacts = build_run_history_artifacts(current)
+        finally:
+            output.file.delete(save=False)
+
+        self.assertEqual(
+            artifacts,
+            [
+                {
+                    "uuid": str(output.uuid),
+                    "filename": "report.md",
+                    "content_type": "text/markdown",
+                    "byte_size": len(content),
+                    "content_hash": hashlib.sha256(content).hexdigest(),
+                    "source_run_uuid": str(prior.uuid),
+                }
+            ],
+        )
+
+    def test_build_run_history_artifacts_excludes_blocked_run(self):
+        prior = create_execution_run(
+            session=self.session,
+            question="Create the report",
+            enqueue=False,
+        )
+        prior.status = Run.Status.DONE
+        prior.outcome = Run.Outcome.BLOCKED
+        prior.save(update_fields=["status", "outcome"])
+        RunOutputFile.objects.create(
+            run=prior,
+            message=prior.output_message,
+            session=self.session,
+            assistant=self.assistant,
+            filename="partial.md",
+            content_type="text/markdown",
+            byte_size=10,
+            content_hash="a" * 64,
+        )
+        current = create_execution_run(
+            session=self.session,
+            question="Continue",
+            enqueue=False,
+        )
+
+        self.assertEqual(build_run_history_artifacts(current), [])
 
     def test_build_run_history_skips_capability_unavailable_answer(self):
         blocked = create_execution_run(
@@ -660,6 +743,43 @@ class LensServiceTests(TransactionTestCase):
             run.execution.loaded_skills[0]["package_hash"],
             "sha256:new",
         )
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    @patch("lens.services.build_run_history_artifacts")
+    def test_dispatch_includes_general_chat_history_artifacts(
+        self,
+        build_artifacts,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        build_artifacts.return_value = [
+            {
+                "uuid": "artifact-1",
+                "filename": "report.md",
+                "content_type": "text/markdown",
+                "byte_size": 42,
+                "content_hash": "a" * 64,
+                "source_run_uuid": "prior-run",
+            }
+        ]
+        sender = mock_async_to_sync.return_value
+        self.assistant.selected_task = "general_chat"
+        self.assistant.save(update_fields=["selected_task"])
+        run = create_execution_run(
+            session=self.session,
+            question="Translate the previous file",
+            enqueue=False,
+        )
+
+        dispatch_run_to_lensnode(run, "Translate the previous file")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            payload["history_artifacts"],
+            build_artifacts.return_value,
+        )
+        build_artifacts.assert_called_once_with(run)
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")

@@ -22,6 +22,8 @@ from .tls import create_config_ssl_context
 MAX_SKILL_PACKAGE_BYTES = 25 * 1024 * 1024
 MAX_RUN_ATTACHMENT_BYTES = 25 * 1024 * 1024
 MAX_RUN_ATTACHMENTS = 4
+MAX_HISTORY_ARTIFACT_BYTES = 50 * 1024 * 1024
+MAX_HISTORY_ARTIFACTS = 3
 RUN_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
 MAX_FILENAME_COMPONENT_BYTES = 255
 STALE_RUNTIME_MAX_AGE_S = 24 * 60 * 60
@@ -131,6 +133,13 @@ def prepare_runtime_resources(
     )
 
     try:
+        artifact_paths = _materialize_history_artifacts(
+            config,
+            command,
+            runtime_root,
+            cancel_event=cancel_event,
+            on_activity=on_activity,
+        )
         subject_dir = _materialize_subject_documents(
             config,
             command,
@@ -141,6 +150,8 @@ def prepare_runtime_resources(
     except Exception:
         shutil.rmtree(runtime_root, ignore_errors=True)
         raise
+    if artifact_paths:
+        command["history_artifact_paths"] = artifact_paths
     if subject_dir is not None:
         command["subject_dirs"] = [str(subject_dir)]
         command.setdefault("target_dirs", []).append(
@@ -172,6 +183,81 @@ def prepare_runtime_resources(
         skill_transforms=skill_transforms,
         mcp_configs=mcp_configs,
     )
+
+
+def _materialize_history_artifacts(
+    config,
+    command,
+    runtime_root,
+    cancel_event=None,
+    on_activity=None,
+):
+    """Download trusted prior deliverables into this Run's sandbox."""
+
+    artifacts = command.get("history_artifacts") or []
+    if not artifacts:
+        return []
+    if len(artifacts) > MAX_HISTORY_ARTIFACTS:
+        raise ValueError("History artifact count exceeds limit")
+
+    artifact_dir = runtime_root / "conversation-artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    run_uuid = str(command.get("run_uuid") or "").strip()
+    paths = []
+    total_bytes = 0
+    for artifact in artifacts:
+        _check_cancelled(cancel_event)
+        artifact_uuid = str(artifact.get("uuid") or "").strip()
+        expected_size = int(artifact.get("byte_size") or 0)
+        expected_hash = str(artifact.get("content_hash") or "")
+        if (
+            not artifact_uuid
+            or len(artifact_uuid) > 36
+            or expected_size < 0
+            or expected_size > MAX_HISTORY_ARTIFACT_BYTES
+            or total_bytes + expected_size > MAX_HISTORY_ARTIFACT_BYTES
+            or len(expected_hash) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in expected_hash
+            )
+        ):
+            raise ValueError("Invalid history artifact metadata")
+        original_name = Path(
+            str(artifact.get("filename") or "artifact")
+        ).name
+        filename = safe_filename(
+            original_name,
+            max_bytes=(
+                MAX_FILENAME_COMPONENT_BYTES
+                - len(artifact_uuid.encode("utf-8"))
+                - 1
+            ),
+        )
+        data = _download_history_artifact(
+            config,
+            run_uuid,
+            artifact,
+            cancel_event=cancel_event,
+            on_activity=on_activity,
+        )
+        if len(data) != expected_size:
+            raise ValueError("History artifact size mismatch")
+        if hashlib.sha256(data).hexdigest() != expected_hash:
+            raise ValueError("History artifact hash mismatch")
+        stored_name = f"{artifact_uuid}-{filename}"
+        (artifact_dir / stored_name).write_bytes(data)
+        total_bytes += len(data)
+        paths.append(
+            {
+                "path": f"/conversation-artifacts/{stored_name}",
+                "filename": original_name,
+                "source_run_uuid": str(
+                    artifact.get("source_run_uuid") or ""
+                ),
+            }
+        )
+    return paths
 
 
 def _materialize_subject_documents(
@@ -386,6 +472,54 @@ def _download_run_attachment(
     return b"".join(chunks)
 
 
+def _download_history_artifact(
+    config,
+    run_uuid,
+    artifact,
+    cancel_event=None,
+    on_activity=None,
+):
+    """Download one conversation artifact with a hard byte ceiling."""
+
+    _check_cancelled(cancel_event)
+    _touch_activity(on_activity)
+    artifact_uuid = str(artifact.get("uuid") or "").strip()
+    url = _history_artifact_url(
+        config.ai_gateway_url,
+        run_uuid,
+        artifact_uuid,
+    )
+    chunks = []
+    size = 0
+    with httpx.Client(
+        timeout=config.request_timeout_s,
+        verify=create_config_ssl_context(config),
+    ) as client:
+        with client.stream(
+            "GET",
+            url,
+            headers={"Authorization": f"Bearer {config.token}"},
+        ) as response:
+            response.raise_for_status()
+            content_length = int(response.headers.get("Content-Length") or 0)
+            if content_length > MAX_HISTORY_ARTIFACT_BYTES:
+                raise ValueError(
+                    "History artifact download exceeds size limit"
+                )
+            for chunk in response.iter_bytes():
+                _check_cancelled(cancel_event)
+                size += len(chunk)
+                if size > MAX_HISTORY_ARTIFACT_BYTES:
+                    raise ValueError(
+                        "History artifact download exceeds size limit"
+                    )
+                chunks.append(chunk)
+                _touch_activity(on_activity)
+    _check_cancelled(cancel_event)
+    _touch_activity(on_activity)
+    return b"".join(chunks)
+
+
 def _run_attachment_url(
     ai_gateway_url,
     run_uuid,
@@ -398,6 +532,20 @@ def _run_attachment_url(
     if base.endswith(suffix):
         base = base[: -len(suffix)]
     return f"{base}/runs/{run_uuid}/attachments/{attachment_uuid}/"
+
+
+def _history_artifact_url(
+    ai_gateway_url,
+    run_uuid,
+    artifact_uuid,
+):
+    """Derive the history artifact endpoint from the AI gateway URL."""
+
+    base = str(ai_gateway_url).rstrip("/")
+    suffix = "/ai-gateway"
+    if base.endswith(suffix):
+        base = base[: -len(suffix)]
+    return f"{base}/runs/{run_uuid}/history-artifacts/{artifact_uuid}/"
 
 
 def cleanup_runtime_resources(resources):
