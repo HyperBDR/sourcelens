@@ -4,7 +4,8 @@ import test from 'node:test'
 
 import {
   precedingUserMessage,
-  retryRunUuid
+  retryRunUuid,
+  retryableUserMessage
 } from '../src/pages/lens/chatMessageContext.js'
 
 test('passes the clicked assistant reply to the retry handler', async () => {
@@ -61,4 +62,43 @@ test('uses the latest user Run for an empty-answer Retry hint', () => {
   ]
 
   assert.equal(retryRunUuid(messages), 'run-2')
+})
+
+test('does not retry an attachment-only question without reusable files', () => {
+  const messages = [
+    {
+      uuid: 'question-1',
+      role: 'user',
+      content: '',
+      attachments: [{ uuid: 'document-1', kind: 'document' }]
+    },
+    { uuid: 'answer-1', role: 'assistant', content: '' }
+  ]
+
+  assert.equal(retryableUserMessage(messages, messages[1]), null)
+  assert.equal(retryableUserMessage(messages), null)
+})
+
+test('does not retry text when its document cannot be replayed', () => {
+  const messages = [
+    {
+      uuid: 'question-1',
+      role: 'user',
+      content: 'Validate this PDF',
+      attachments: [{ uuid: 'document-1', kind: 'document' }]
+    },
+    { uuid: 'answer-1', role: 'assistant', content: '' }
+  ]
+
+  assert.equal(retryableUserMessage(messages, messages[1]), null)
+  assert.equal(retryableUserMessage(messages), null)
+})
+
+test('keeps text questions retryable', () => {
+  const messages = [
+    { uuid: 'question-1', role: 'user', content: 'Try again' },
+    { uuid: 'answer-1', role: 'assistant', content: '' }
+  ]
+
+  assert.equal(retryableUserMessage(messages, messages[1])?.uuid, 'question-1')
 })

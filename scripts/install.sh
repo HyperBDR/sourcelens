@@ -296,6 +296,16 @@ if ! wait_for_healthy "sourcelens-api-${DEPLOY_COLOR}"; then
 fi
 log "sourcelens-api-${DEPLOY_COLOR} is healthy"
 
+# --- Roll non-blue/green consumers before exposing the new producer ------
+# The new worker accepts tasks from the outgoing API while the new LensNode
+# advertises capabilities needed by the incoming API. This ordering also keeps
+# Celery message-shape changes from reaching an old worker after traffic moves.
+# CELERY_TASK_ACKS_LATE + prefetch + stop_grace_period make `up -d` a graceful
+# drain-and-replace rather than a hard kill.
+log "Rolling backend-worker / backend-scheduler / lensnode to ${IMAGE_TAG}..."
+sync_images backend-worker backend-scheduler lensnode
+docker compose up -d backend-worker backend-scheduler lensnode
+
 # Always ensure nginx is actually running before doing anything that touches it.
 # `switch_traffic` does `docker exec sourcelens-nginx ...`, which fails outright
 # if nginx isn't running (crashed, manually stopped, or left half-started from a
@@ -345,14 +355,6 @@ fi
 # services, so `up` never touches them and they keep holding a DB connection and
 # memory. Retire them here. No-op once the host is already on blue/green.
 docker rm -f sourcelens-api sourcelens-ui >/dev/null 2>&1 || true
-
-# --- Worker/scheduler/lensnode: no blue/green, just a rolling restart ----
-# CELERY_TASK_ACKS_LATE + prefetch + stop_grace_period already make `up -d` here
-# a graceful drain-and-replace, not a hard kill. lensnode reconnects to the new
-# active color through nginx on its own.
-log "Rolling backend-worker / backend-scheduler / lensnode to ${IMAGE_TAG}..."
-sync_images backend-worker backend-scheduler lensnode
-docker compose up -d backend-worker backend-scheduler lensnode
 
 # --- Prune old version tags (remote mode only — --local only ever has a
 # single "local"-ish tag, nothing to prune) ------------------------------

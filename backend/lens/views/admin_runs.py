@@ -8,8 +8,16 @@ from rest_framework.views import APIView
 from agentcore_metering.adapters.django.models import LLMUsage
 
 from accounts.permissions import HasRequiredFeature
+from lens.document_attachments import (
+    document_attachment_response,
+    get_run_document_attachments,
+)
 from lens.models import Run
-from lens.runtime_events import sanitize_loaded_mcps, sanitize_loaded_skills
+from lens.runtime_events import (
+    sanitize_loaded_mcps,
+    sanitize_loaded_skills,
+    sanitize_termination_detail,
+)
 from lens.serializers import (
     MessageAttachmentSerializer,
     RunOutputFileSerializer,
@@ -37,6 +45,16 @@ def _admin_run_duration(run):
     return None
 
 
+def _admin_step_detail(step):
+    """Return a mapping and object-only events from persisted step data."""
+
+    detail = step.detail if isinstance(step.detail, dict) else {}
+    events = detail.get("events")
+    if not isinstance(events, list):
+        events = []
+    return detail, [event for event in events if isinstance(event, dict)]
+
+
 def _admin_run_step_counts(run):
     """Aggregate event/subagent/LLM counts and token usage from steps."""
 
@@ -62,8 +80,8 @@ def _admin_run_step_counts(run):
     total_cost = 0.0
     has_cost = False
     for step in run.steps.all():
-        detail = step.detail or {}
-        for event in detail.get("events", []):
+        detail, events = _admin_step_detail(step)
+        for event in events:
             counts["event_count"] += 1
             agent_event = event.get("agent_event")
             if agent_event == "tool.task.invoke":
@@ -209,6 +227,80 @@ def _admin_run_model_usage(run):
     }
 
 
+def _admin_run_failure_summary(run):
+    """Return safe terminal failure-scope diagnostics from Run events."""
+
+    empty = {
+        "unresolved_failure_count": 0,
+        "recovered_failure_count": 0,
+        "warning_count": 0,
+        "failures": [],
+    }
+    allowed_capabilities = {
+        "artifact_delivery",
+        "mcp",
+        "skill",
+        "tool",
+        "workspace",
+    }
+    allowed_error_types = {
+        "capability",
+        "configuration",
+        "policy",
+        "request",
+        "tool",
+        "transient",
+        "verification",
+    }
+    allowed_scopes = {"recovered", "unresolved", "warning"}
+    outcome_event = None
+    for step in run.steps.all():
+        _detail, events = _admin_step_detail(step)
+        for event in events:
+            if event.get("agent_event") == "deepagents.runtime.outcome":
+                outcome_event = event
+    if outcome_event is None:
+        return empty
+
+    summary = {}
+    for key in (
+        "unresolved_failure_count",
+        "recovered_failure_count",
+        "warning_count",
+    ):
+        try:
+            summary[key] = max(int(outcome_event.get(key) or 0), 0)
+        except (TypeError, ValueError):
+            summary[key] = 0
+    failure_items = outcome_event.get("failures")
+    if not isinstance(failure_items, list):
+        failure_items = []
+    failures = []
+    for item in failure_items[:12]:
+        if not isinstance(item, dict):
+            continue
+        capability = item.get("capability")
+        error_type = item.get("error_type")
+        scope = item.get("scope")
+        if (
+            capability not in allowed_capabilities
+            or error_type not in allowed_error_types
+            or scope not in allowed_scopes
+        ):
+            continue
+        failures.append({
+            "capability": capability,
+            "error_type": error_type,
+            "scope": scope,
+            "required": item.get("required") is True,
+            "affects_required_evidence": (
+                item.get("affects_required_evidence") is True
+            ),
+        })
+    summary["failures"] = failures
+    return summary
+
+
 def _admin_run_row(run):
     """Serialize one run for the observability list."""
 
@@ -217,9 +309,15 @@ def _admin_run_row(run):
     assistant = session.assistant if session else None
     question = (run.input_message.content if run.input_message else "") or ""
     counts = _admin_run_step_counts(run)
+    execution = run.execution if hasattr(run, "execution") else None
     return {
         "uuid": str(run.uuid),
         "status": run.status,
+        "executor_status": execution.status if execution else run.status,
+        "outcome": run.outcome,
+        "termination_detail": sanitize_termination_detail(
+            run.termination_detail
+        ),
         "username": user.username if user else None,
         "assistant_name": assistant.name if assistant else None,
         "assistant_slug": assistant.slug if assistant else None,
@@ -285,12 +383,12 @@ def _admin_run_detail(run):
     model_usage = _admin_run_model_usage(run)
     steps = []
     for step in run.steps.all():
-        detail = step.detail or {}
+        detail, events = _admin_step_detail(step)
         item = {
             "step_type": step.step_type,
             "status": step.status,
             "sequence": step.sequence,
-            "events": detail.get("events", []),
+            "events": events,
             "usage": detail.get("usage"),
             "updated_at": (
                 step.updated_at.isoformat() if step.updated_at else None
@@ -310,6 +408,13 @@ def _admin_run_detail(run):
         if run.input_message
         else []
     )
+    attachments.extend(
+        document_attachment_response(item)
+        for item in get_run_document_attachments(
+            run.uuid,
+            fail_silently=True,
+        )
+    )
     output_files = RunOutputFileSerializer(
         run.output_files.all(), many=True
     ).data
@@ -322,9 +427,11 @@ def _admin_run_detail(run):
         "output_files": output_files,
         "error": run.error or "",
         "agent_rounds": agent_rounds,
+        "failure_summary": _admin_run_failure_summary(run),
         "steps": steps,
         "execution": {
             "task": execution.task,
+            "status": execution.status,
             "target_dirs": execution.target_dirs,
             "loaded_skills": sanitize_loaded_skills(
                 execution.loaded_skills
@@ -362,6 +469,7 @@ class AdminRunListView(APIView):
                 "session__assistant",
                 "input_message",
                 "lensnode",
+                "execution",
             )
             .prefetch_related("steps")
             .order_by("-created_at")
@@ -419,6 +527,7 @@ class AdminRunDetailView(APIView):
                     "input_message",
                     "output_message",
                     "lensnode",
+                    "execution",
                 )
                 .prefetch_related("output_files", "steps")
                 .get(uuid=uuid)

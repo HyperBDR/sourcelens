@@ -115,10 +115,13 @@ is by design; `install.sh` is its only entrypoint.
    startup migrate) — no traffic yet.
 5. Bring up the deploy color, **health-gate** it (poll `/health`, bounded
    retries). Abort cleanly if it never turns healthy — current color stays live.
-6. **Switch** nginx to the new color (`nginx -t` then `nginx -s reload`, no
+6. Roll queue and WS consumers (`up -d`) while the old API producer is still
+   active. Consumers must accept both the outgoing and incoming producer's
+   message shapes and capabilities during this step.
+7. **Switch** nginx to the new color (`nginx -t` then `nginx -s reload`, no
    dropped connections). Write `.active_color` + `.rollback_version`
-   **immediately**. Observe a fixed window, then retire the old color.
-7. Roll workers (`up -d`). Prune old image tags. Single-flight lock throughout.
+   **immediately**. Observe a fixed window, then retire the old color. Prune old
+   image tags. Single-flight lock throughout.
 
 ---
 
@@ -185,6 +188,11 @@ was caught only in review. Treat them as acceptance criteria.
       reload (zero-downtime).
       *(sourcelens `install.sh` does NOT do this cleanup yet — copy it from the
       devify implementation, which does `docker rm -f devify-api devify-ui`.)*
+- [ ] **Roll queue consumers before switching to a new producer.** A release
+      that changes a Celery task signature or a WS capability must first put
+      consumers in place that accept both the outgoing and incoming API's
+      messages. Switching API traffic first can enqueue new payloads to old
+      workers or leave the new API unaware of required worker capabilities.
 
 ### 5.2 nginx
 

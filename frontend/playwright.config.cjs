@@ -8,6 +8,10 @@ const baseURL =
 
 module.exports = {
   testDir: './e2e',
+  // The UI-regression tier has its own config (playwright.ui.config.cjs) and a
+  // dedicated served build; keep its specs out of the default suite so a plain
+  // `test:e2e` never tries to run them against the wrong base URL.
+  testIgnore: '**/ui-regression/**',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

@@ -16,6 +16,7 @@ from .environment_variables import EnvironmentVariableSetViewSet
 from .gateway import (
     LensNodeAIGatewayView,
     LensNodeDeliverableUploadView,
+    LensNodeRunAttachmentView,
     LensNodeSkillPackageView,
 )
 from .global_settings import GlobalSettingViewSet
@@ -51,6 +52,7 @@ __all__ = [
     "LensAttachmentView",
     "LensNodeAIGatewayView",
     "LensNodeDeliverableUploadView",
+    "LensNodeRunAttachmentView",
     "LensNodeSkillPackageView",
     "LensNodeViewSet",
     "MCPServerViewSet",

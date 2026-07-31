@@ -105,7 +105,12 @@ def store_message_attachment(session, user, uploaded_file):
     return attachment
 
 
-def bind_attachments_to_message(session, message, attachment_uuids):
+def bind_attachments_to_message(
+    session,
+    message,
+    attachment_uuids,
+    order_by_uuid=None,
+):
     """Link previously uploaded attachments to a question message.
 
     Only unbound attachments owned by the session are linked, in the
@@ -114,7 +119,8 @@ def bind_attachments_to_message(session, message, attachment_uuids):
     """
 
     if not attachment_uuids:
-        return
+        return []
+    order_by_uuid = order_by_uuid or {}
     wanted = [str(value) for value in attachment_uuids]
     by_uuid = {
         str(item.uuid): item
@@ -125,14 +131,17 @@ def bind_attachments_to_message(session, message, attachment_uuids):
         )
     }
     order = 0
+    bound = []
     for raw in wanted:
         attachment = by_uuid.get(raw)
         if attachment is None:
             continue
         attachment.message = message
-        attachment.order = order
+        attachment.order = order_by_uuid.get(raw, order)
         attachment.save(update_fields=["message", "order", "updated_at"])
+        bound.append(raw)
         order += 1
+    return bound
 
 
 def attachment_data_url(attachment):

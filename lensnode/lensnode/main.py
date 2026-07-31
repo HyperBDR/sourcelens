@@ -21,11 +21,13 @@ from .logging_utils import (
     task_log,
     utc_now,
 )
+from .runtime_resources import cleanup_stale_runtime_resources
 from .tls import create_config_ssl_context
 from .tls import warn_if_verification_disabled
 from .workspace import available_dirs
 
 LOGGER = logging.getLogger("lensnode")
+RUNTIME_CLEANUP_INTERVAL_S = 60 * 60
 
 
 class LensNodeClient:
@@ -33,6 +35,9 @@ class LensNodeClient:
 
     def __init__(self, config):
         self.config = config
+        workspace_path = getattr(config, "workspace_path", None)
+        if workspace_path:
+            cleanup_stale_runtime_resources(workspace_path)
         self.ssl_context = create_config_ssl_context(config)
         self.gateway_http_client = httpx.Client(
             timeout=config.request_timeout_s,
@@ -110,46 +115,66 @@ class LensNodeClient:
     async def run_forever(self):
         """Run the client with reconnect backoff until stopped."""
 
-        backoff_s = 1
-        while not self.stopping.is_set():
-            url = self._ws_url()
-            self.connect_started_at = utc_now()
-            LOGGER.info(
-                task_log(
-                    (
-                        "Starting to connect LensNode control channel "
-                        f"{self.config.name}. The timeout is set to "
-                        "10 secs."
-                    ),
-                    self.connect_started_at,
-                    [
-                        f"ControlPlaneWebSocket: {safe_ws_url(url)}",
-                        f"WorkspacePath: {self.config.workspace_path}",
-                    ],
-                )
-            )
-            try:
-                connected = await self._run_connection(url)
-                if connected:
-                    backoff_s = 1
-            except Exception as exc:
-                if self.stopping.is_set():
-                    break
-                self._log_connection_error(exc)
-
-            if self.stopping.is_set():
-                break
-            LOGGER.info(
-                task_log(
-                    (
-                        "Starting to reconnect LensNode control channel "
-                        f"{self.config.name}. The timeout is set to "
-                        f"{format_duration(backoff_s)}."
+        cleanup_task = asyncio.create_task(self._runtime_cleanup_loop())
+        try:
+            backoff_s = 1
+            while not self.stopping.is_set():
+                url = self._ws_url()
+                self.connect_started_at = utc_now()
+                LOGGER.info(
+                    task_log(
+                        (
+                            "Starting to connect LensNode control channel "
+                            f"{self.config.name}. The timeout is set to "
+                            "10 secs."
+                        ),
+                        self.connect_started_at,
+                        [
+                            f"ControlPlaneWebSocket: {safe_ws_url(url)}",
+                            f"WorkspacePath: {self.config.workspace_path}",
+                        ],
                     )
                 )
+                try:
+                    connected = await self._run_connection(url)
+                    if connected:
+                        backoff_s = 1
+                except Exception as exc:
+                    if self.stopping.is_set():
+                        break
+                    self._log_connection_error(exc)
+
+                if self.stopping.is_set():
+                    break
+                LOGGER.info(
+                    task_log(
+                        (
+                            "Starting to reconnect LensNode control channel "
+                            f"{self.config.name}. The timeout is set to "
+                            f"{format_duration(backoff_s)}."
+                        )
+                    )
+                )
+                await asyncio.sleep(backoff_s)
+                backoff_s = min(backoff_s * 2, 30)
+        finally:
+            cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
+
+    async def _runtime_cleanup_loop(self):
+        """Periodically remove abandoned per-Run runtime directories."""
+
+        workspace_path = getattr(self.config, "workspace_path", None)
+        if not workspace_path:
+            return
+        while not self.stopping.is_set():
+            await asyncio.sleep(RUNTIME_CLEANUP_INTERVAL_S)
+            if self.stopping.is_set():
+                break
+            await asyncio.to_thread(
+                cleanup_stale_runtime_resources,
+                workspace_path,
             )
-            await asyncio.sleep(backoff_s)
-            backoff_s = min(backoff_s * 2, 30)
 
     async def stop(self):
         """Gracefully drain in-flight runs, then stop the client.
@@ -706,6 +731,7 @@ class LensNodeClient:
                     "active_runs": active_runs,
                     "labels": {
                         "mode": "local",
+                        "run_document_attachments": True,
                     },
                 },
                 ensure_ascii=False,

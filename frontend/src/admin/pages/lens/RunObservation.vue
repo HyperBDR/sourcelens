@@ -429,12 +429,22 @@
                   <dl class="overview-grid">
                     <div>
                       <dt class="overview-label">
-                        {{ t('lensRuns.colStatus') }}
+                        {{ t('lensRuns.executorStatus') }}
                       </dt>
                       <dd class="mt-1">
-                        <span :class="statusClass(detail.status)">{{
-                          detail.status
+                        <span :class="statusClass(detail.executor_status)">{{
+                          detail.executor_status || detail.status
                         }}</span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.businessOutcome') }}
+                      </dt>
+                      <dd class="mt-1">
+                        <span :class="statusClass(detail.outcome)">
+                          {{ detail.outcome || '-' }}
+                        </span>
                       </dd>
                     </div>
                     <div>
@@ -457,6 +467,70 @@
                           {{ t('lensRuns.feedbackUnhelpful') }}
                         </span>
                         <span v-else class="text-sm text-gray-400">—</span>
+                      </dd>
+                    </div>
+                    <div
+                      v-if="Object.keys(detail.termination_detail || {}).length"
+                      class="col-span-2"
+                    >
+                      <dt class="overview-label">
+                        {{ t('lensRuns.terminationDetail') }}
+                      </dt>
+                      <dd class="overview-value">
+                        {{ detail.termination_detail.reason || '-' }}
+                        <span
+                          v-if="detail.termination_detail.capability"
+                          class="font-normal text-gray-500"
+                        >
+                          · {{ detail.termination_detail.capability }}
+                        </span>
+                        <span
+                          v-if="detail.termination_detail.error_type"
+                          class="font-normal text-gray-500"
+                        >
+                          · {{ detail.termination_detail.error_type }}
+                        </span>
+                      </dd>
+                    </div>
+                    <div
+                      v-if="hasFailureSummary"
+                      class="col-span-2"
+                      data-testid="run-failure-summary"
+                    >
+                      <dt class="overview-label">
+                        {{ t('lensRuns.failureScope') }}
+                      </dt>
+                      <dd class="mt-1 flex flex-wrap gap-2">
+                        <span
+                          v-if="detail.failure_summary.unresolved_failure_count"
+                          class="failure-pill failure-pill-error"
+                        >
+                          {{
+                            t('lensRuns.failureUnresolved', {
+                              n: detail.failure_summary.unresolved_failure_count
+                            })
+                          }}
+                        </span>
+                        <span
+                          v-if="detail.failure_summary.recovered_failure_count"
+                          class="failure-pill failure-pill-recovered"
+                        >
+                          {{
+                            t('lensRuns.failureRecovered', {
+                              n: detail.failure_summary.recovered_failure_count
+                            })
+                          }}
+                        </span>
+                        <span
+                          v-if="detail.failure_summary.warning_count"
+                          class="failure-pill failure-pill-warning"
+                        >
+                          {{
+                            t('lensRuns.failureWarning', {
+                              n: detail.failure_summary.warning_count
+                            })
+                          }}
+                        </span>
                       </dd>
                     </div>
                     <div>
@@ -727,13 +801,33 @@
                   </h3>
                   <div class="flex flex-wrap gap-3">
                     <AuthImage
-                      v-for="img in detail.attachments"
+                      v-for="img in detail.attachments.filter(
+                        (item) => item.kind !== 'document'
+                      )"
                       :key="img.uuid"
                       :src="img.url"
                       :alt="img.original_name || 'image'"
                       class="run-attachment"
                       zoomable
                     />
+                    <button
+                      v-for="file in detail.attachments.filter(
+                        (item) => item.kind === 'document'
+                      )"
+                      :key="file.uuid"
+                      type="button"
+                      class="run-document-attachment"
+                      @click="
+                        downloadOutputFile({
+                          ...file,
+                          filename: file.original_name
+                        })
+                      "
+                    >
+                      <FileText :size="20" aria-hidden="true" />
+                      <span>{{ file.original_name }}</span>
+                      <Download :size="16" aria-hidden="true" />
+                    </button>
                   </div>
                   <p v-if="visionQuery" class="mt-2 text-xs text-gray-500">
                     {{ t('lensRuns.visionQuery') }}: {{ visionQuery }}
@@ -1089,6 +1183,16 @@ const agentRoundsLabel = computed(() => {
   return key ? t(`lensAdmin.agentRounds.${key}`) : value || '-'
 })
 
+const hasFailureSummary = computed(() => {
+  const summary = detail.value?.failure_summary
+  return Boolean(
+    summary &&
+      (summary.unresolved_failure_count ||
+        summary.recovered_failure_count ||
+        summary.warning_count)
+  )
+})
+
 const TIMELINE_LABELS = {
   'llm.response': 'Model response',
   'deepagents.runtime.start': 'Runtime started',
@@ -1239,8 +1343,13 @@ function durationText(sec) {
 function statusClass(status) {
   const s = (status || '').toLowerCase()
   const base = 'text-xs font-medium px-2 py-0.5 rounded'
-  if (s === 'done') return `${base} bg-green-100 text-green-800`
-  if (s === 'failed') return `${base} bg-red-100 text-red-800`
+  if (['completed', 'done'].includes(s)) {
+    return `${base} bg-green-100 text-green-800`
+  }
+  if (['blocked', 'failed'].includes(s)) {
+    return `${base} bg-red-100 text-red-800`
+  }
+  if (s === 'partial') return `${base} bg-amber-100 text-amber-800`
   if (s === 'cancelled') return `${base} bg-gray-100 text-gray-600`
   if (['running', 'streaming', 'queued'].includes(s))
     return `${base} bg-blue-100 text-blue-800`
@@ -1415,6 +1524,13 @@ watch(detailVisible, (visible) => {
   object-fit: cover;
   border: 1px solid #e5e7eb;
 }
+.run-document-attachment {
+  @apply flex max-w-sm items-center gap-2 rounded-lg border border-gray-200
+    bg-white px-3 py-2 text-left text-sm text-gray-700;
+}
+.run-document-attachment span {
+  @apply truncate;
+}
 .run-detail-id {
   @apply ml-2 break-all font-mono text-xs font-normal text-gray-500;
 }
@@ -1436,6 +1552,18 @@ watch(detailVisible, (visible) => {
 .analysis-depth-pill {
   @apply inline-flex rounded-full border border-primary-200 bg-primary-50 px-2.5
     py-1 text-xs font-semibold text-primary-700;
+}
+.failure-pill {
+  @apply inline-flex rounded-full px-2.5 py-1 text-xs font-semibold;
+}
+.failure-pill-error {
+  @apply bg-red-100 text-red-800;
+}
+.failure-pill-recovered {
+  @apply bg-green-100 text-green-800;
+}
+.failure-pill-warning {
+  @apply bg-amber-100 text-amber-800;
 }
 .token-summary-pill {
   @apply inline-flex rounded-full border border-indigo-100 bg-white px-2.5 py-1

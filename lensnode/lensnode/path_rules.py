@@ -7,14 +7,40 @@ INVALID_FILENAME_CHARS = re.compile(r'[\\/:\*\?"<>\|\x00-\x1f]+')
 SIDECAR_SUFFIX = ".sourcelens"
 
 
-def safe_filename(value, fallback="document"):
+def safe_filename(value, fallback="document", max_bytes=None):
     """Return a Unicode-preserving filesystem-safe filename."""
 
     cleaned = INVALID_FILENAME_CHARS.sub("-", str(value or "").strip())
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
     if cleaned in {"", ".", ".."}:
-        return fallback
+        cleaned = fallback
+    if max_bytes is not None:
+        cleaned = _truncate_filename(cleaned, max_bytes, fallback)
     return cleaned
+
+
+def _truncate_filename(value, max_bytes, fallback):
+    """Truncate one filename by encoded bytes while preserving its suffix."""
+
+    max_bytes = max(int(max_bytes), 1)
+    if len(value.encode("utf-8")) <= max_bytes:
+        return value
+    path = Path(value)
+    suffix = path.suffix
+    suffix_size = len(suffix.encode("utf-8"))
+    if suffix_size >= max_bytes:
+        suffix = ""
+        suffix_size = 0
+    stem = value[: -len(path.suffix)] if path.suffix else value
+    budget = max_bytes - suffix_size
+    truncated = stem.encode("utf-8")[:budget].decode("utf-8", "ignore")
+    truncated = truncated.rstrip(" .")
+    if not truncated:
+        truncated = fallback.encode("utf-8")[:budget].decode(
+            "utf-8",
+            "ignore",
+        )
+    return f"{truncated}{suffix}"
 
 
 def stable_suffix(value, length=8):

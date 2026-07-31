@@ -12,7 +12,17 @@ from django.db.models import Max, Q
 from django.utils import timezone
 
 from .assistant_lifecycle import lock_assistant_for_new_work
-from .attachments import attachment_data_url, bind_attachments_to_message
+from .attachments import (
+    AttachmentError,
+    attachment_data_url,
+    bind_attachments_to_message,
+)
+from .document_attachments import (
+    bind_document_attachments_to_run,
+    get_run_document_attachments,
+    get_run_document_expectation,
+    set_run_document_expectation,
+)
 from .llm import run_completion, run_completion_multimodal
 from .models import (
     Assistant,
@@ -47,6 +57,7 @@ STREAM_PING_INTERVAL_SECONDS = 15
 
 BUSY_RETRY_INTERVAL_S = 5
 BUSY_RETRY_WINDOW_S = 120
+DOCUMENT_ATTACHMENT_CAPABILITY = "run_document_attachments"
 
 HISTORY_MAX_PAIRS = 5
 HISTORY_MAX_MESSAGE_CHARS = 2000
@@ -336,11 +347,43 @@ def create_execution_run(
     )
     input_message.run = run
     input_message.save(update_fields=["run"])
-    bind_attachments_to_message(session, input_message, attachment_uuids)
     create_run_execution_snapshot(run)
+    requested_attachment_uuids = [
+        str(value) for value in (attachment_uuids or [])
+    ]
+    attachment_order = {
+        value: order for order, value in enumerate(requested_attachment_uuids)
+    }
+    image_uuids = bind_attachments_to_message(
+        session,
+        input_message,
+        requested_attachment_uuids,
+        order_by_uuid=attachment_order,
+    )
+    document_uuids = [
+        value
+        for value in requested_attachment_uuids
+        if str(value) not in image_uuids
+    ]
+    if document_uuids and run.execution.task == "general_chat":
+        raise AttachmentError("ATTACHMENT_UNSUPPORTED_TYPE")
+    if document_uuids and not supports_document_attachments(run.lensnode):
+        raise AttachmentError("DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE")
+    documents = bind_document_attachments_to_run(
+        session,
+        run,
+        document_uuids,
+        order_by_uuid=attachment_order,
+    )
+    if len(image_uuids) + len(documents) != len(requested_attachment_uuids):
+        raise AttachmentError("ATTACHMENT_NOT_FOUND")
 
+    document_count = len(documents)
+    set_run_document_expectation(run.uuid, document_count)
     if enqueue:
-        transaction.on_commit(lambda: _enqueue_answer_run(run.uuid))
+        transaction.on_commit(
+            lambda: _enqueue_answer_run(run.uuid, document_count)
+        )
 
     return run
 
@@ -367,12 +410,22 @@ def validate_retry_run(session, retry_of_run):
         ).get(pk=current.retry_of_run_id)
 
 
-def _enqueue_answer_run(run_uuid):
+def _enqueue_answer_run(run_uuid, expected_document_count=0):
     """Enqueue a run after transaction commit."""
 
-    from .tasks import execute_answer_run
+    from .tasks import enqueue_answer_run_task
 
-    execute_answer_run.delay(str(run_uuid))
+    enqueue_answer_run_task(run_uuid, expected_document_count)
+
+
+def supports_document_attachments(lensnode):
+    """Return whether a LensNode advertised transient document support."""
+
+    labels = lensnode.labels if lensnode else {}
+    return bool(
+        isinstance(labels, dict)
+        and labels.get(DOCUMENT_ATTACHMENT_CAPABILITY) is True
+    )
 
 
 def _enqueue_session_title_generation(session_uuid, run_uuid):
@@ -920,10 +973,30 @@ def rewrite_query(run):
     }
 
 
-def dispatch_run_to_lensnode(run, rewritten_question):
+def dispatch_run_to_lensnode(
+    run,
+    rewritten_question,
+    subject_documents=None,
+):
     """Send a run_start command to the connected LensNode."""
 
     execution = run.execution
+    if subject_documents is None:
+        subject_documents = get_run_document_attachments(run.uuid)
+    subject_documents = [
+        {
+            "uuid": item["uuid"],
+            "original_name": item["original_name"],
+            "mime_type": item["mime_type"],
+            "byte_size": item["byte_size"],
+            "content_hash": item["content_hash"],
+        }
+        for item in subject_documents
+    ]
+    if subject_documents and not supports_document_attachments(run.lensnode):
+        raise LensNodeDispatchError(
+            "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"
+        )
     channel_layer = get_channel_layer()
     if channel_layer is None:
         raise LensNodeDispatchError("LENS_CHANNEL_LAYER_UNAVAILABLE")
@@ -936,6 +1009,8 @@ def dispatch_run_to_lensnode(run, rewritten_question):
     run_timeout_s = execution.run_timeout_s or run_timeout_for_rounds(
         agent_rounds
     )
+    profile = getattr(run.session.user, "profile", None)
+    answer_language = getattr(profile, "language", "")
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),
         {
@@ -945,6 +1020,13 @@ def dispatch_run_to_lensnode(run, rewritten_question):
                 "run_uuid": str(run.uuid),
                 "task": execution.task,
                 "question": rewritten_question,
+                "answer_language": answer_language,
+                "subject_documents": subject_documents,
+                "vision_model_ref": (
+                    str(run.session.assistant.multimodal_model_ref)
+                    if run.session.assistant.multimodal_model_ref
+                    else ""
+                ),
                 "history": build_run_history(run),
                 "target_dirs": execution.target_dirs,
                 "loaded_skills": resolve_loaded_skill_environment(
@@ -1157,9 +1239,16 @@ def finish_lensnode_run(
                     "updated_at",
                 ]
             )
-            from .tasks import execute_answer_run
-            execute_answer_run.apply_async(
-                args=[str(run_uuid)],
+            from .tasks import enqueue_answer_run_task
+
+            expected_document_count = get_run_document_expectation(run_uuid)
+            enqueue_answer_run_task(
+                run_uuid,
+                (
+                    expected_document_count
+                    if expected_document_count is not None
+                    else -1
+                ),
                 countdown=BUSY_RETRY_INTERVAL_S,
             )
             return run
@@ -1258,9 +1347,17 @@ def _promote_next_queued_run(assistant):
             assistant.slug,
             next_run.uuid,
         )
-        from .tasks import execute_answer_run
-        execute_answer_run.delay(str(next_run.uuid))
+        from .tasks import enqueue_answer_run_task
 
+        expected_document_count = get_run_document_expectation(next_run.uuid)
+        enqueue_answer_run_task(
+            next_run.uuid,
+            (
+                expected_document_count
+                if expected_document_count is not None
+                else -1
+            ),
+        )
 
 
 def _step_sequence(step_type):
