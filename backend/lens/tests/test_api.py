@@ -14,9 +14,15 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import (
+    SimpleTestCase,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -48,7 +54,11 @@ from lens.models import (
     SharedQA,
     Skill,
 )
-from lens.serializers import AssistantSerializer
+from lens.serializers import (
+    AssistantSerializer,
+    validate_retrieval_policy,
+    validate_retrieval_scope,
+)
 from lens.services import (
     LensNodeDispatchError,
     build_loaded_skills,
@@ -175,6 +185,35 @@ def skill_zip_upload_with_file(name, file_size):
         buffer.read(),
         content_type="application/zip",
     )
+
+
+class RetrievalPolicyValidationTests(SimpleTestCase):
+    def test_hidden_file_retrieval_options_accept_booleans(self):
+        self.assertEqual(
+            validate_retrieval_scope({"include_hidden": True}),
+            {"include_hidden": True},
+        )
+        self.assertEqual(
+            validate_retrieval_policy({"include_hidden": False}),
+            {"include_hidden": False},
+        )
+
+    def test_hidden_file_retrieval_options_reject_non_booleans(self):
+        for value in ("true", None, 1):
+            with self.subTest(scope_value=value):
+                with self.assertRaisesRegex(
+                    ValidationError,
+                    "retrieval_scope.include_hidden must be a boolean",
+                ):
+                    validate_retrieval_scope({"include_hidden": value})
+
+            with self.subTest(policy_value=value):
+                with self.assertRaisesRegex(
+                    ValidationError,
+                    "settings.retrieval_policy.include_hidden must be "
+                    "a boolean",
+                ):
+                    validate_retrieval_policy({"include_hidden": value})
 
 
 @override_settings(CACHES=TEST_CACHES, CHANNEL_LAYERS=TEST_CHANNEL_LAYERS)
@@ -321,6 +360,34 @@ class LensApiTests(TestCase):
             response.data["description"],
             "Updated assistant description.",
         )
+
+    def test_assistant_serializer_rejects_non_boolean_hidden_options(self):
+        scope_serializer = AssistantSerializer(
+            self.assistant,
+            data={
+                "selected_dirs": [
+                    {
+                        "path": "/workspace/repo",
+                        "retrieval_scope": {"include_hidden": "true"},
+                    }
+                ]
+            },
+            partial=True,
+        )
+        policy_serializer = AssistantSerializer(
+            self.assistant,
+            data={
+                "settings": {
+                    "retrieval_policy": {"include_hidden": "false"},
+                }
+            },
+            partial=True,
+        )
+
+        self.assertFalse(scope_serializer.is_valid())
+        self.assertFalse(policy_serializer.is_valid())
+        self.assertIn("include_hidden", str(scope_serializer.errors))
+        self.assertIn("include_hidden", str(policy_serializer.errors))
 
     def test_assistant_archive_moves_it_to_archived_list(self):
         response = self.client.post(

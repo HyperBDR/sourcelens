@@ -22,11 +22,12 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from .tls import create_config_ssl_context
 from .workspace import (
-    DEFAULT_EXCLUDED_DIRS,
-    DEFAULT_EXCLUDED_EXTENSIONS,
     glob_files,
+    is_path_allowed,
+    is_path_excluded,
     read_workspace_window,
     search_workspace as search_workspace_files,
+    target_scope,
 )
 
 
@@ -201,11 +202,19 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
                 ),
             },
         )
-        resolved = _resolve_allowed_path(path, target_dirs)
+        resolved = _resolve_allowed_path(path, target_dirs, retrieval_policy)
         if resolved is None:
-            directory = _resolve_allowed_directory(path, target_dirs)
+            directory = _resolve_allowed_directory(
+                path,
+                target_dirs,
+                retrieval_policy,
+            )
             if directory is not None:
-                candidates = _list_directory_files(directory)
+                candidates = _list_directory_files(
+                    directory,
+                    target_dirs,
+                    retrieval_policy,
+                )
                 emit(
                     "tool.read_workspace_file.directory",
                     {
@@ -3135,7 +3144,7 @@ def _safe_resource_name(value):
     return "".join(output).strip("-_")
 
 
-def _resolve_allowed_path(path, target_dirs):
+def _resolve_allowed_path(path, target_dirs, policy=None):
     """Resolve a file path and ensure it is under selected dirs."""
 
     candidate = Path(path).resolve()
@@ -3145,12 +3154,13 @@ def _resolve_allowed_path(path, target_dirs):
             candidate.relative_to(root)
         except ValueError:
             continue
-        if candidate.is_file():
+        scope = target_scope(item)
+        if is_path_allowed(root, candidate, scope, policy or {}):
             return candidate
     return None
 
 
-def _resolve_allowed_directory(path, target_dirs):
+def _resolve_allowed_directory(path, target_dirs, policy=None):
     """Resolve a directory path and ensure it is under selected dirs."""
 
     candidate = Path(path).resolve()
@@ -3160,7 +3170,13 @@ def _resolve_allowed_directory(path, target_dirs):
             candidate.relative_to(root)
         except ValueError:
             continue
-        if candidate.is_dir():
+        scope = target_scope(item)
+        if candidate.is_dir() and not is_path_excluded(
+            root,
+            candidate,
+            scope,
+            policy or {},
+        ):
             return candidate
     return None
 
@@ -3273,23 +3289,41 @@ def _name_tokens(name):
     return tokens
 
 
-def _list_directory_files(directory, limit=50):
+def _list_directory_files(directory, target_dirs, policy=None, limit=50):
     """Return a bounded, recursive list of candidate files in a directory."""
 
+    context = None
+    for item in target_dirs:
+        root = Path(item.get("path", "")).resolve()
+        try:
+            directory.relative_to(root)
+        except ValueError:
+            continue
+        context = (root, target_scope(item))
+        break
+    if context is None:
+        return []
+
+    root, scope = context
+    policy = policy or {}
     files = []
     for current, subdirs, filenames in os.walk(directory):
+        current_path = Path(current)
         subdirs[:] = sorted(
             name
             for name in subdirs
-            if not name.startswith(".") and name not in DEFAULT_EXCLUDED_DIRS
+            if not is_path_excluded(
+                root,
+                current_path / name,
+                scope,
+                policy,
+            )
         )
         for name in sorted(filenames):
             if len(files) >= limit:
                 return files
-            if name.startswith("."):
-                continue
-            path = Path(current) / name
-            if path.suffix in DEFAULT_EXCLUDED_EXTENSIONS:
+            path = current_path / name
+            if not is_path_allowed(root, path, scope, policy):
                 continue
             files.append(str(path))
     return files

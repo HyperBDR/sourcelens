@@ -1,5 +1,6 @@
 import json
 
+from lensnode import workspace as workspace_module
 from lensnode.agent_tools import build_agent_tools
 from lensnode.workspace import (
     glob_files,
@@ -235,6 +236,306 @@ def test_search_without_match_lists_nested_files(tmp_path):
     assert result["matches"] == []
     assert any(path.endswith("a.txt") for path in result["files"])
     assert "note" in result
+
+
+def test_hidden_descendants_are_excluded_by_default_across_discovery_modes(
+    tmp_path,
+):
+    root = tmp_path / "ws"
+    hidden = root / ".claude"
+    hidden.mkdir(parents=True)
+    hidden_file = hidden / "instructions.md"
+    hidden_file.write_text("hidden policy marker\n", encoding="utf-8")
+
+    content = search_workspace([{"path": str(root)}], "policy marker")
+    files = search_workspace(
+        [{"path": str(root)}],
+        "policy marker",
+        output_mode="files",
+    )
+    counts = search_workspace(
+        [{"path": str(root)}],
+        "policy marker",
+        output_mode="count",
+    )
+    fallback = search_workspace([{"path": str(root)}], "zzzznomatchquery")
+
+    assert content["matches"] == []
+    assert files["files"] == []
+    assert counts["counts"] == []
+    assert str(hidden_file) not in fallback["files"]
+    assert str(hidden_file) not in glob_files([{"path": str(root)}], "**/*")
+
+
+def test_scope_include_hidden_applies_to_all_discovery_modes(tmp_path):
+    root = tmp_path / "ws"
+    hidden = root / ".codex"
+    hidden.mkdir(parents=True)
+    hidden_file = hidden / "instructions.md"
+    hidden_file.write_text("hidden policy marker\n", encoding="utf-8")
+    target_dirs = [
+        {
+            "path": str(root),
+            "retrieval_scope": {"include_hidden": True},
+        }
+    ]
+
+    content = search_workspace(target_dirs, "policy marker")
+    files = search_workspace(
+        target_dirs,
+        "policy marker",
+        output_mode="files",
+    )
+    counts = search_workspace(
+        target_dirs,
+        "policy marker",
+        output_mode="count",
+    )
+    fallback = search_workspace(target_dirs, "zzzznomatchquery")
+
+    assert content["matches"][0]["path"] == str(hidden_file)
+    assert files["files"] == [str(hidden_file)]
+    assert counts["counts"] == [{"path": str(hidden_file), "count": 1}]
+    assert str(hidden_file) in fallback["files"]
+    assert str(hidden_file) in glob_files(target_dirs, "**/*")
+
+
+def test_directory_scope_overrides_assistant_hidden_policy(tmp_path):
+    root = tmp_path / "ws"
+    hidden = root / ".claude"
+    hidden.mkdir(parents=True)
+    hidden_file = hidden / "settings.json"
+    hidden_file.write_text("policy marker\n", encoding="utf-8")
+
+    disabled = search_workspace(
+        [
+            {
+                "path": str(root),
+                "retrieval_scope": {"include_hidden": False},
+            }
+        ],
+        "policy marker",
+        policy={"include_hidden": True},
+    )
+    enabled = search_workspace(
+        [
+            {
+                "path": str(root),
+                "retrieval_scope": {"include_hidden": True},
+            }
+        ],
+        "policy marker",
+        policy={"include_hidden": False},
+    )
+
+    assert disabled["matches"] == []
+    assert enabled["matches"][0]["path"] == str(hidden_file)
+
+
+def test_explicit_hidden_root_is_evaluated_relative_to_itself(tmp_path):
+    root = tmp_path / ".managed" / ".claude"
+    root.mkdir(parents=True)
+    target = root / "instructions.md"
+    target.write_text("policy marker\n", encoding="utf-8")
+
+    result = search_workspace(
+        [
+            {
+                "path": str(root),
+                "retrieval_scope": {"include_hidden": True},
+            }
+        ],
+        "policy marker",
+    )
+
+    assert result["matches"][0]["path"] == str(target)
+
+
+def test_subject_runtime_root_remains_readable_through_agent_tools(tmp_path):
+    root = (
+        tmp_path
+        / ".sourcelens"
+        / "runtime"
+        / "runs"
+        / "run-123"
+        / "subject-documents"
+    )
+    root.mkdir(parents=True)
+    target = root / "content.md"
+    target.write_text("subject marker\n", encoding="utf-8")
+    tools = {
+        tool.name: tool
+        for tool in build_agent_tools(
+            {
+                "target_dirs": [
+                    {
+                        "path": str(root),
+                        "material_role": "subject",
+                    }
+                ],
+                "settings": {},
+            }
+        )
+    }
+
+    result = json.loads(
+        tools["read_workspace_file"].invoke({"path": str(target)})
+    )
+
+    assert "subject marker" in result["content"]
+
+
+def test_ripgrep_modes_add_hidden_flag_only_when_enabled(
+    tmp_path,
+    monkeypatch,
+):
+    root = tmp_path / "ws"
+    root.mkdir()
+    commands = []
+
+    def record_command(command):
+        commands.append(command)
+        return ""
+
+    monkeypatch.setattr(workspace_module, "_run_rg", record_command)
+    enabled = [
+        {
+            "path": str(root),
+            "retrieval_scope": {"include_hidden": True},
+        }
+    ]
+    disabled = [{"path": str(root)}]
+
+    for output_mode in ("content", "files", "count"):
+        search_workspace(enabled, "marker", output_mode=output_mode)
+
+    assert len(commands) == 3
+    assert all("--hidden" in command for command in commands)
+
+    commands.clear()
+    for output_mode in ("content", "files", "count"):
+        search_workspace(disabled, "marker", output_mode=output_mode)
+
+    assert len(commands) == 3
+    assert all("--hidden" not in command for command in commands)
+
+
+def test_include_hidden_keeps_exclusions_and_symlink_containment(tmp_path):
+    root = tmp_path / "ws"
+    hidden = root / ".codex"
+    excluded = root / ".git"
+    hidden.mkdir(parents=True)
+    excluded.mkdir()
+    allowed_file = hidden / "instructions.md"
+    excluded_file = excluded / "config"
+    outside_file = tmp_path / "outside.txt"
+    allowed_file.write_text("policy marker\n", encoding="utf-8")
+    excluded_file.write_text("policy marker\n", encoding="utf-8")
+    outside_file.write_text("policy marker\n", encoding="utf-8")
+    (hidden / "outside-link.txt").symlink_to(outside_file)
+    target_dirs = [
+        {
+            "path": str(root),
+            "retrieval_scope": {
+                "include_hidden": True,
+                "exclude_dirs": [".git"],
+            },
+        }
+    ]
+
+    result = search_workspace(target_dirs, "policy marker")
+    found = glob_files(target_dirs, "**/*")
+
+    assert [item["path"] for item in result["matches"]] == [str(allowed_file)]
+    assert str(allowed_file) in found
+    assert str(excluded_file) not in found
+    assert str(hidden / "outside-link.txt") not in found
+
+
+def test_python_search_fallback_honors_include_hidden(tmp_path, monkeypatch):
+    root = tmp_path / "ws"
+    hidden = root / ".claude"
+    hidden.mkdir(parents=True)
+    target = hidden / "instructions.md"
+    target.write_text("policy marker\n", encoding="utf-8")
+    monkeypatch.setattr(workspace_module, "_run_rg", lambda _cmd: None)
+
+    result = search_workspace(
+        [
+            {
+                "path": str(root),
+                "retrieval_scope": {"include_hidden": True},
+            }
+        ],
+        "policy marker",
+    )
+
+    assert result["matches"][0]["path"] == str(target)
+
+
+def test_hidden_policy_controls_direct_reads_and_directory_fallback(tmp_path):
+    root = tmp_path / "ws"
+    hidden = root / ".claude"
+    excluded = root / ".git"
+    hidden.mkdir(parents=True)
+    excluded.mkdir()
+    hidden_file = hidden / "instructions.md"
+    excluded_file = excluded / "config"
+    outside_file = tmp_path / "outside.txt"
+    hidden_file.write_text("policy marker\n", encoding="utf-8")
+    excluded_file.write_text("excluded marker\n", encoding="utf-8")
+    outside_file.write_text("outside marker\n", encoding="utf-8")
+    link = hidden / "outside-link.txt"
+    link.symlink_to(outside_file)
+
+    default_tools = {
+        tool.name: tool
+        for tool in build_agent_tools(
+            {"target_dirs": [{"path": str(root)}], "settings": {}}
+        )
+    }
+    enabled_tools = {
+        tool.name: tool
+        for tool in build_agent_tools(
+            {
+                "target_dirs": [
+                    {
+                        "path": str(root),
+                        "retrieval_scope": {
+                            "include_hidden": True,
+                            "exclude_dirs": [".git"],
+                        },
+                    }
+                ],
+                "settings": {},
+            }
+        )
+    }
+
+    default_read = json.loads(
+        default_tools["read_workspace_file"].invoke({"path": str(hidden_file)})
+    )
+    enabled_read = json.loads(
+        enabled_tools["read_workspace_file"].invoke({"path": str(hidden_file)})
+    )
+    directory = json.loads(
+        enabled_tools["read_workspace_file"].invoke({"path": str(root)})
+    )
+    excluded_read = json.loads(
+        enabled_tools["read_workspace_file"].invoke(
+            {"path": str(excluded_file)}
+        )
+    )
+    escaped_read = json.loads(
+        enabled_tools["read_workspace_file"].invoke({"path": str(link)})
+    )
+
+    assert default_read["error"] == "PATH_NOT_ALLOWED"
+    assert "policy marker" in enabled_read["content"]
+    assert str(hidden_file) in directory["candidate_files"]
+    assert str(excluded_file) not in directory["candidate_files"]
+    assert excluded_read["error"] == "PATH_NOT_ALLOWED"
+    assert escaped_read["error"] == "PATH_NOT_ALLOWED"
 
 
 def test_tools_search_and_read_large_file_through_wrapper(tmp_path):

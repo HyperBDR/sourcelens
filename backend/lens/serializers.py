@@ -121,6 +121,30 @@ def validate_retrieval_scope(value):
             "retrieval_scope.max_depth must be a positive integer"
         )
 
+    include_hidden = value.get("include_hidden")
+    if "include_hidden" in value and not isinstance(include_hidden, bool):
+        raise serializers.ValidationError(
+            "retrieval_scope.include_hidden must be a boolean"
+        )
+
+    return value
+
+
+def validate_retrieval_policy(value):
+    """Validate Assistant-level retrieval policy options."""
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise serializers.ValidationError(
+            "settings.retrieval_policy must be an object or null"
+        )
+    include_hidden = value.get("include_hidden")
+    if "include_hidden" in value and not isinstance(include_hidden, bool):
+        raise serializers.ValidationError(
+            "settings.retrieval_policy.include_hidden must be "
+            "a boolean"
+        )
     return value
 
 
@@ -519,6 +543,12 @@ class AssistantSerializer(serializers.ModelSerializer):
                 )
         else:
             validate_selected_dirs(selected_dirs, lensnode)
+        settings = attrs.get(
+            "settings",
+            getattr(self.instance, "settings", {}),
+        )
+        if isinstance(settings, dict) and "retrieval_policy" in settings:
+            validate_retrieval_policy(settings.get("retrieval_policy"))
         return attrs
 
     def _sync_bindings(self, assistant, validated_data):
