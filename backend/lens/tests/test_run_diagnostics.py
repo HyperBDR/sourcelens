@@ -18,6 +18,7 @@ from lens.models import (
     Run,
     RunDiagnostic,
     RunDiagnosticEvidence,
+    RunExecution,
     RunStep,
     Session,
 )
@@ -138,7 +139,7 @@ class RunDiagnosticsTests(TestCase):
                 ],
             },
         )
-        self.run.error = "private raw failure details"
+        self.run.error = "Bearer private-token-xyz"
         self.run.save(update_fields=["error", "updated_at"])
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -160,7 +161,7 @@ class RunDiagnosticsTests(TestCase):
         self.assertNotIn("private-token", serialized)
         self.assertNotIn("assistant-secret", serialized)
         self.assertNotIn("event-secret", serialized)
-        self.assertNotIn("private raw failure details", serialized)
+        self.assertNotIn("Bearer private-token-xyz", serialized)
         self.assertEqual(
             evidence.payload["evidence"]["E-RUN"]["data"]["error_code"],
             "UNCLASSIFIED_RUN_ERROR",
@@ -223,21 +224,112 @@ class RunDiagnosticsTests(TestCase):
         with self.assertRaises(ValidationError):
             evidence.save()
 
+    def test_step_error_is_captured_in_evidence(self):
+        RunStep.objects.create(
+            run=self.run,
+            step_type=RunStep.StepType.RETRIEVAL,
+            sequence=1,
+            status=RunStep.Status.FAILED,
+            detail={"error": "'str' object has no attribute 'get'"},
+        )
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        serialized = json.dumps(diagnostic.evidence.payload)
+        self.assertIn("'str' object has no attribute 'get'", serialized)
+
+    def test_run_error_message_is_preserved_in_evidence(self):
+        self.run.error = "'str' object has no attribute 'get'"
+        self.run.save(update_fields=["error", "updated_at"])
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        error_code = diagnostic.evidence.payload["evidence"]["E-RUN"]["data"][
+            "error_code"
+        ]
+        self.assertEqual(error_code, "'str' object has no attribute 'get'")
+
+    def test_stale_running_diagnostic_is_reset_and_reenqueued(self):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        diagnostic.status = RunDiagnostic.Status.RUNNING
+        diagnostic.started_at = timezone.now() - timezone.timedelta(
+            minutes=11
+        )
+        diagnostic.save(update_fields=["status", "started_at", "updated_at"])
+
+        with patch(
+            "lens.run_diagnostics.enqueue_run_diagnostic"
+        ) as enqueue:
+            with self.captureOnCommitCallbacks(execute=True):
+                retried, should_enqueue = create_run_diagnostic(
+                    self.run,
+                    self.admin,
+                )
+
+        self.assertTrue(should_enqueue)
+        self.assertEqual(retried.pk, diagnostic.pk)
+        retried.refresh_from_db()
+        self.assertEqual(
+            retried.status,
+            RunDiagnostic.Status.QUEUED,
+        )
+        self.assertIsNone(retried.started_at)
+        enqueue.assert_called_once_with(retried.uuid)
+
+    def test_fresh_running_diagnostic_is_not_reset(self):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        diagnostic.status = RunDiagnostic.Status.RUNNING
+        diagnostic.started_at = timezone.now()
+        diagnostic.save(update_fields=["status", "started_at", "updated_at"])
+
+        with patch(
+            "lens.run_diagnostics.enqueue_run_diagnostic"
+        ) as enqueue:
+            with self.captureOnCommitCallbacks(execute=True):
+                retried, should_enqueue = create_run_diagnostic(
+                    self.run,
+                    self.admin,
+                )
+
+        retried.refresh_from_db()
+        self.assertEqual(retried.status, RunDiagnostic.Status.RUNNING)
+        self.assertFalse(should_enqueue)
+
+    def test_error_sanitizer_masks_credentials_only(self):
+        from lens.run_diagnostics import _safe_run_error_code
+
+        self.assertEqual(
+            _safe_run_error_code("The token limit of 500000 was exceeded"),
+            "The token limit of 500000 was exceeded",
+        )
+        self.assertEqual(
+            _safe_run_error_code("request body too large"),
+            "request body too large",
+        )
+        self.assertEqual(
+            _safe_run_error_code("Bearer eyJhbGciOiJIUzI1NiJ9"),
+            "UNCLASSIFIED_RUN_ERROR",
+        )
+        self.assertEqual(
+            _safe_run_error_code("access_token=abc123"),
+            "UNCLASSIFIED_RUN_ERROR",
+        )
+        self.assertEqual(
+            _safe_run_error_code("line1\nline2"),
+            "UNCLASSIFIED_RUN_ERROR",
+        )
+
     def test_result_rejects_unknown_evidence_reference(self):
         diagnostic, _created = create_run_diagnostic(self.run, self.admin)
         result = {
             "summary": "A bounded summary.",
             "severity": "high",
             "confidence": 0.8,
-            "findings": [
+            "events": [
                 {
-                    "kind": "fact",
-                    "title": "Failure",
-                    "statement": "The Run failed.",
-                    "confidence": 1.0,
+                    "title": "Tool call",
+                    "description": "The failing tool ran.",
+                    "status": "failed",
                     "evidence_refs": ["E-NOT-THERE"],
                 }
             ],
+            "root_cause": None,
             "cause_categories": ["execution"],
             "recommendations": [],
             "unknowns": [],
@@ -255,15 +347,19 @@ class RunDiagnosticsTests(TestCase):
             "summary": "The Run stopped after an execution failure.",
             "severity": "high",
             "confidence": 0.9,
-            "findings": [
+            "events": [
                 {
-                    "kind": "fact",
-                    "title": "Terminal failure",
-                    "statement": "The executor marked the Run failed.",
-                    "confidence": 1,
+                    "title": "Execution",
+                    "description": "The executor marked the Run failed.",
+                    "status": "failed",
                     "evidence_refs": ["E-RUN"],
                 }
             ],
+            "root_cause": {
+                "title": "Tool error",
+                "description": "The tool raised an error.",
+                "evidence_refs": ["E-RUN"],
+            },
             "cause_categories": ["execution"],
             "recommendations": [
                 {
@@ -289,21 +385,244 @@ class RunDiagnosticsTests(TestCase):
         self.assertEqual(diagnostic.usage, {"total_tokens": 321})
         completion.assert_called_once()
 
-    def test_result_requires_citations_for_conclusions(self):
+    @patch("lens.run_diagnostics.run_completion")
+    def test_execute_diagnostic_accepts_fenced_model_output(self, completion):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        result = {
+            "summary": "The Run stopped after an execution failure.",
+            "severity": "high",
+            "confidence": 0.9,
+            "events": [],
+            "root_cause": None,
+            "cause_categories": ["execution"],
+            "recommendations": [],
+            "unknowns": [],
+        }
+        completion.return_value = LensLLMResult(
+            content=(
+                "Here is the analysis:\n```json\n"
+                + json.dumps(result)
+                + "\n```\nEnd of report."
+            ),
+            usage={},
+            metered=True,
+        )
+
+        completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(diagnostic.status, RunDiagnostic.Status.COMPLETED)
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_severity_synonyms_are_normalized(self, completion):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        result = {
+            "summary": "The Run stopped after an execution failure.",
+            "severity": "info",
+            "confidence": 0.9,
+            "events": [],
+            "root_cause": None,
+            "cause_categories": [],
+            "recommendations": [],
+            "unknowns": [],
+        }
+        completion.return_value = LensLLMResult(
+            content=json.dumps(result),
+            usage={},
+            metered=True,
+        )
+
+        completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(diagnostic.result["severity"], "low")
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_event_status_synonyms_are_normalized(self, completion):
         diagnostic, _created = create_run_diagnostic(self.run, self.admin)
         result = {
             "summary": "A bounded summary.",
             "severity": "low",
             "confidence": 0.5,
-            "findings": [
+            "events": [
                 {
-                    "kind": "hypothesis",
-                    "title": "Possible cause",
-                    "statement": "More evidence is required.",
-                    "confidence": 0.5,
+                    "title": "Retrieval",
+                    "description": "Sources loaded.",
+                    "status": "Success",
                     "evidence_refs": [],
                 }
             ],
+            "root_cause": None,
+            "cause_categories": [],
+            "recommendations": [],
+            "unknowns": [],
+        }
+        completion.return_value = LensLLMResult(
+            content=json.dumps(result),
+            usage={},
+            metered=True,
+        )
+
+        completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(diagnostic.result["events"][0]["status"], "ok")
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_recommendation_accepts_statement_key(self, completion):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        result = {
+            "summary": "A bounded summary.",
+            "severity": "low",
+            "confidence": 0.5,
+            "events": [],
+            "root_cause": None,
+            "cause_categories": [],
+            "recommendations": [
+                {
+                    "title": "Inspect the trace",
+                    "statement": "Review the failed execution events.",
+                    "evidence_refs": ["E-RUN"],
+                }
+            ],
+            "unknowns": [],
+        }
+        completion.return_value = LensLLMResult(
+            content=json.dumps(result),
+            usage={},
+            metered=True,
+        )
+
+        completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(
+            diagnostic.result["recommendations"][0]["action"],
+            "Review the failed execution events.",
+        )
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_diagnosis_language_matches_request_language(self, completion):
+        from django.utils import translation
+
+        result = {
+            "summary": "A bounded summary.",
+            "severity": "low",
+            "confidence": 0.5,
+            "events": [],
+            "root_cause": None,
+            "cause_categories": [],
+            "recommendations": [],
+            "unknowns": [],
+        }
+        completion.return_value = LensLLMResult(
+            content=json.dumps(result),
+            usage={},
+            metered=True,
+        )
+        translation.activate("zh-hans")
+        try:
+            diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+            completed = execute_diagnostic(diagnostic.uuid)
+        finally:
+            translation.deactivate()
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(diagnostic.language, "zh-hans")
+        self.assertEqual(
+            diagnostic.deterministic_findings[0]["title"],
+            "终端运行状态",
+        )
+        _, kwargs = completion.call_args
+        self.assertIn("Simplified Chinese", kwargs["system"])
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_execute_diagnostic_tracks_progress(self, completion):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        result = {
+            "summary": "A bounded summary.",
+            "severity": "low",
+            "confidence": 0.5,
+            "events": [],
+            "root_cause": None,
+            "cause_categories": [],
+            "recommendations": [],
+            "unknowns": [],
+        }
+        completion.return_value = LensLLMResult(
+            content=json.dumps(result),
+            usage={},
+            metered=True,
+        )
+
+        completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(diagnostic.progress["stage"], "completed")
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_diagnosis_succeeds_without_execution_record(self, completion):
+        run = self.run
+        run.execution = None
+        run.save(update_fields=["updated_at"])
+        RunExecution.objects.filter(run=run).delete()
+        result = {
+            "summary": "A bounded summary.",
+            "severity": "low",
+            "confidence": 0.5,
+            "events": [],
+            "root_cause": None,
+            "cause_categories": [],
+            "recommendations": [],
+            "unknowns": [],
+        }
+        completion.return_value = LensLLMResult(
+            content=json.dumps(result),
+            usage={},
+            metered=True,
+        )
+
+        diagnostic, created = create_run_diagnostic(run, self.admin)
+        self.assertTrue(created)
+        completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(diagnostic.status, RunDiagnostic.Status.COMPLETED)
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_invalid_model_output_is_failed_and_logged(self, completion):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        completion.return_value = LensLLMResult(
+            content="Sorry, here is a summary without valid JSON.",
+            usage={},
+            metered=True,
+        )
+
+        with self.assertLogs("lens.run_diagnostics", level="WARNING") as logs:
+            completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertFalse(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(diagnostic.status, RunDiagnostic.Status.FAILED)
+        self.assertEqual(diagnostic.error_code, "MODEL_RESPONSE_INVALID")
+        self.assertIn("MODEL_RESPONSE_INVALID", logs.output[0])
+        self.assertIn("Sorry, here is a summary", logs.output[0])
+
+    def test_root_cause_must_be_object_or_null(self):
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        result = {
+            "summary": "A bounded summary.",
+            "severity": "low",
+            "confidence": 0.5,
+            "events": [],
+            "root_cause": "tool error",
             "cause_categories": [],
             "recommendations": [],
             "unknowns": [],
@@ -322,7 +641,8 @@ class RunDiagnosticsTests(TestCase):
             "summary": "The Run failed after a tool error.",
             "severity": "high",
             "confidence": 0.8,
-            "findings": [],
+            "events": [],
+            "root_cause": None,
             "cause_categories": [],
             "recommendations": [],
             "unknowns": [],

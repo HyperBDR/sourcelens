@@ -90,7 +90,30 @@
     "diagnosisEmptyTitle": "尚未生成诊断",
     "diagnosisEmptyDescription": "基于为此 Run 捕获的不可变证据，生成只读诊断分析。",
     "diagnosisRunning": "正在分析 Run 证据",
-    "diagnosisRunningDescription": "确定性检查和受限模型分析正在异步执行。",
+    "diagnosisStageTitles": {
+      "queued": "诊断已排队，等待执行",
+      "deterministic_checks": "正在执行确定性检查",
+      "model_analysis": "正在调用模型分析",
+      "validating": "正在校验诊断结果"
+    },
+    "diagnosisStages": {
+      "queued": "等待执行",
+      "deterministic_checks": "确定性检查",
+      "model_analysis": "模型分析",
+      "validating": "校验结果"
+    },
+    "diagnosisElapsed": "已耗时 {n}s",
+    "diagnosisModelAnalysisDetail": "已完成 {n} 项确定性检查，正在调用模型分析…",
+    "timelineTitle": "执行时间线",
+    "timelineEventStatus": {
+      "ok": "成功",
+      "failed": "失败",
+      "recovered": "已恢复",
+      "unknown": "未知"
+    },
+    "rootCauseTitle": "出错定位",
+    "noRootCauseTitle": "未发现错误",
+    "noRootCauseDescription": "执行过程中未发现明确的失败点。",
     "diagnosisFailed": "诊断失败",
     "diagnosisFailedDescription": "诊断未能完成，原 Run 不会因此发生变化。",
     "diagnosisSummary": "诊断摘要",

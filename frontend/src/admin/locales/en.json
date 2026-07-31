@@ -90,7 +90,30 @@
     "diagnosisEmptyTitle": "No diagnosis yet",
     "diagnosisEmptyDescription": "Generate a read-only analysis from the immutable evidence captured for this Run.",
     "diagnosisRunning": "Analyzing Run evidence",
-    "diagnosisRunningDescription": "Deterministic checks and bounded model analysis are running asynchronously.",
+    "diagnosisStageTitles": {
+      "queued": "Diagnosis queued, waiting to run",
+      "deterministic_checks": "Running deterministic checks",
+      "model_analysis": "Analyzing with the model",
+      "validating": "Validating diagnosis"
+    },
+    "diagnosisStages": {
+      "queued": "Queued",
+      "deterministic_checks": "Deterministic checks",
+      "model_analysis": "Model analysis",
+      "validating": "Validating"
+    },
+    "diagnosisElapsed": "Elapsed {n}s",
+    "diagnosisModelAnalysisDetail": "{n} deterministic checks done, calling the analysis model…",
+    "timelineTitle": "Execution timeline",
+    "timelineEventStatus": {
+      "ok": "OK",
+      "failed": "Failed",
+      "recovered": "Recovered",
+      "unknown": "Unknown"
+    },
+    "rootCauseTitle": "Root cause",
+    "noRootCauseTitle": "No failure found",
+    "noRootCauseDescription": "No clear failure point was found during execution.",
     "diagnosisFailed": "Diagnosis failed",
     "diagnosisFailedDescription": "The diagnosis could not be completed. The Run itself was not changed.",
     "diagnosisSummary": "Diagnosis summary",

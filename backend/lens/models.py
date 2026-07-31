@@ -934,6 +934,16 @@ class RunDiagnostic(TimestampedUUIDModel):
         on_delete=models.SET_NULL,
         related_name="requested_run_diagnostics",
     )
+    language = models.CharField(
+        max_length=16,
+        default="en",
+        help_text="UI language active when the diagnosis was requested.",
+    )
+    progress = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Execution stage and detail while the diagnosis is pending.",
+    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
