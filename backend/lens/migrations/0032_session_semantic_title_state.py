@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("lens", "0030_alter_token_budget_profile_choices"),
+        ("lens", "0031_run_retry_of_run"),
     ]
 
     operations = [

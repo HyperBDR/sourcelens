@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("lens", "0031_session_semantic_title_state"),
+        ("lens", "0032_session_semantic_title_state"),
     ]
 
     operations = [

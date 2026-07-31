@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+
+import { prepareRunSubmission } from '../src/pages/lens/chatSubmission.js'
+
+test('reuses the idempotency key for the same unknown-result replay', () => {
+  const first = prepareRunSubmission({
+    sessionUuid: 'session-1',
+    question: 'Check status',
+    attachmentUuids: ['attachment-1'],
+    randomUUID: () => 'submission-1'
+  })
+
+  const replay = prepareRunSubmission({
+    sessionUuid: 'session-1',
+    question: 'Check status',
+    attachmentUuids: ['attachment-1'],
+    pendingSubmission: first.submission,
+    randomUUID: () => 'must-not-be-used'
+  })
+
+  assert.equal(replay.payload.idempotency_key, 'submission-1')
+  assert.deepEqual(replay.submission, first.submission)
+})
+
+test('explicit Retry creates a new key and carries the source Run', () => {
+  const prepared = prepareRunSubmission({
+    sessionUuid: 'session-1',
+    question: 'Check status',
+    retryDraft: {
+      question: 'Check status',
+      runUuid: 'run-1'
+    },
+    randomUUID: () => 'retry-submission'
+  })
+
+  assert.equal(prepared.payload.idempotency_key, 'retry-submission')
+  assert.equal(prepared.payload.retry_of_run_uuid, 'run-1')
+})
+
+test('manual identical submission remains a distinct ordinary turn', () => {
+  const first = prepareRunSubmission({
+    sessionUuid: 'session-1',
+    question: 'Check status',
+    randomUUID: () => 'submission-1'
+  })
+  const second = prepareRunSubmission({
+    sessionUuid: 'session-1',
+    question: 'Check status',
+    randomUUID: () => 'submission-2'
+  })
+
+  const firstKey = first.payload.idempotency_key
+  const secondKey = second.payload.idempotency_key
+  assert.notEqual(firstKey, secondKey)
+  assert.equal('retry_of_run_uuid' in second.payload, false)
+})
+
+test('editing a Retry draft turns it into an ordinary new turn', () => {
+  const prepared = prepareRunSubmission({
+    sessionUuid: 'session-1',
+    question: 'Check a different status',
+    retryDraft: {
+      question: 'Check status',
+      runUuid: 'run-1'
+    },
+    randomUUID: () => 'submission-2'
+  })
+
+  assert.equal('retry_of_run_uuid' in prepared.payload, false)
+})

@@ -64,6 +64,13 @@ async function mockChat(
       '/api/lens/sessions/session-1/messages/': [],
       '/api/lens/sessions/session-2/messages/': [
         {
+          uuid: 'message-2-user',
+          role: 'user',
+          content: 'Original second question',
+          run: 'run-2',
+          created_at: '2026-07-24T07:59:00Z'
+        },
+        {
           uuid: 'message-2',
           role: 'assistant',
           content: 'Second session response',
@@ -557,6 +564,36 @@ test('deleting the final session leaves the recent list empty', async ({
   await page.reload()
   await expect(page.locator('.session-item')).toHaveCount(0)
   await expect(page.getByText('No recent sessions')).toBeVisible()
+})
+
+test('new sessions clear retry relationships from the previous session', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockChat(page)
+  await page.goto('/lens/assistants/drawer-test/chat')
+
+  await page
+    .locator('.session-item')
+    .filter({ hasText: 'Second session' })
+    .click()
+  await page.getByRole('button', { name: 'Retry' }).click()
+
+  const composer = page.locator('.composer-input')
+  await expect(composer).toHaveValue('Original second question')
+  await page.getByRole('button', { name: 'New session' }).click()
+  await expect(composer).toHaveValue('')
+  await composer.fill('Original second question')
+
+  const runRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      request.url().includes('/sessions/session-4/runs/')
+  )
+  await page.getByRole('button', { name: 'Submit' }).click()
+  const payload = (await runRequest).postDataJSON()
+
+  expect(payload).not.toHaveProperty('retry_of_run_uuid')
 })
 
 test('stale session responses do not replace a newer session draft', async ({
