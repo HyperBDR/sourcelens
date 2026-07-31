@@ -42,6 +42,7 @@ from lens.models import (
     MessageAttachment,
     Run,
     RunExecution,
+    RunStep,
     ScheduledTask,
     Session,
     SharedQA,
@@ -2429,6 +2430,112 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["agent_rounds"], "max")
+
+    def test_admin_run_detail_separates_executor_and_business_outcomes(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="Query July orders",
+            enqueue=False,
+        )
+        run.status = Run.Status.DONE
+        run.outcome = Run.Outcome.COMPLETED
+        run.termination_detail = {}
+        run.save(update_fields=["status", "outcome", "termination_detail"])
+        run.execution.status = RunExecution.Status.COMPLETED
+        run.execution.save(update_fields=["status"])
+        RunStep.objects.create(
+            run=run,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            status=RunStep.Status.DONE,
+            sequence=3,
+            detail={
+                "events": [
+                    "malformed persisted event",
+                    {
+                        "agent_event": "deepagents.runtime.outcome",
+                        "outcome": "completed",
+                        "unresolved_failure_count": 0,
+                        "recovered_failure_count": 0,
+                        "warning_count": 2,
+                        "failures": [
+                            {
+                                "capability": "skill",
+                                "error_type": "tool",
+                                "scope": "warning",
+                                "required": True,
+                                "affects_required_evidence": False,
+                                "arguments": {
+                                    "authorization": "must-not-leak"
+                                },
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{run.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "done")
+        self.assertEqual(response.data["executor_status"], "completed")
+        self.assertEqual(response.data["outcome"], "completed")
+        self.assertEqual(response.data["termination_detail"], {})
+        self.assertEqual(
+            response.data["failure_summary"]["warning_count"],
+            2,
+        )
+        failure = response.data["failure_summary"]["failures"][0]
+        self.assertTrue(failure["required"])
+        self.assertFalse(failure["affects_required_evidence"])
+        self.assertEqual(failure["scope"], "warning")
+        self.assertNotIn("arguments", failure)
+
+    def test_admin_run_detail_ignores_malformed_failure_collection(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="Query July orders",
+            enqueue=False,
+        )
+        RunStep.objects.create(
+            run=run,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            status=RunStep.Status.DONE,
+            sequence=3,
+            detail={
+                "events": [
+                    {
+                        "agent_event": "deepagents.runtime.outcome",
+                        "warning_count": 1,
+                        "failures": 42,
+                    }
+                ]
+            },
+        )
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{run.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["failure_summary"]["warning_count"],
+            1,
+        )
+        self.assertEqual(
+            response.data["failure_summary"]["failures"],
+            [],
+        )
 
     def test_session_messages_use_run_finish_time_for_assistant(self):
         session, run, output = self._make_output_file()
