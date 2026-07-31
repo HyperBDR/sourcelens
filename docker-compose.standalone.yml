@@ -43,6 +43,7 @@ services:
       - ./data/django/staticfiles:/opt/backend/core/staticfiles
       - ./data/logs/api:/var/log/gunicorn
       - ./data/storage:/opt/storage
+      - ./data/document-attachments:/opt/document-attachments
       - ./data/deliverables:/opt/deliverables
       - ./docker/nginx/certs:/opt/certs
     networks:
@@ -98,6 +99,7 @@ services:
     volumes:
       - ./data/logs/worker:/var/log/celery
       - ./data/storage:/opt/storage
+      - ./data/document-attachments:/opt/document-attachments
       - ./data/deliverables:/opt/deliverables
     networks:
       - backend_network

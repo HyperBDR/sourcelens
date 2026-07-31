@@ -1,19 +1,32 @@
 import base64
+import hashlib
 import io
 import json
+import multiprocessing
 import os
+import queue
 import shutil
 import stat
 import tempfile
+import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import httpx
 
+from .document_convert import convert_one
+from .path_rules import SIDECAR_SUFFIX, safe_filename
 from .tls import create_config_ssl_context
 
 MAX_SKILL_PACKAGE_BYTES = 25 * 1024 * 1024
+MAX_RUN_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_RUN_ATTACHMENTS = 4
+RUN_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
+MAX_FILENAME_COMPONENT_BYTES = 255
+STALE_RUNTIME_MAX_AGE_S = 24 * 60 * 60
+RUNTIME_ACTIVITY_INTERVAL_S = 15
+RUNTIME_CONVERSION_POLL_S = 0.25
 
 
 @dataclass(frozen=True)
@@ -31,7 +44,13 @@ class RuntimeResources:
     mcp_configs: list[dict] = field(default_factory=list)
 
 
-def prepare_runtime_resources(config, command, emit_event=None):
+def prepare_runtime_resources(
+    config,
+    command,
+    emit_event=None,
+    cancel_event=None,
+    on_activity=None,
+):
     """Materialize Skill/MCP snapshots into cache and run directories."""
 
     workspace = Path(config.workspace_path)
@@ -111,6 +130,23 @@ def prepare_runtime_resources(config, command, emit_event=None):
         },
     )
 
+    try:
+        subject_dir = _materialize_subject_documents(
+            config,
+            command,
+            runtime_root,
+            cancel_event=cancel_event,
+            on_activity=on_activity,
+        )
+    except Exception:
+        shutil.rmtree(runtime_root, ignore_errors=True)
+        raise
+    if subject_dir is not None:
+        command["subject_dirs"] = [str(subject_dir)]
+        command.setdefault("target_dirs", []).append(
+            {"path": str(subject_dir), "material_role": "subject"}
+        )
+
     if emit_event is not None:
         emit_event(
             "resources.materialized",
@@ -138,10 +174,287 @@ def prepare_runtime_resources(config, command, emit_event=None):
     )
 
 
+def _materialize_subject_documents(
+    config,
+    command,
+    runtime_root,
+    cancel_event=None,
+    on_activity=None,
+):
+    """Download and convert transient documents for one Run."""
+
+    documents = command.get("subject_documents") or []
+    if not documents:
+        return None
+    if len(documents) > MAX_RUN_ATTACHMENTS:
+        raise ValueError("Run attachment count exceeds limit")
+
+    subject_dir = runtime_root / "subject-documents"
+    subject_dir.mkdir(parents=True, exist_ok=True)
+    run_uuid = str(command.get("run_uuid") or "").strip()
+    conversion_deadline = time.monotonic() + max(
+        1,
+        int(command.get("run_timeout_s") or config.request_timeout_s),
+    )
+    for document in documents:
+        _check_cancelled(cancel_event)
+        attachment_uuid = str(document.get("uuid") or "").strip()
+        original_name = Path(
+            str(document.get("original_name") or "document")
+        ).name
+        attachment_name = safe_filename(
+            attachment_uuid,
+            fallback="attachment",
+        )
+        prefix = f"{attachment_name}-"
+        filename = safe_filename(
+            original_name,
+            max_bytes=(
+                MAX_FILENAME_COMPONENT_BYTES
+                - len(SIDECAR_SUFFIX.encode("utf-8"))
+                - len(prefix.encode("utf-8"))
+            ),
+        )
+        extension = Path(filename).suffix.lower()
+        if not attachment_uuid or extension not in RUN_DOCUMENT_EXTENSIONS:
+            raise ValueError("Unsupported Run attachment metadata")
+        data = _download_run_attachment(
+            config,
+            run_uuid,
+            document,
+            cancel_event=cancel_event,
+            on_activity=on_activity,
+        )
+        _check_cancelled(cancel_event)
+        if len(data) != int(document.get("byte_size") or 0):
+            raise ValueError("Run attachment size mismatch")
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != str(document.get("content_hash") or ""):
+            raise ValueError("Run attachment hash mismatch")
+
+        source_path = subject_dir / f"{prefix}{filename}"
+        source_path.write_bytes(data)
+        context = {
+            "source_type": "run_attachment",
+            "target_path": str(subject_dir),
+            "conversion": {
+                "document": True,
+                "embedded_image": True,
+                "vision_model_ref": command.get("vision_model_ref") or "",
+            },
+            "ai_gateway_url": config.ai_gateway_url,
+            "lensnode_token": config.token,
+            "tls_skip_verify": bool(getattr(config, "tls_skip_verify", False)),
+            "tls_ca_file": getattr(config, "tls_ca_file", None),
+            "vision_model_ref": command.get("vision_model_ref") or "",
+        }
+        _run_document_conversion(
+            subject_dir,
+            source_path,
+            document,
+            context,
+            cancel_event=cancel_event,
+            on_activity=on_activity,
+            deadline_at=conversion_deadline,
+        )
+    return subject_dir
+
+
+def _conversion_worker(target, path, item, context, result_queue):
+    """Convert one document and report a serialization-safe result."""
+
+    try:
+        result = convert_one(target, path, item, context)
+    except Exception as exc:
+        result_queue.put(
+            {
+                "ok": False,
+                "error": str(exc) or type(exc).__name__,
+            }
+        )
+        return
+    result_queue.put({"ok": True, "result": result})
+
+
+def _run_document_conversion(
+    target,
+    path,
+    item,
+    context,
+    *,
+    cancel_event,
+    on_activity,
+    deadline_at,
+):
+    """Run conversion in a child process bounded by cancellation and time."""
+
+    _check_cancelled(cancel_event)
+    remaining_s = deadline_at - time.monotonic()
+    if remaining_s <= 0:
+        raise TimeoutError("Run attachment conversion exceeded run timeout")
+
+    process_context = multiprocessing.get_context("spawn")
+    result_queue = process_context.Queue(maxsize=1)
+    process = process_context.Process(
+        target=_conversion_worker,
+        args=(target, path, item, context, result_queue),
+        name="document-attachment-conversion",
+    )
+    started = False
+    try:
+        process.start()
+        started = True
+        next_activity_at = time.monotonic()
+        while process.is_alive():
+            _check_cancelled(cancel_event)
+            remaining_s = deadline_at - time.monotonic()
+            if remaining_s <= 0:
+                raise TimeoutError(
+                    "Run attachment conversion exceeded run timeout"
+                )
+            process.join(
+                timeout=min(RUNTIME_CONVERSION_POLL_S, remaining_s)
+            )
+            now = time.monotonic()
+            if now >= next_activity_at:
+                _touch_activity(on_activity)
+                next_activity_at = now + RUNTIME_ACTIVITY_INTERVAL_S
+
+        try:
+            payload = result_queue.get(timeout=1)
+        except queue.Empty as exc:
+            raise RuntimeError(
+                "Document conversion process exited without a result"
+            ) from exc
+        if not payload.get("ok"):
+            raise RuntimeError(payload.get("error") or "CONVERSION_FAILED")
+        return payload.get("result")
+    finally:
+        if started and process.is_alive():
+            process.terminate()
+            process.join(timeout=1)
+        if started and process.is_alive() and hasattr(process, "kill"):
+            process.kill()
+            process.join(timeout=1)
+        result_queue.close()
+        result_queue.join_thread()
+
+
+def _download_run_attachment(
+    config,
+    run_uuid,
+    document,
+    cancel_event=None,
+    on_activity=None,
+):
+    """Download one Run-bound document with a hard byte ceiling."""
+
+    _check_cancelled(cancel_event)
+    _touch_activity(on_activity)
+    attachment_uuid = str(document.get("uuid") or "").strip()
+    url = _run_attachment_url(
+        config.ai_gateway_url,
+        run_uuid,
+        attachment_uuid,
+    )
+    chunks = []
+    size = 0
+    with httpx.Client(
+        timeout=config.request_timeout_s,
+        verify=create_config_ssl_context(config),
+    ) as client:
+        with client.stream(
+            "GET",
+            url,
+            headers={"Authorization": f"Bearer {config.token}"},
+        ) as response:
+            response.raise_for_status()
+            content_length = int(response.headers.get("Content-Length") or 0)
+            if content_length > MAX_RUN_ATTACHMENT_BYTES:
+                raise ValueError("Run attachment download exceeds size limit")
+            for chunk in response.iter_bytes():
+                _check_cancelled(cancel_event)
+                size += len(chunk)
+                if size > MAX_RUN_ATTACHMENT_BYTES:
+                    raise ValueError(
+                        "Run attachment download exceeds size limit"
+                    )
+                chunks.append(chunk)
+                _touch_activity(on_activity)
+    _check_cancelled(cancel_event)
+    _touch_activity(on_activity)
+    return b"".join(chunks)
+
+
+def _run_attachment_url(
+    ai_gateway_url,
+    run_uuid,
+    attachment_uuid,
+):
+    """Derive the Run attachment endpoint from the AI gateway URL."""
+
+    base = str(ai_gateway_url).rstrip("/")
+    suffix = "/ai-gateway"
+    if base.endswith(suffix):
+        base = base[: -len(suffix)]
+    return f"{base}/runs/{run_uuid}/attachments/{attachment_uuid}/"
+
+
 def cleanup_runtime_resources(resources):
     """Remove per-run runtime resources but keep shared cache."""
 
     shutil.rmtree(resources.root, ignore_errors=True)
+
+
+def cleanup_stale_runtime_resources(
+    workspace_path,
+    max_age_s=STALE_RUNTIME_MAX_AGE_S,
+    now=None,
+):
+    """Remove abandoned per-Run directories older than the safety window."""
+
+    runs_root = Path(workspace_path) / ".sourcelens" / "runtime" / "runs"
+    cutoff = float(time.time() if now is None else now) - max(
+        0,
+        int(max_age_s),
+    )
+    try:
+        candidates = list(runs_root.iterdir())
+    except (FileNotFoundError, OSError):
+        return 0
+
+    removed = 0
+    for path in candidates:
+        try:
+            if path.is_symlink() or not path.is_dir():
+                continue
+            if path.stat().st_mtime > cutoff:
+                continue
+        except (FileNotFoundError, OSError):
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            removed += 1
+    return removed
+
+
+def _check_cancelled(cancel_event):
+    """Abort synchronous materialization after a Run cancellation."""
+
+    if cancel_event is None or not cancel_event.is_set():
+        return
+    from .gateway_model import RunCancelledError
+
+    raise RunCancelledError(
+        "Run was cancelled while materializing document attachments."
+    )
+
+
+def _touch_activity(on_activity):
+    """Refresh the executor idle watchdog when work makes progress."""
+
+    if on_activity is not None:
+        on_activity()
 
 
 def _materialize_skill(config, cache_root, skills_root, skill):

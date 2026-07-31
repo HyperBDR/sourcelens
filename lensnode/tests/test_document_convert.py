@@ -1,5 +1,6 @@
 import json
 import sys
+import threading
 import types
 import zipfile
 from io import BytesIO
@@ -7,11 +8,13 @@ from io import BytesIO
 import pytest
 
 from lensnode.datasource_manifest import SyncResult
+from lensnode.document_convert import describe_image_bytes
 from lensnode.document_convert import document_image_context
 from lensnode.document_convert import image_prompt
 from lensnode.document_convert import post_process_documents
 from lensnode.document_convert import prepare_image_for_model
 from lensnode.document_convert import standalone_image_context
+from lensnode.gateway_model import RunCancelledError
 
 Image = pytest.importorskip("PIL.Image")
 fitz = pytest.importorskip("fitz")
@@ -446,3 +449,20 @@ def conversion_context(tmp_path, conversion):
         "ai_gateway_url": "http://gateway",
         "lensnode_token": "token",
     }
+
+
+def test_describe_image_stops_before_gateway_after_run_cancellation():
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    with pytest.raises(RunCancelledError, match="cancelled"):
+        describe_image_bytes(
+            b"image",
+            "image/png",
+            {
+                "cancel_event": cancel_event,
+                "conversion": {"vision_model_ref": "vision-model"},
+                "ai_gateway_url": "https://control.example/ai-gateway/",
+                "lensnode_token": "node-token",
+            },
+        )

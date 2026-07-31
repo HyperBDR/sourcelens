@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from django.db import transaction
 from django.utils import timezone
 
+from .document_attachments import get_run_document_attachments
 from .models import Run, RunExecution, RunStep
 from .services import (
     LensNodeDispatchError,
@@ -17,6 +18,16 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _document_analysis_prompt(run):
+    """Return the document-only prompt in the user's AI language."""
+
+    profile = getattr(run.session.user, "profile", None)
+    language = str(getattr(profile, "language", "") or "").lower()
+    if language.startswith("zh"):
+        return "请分析所附文档"
+    return "Analyze the attached document."
 
 
 class LensExecutionError(Exception):
@@ -72,6 +83,13 @@ def _lensnode_dispatch(state):
     assistant = run.session.assistant
     question = run.input_message.content
     has_images = run.input_message.attachments.exists()
+    subject_documents = get_run_document_attachments(run.uuid)
+    expected_document_count = int(state.get("expected_document_count") or 0)
+    if expected_document_count < 0:
+        raise LensNodeDispatchError("DOCUMENT_ATTACHMENT_STATE_UNAVAILABLE")
+    if len(subject_documents) < expected_document_count:
+        raise LensNodeDispatchError("DOCUMENT_ATTACHMENT_UNAVAILABLE")
+    has_documents = bool(subject_documents)
     if has_images and assistant.multimodal_model_ref:
         with run_step(run, RunStep.StepType.MULTIMODAL, 0) as step:
             analysis = analyze_multimodal_intent(run)
@@ -88,7 +106,7 @@ def _lensnode_dispatch(state):
                 step.detail["usage"] = analysis["usage"]
             if analysis.get("error"):
                 step.detail["error"] = analysis["error"]
-    elif assistant.preprocess_model_ref:
+    elif assistant.preprocess_model_ref and (question or "").strip():
         with run_step(run, RunStep.StepType.QUERY_REWRITE, 0) as step:
             rewrite = rewrite_query(run)
             question = rewrite["question"]
@@ -106,6 +124,8 @@ def _lensnode_dispatch(state):
         # (e.g. the multimodal call failed). Give the node a usable prompt
         # rather than dispatching an empty query.
         question = "请分析所附图片中的问题"
+    if has_documents and not (question or "").strip():
+        question = _document_analysis_prompt(run)
     with run_step(run, RunStep.StepType.RETRIEVAL, 1) as step:
         execution = create_run_execution_snapshot(run)
         execution.loaded_skills = build_loaded_skills(assistant)
@@ -114,7 +134,11 @@ def _lensnode_dispatch(state):
         execution.status = RunExecution.Status.DISPATCHED
         execution.started_at = timezone.now()
         execution.save(update_fields=["status", "started_at"])
-        dispatch_run_to_lensnode(run, question)
+        dispatch_run_to_lensnode(
+            run,
+            question,
+            subject_documents=subject_documents,
+        )
         execution.status = RunExecution.Status.RUNNING
         execution.save(update_fields=["status"])
         step.detail = {
@@ -166,7 +190,11 @@ def _build_execution_graph(dispatch):
     return graph.compile()
 
 
-def execute_answer_run(run, dispatch=True):
+def execute_answer_run(
+    run,
+    dispatch=True,
+    expected_document_count=0,
+):
     """Execute a Lens answer run through LensNode dispatch flow."""
 
     assistant = run.session.assistant
@@ -189,8 +217,13 @@ def execute_answer_run(run, dispatch=True):
                 active_count,
                 max_concurrency,
             )
-            from .tasks import execute_answer_run as _task
-            _task.apply_async(args=[str(run.uuid)], countdown=3)
+            from .tasks import enqueue_answer_run_task
+
+            enqueue_answer_run_task(
+                run.uuid,
+                expected_document_count,
+                countdown=3,
+            )
             return run
 
     logger.info(
@@ -212,7 +245,12 @@ def execute_answer_run(run, dispatch=True):
         )
 
         graph = _build_execution_graph(dispatch)
-        graph.invoke({"run": run})
+        graph.invoke(
+            {
+                "run": run,
+                "expected_document_count": expected_document_count,
+            }
+        )
         run.refresh_from_db()
         if dispatch and run.status not in [
             Run.Status.DONE,

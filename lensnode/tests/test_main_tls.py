@@ -73,3 +73,65 @@ def test_websocket_connection_uses_tls_context_only_for_wss(
         assert context.check_hostname is False
     else:
         assert "ssl" not in captured["options"]
+
+
+def test_runtime_cleanup_loop_repeats_until_stopped(monkeypatch):
+    """The cleanup loop keeps sweeping while the LensNode is alive."""
+
+    calls = []
+
+    async def exercise():
+        client = _make_client()
+        client.config.workspace_path = "/test-workspace"
+
+        async def no_wait(_delay):
+            return None
+
+        def cleanup(workspace_path):
+            calls.append(workspace_path)
+            if len(calls) == 2:
+                client.stopping.set()
+
+        monkeypatch.setattr("lensnode.main.asyncio.sleep", no_wait)
+        monkeypatch.setattr(
+            "lensnode.main.cleanup_stale_runtime_resources",
+            cleanup,
+        )
+
+        await client._runtime_cleanup_loop()
+
+    asyncio.run(exercise())
+
+    assert calls == ["/test-workspace", "/test-workspace"]
+
+
+def test_run_forever_starts_runtime_cleanup(monkeypatch):
+    """The main client lifecycle owns the periodic cleanup task."""
+
+    cleanup_started = False
+
+    async def exercise():
+        nonlocal cleanup_started
+        client = _make_client()
+        client.config.workspace_path = "/test-workspace"
+
+        async def cleanup_loop():
+            nonlocal cleanup_started
+            cleanup_started = True
+            await client.stopping.wait()
+
+        async def run_connection(_url):
+            while not cleanup_started:
+                await asyncio.sleep(0)
+            client.stopping.set()
+            return True
+
+        monkeypatch.setattr(client, "_ws_url", lambda: "ws://test")
+        monkeypatch.setattr(client, "_run_connection", run_connection)
+        monkeypatch.setattr(client, "_runtime_cleanup_loop", cleanup_loop)
+
+        await client.run_forever()
+
+    asyncio.run(exercise())
+
+    assert cleanup_started is True
