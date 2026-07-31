@@ -59,7 +59,7 @@ def available_dirs(workspace_path):
 
     dirs = []
     for child in sorted(root.iterdir(), key=lambda item: item.name):
-        if not child.is_dir():
+        if not child.is_dir() or child.name.startswith("."):
             continue
         children = []
         try:
@@ -107,7 +107,7 @@ def search_workspace(
     for item in target_dirs:
         root = Path(item.get("path", ""))
         if root.exists() and root.is_dir():
-            dirs.append((root, item.get("retrieval_scope") or {}))
+            dirs.append((root, _target_scope(item)))
 
     if output_mode == "files":
         files = []
@@ -199,7 +199,7 @@ def glob_files(target_dirs, pattern, max_results=None, policy=None):
         root = Path(item.get("path", ""))
         if not root.exists() or not root.is_dir():
             continue
-        scope = item.get("retrieval_scope") or {}
+        scope = _target_scope(item)
         try:
             for path in root.glob(pattern):
                 if len(found) >= GLOB_SCAN_LIMIT:
@@ -269,7 +269,7 @@ def read_text_samples(target_dirs, max_files=16, max_chars=30000, policy=None):
         root = Path(item.get("path", ""))
         if not root.exists() or not root.is_dir():
             continue
-        scope = item.get("retrieval_scope") or {}
+        scope = _target_scope(item)
         for path in _iter_allowed_paths(root, scope, policy):
             if len(samples) >= max_files or remaining_chars <= 0:
                 return samples
@@ -671,6 +671,15 @@ def _option(scope, policy, key, default):
     return default
 
 
+def _target_scope(item):
+    """Return retrieval options plus the trusted runtime material role."""
+
+    scope = dict(item.get("retrieval_scope") or {})
+    if item.get("material_role") == "subject":
+        scope["material_role"] = "subject"
+    return scope
+
+
 def _bounded_results(max_results, policy):
     """Clamp the requested match count to a sane positive ceiling."""
 
@@ -700,9 +709,15 @@ def _bounded_limit(limit, policy):
 def _is_excluded_path(root, path, scope, policy):
     """Return whether a path is excluded by configured rules."""
 
-    if any(part.startswith(".") for part in path.parts):
+    relative_parts = path.parts if root is None else path.relative_to(root).parts
+    hidden_parts = (
+        relative_parts
+        if _is_subject_runtime_root(root, scope)
+        else path.parts
+    )
+    if any(part.startswith(".") for part in hidden_parts):
         return True
-    parts = set(path.parts if root is None else path.relative_to(root).parts)
+    parts = set(relative_parts)
     exclude_dirs = set(
         _option(scope, policy, "exclude_dirs", DEFAULT_EXCLUDED_DIRS)
     )
@@ -717,6 +732,19 @@ def _is_excluded_path(root, path, scope, policy):
         return False
     relative = path.relative_to(root)
     return any(relative.match(pattern) for pattern in exclude_paths)
+
+
+def _is_subject_runtime_root(root, scope):
+    """Return whether root is a private Run subject-document directory."""
+
+    if root is None or scope.get("material_role") != "subject":
+        return False
+    parts = root.parts
+    return (
+        len(parts) >= 5
+        and parts[-5:-2] == (".sourcelens", "runtime", "runs")
+        and parts[-1] == "subject-documents"
+    )
 
 
 def _exclude_globs(scope, policy):

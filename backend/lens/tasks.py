@@ -23,13 +23,28 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+ANSWER_RUN_DOCUMENT_COUNT_HEADER = "sourcelens_expected_document_count"
 
 
-@shared_task(name="lens.execute_answer_run", queue="lens")
-def execute_answer_run(run_uuid):
+@shared_task(name="lens.execute_answer_run", queue="lens", bind=True)
+def execute_answer_run(task, run_uuid, expected_document_count=None):
     """Celery entrypoint for executing a Lens run."""
 
     logger.info("task execute_answer_run received: run_uuid=%s", run_uuid)
+    if expected_document_count is None:
+        from .document_attachments import set_run_document_expectation
+
+        headers = task.request.headers or {}
+        header_value = headers.get(ANSWER_RUN_DOCUMENT_COUNT_HEADER)
+        if header_value is None:
+            expected_document_count = 0
+        else:
+            try:
+                expected_document_count = int(header_value)
+            except (TypeError, ValueError):
+                expected_document_count = -1
+        if expected_document_count >= 0:
+            set_run_document_expectation(run_uuid, expected_document_count)
     from .execution import execute_answer_run as execute_answer_run_service
 
     run = Run.objects.select_related(
@@ -40,7 +55,10 @@ def execute_answer_run(run_uuid):
         "output_message",
         "lensnode",
     ).get(uuid=run_uuid)
-    execute_answer_run_service(run)
+    execute_answer_run_service(
+        run,
+        expected_document_count=expected_document_count,
+    )
     return str(run.uuid)
 
 
@@ -51,6 +69,25 @@ def generate_session_title(session_uuid, run_uuid):
     from .session_titles import generate_semantic_session_title
 
     return generate_semantic_session_title(session_uuid, run_uuid)
+
+
+def enqueue_answer_run_task(
+    run_uuid,
+    expected_document_count,
+    *,
+    countdown=None,
+):
+    """Enqueue a task payload accepted by old and new workers."""
+
+    options = {
+        "args": [str(run_uuid)],
+        "headers": {
+            ANSWER_RUN_DOCUMENT_COUNT_HEADER: int(expected_document_count),
+        },
+    }
+    if countdown is not None:
+        options["countdown"] = countdown
+    execute_answer_run.apply_async(**options)
 
 
 def _get_or_create_source_sync_record(datasource):
@@ -904,3 +941,12 @@ def run_retention_task():
     record.last_run_at = timezone.now()
     record.save(update_fields=["last_status", "last_metrics", "last_run_at"])
     return deleted
+
+
+@shared_task(name="lens.document_attachment_cleanup", queue="lens")
+def document_attachment_cleanup_task():
+    """Delete source files whose fixed temporary retention has elapsed."""
+
+    from .document_attachments import cleanup_expired_document_files
+
+    return cleanup_expired_document_files()

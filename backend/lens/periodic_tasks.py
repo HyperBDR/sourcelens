@@ -292,6 +292,14 @@ def register_periodic_tasks():
             enabled=True,
         )
 
+    TASK_REGISTRY.add(
+        name="lens-document-attachment-cleanup",
+        task="lens.document_attachment_cleanup",
+        schedule=3600,
+        queue="lens",
+        enabled=True,
+    )
+
     datasources = DataSource.objects.filter(
         status=DataSource.Status.ACTIVE,
     ).exclude(source_type=DataSource.SourceType.MANAGED_WORKSPACE)

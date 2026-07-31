@@ -40,6 +40,27 @@ DEFAULT_TOKEN_CHARS = 4
 DETAIL_ITEMS_LIMIT = 200
 
 
+def _check_runtime_cancelled(context):
+    """Abort conversion at safe boundaries after a Run cancellation."""
+
+    cancel_event = context.get("cancel_event")
+    if cancel_event is None or not cancel_event.is_set():
+        return
+    from .gateway_model import RunCancelledError
+
+    raise RunCancelledError(
+        "Run was cancelled while converting document attachments."
+    )
+
+
+def _touch_runtime_activity(context):
+    """Refresh the owning executor's idle watchdog."""
+
+    on_activity = context.get("on_activity")
+    if on_activity is not None:
+        on_activity()
+
+
 class ConversionOutput:
     """One converter output."""
 
@@ -84,17 +105,23 @@ class MarkItDownDocumentConverter(BaseConverter):
     def convert(self, path, context):
         """Convert a document file into Markdown text."""
 
+        _check_runtime_cancelled(context)
+        _touch_runtime_activity(context)
         try:
             from markitdown import MarkItDown
         except Exception as exc:
             raise RuntimeError("MARKITDOWN_NOT_AVAILABLE") from exc
 
         result = MarkItDown().convert(str(path))
+        _check_runtime_cancelled(context)
+        _touch_runtime_activity(context)
         text = getattr(result, "text_content", "") or str(result)
         stats = document_stats(path)
         cost = empty_cost_stats()
         image_context = document_image_context(context, path, text)
         embedded = convert_embedded_images(path, image_context)
+        _check_runtime_cancelled(context)
+        _touch_runtime_activity(context)
         if embedded["markdown"]:
             text = f"{text.rstrip()}\n\n{embedded['markdown']}"
         stats.update(embedded["stats"])
@@ -121,6 +148,7 @@ class GatewayImageConverter(BaseConverter):
     def convert(self, path, context):
         """Convert an image file into a searchable description."""
 
+        _check_runtime_cancelled(context)
         context = standalone_image_context(context, path)
         prepared = prepare_image_for_model(path, context)
         if prepared.get("skipped"):
@@ -684,6 +712,8 @@ def convert_job(job, target, context):
 def convert_one(target, path, item, context):
     """Convert one file if fingerprint requires it."""
 
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     limits = conversion_limits(context.get("conversion") or {})
     size = path.stat().st_size
     if size > limits["max_file_size"]:
@@ -723,6 +753,8 @@ def convert_one(target, path, item, context):
             }
 
     output = converter.convert(path, context)
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     if output.skipped:
         write_skipped_meta(target, path, item, context, output.reason)
         return {
@@ -1015,6 +1047,8 @@ def convert_embedded_images(path, context):
         with zipfile.ZipFile(path) as archive:
             entries = embedded_image_entries(archive, prefix)
             for index, name in enumerate(entries, start=1):
+                _check_runtime_cancelled(context)
+                _touch_runtime_activity(context)
                 stats["embedded_images_total"] += 1
                 if index > max_images:
                     stats["embedded_images_skipped"] += 1
@@ -1023,6 +1057,7 @@ def convert_embedded_images(path, context):
                     ) + 1
                     continue
                 raw = archive.read(name)
+                _check_runtime_cancelled(context)
                 digest = source_bytes_sha256(raw)
                 if digest in seen:
                     stats["embedded_images_skipped"] += 1
@@ -1083,6 +1118,8 @@ def count_embedded_image_entries(path, prefix):
 def convert_one_embedded_image(source_path, assets_dir, name, raw, context):
     """Recognize one embedded image and return markdown data."""
 
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     assets_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(name).suffix.lower() or ".png"
     digest = source_bytes_sha256(raw)
@@ -1199,6 +1236,8 @@ def convert_pdf_images(path, context):
             stats["pdf_pages"] = int(document.page_count or 0)
             page_count = min(stats["pdf_pages"], options["max_pages"])
             for page_index in range(page_count):
+                _check_runtime_cancelled(context)
+                _touch_runtime_activity(context)
                 page = document.load_page(page_index)
                 stats["pdf_pages_processed"] += 1
                 page_has_text = pdf_page_has_text(
@@ -1257,6 +1296,7 @@ def convert_pdf_images(path, context):
                         if result["description"]:
                             descriptions.append(result)
     except Exception:
+        _check_runtime_cancelled(context)
         stats["pdf_images_skipped"] += 1
 
     return {
@@ -1340,6 +1380,8 @@ def convert_pdf_page_images(
     results = []
     images = page.get_images(full=True) or []
     for image_index, image in enumerate(images, start=1):
+        _check_runtime_cancelled(context)
+        _touch_runtime_activity(context)
         if remaining_images <= 0:
             results.append(
                 pdf_skipped_result(
@@ -1420,6 +1462,8 @@ def convert_pdf_rendered_page(
 ):
     """Render and recognize one scanned PDF page."""
 
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     import fitz
 
     matrix = fitz.Matrix(
@@ -1428,6 +1472,8 @@ def convert_pdf_rendered_page(
     )
     pixmap = page.get_pixmap(matrix=matrix, alpha=False)
     raw = pixmap.tobytes("png")
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     name = f"pdf_p{page_index + 1}_rendered.png"
     return convert_pdf_image_bytes(
         source_path,
@@ -1450,6 +1496,8 @@ def convert_pdf_rendered_page(
 def convert_pdf_image_bytes(source_path, assets_dir, name, raw, context, meta):
     """Recognize one PDF image-like asset."""
 
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     assets_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(name).suffix.lower() or ".png"
     digest = source_bytes_sha256(raw)
@@ -1688,6 +1736,8 @@ def describe_image_file(path, context):
 def describe_image_bytes(image_bytes, mime_type, context):
     """Describe image bytes through the LensNode gateway."""
 
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     conversion = context.get("conversion") or {}
     model_ref = conversion.get("vision_model_ref") or context.get(
         "vision_model_ref"
@@ -1710,6 +1760,8 @@ def describe_image_bytes(image_bytes, mime_type, context):
         tls_ca_file=context.get("tls_ca_file"),
         http_client=context.get("gateway_http_client"),
     )
+    _check_runtime_cancelled(context)
+    _touch_runtime_activity(context)
     return result.get("content") or "", result.get("usage") or {}
 
 

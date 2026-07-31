@@ -1,11 +1,17 @@
 """Session, run, attachment, and run-stream conversation views."""
 
 import json
+import logging
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
 from django.db.models import Exists, F, OuterRef
-from django.http import FileResponse, HttpResponse, StreamingHttpResponse
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpResponse,
+    StreamingHttpResponse,
+)
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.http import content_disposition_header
@@ -18,8 +24,21 @@ from rest_framework.views import APIView
 
 from lens.assistant_lifecycle import AssistantNotRunnableError
 from lens.attachments import AttachmentError, store_message_attachment
+from lens.document_attachments import (
+    DocumentAttachmentError,
+    delete_document_attachment,
+    delete_session_document_attachments,
+    document_attachment_response,
+    document_attachment_storage,
+    get_document_attachment,
+    get_run_document_attachments,
+    get_runs_document_attachments,
+    is_document_upload,
+    store_document_attachment,
+)
 from lens.models import (
     Assistant,
+    Message,
     MessageAttachment,
     Run,
     RunExecution,
@@ -48,8 +67,10 @@ from lens.serializers import (
 from lens.services import (
     cancel_run_on_lensnode,
     stream_run_events_async,
+    supports_document_attachments,
 )
 from lens.shared_qa_files import snapshot_shared_qa_files
+
 from .base import (
     BaseAuthenticatedViewSet,
     EventStreamRenderer,
@@ -57,6 +78,8 @@ from .base import (
     _get_user_run,
 )
 from .shares import _shared_qa_default_title, _unique_share_token
+
+logger = logging.getLogger(__name__)
 
 
 async def run_stream_view(request, uuid):
@@ -142,13 +165,30 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Return ordered messages for a session."""
 
         session = self.get_object()
-        messages = session.message_set.select_related("run").prefetch_related(
-            "run__steps",
-            "response_runs__steps",
-            "attachments",
-            "output_files",
+        messages = list(
+            session.message_set.select_related("run").prefetch_related(
+                "run__steps",
+                "response_runs__steps",
+                "attachments",
+                "output_files",
+            )
         )
-        serializer = MessageSerializer(messages, many=True)
+        documents_by_run = get_runs_document_attachments(
+            [
+                message.run.uuid
+                for message in messages
+                if message.role == Message.Role.USER
+                and message.run_id is not None
+            ],
+            fail_silently=True,
+        )
+        serializer = MessageSerializer(
+            messages,
+            many=True,
+            context={
+                "document_attachments_by_run": documents_by_run,
+            },
+        )
         return Response(serializer.data)
 
     def perform_destroy(self, instance):
@@ -160,8 +200,20 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         deletion before Run is added to the deletion set. Deleting Runs
         explicitly first removes the PROTECT reference.
         """
+        session_uuid = instance.uuid
+        user_id = instance.user_id
         instance.run_set.all().delete()
         instance.delete()
+        try:
+            delete_session_document_attachments(
+                session_uuid,
+                user_id=user_id,
+            )
+        except Exception:
+            logger.exception(
+                "Unable to delete temporary documents for Session %s.",
+                session_uuid,
+            )
 
     @action(detail=True, methods=["post"])
     def pin(self, request, uuid=None):
@@ -222,7 +274,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         parser_classes=[MultiPartParser, FormParser],
     )
     def attachments(self, request, uuid=None):
-        """Upload one image attachment for a session question."""
+        """Upload one attachment for a session question."""
 
         session = self.get_object()
         if (
@@ -232,23 +284,48 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
-        if not session.assistant.multimodal_model_ref:
-            raise ValidationError("This assistant does not accept images.")
         uploaded = request.FILES.get("file")
         if uploaded is None:
             raise ValidationError("No file provided.")
-        try:
-            attachment = store_message_attachment(
-                session, request.user, uploaded
+        is_document = is_document_upload(uploaded)
+        if is_document and session.assistant.selected_task == "general_chat":
+            raise ValidationError(
+                "This assistant does not accept document attachments."
             )
+        if is_document and not supports_document_attachments(
+            session.assistant.lensnode
+        ):
+            raise ValidationError(
+                "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"
+            )
+        if not is_document and not session.assistant.multimodal_model_ref:
+            raise ValidationError("This assistant does not accept images.")
+        try:
+            if is_document:
+                attachment = store_document_attachment(
+                    session,
+                    request.user,
+                    uploaded,
+                )
+            else:
+                attachment = store_message_attachment(
+                    session,
+                    request.user,
+                    uploaded,
+                )
         except SessionStateError:
             raise ValidationError("SESSION_ARCHIVED")
         except AssistantNotRunnableError:
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
-        except AttachmentError as exc:
+        except (AttachmentError, DocumentAttachmentError) as exc:
             raise ValidationError(str(exc))
+        if is_document:
+            return Response(
+                document_attachment_response(attachment),
+                status=status.HTTP_201_CREATED,
+            )
         return Response(
             MessageAttachmentSerializer(attachment).data,
             status=status.HTTP_201_CREATED,
@@ -256,26 +333,78 @@ class SessionViewSet(BaseAuthenticatedViewSet):
 
 
 class LensAttachmentView(APIView):
-    """Serve a question image attachment to its owner or any admin."""
+    """Serve a question attachment to its owner or any admin."""
 
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, uuid):
         """Return the image bytes for the session owner or a staff admin."""
 
-        attachment = get_object_or_404(
-            MessageAttachment.objects.select_related("session"),
-            uuid=uuid,
+        attachment = (
+            MessageAttachment.objects.select_related("session")
+            .filter(uuid=uuid)
+            .first()
         )
-        is_owner = attachment.session.user_id == request.user.id
+        if attachment is not None:
+            is_owner = attachment.session.user_id == request.user.id
+            if not is_owner and not request.user.is_staff:
+                raise PermissionDenied("You do not have access to this image.")
+            response = FileResponse(
+                attachment.file.open("rb"),
+                content_type=(
+                    attachment.mime_type or "application/octet-stream"
+                ),
+            )
+            response["Cache-Control"] = "private, max-age=3600"
+            return response
+
+        metadata = get_document_attachment(uuid)
+        if metadata is None:
+            raise Http404
+        is_owner = metadata["uploaded_by_id"] == request.user.id
         if not is_owner and not request.user.is_staff:
-            raise PermissionDenied("You do not have access to this image.")
+            raise PermissionDenied("You do not have access to this document.")
+        storage = document_attachment_storage()
+        if not storage.exists(metadata["storage_name"]):
+            raise Http404
         response = FileResponse(
-            attachment.file.open("rb"),
-            content_type=attachment.mime_type or "application/octet-stream",
+            storage.open(metadata["storage_name"], "rb"),
+            as_attachment=True,
+            filename=metadata["original_name"],
+            content_type=metadata["mime_type"],
         )
-        response["Cache-Control"] = "private, max-age=3600"
+        response["Cache-Control"] = "private, no-store"
+        response["Content-Length"] = metadata["byte_size"]
+        response["X-Attachment-Hash"] = metadata["content_hash"]
         return response
+
+    def delete(self, request, uuid):
+        """Delete one still-valid transient document attachment."""
+
+        metadata = get_document_attachment(uuid)
+        if metadata is None:
+            raise Http404
+        is_owner = metadata["uploaded_by_id"] == request.user.id
+        if not is_owner and not request.user.is_staff:
+            raise PermissionDenied("You do not have access to this document.")
+        run_uuid = metadata.get("run_uuid")
+        if (
+            run_uuid
+            and Run.objects.filter(
+                uuid=run_uuid,
+                status__in=[
+                    Run.Status.QUEUED,
+                    Run.Status.RUNNING,
+                    Run.Status.STREAMING,
+                ],
+            ).exists()
+        ):
+            return Response(
+                {"detail": "ATTACHMENT_IN_USE"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        delete_document_attachment(uuid)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RunOutputFileDownloadView(APIView):
@@ -354,13 +483,17 @@ class RunViewSet(BaseAuthenticatedViewSet):
             )
         question = run.input_message.content or ""
         title = " ".join(question.split())[:80]
+        input_files = [
+            *run.input_message.attachments.all(),
+            *get_run_document_attachments(run.uuid, fail_silently=True),
+        ]
         pdf_bytes = render_qa_pdf(
             title=title,
             question=question,
             answer=run.output_message.content or "",
             assistant_name=run.session.assistant.name,
             published_at=run.output_message.created_at,
-            input_files=run.input_message.attachments.all(),
+            input_files=input_files,
             output_files=run.output_files.all(),
             language_code=getattr(request, "LANGUAGE_CODE", "en"),
         )

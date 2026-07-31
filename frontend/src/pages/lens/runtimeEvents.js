@@ -378,6 +378,53 @@ export function normalizePlanSteps(steps) {
   })
 }
 
+function prePlanActivityFamily(activity) {
+  if (activity.stageKind === 'preparation') return 'preparation'
+  if (activity.kind === 'get_order_detail') return 'order_detail'
+  if (activity.kind === 'query_orders') return 'order_query'
+  if (
+    ['count_results', 'group_results', 'analyzing_results'].includes(
+      activity.kind
+    )
+  ) {
+    return 'validation'
+  }
+  if (activity.kind === 'summarizing_results') return 'summary'
+  return `${activity.stageKind}:${activity.kind}`
+}
+
+function reconcilePrePlanActivities(state, plan) {
+  if (state.plan.length > 0 || plan.length === 0) return state.activities
+  const fallbackActivities = state.activities.filter(
+    (item) => item.structured && item.taskId === 'task-execute'
+  )
+  if (fallbackActivities.length === 0) return state.activities
+
+  const taskByActivityId = new Map()
+  let groupIndex = -1
+  let previousFamily = ''
+  for (const activity of fallbackActivities) {
+    const family = prePlanActivityFamily(activity)
+    if (family !== previousFamily) {
+      groupIndex += 1
+      previousFamily = family
+    }
+    const task = plan[Math.min(groupIndex, plan.length - 1)]
+    taskByActivityId.set(activity.id, task.id)
+  }
+
+  return state.activities.map((item) => {
+    const taskId = taskByActivityId.get(item.id)
+    if (!taskId) return item
+    return {
+      ...item,
+      taskId,
+      stageId: `${taskId}:${item.stageKind}`,
+      planRevision: state.planRevision + 1
+    }
+  })
+}
+
 // A batched revision can complete pending tasks after their work already ran.
 function alignBatchedPlanActivities(state, plan) {
   const previousPlanById = new Map(state.plan.map((item) => [item.id, item]))
@@ -518,6 +565,7 @@ export function buildWorkflowTree(plan, activities) {
     if (!step?.structured || !step.taskId || !step.stageId) continue
     let task = taskById.get(step.taskId)
     if (!task) {
+      if (tasks.length > 0 && step.taskId === 'task-execute') continue
       task = {
         id: step.taskId,
         kind: 'query_data',
@@ -718,7 +766,10 @@ export function applyRuntimeEvent(state, event) {
       ...current,
       plan,
       planRevision: revision,
-      activities: alignBatchedPlanActivities(current, plan)
+      activities:
+        current.plan.length === 0
+          ? reconcilePrePlanActivities(current, plan)
+          : alignBatchedPlanActivities(current, plan)
     }
   }
   if (event.event_type === 'stage.updated') {

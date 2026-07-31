@@ -209,6 +209,10 @@ export async function uploadAttachment(sessionUuid, file) {
   return unwrapResponse(response)
 }
 
+export async function deleteAttachment(uuid) {
+  await api.delete(`/lens/attachments/${uuid}/`)
+}
+
 export async function getRun(uuid) {
   const response = await api.get(`/lens/runs/${uuid}/`)
   return unwrapResponse(response)

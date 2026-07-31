@@ -860,6 +860,75 @@ test('attaches final summary to the last real plan task', () => {
   assert.equal(tasks[1].stages[0].steps[0].kind, 'summarizing_results')
 })
 
+test('migrates pre-plan activities into a late five-task plan', () => {
+  let state = createRuntimeState()
+  const activities = [
+    ['auth', 'checking_authentication', 'preparation'],
+    ['orders', 'query_orders', 'order_query'],
+    ['validation', 'analyzing_results', 'result_analysis'],
+    ['details', 'get_order_detail', 'order_query']
+  ]
+  for (const [id, kind, stage_kind] of activities) {
+    state = applyRuntimeEvent(state, {
+      event_type: 'activity.recorded',
+      visibility: 'user',
+      payload: { id, kind, stage_kind, status: 'completed' }
+    })
+  }
+
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 1,
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Verify Income authentication',
+          status: 'completed'
+        },
+        { id: 'step-2', title: 'Query all July orders', status: 'completed' },
+        { id: 'step-3', title: 'Validate all records', status: 'completed' },
+        { id: 'step-4', title: 'Collect order details', status: 'completed' },
+        {
+          id: 'step-5',
+          title: 'Generate Markdown report',
+          status: 'in_progress'
+        }
+      ]
+    }
+  })
+
+  assert.equal(
+    state.activities.some((item) => item.taskId === 'task-execute'),
+    false
+  )
+  let tasks = buildWorkflowTree(state.plan, state.activities)
+  let progress = summarizePlanProgress(tasks)
+  assert.equal(tasks.length, 5)
+  assert.deepEqual(
+    { completed: progress.completed, total: progress.total },
+    { completed: 4, total: 5 }
+  )
+
+  state = applyRuntimeEvent(state, {
+    event_type: 'plan.updated',
+    visibility: 'user',
+    payload: {
+      revision: 2,
+      steps: state.plan.map((item) => ({ ...item, status: 'completed' }))
+    }
+  })
+  state = applyRuntimeEvent(state, { type: 'done', outcome: 'completed' })
+  tasks = buildWorkflowTree(state.plan, state.activities)
+  progress = summarizePlanProgress(tasks, { terminal: true })
+
+  assert.deepEqual(
+    { completed: progress.completed, total: progress.total },
+    { completed: 5, total: 5 }
+  )
+})
+
 test('uses plan tasks for the progress count when a plan exists', () => {
   const tasks = [
     { id: 'step-1', status: 'completed', stages: [{}] },

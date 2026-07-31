@@ -613,15 +613,33 @@
                   <template v-else>
                     <div
                       v-if="message.attachments && message.attachments.length"
-                      class="message-images"
+                      class="message-attachments"
                     >
                       <AuthImage
-                        v-for="img in message.attachments"
+                        v-for="img in message.attachments.filter(
+                          (item) => item.kind !== 'document'
+                        )"
                         :key="img.uuid || img.localUrl"
                         :src="img.localUrl || img.url"
                         :alt="img.original_name || 'image'"
                         zoomable
                       />
+                      <button
+                        v-for="file in message.attachments.filter(
+                          (item) => item.kind === 'document'
+                        )"
+                        :key="file.uuid"
+                        type="button"
+                        class="message-document-card"
+                        @click="downloadAttachmentFile(file)"
+                      >
+                        <FileText :size="20" aria-hidden="true" />
+                        <span>
+                          <strong>{{ file.original_name }}</strong>
+                          <small>{{ formatBytes(file.byte_size) }}</small>
+                        </span>
+                        <Download :size="16" aria-hidden="true" />
+                      </button>
                     </div>
                     <div v-if="message.content" class="message-text">
                       {{ message.content }}
@@ -783,6 +801,7 @@
                     </svg>
                   </button>
                   <button
+                    v-if="canRetryLastQuestion(message)"
                     type="button"
                     class="icon-btn"
                     :title="t('lens.chat.retryAction')"
@@ -827,6 +846,7 @@
                     {{ retryHintMessage }}
                   </span>
                   <button
+                    v-if="canRetryLastQuestion()"
                     type="button"
                     class="retry-hint-btn"
                     @click="retryLastQuestion"
@@ -1197,9 +1217,20 @@
                   v-for="item in attachments"
                   :key="item.key"
                   class="composer-thumb"
-                  :class="{ 'is-uploading': item.status === 'uploading' }"
+                  :class="{
+                    'is-uploading': item.status === 'uploading',
+                    'is-document': item.kind === 'document'
+                  }"
                 >
-                  <img :src="item.localUrl" :alt="item.name" />
+                  <img
+                    v-if="item.kind === 'image'"
+                    :src="item.localUrl"
+                    :alt="item.name"
+                  />
+                  <span v-else class="composer-document">
+                    <FileText :size="22" aria-hidden="true" />
+                    <span>{{ item.name }}</span>
+                  </span>
                   <span
                     v-if="item.status === 'uploading'"
                     class="composer-thumb-spinner"
@@ -1207,8 +1238,8 @@
                   <button
                     type="button"
                     class="composer-thumb-remove"
-                    :aria-label="t('lens.chat.removeImage')"
-                    :title="t('lens.chat.removeImage')"
+                    :aria-label="t('lens.chat.removeAttachment')"
+                    :title="t('lens.chat.removeAttachment')"
                     @click="removeAttachment(item)"
                   >
                     <span aria-hidden="true">×</span>
@@ -1219,20 +1250,21 @@
                 <input
                   ref="fileInput"
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  :accept="ATTACHMENT_ACCEPT"
                   multiple
                   class="composer-file-input"
                   @change="onFileInputChange"
                 />
                 <button
-                  v-if="acceptsImages"
+                  v-if="acceptsAttachments"
                   class="composer-attach-btn"
                   type="button"
                   :disabled="
-                    !selectedSessionUuid || attachments.length >= MAX_IMAGES
+                    !selectedSessionUuid ||
+                    attachments.length >= MAX_ATTACHMENTS
                   "
-                  :aria-label="t('lens.chat.attachImage')"
-                  :title="t('lens.chat.attachImage')"
+                  :aria-label="t('lens.chat.attachFile')"
+                  :title="t('lens.chat.attachFile')"
                   @click="triggerFilePick"
                 >
                   <svg
@@ -1428,9 +1460,16 @@ import {
 import { startRunCompletionTracking } from '@/utils/runCompletionTracking'
 import {
   precedingUserMessage,
-  retryRunUuid
+  retryRunUuid,
+  retryableUserMessage
 } from '@/pages/lens/chatMessageContext'
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
+import {
+  ATTACHMENT_ACCEPT,
+  hasAttachmentErrorCode,
+  MAX_ATTACHMENTS,
+  validateAttachment
+} from '@/pages/lens/chatAttachments'
 import {
   resolveRunStatus,
   shouldShowRetryHint
@@ -1457,6 +1496,7 @@ import {
   cancelRun,
   createRun,
   createSession,
+  deleteAttachment,
   deleteSession,
   getPublicAssistant,
   getRun,
@@ -1493,9 +1533,6 @@ const attachments = ref([])
 const fileInput = ref(null)
 const partialAnswer = ref('')
 
-const MAX_IMAGES = 4
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
 const TITLE_POLL_INTERVAL_MS = 2000
@@ -1567,7 +1604,20 @@ const acceptsImages = computed(
     !!selectedAssistant.value?.multimodal_model_ref
 )
 
-const hasUploadingImage = computed(() =>
+const acceptsDocuments = computed(
+  () =>
+    canCompose.value &&
+    !isAnonymous.value &&
+    !!selectedAssistant.value &&
+    selectedAssistant.value.selected_task !== 'general_chat' &&
+    selectedAssistant.value.supports_document_attachments === true
+)
+
+const acceptsAttachments = computed(
+  () => acceptsImages.value || acceptsDocuments.value
+)
+
+const hasUploadingAttachment = computed(() =>
   attachments.value.some((item) => item.status === 'uploading')
 )
 
@@ -1575,11 +1625,13 @@ const canSubmit = computed(() => {
   if (!canCompose.value) {
     return false
   }
-  if (hasUploadingImage.value) {
+  if (hasUploadingAttachment.value) {
     return false
   }
-  const hasReadyImage = attachments.value.some((item) => item.status === 'done')
-  return !!question.value.trim() || hasReadyImage
+  const hasReadyAttachment = attachments.value.some(
+    (item) => item.status === 'done'
+  )
+  return !!question.value.trim() || hasReadyAttachment
 })
 
 const hasAssistant = computed(() =>
@@ -2647,7 +2699,7 @@ async function onFileInputChange(event) {
   const files = Array.from(event.target.files || [])
   event.target.value = ''
   for (const file of files) {
-    await addImage(file)
+    await addAttachment(file)
   }
 }
 
@@ -2663,22 +2715,22 @@ async function onComposerPaste(event) {
   event.preventDefault()
   for (const item of images) {
     const file = item.getAsFile()
-    if (file) await addImage(file)
+    if (file) await addAttachment(file)
   }
 }
 
-async function addImage(file) {
-  if (!acceptsImages.value) return
-  if (!IMAGE_MIME.includes(file.type)) {
-    showError(t('lens.chat.imageUnsupported'))
-    return
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    showError(t('lens.chat.imageTooLarge'))
-    return
-  }
-  if (attachments.value.length >= MAX_IMAGES) {
-    showError(t('lens.chat.imageTooMany', { max: MAX_IMAGES }))
+async function addAttachment(file) {
+  const validation = validateAttachment(file, {
+    acceptsImages: acceptsImages.value,
+    acceptsDocuments: acceptsDocuments.value,
+    currentCount: attachments.value.length
+  })
+  if (validation.error) {
+    showError(
+      t(`lens.chat.${validation.error}`, {
+        max: MAX_ATTACHMENTS
+      })
+    )
     return
   }
   const sessionUuid = selectedSessionUuid.value
@@ -2686,32 +2738,51 @@ async function addImage(file) {
   const item = {
     key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     uuid: '',
-    name: file.name || 'image',
-    localUrl: URL.createObjectURL(file),
+    kind: validation.kind,
+    name: file.name || validation.kind,
+    localUrl: validation.kind === 'image' ? URL.createObjectURL(file) : '',
     status: 'uploading'
   }
   attachments.value = [...attachments.value, item]
   try {
     const result = await uploadAttachment(sessionUuid, file)
-    if (selectedSessionUuid.value !== sessionUuid) {
+    item.uuid = result.uuid
+    item.kind = result.kind || validation.kind
+    item.name = result.original_name || item.name
+    item.url = result.url || ''
+    item.byte_size = result.byte_size || 0
+    item.mime_type = result.mime_type || ''
+    if (
+      selectedSessionUuid.value !== sessionUuid ||
+      !attachments.value.includes(item)
+    ) {
       removeAttachment(item)
       return
     }
-    item.uuid = result.uuid
     item.status = 'done'
     attachments.value = [...attachments.value]
   } catch {
     removeAttachment(item)
-    showError(t('lens.chat.imageUploadFailed'))
+    showError(t('lens.chat.attachmentUploadFailed'))
   }
 }
 
 function removeAttachment(item) {
   if (item.localUrl) URL.revokeObjectURL(item.localUrl)
   attachments.value = attachments.value.filter((entry) => entry !== item)
+  if (item.kind === 'document' && item.uuid) {
+    deleteAttachment(item.uuid).catch(() => {
+      showWarning(t('lens.chat.attachmentDeleteFailed'))
+    })
+  }
 }
 
 function clearAttachments() {
+  attachments.value.forEach((item) => {
+    if (item.kind === 'document' && item.uuid) {
+      deleteAttachment(item.uuid).catch(() => {})
+    }
+  })
   attachments.value.forEach(
     (item) => item.localUrl && URL.revokeObjectURL(item.localUrl)
   )
@@ -2952,12 +3023,12 @@ async function submit() {
   resetStreamState()
   const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
   question.value = ''
-  // Snapshot ready images, clear the composer strip, and keep the object
+  // Snapshot ready attachments, clear the composer strip, and keep the object
   // URLs alive for the optimistic bubble until the server reload replaces it.
-  const pendingImages = attachments.value.filter(
+  const pendingAttachments = attachments.value.filter(
     (item) => item.status === 'done'
   )
-  const attachmentUuids = pendingImages.map((item) => item.uuid)
+  const attachmentUuids = pendingAttachments.map((item) => item.uuid)
   const retryDraftAtSubmit = retryDraft.value
   const preparedSubmission = prepareRunSubmission({
     sessionUuid: sessionAtSubmit,
@@ -2970,7 +3041,8 @@ async function submit() {
   attachments.value = []
   // Revoke the optimistic object URLs on every exit path, unless they are
   // restored to the composer for a retry (set below on real failures).
-  let keepImages = false
+  let keepAttachments = false
+  let submittedRunUuid = ''
   if (composerRef.value) composerRef.value.style.height = 'auto'
   messages.value = [
     ...messages.value,
@@ -2979,9 +3051,14 @@ async function submit() {
       content: optimisticText,
       uuid: '__optimistic__',
       created_at: new Date().toISOString(),
-      attachments: pendingImages.map((item) => ({
+      attachments: pendingAttachments.map((item) => ({
+        uuid: item.uuid,
+        kind: item.kind,
         localUrl: item.localUrl,
-        original_name: item.name
+        url: item.url,
+        original_name: item.name,
+        byte_size: item.byte_size,
+        mime_type: item.mime_type
       }))
     }
   ]
@@ -3005,6 +3082,7 @@ async function submit() {
   currentRun.value = null
   try {
     const run = await createRun(sessionAtSubmit, preparedSubmission.payload)
+    submittedRunUuid = run.uuid
     if (
       pendingRunSubmission.value?.idempotencyKey ===
       preparedSubmission.submission.idempotencyKey
@@ -3037,7 +3115,7 @@ async function submit() {
     ) {
       return
     }
-    const runUuid = currentRun.value?.uuid
+    const runUuid = submittedRunUuid
     if (runUuid) {
       try {
         const run = await waitForRunTerminal(runUuid)
@@ -3059,16 +3137,23 @@ async function submit() {
     messages.value = messages.value.filter((m) => m.uuid !== '__optimistic__')
     question.value = optimisticText
     retryDraft.value = retryDraftAtSubmit
-    // Restore the uploaded (still-unbound) images so the user can retry;
-    // keep their object URLs alive for the composer thumbnails.
-    if (pendingImages.length) {
-      attachments.value = [...attachments.value, ...pendingImages]
-      keepImages = true
+    // Only a 4xx response proves that the Run transaction rejected the
+    // request. Network and server failures are ambiguous: the attachments may
+    // already be bound to a committed Run and cannot be reused by a retry.
+    const requestRejected =
+      !runUuid && err?.response?.status >= 400 && err.response.status < 500
+    const attachmentMissing = hasAttachmentErrorCode(
+      err,
+      'ATTACHMENT_NOT_FOUND'
+    )
+    if (pendingAttachments.length && requestRejected && !attachmentMissing) {
+      attachments.value = [...attachments.value, ...pendingAttachments]
+      keepAttachments = true
     }
     showError(t('lens.chat.submitFailed'))
   } finally {
-    if (!keepImages) {
-      pendingImages.forEach(
+    if (!keepAttachments) {
+      pendingAttachments.forEach(
         (item) => item.localUrl && URL.revokeObjectURL(item.localUrl)
       )
     }
@@ -3160,6 +3245,13 @@ async function downloadOutputFile(file) {
   } catch {
     showWarning(t('lens.chat.downloadFailed'))
   }
+}
+
+function downloadAttachmentFile(file) {
+  return downloadOutputFile({
+    ...file,
+    filename: file.original_name || 'document'
+  })
 }
 
 function formatBytes(size) {
@@ -3287,9 +3379,7 @@ function userMessageForMessage(message) {
 }
 
 function retryLastQuestion(message = null) {
-  const userMessage = message
-    ? userMessageForMessage(message)
-    : [...messages.value].reverse().find((item) => item.role === 'user')
+  const userMessage = retryableUserMessage(messages.value, message)
   if (!userMessage) {
     return
   }
@@ -3299,6 +3389,10 @@ function retryLastQuestion(message = null) {
   nextTick(() => {
     composerRef.value?.focus()
   })
+}
+
+function canRetryLastQuestion(message = null) {
+  return retryableUserMessage(messages.value, message) !== null
 }
 
 function formatTime(isoString) {
@@ -4259,6 +4353,18 @@ onBeforeUnmount(() => {
   @apply relative h-16 w-16 overflow-hidden rounded-lg border border-line;
 }
 
+.composer-thumb.is-document {
+  @apply w-48 bg-gray-50;
+}
+
+.composer-document {
+  @apply flex h-full min-w-0 items-center gap-2 px-3 pr-7 text-gray-600;
+}
+
+.composer-document span {
+  @apply truncate text-xs font-medium;
+}
+
 .composer-thumb img {
   @apply h-full w-full object-cover;
 }
@@ -4325,14 +4431,35 @@ onBeforeUnmount(() => {
   }
 }
 
-.message-images {
+.message-attachments {
   @apply mb-2 flex flex-wrap justify-end gap-2;
 }
 
-.message-images :deep(.auth-image) {
+.message-attachments :deep(.auth-image) {
   max-width: 220px;
   max-height: 220px;
   object-fit: cover;
+}
+
+.message-document-card {
+  @apply flex max-w-sm items-center gap-2 rounded-lg border border-line
+    bg-white px-3 py-2 text-left text-gray-600 transition-colors;
+}
+
+.message-document-card:hover {
+  @apply border-primary-300 text-primary-700;
+}
+
+.message-document-card span {
+  @apply flex min-w-0 flex-1 flex-col;
+}
+
+.message-document-card strong {
+  @apply truncate text-sm font-medium;
+}
+
+.message-document-card small {
+  @apply text-xs text-gray-400;
 }
 
 .message-deliverables {
