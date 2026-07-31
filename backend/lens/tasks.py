@@ -44,6 +44,15 @@ def execute_answer_run(run_uuid):
     return str(run.uuid)
 
 
+@shared_task(name="lens.generate_session_title", queue="lens")
+def generate_session_title(session_uuid, run_uuid):
+    """Generate one semantic title without delaying its completed answer."""
+
+    from .session_titles import generate_semantic_session_title
+
+    return generate_semantic_session_title(session_uuid, run_uuid)
+
+
 def _get_or_create_source_sync_record(datasource):
     """Return the ScheduledTask mirror for a datasource sync."""
 

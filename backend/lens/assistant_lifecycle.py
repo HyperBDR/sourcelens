@@ -28,8 +28,15 @@ def create_assistant_session(assistant_uuid, user, title=""):
 
     assistant = Assistant.objects.get(uuid=assistant_uuid)
     assistant = lock_assistant_for_new_work(assistant, user)
+    normalized_title = " ".join(str(title or "").split())
     return Session.objects.create(
         assistant=assistant,
         user=user,
-        title=title,
+        title=normalized_title,
+        title_manually_edited=bool(normalized_title),
+        title_generation_status=(
+            Session.TitleGenerationStatus.SKIPPED
+            if normalized_title
+            else Session.TitleGenerationStatus.PENDING
+        ),
     )

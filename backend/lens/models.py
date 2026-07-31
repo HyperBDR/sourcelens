@@ -552,9 +552,26 @@ class Session(TimestampedUUIDModel):
         ACTIVE = "active", "Active"
         ARCHIVED = "archived", "Archived"
 
+    class TitleGenerationStatus(models.TextChoices):
+        SKIPPED = "skipped", "Skipped"
+        PENDING = "pending", "Pending"
+        GENERATING = "generating", "Generating"
+        GENERATED = "generated", "Generated"
+        FAILED = "failed", "Failed"
+
     assistant = models.ForeignKey(Assistant, on_delete=models.PROTECT)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     title = models.CharField(max_length=160, blank=True, default="")
+    title_manually_edited = models.BooleanField(
+        default=False,
+        db_default=False,
+    )
+    title_generation_status = models.CharField(
+        max_length=16,
+        choices=TitleGenerationStatus.choices,
+        default=TitleGenerationStatus.SKIPPED,
+        db_default=TitleGenerationStatus.SKIPPED,
+    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
