@@ -4,6 +4,7 @@ from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
 
+from agentcore_task.adapters.django.models import TaskExecution
 from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
 from django.apps import apps
@@ -11,8 +12,6 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
-
-from agentcore_task.adapters.django.models import TaskExecution
 from django_celery_beat.models import PeriodicTask
 
 from core.asgi import application
@@ -55,8 +54,8 @@ from lens.services import (
     _step_sequence,
     append_lensnode_output,
     build_run_history,
-    create_run_execution_snapshot,
     create_execution_run,
+    create_run_execution_snapshot,
     dispatch_run_to_lensnode,
     finish_lensnode_run,
     rewrite_query,
@@ -64,8 +63,8 @@ from lens.services import (
 )
 from lens.tasks import (
     acquire_datasource_lock,
-    complete_datasource_sync_task,
     cleanup_stale_datasource_sync_tasks,
+    complete_datasource_sync_task,
     datasource_lock,
     lensnode_health_task,
     register_datasource_sync_task,
@@ -102,7 +101,12 @@ class LensServiceTests(TransactionTestCase):
             enrollment_status=LensNode.EnrollmentStatus.APPROVED,
             workspace_path="/workspace",
             available_dirs=[{"path": "/workspace/repo"}],
-            tasks=[{"name": "knowledge_qa", "description": "Answer code questions"}],
+            tasks=[
+                {
+                    "name": "knowledge_qa",
+                    "description": "Answer code questions",
+                }
+            ],
         )
         self.assistant = Assistant.objects.create(
             name="Code Advisor",
@@ -151,9 +155,7 @@ class LensServiceTests(TransactionTestCase):
         )
         run.execution.agent_rounds = None
         run.execution.run_timeout_s = None
-        run.execution.save(
-            update_fields=["agent_rounds", "run_timeout_s"]
-        )
+        run.execution.save(update_fields=["agent_rounds", "run_timeout_s"])
         migration = import_module(
             "lens.migrations."
             "0028_runexecution_agent_rounds_runexecution_run_timeout_s"
@@ -273,9 +275,7 @@ class LensServiceTests(TransactionTestCase):
         blocked.status = Run.Status.DONE
         blocked.outcome = Run.Outcome.BLOCKED
         blocked.termination_detail = {"reason": "capability_unavailable"}
-        blocked.save(
-            update_fields=["status", "outcome", "termination_detail"]
-        )
+        blocked.save(update_fields=["status", "outcome", "termination_detail"])
         blocked.output_message.delete()
         current = create_execution_run(
             session=self.session,
@@ -312,9 +312,7 @@ class LensServiceTests(TransactionTestCase):
             prior.status = status
             prior.outcome = outcome
             prior.save(update_fields=["status", "outcome"])
-            expected.append(
-                {"role": "user", "content": f"question {index}"}
-            )
+            expected.append({"role": "user", "content": f"question {index}"})
         current = create_execution_run(
             session=self.session,
             question="follow up",
@@ -606,7 +604,9 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(run.steps.count(), 3)
         self.assertTrue(run.output_message.content)
         self.assertEqual(run.execution.task, "knowledge_qa")
-        self.assertEqual(run.execution.target_dirs, [{"path": "/workspace/repo"}])
+        self.assertEqual(
+            run.execution.target_dirs, [{"path": "/workspace/repo"}]
+        )
         self.assertEqual(run.execution.agent_rounds, "max")
         self.assertEqual(run.execution.run_timeout_s, 3600)
         self.assertEqual(run.execution.token_budget_profile, "deep")
@@ -754,6 +754,55 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(payload["run_timeout_s"], 3600)
         self.assertEqual(execution.agent_rounds, "max")
         self.assertEqual(execution.run_timeout_s, 3600)
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_uses_model_and_settings_runtime_snapshot(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        self.assistant.agent_model_ref = "11111111-1111-1111-1111-111111111111"
+        self.assistant.multimodal_model_ref = (
+            "22222222-2222-2222-2222-222222222222"
+        )
+        self.assistant.settings = {"runtime_mode": "original"}
+        self.assistant.save(
+            update_fields=[
+                "agent_model_ref",
+                "multimodal_model_ref",
+                "settings",
+            ]
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze with frozen configuration",
+            enqueue=False,
+        )
+
+        self.assistant.agent_model_ref = "33333333-3333-3333-3333-333333333333"
+        self.assistant.multimodal_model_ref = None
+        self.assistant.settings = {"runtime_mode": "changed"}
+        self.assistant.save(
+            update_fields=[
+                "agent_model_ref",
+                "multimodal_model_ref",
+                "settings",
+            ]
+        )
+        dispatch_run_to_lensnode(run, "Analyze frozen configuration")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            payload["agent_model_ref"],
+            "11111111-1111-1111-1111-111111111111",
+        )
+        self.assertEqual(
+            payload["vision_model_ref"],
+            "22222222-2222-2222-2222-222222222222",
+        )
+        self.assertEqual(payload["settings"], {"runtime_mode": "original"})
 
     def test_execute_answer_run_fails_when_lensnode_offline(self):
         self.lensnode.status = LensNode.Status.OFFLINE
@@ -907,19 +956,21 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_route_event_rejects_unknown_contract_values(self):
-        event = sanitize_runtime_event({
-            "agent_event": "workflow.route.selected",
-            "activity": "running",
-            "event_type": "route.selected",
-            "visibility": "user",
-            "payload": {
-                "intent": "secret-intent",
-                "complexity": "oversized",
-                "route": "arbitrary-route",
-                "evidence_requirement": "secret-token",
-                "required_capabilities": ["skill", "secret-token"],
-            },
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "workflow.route.selected",
+                "activity": "running",
+                "event_type": "route.selected",
+                "visibility": "user",
+                "payload": {
+                    "intent": "secret-intent",
+                    "complexity": "oversized",
+                    "route": "arbitrary-route",
+                    "evidence_requirement": "secret-token",
+                    "required_capabilities": ["skill", "secret-token"],
+                },
+            }
+        )
 
         self.assertEqual(
             event["payload"],
@@ -927,17 +978,19 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_capability_unavailable_route_is_public(self):
-        event = sanitize_runtime_event({
-            "event_type": "route.selected",
-            "visibility": "user",
-            "payload": {
-                "intent": "action",
-                "complexity": "simple",
-                "route": "capability_unavailable",
-                "evidence_requirement": "tool_result",
-                "required_capabilities": ["skill"],
-            },
-        })
+        event = sanitize_runtime_event(
+            {
+                "event_type": "route.selected",
+                "visibility": "user",
+                "payload": {
+                    "intent": "action",
+                    "complexity": "simple",
+                    "route": "capability_unavailable",
+                    "evidence_requirement": "tool_result",
+                    "required_capabilities": ["skill"],
+                },
+            }
+        )
 
         self.assertEqual(
             event["payload"]["route"],
@@ -945,30 +998,34 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_execution_failure_event_is_distinct(self):
-        event = sanitize_runtime_event({
-            "event_type": "execution.failed",
-            "visibility": "user",
-            "payload": {
-                "reason": "execution_failed",
-                "capability": "skill",
-                "error_type": "transient",
-            },
-        })
+        event = sanitize_runtime_event(
+            {
+                "event_type": "execution.failed",
+                "visibility": "user",
+                "payload": {
+                    "reason": "execution_failed",
+                    "capability": "skill",
+                    "error_type": "transient",
+                },
+            }
+        )
 
         self.assertEqual(event["event_type"], "execution.failed")
         self.assertEqual(event["payload"]["reason"], "execution_failed")
         self.assertEqual(event["payload"]["error_type"], "transient")
 
     def test_verification_failure_event_is_distinct(self):
-        event = sanitize_runtime_event({
-            "event_type": "verification.failed",
-            "visibility": "user",
-            "payload": {
-                "reason": "evidence_unavailable",
-                "capability": "skill",
-                "error_type": "verification",
-            },
-        })
+        event = sanitize_runtime_event(
+            {
+                "event_type": "verification.failed",
+                "visibility": "user",
+                "payload": {
+                    "reason": "evidence_unavailable",
+                    "capability": "skill",
+                    "error_type": "verification",
+                },
+            }
+        )
 
         self.assertEqual(event["event_type"], "verification.failed")
         self.assertEqual(
@@ -978,26 +1035,30 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(event["payload"]["error_type"], "verification")
 
     def test_runtime_event_rejects_unknown_phase_and_status_values(self):
-        phase_event = sanitize_runtime_event({
-            "agent_event": "secret-token",
-            "activity": "Authorization: secret-token",
-            "event_type": "phase.changed",
-            "visibility": "user",
-            "payload": {"phase": "secret-token"},
-        })
-        plan_event = sanitize_runtime_event({
-            "event_type": "plan.updated",
-            "visibility": "user",
-            "payload": {
-                "steps": [
-                    {
-                        "id": "step-1",
-                        "title": "Inspect configuration",
-                        "status": "secret-token",
-                    }
-                ]
-            },
-        })
+        phase_event = sanitize_runtime_event(
+            {
+                "agent_event": "secret-token",
+                "activity": "Authorization: secret-token",
+                "event_type": "phase.changed",
+                "visibility": "user",
+                "payload": {"phase": "secret-token"},
+            }
+        )
+        plan_event = sanitize_runtime_event(
+            {
+                "event_type": "plan.updated",
+                "visibility": "user",
+                "payload": {
+                    "steps": [
+                        {
+                            "id": "step-1",
+                            "title": "Inspect configuration",
+                            "status": "secret-token",
+                        }
+                    ]
+                },
+            }
+        )
 
         self.assertNotIn("secret-token", str(phase_event))
         self.assertEqual(phase_event["payload"], {})
@@ -1007,19 +1068,21 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_stage_event_bounds_public_fields(self):
-        event = sanitize_runtime_event({
-            "event_type": "stage.updated",
-            "visibility": "user",
-            "payload": {
-                "id": "stage-" + ("x" * 100),
-                "title": "T" * 300,
-                "status": "completed",
-                "summary": "S" * 300,
-                "order": 99,
-                "revision": "7",
-                "secret": "hidden",
-            },
-        })
+        event = sanitize_runtime_event(
+            {
+                "event_type": "stage.updated",
+                "visibility": "user",
+                "payload": {
+                    "id": "stage-" + ("x" * 100),
+                    "title": "T" * 300,
+                    "status": "completed",
+                    "summary": "S" * 300,
+                    "order": 99,
+                    "revision": "7",
+                    "secret": "hidden",
+                },
+            }
+        )
 
         self.assertEqual(len(event["payload"]["id"]), 64)
         self.assertEqual(len(event["payload"]["title"]), 240)
@@ -1030,40 +1093,44 @@ class LensServiceTests(TransactionTestCase):
         self.assertNotIn("secret", str(event))
 
     def test_stage_event_rejects_invalid_status(self):
-        event = sanitize_runtime_event({
-            "event_type": "stage.updated",
-            "visibility": "user",
-            "payload": {
-                "id": "fetch-orders",
-                "title": "Fetch order data",
-                "status": "secret-token",
-            },
-        })
+        event = sanitize_runtime_event(
+            {
+                "event_type": "stage.updated",
+                "visibility": "user",
+                "payload": {
+                    "id": "fetch-orders",
+                    "title": "Fetch order data",
+                    "status": "secret-token",
+                },
+            }
+        )
 
         self.assertEqual(event["payload"], {})
         self.assertNotIn("secret-token", str(event))
 
     def test_order_query_activity_exposes_safe_real_parameters(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "activity": "running_tool",
-            "runtime_scope": "general_chat",
-            "invocation_id": "activity-123",
-            "skill": "license-cli",
-            "artifact": "income",
-            "args_redacted": [
-                "--profile",
-                "default",
-                "order",
-                "list",
-                "--start",
-                "2026-07-20T00:00:00+08:00",
-                "--end",
-                "2026-07-26T23:59:59+08:00",
-                "--token",
-                "[REDACTED]",
-            ],
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+                "runtime_scope": "general_chat",
+                "invocation_id": "activity-123",
+                "skill": "license-cli",
+                "artifact": "income",
+                "args_redacted": [
+                    "--profile",
+                    "default",
+                    "order",
+                    "list",
+                    "--start",
+                    "2026-07-20T00:00:00+08:00",
+                    "--end",
+                    "2026-07-26T23:59:59+08:00",
+                    "--token",
+                    "[REDACTED]",
+                ],
+            }
+        )
 
         self.assertEqual(event["event_type"], "activity.recorded")
         self.assertEqual(event["visibility"], "user")
@@ -1083,14 +1150,16 @@ class LensServiceTests(TransactionTestCase):
         self.assertNotIn("run_skill_artifact", str(event))
 
     def test_completed_tool_activity_preserves_only_pairing_fields(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.done",
-            "activity": "running_tool",
-            "runtime_scope": "general_chat",
-            "invocation_id": "activity-123",
-            "stdout_ref": "/large_tool_results/private.txt",
-            "summary": "license-cli/income · rc=0",
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.done",
+                "activity": "running_tool",
+                "runtime_scope": "general_chat",
+                "invocation_id": "activity-123",
+                "stdout_ref": "/large_tool_results/private.txt",
+                "summary": "license-cli/income · rc=0",
+            }
+        )
 
         self.assertEqual(
             event["payload"],
@@ -1104,26 +1173,30 @@ class LensServiceTests(TransactionTestCase):
         self.assertNotIn("stdout", str(event))
 
     def test_order_detail_and_command_help_have_real_activity_kinds(self):
-        detail = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "activity": "running_tool",
-            "runtime_scope": "general_chat",
-            "invocation_id": "detail-123",
-            "args_redacted": [
-                "--profile",
-                "default",
-                "order",
-                "get",
-                "ORDER-123",
-            ],
-        })
-        command_help = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "activity": "running_tool",
-            "runtime_scope": "general_chat",
-            "invocation_id": "help-123",
-            "args_redacted": ["order", "get", "--help"],
-        })
+        detail = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+                "runtime_scope": "general_chat",
+                "invocation_id": "detail-123",
+                "args_redacted": [
+                    "--profile",
+                    "default",
+                    "order",
+                    "get",
+                    "ORDER-123",
+                ],
+            }
+        )
+        command_help = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+                "runtime_scope": "general_chat",
+                "invocation_id": "help-123",
+                "args_redacted": ["order", "get", "--help"],
+            }
+        )
 
         self.assertEqual(detail["payload"]["kind"], "get_order_detail")
         self.assertEqual(
@@ -1136,22 +1209,24 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_order_list_by_code_exposes_only_safe_order_reference(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "activity": "running_tool",
-            "runtime_scope": "general_chat",
-            "invocation_id": "lookup-123",
-            "args_redacted": [
-                "--profile",
-                "default",
-                "order",
-                "list",
-                "--code",
-                "HWINSTAD2025071509",
-                "--token",
-                "[REDACTED]",
-            ],
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+                "runtime_scope": "general_chat",
+                "invocation_id": "lookup-123",
+                "args_redacted": [
+                    "--profile",
+                    "default",
+                    "order",
+                    "list",
+                    "--code",
+                    "HWINSTAD2025071509",
+                    "--token",
+                    "[REDACTED]",
+                ],
+            }
+        )
 
         self.assertEqual(
             event["payload"]["order_ref"],
@@ -1161,29 +1236,33 @@ class LensServiceTests(TransactionTestCase):
         self.assertNotIn("token", str(event).lower())
 
     def test_order_reference_rejects_non_identifier_arguments(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "activity": "running_tool",
-            "runtime_scope": "general_chat",
-            "invocation_id": "lookup-unsafe",
-            "args_redacted": [
-                "order",
-                "get",
-                "../../private-order",
-            ],
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+                "runtime_scope": "general_chat",
+                "invocation_id": "lookup-unsafe",
+                "args_redacted": [
+                    "order",
+                    "get",
+                    "../../private-order",
+                ],
+            }
+        )
 
         self.assertNotIn("order_ref", event["payload"])
 
     def test_structured_analysis_activity_exposes_allowlisted_operation(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.analyze_structured_output.start",
-            "activity": "running_tool",
-            "runtime_scope": "general_chat",
-            "invocation_id": "analysis-123",
-            "operation": "count",
-            "input_ref": "/large_tool_results/private.txt",
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.analyze_structured_output.start",
+                "activity": "running_tool",
+                "runtime_scope": "general_chat",
+                "invocation_id": "analysis-123",
+                "operation": "count",
+                "input_ref": "/large_tool_results/private.txt",
+            }
+        )
 
         self.assertEqual(
             event["payload"],
@@ -1197,12 +1276,14 @@ class LensServiceTests(TransactionTestCase):
         self.assertNotIn("input_ref", str(event))
 
     def test_non_general_chat_tool_event_keeps_original_public_shape(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "activity": "running_tool",
-            "invocation_id": "activity-123",
-            "args_redacted": ["order", "list"],
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "activity": "running_tool",
+                "invocation_id": "activity-123",
+                "args_redacted": ["order", "list"],
+            }
+        )
 
         self.assertEqual(
             event,
@@ -1213,23 +1294,27 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_general_chat_model_round_is_not_user_visible(self):
-        event = sanitize_runtime_event({
-            "agent_event": "model.round.start",
-            "runtime_scope": "general_chat",
-            "invocation_id": "model-round-2",
-            "round": 2,
-            "summary": "private model reasoning",
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "model.round.start",
+                "runtime_scope": "general_chat",
+                "invocation_id": "model-round-2",
+                "round": 2,
+                "summary": "private model reasoning",
+            }
+        )
 
         self.assertIsNone(event)
 
     def test_order_help_is_preparation_not_a_business_query(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "runtime_scope": "general_chat",
-            "invocation_id": "order-list-help",
-            "args_redacted": ["order", "list", "--help"],
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "runtime_scope": "general_chat",
+                "invocation_id": "order-list-help",
+                "args_redacted": ["order", "list", "--help"],
+            }
+        )
 
         self.assertEqual(
             event["payload"],
@@ -1242,16 +1327,18 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_order_view_is_an_order_detail_operation(self):
-        event = sanitize_runtime_event({
-            "agent_event": "tool.run_skill_artifact.start",
-            "runtime_scope": "general_chat",
-            "invocation_id": "order-view",
-            "args_redacted": [
-                "order",
-                "view",
-                "HWINSTAD2025071509",
-            ],
-        })
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.run_skill_artifact.start",
+                "runtime_scope": "general_chat",
+                "invocation_id": "order-view",
+                "args_redacted": [
+                    "order",
+                    "view",
+                    "HWINSTAD2025071509",
+                ],
+            }
+        )
 
         self.assertEqual(event["payload"]["kind"], "get_order_detail")
         self.assertEqual(
@@ -1260,35 +1347,37 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_general_chat_does_not_guess_summary_before_later_tools(self):
-        detail = public_step_detail({
-            "events": [
-                {
-                    "agent_event": "tool.run_skill_artifact.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "order-query",
-                    "args_redacted": [
-                        "order",
-                        "get",
-                        "HWINSTAD2025071509",
-                    ],
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.done",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "order-query",
-                },
-                {
-                    "agent_event": "model.round.start",
-                    "runtime_scope": "general_chat",
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "order-help",
-                    "args_redacted": ["order", "--help"],
-                },
-            ]
-        })
+        detail = public_step_detail(
+            {
+                "events": [
+                    {
+                        "agent_event": "tool.run_skill_artifact.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "order-query",
+                        "args_redacted": [
+                            "order",
+                            "get",
+                            "HWINSTAD2025071509",
+                        ],
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.done",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "order-query",
+                    },
+                    {
+                        "agent_event": "model.round.start",
+                        "runtime_scope": "general_chat",
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "order-help",
+                        "args_redacted": ["order", "--help"],
+                    },
+                ]
+            }
+        )
 
         kinds = [
             item["payload"]["kind"]
@@ -1299,70 +1388,72 @@ class LensServiceTests(TransactionTestCase):
         self.assertNotIn("summarizing_results", kinds)
 
     def test_general_chat_public_path_uses_real_operation_stages(self):
-        detail = public_step_detail({
-            "events": [
-                {
-                    "agent_event": "tool.run_skill_artifact.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "tool-version",
-                    "args_redacted": ["version"],
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.done",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "tool-version",
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "auth-status",
-                    "args_redacted": ["auth", "status"],
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.done",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "auth-status",
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "auth-login",
-                    "args_redacted": ["auth", "login"],
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.done",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "auth-login",
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "order-query",
-                    "args_redacted": [
-                        "order",
-                        "list",
-                        "--code",
-                        "HWINSTAD2025071509",
-                    ],
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.done",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "order-query",
-                },
-                {
-                    "agent_event": "model.round.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "model-round-4",
-                    "round": 4,
-                },
-                {
-                    "agent_event": "deepagents.runtime.done",
-                    "runtime_scope": "general_chat",
-                    "answer_chars": 120,
-                },
-            ]
-        })
+        detail = public_step_detail(
+            {
+                "events": [
+                    {
+                        "agent_event": "tool.run_skill_artifact.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "tool-version",
+                        "args_redacted": ["version"],
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.done",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "tool-version",
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "auth-status",
+                        "args_redacted": ["auth", "status"],
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.done",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "auth-status",
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "auth-login",
+                        "args_redacted": ["auth", "login"],
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.done",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "auth-login",
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "order-query",
+                        "args_redacted": [
+                            "order",
+                            "list",
+                            "--code",
+                            "HWINSTAD2025071509",
+                        ],
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.done",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "order-query",
+                    },
+                    {
+                        "agent_event": "model.round.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "model-round-4",
+                        "round": 4,
+                    },
+                    {
+                        "agent_event": "deepagents.runtime.done",
+                        "runtime_scope": "general_chat",
+                        "answer_chars": 120,
+                    },
+                ]
+            }
+        )
 
         activities = [
             item["payload"]
@@ -1405,32 +1496,34 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_general_chat_summary_completes_without_order_assumptions(self):
-        detail = public_step_detail({
-            "events": [
-                {
-                    "agent_event": "tool.run_skill_artifact.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "ticket-query",
-                    "args_redacted": ["ticket", "search", "INC-123"],
-                },
-                {
-                    "agent_event": "tool.run_skill_artifact.done",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "ticket-query",
-                },
-                {
-                    "agent_event": "model.round.start",
-                    "runtime_scope": "general_chat",
-                    "invocation_id": "model-round-2",
-                    "round": 2,
-                },
-                {
-                    "agent_event": "deepagents.runtime.done",
-                    "runtime_scope": "general_chat",
-                    "answer_chars": 120,
-                },
-            ]
-        })
+        detail = public_step_detail(
+            {
+                "events": [
+                    {
+                        "agent_event": "tool.run_skill_artifact.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "ticket-query",
+                        "args_redacted": ["ticket", "search", "INC-123"],
+                    },
+                    {
+                        "agent_event": "tool.run_skill_artifact.done",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "ticket-query",
+                    },
+                    {
+                        "agent_event": "model.round.start",
+                        "runtime_scope": "general_chat",
+                        "invocation_id": "model-round-2",
+                        "round": 2,
+                    },
+                    {
+                        "agent_event": "deepagents.runtime.done",
+                        "runtime_scope": "general_chat",
+                        "answer_chars": 120,
+                    },
+                ]
+            }
+        )
 
         activities = [
             item["payload"]
@@ -1464,9 +1557,7 @@ class LensServiceTests(TransactionTestCase):
             detail={
                 "events": [
                     {
-                        "agent_event": (
-                            "tool.run_skill_artifact.start"
-                        ),
+                        "agent_event": ("tool.run_skill_artifact.start"),
                         "runtime_scope": "general_chat",
                         "invocation_id": "ticket-query",
                         "args_redacted": [
@@ -1476,9 +1567,7 @@ class LensServiceTests(TransactionTestCase):
                         ],
                     },
                     {
-                        "agent_event": (
-                            "tool.run_skill_artifact.done"
-                        ),
+                        "agent_event": ("tool.run_skill_artifact.done"),
                         "runtime_scope": "general_chat",
                         "invocation_id": "ticket-query",
                     },
@@ -1513,21 +1602,26 @@ class LensServiceTests(TransactionTestCase):
         )
 
     def test_termination_detail_uses_fixed_public_contract(self):
-        detail = sanitize_termination_detail({
-            "reason": "evidence_unavailable",
-            "trigger": "soft_deadline",
-            "capability": "mcp",
-            "error_type": "secret-token",
-            "tool": "Authorization: secret-token",
-            "recovery": "Authorization: secret-token",
-            "code": "secret-token",
-        })
+        detail = sanitize_termination_detail(
+            {
+                "reason": "evidence_unavailable",
+                "trigger": "soft_deadline",
+                "capability": "mcp",
+                "error_type": "secret-token",
+                "tool": "Authorization: secret-token",
+                "recovery": "Authorization: secret-token",
+                "code": "secret-token",
+            }
+        )
 
-        self.assertEqual(detail, {
-            "reason": "evidence_unavailable",
-            "trigger": "soft_deadline",
-            "capability": "mcp",
-        })
+        self.assertEqual(
+            detail,
+            {
+                "reason": "evidence_unavailable",
+                "trigger": "soft_deadline",
+                "capability": "mcp",
+            },
+        )
         self.assertNotIn("secret-token", str(detail))
 
     def test_run_serializer_hides_runtime_credentials(self):
@@ -2294,7 +2388,9 @@ class LensServiceTests(TransactionTestCase):
 
     def test_lensnode_health_marks_stale_lensnodes_offline(self):
         self.lensnode.status = LensNode.Status.ONLINE
-        self.lensnode.last_heartbeat_at = timezone.now() - timedelta(seconds=120)
+        self.lensnode.last_heartbeat_at = timezone.now() - timedelta(
+            seconds=120
+        )
         self.lensnode.save(update_fields=["status", "last_heartbeat_at"])
 
         marked = lensnode_health_task()

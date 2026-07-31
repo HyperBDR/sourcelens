@@ -43,6 +43,7 @@
     "execution": "Execution Snapshot",
     "lensnode": "LensNode",
     "tabOverview": "Overview",
+    "tabDiagnosis": "Diagnosis",
     "tabTrace": "Task details",
     "tabFiles": "Files",
     "overviewSummary": "Run overview",
@@ -82,7 +83,46 @@
     "callLimitHit": "call limit reached",
     "task": "Task",
     "targetDirs": "Workspace dirs",
-    "resources": "Resources"
+    "resources": "Resources",
+    "generateDiagnosis": "Generate diagnosis",
+    "closeDetail": "Close Run details",
+    "retryDiagnosis": "Retry diagnosis",
+    "diagnosisEmptyTitle": "No diagnosis yet",
+    "diagnosisEmptyDescription": "Generate a read-only analysis from the immutable evidence captured for this Run.",
+    "diagnosisRunning": "Analyzing Run evidence",
+    "diagnosisRunningDescription": "Deterministic checks and bounded model analysis are running asynchronously.",
+    "diagnosisFailed": "Diagnosis failed",
+    "diagnosisFailedDescription": "The diagnosis could not be completed. The Run itself was not changed.",
+    "diagnosisSummary": "Diagnosis summary",
+    "evidenceSnapshot": "Evidence snapshot",
+    "deterministicChecks": "Deterministic checks",
+    "findings": "Findings",
+    "recommendations": "Recommendations",
+    "unknowns": "Unknowns",
+    "followUpConversation": "Questions about this Run",
+    "askAboutRun": "Ask about this Run",
+    "askAboutRunPlaceholder": "Ask for clarification about this diagnosis…",
+    "sendFollowUp": "Send question",
+    "followUpBoundary": "Answers remain bound to this Run and its evidence snapshot.",
+    "followUpRunning": "Checking the bound evidence…",
+    "followUpFailed": "This follow-up could not be completed.",
+    "confidence": "{value}% confidence",
+    "confidenceUnknown": "Confidence unknown",
+    "severity": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "findingKind": {
+      "fact": "Fact",
+      "hypothesis": "Hypothesis"
+    },
+    "diagnosisErrors": {
+      "MODEL_RESPONSE_INVALID": "The model returned an invalid diagnosis format.",
+      "INVALID_EVIDENCE_REFERENCE": "The model cited evidence outside this snapshot.",
+      "MODEL_CALL_FAILED": "The diagnostic model call failed."
+    }
   },
   "management": {
     "adminConsole": "Admin Console",

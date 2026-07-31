@@ -352,24 +352,39 @@
                 {{ selectedUuid }}
               </span>
             </h2>
-            <button
-              class="text-gray-400 hover:text-gray-600"
-              @click="closeDetail"
-            >
-              <svg
-                class="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <div class="flex shrink-0 items-center gap-2">
+              <BaseButton
+                v-if="canDiagnoseRun"
+                data-testid="generate-run-diagnosis"
+                size="sm"
+                variant="outline"
+                :disabled="!canGenerateDiagnosis"
+                @click="generateDiagnosis"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
+                {{ t('lensRuns.generateDiagnosis') }}
+              </BaseButton>
+              <button
+                data-testid="close-run-detail"
+                type="button"
+                class="rounded-md p-2 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                :aria-label="t('lensRuns.closeDetail')"
+                @click="closeDetail"
+              >
+                <svg
+                  class="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <div class="flex-1 overflow-y-auto">
@@ -386,6 +401,16 @@
                   @click="activeDetailTab = 'overview'"
                 >
                   {{ t('lensRuns.tabOverview') }}
+                </button>
+                <button
+                  class="detail-tab"
+                  data-testid="run-diagnosis-tab"
+                  :class="
+                    activeDetailTab === 'diagnosis' ? 'detail-tab-active' : ''
+                  "
+                  @click="activeDetailTab = 'diagnosis'"
+                >
+                  {{ t('lensRuns.tabDiagnosis') }}
                 </button>
                 <button
                   class="detail-tab"
@@ -855,6 +880,15 @@
                 </section>
               </div>
 
+              <!-- Diagnosis tab -->
+              <RunDiagnosisPanel
+                v-show="activeDetailTab === 'diagnosis'"
+                ref="diagnosisPanel"
+                :run-uuid="selectedUuid"
+                :active="activeDetailTab === 'diagnosis'"
+                @navigate="navigateFromEvidence"
+              />
+
               <!-- Trace tab -->
               <div
                 v-show="activeDetailTab === 'trace'"
@@ -1110,7 +1144,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
@@ -1121,17 +1155,20 @@ import { extractErrorMessage } from '@/utils/api'
 import { fetchDeliverableBlob, isPreviewable } from '@/utils/filePreview'
 import { getAdminRuns, getAdminRun, listAssistants } from '@/api/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
+import RunDiagnosisPanel from '@/admin/pages/lens/RunDiagnosisPanel.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
+import { useUserStore } from '@/store/user'
 
 const { t, locale } = useI18n()
 const { showError } = useToast()
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const runs = ref([])
@@ -1146,6 +1183,21 @@ const detail = ref(null)
 const selectedUuid = ref(null)
 const activeDetailTab = ref('overview')
 const previewFile = ref(null)
+const diagnosisPanel = ref(null)
+
+const canDiagnoseRun = computed(() => {
+  const user = userStore.userInfo
+  return Boolean(
+    user?.is_staff ||
+      user?.is_superuser ||
+      userStore.userHasPermission('lens.run_diagnostics')
+  )
+})
+const canGenerateDiagnosis = computed(
+  () =>
+    Boolean(detail.value) &&
+    ['done', 'failed', 'cancelled'].includes(detail.value.status)
+)
 
 const filters = ref({
   q: '',
@@ -1464,6 +1516,23 @@ function closeDetail() {
   selectedUuid.value = null
   detail.value = null
   previewFile.value = null
+}
+
+async function generateDiagnosis() {
+  if (!canGenerateDiagnosis.value) return
+  activeDetailTab.value = 'diagnosis'
+  await nextTick()
+  diagnosisPanel.value?.generate()
+}
+
+function navigateFromEvidence(evidenceRef) {
+  if (String(evidenceRef).startsWith('E-FILE-')) {
+    activeDetailTab.value = 'files'
+  } else if (evidenceRef === 'E-RUN') {
+    activeDetailTab.value = 'overview'
+  } else {
+    activeDetailTab.value = 'trace'
+  }
 }
 
 async function fetchRuns() {

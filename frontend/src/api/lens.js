@@ -66,6 +66,31 @@ export async function getAdminRun(uuid) {
   return unwrapResponse(response)
 }
 
+export async function getAdminRunDiagnostics(runUuid) {
+  const response = await api.get(`/lens/admin/runs/${runUuid}/diagnostics/`)
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function generateAdminRunDiagnosis(runUuid) {
+  const response = await api.post(
+    `/lens/admin/runs/${runUuid}/diagnostics/`,
+    {}
+  )
+  return unwrapResponse(response)
+}
+
+export async function createAdminRunDiagnosticTurn(
+  runUuid,
+  diagnosticUuid,
+  question
+) {
+  const response = await api.post(
+    `/lens/admin/runs/${runUuid}/diagnostics/${diagnosticUuid}/turns/`,
+    { question }
+  )
+  return unwrapResponse(response)
+}
+
 export async function getAdminUserAccessDetail(userId) {
   const response = await api.get(`/lens/admin/access/users/${userId}/`)
   return unwrapResponse(response)

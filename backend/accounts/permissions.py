@@ -13,8 +13,23 @@ class HasRequiredFeature(BasePermission):
         if not user or not user.is_authenticated:
             return False
 
-        required_feature = getattr(view, 'required_feature', '')
+        required_feature = getattr(view, "required_feature", "")
         if not required_feature:
             return False
 
         return required_feature in get_effective_feature_keys(user)
+
+
+class HasRunDiagnosticsAccess(BasePermission):
+    """Allow staff or explicitly authorized Admin Console operators."""
+
+    def has_permission(self, request, view):
+        del view
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_staff:
+            return True
+        return "admin_console" in get_effective_feature_keys(
+            user
+        ) and user.has_perm("lens.run_diagnostics")
