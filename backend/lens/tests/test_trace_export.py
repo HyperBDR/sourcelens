@@ -5,8 +5,17 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
-from lens.models import Assistant, LensNode, Run, RunStep, Session
+
+from lens.models import (
+    Assistant,
+    LensNode,
+    Run,
+    RunStep,
+    RunTraceExport,
+    Session,
+)
 from lens.services import create_execution_run, finish_lensnode_run
+from lens.tasks import export_run_trace_task
 from lens.trace_context import root_observation_id_for_run
 from lens.trace_export import (
     _observation_summaries_enabled,
@@ -192,6 +201,15 @@ class LangfuseTraceExportTests(TestCase):
             include_summaries=False,
         )
         self.assertNotIn("comment", json.dumps(batch_without_summaries))
+        repeated = build_ingestion_batch(
+            self.run,
+            root_id,
+            include_summaries=True,
+        )
+        self.assertEqual(
+            [item["id"] for item in batch],
+            [item["id"] for item in repeated],
+        )
 
     def test_trace_metadata_reports_retry_filtering_without_content(self):
         retry = create_execution_run(
@@ -239,7 +257,7 @@ class LangfuseTraceExportTests(TestCase):
         self.assertFalse(exported)
         urlopen.assert_not_called()
 
-    def test_finish_schedules_export_after_observations_are_committed(self):
+    def test_finish_enqueues_trace_export_without_synchronous_http(self):
         root_id = root_observation_id_for_run(self.run.uuid)
         self.run.status = Run.Status.RUNNING
         self.run.finished_at = None
@@ -264,8 +282,27 @@ class LangfuseTraceExportTests(TestCase):
             },
         )
 
-        with patch("lens.services.export_run_trace") as export:
-            with self.captureOnCommitCallbacks(execute=True):
-                finish_lensnode_run(self.run.uuid, Run.Status.DONE)
+        with patch("lens.tasks.export_run_trace_task.delay") as enqueue:
+            with patch("lens.trace_export.request.urlopen") as urlopen:
+                with self.captureOnCommitCallbacks(execute=True):
+                    finish_lensnode_run(self.run.uuid, Run.Status.DONE)
 
-        export.assert_called_once_with(self.run.pk)
+        export = RunTraceExport.objects.get(run=self.run)
+        enqueue.assert_called_once_with(str(export.uuid))
+        urlopen.assert_not_called()
+
+    @patch("lens.trace_export.export_run_trace", return_value=True)
+    def test_trace_export_task_completes_outbox(self, export_run_trace):
+        export = RunTraceExport.objects.create(run=self.run)
+
+        result = export_run_trace_task.run(str(export.uuid))
+
+        export.refresh_from_db()
+        self.assertEqual(result, RunTraceExport.Status.COMPLETED)
+        self.assertEqual(export.status, RunTraceExport.Status.COMPLETED)
+        self.assertEqual(export.attempts, 1)
+        self.assertIsNotNone(export.exported_at)
+        export_run_trace.assert_called_once_with(
+            self.run.pk,
+            raise_on_failure=True,
+        )

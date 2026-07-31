@@ -1,7 +1,7 @@
-from contextlib import contextmanager
-from datetime import timedelta
 import logging
 import uuid
+from contextlib import contextmanager
+from datetime import timedelta
 
 from celery import shared_task
 from django.core.cache import cache
@@ -19,11 +19,96 @@ from .models import (
     LensNode,
     Run,
     RunExecution,
+    RunTraceExport,
     ScheduledTask,
 )
 
 logger = logging.getLogger(__name__)
 ANSWER_RUN_DOCUMENT_COUNT_HEADER = "sourcelens_expected_document_count"
+
+
+@shared_task(name="lens.execute_run_diagnostic", queue="lens")
+def execute_run_diagnostic(diagnostic_uuid):
+    """Generate one diagnosis from its immutable evidence snapshot."""
+
+    from .run_diagnostics import execute_diagnostic
+
+    return execute_diagnostic(diagnostic_uuid)
+
+
+@shared_task(name="lens.execute_diagnostic_turn", queue="lens")
+def execute_diagnostic_turn(turn_uuid):
+    """Answer one evidence-bound diagnosis follow-up."""
+
+    from .run_diagnostics import execute_diagnostic_follow_up
+
+    return execute_diagnostic_follow_up(turn_uuid)
+
+
+@shared_task(
+    name="lens.export_run_trace",
+    queue="lens",
+    bind=True,
+    max_retries=3,
+)
+def export_run_trace_task(task, export_uuid):
+    """Export an optional trace from an outbox with bounded retries."""
+
+    from .trace_export import TraceExportError, export_run_trace
+
+    export_record = RunTraceExport.objects.select_related("run").get(
+        uuid=export_uuid
+    )
+    if export_record.status in {
+        RunTraceExport.Status.COMPLETED,
+        RunTraceExport.Status.SKIPPED,
+    }:
+        return export_record.status
+    export_record.status = RunTraceExport.Status.RUNNING
+    export_record.attempts += 1
+    export_record.last_error_category = ""
+    export_record.save(
+        update_fields=[
+            "status",
+            "attempts",
+            "last_error_category",
+            "updated_at",
+        ]
+    )
+    try:
+        exported = export_run_trace(
+            export_record.run_id,
+            raise_on_failure=True,
+        )
+    except TraceExportError as exc:
+        export_record.last_error_category = exc.category
+        if task.request.retries < task.max_retries:
+            export_record.status = RunTraceExport.Status.RETRYING
+            export_record.save(
+                update_fields=[
+                    "status",
+                    "last_error_category",
+                    "updated_at",
+                ]
+            )
+            raise task.retry(exc=exc, countdown=2**task.request.retries)
+        export_record.status = RunTraceExport.Status.FAILED
+        export_record.save(
+            update_fields=[
+                "status",
+                "last_error_category",
+                "updated_at",
+            ]
+        )
+        return export_record.status
+    export_record.status = (
+        RunTraceExport.Status.COMPLETED
+        if exported
+        else RunTraceExport.Status.SKIPPED
+    )
+    export_record.exported_at = timezone.now() if exported else None
+    export_record.save(update_fields=["status", "exported_at", "updated_at"])
+    return export_record.status
 
 
 @shared_task(name="lens.execute_answer_run", queue="lens", bind=True)
@@ -156,11 +241,15 @@ def _datasource_sync_task_name(datasource):
 def _is_global_task_enabled(task_type, default=True):
     """Return whether a global periodic task is enabled."""
 
-    record = ScheduledTask.objects.filter(
-        task_type=task_type,
-        target_type=None,
-        target_id=None,
-    ).only("enabled").first()
+    record = (
+        ScheduledTask.objects.filter(
+            task_type=task_type,
+            target_type=None,
+            target_id=None,
+        )
+        .only("enabled")
+        .first()
+    )
     if record is None:
         return default
     return bool(record.enabled)
@@ -544,9 +633,7 @@ def cleanup_stale_datasource_sync_tasks(startup=False):
         task.finished_at = now
         task.error = "LENS_SOURCE_SYNC_TIMEOUT"
         task.metadata = metadata
-        task.save(
-            update_fields=["status", "finished_at", "error", "metadata"]
-        )
+        task.save(update_fields=["status", "finished_at", "error", "metadata"])
         failed_count += 1
 
     completed = TaskExecution.objects.filter(
@@ -618,9 +705,7 @@ def _datasource_task_metadata(datasource, trigger):
         "sync_policy": sync_policy,
         "conversion": conversion,
         "conversion_enabled": _conversion_enabled(conversion),
-        "sync_interval_seconds": (
-            sync_policy
-        ).get("interval_seconds"),
+        "sync_interval_seconds": (sync_policy).get("interval_seconds"),
         "steps": [],
         "logs": [],
     }
@@ -810,7 +895,9 @@ def lensnode_health_task():
     if not _is_global_task_enabled(ScheduledTask.TaskType.LENSNODE_HEALTH):
         return 0
 
-    record = _get_or_create_global_record(ScheduledTask.TaskType.LENSNODE_HEALTH)
+    record = _get_or_create_global_record(
+        ScheduledTask.TaskType.LENSNODE_HEALTH
+    )
     record.last_status = ScheduledTask.Status.RUNNING
     record.last_error = ""
     record.last_run_at = timezone.now()
@@ -847,7 +934,9 @@ def lensnode_cleanup_task():
     if not _is_global_task_enabled(ScheduledTask.TaskType.LENSNODE_CLEANUP):
         return 0
 
-    record = _get_or_create_global_record(ScheduledTask.TaskType.LENSNODE_CLEANUP)
+    record = _get_or_create_global_record(
+        ScheduledTask.TaskType.LENSNODE_CLEANUP
+    )
     record.last_status = ScheduledTask.Status.RUNNING
     record.last_error = ""
     record.last_run_at = timezone.now()
@@ -863,7 +952,9 @@ def lensnode_cleanup_task():
         key="lensnode.defaults.idle_timeout"
     ).first()
     idle_timeout_s = int(idle_setting.value if idle_setting else 300)
-    setting = GlobalSetting.objects.filter(key="lensnode.defaults.timeout").first()
+    setting = GlobalSetting.objects.filter(
+        key="lensnode.defaults.timeout"
+    ).first()
     timeout_s = int(setting.value if setting else 14400)
     now = timezone.now()
     idle_cutoff = now - timedelta(seconds=idle_timeout_s)

@@ -43,6 +43,7 @@
     "execution": "执行快照",
     "lensnode": "LensNode",
     "tabOverview": "基本情况",
+    "tabDiagnosis": "诊断",
     "tabTrace": "任务详情",
     "tabFiles": "生成文件",
     "overviewSummary": "运行概览",
@@ -82,7 +83,46 @@
     "callLimitHit": "已触发调用上限",
     "task": "任务",
     "targetDirs": "工作区目录",
-    "resources": "加载资源"
+    "resources": "加载资源",
+    "generateDiagnosis": "生成诊断",
+    "closeDetail": "关闭 Run 详情",
+    "retryDiagnosis": "重新诊断",
+    "diagnosisEmptyTitle": "尚未生成诊断",
+    "diagnosisEmptyDescription": "基于为此 Run 捕获的不可变证据，生成只读诊断分析。",
+    "diagnosisRunning": "正在分析 Run 证据",
+    "diagnosisRunningDescription": "确定性检查和受限模型分析正在异步执行。",
+    "diagnosisFailed": "诊断失败",
+    "diagnosisFailedDescription": "诊断未能完成，原 Run 不会因此发生变化。",
+    "diagnosisSummary": "诊断摘要",
+    "evidenceSnapshot": "证据快照",
+    "deterministicChecks": "确定性检查",
+    "findings": "诊断发现",
+    "recommendations": "建议",
+    "unknowns": "未知项",
+    "followUpConversation": "关于此 Run 的追问",
+    "askAboutRun": "询问此 Run",
+    "askAboutRunPlaceholder": "针对本次诊断继续提问…",
+    "sendFollowUp": "发送问题",
+    "followUpBoundary": "回答始终绑定当前 Run 及其证据快照。",
+    "followUpRunning": "正在检查绑定证据…",
+    "followUpFailed": "本次追问未能完成。",
+    "confidence": "置信度 {value}%",
+    "confidenceUnknown": "置信度未知",
+    "severity": {
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "critical": "严重"
+    },
+    "findingKind": {
+      "fact": "事实",
+      "hypothesis": "假设"
+    },
+    "diagnosisErrors": {
+      "MODEL_RESPONSE_INVALID": "模型返回了无效的诊断格式。",
+      "INVALID_EVIDENCE_REFERENCE": "模型引用了当前快照之外的证据。",
+      "MODEL_CALL_FAILED": "诊断模型调用失败。"
+    }
   },
   "management": {
     "adminConsole": "管理员控制台",

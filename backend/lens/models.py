@@ -5,6 +5,7 @@ import uuid
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
@@ -144,12 +145,13 @@ class Assistant(TimestampedUUIDModel):
         on_delete=models.PROTECT,
         related_name="assistants",
     )
+
     class AgentRounds(models.TextChoices):
-        FLASH    = "flash",    "极速"
-        FAST     = "fast",     "快速"
+        FLASH = "flash", "极速"
+        FAST = "fast", "快速"
         BALANCED = "balanced", "均衡"
-        DEEP     = "deep",     "深度"
-        MAX      = "max",      "极限"
+        DEEP = "deep", "深度"
+        MAX = "max", "极限"
 
     selected_task = models.CharField(max_length=160)
     selected_dirs = models.JSONField(default=list, blank=True)
@@ -198,9 +200,7 @@ class Assistant(TimestampedUUIDModel):
             return True
         if self.access_grants.filter(user=user).exists():
             return True
-        return self.access_grants.filter(
-            group__in=user.groups.all()
-        ).exists()
+        return self.access_grants.filter(group__in=user.groups.all()).exists()
 
     def is_runnable_by(self, user):
         """Return True when the user may start work with this assistant."""
@@ -313,8 +313,8 @@ class EnvironmentVariableSet(TimestampedUUIDModel):
         """Encrypt and store a mapping of environment-variable values."""
 
         payload = json.dumps(values or {}, sort_keys=True).encode("utf-8")
-        self.encrypted_values = _datasource_fernet().encrypt(payload).decode(
-            "utf-8"
+        self.encrypted_values = (
+            _datasource_fernet().encrypt(payload).decode("utf-8")
         )
 
     def get_values(self):
@@ -336,9 +336,7 @@ class EnvironmentVariableSet(TimestampedUUIDModel):
         """Return configured variable names without exposing their values."""
 
         return sorted(
-            key
-            for key, value in self.get_values().items()
-            if str(value or "")
+            key for key, value in self.get_values().items() if str(value or "")
         )
 
     def __str__(self):
@@ -472,9 +470,11 @@ class DataSourceCredential(TimestampedUUIDModel):
     def set_secret(self, value):
         """Encrypt and store a plaintext credential secret."""
 
-        self.encrypted_secret = _datasource_fernet().encrypt(
-            str(value or "").encode("utf-8")
-        ).decode("utf-8")
+        self.encrypted_secret = (
+            _datasource_fernet()
+            .encrypt(str(value or "").encode("utf-8"))
+            .decode("utf-8")
+        )
 
     def get_secret(self):
         """Return the decrypted credential secret."""
@@ -482,9 +482,11 @@ class DataSourceCredential(TimestampedUUIDModel):
         if not self.encrypted_secret:
             return ""
         try:
-            return _datasource_fernet().decrypt(
-                self.encrypted_secret.encode("utf-8")
-            ).decode("utf-8")
+            return (
+                _datasource_fernet()
+                .decrypt(self.encrypted_secret.encode("utf-8"))
+                .decode("utf-8")
+            )
         except InvalidToken:
             return ""
 
@@ -560,7 +562,9 @@ class Session(TimestampedUUIDModel):
         FAILED = "failed", "Failed"
 
     assistant = models.ForeignKey(Assistant, on_delete=models.PROTECT)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE
+    )
     title = models.CharField(max_length=160, blank=True, default="")
     title_manually_edited = models.BooleanField(
         default=False,
@@ -800,7 +804,9 @@ class RunStep(models.Model):
         FAILED = "failed", "Failed"
 
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="steps")
+    run = models.ForeignKey(
+        Run, on_delete=models.CASCADE, related_name="steps"
+    )
     step_type = models.CharField(max_length=32, choices=StepType.choices)
     detail = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices)
@@ -841,6 +847,7 @@ class RunExecution(models.Model):
     loaded_skills = models.JSONField(default=list, blank=True)
     loaded_mcps = models.JSONField(default=list, blank=True)
     target_dirs = models.JSONField(default=list, blank=True)
+    runtime_snapshot = models.JSONField(default=dict, blank=True)
     agent_rounds = models.CharField(
         max_length=16,
         choices=Assistant.AgentRounds.choices,
@@ -867,8 +874,185 @@ class RunExecution(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["lensnode"], name="lens_runexec_lensnode_idx"),
+            models.Index(
+                fields=["lensnode"], name="lens_runexec_lensnode_idx"
+            ),
         ]
+
+
+class RunDiagnosticEvidence(TimestampedUUIDModel):
+    """Immutable, privacy-bounded evidence captured for one Run."""
+
+    run = models.OneToOneField(
+        Run,
+        on_delete=models.CASCADE,
+        related_name="diagnostic_evidence",
+    )
+    schema_version = models.PositiveSmallIntegerField(default=1)
+    payload = models.JSONField(default=dict)
+    payload_hash = models.CharField(max_length=64)
+
+    def save(self, *args, **kwargs):
+        """Persist a new snapshot and reject later mutation."""
+
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Run diagnostic evidence is immutable.")
+        if not self.payload_hash:
+            serialized = json.dumps(
+                self.payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            self.payload_hash = hashlib.sha256(serialized.encode()).hexdigest()
+        super().save(*args, **kwargs)
+
+
+class RunDiagnostic(TimestampedUUIDModel):
+    """Asynchronous evidence-backed analysis of one terminal Run."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    run = models.ForeignKey(
+        Run,
+        on_delete=models.CASCADE,
+        related_name="diagnostics",
+    )
+    evidence = models.ForeignKey(
+        RunDiagnosticEvidence,
+        on_delete=models.PROTECT,
+        related_name="diagnostics",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="requested_run_diagnostics",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.QUEUED,
+    )
+    deterministic_findings = models.JSONField(default=list, blank=True)
+    model_ref = models.UUIDField(null=True, blank=True)
+    model_config_hash = models.CharField(max_length=64, blank=True, default="")
+    prompt_version = models.CharField(
+        max_length=32, default="run-diagnosis-v1"
+    )
+    result = models.JSONField(default=dict, blank=True)
+    usage = models.JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=64, blank=True, default="")
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    superseded_by = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="superseded_diagnostics",
+    )
+    idempotency_key = models.CharField(max_length=128, default="initial-v1")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run", "idempotency_key"],
+                name="lens_diag_run_idem_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["run", "status"],
+                name="lens_diag_run_status_idx",
+            ),
+        ]
+        permissions = [
+            (
+                "run_diagnostics",
+                "Can run evidence-backed diagnostics",
+            ),
+        ]
+
+
+class RunDiagnosticTurn(TimestampedUUIDModel):
+    """Controlled follow-up bound to one diagnosis and evidence snapshot."""
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    diagnostic = models.ForeignKey(
+        RunDiagnostic,
+        on_delete=models.CASCADE,
+        related_name="turns",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="requested_run_diagnostic_turns",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.QUEUED,
+    )
+    question = models.TextField(max_length=2000)
+    answer = models.TextField(blank=True, default="")
+    evidence_refs = models.JSONField(default=list, blank=True)
+    usage = models.JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=64, blank=True, default="")
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    idempotency_key = models.CharField(max_length=64)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["diagnostic", "idempotency_key"],
+                name="lens_diag_turn_idem_uniq",
+            ),
+        ]
+        ordering = ["created_at"]
+
+
+class RunTraceExport(TimestampedUUIDModel):
+    """Outbox state for optional non-blocking Langfuse export."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        RETRYING = "retrying", "Retrying"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+
+    run = models.OneToOneField(
+        Run,
+        on_delete=models.CASCADE,
+        related_name="trace_export",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    attempts = models.PositiveSmallIntegerField(default=0)
+    last_error_category = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
+    exported_at = models.DateTimeField(null=True, blank=True)
 
 
 class ScheduledTask(TimestampedUUIDModel):

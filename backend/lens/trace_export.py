@@ -34,6 +34,14 @@ ROOT_OBSERVATION_SUMMARY = (
 )
 
 
+class TraceExportError(RuntimeError):
+    """Classify retryable trace export failures without storing details."""
+
+    def __init__(self, category):
+        super().__init__(category)
+        self.category = category
+
+
 def build_ingestion_batch(
     run,
     root_observation_id,
@@ -169,10 +177,17 @@ def build_ingestion_batch(
     if run.status != Run.Status.DONE:
         root_update["level"] = "ERROR"
     batch.append(_event("span-update", finished_at, root_update))
+    for index, event in enumerate(batch):
+        event["id"] = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"sourcelens:{trace_id}:{index}:{event['type']}",
+            )
+        )
     return batch
 
 
-def export_run_trace(run_pk):
+def export_run_trace(run_pk, *, raise_on_failure=False):
     """Export one completed run, returning whether a batch was sent."""
 
     config = _langfuse_config()
@@ -212,6 +227,8 @@ def export_run_trace(run_pk):
                     response.status,
                     run.uuid,
                 )
+                if raise_on_failure:
+                    raise TraceExportError("http_status")
                 return False
     except (OSError, urlerror.URLError) as exc:
         logger.warning(
@@ -219,6 +236,8 @@ def export_run_trace(run_pk):
             run.uuid,
             type(exc).__name__,
         )
+        if raise_on_failure:
+            raise TraceExportError("network") from exc
         return False
     return True
 
