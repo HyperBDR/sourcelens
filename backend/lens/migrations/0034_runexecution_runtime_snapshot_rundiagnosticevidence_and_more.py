@@ -10,7 +10,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("lens", "0032_session_semantic_title_state"),
+        ("lens", "0033_session_pinned_at"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
