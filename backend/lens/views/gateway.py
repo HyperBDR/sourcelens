@@ -15,8 +15,13 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from lens.document_attachments import (
+    document_attachment_storage,
+    get_document_attachment,
+)
 from lens.models import Run, RunOutputFile, Skill
 from lens.skill_packages import package_zip_bytes
+
 from .base import EventStreamRenderer, LensNodeAuthMixin
 
 
@@ -363,6 +368,49 @@ class LensNodeSkillPackageView(LensNodeAuthMixin, APIView):
             content_type="application/zip",
         )
         response["X-Skill-Package-Hash"] = skill.package_hash
+        return response
+
+
+class LensNodeRunAttachmentView(LensNodeAuthMixin, APIView):
+    """Serve one Run-bound document to its assigned LensNode."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, run_uuid, uuid):
+        """Return document bytes after node, Run, and attachment checks."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        if not Run.objects.filter(
+            uuid=run_uuid,
+            lensnode=lensnode,
+        ).exists():
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        attachment = get_document_attachment(uuid)
+        if attachment is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if attachment.get("run_uuid") != str(run_uuid):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if attachment.get("lensnode_uuid") != str(lensnode.uuid):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        storage = document_attachment_storage()
+        if not storage.exists(attachment["storage_name"]):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        response = FileResponse(
+            storage.open(attachment["storage_name"], "rb"),
+            as_attachment=True,
+            filename=attachment["original_name"] or "document",
+            content_type=(
+                attachment["mime_type"] or "application/octet-stream"
+            ),
+        )
+        response["Content-Length"] = attachment["byte_size"]
+        response["X-Attachment-Hash"] = attachment["content_hash"]
         return response
 
 

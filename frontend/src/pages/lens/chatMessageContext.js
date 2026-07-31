@@ -20,3 +20,15 @@ export function retryRunUuid(messages, targetMessage = null) {
     : [...messages].reverse().find((message) => message.role === 'user')
   return targetMessage?.run || userMessage?.run || ''
 }
+
+export function retryableUserMessage(messages, targetMessage = null) {
+  const userMessage = targetMessage
+    ? precedingUserMessage(messages, targetMessage)
+    : [...messages].reverse().find((message) => message.role === 'user')
+  const hasDocument = (userMessage?.attachments || []).some(
+    (attachment) => attachment.kind === 'document'
+  )
+  return (userMessage?.content || '').trim() && !hasDocument
+    ? userMessage
+    : null
+}

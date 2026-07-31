@@ -13,7 +13,7 @@ from .assistant_lifecycle import (
     AssistantNotRunnableError,
     create_assistant_session,
 )
-from .attachments import ATTACHMENT_MAX_PER_MESSAGE
+from .attachments import ATTACHMENT_MAX_PER_MESSAGE, AttachmentError
 from .datasource_services import (
     check_datasource_path,
     DataSourceDispatchError,
@@ -57,7 +57,11 @@ from .runtime_events import (
     sanitize_loaded_skills,
     sanitize_termination_detail,
 )
-from .services import create_execution_run, validate_retry_run
+from .services import (
+    create_execution_run,
+    supports_document_attachments,
+    validate_retry_run,
+)
 from .skill_generation import (
     get_workspace_guide_payload,
     sync_workspace_guide_skill,
@@ -387,6 +391,7 @@ class AssistantSerializer(serializers.ModelSerializer):
     workspace_guide = serializers.JSONField(required=False)
     skill_summary = serializers.SerializerMethodField()
     mcp_summary = serializers.SerializerMethodField()
+    supports_document_attachments = serializers.SerializerMethodField()
 
     class Meta:
         model = Assistant
@@ -413,6 +418,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "workspace_guide",
             "skill_summary",
             "mcp_summary",
+            "supports_document_attachments",
             "created_at",
             "updated_at",
         ]
@@ -421,6 +427,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "lensnode",
             "skill_summary",
             "mcp_summary",
+            "supports_document_attachments",
             "status",
             "created_at",
             "updated_at",
@@ -434,6 +441,11 @@ class AssistantSerializer(serializers.ModelSerializer):
             "total": assistant.skill_bindings.count(),
             "enabled": enabled,
         }
+
+    def get_supports_document_attachments(self, assistant):
+        """Return whether the assigned LensNode accepts Run documents."""
+
+        return supports_document_attachments(assistant.lensnode)
 
     def get_mcp_summary(self, assistant):
         """Return MCP binding summary for list views."""
@@ -1885,7 +1897,7 @@ class MessageSerializer(serializers.ModelSerializer):
     completed_at = serializers.SerializerMethodField()
     feedback = serializers.SerializerMethodField()
     feedback_updated_at = serializers.SerializerMethodField()
-    attachments = MessageAttachmentSerializer(many=True, read_only=True)
+    attachments = serializers.SerializerMethodField()
     output_files = RunOutputFileSerializer(many=True, read_only=True)
 
     class Meta:
@@ -1918,6 +1930,33 @@ class MessageSerializer(serializers.ModelSerializer):
             "output_files",
             "created_at",
         ]
+
+    def get_attachments(self, obj):
+        """Return persistent images plus unexpired transient documents."""
+
+        images = MessageAttachmentSerializer(
+            obj.attachments.all(),
+            many=True,
+        ).data
+        if obj.role != Message.Role.USER or obj.run_id is None:
+            return images
+        from .document_attachments import document_attachment_response
+
+        documents_by_run = self.context.get("document_attachments_by_run")
+        if documents_by_run is None:
+            from .document_attachments import get_run_document_attachments
+
+            documents = get_run_document_attachments(
+                obj.run.uuid,
+                fail_silently=True,
+            )
+        else:
+            documents = documents_by_run.get(str(obj.run.uuid), [])
+        documents = [document_attachment_response(item) for item in documents]
+        return sorted(
+            [*images, *documents],
+            key=lambda item: item.get("order", 0),
+        )
 
     def get_completed_at(self, obj):
         """Return the terminal Run timestamp for assistant messages."""
@@ -2219,17 +2258,22 @@ class RunCreateSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        """Require text or at least one image, and cap attachment count."""
+        """Require text or an attachment, and cap attachment count."""
 
         question = (attrs.get("question") or "").strip()
         attachments = attrs.get("attachment_uuids") or []
         if not question and not attachments:
             raise serializers.ValidationError(
-                "Provide a question or at least one image."
+                "Provide a question or at least one attachment."
             )
         if len(attachments) > ATTACHMENT_MAX_PER_MESSAGE:
             raise serializers.ValidationError(
-                f"At most {ATTACHMENT_MAX_PER_MESSAGE} images per message."
+                "At most "
+                f"{ATTACHMENT_MAX_PER_MESSAGE} attachments per message."
+            )
+        if len(set(attachments)) != len(attachments):
+            raise serializers.ValidationError(
+                "Attachment UUIDs must be unique."
             )
         retry_uuid = attrs.get("retry_of_run_uuid")
         if retry_uuid is not None:
@@ -2266,6 +2310,8 @@ class RunCreateSerializer(serializers.Serializer):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
+        except AttachmentError as exc:
+            raise serializers.ValidationError(str(exc))
         if run_inline:
             from .execution import execute_answer_run
 

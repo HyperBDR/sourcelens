@@ -801,13 +801,33 @@
                   </h3>
                   <div class="flex flex-wrap gap-3">
                     <AuthImage
-                      v-for="img in detail.attachments"
+                      v-for="img in detail.attachments.filter(
+                        (item) => item.kind !== 'document'
+                      )"
                       :key="img.uuid"
                       :src="img.url"
                       :alt="img.original_name || 'image'"
                       class="run-attachment"
                       zoomable
                     />
+                    <button
+                      v-for="file in detail.attachments.filter(
+                        (item) => item.kind === 'document'
+                      )"
+                      :key="file.uuid"
+                      type="button"
+                      class="run-document-attachment"
+                      @click="
+                        downloadOutputFile({
+                          ...file,
+                          filename: file.original_name
+                        })
+                      "
+                    >
+                      <FileText :size="20" aria-hidden="true" />
+                      <span>{{ file.original_name }}</span>
+                      <Download :size="16" aria-hidden="true" />
+                    </button>
                   </div>
                   <p v-if="visionQuery" class="mt-2 text-xs text-gray-500">
                     {{ t('lensRuns.visionQuery') }}: {{ visionQuery }}
@@ -1503,6 +1523,13 @@ watch(detailVisible, (visible) => {
   max-height: 180px;
   object-fit: cover;
   border: 1px solid #e5e7eb;
+}
+.run-document-attachment {
+  @apply flex max-w-sm items-center gap-2 rounded-lg border border-gray-200
+    bg-white px-3 py-2 text-left text-sm text-gray-700;
+}
+.run-document-attachment span {
+  @apply truncate;
 }
 .run-detail-id {
   @apply ml-2 break-all font-mono text-xs font-normal text-gray-500;

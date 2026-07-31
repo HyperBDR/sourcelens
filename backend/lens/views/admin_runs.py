@@ -8,6 +8,10 @@ from rest_framework.views import APIView
 from agentcore_metering.adapters.django.models import LLMUsage
 
 from accounts.permissions import HasRequiredFeature
+from lens.document_attachments import (
+    document_attachment_response,
+    get_run_document_attachments,
+)
 from lens.models import Run
 from lens.runtime_events import (
     sanitize_loaded_mcps,
@@ -403,6 +407,13 @@ def _admin_run_detail(run):
         ).data
         if run.input_message
         else []
+    )
+    attachments.extend(
+        document_attachment_response(item)
+        for item in get_run_document_attachments(
+            run.uuid,
+            fail_silently=True,
+        )
     )
     output_files = RunOutputFileSerializer(
         run.output_files.all(), many=True
