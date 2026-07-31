@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 export const useUiStore = defineStore('ui', () => {
+  const adminSidebarScrollTop = ref(0)
   const settingsOpen = ref(false)
   const settingsTab = ref('profile')
 
@@ -15,6 +16,7 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   return {
+    adminSidebarScrollTop,
     settingsOpen,
     settingsTab,
     openSettings,
