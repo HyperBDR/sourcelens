@@ -160,11 +160,24 @@
 
                 <div class="flex shrink-0 items-center gap-1">
                   <span
-                    v-if="sessionHasUnreadAnswer(session.uuid)"
+                    v-if="sessionActivity.hasActivity(session.uuid)"
+                    class="session-activity-indicator"
+                    :title="t('lens.chat.sessionActive')"
+                  >
+                    <LoaderCircle
+                      :size="15"
+                      :stroke-width="2.2"
+                      aria-hidden="true"
+                    />
+                    <span class="sr-only">
+                      {{ t('lens.chat.sessionActive') }}
+                    </span>
+                  </span>
+                  <span
+                    v-else-if="sessionHasUnreadAnswer(session.uuid)"
                     class="session-unread-indicator"
                     :title="t('lens.chat.unreadAnswer')"
                   >
-                    <Bell :size="14" :stroke-width="2.2" aria-hidden="true" />
                     <span class="sr-only">
                       {{ t('lens.chat.unreadAnswer') }}
                     </span>
@@ -1367,7 +1380,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
 import {
   ArrowLeft,
-  Bell,
   MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -1375,6 +1387,7 @@ import {
   Download,
   Eye,
   FileText,
+  LoaderCircle,
   ThumbsDown,
   ThumbsUp
 } from '@lucide/vue'
@@ -1399,21 +1412,26 @@ import {
 } from '@/utils/filePreview'
 import { downloadQaPdf } from '@/utils/qaPdf'
 import { useToast } from '@/composables/useToast'
+import { useSessionActivity } from '@/composables/useSessionActivity'
 import { useIsMobile } from '@/composables/useIsMobile'
 import apiConfig from '@/config/api'
 import { useLensStore } from '@/store/lens'
 import { usePreferencesStore } from '@/store/preferences'
 import { useUserStore } from '@/store/user'
 import {
-  answerCompletionTitle,
+  answerSummary,
   clearUnreadSession,
   handleTerminalRun,
-  pollRunUntilTerminal,
   readUnreadSessions,
   shouldReviewUnreadSession,
   UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
-import { precedingUserMessage } from '@/pages/lens/chatMessageContext'
+import { startRunCompletionTracking } from '@/utils/runCompletionTracking'
+import {
+  precedingUserMessage,
+  retryRunUuid
+} from '@/pages/lens/chatMessageContext'
+import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import {
   resolveRunStatus,
   shouldShowRetryHint
@@ -1459,6 +1477,7 @@ const { showError, showSuccess, showWarning } = useToast()
 const userStore = useUserStore()
 const lensStore = useLensStore()
 const preferencesStore = usePreferencesStore()
+const sessionActivity = useSessionActivity()
 
 const assistants = ref([])
 const sessions = ref([])
@@ -1478,13 +1497,13 @@ const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
 const TITLE_POLL_INTERVAL_MS = 2000
 const TITLE_POLL_MAX_ATTEMPTS = 15
-const BASE_DOCUMENT_TITLE = document.title || 'SourceLens'
 const streamError = ref('')
 const failedRunError = ref(null)
 const queuePosition = ref(null)
 const currentRun = ref(null)
+const pendingRunSubmission = ref(null)
+const retryDraft = ref(null)
 const runStatusResolvingSessionUuid = ref('')
-const unreadSessions = ref(readUnreadSessions(window.localStorage))
 const loading = ref({ run: false })
 const streamController = ref(null)
 const sidebarOpen = ref(false)
@@ -1495,7 +1514,6 @@ const renameDraft = ref('')
 const composerRef = ref(null)
 const scrollRef = ref(null)
 const seenStepEventCounts = new Map()
-const completionTrackers = new Map()
 let sessionLoadGeneration = 0
 const runtimeState = ref(createRuntimeState())
 const liveActivityScrollRef = ref(null)
@@ -2009,14 +2027,6 @@ watch(isRunActive, (active) => {
   }
 })
 
-watch(
-  [
-    () => preferencesStore.answerCompletionIndicator,
-    () => preferencesStore.currentLanguage
-  ],
-  refreshUnreadSessions
-)
-
 const { isMobile } = useIsMobile()
 
 function authHeaders() {
@@ -2040,22 +2050,14 @@ function sleep(ms) {
 }
 
 function refreshUnreadSessions() {
-  unreadSessions.value = readUnreadSessions(window.localStorage)
-  const hasUnread =
-    preferencesStore.answerCompletionIndicator &&
-    Object.keys(unreadSessions.value).length > 0
-  document.title = answerCompletionTitle({
-    baseTitle: BASE_DOCUMENT_TITLE,
-    completionLabel: t('lens.chat.tabAnswerCompleted'),
-    hasUnread
-  })
+  sessionActivity.setUnreadSessions(readUnreadSessions(window.localStorage))
 }
 
 function sessionHasUnreadAnswer(sessionUuid) {
   return (
     preferencesStore.answerCompletionIndicator &&
     selectedSessionUuid.value !== sessionUuid &&
-    Boolean(unreadSessions.value[sessionUuid])
+    Boolean(sessionActivity.state.unreadSessions[sessionUuid])
   )
 }
 
@@ -2079,7 +2081,7 @@ function handleCompletionVisibility() {
     !shouldReviewUnreadSession({
       documentRef: document,
       selectedSessionUuid: sessionUuid,
-      unreadSessions: unreadSessions.value
+      unreadSessions: sessionActivity.state.unreadSessions
     })
   ) {
     return
@@ -2091,25 +2093,29 @@ function handleCompletionVisibility() {
 }
 
 function startCompletionTracking(run, sessionUuid) {
-  if (!run?.uuid || completionTrackers.has(run.uuid)) {
-    return
+  const session = sessions.value.find((item) => item.uuid === sessionUuid)
+  const assistantSlug =
+    session?.assistant_slug || selectedAssistant.value?.slug || ''
+  const navigationTarget = {
+    name: 'LensAssistantChat',
+    params: { slug: assistantSlug },
+    query: { session: sessionUuid }
   }
-
-  const tracker = { stopped: false }
-  completionTrackers.set(run.uuid, tracker)
-  void pollRunUntilTerminal({
+  startRunCompletionTracking({
     getRun,
-    initialRun: run,
-    isStopped: () => tracker.stopped,
     maxAttempts: RUN_POLL_MAX_ATTEMPTS,
-    runUuid: run.uuid,
-    sleep: () => sleep(RUN_POLL_INTERVAL_MS)
-  })
-    .then((terminalRun) => {
-      if (!terminalRun || tracker.stopped) return
+    run,
+    sessionUuid,
+    sleep: () => sleep(RUN_POLL_INTERVAL_MS),
+    onTerminal: async (terminalRun) => {
       if (terminalRun.status === 'done') {
         void refreshSessionTitleUntilSettled(sessionUuid)
       }
+      const visibleSessionUuid =
+        route.name === 'LensAssistantChat' &&
+        route.params.slug === assistantSlug
+          ? selectedSessionUuid.value
+          : ''
       const result = handleTerminalRun({
         documentRef: document,
         indicatorEnabled: preferencesStore.answerCompletionIndicator,
@@ -2117,21 +2123,48 @@ function startCompletionTracking(run, sessionUuid) {
           body: t('settings.modal.nativeAnswerCompletedBody'),
           enabled: preferencesStore.nativeBrowserNotifications,
           NotificationRef: window.Notification,
-          onOpenConversation: (completedSessionUuid) =>
-            selectSession({ uuid: completedSessionUuid }),
+          onOpenConversation: () => router.push(navigationTarget),
           title: t('settings.modal.nativeAnswerCompletedTitle'),
           windowRef: window
         },
         run: terminalRun,
-        selectedSessionUuid: selectedSessionUuid.value,
+        selectedSessionUuid: visibleSessionUuid,
         sessionUuid,
         storage: window.localStorage
       })
       if (result.unreadChanged) {
         refreshUnreadSessions()
       }
-    })
-    .finally(() => completionTrackers.delete(run.uuid))
+      if (!result.inAppNotificationRequested) {
+        return
+      }
+      let summary = ''
+      try {
+        const completedMessages = await listMessages(sessionUuid)
+        const answer = [...completedMessages].reverse().find((message) => {
+          return (
+            message.role === 'assistant' && message.run === terminalRun.uuid
+          )
+        })
+        summary = answerSummary(answer?.content)
+      } catch {
+        summary = ''
+      }
+      if (
+        document.visibilityState !== 'visible' ||
+        document.hasFocus() === false
+      ) {
+        return
+      }
+      sessionActivity.notify({
+        duration: 5000,
+        message: summary || t('lens.chat.answerReady'),
+        title: session?.title?.trim() || t('lens.chat.untitledSession'),
+        to: navigationTarget,
+        type: 'success'
+      })
+    }
+  })
 }
 
 async function waitForRunTerminal(runUuid) {
@@ -2561,6 +2594,7 @@ async function selectSession(session, updateRoute = true) {
   booted.value = true
   if (sessionChanged) {
     question.value = ''
+    retryDraft.value = null
     if (composerRef.value) composerRef.value.style.height = 'auto'
   }
   currentRun.value = null
@@ -2738,6 +2772,15 @@ async function submit() {
     (item) => item.status === 'done'
   )
   const attachmentUuids = pendingImages.map((item) => item.uuid)
+  const retryDraftAtSubmit = retryDraft.value
+  const preparedSubmission = prepareRunSubmission({
+    sessionUuid: sessionAtSubmit,
+    question: optimisticText,
+    attachmentUuids,
+    retryDraft: retryDraftAtSubmit,
+    pendingSubmission: pendingRunSubmission.value
+  })
+  pendingRunSubmission.value = preparedSubmission.submission
   attachments.value = []
   // Revoke the optimistic object URLs on every exit path, unless they are
   // restored to the composer for a retry (set below on real failures).
@@ -2773,13 +2816,16 @@ async function submit() {
       setSessionTitle(sessionAtSubmit, autoTitle)
     }
   }
+  currentRun.value = null
   try {
-    const run = await createRun(sessionAtSubmit, {
-      question: optimisticText,
-      run_inline: false,
-      enqueue: true,
-      attachment_uuids: attachmentUuids
-    })
+    const run = await createRun(sessionAtSubmit, preparedSubmission.payload)
+    if (
+      pendingRunSubmission.value?.idempotencyKey ===
+      preparedSubmission.submission.idempotencyKey
+    ) {
+      pendingRunSubmission.value = null
+    }
+    retryDraft.value = null
     startCompletionTracking(run, sessionAtSubmit)
     // switched away between createRun and here — don't bind this run's live
     // state onto the now-current assistant
@@ -2789,6 +2835,13 @@ async function submit() {
     // switched away while streaming — leave the new assistant untouched
     if (selectedSessionUuid.value !== sessionAtSubmit) return
     await finishSubmittedRun(run.uuid, sessionAtSubmit)
+    if (
+      pendingRunSubmission.value?.idempotencyKey ===
+      preparedSubmission.submission.idempotencyKey
+    ) {
+      pendingRunSubmission.value = null
+    }
+    retryDraft.value = null
   } catch (err) {
     // a deliberate stream abort (switch/navigate) or a switch away is not a
     // submit failure — bail silently without touching the current state
@@ -2805,6 +2858,13 @@ async function submit() {
         if (selectedSessionUuid.value !== sessionAtSubmit) return
         currentRun.value = run
         await finishSubmittedRun(runUuid, sessionAtSubmit)
+        if (
+          pendingRunSubmission.value?.idempotencyKey ===
+          preparedSubmission.submission.idempotencyKey
+        ) {
+          pendingRunSubmission.value = null
+        }
+        retryDraft.value = null
         return
       } catch {
         // Fall through to the true submit-failure recovery path.
@@ -2812,6 +2872,7 @@ async function submit() {
     }
     messages.value = messages.value.filter((m) => m.uuid !== '__optimistic__')
     question.value = optimisticText
+    retryDraft.value = retryDraftAtSubmit
     // Restore the uploaded (still-unbound) images so the user can retry;
     // keep their object URLs alive for the composer thumbnails.
     if (pendingImages.length) {
@@ -2945,17 +3006,40 @@ function openShare(message) {
 async function exportQa(message) {
   const sourceQuestion = userMessageForMessage(message)
   const questionText = sourceQuestion?.content || ''
-  const sessionSummary = sessions.value.find(
+  const session = sessions.value.find(
     (session) => session.uuid === selectedSessionUuid.value
-  )?.title
+  )
+  const sessionSummary =
+    session?.title?.trim() || t('lens.chat.untitledSession')
+  const sessionUuid = selectedSessionUuid.value
+  const activityId = sessionActivity.createActivityId('pdf')
+  const sourceRoute = {
+    name: 'LensAssistantChat',
+    params: { slug: session?.assistant_slug || selectedAssistant.value?.slug },
+    query: { session: sessionUuid }
+  }
+  sessionActivity.beginActivity(sessionUuid, activityId)
   try {
     const response = await getRunPdf(message.run)
     downloadQaPdf(response, {
       summary: sessionSummary,
       question: questionText
     })
+    sessionActivity.notify({
+      duration: 5000,
+      message: t('lens.chat.pdfGenerated', { title: sessionSummary }),
+      to: sourceRoute,
+      type: 'success'
+    })
   } catch {
-    showWarning(t('lens.chat.downloadFailed'))
+    sessionActivity.notify({
+      duration: 8000,
+      message: t('lens.chat.pdfGenerationFailed'),
+      to: sourceRoute,
+      type: 'error'
+    })
+  } finally {
+    sessionActivity.endActivity(sessionUuid, activityId)
   }
 }
 
@@ -3000,6 +3084,8 @@ function retryLastQuestion(message = null) {
     return
   }
   question.value = userMessage.content || ''
+  const runUuid = retryRunUuid(messages.value, message)
+  retryDraft.value = runUuid ? { question: question.value, runUuid } : null
   nextTick(() => {
     composerRef.value?.focus()
   })
@@ -3038,6 +3124,24 @@ async function doDeleteSession(session) {
 }
 
 watch(
+  () => route.query.session,
+  (sessionUuid) => {
+    if (
+      route.name !== 'LensAssistantChat' ||
+      route.params.slug !== selectedAssistant.value?.slug ||
+      !sessionUuid ||
+      sessionUuid === selectedSessionUuid.value
+    ) {
+      return
+    }
+    const session = sessions.value.find((item) => item.uuid === sessionUuid)
+    if (session) {
+      void selectSession(session, false)
+    }
+  }
+)
+
+watch(
   () => route.params.slug,
   () => {
     // On a hard load with a stored token, defer the first bootstrap to
@@ -3070,11 +3174,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('storage', handleCompletionStorage)
   window.removeEventListener('focus', handleCompletionVisibility)
   document.removeEventListener('visibilitychange', handleCompletionVisibility)
-  document.title = BASE_DOCUMENT_TITLE
-  completionTrackers.forEach((tracker) => {
-    tracker.stopped = true
-  })
-  completionTrackers.clear()
   streamController.value?.abort()
   clearInterval(elapsedTimer)
 })
@@ -3197,9 +3296,16 @@ onBeforeUnmount(() => {
   color: #111827;
 }
 
+.session-activity-indicator {
+  @apply flex h-6 w-6 shrink-0 items-center justify-center text-primary-600;
+}
+
+.session-activity-indicator svg {
+  animation: spin 0.75s linear infinite;
+}
+
 .session-unread-indicator {
-  @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-full;
-  @apply bg-primary-50 text-primary-600;
+  @apply h-2.5 w-2.5 shrink-0 rounded-full bg-primary-600;
 }
 
 .session-delete-btn,
@@ -4025,6 +4131,7 @@ onBeforeUnmount(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .session-activity-indicator svg,
   .runtime-plan-status.is-in_progress,
   .runtime-activity-indicator.is-current {
     animation: none;

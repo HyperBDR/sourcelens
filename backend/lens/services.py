@@ -276,6 +276,7 @@ def create_execution_run(
     session,
     question,
     idempotency_key="",
+    retry_of_run=None,
     enqueue=True,
     attachment_uuids=None,
     user=None,
@@ -297,6 +298,8 @@ def create_execution_run(
         )
         if existing:
             return existing
+
+    validate_retry_run(session, retry_of_run)
 
     if (
         not session.title_manually_edited
@@ -326,6 +329,7 @@ def create_execution_run(
         status=Run.Status.QUEUED,
         input_message=input_message,
         output_message=output_message,
+        retry_of_run=retry_of_run,
         lensnode=session.assistant.lensnode,
         idempotency_key=idempotency_key,
     )
@@ -338,6 +342,28 @@ def create_execution_run(
         transaction.on_commit(lambda: _enqueue_answer_run(run.uuid))
 
     return run
+
+
+def validate_retry_run(session, retry_of_run):
+    """Reject Retry links outside the Session or with an existing cycle."""
+
+    if retry_of_run is None:
+        return
+    seen = set()
+    current = retry_of_run
+    while current is not None:
+        if current.session_id != session.pk:
+            raise ValueError("Retry Run must belong to the same Session.")
+        if current.pk in seen:
+            raise ValueError("Retry Run chain contains a cycle.")
+        seen.add(current.pk)
+        if current.retry_of_run_id is None:
+            return
+        current = Run.objects.only(
+            "pk",
+            "session_id",
+            "retry_of_run_id",
+        ).get(pk=current.retry_of_run_id)
 
 
 def _enqueue_answer_run(run_uuid):
@@ -684,44 +710,158 @@ AGENT_TURNS_BY_ROUNDS = {
 
 
 def build_run_history(run):
-    """Return prior conversation turns for a run as role/content dicts.
+    """Return trusted prior Run turns in chronological order."""
 
-    Includes only completed user and assistant messages before the
-    current turn, newest-first up to the caps, then returned in
-    chronological order. A Message stores only final content (never tool
-    traces), so the carried history stays compact and the agent context
-    cannot blow up from a long session. Capability-unavailable fallback
-    answers are omitted because their boundary decision applies only to
-    that request; the user message remains available for follow-up context.
-    """
-
-    blocked_runs = Run.objects.filter(
-        session=run.session,
-        termination_detail__reason="capability_unavailable",
-        output_message_id__isnull=False,
-    )
-    messages = Message.objects.filter(
-        session=run.session,
-        sequence__lt=run.input_message.sequence,
-        role__in=[Message.Role.USER, Message.Role.ASSISTANT],
-    ).exclude(
-        pk__in=blocked_runs.values("output_message_id")
-    ).order_by("-sequence")
-    history = []
-    total_chars = 0
-    for message in messages:
-        content = (message.content or "").strip()
-        if not content:
-            continue
-        content = content[:HISTORY_MAX_MESSAGE_CHARS]
-        if total_chars + len(content) > HISTORY_MAX_TOTAL_CHARS:
-            break
-        history.append({"role": message.role, "content": content})
-        total_chars += len(content)
-        if len(history) >= HISTORY_MAX_PAIRS * 2:
-            break
-    history.reverse()
+    history, _ = _build_run_history_data(run)
     return history
+
+
+def build_run_history_metadata(run):
+    """Return non-sensitive counts describing Run history filtering."""
+
+    _, metadata = _build_run_history_data(run)
+    return metadata
+
+
+def _build_run_history_data(run):
+    """Build trusted history and the corresponding filter counts."""
+
+    all_prior_runs = list(
+        Run.objects.filter(
+            session=run.session,
+            input_message__sequence__lt=run.input_message.sequence,
+        )
+        .select_related(
+            "input_message",
+            "output_message",
+        )
+        .order_by("input_message__sequence")
+    )
+    runs_by_id = {item.pk: item for item in all_prior_runs}
+    cutoff_sequence = run.input_message.sequence
+    superseded_current_attempts = 0
+    if run.retry_of_run_id:
+        root, superseded_current_attempts = _retry_chain_root(
+            run,
+            runs_by_id,
+        )
+        cutoff_sequence = root.input_message.sequence
+    prior_runs = [
+        item
+        for item in all_prior_runs
+        if item.input_message.sequence < cutoff_sequence
+    ]
+    latest_attempts = _latest_retry_attempts(prior_runs)
+    limited_pairs = []
+    total_chars = 0
+    for prior in reversed(latest_attempts):
+        entries = _trusted_history_entries(prior)
+        pair_chars = sum(len(item["content"]) for item in entries)
+        if total_chars + pair_chars > HISTORY_MAX_TOTAL_CHARS:
+            break
+        if entries:
+            limited_pairs.append(entries)
+            total_chars += pair_chars
+        if len(limited_pairs) >= HISTORY_MAX_PAIRS:
+            break
+    history = [
+        item
+        for pair in reversed(limited_pairs)
+        for item in pair
+    ]
+    metadata = {
+        "history_runs_before_filtering": len(all_prior_runs),
+        "history_runs_after_filtering": len(latest_attempts),
+        "superseded_retry_attempts_removed": (
+            superseded_current_attempts
+            + len(prior_runs)
+            - len(latest_attempts)
+        ),
+        "non_completed_assistant_outputs_excluded": sum(
+            bool(
+                prior.output_message_id
+                and (prior.output_message.content or "").strip()
+            )
+            and not _assistant_output_is_trusted(prior)
+            for prior in latest_attempts
+        ),
+    }
+    return history, metadata
+
+
+def _retry_chain_root(run, runs_by_id):
+    """Return the first Run in a valid Retry chain."""
+
+    seen = set()
+    current = run
+    attempts = 0
+    while current.retry_of_run_id and current.pk not in seen:
+        seen.add(current.pk)
+        parent = runs_by_id.get(current.retry_of_run_id)
+        if parent is None:
+            break
+        current = parent
+        attempts += 1
+    return current, attempts
+
+
+def _latest_retry_attempts(prior_runs):
+    """Collapse each Retry chain to its latest prior attempt."""
+
+    runs_by_id = {item.pk: item for item in prior_runs}
+    latest_by_root = {}
+    for prior in prior_runs:
+        root_id = prior.pk
+        current = prior
+        seen = set()
+        while (
+            current.retry_of_run_id in runs_by_id
+            and current.pk not in seen
+        ):
+            seen.add(current.pk)
+            current = runs_by_id[current.retry_of_run_id]
+            root_id = current.pk
+        latest_by_root[root_id] = prior
+    return sorted(
+        latest_by_root.values(),
+        key=lambda item: item.input_message.sequence,
+    )
+
+
+def _trusted_history_entries(run):
+    """Build one bounded Run turn, excluding untrusted assistant output."""
+
+    entries = []
+    question = (run.input_message.content or "").strip()
+    if question:
+        entries.append(
+            {
+                "role": Message.Role.USER,
+                "content": question[:HISTORY_MAX_MESSAGE_CHARS],
+            }
+        )
+    if (
+        _assistant_output_is_trusted(run)
+        and run.output_message_id
+    ):
+        answer = (run.output_message.content or "").strip()
+        if answer:
+            entries.append(
+                {
+                    "role": Message.Role.ASSISTANT,
+                    "content": answer[:HISTORY_MAX_MESSAGE_CHARS],
+                }
+            )
+    return entries
+
+
+def _assistant_output_is_trusted(run):
+    """Return whether a Run's assistant output is safe as history."""
+
+    return (
+        run.status == Run.Status.DONE
+        and run.outcome in {"", Run.Outcome.COMPLETED}
+    )
 
 
 def _recent_history_context(run):

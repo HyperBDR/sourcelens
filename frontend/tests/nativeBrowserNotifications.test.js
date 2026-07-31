@@ -25,11 +25,31 @@ test('requests permission from the native notification switch click', async () =
   )
 })
 
-test('wires native completion delivery to the existing terminal run hook', async () => {
+test('uses one route-aware target for native and in-app completion clicks', async () => {
   const source = await readSource('src/pages/lens/Chat.vue')
 
-  assert.match(source, /nativeNotification:\s*{/)
-  assert.match(source, /onOpenConversation:\s*\(completedSessionUuid\)\s*=>/)
+  assert.match(source, /const navigationTarget = {/)
+  assert.match(source, /params: { slug: assistantSlug }/)
+  assert.match(source, /query: { session: sessionUuid }/)
+  assert.match(
+    source,
+    /onOpenConversation: \(\) => router\.push\(navigationTarget\)/
+  )
+  assert.match(source, /to: navigationTarget/)
+})
+
+test('synchronizes completion preferences and unread state across tabs', async () => {
+  const source = await readSource('src/pages/lens/Chat.vue')
+
+  assert.match(source, /function handleCompletionStorage\(event\)/)
+  assert.match(
+    source,
+    /window\.addEventListener\('storage', handleCompletionStorage\)/
+  )
+  assert.match(
+    source,
+    /window\.removeEventListener\('storage', handleCompletionStorage\)/
+  )
 })
 
 test('provides English and Simplified Chinese native notification text', async () => {

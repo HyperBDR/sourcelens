@@ -202,6 +202,9 @@ class LensServiceTests(TransactionTestCase):
         )
         run1.output_message.content = "a1"
         run1.output_message.save(update_fields=["content"])
+        run1.status = Run.Status.DONE
+        run1.outcome = Run.Outcome.COMPLETED
+        run1.save(update_fields=["status", "outcome"])
         # second turn left unanswered -> its empty answer must be skipped
         create_execution_run(
             session=self.session, question="q2", enqueue=False
@@ -259,13 +262,20 @@ class LensServiceTests(TransactionTestCase):
         )
         answered.output_message.content = "Order states explained"
         answered.output_message.save(update_fields=["content"])
+        answered.status = Run.Status.DONE
+        answered.outcome = Run.Outcome.COMPLETED
+        answered.save(update_fields=["status", "outcome"])
         blocked = create_execution_run(
             session=self.session,
             question="Create an order",
             enqueue=False,
         )
+        blocked.status = Run.Status.DONE
+        blocked.outcome = Run.Outcome.BLOCKED
         blocked.termination_detail = {"reason": "capability_unavailable"}
-        blocked.save(update_fields=["termination_detail"])
+        blocked.save(
+            update_fields=["status", "outcome", "termination_detail"]
+        )
         blocked.output_message.delete()
         current = create_execution_run(
             session=self.session,
@@ -282,6 +292,228 @@ class LensServiceTests(TransactionTestCase):
                 {"role": "assistant", "content": "Order states explained"},
                 {"role": "user", "content": "Create an order"},
             ],
+        )
+
+    def test_build_run_history_excludes_untrusted_assistant_outputs(self):
+        cases = [
+            (Run.Status.DONE, Run.Outcome.BLOCKED),
+            (Run.Status.FAILED, Run.Outcome.BLOCKED),
+            (Run.Status.CANCELLED, Run.Outcome.PARTIAL),
+        ]
+        expected = []
+        for index, (status, outcome) in enumerate(cases, start=1):
+            prior = create_execution_run(
+                session=self.session,
+                question=f"question {index}",
+                enqueue=False,
+            )
+            prior.output_message.content = f"partial answer {index}"
+            prior.output_message.save(update_fields=["content"])
+            prior.status = status
+            prior.outcome = outcome
+            prior.save(update_fields=["status", "outcome"])
+            expected.append(
+                {"role": "user", "content": f"question {index}"}
+            )
+        current = create_execution_run(
+            session=self.session,
+            question="follow up",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        self.assertEqual(history, expected)
+
+    def test_build_run_history_collapses_retry_chain_to_latest_attempt(self):
+        first = create_execution_run(
+            session=self.session,
+            question="same question",
+            enqueue=False,
+        )
+        first.status = Run.Status.DONE
+        first.outcome = Run.Outcome.BLOCKED
+        first.save(update_fields=["status", "outcome"])
+        second = create_execution_run(
+            session=self.session,
+            question="same question",
+            retry_of_run=first,
+            enqueue=False,
+        )
+        second.status = Run.Status.FAILED
+        second.outcome = Run.Outcome.BLOCKED
+        second.save(update_fields=["status", "outcome"])
+        third = create_execution_run(
+            session=self.session,
+            question="same question",
+            retry_of_run=second,
+            enqueue=False,
+        )
+        third.output_message.content = "fresh completed answer"
+        third.output_message.save(update_fields=["content"])
+        third.status = Run.Status.DONE
+        third.outcome = Run.Outcome.COMPLETED
+        third.save(update_fields=["status", "outcome"])
+        current = create_execution_run(
+            session=self.session,
+            question="follow up",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": "same question"},
+                {"role": "assistant", "content": "fresh completed answer"},
+            ],
+        )
+
+    def test_retry_history_stops_before_the_original_run(self):
+        context = create_execution_run(
+            session=self.session,
+            question="context question",
+            enqueue=False,
+        )
+        context.output_message.content = "context answer"
+        context.output_message.save(update_fields=["content"])
+        context.status = Run.Status.DONE
+        context.outcome = Run.Outcome.COMPLETED
+        context.save(update_fields=["status", "outcome"])
+        original = create_execution_run(
+            session=self.session,
+            question="regenerate this",
+            enqueue=False,
+        )
+        original.output_message.content = "original answer"
+        original.output_message.save(update_fields=["content"])
+        original.status = Run.Status.DONE
+        original.outcome = Run.Outcome.COMPLETED
+        original.save(update_fields=["status", "outcome"])
+        later = create_execution_run(
+            session=self.session,
+            question="later question",
+            enqueue=False,
+        )
+        later.output_message.content = "later answer"
+        later.output_message.save(update_fields=["content"])
+        later.status = Run.Status.DONE
+        later.outcome = Run.Outcome.COMPLETED
+        later.save(update_fields=["status", "outcome"])
+        retry = create_execution_run(
+            session=self.session,
+            question="regenerate this",
+            retry_of_run=original,
+            enqueue=False,
+        )
+
+        history = build_run_history(retry)
+
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": "context question"},
+                {"role": "assistant", "content": "context answer"},
+            ],
+        )
+
+    def test_retry_history_resolves_a_long_chain_in_one_query(self):
+        original = create_execution_run(
+            session=self.session,
+            question="original",
+            enqueue=False,
+        )
+        previous = original
+        for index in range(5):
+            previous = create_execution_run(
+                session=self.session,
+                question=f"retry {index}",
+                retry_of_run=previous,
+                enqueue=False,
+            )
+        current = create_execution_run(
+            session=self.session,
+            question="latest retry",
+            retry_of_run=previous,
+            enqueue=False,
+        )
+
+        with self.assertNumQueries(1):
+            history = build_run_history(current)
+
+        self.assertEqual(history, [])
+
+    def test_build_run_history_preserves_manual_identical_turns(self):
+        for answer in ("first answer", "second answer"):
+            prior = create_execution_run(
+                session=self.session,
+                question="same text",
+                enqueue=False,
+            )
+            prior.output_message.content = answer
+            prior.output_message.save(update_fields=["content"])
+            prior.status = Run.Status.DONE
+            prior.outcome = Run.Outcome.COMPLETED
+            prior.save(update_fields=["status", "outcome"])
+        current = create_execution_run(
+            session=self.session,
+            question="follow up",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        self.assertEqual(
+            history,
+            [
+                {"role": "user", "content": "same text"},
+                {"role": "assistant", "content": "first answer"},
+                {"role": "user", "content": "same text"},
+                {"role": "assistant", "content": "second answer"},
+            ],
+        )
+
+    def test_history_limits_apply_after_untrusted_outputs_are_filtered(self):
+        completed = create_execution_run(
+            session=self.session,
+            question="trusted question",
+            enqueue=False,
+        )
+        completed.output_message.content = "trusted answer"
+        completed.output_message.save(update_fields=["content"])
+        completed.status = Run.Status.DONE
+        completed.outcome = Run.Outcome.COMPLETED
+        completed.save(update_fields=["status", "outcome"])
+        for index in range(4):
+            blocked = create_execution_run(
+                session=self.session,
+                question=f"blocked question {index}",
+                enqueue=False,
+            )
+            blocked.output_message.content = "x" * 8000
+            blocked.output_message.save(update_fields=["content"])
+            blocked.status = Run.Status.DONE
+            blocked.outcome = Run.Outcome.BLOCKED
+            blocked.save(update_fields=["status", "outcome"])
+        current = create_execution_run(
+            session=self.session,
+            question="follow up",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        self.assertEqual(
+            history[0:2],
+            [
+                {"role": "user", "content": "trusted question"},
+                {"role": "assistant", "content": "trusted answer"},
+            ],
+        )
+        self.assertEqual(
+            [item["content"] for item in history[2:]],
+            [f"blocked question {index}" for index in range(4)],
         )
 
     def test_rewrite_query_passthrough_without_preprocess_model(self):
@@ -334,6 +566,25 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertEqual(first.uuid, second.uuid)
         self.assertEqual(self.session.message_set.count(), 2)
+
+    def test_create_execution_run_persists_retry_relationship(self):
+        first = create_execution_run(
+            session=self.session,
+            question="How does SSE work?",
+            idempotency_key="first-run",
+            enqueue=False,
+        )
+
+        retry = create_execution_run(
+            session=self.session,
+            question="How does SSE work?",
+            idempotency_key="retry-run",
+            retry_of_run=first,
+            enqueue=False,
+        )
+
+        self.assertEqual(retry.retry_of_run, first)
+        self.assertEqual(self.session.message_set.count(), 4)
 
     def test_execute_answer_run_creates_execution_snapshot(self):
         self.assistant.agent_rounds = "max"

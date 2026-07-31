@@ -57,7 +57,7 @@ from .runtime_events import (
     sanitize_loaded_skills,
     sanitize_termination_detail,
 )
-from .services import create_execution_run
+from .services import create_execution_run, validate_retry_run
 from .skill_generation import (
     get_workspace_guide_payload,
     sync_workspace_guide_skill,
@@ -2048,6 +2048,10 @@ class RunSerializer(serializers.ModelSerializer):
     steps = RunStepSerializer(many=True, read_only=True)
     execution = RunExecutionSerializer(read_only=True)
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    retry_of_run_uuid = serializers.UUIDField(
+        source="retry_of_run.uuid",
+        read_only=True,
+    )
     termination_detail = serializers.SerializerMethodField()
 
     def get_termination_detail(self, obj):
@@ -2062,6 +2066,7 @@ class RunSerializer(serializers.ModelSerializer):
             "status",
             "input_message",
             "output_message",
+            "retry_of_run_uuid",
             "lensnode",
             "metering_ref",
             "error",
@@ -2199,7 +2204,12 @@ class RunCreateSerializer(serializers.Serializer):
         allow_blank=True,
         default="",
     )
-    idempotency_key = serializers.CharField(required=False, allow_blank=True)
+    idempotency_key = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=128,
+    )
+    retry_of_run_uuid = serializers.UUIDField(required=False, allow_null=True)
     enqueue = serializers.BooleanField(required=False, default=True)
     run_inline = serializers.BooleanField(required=False, default=False)
     attachment_uuids = serializers.ListField(
@@ -2221,6 +2231,16 @@ class RunCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 f"At most {ATTACHMENT_MAX_PER_MESSAGE} images per message."
             )
+        retry_uuid = attrs.get("retry_of_run_uuid")
+        if retry_uuid is not None:
+            try:
+                retry_of_run = Run.objects.get(uuid=retry_uuid)
+                validate_retry_run(self.context["session"], retry_of_run)
+            except (Run.DoesNotExist, ValueError):
+                raise serializers.ValidationError(
+                    {"retry_of_run_uuid": "Invalid Retry Run."}
+                )
+            attrs["retry_of_run"] = retry_of_run
         return attrs
 
     def create(self, validated_data):
@@ -2232,6 +2252,7 @@ class RunCreateSerializer(serializers.Serializer):
                 session=session,
                 question=validated_data.get("question", ""),
                 idempotency_key=validated_data.get("idempotency_key", ""),
+                retry_of_run=validated_data.get("retry_of_run"),
                 enqueue=(
                     validated_data.get("enqueue", True) and not run_inline
                 ),
