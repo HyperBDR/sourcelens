@@ -13,3 +13,10 @@ export function precedingUserMessage(messages, targetMessage) {
   }
   return null
 }
+
+export function retryRunUuid(messages, targetMessage = null) {
+  const userMessage = targetMessage
+    ? precedingUserMessage(messages, targetMessage)
+    : [...messages].reverse().find((message) => message.role === 'user')
+  return targetMessage?.run || userMessage?.run || ''
+}

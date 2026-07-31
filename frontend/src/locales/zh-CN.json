@@ -390,7 +390,7 @@
       "codeSent": "验证码已发送，请查收邮箱",
       "verifyLogin": "登录",
       "verifying": "登录中...",
-      "switchToPassword": "使用账号密码登录",
+      "switchToPassword": "使用邮箱密码登录",
       "switchToCode": "使用邮箱验证码登录",
       "turnstileRequired": "请先完成人机验证",
       "sendFailed": "验证码发送失败，请稍后重试",
@@ -432,8 +432,8 @@
     "signingUp": "注册中...",
     "loginSuccess": "登录成功",
     "registerSuccess": "注册成功",
-    "loginError": "用户名或密码错误，请重试",
-    "loginErrorDetail": "登录失败。请检查您的用户名和密码是否正确，或者<a href='/register' class='font-medium underline'>注册新账户</a>。",
+    "loginError": "邮箱或密码错误，请重试",
+    "loginErrorDetail": "登录失败。请检查您的邮箱和密码是否正确，或者<a href='/register' class='font-medium underline'>注册新账户</a>。",
     "registerError": "注册失败，请重试",
     "registerErrorDetail": "注册失败。该用户名或邮箱可能已被使用，请尝试其他用户名或邮箱。",
     "selectScene": "请选择使用场景",
@@ -459,7 +459,7 @@
       "passwordTooLong": "密码长度不能超过32个字符",
       "passwordComplexity": "密码必须同时包含字母和数字"
     },
-    "loginFailedMessage": "登录失败。请检查您的用户名和密码是否正确，或者",
+    "loginFailedMessage": "登录失败。请检查您的邮箱和密码是否正确，或者",
     "registerNewAccount": "注册新账户",
     "period": "。",
     "processing": "处理中..."

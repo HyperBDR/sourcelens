@@ -706,6 +706,13 @@ class Run(models.Model):
         on_delete=models.SET_NULL,
         related_name="response_runs",
     )
+    retry_of_run = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="retry_runs",
+    )
     lensnode = models.ForeignKey(
         LensNode,
         null=True,

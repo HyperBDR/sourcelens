@@ -68,9 +68,24 @@ SOCIALACCOUNT_LOGIN_ON_GET = True
 # Unique email addresses (prevent duplicate registrations)
 ACCOUNT_UNIQUE_EMAIL = True
 
+# Keep Django's username backend for the admin while allauth handles email
+# authentication for the public password login API.
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
 # Login methods (replaces deprecated AUTHENTICATION_METHOD)
-# Allow both email and username login
-ACCOUNT_LOGIN_METHODS = ['email', 'username']
+ACCOUNT_LOGIN_METHODS = ['email']
+
+# Accounts created through allauth must have the identifier required by the
+# password login flow. Usernames remain required profile identifiers.
+ACCOUNT_SIGNUP_FIELDS = [
+    'email*',
+    'username*',
+    'password1*',
+    'password2*',
+]
 
 # Force HTTPS for OAuth callback URLs in production
 # This ensures django-allauth generates https:// URLs for OAuth providers
