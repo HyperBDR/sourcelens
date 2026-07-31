@@ -50,3 +50,14 @@ test('run overview groups related fields and localizes analysis depth', async ()
   assert.match(contents, /lensAdmin\.agentRounds/)
   assert.doesNotMatch(contents, /· \{\{ detail\.agent_rounds \}\}/)
 })
+
+test('run overview separates executor status from business outcome', async () => {
+  const contents = await source()
+
+  assert.match(contents, /detail\.executor_status/)
+  assert.match(contents, /detail\.outcome/)
+  assert.match(contents, /detail\.termination_detail/)
+  assert.match(contents, /detail\.failure_summary/)
+  assert.match(contents, /lensRuns\.executorStatus/)
+  assert.match(contents, /lensRuns\.businessOutcome/)
+})

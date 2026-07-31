@@ -2,8 +2,11 @@ import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
-from langchain_core.messages import ToolMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 
 from lensnode import agent_runtime
 from lensnode.agent_runtime import (
@@ -35,6 +38,38 @@ class _Msg:
         self.content = content
         self.tool_calls = tool_calls
         self.response_metadata = response_metadata or {}
+
+
+class _HarnessCaptureModel(BaseChatModel):
+    """Capture the final tools and prompt bound by Deep Agents."""
+
+    captured_tool_names: ClassVar[list[str]] = []
+    captured_messages: ClassVar[list] = []
+
+    @property
+    def _llm_type(self):
+        return "lens_gateway_chat_model"
+
+    def _get_ls_params(self, **_kwargs):
+        return {
+            "ls_provider": "lensgatewaychatmodel",
+            "ls_model_type": "chat",
+        }
+
+    def bind_tools(self, tools, **_kwargs):
+        type(self).captured_tool_names = [
+            getattr(tool, "name", None) or tool.get("name")
+            for tool in tools
+        ]
+        return self
+
+    def _generate(self, messages, **_kwargs):
+        type(self).captured_messages = list(messages)
+        return ChatResult(
+            generations=[
+                ChatGeneration(message=AIMessage(content="done"))
+            ]
+        )
 
 
 class _FakeStreamAgent:
@@ -220,6 +255,43 @@ def test_write_todos_emits_user_visible_normalized_plan():
     ]
 
 
+def test_write_todos_preserves_explicit_all_completed_plan():
+    events = []
+    message = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "call-plan-complete",
+                "name": "write_todos",
+                "args": {
+                    "todos": [
+                        {
+                            "content": "Query orders",
+                            "status": "completed",
+                        },
+                        {
+                            "content": "Deliver report",
+                            "status": "completed",
+                        },
+                    ]
+                },
+            }
+        ],
+    )
+
+    _emit_new_tool_calls(
+        [message],
+        set(),
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    steps = events[0][1]["payload"]["steps"]
+    assert [item["status"] for item in steps] == [
+        "completed",
+        "completed",
+    ]
+
+
 def test_write_todos_keeps_the_initial_plan_shape_during_execution():
     events = []
     seen = set()
@@ -277,7 +349,7 @@ def test_write_todos_keeps_the_initial_plan_shape_during_execution():
     ]
 
 
-def test_write_todos_defers_full_completion_until_run_terminal():
+def test_write_todos_preserves_full_completion_before_run_terminal():
     events = []
     seen = set()
     plan_state = {"revision": 0}
@@ -322,7 +394,7 @@ def test_write_todos_defers_full_completion_until_run_terminal():
 
     assert events[-1][1]["payload"]["steps"] == [
         {"id": "step-1", "title": "Query orders", "status": "completed"},
-        {"id": "step-2", "title": "Return answer", "status": "in_progress"},
+        {"id": "step-2", "title": "Return answer", "status": "completed"},
     ]
 
 
@@ -1228,7 +1300,7 @@ def test_relevant_evidence_is_partial_at_soft_deadline():
     assert termination_detail == {"reason": "soft_deadline"}
 
 
-def test_relevant_evidence_is_partial_after_unrecovered_failure():
+def test_relevant_evidence_is_partial_after_exhausted_failure():
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
         required_capabilities=["skill"],
     )
@@ -1254,6 +1326,15 @@ def test_relevant_evidence_is_partial_after_unrecovered_failure():
             content='{"ok":false,"error":"TIMEOUT"}',
             name="run_skill_artifact",
             tool_call_id="call-2",
+            status="error",
+        ),
+    )
+    middleware.wrap_tool_call(
+        request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"TIMEOUT"}',
+            name="run_skill_artifact",
+            tool_call_id="call-3",
             status="error",
         ),
     )
@@ -1427,6 +1508,254 @@ def test_plan_execute_prompt_requires_a_stable_initial_plan():
     assert "may only update statuses" in prompt
 
 
+def test_plan_execute_blocks_business_tools_until_plan_exists():
+    events = []
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        emit_event=lambda name, detail: events.append((name, detail)),
+        required_capabilities=["skill"],
+        require_initial_plan=True,
+    )
+    business_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "call-business",
+            "args": {
+                "artifact": "income",
+                "args": ["order", "list"],
+            },
+        },
+    )
+    called = []
+
+    denied = middleware.wrap_tool_call(
+        business_request,
+        lambda _request: called.append(True),
+    )
+
+    assert called == []
+    assert json.loads(denied.content)["error"] == "INITIAL_PLAN_REQUIRED"
+
+    plan_request = SimpleNamespace(
+        tool=SimpleNamespace(name="write_todos"),
+        tool_call={
+            "name": "write_todos",
+            "id": "call-plan",
+            "args": {
+                "todos": [
+                    {
+                        "content": "Query orders",
+                        "status": "in_progress",
+                    },
+                    {
+                        "content": "Deliver report",
+                        "status": "pending",
+                    },
+                ]
+            },
+        },
+    )
+    middleware.wrap_tool_call(
+        plan_request,
+        lambda _request: ToolMessage(
+            content='{"ok":true}',
+            name="write_todos",
+            tool_call_id="call-plan",
+        ),
+    )
+    result = middleware.wrap_tool_call(
+        business_request,
+        lambda _request: ToolMessage(
+            content='{"ok":true,"orders":[]}',
+            name="run_skill_artifact",
+            tool_call_id="call-business",
+        ),
+    )
+
+    assert json.loads(result.content)["ok"] is True
+    assert any(
+        name == "deepagents.plan.required" for name, _detail in events
+    )
+
+
+def test_failed_initial_plan_does_not_unlock_business_tools():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        require_initial_plan=True,
+    )
+    plan_request = SimpleNamespace(
+        tool=SimpleNamespace(name="write_todos"),
+        tool_call={
+            "name": "write_todos",
+            "id": "call-plan",
+            "args": {
+                "todos": [
+                    {
+                        "content": "Query orders",
+                        "status": "in_progress",
+                    }
+                ]
+            },
+        },
+    )
+    business_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "call-business",
+            "args": {},
+        },
+    )
+
+    middleware.wrap_tool_call(
+        plan_request,
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"PLAN_WRITE_FAILED"}',
+            name="write_todos",
+            tool_call_id="call-plan",
+            status="error",
+        ),
+    )
+    called = []
+    denied = middleware.wrap_tool_call(
+        business_request,
+        lambda _request: called.append(True),
+    )
+
+    assert called == []
+    assert json.loads(denied.content)["error"] == "INITIAL_PLAN_REQUIRED"
+
+
+def test_validated_delivery_survives_format_warning_and_call_limit():
+    events = []
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        emit_event=lambda name, detail: events.append((name, detail)),
+        required_capabilities=["skill"],
+    )
+
+    def request(name, call_id, args):
+        return SimpleNamespace(
+            tool=SimpleNamespace(name=name),
+            tool_call={"name": name, "id": call_id, "args": args},
+        )
+
+    middleware.wrap_tool_call(
+        request(
+            "run_skill_artifact",
+            "orders-json",
+            {
+                "artifact": "income",
+                "args": ["order", "list", "--all"],
+            },
+        ),
+        lambda _request: ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": True,
+                    "stdout_ref": "/large_tool_results/orders.json",
+                }
+            ),
+            name="run_skill_artifact",
+            tool_call_id="orders-json",
+        ),
+    )
+    middleware.wrap_tool_call(
+        request(
+            "run_skill_artifact",
+            "orders-csv",
+            {
+                "artifact": "income",
+                "args": [
+                    "order",
+                    "list",
+                    "--all",
+                    "--output",
+                    "csv",
+                ],
+            },
+        ),
+        lambda _request: ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": False,
+                    "returncode": 2,
+                    "stderr": (
+                        'unsupported output format "csv": '
+                        "use table or json"
+                    ),
+                }
+            ),
+            name="run_skill_artifact",
+            tool_call_id="orders-csv",
+            status="error",
+        ),
+    )
+    middleware.wrap_tool_call(
+        request(
+            "run_skill_artifact",
+            "orders-table",
+            {
+                "artifact": "income",
+                "args": [
+                    "order",
+                    "list",
+                    "--all",
+                    "--output",
+                    "table",
+                ],
+            },
+        ),
+        lambda _request: ToolMessage(
+            content='{"ok":false,"error":"ARTIFACT_CALL_LIMIT"}',
+            name="run_skill_artifact",
+            tool_call_id="orders-table",
+            status="error",
+        ),
+    )
+    middleware.wrap_tool_call(
+        request(
+            "save_deliverable",
+            "deliver-report",
+            {"path": "/july_2026_orders_report.md"},
+        ),
+        lambda _request: ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": True,
+                    "filename": "july_2026_orders_report.md",
+                }
+            ),
+            name="save_deliverable",
+            tool_call_id="deliver-report",
+        ),
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=False,
+        stop_reason=None,
+        runtime_evidence={
+            "record_validation": {
+                "valid": True,
+                "total_count": 110,
+                "expected_count": 110,
+                "count_matches": True,
+                "unique_by": ["id"],
+            }
+        },
+    )
+
+    assert outcome == "completed"
+    assert termination_detail == {}
+    assert middleware.failed_capabilities == set()
+    assert middleware.warning_count == 2
+    assert any(
+        name == "deepagents.capability.warning"
+        for name, _detail in events
+    )
+
+
 def test_execution_boundary_disables_configuration_failure_capability():
     events = []
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
@@ -1459,7 +1788,9 @@ def test_execution_boundary_disables_configuration_failure_capability():
     assert [tool.name for tool in remaining] == ["mcp__orders"]
     assert middleware.termination_detail["capability"] == "skill"
     assert middleware.termination_detail["reason"] == "execution_failed"
-    assert events[0][0] == "deepagents.capability.exhausted"
+    assert [name for name, _detail in events] == [
+        "deepagents.capability.exhausted"
+    ]
 
 
 def test_capability_boundary_allows_one_transient_retry():
@@ -1898,7 +2229,10 @@ def test_execution_boundary_classifies_artifact_http_500_as_transient():
     assert middleware.blocked_tools == {"run_skill_artifact"}
     assert middleware.termination_detail["reason"] == "execution_failed"
     assert middleware.termination_detail["error_type"] == "transient"
-    assert events[0][0] == "deepagents.capability.exhausted"
+    assert [name for name, _detail in events] == [
+        "deepagents.capability.warning",
+        "deepagents.capability.exhausted",
+    ]
 
 
 def test_capability_boundary_counts_raw_mcp_success_as_evidence():
@@ -2060,6 +2394,53 @@ def test_general_chat_middleware_removes_task_tool():
     )
 
     assert result == ["run_skill_artifact"]
+
+
+def test_general_chat_agent_stack_omits_default_subagent_guidance():
+    _HarnessCaptureModel.captured_tool_names = []
+    _HarnessCaptureModel.captured_messages = []
+    agent = agent_runtime.create_deep_agent(
+        model=_HarnessCaptureModel(),
+        tools=[],
+        system_prompt="General Chat runtime.",
+        subagents=[],
+    )
+
+    agent.invoke(
+        {"messages": [HumanMessage(content="Generate a report.")]}
+    )
+
+    system_prompt = "\n".join(
+        str(message.content)
+        for message in _HarnessCaptureModel.captured_messages
+        if message.type == "system"
+    )
+    assert "task" not in _HarnessCaptureModel.captured_tool_names
+    assert "## `task` (subagent spawner)" not in system_prompt
+    assert "general-purpose" not in system_prompt
+
+
+def test_explicit_legacy_subagent_keeps_task_tool_available():
+    _HarnessCaptureModel.captured_tool_names = []
+    agent = agent_runtime.create_deep_agent(
+        model=_HarnessCaptureModel(),
+        tools=[],
+        system_prompt="Knowledge Q&A runtime.",
+        subagents=[
+            {
+                "name": "fast-analysis",
+                "description": "Analyze retrieved sources.",
+                "system_prompt": "Use the supplied sources.",
+                "tools": [],
+            }
+        ],
+    )
+
+    agent.invoke(
+        {"messages": [HumanMessage(content="Analyze the sources.")]}
+    )
+
+    assert "task" in _HarnessCaptureModel.captured_tool_names
 
 
 def test_general_chat_middleware_emits_each_model_round_as_one_step():
