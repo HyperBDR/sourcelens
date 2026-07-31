@@ -881,6 +881,15 @@ def confirm_reconcile_orphan(run_uuid):
         updated_at=now,
     )
     if updated:
+        from .services import fail_running_steps_for_runs
+
+        run_id = (
+            Run.objects.filter(uuid=run_uuid)
+            .values_list("id", flat=True)
+            .first()
+        )
+        if run_id:
+            fail_running_steps_for_runs([run_id])
         logger.warning(
             "Run %s still non-terminal after the reconcile confirm grace "
             "window; marking it failed (LENSNODE_RECONNECT_ORPHANED)",
@@ -966,7 +975,12 @@ def lensnode_cleanup_task():
         | Q(last_activity_at__isnull=True, started_at__lt=idle_cutoff)
         | Q(started_at__lt=abs_cutoff)
     )
-    count = stale.count()
+    stale_ids = list(stale.values_list("id", flat=True))
+    count = len(stale_ids)
+    if count:
+        from .services import fail_running_steps_for_runs
+
+        fail_running_steps_for_runs(stale_ids)
     stale.update(
         status=Run.Status.FAILED,
         error="LENS_RUN_TIMEOUT",

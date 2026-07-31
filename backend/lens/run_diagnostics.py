@@ -6,9 +6,10 @@ import logging
 import re
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from .llm import run_completion
 from .models import (
@@ -28,14 +29,41 @@ TERMINAL_RUN_STATUSES = {
     Run.Status.FAILED,
     Run.Status.CANCELLED,
 }
-DIAGNOSTIC_PROMPT_VERSION = "run-diagnosis-v1"
+DIAGNOSTIC_PROMPT_VERSION = "run-diagnosis-v3"
+STALE_EXECUTION_SECONDS = 600
 MAX_QUESTION_CHARS = 2000
 MAX_SUMMARY_CHARS = 4000
 MAX_ANSWER_CHARS = 8000
-MAX_FINDINGS = 20
+MAX_EVENTS = 30
 MAX_LIST_ITEMS = 20
-VALID_SEVERITIES = {"low", "medium", "high", "critical"}
-VALID_FINDING_KINDS = {"fact", "hypothesis"}
+SEVERITY_SYNONYMS = {
+    "low": "low",
+    "info": "low",
+    "informational": "low",
+    "ok": "low",
+    "okay": "low",
+    "success": "low",
+    "none": "low",
+    "normal": "low",
+    "medium": "medium",
+    "moderate": "medium",
+    "warning": "medium",
+    "high": "high",
+    "critical": "critical",
+    "severe": "critical",
+}
+EVENT_STATUS_SYNONYMS = {
+    "ok": "ok",
+    "success": "ok",
+    "successful": "ok",
+    "done": "ok",
+    "failed": "failed",
+    "error": "failed",
+    "failure": "failed",
+    "recovered": "recovered",
+    "retried": "recovered",
+    "unknown": "unknown",
+}
 SAFE_EVENT_FIELDS = {
     "agent_event",
     "status",
@@ -59,6 +87,11 @@ SAFE_OBSERVATION_FIELDS = {
     "ended_at",
 }
 SAFE_CODE_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,96}")
+SENSITIVE_ERROR_RE = re.compile(
+    r"(api[_-]?key|apikey|secret|password|passwd|bearer|authorization|"
+    r"private[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"id_token|credential)\b|token[=:]"
+)
 SAFE_MIME_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9.+-]*/[A-Za-z0-9][A-Za-z0-9.+-]*"
 )
@@ -108,9 +141,15 @@ def create_run_diagnostic(run, requested_by, idempotency_key="initial-v1"):
         defaults={
             "evidence": evidence,
             "requested_by": requested_by,
+            "language": translation.get_language()
+            or settings.LANGUAGE_CODE,
             "model_ref": model_ref,
             "model_config_hash": model_config_hash,
             "prompt_version": DIAGNOSTIC_PROMPT_VERSION,
+            "progress": {
+                "stage": "queued",
+                "updated_at": timezone.now().isoformat(),
+            },
         },
     )
     should_enqueue = created
@@ -119,14 +158,35 @@ def create_run_diagnostic(run, requested_by, idempotency_key="initial-v1"):
         diagnostic.error_code = ""
         diagnostic.started_at = None
         diagnostic.finished_at = None
+        diagnostic.progress = {
+            "stage": "queued",
+            "updated_at": timezone.now().isoformat(),
+        }
         diagnostic.save(
             update_fields=[
                 "status",
                 "error_code",
                 "started_at",
                 "finished_at",
+                "progress",
                 "updated_at",
             ]
+        )
+        should_enqueue = True
+    elif (
+        not created
+        and diagnostic.status == RunDiagnostic.Status.RUNNING
+        and _is_stale_started(diagnostic)
+    ):
+        # The worker died mid-run; reset so the user can re-trigger.
+        diagnostic.status = RunDiagnostic.Status.QUEUED
+        diagnostic.started_at = None
+        diagnostic.progress = {
+            "stage": "queued",
+            "updated_at": timezone.now().isoformat(),
+        }
+        diagnostic.save(
+            update_fields=["status", "started_at", "progress", "updated_at"]
         )
         should_enqueue = True
     if should_enqueue:
@@ -178,6 +238,17 @@ def create_diagnostic_turn(diagnostic, requested_by, question):
         transaction.on_commit(
             lambda turn_uuid=turn.uuid: enqueue_diagnostic_turn(turn_uuid)
         )
+    elif (
+        turn.status == RunDiagnosticTurn.Status.RUNNING
+        and _is_stale_started(turn)
+    ):
+        # The worker died while answering; reset so the user can re-ask.
+        turn.status = RunDiagnosticTurn.Status.QUEUED
+        turn.started_at = None
+        turn.save(update_fields=["status", "started_at", "updated_at"])
+        transaction.on_commit(
+            lambda turn_uuid=turn.uuid: enqueue_diagnostic_turn(turn_uuid)
+        )
     return turn, created
 
 
@@ -195,13 +266,29 @@ def execute_diagnostic(diagnostic_uuid):
     diagnostic = _mark_diagnostic_running(diagnostic_uuid)
     if diagnostic is None:
         return False
-    findings = _deterministic_findings(diagnostic.run, diagnostic.evidence)
+    _set_diagnostic_progress(diagnostic, "deterministic_checks")
+    findings = _deterministic_findings(
+        diagnostic.run,
+        diagnostic.evidence,
+        diagnostic.language,
+    )
     diagnostic.deterministic_findings = findings
     diagnostic.save(update_fields=["deterministic_findings", "updated_at"])
+    _set_diagnostic_progress(
+        diagnostic,
+        "model_analysis",
+        detail={
+            "model": (
+                str(diagnostic.model_ref) if diagnostic.model_ref else ""
+            ),
+            "deterministic_findings_count": len(findings),
+        },
+    )
+    completion = None
     try:
         completion = run_completion(
             model_ref=diagnostic.model_ref,
-            system=_diagnostic_system_prompt(),
+            system=_diagnostic_system_prompt(diagnostic.language),
             user=json.dumps(
                 {
                     "evidence_snapshot": diagnostic.evidence.payload,
@@ -214,11 +301,18 @@ def execute_diagnostic(diagnostic_uuid):
             node_name="run_diagnostics",
             user_id=diagnostic.requested_by_id,
         )
+        _set_diagnostic_progress(diagnostic, "validating")
         result = validate_diagnostic_result(
             _parse_json_object(completion.content),
             diagnostic.evidence,
         )
     except DiagnosticResultError as exc:
+        _log_rejected_output(
+            exc.code,
+            "run diagnosis",
+            {"diagnostic_uuid": diagnostic.uuid},
+            getattr(completion, "content", None) if completion else None,
+        )
         _fail_diagnostic(diagnostic, exc.code)
         return False
     except Exception:
@@ -235,6 +329,10 @@ def execute_diagnostic(diagnostic_uuid):
     diagnostic.usage = completion.usage or {}
     diagnostic.error_code = ""
     diagnostic.finished_at = now
+    diagnostic.progress = {
+        "stage": "completed",
+        "updated_at": now.isoformat(),
+    }
     diagnostic.save(
         update_fields=[
             "status",
@@ -242,6 +340,7 @@ def execute_diagnostic(diagnostic_uuid):
             "usage",
             "error_code",
             "finished_at",
+            "progress",
             "updated_at",
         ]
     )
@@ -255,10 +354,11 @@ def execute_diagnostic_follow_up(turn_uuid):
     if turn is None:
         return False
     diagnostic = turn.diagnostic
+    completion = None
     try:
         completion = run_completion(
             model_ref=diagnostic.model_ref,
-            system=_follow_up_system_prompt(),
+            system=_follow_up_system_prompt(diagnostic.language),
             user=json.dumps(
                 {
                     "diagnosis": diagnostic.result,
@@ -277,6 +377,12 @@ def execute_diagnostic_follow_up(turn_uuid):
             diagnostic.evidence,
         )
     except DiagnosticResultError as exc:
+        _log_rejected_output(
+            exc.code,
+            "run diagnosis follow-up",
+            {"turn_uuid": turn.uuid},
+            getattr(completion, "content", None) if completion else None,
+        )
         _fail_turn(turn, exc.code)
         return False
     except Exception:
@@ -313,16 +419,12 @@ def validate_diagnostic_result(result, evidence):
     if not isinstance(result, dict):
         raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
     summary = _bounded_text(result.get("summary"), MAX_SUMMARY_CHARS)
-    severity = result.get("severity")
-    if severity not in VALID_SEVERITIES:
+    severity = _normalize_severity(result.get("severity"))
+    if severity is None:
         raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
     confidence = _confidence(result.get("confidence"))
-    findings = result.get("findings")
-    if not isinstance(findings, list) or len(findings) > MAX_FINDINGS:
-        raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
-    normalized_findings = [
-        _validate_finding(item, evidence) for item in findings
-    ]
+    events = _validate_events(result.get("events"), evidence)
+    root_cause = _validate_root_cause(result.get("root_cause"), evidence)
     cause_categories = _short_string_list(
         result.get("cause_categories"),
         MAX_LIST_ITEMS,
@@ -336,7 +438,8 @@ def validate_diagnostic_result(result, evidence):
         "summary": summary,
         "severity": severity,
         "confidence": confidence,
-        "findings": normalized_findings,
+        "events": events,
+        "root_cause": root_cause,
         "cause_categories": cause_categories,
         "recommendations": recommendations,
         "unknowns": unknowns,
@@ -357,6 +460,8 @@ def serialize_diagnostic(diagnostic):
         ),
         "deterministic_findings": diagnostic.deterministic_findings,
         "prompt_version": diagnostic.prompt_version,
+        "language": diagnostic.language,
+        "progress": diagnostic.progress or {},
         "result": diagnostic.result,
         "usage": diagnostic.usage,
         "error_code": diagnostic.error_code,
@@ -555,7 +660,7 @@ def _step_evidence(step):
                 safe_event["observation"] = safe_observation
         if safe_event:
             events.append(safe_event)
-    return {
+    evidence = {
         "step_uuid": str(step.uuid),
         "step_type": step.step_type,
         "status": step.status,
@@ -563,6 +668,10 @@ def _step_evidence(step):
         "events": events[:100],
         "updated_at": step.updated_at.isoformat(),
     }
+    error = detail.get("error")
+    if isinstance(error, str) and error.strip():
+        evidence["error"] = _safe_run_error_code(error)
+    return evidence
 
 
 def _usage_evidence(run):
@@ -597,7 +706,10 @@ def _diagnostic_model_snapshot(run):
         .values_list("value", flat=True)
         .first()
     )
-    runtime_snapshot = getattr(run.execution, "runtime_snapshot", {}) or {}
+    runtime_snapshot = (
+        getattr(getattr(run, "execution", None), "runtime_snapshot", None)
+        or {}
+    )
     model_refs = runtime_snapshot.get("model_refs") or {}
     raw_model_ref = configured or model_refs.get("agent")
     try:
@@ -612,14 +724,23 @@ def _diagnostic_model_snapshot(run):
     return model_ref, config_hash
 
 
-def _deterministic_findings(run, evidence):
+def _deterministic_findings(run, evidence, language="en"):
+    zh = language == "zh-hans"
     findings = [
         {
             "kind": "fact",
-            "title": "Terminal Run state",
+            "title": "终端运行状态" if zh else "Terminal Run state",
             "statement": (
-                f"The Run finished with executor status {run.status}"
-                f" and business outcome {run.outcome or 'unknown'}."
+                "运行以执行器状态 {status} 结束，"
+                "业务结果为 {outcome}。"
+                if zh
+                else (
+                    "The Run finished with executor status {status}"
+                    " and business outcome {outcome}."
+                )
+            ).format(
+                status=run.status,
+                outcome=run.outcome or ("未知" if zh else "unknown"),
             ),
             "confidence": 1.0,
             "evidence_refs": ["E-RUN"],
@@ -630,12 +751,36 @@ def _deterministic_findings(run, evidence):
         findings.append(
             {
                 "kind": "unknown",
-                "title": "Missing evidence",
+                "title": "缺失证据" if zh else "Missing evidence",
                 "statement": ", ".join(str(item) for item in missing),
                 "evidence_refs": [],
             }
         )
     return findings
+
+
+def _is_stale_started(instance):
+    """Return True when a pending run started too long ago to be alive."""
+
+    started_at = getattr(instance, "started_at", None)
+    if started_at is None:
+        return True
+    return (
+        timezone.now() - started_at
+    ).total_seconds() > STALE_EXECUTION_SECONDS
+
+
+def _set_diagnostic_progress(diagnostic, stage, detail=None):
+    """Persist the current execution stage for the pending state UI."""
+
+    progress = {
+        "stage": stage,
+        "updated_at": timezone.now().isoformat(),
+    }
+    if detail:
+        progress.update(detail)
+    diagnostic.progress = progress
+    diagnostic.save(update_fields=["progress", "updated_at"])
 
 
 @transaction.atomic
@@ -689,11 +834,16 @@ def _fail_diagnostic(diagnostic, error_code):
     diagnostic.status = RunDiagnostic.Status.FAILED
     diagnostic.error_code = error_code
     diagnostic.finished_at = timezone.now()
+    diagnostic.progress = {
+        "stage": "failed",
+        "updated_at": diagnostic.finished_at.isoformat(),
+    }
     diagnostic.save(
         update_fields=[
             "status",
             "error_code",
             "finished_at",
+            "progress",
             "updated_at",
         ]
     )
@@ -714,55 +864,140 @@ def _fail_turn(turn, error_code):
 
 
 def _parse_json_object(content):
+    """Parse one JSON object, tolerating a markdown code fence wrapper."""
+
     raw = str(content or "").strip()
-    if raw.startswith("```"):
-        raw = raw.removeprefix("```json").removeprefix("```")
-        raw = raw.removesuffix("```").strip()
-    try:
-        result = json.loads(raw)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise DiagnosticResultError("MODEL_RESPONSE_INVALID") from exc
-    if not isinstance(result, dict):
-        raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
-    return result
+    candidates = [raw]
+    fence = _FENCE_RE.search(raw)
+    if fence:
+        candidates.insert(0, fence.group(1).strip())
+    for candidate in candidates:
+        try:
+            result = json.loads(candidate)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(result, dict):
+            return result
+    raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
 
 
-def _diagnostic_system_prompt():
+_FENCE_RE = re.compile(r"```[A-Za-z0-9_+-]*\s*\n(.*?)```", re.DOTALL)
+
+
+def _log_rejected_output(error_code, flow, ids, content):
+    """Log the rejected model output so the failure is diagnosable."""
+
+    logger.warning(
+        "%s rejected model output: code=%s ids=%s raw_output=%r",
+        flow,
+        error_code,
+        ids,
+        str(content or "")[:8000],
+    )
+
+
+def _diagnostic_system_prompt(language="en"):
     return (
         "You are a read-only Run Diagnostics Assistant. Analyze only the "
         "provided immutable evidence snapshot. Do not request tools, perform "
-        "actions, reveal hidden reasoning, or infer facts without labeling "
-        "them as hypotheses. Return strict JSON with summary, severity, "
-        "confidence, findings, cause_categories, recommendations, and "
-        "unknowns. Every fact, hypothesis, and recommendation must cite only "
-        "Evidence IDs present in the snapshot."
+        "actions, reveal hidden reasoning, or speculate without labeling it "
+        "as a hypothesis. Return strict JSON with exactly: summary (string), "
+        "severity (one of low|medium|high|critical), confidence (number 0-1), "
+        "events (array of {title, description, status, evidence_refs} in "
+        "chronological order, status one of ok|failed|recovered|unknown), "
+        "root_cause ({title, description, evidence_refs} or null when the "
+        "Run completed without a failure), cause_categories (array of short "
+        "strings), recommendations (array of {title, action, evidence_refs}), "
+        "and unknowns (array of {statement, evidence_refs}). Every event, "
+        "root cause, and recommendation must cite only Evidence IDs present "
+        "in the snapshot."
+        " Be concise and focus on what matters: summary is 1-3 sentences "
+        "stating the outcome and any failure or recovery; events are only "
+        "meaningful milestones (start, major steps, failures, recoveries, "
+        "completion) with 1-2 short sentences each; omit routine details "
+        "such as timestamps, token counts, budgets, and timeouts unless they "
+        "directly explain the outcome; root_cause names the concrete failure "
+        "point and why it failed; recommendations are specific and "
+        "actionable; unknowns list only genuinely missing information."
+        + _language_instruction(language)
     )
 
 
-def _follow_up_system_prompt():
+def _follow_up_system_prompt(language="en"):
     return (
-        "Answer only about the single target Run using its bound diagnosis and "
-        "immutable evidence. Do not use tools, search for other Runs, perform "
-        "actions, or reveal hidden reasoning. Return strict JSON with answer "
-        "and evidence_refs. Cite only Evidence IDs present in the snapshot."
+        "Answer only about the single target Run using its bound diagnosis"
+        " and immutable evidence. Do not use tools, search for other Runs,"
+        " perform actions, or reveal hidden reasoning. Return strict JSON"
+        "actions, or reveal hidden reasoning. Return strict JSON with exactly "
+        "answer (string) and evidence_refs (array of Evidence IDs present in "
+        "the snapshot)."
+        + _language_instruction(language)
     )
 
 
-def _validate_finding(item, evidence):
-    if (
-        not isinstance(item, dict)
-        or item.get("kind") not in VALID_FINDING_KINDS
-    ):
+def _language_instruction(language):
+    """Return a prompt suffix pinning the output language to the UI."""
+
+    names = {
+        "zh-hans": "Simplified Chinese",
+        "zh": "Simplified Chinese",
+        "en": "English",
+    }
+    name = names.get((language or "en").lower(), "English")
+    return (
+        f" Respond in {name}: all summary, event titles and descriptions, "
+        "cause categories, recommendation titles and actions, unknowns, and "
+        "answers must be written in that language."
+    )
+
+
+def _validate_events(items, evidence):
+    """Validate the chronological event timeline of the Run."""
+
+    if not isinstance(items, list) or len(items) > MAX_EVENTS:
+        raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
+    normalized = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
+        status = _normalize_event_status(item.get("status"))
+        if status is None:
+            raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
+        normalized.append(
+            {
+                "title": _bounded_text(item.get("title"), 240),
+                "description": _bounded_text(item.get("description"), 2000),
+                "status": status,
+                "evidence_refs": _evidence_refs(
+                    item.get("evidence_refs", []),
+                    evidence,
+                ),
+            }
+        )
+    return normalized
+
+
+def _normalize_event_status(value):
+    """Map case variants and synonyms onto the event-status enum."""
+
+    if not isinstance(value, str):
+        return None
+    return EVENT_STATUS_SYNONYMS.get(value.strip().lower())
+
+
+def _validate_root_cause(value, evidence):
+    """Validate the failure root cause, or None when nothing failed."""
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
         raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
     return {
-        "kind": item["kind"],
-        "title": _bounded_text(item.get("title"), 240),
-        "statement": _bounded_text(item.get("statement"), 2000),
-        "confidence": _confidence(item.get("confidence")),
+        "title": _bounded_text(value.get("title"), 240),
+        "description": _bounded_text(value.get("description"), 2000),
         "evidence_refs": _evidence_refs(
-            item.get("evidence_refs"),
+            value.get("evidence_refs", []),
             evidence,
-            required=True,
         ),
     }
 
@@ -777,7 +1012,10 @@ def _validate_recommendations(items, evidence):
         normalized.append(
             {
                 "title": _bounded_text(item.get("title"), 240),
-                "action": _bounded_text(item.get("action"), 2000),
+                "action": _bounded_text(
+                    item.get("action") or item.get("statement"),
+                    2000,
+                ),
                 "evidence_refs": _evidence_refs(
                     item.get("evidence_refs"),
                     evidence,
@@ -842,6 +1080,14 @@ def _bounded_text(value, maximum):
     return value
 
 
+def _normalize_severity(value):
+    """Map case variants and common synonyms onto the severity enum."""
+
+    if not isinstance(value, str):
+        return None
+    return SEVERITY_SYNONYMS.get(value.strip().lower())
+
+
 def _confidence(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise DiagnosticResultError("MODEL_RESPONSE_INVALID")
@@ -890,12 +1136,21 @@ def _model_config_hash(model_ref):
 
 
 def _safe_run_error_code(value):
-    value = str(value or "")
+    """Sanitize one error message: mask credentials, keep operational text."""
+
+    value = str(value or "").strip()
     if not value:
         return ""
-    if SAFE_CODE_PATTERN.fullmatch(value):
-        return value
-    return "UNCLASSIFIED_RUN_ERROR"
+    if len(value) > 200:
+        return "UNCLASSIFIED_RUN_ERROR"
+    if any(ch in value for ch in "\r\n\t") or any(
+        ord(ch) < 32 for ch in value
+    ):
+        return "UNCLASSIFIED_RUN_ERROR"
+    lowered = value.lower()
+    if SENSITIVE_ERROR_RE.search(lowered):
+        return "UNCLASSIFIED_RUN_ERROR"
+    return value
 
 
 def _safe_event_value(key, value):

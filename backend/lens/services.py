@@ -171,15 +171,36 @@ def fail_active_runs_for_lensnode(lensnode_uuid):
     """
 
     now = timezone.now()
-    Run.objects.filter(
-        lensnode__uuid=lensnode_uuid,
-        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
-    ).update(
+    run_ids = list(
+        Run.objects.filter(
+            lensnode__uuid=lensnode_uuid,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        ).values_list("id", flat=True)
+    )
+    if not run_ids:
+        return 0
+    Run.objects.filter(id__in=run_ids).update(
         status=Run.Status.FAILED,
         error="LENSNODE_DISCONNECTED",
         finished_at=now,
         updated_at=now,
     )
+    fail_running_steps_for_runs(run_ids)
+    return len(run_ids)
+
+
+def fail_running_steps_for_runs(run_ids):
+    """Finalize in-flight steps for runs failed outside the step context.
+
+    Out-of-band failure paths (lensnode disconnect, orphan reconcile, idle
+    sweep) update the Run row directly, so their RUNNING RunStep rows would
+    otherwise stay RUNNING forever and disagree with the terminal Run state.
+    """
+
+    return RunStep.objects.filter(
+        run_id__in=run_ids,
+        status=RunStep.Status.RUNNING,
+    ).update(status=RunStep.Status.FAILED, updated_at=timezone.now())
 
 
 RECONCILE_GRACE_SECONDS = 60
