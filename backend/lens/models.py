@@ -572,6 +572,11 @@ class Session(TimestampedUUIDModel):
         default=TitleGenerationStatus.SKIPPED,
         db_default=TitleGenerationStatus.SKIPPED,
     )
+    pinned_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,

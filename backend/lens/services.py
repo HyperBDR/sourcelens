@@ -37,6 +37,7 @@ from .models import (
     Session,
 )
 from .runtime_events import public_step_detail, sanitize_termination_detail
+from .session_lifecycle import lock_active_session
 from .session_titles import fallback_session_title
 from .trace_context import (
     root_observation_id_for_run,
@@ -295,7 +296,7 @@ def create_execution_run(
     """Create a queued run for LensNode execution."""
 
     assistant = lock_assistant_for_new_work(session.assistant, user)
-    session = session.__class__.objects.select_for_update().get(pk=session.pk)
+    session = lock_active_session(session)
     session.assistant = assistant
 
     if idempotency_key:

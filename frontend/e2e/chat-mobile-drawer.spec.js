@@ -4,15 +4,42 @@ async function mockChat(
   page,
   messageDelays = {},
   language = 'en',
-  assistantList = null
+  assistantList = null,
+  initialSessions = null
 ) {
   await page.addInitScript((selectedLanguage) => {
     localStorage.setItem('access_token', 'test-token')
     localStorage.setItem('userLanguage', selectedLanguage)
   }, language)
 
+  const chatSessions = initialSessions || [
+    {
+      uuid: 'session-1',
+      title: 'First session',
+      status: 'active',
+      pinned_at: null,
+      has_shareable_answer: false
+    },
+    {
+      uuid: 'session-2',
+      title: 'Second session',
+      status: 'active',
+      pinned_at: null,
+      has_shareable_answer: true
+    },
+    {
+      uuid: 'session-3',
+      title: 'Third session',
+      status: 'active',
+      pinned_at: null,
+      has_shareable_answer: false
+    }
+  ]
+  let nextSessionNumber = chatSessions.length + 1
+
   await page.route('**/api/**', async (route) => {
-    const path = new URL(route.request().url()).pathname
+    const url = new URL(route.request().url())
+    const path = url.pathname
     if (!path.startsWith('/api/')) {
       await route.continue()
       return
@@ -34,13 +61,15 @@ async function mockChat(
         }
       ],
       '/api/lens/shares/': [],
-      '/api/lens/sessions/': [
-        { uuid: 'session-1', title: 'First session' },
-        { uuid: 'session-2', title: 'Second session' },
-        { uuid: 'session-3', title: 'Third session' }
-      ],
       '/api/lens/sessions/session-1/messages/': [],
       '/api/lens/sessions/session-2/messages/': [
+        {
+          uuid: 'message-2-user',
+          role: 'user',
+          content: 'Original second question',
+          run: 'run-2',
+          created_at: '2026-07-24T07:59:00Z'
+        },
         {
           uuid: 'message-2',
           role: 'assistant',
@@ -77,6 +106,62 @@ async function mockChat(
         contentType: 'application/json',
         body: JSON.stringify({ data: { uuid: 'attachment-1' } })
       })
+      return
+    }
+
+    if (path === '/api/lens/sessions/' && route.request().method() === 'GET') {
+      const archived = url.searchParams.get('archived') === 'true'
+      await route.fulfill({
+        json: {
+          data: chatSessions.filter(
+            (session) => session.status === (archived ? 'archived' : 'active')
+          )
+        }
+      })
+      return
+    }
+
+    if (path === '/api/lens/sessions/' && route.request().method() === 'POST') {
+      const session = {
+        uuid: `session-${nextSessionNumber}`,
+        title: '',
+        status: 'active',
+        pinned_at: null,
+        has_shareable_answer: false,
+        created_at: new Date().toISOString()
+      }
+      nextSessionNumber += 1
+      chatSessions.push(session)
+      await route.fulfill({ json: { data: session } })
+      return
+    }
+
+    const sessionDelete = path.match(/^\/api\/lens\/sessions\/(session-\d+)\/$/)
+    if (sessionDelete && route.request().method() === 'DELETE') {
+      const index = chatSessions.findIndex(
+        (item) => item.uuid === sessionDelete[1]
+      )
+      if (index !== -1) chatSessions.splice(index, 1)
+      await route.fulfill({ status: 204, body: '' })
+      return
+    }
+
+    const sessionAction = path.match(
+      /^\/api\/lens\/sessions\/(session-\d+)\/(pin|unpin|archive|restore)\/$/
+    )
+    if (sessionAction) {
+      const session = chatSessions.find(
+        (item) => item.uuid === sessionAction[1]
+      )
+      const action = sessionAction[2]
+      if (action === 'pin') session.pinned_at = new Date().toISOString()
+      if (action === 'unpin') session.pinned_at = null
+      if (action === 'archive') {
+        session.status = 'archived'
+        session.pinned_at = null
+      }
+      if (action === 'restore') session.status = 'active'
+      await route.fulfill({ json: { data: session } })
       return
     }
 
@@ -231,24 +316,22 @@ test.describe('touch input accessibility', () => {
     const firstSession = page
       .locator('.session-item')
       .filter({ hasText: 'First session' })
-    const rename = firstSession.getByRole('button', { name: 'Rename' })
-    const remove = firstSession.getByRole('button', {
-      name: 'Delete session'
+    const overflow = firstSession.getByRole('button', {
+      name: 'Actions for First session'
     })
 
-    await expect(rename).toBeVisible()
-    await expect(remove).toBeVisible()
-    await expect(rename).toHaveCSS('opacity', '1')
-    await expect(remove).toHaveCSS('opacity', '1')
-    await expectMinimumTouchTarget(rename)
+    await expect(overflow).toBeVisible()
+    await expect(firstSession.locator('.session-overflow')).toHaveCSS(
+      'opacity',
+      '1'
+    )
+    await expectMinimumTouchTarget(overflow)
+
+    await overflow.click()
+    const remove = page.getByRole('menuitem', { name: 'Delete session' })
     await expectMinimumTouchTarget(remove)
-
     await remove.click()
-    const confirmDelete = firstSession.getByRole('button', {
-      name: 'Confirm delete'
-    })
-    const cancelDelete = firstSession.getByRole('button', { name: 'Cancel' })
-    await expectMinimumTouchTarget(confirmDelete)
+    const cancelDelete = page.getByRole('button', { name: 'Cancel' })
     await expectMinimumTouchTarget(cancelDelete)
     await cancelDelete.click()
 
@@ -352,29 +435,165 @@ test.describe('touch input accessibility', () => {
   })
 })
 
-test('desktop session actions retain compact hover behavior', async ({
+test('desktop session actions use one ordered compact overflow menu', async ({
   page
 }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await mockChat(page)
   await page.goto('/lens/assistants/drawer-test/chat')
 
-  const firstSession = page
+  const thirdSession = page
     .locator('.session-item')
-    .filter({ hasText: 'First session' })
-  const rename = firstSession.getByRole('button', { name: 'Rename' })
-  const remove = firstSession.getByRole('button', { name: 'Delete session' })
+    .filter({ hasText: 'Third session' })
+  const overflowContainer = thirdSession.locator('.session-overflow')
+  const overflow = thirdSession.getByRole('button', {
+    name: 'Actions for Third session'
+  })
 
-  await expect(rename).toHaveCSS('opacity', '0')
-  await expect(remove).toHaveCSS('opacity', '0')
-  const renameBox = await rename.boundingBox()
-  const removeBox = await remove.boundingBox()
-  expect(renameBox).toMatchObject({ width: 24, height: 24 })
-  expect(removeBox).toMatchObject({ width: 24, height: 24 })
+  await expect(overflowContainer).toHaveCSS('opacity', '0')
+  const overflowBox = await overflow.boundingBox()
+  expect(overflowBox).toMatchObject({ width: 32, height: 32 })
 
-  await firstSession.hover()
-  await expect(rename).toHaveCSS('opacity', '1')
-  await expect(remove).toHaveCSS('opacity', '1')
+  await thirdSession.hover()
+  await expect(overflowContainer).toHaveCSS('opacity', '1')
+  await overflow.click()
+  await expect(page.getByRole('menuitem')).toHaveText([
+    'Share',
+    'Rename',
+    'Pin chat',
+    'Archive',
+    'Delete session'
+  ])
+  await expect(page.getByRole('menuitem', { name: /Share\./ })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(overflow).toBeFocused()
+
+  await overflow.click()
+  await page
+    .locator('div.fixed.inset-0.z-40')
+    .click({ position: { x: 5, y: 5 } })
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(overflow).toBeFocused()
+})
+
+test('sessions can be pinned, archived, and restored from the menu', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockChat(page)
+  await page.goto('/lens/assistants/drawer-test/chat')
+
+  const secondSession = page
+    .locator('.session-item')
+    .filter({ hasText: 'Second session' })
+  const openSecondMenu = () =>
+    secondSession.getByRole('button', {
+      name: 'Actions for Second session'
+    })
+
+  await openSecondMenu().click()
+  await page.getByRole('menuitem', { name: 'Pin chat' }).click()
+  await expect(secondSession.getByLabel('Pinned')).toBeVisible()
+
+  await page.getByRole('button', { name: 'New session' }).click()
+  await expect(page.locator('.session-item').first()).toContainText(
+    'Second session'
+  )
+  await expect(page.locator('.session-item').nth(1)).toContainText(
+    'Untitled session'
+  )
+
+  await openSecondMenu().click()
+  await page.getByRole('menuitem', { name: 'Archive' }).click()
+  await expect(secondSession).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Archived' }).click()
+  const archivedSession = page
+    .locator('.session-item')
+    .filter({ hasText: 'Second session' })
+  await expect(archivedSession).toBeVisible()
+  await archivedSession
+    .getByRole('button', { name: 'Actions for Second session' })
+    .click()
+  await expect(page.getByRole('menuitem')).toHaveText([
+    'Share',
+    'Rename',
+    'Restore',
+    'Delete session'
+  ])
+  await page.getByRole('menuitem', { name: 'Restore' }).click()
+  await expect(archivedSession).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Recent' }).click()
+  await expect(
+    page.locator('.session-item').filter({ hasText: 'Second session' })
+  ).toBeVisible()
+})
+
+test('deleting the final session leaves the recent list empty', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockChat(page, {}, 'en', null, [
+    {
+      uuid: 'session-1',
+      title: 'Only session',
+      status: 'active',
+      pinned_at: null,
+      has_shareable_answer: false
+    }
+  ])
+  await page.goto('/lens/assistants/drawer-test/chat')
+
+  const session = page.locator('.session-item')
+  await session
+    .getByRole('button', { name: 'Actions for Only session' })
+    .click()
+  await page.getByRole('menuitem', { name: 'Delete session' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click()
+
+  await expect(session).toHaveCount(0)
+  await expect(page.getByText('No recent sessions')).toBeVisible()
+  await expect(page).not.toHaveURL(/session=/)
+  await expect(page.getByRole('button', { name: 'Submit' })).toBeDisabled()
+
+  await page.reload()
+  await expect(page.locator('.session-item')).toHaveCount(0)
+  await expect(page.getByText('No recent sessions')).toBeVisible()
+})
+
+test('new sessions clear retry relationships from the previous session', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockChat(page)
+  await page.goto('/lens/assistants/drawer-test/chat')
+
+  await page
+    .locator('.session-item')
+    .filter({ hasText: 'Second session' })
+    .click()
+  await page.getByRole('button', { name: 'Retry' }).click()
+
+  const composer = page.locator('.composer-input')
+  await expect(composer).toHaveValue('Original second question')
+  await page.getByRole('button', { name: 'New session' }).click()
+  await expect(composer).toHaveValue('')
+  await composer.fill('Original second question')
+
+  const runRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      request.url().includes('/sessions/session-4/runs/')
+  )
+  await page.getByRole('button', { name: 'Submit' }).click()
+  const payload = (await runRequest).postDataJSON()
+
+  expect(payload).not.toHaveProperty('retry_of_run_uuid')
 })
 
 test('stale session responses do not replace a newer session draft', async ({
