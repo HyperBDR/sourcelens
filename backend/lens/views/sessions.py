@@ -5,6 +5,7 @@ import logging
 
 from asgiref.sync import sync_to_async
 from django.db import transaction
+from django.db.models import Exists, F, OuterRef
 from django.http import (
     FileResponse,
     Http404,
@@ -46,6 +47,13 @@ from lens.models import (
     SharedQA,
 )
 from lens.qa_pdf import build_qa_pdf_filename, render_qa_pdf
+from lens.session_lifecycle import (
+    SessionStateError,
+    archive_session,
+    pin_session,
+    restore_session,
+    unpin_session,
+)
 from lens.serializers import (
     MessageAttachmentSerializer,
     MessageSerializer,
@@ -110,7 +118,31 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         assistant_slug = self.request.query_params.get("assistant_slug")
         if assistant_slug:
             queryset = queryset.filter(assistant__slug=assistant_slug)
-        return queryset.filter(user=self.request.user)
+        queryset = queryset.filter(user=self.request.user)
+        if self.action == "list":
+            archived = self.request.query_params.get("archived", "").lower()
+            session_status = (
+                Session.Status.ARCHIVED
+                if archived == "true"
+                else Session.Status.ACTIVE
+            )
+            shareable_runs = Run.objects.filter(
+                session=OuterRef("pk"),
+                status=Run.Status.DONE,
+                output_message__isnull=False,
+            )
+            return queryset.filter(status=session_status).annotate(
+                has_shareable_answer=Exists(shareable_runs),
+            ).order_by(
+                F("pinned_at").desc(nulls_last=True),
+                "-created_at",
+                "-pk",
+            )
+        if self.action in ("pin", "unpin", "archive"):
+            return queryset.filter(status=Session.Status.ACTIVE)
+        if self.action == "restore":
+            return queryset.filter(status=Session.Status.ARCHIVED)
+        return queryset
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -184,6 +216,34 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             )
 
     @action(detail=True, methods=["post"])
+    def pin(self, request, uuid=None):
+        """Pin an active session above ordinary recent sessions."""
+
+        session = pin_session(self.get_object())
+        return Response(self.get_serializer(session).data)
+
+    @action(detail=True, methods=["post"])
+    def unpin(self, request, uuid=None):
+        """Remove an active session from the pinned group."""
+
+        session = unpin_session(self.get_object())
+        return Response(self.get_serializer(session).data)
+
+    @action(detail=True, methods=["post"])
+    def archive(self, request, uuid=None):
+        """Archive an active session without deleting its history."""
+
+        session = archive_session(self.get_object())
+        return Response(self.get_serializer(session).data)
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, uuid=None):
+        """Restore an archived session to active use."""
+
+        session = restore_session(self.get_object())
+        return Response(self.get_serializer(session).data)
+
+    @action(detail=True, methods=["post"])
     def runs(self, request, uuid=None):
         """Create an execution run for a session."""
 
@@ -200,7 +260,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             context={"session": session, "request": request},
         )
         serializer.is_valid(raise_exception=True)
-        run = serializer.save()
+        try:
+            run = serializer.save()
+        except SessionStateError:
+            raise ValidationError("SESSION_ARCHIVED")
         run.refresh_from_db()
         return Response(RunSerializer(run).data, status=201)
 
@@ -250,6 +313,8 @@ class SessionViewSet(BaseAuthenticatedViewSet):
                     request.user,
                     uploaded,
                 )
+        except SessionStateError:
+            raise ValidationError("SESSION_ARCHIVED")
         except AssistantNotRunnableError:
             raise PermissionDenied(
                 "You do not have access to this assistant."

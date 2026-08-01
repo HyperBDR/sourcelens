@@ -107,7 +107,7 @@ def search_workspace(
     for item in target_dirs:
         root = Path(item.get("path", ""))
         if root.exists() and root.is_dir():
-            dirs.append((root, _target_scope(item)))
+            dirs.append((root, target_scope(item)))
 
     if output_mode == "files":
         files = []
@@ -199,12 +199,12 @@ def glob_files(target_dirs, pattern, max_results=None, policy=None):
         root = Path(item.get("path", ""))
         if not root.exists() or not root.is_dir():
             continue
-        scope = _target_scope(item)
+        scope = target_scope(item)
         try:
             for path in root.glob(pattern):
                 if len(found) >= GLOB_SCAN_LIMIT:
                     break
-                if _is_allowed(root, path, scope, policy):
+                if is_path_allowed(root, path, scope, policy):
                     found.append(path)
         except (ValueError, NotImplementedError):
             continue
@@ -269,7 +269,7 @@ def read_text_samples(target_dirs, max_files=16, max_chars=30000, policy=None):
         root = Path(item.get("path", ""))
         if not root.exists() or not root.is_dir():
             continue
-        scope = _target_scope(item)
+        scope = target_scope(item)
         for path in _iter_allowed_paths(root, scope, policy):
             if len(samples) >= max_files or remaining_chars <= 0:
                 return samples
@@ -307,7 +307,7 @@ def summarize_snippets(samples):
     return json.dumps({"snippets": snippets}, ensure_ascii=False)
 
 
-def _is_allowed(root, path, scope, policy):
+def is_path_allowed(root, path, scope, policy):
     """Return whether a path is useful as a workspace sample.
 
     File size is intentionally not a criterion: large files are read in
@@ -315,9 +315,13 @@ def _is_allowed(root, path, scope, policy):
     file from retrieval.
     """
 
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
     if not path.is_file():
         return False
-    if _is_excluded_path(root, path, scope, policy):
+    if is_path_excluded(root, path, scope, policy):
         return False
     exclude_extensions = _option(
         scope,
@@ -381,6 +385,8 @@ def _rg_glob_args(scope, policy, glob):
     """
 
     args = []
+    if _include_hidden(scope, policy):
+        args.append("--hidden")
     for pattern in scope.get("include_paths") or []:
         if pattern == "**/*":
             continue
@@ -643,7 +649,7 @@ def _iter_scope_files(root, scope, policy, limit=DEFAULT_FILE_LIST_LIMIT):
         for path in root.glob(pattern):
             if len(found) >= limit:
                 return sorted(set(found))[:limit]
-            if _is_allowed(root, path, scope, policy):
+            if is_path_allowed(root, path, scope, policy):
                 found.append(path)
     return sorted(set(found))[:limit]
 
@@ -656,7 +662,7 @@ def _iter_allowed_paths(root, scope, policy):
         paths.extend(
             path
             for path in root.glob(pattern)
-            if _is_allowed(root, path, scope, policy)
+            if is_path_allowed(root, path, scope, policy)
         )
     return sorted(set(paths))
 
@@ -671,13 +677,19 @@ def _option(scope, policy, key, default):
     return default
 
 
-def _target_scope(item):
+def target_scope(item):
     """Return retrieval options plus the trusted runtime material role."""
 
     scope = dict(item.get("retrieval_scope") or {})
     if item.get("material_role") == "subject":
         scope["material_role"] = "subject"
     return scope
+
+
+def _include_hidden(scope, policy):
+    """Return whether hidden descendants are explicitly enabled."""
+
+    return _option(scope, policy, "include_hidden", False) is True
 
 
 def _bounded_results(max_results, policy):
@@ -706,31 +718,36 @@ def _bounded_limit(limit, policy):
     return min(value, MAX_READ_LIMIT)
 
 
-def _is_excluded_path(root, path, scope, policy):
+def is_path_excluded(root, path, scope, policy):
     """Return whether a path is excluded by configured rules."""
 
-    relative_parts = path.parts if root is None else path.relative_to(root).parts
-    hidden_parts = (
-        relative_parts
-        if _is_subject_runtime_root(root, scope)
-        else path.parts
-    )
+    try:
+        relative = path if root is None else path.relative_to(root)
+    except ValueError:
+        return True
+    if _include_hidden(scope, policy):
+        hidden_parts = ()
+    elif _is_subject_runtime_root(root, scope):
+        hidden_parts = relative.parts
+    else:
+        hidden_parts = path.parts
     if any(part.startswith(".") for part in hidden_parts):
         return True
-    parts = set(relative_parts)
+    parts = set(relative.parts)
     exclude_dirs = set(
         _option(scope, policy, "exclude_dirs", DEFAULT_EXCLUDED_DIRS)
     )
-    if parts.intersection(exclude_dirs):
+    if parts.intersection(exclude_dirs) or (
+        root is not None and root.name in exclude_dirs
+    ):
         return True
     max_depth = _option(scope, policy, "max_depth", None)
     if root is not None and max_depth is not None:
-        if len(path.relative_to(root).parts) > int(max_depth):
+        if len(relative.parts) > int(max_depth):
             return True
     exclude_paths = _option(scope, policy, "exclude_paths", [])
     if root is None:
         return False
-    relative = path.relative_to(root)
     return any(relative.match(pattern) for pattern in exclude_paths)
 
 

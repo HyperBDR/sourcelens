@@ -119,8 +119,22 @@
           <div
             v-else
             class="relative min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-surface"
+            data-testid="user-table-scroll"
           >
-            <table class="min-w-full divide-y divide-line">
+            <table
+              class="w-full min-w-[73rem] table-fixed divide-y divide-line"
+            >
+              <colgroup>
+                <col class="w-12" />
+                <col class="w-16" />
+                <col class="w-48" />
+                <col class="w-56" />
+                <col class="w-48" />
+                <col class="w-24" />
+                <col class="w-28" />
+                <col class="w-44" />
+                <col class="w-16" />
+              </colgroup>
               <thead class="sticky top-0 z-10 bg-surface-sunken">
                 <tr>
                   <th class="table-head w-12">
@@ -140,14 +154,18 @@
                   <th class="table-head">{{ t('dashboard.isStaff') }}</th>
                   <th class="table-head">{{ t('management.isActive') }}</th>
                   <th class="table-head">{{ t('management.dateJoined') }}</th>
-                  <th class="table-head">{{ t('common.actions') }}</th>
+                  <th
+                    class="table-head sticky right-0 z-20 bg-surface-sunken text-right"
+                  >
+                    {{ t('common.actions') }}
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
                   v-for="user in users"
                   :key="user.id"
-                  class="cursor-pointer transition-colors hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                  class="group cursor-pointer transition-colors hover:bg-line-soft focus-visible:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
                   data-testid="user-detail-row"
                   tabindex="0"
                   @click="openDetail(user)"
@@ -168,23 +186,37 @@
                   <td class="table-cell font-mono text-ink-500">
                     {{ user.id }}
                   </td>
-                  <td class="table-cell">
+                  <td class="table-cell min-w-0" data-testid="user-identity">
                     <button
-                      class="font-medium text-brand-700 hover:underline"
+                      class="block w-full truncate text-left font-medium text-brand-700 hover:underline"
                       data-testid="user-detail-trigger"
+                      :title="user.username"
                       @click.stop="openDetail(user)"
                     >
                       {{ user.username }}
                     </button>
-                    <div class="text-xs text-ink-400">
-                      {{ user.display_name || '—' }}
+                    <div
+                      v-if="secondaryDisplayName(user)"
+                      class="truncate text-xs text-ink-400"
+                      data-testid="secondary-identity"
+                      :title="secondaryDisplayName(user)"
+                    >
+                      {{ secondaryDisplayName(user) }}
                     </div>
                   </td>
-                  <td class="table-cell text-ink-600">
-                    {{ user.email || '—' }}
+                  <td class="table-cell min-w-0 text-ink-600">
+                    <div
+                      class="truncate"
+                      data-testid="user-email"
+                      :title="secondaryIdentity(user.email, user.username)"
+                    >
+                      {{ secondaryIdentity(user.email, user.username) || '—' }}
+                    </div>
                   </td>
-                  <td class="table-cell text-ink-600">
-                    {{ joinNames(user.groups) }}
+                  <td class="table-cell min-w-0 text-ink-600">
+                    <div class="truncate" :title="joinNames(user.groups)">
+                      {{ joinNames(user.groups) }}
+                    </div>
                   </td>
                   <td class="table-cell">
                     <span
@@ -205,7 +237,11 @@
                   <td class="table-cell text-ink-500">
                     {{ formatDate(user.date_joined) }}
                   </td>
-                  <td class="table-cell text-right" @click.stop>
+                  <td
+                    class="table-cell sticky right-0 z-10 bg-surface text-right group-hover:bg-line-soft group-focus-visible:bg-line-soft"
+                    data-testid="user-actions"
+                    @click.stop
+                  >
                     <RowActionMenu
                       :actions="rowActions(user)"
                       @select="handleRowAction($event, user)"
@@ -445,6 +481,16 @@ function joinNames(items) {
     : '—'
 }
 
+function secondaryDisplayName(user) {
+  return secondaryIdentity(user?.display_name, user?.username)
+}
+
+function secondaryIdentity(value, username) {
+  const identity = (value || '').trim()
+  const primary = (username || '').trim()
+  return identity && identity !== primary ? identity : ''
+}
+
 function formatDate(value) {
   if (!value) return '—'
   const date = new Date(value)
@@ -508,13 +554,9 @@ function openUserHistory(assistant) {
 
 async function loadOptions() {
   try {
-    const groupsData = await managementApi.getGroups({
-      page: 1,
-      page_size: 1000
+    groupOptions.value = await managementApi.getAllGroups({
+      compact: 'true'
     })
-    groupOptions.value = Array.isArray(groupsData)
-      ? groupsData
-      : (groupsData?.results ?? [])
   } catch {
     groupOptions.value = []
   }

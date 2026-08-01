@@ -121,6 +121,30 @@ def validate_retrieval_scope(value):
             "retrieval_scope.max_depth must be a positive integer"
         )
 
+    include_hidden = value.get("include_hidden")
+    if "include_hidden" in value and not isinstance(include_hidden, bool):
+        raise serializers.ValidationError(
+            "retrieval_scope.include_hidden must be a boolean"
+        )
+
+    return value
+
+
+def validate_retrieval_policy(value):
+    """Validate Assistant-level retrieval policy options."""
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise serializers.ValidationError(
+            "settings.retrieval_policy must be an object or null"
+        )
+    include_hidden = value.get("include_hidden")
+    if "include_hidden" in value and not isinstance(include_hidden, bool):
+        raise serializers.ValidationError(
+            "settings.retrieval_policy.include_hidden must be "
+            "a boolean"
+        )
     return value
 
 
@@ -519,6 +543,12 @@ class AssistantSerializer(serializers.ModelSerializer):
                 )
         else:
             validate_selected_dirs(selected_dirs, lensnode)
+        settings = attrs.get(
+            "settings",
+            getattr(self.instance, "settings", {}),
+        )
+        if isinstance(settings, dict) and "retrieval_policy" in settings:
+            validate_retrieval_policy(settings.get("retrieval_policy"))
         return attrs
 
     def _sync_bindings(self, assistant, validated_data):
@@ -2165,8 +2195,15 @@ class RunFeedbackSerializer(serializers.ModelSerializer):
 class SessionSerializer(serializers.ModelSerializer):
     """Session serializer."""
 
-    assistant_name = serializers.CharField(source="assistant.name", read_only=True)
-    assistant_slug = serializers.CharField(source="assistant.slug", read_only=True)
+    assistant_name = serializers.CharField(
+        source="assistant.name",
+        read_only=True,
+    )
+    assistant_slug = serializers.CharField(
+        source="assistant.slug",
+        read_only=True,
+    )
+    has_shareable_answer = serializers.SerializerMethodField()
 
     class Meta:
         model = Session
@@ -2179,6 +2216,8 @@ class SessionSerializer(serializers.ModelSerializer):
             "title",
             "title_manually_edited",
             "title_generation_status",
+            "pinned_at",
+            "has_shareable_answer",
             "status",
             "created_at",
             "updated_at",
@@ -2188,6 +2227,9 @@ class SessionSerializer(serializers.ModelSerializer):
             "user",
             "title_manually_edited",
             "title_generation_status",
+            "pinned_at",
+            "has_shareable_answer",
+            "status",
             "created_at",
             "updated_at",
         ]
@@ -2199,6 +2241,17 @@ class SessionSerializer(serializers.ModelSerializer):
         if not title:
             raise serializers.ValidationError("SESSION_TITLE_REQUIRED")
         return title
+
+    def get_has_shareable_answer(self, obj):
+        """Return the list annotation or calculate the fallback value."""
+
+        annotated = getattr(obj, "has_shareable_answer", None)
+        if annotated is not None:
+            return annotated
+        return obj.run_set.filter(
+            status=Run.Status.DONE,
+            output_message__isnull=False,
+        ).exists()
 
     def update(self, instance, validated_data):
         """Protect an explicit title from later automatic generation."""

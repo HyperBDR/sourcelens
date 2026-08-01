@@ -60,6 +60,9 @@ services:
       - ./.env.dev
     environment:
       WORKSPACE_ROOT: /opt/backend
+      # Development login must not depend on the external Turnstile service.
+      TURNSTILE_ENABLED: "false"
+      TURNSTILE_SECRET_KEY: ""
     volumes:
       - ./data.dev/logs/worker:/var/log/celery
       - ./data.dev/storage:/opt/storage
@@ -84,6 +87,10 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.dev
+    environment:
+      # Development login must not depend on the external Turnstile service.
+      TURNSTILE_ENABLED: "false"
+      TURNSTILE_SECRET_KEY: ""
     volumes:
       - ./data.dev/logs/scheduler:/var/log/celery
       - ./backend:/opt/backend

@@ -392,9 +392,51 @@ def test_write_todos_preserves_full_completion_before_run_terminal():
             plan_state=plan_state,
         )
 
-    assert events[-1][1]["payload"]["steps"] == [
+    assert events[-2][1]["payload"]["steps"] == [
         {"id": "step-1", "title": "Query orders", "status": "completed"},
         {"id": "step-2", "title": "Return answer", "status": "completed"},
+    ]
+    assert events[-1] == (
+        "workflow.phase.changed",
+        {
+            "event_type": "phase.changed",
+            "visibility": "user",
+            "payload": {"phase": "answering"},
+        },
+    )
+
+
+def test_write_todos_does_not_answer_before_hidden_steps_complete():
+    events = []
+    todos = [
+        {
+            "content": f"Visible step {index}",
+            "status": "completed",
+        }
+        for index in range(1, 13)
+    ]
+    todos.append({"content": "Hidden step", "status": "pending"})
+
+    _emit_new_tool_calls(
+        [
+            _Msg(
+                "ai",
+                tool_calls=[
+                    {
+                        "id": "call-plan",
+                        "name": "write_todos",
+                        "args": {"todos": todos},
+                    }
+                ],
+            )
+        ],
+        set(),
+        lambda name, detail: events.append((name, detail)),
+        plan_state={"revision": 0},
+    )
+
+    assert [name for name, _detail in events] == [
+        "workflow.plan.updated"
     ]
 
 
@@ -1528,6 +1570,20 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "Never invent flags" in prompt
     assert "validate_records" in prompt
     assert "Do not fan out per-record detail calls" in prompt
+
+
+def test_general_chat_prompt_repeats_configured_language_requirement():
+    prompt = _general_chat_system_prompt(
+        {
+            "question": "What were the October order totals?",
+            "answer_language": "zh-CN",
+            "runtime_route": "direct_execute",
+        }
+    )
+
+    assert prompt.startswith("ANSWER LANGUAGE REQUIREMENT: Chinese")
+    assert "Conversation history" in prompt
+    assert prompt.count("ANSWER LANGUAGE REQUIREMENT: Chinese") == 2
 
 
 def test_plan_execute_prompt_requires_a_stable_initial_plan():
@@ -2845,6 +2901,10 @@ def test_synthesize_wrapup_answer_strips_dangling_call_and_returns_content():
     assert len(model.invoked_with) == 3
     assert model.invoked_with[-2].content == "partial reasoning"
     assert model.invoked_with[-1].type == "human"
+    assert (
+        "ANSWER LANGUAGE REQUIREMENT: English"
+        in model.invoked_with[-1].content
+    )
 
 
 def test_synthesize_wrapup_answer_returns_empty_on_failure():

@@ -20,6 +20,7 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
 from .assistant_lifecycle import lock_assistant_for_new_work
+from .session_lifecycle import lock_active_session
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ def store_document_attachment(session, user, uploaded_file):
 
     with transaction.atomic():
         lock_assistant_for_new_work(session.assistant, user)
+        lock_active_session(session)
         attachment_uuid = str(uuid4())
         created_at = timezone.now()
         expires_at = created_at + timedelta(

@@ -235,6 +235,24 @@ class DocumentAttachmentTests(TestCase):
         )
         store_document.assert_not_called()
 
+    def test_archived_session_rejects_document_upload(self):
+        self.session.status = Session.Status.ARCHIVED
+        self.session.save(update_fields=["status"])
+        self.client.force_authenticate(self.user)
+
+        with patch(
+            "lens.document_attachments.document_attachment_storage"
+        ) as attachment_storage:
+            response = self.client.post(
+                f"/api/lens/sessions/{self.session.uuid}/attachments/",
+                {"file": _pdf_upload()},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("SESSION_ARCHIVED", str(response.data))
+        attachment_storage.assert_not_called()
+
     def test_assistant_payload_reports_document_capability(self):
         payload = AssistantSerializer(self.assistant).data
 
@@ -605,9 +623,11 @@ class DocumentAttachmentTests(TestCase):
             payload["subject_documents"][0]["original_name"],
             "tender.pdf",
         )
-        self.assertEqual(payload["answer_language"], "zh-CN")
+        self.assertEqual(payload["answer_language"], "en-US")
 
     def test_document_only_run_dispatches_with_analysis_prompt(self):
+        self.user.profile.language = "zh-CN"
+        self.user.profile.save(update_fields=["language"])
         self.assistant.preprocess_model_ref = uuid.uuid4()
         self.assistant.save(update_fields=["preprocess_model_ref"])
         metadata = store_document_attachment(

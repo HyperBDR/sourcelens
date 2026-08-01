@@ -17,6 +17,37 @@ test('active chat run exposes a localized stop action', async () => {
   assert.equal(chinese.common.stop, '停止')
 })
 
+test('final synthesis progress reacts to locale changes', async () => {
+  const [chat, english, chinese, { computed }, { createI18n }] =
+    await Promise.all([
+      source('pages/lens/Chat.vue'),
+      source('locales/en.json').then(JSON.parse),
+      source('locales/zh-CN.json').then(JSON.parse),
+      import('vue'),
+      import('vue-i18n')
+    ])
+  const i18n = createI18n({
+    legacy: false,
+    locale: 'en',
+    messages: { en: english, 'zh-CN': chinese }
+  })
+  const progress = { completed: 4, total: 4 }
+  const progressText = computed(() =>
+    i18n.global.t('lens.chat.runtime.planCompletedAnswering', progress)
+  )
+
+  assert.match(chat, /t\('lens\.chat\.runtime\.planCompletedAnswering'/)
+  assert.doesNotMatch(chat, /计划已完成|Generating final answer/)
+  assert.equal(
+    progressText.value,
+    'Plan completed 4/4 · Generating final answer…'
+  )
+
+  i18n.global.locale.value = 'zh-CN'
+
+  assert.equal(progressText.value, '计划已完成 4/4 · 正在生成最终回答……')
+})
+
 test('task statistics request all users unless a user is selected', async () => {
   const stats = await source('admin/pages/TaskManagement/Stats.vue')
   const fetchStart = stats.indexOf('async function fetchStats')

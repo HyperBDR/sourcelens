@@ -1,9 +1,12 @@
 <template>
-  <div class="inline-flex">
+  <div
+    class="row-action-menu inline-flex"
+    :class="{ 'row-action-menu-open': open }"
+  >
     <button
       ref="triggerRef"
       type="button"
-      class="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-transparent text-ink-500 transition-colors hover:border-line hover:bg-line-soft hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 md:h-8 md:w-8"
+      class="row-action-trigger inline-flex h-11 w-11 items-center justify-center rounded-lg border border-transparent text-ink-500 transition-colors hover:border-line hover:bg-line-soft hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 md:h-8 md:w-8"
       :aria-label="label || t('common.moreActions')"
       aria-haspopup="menu"
       :aria-expanded="open"
@@ -15,11 +18,14 @@
 
     <Teleport to="body">
       <template v-if="open">
-        <div class="fixed inset-0 z-40" @click="closeMenu" />
+        <div
+          class="fixed inset-0 z-40"
+          @click="closeMenu({ restoreFocus: true })"
+        />
         <div
           ref="menuRef"
           role="menu"
-          class="fixed z-50 min-w-44 rounded-lg border border-line bg-surface py-1 shadow-lg"
+          class="fixed z-50 max-h-[calc(100vh-1rem)] min-w-44 overflow-y-auto rounded-lg border border-line bg-surface py-1 shadow-lg"
           :style="menuStyle"
           @keydown="handleMenuKeydown"
         >
@@ -29,12 +35,16 @@
               type="button"
               role="menuitem"
               class="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:opacity-50 md:min-h-0"
-              :class="
+              :class="[
                 action.variant === 'danger'
                   ? 'text-danger-600 hover:bg-danger-50'
-                  : 'text-ink-700 hover:bg-line-soft'
-              "
-              :disabled="action.disabled || action.loading"
+                  : 'text-ink-700 hover:bg-line-soft',
+                action.disabled ? 'cursor-not-allowed opacity-50' : ''
+              ]"
+              :disabled="action.loading"
+              :aria-disabled="action.disabled || undefined"
+              :aria-label="actionAriaLabel(action)"
+              :title="action.disabledReason || action.label"
               @click="selectAction(action)"
             >
               <span class="inline-flex h-4 w-4 items-center justify-center">
@@ -131,8 +141,15 @@ function toggleMenu() {
 
 function selectAction(action) {
   if (action.disabled || action.loading) return
-  closeMenu()
+  closeMenu({ restoreFocus: true })
   emit('select', action.key)
+}
+
+function actionAriaLabel(action) {
+  if (action.disabled && action.disabledReason) {
+    return `${action.label}. ${action.disabledReason}`
+  }
+  return action.label
 }
 
 function handleMenuKeydown(event) {

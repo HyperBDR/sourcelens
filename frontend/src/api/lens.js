@@ -17,8 +17,12 @@ function unwrapList(payload) {
 }
 
 export async function listAssistants(params = {}) {
-  const response = await api.get('/lens/assistants/', { params })
-  return unwrapList(unwrapResponse(response))
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/assistants/', {
+      params: { page_size: 1000, ...params, page }
+    })
+    return unwrapResponse(response)
+  })
 }
 
 export async function getPublicAssistant(slug) {
@@ -52,8 +56,14 @@ export async function restoreAssistant(uuid) {
 }
 
 export async function listLensNodes() {
-  const response = await api.get('/lens/admin/lensnodes/')
-  return unwrapList(unwrapResponse(response))
+  return collectPaginatedResults(async (page) =>
+    listLensNodePage({ page, page_size: 1000 })
+  )
+}
+
+export async function listLensNodePage(params = {}) {
+  const response = await api.get('/lens/admin/lensnodes/', { params })
+  return unwrapResponse(response)
 }
 
 export async function getAdminRuns(params = {}) {
@@ -63,6 +73,31 @@ export async function getAdminRuns(params = {}) {
 
 export async function getAdminRun(uuid) {
   const response = await api.get(`/lens/admin/runs/${uuid}/`)
+  return unwrapResponse(response)
+}
+
+export async function getAdminRunDiagnostics(runUuid) {
+  const response = await api.get(`/lens/admin/runs/${runUuid}/diagnostics/`)
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function generateAdminRunDiagnosis(runUuid) {
+  const response = await api.post(
+    `/lens/admin/runs/${runUuid}/diagnostics/`,
+    {}
+  )
+  return unwrapResponse(response)
+}
+
+export async function createAdminRunDiagnosticTurn(
+  runUuid,
+  diagnosticUuid,
+  question
+) {
+  const response = await api.post(
+    `/lens/admin/runs/${runUuid}/diagnostics/${diagnosticUuid}/turns/`,
+    { question }
+  )
   return unwrapResponse(response)
 }
 
@@ -137,8 +172,11 @@ export async function revokeLensNodeToken(uuid) {
   return unwrapResponse(response)
 }
 
-export async function listSessions(assistantSlug = '') {
-  const params = assistantSlug ? { assistant_slug: assistantSlug } : {}
+export async function listSessions(assistantSlug = '', options = {}) {
+  const params = {
+    ...(assistantSlug ? { assistant_slug: assistantSlug } : {}),
+    ...(options.archived ? { archived: true } : {})
+  }
   const response = await api.get('/lens/sessions/', { params })
   return unwrapList(unwrapResponse(response))
 }
@@ -165,6 +203,26 @@ export async function updateSession(uuid, payload) {
 
 export async function deleteSession(uuid) {
   await api.delete(`/lens/sessions/${uuid}/`)
+}
+
+export async function pinSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/pin/`)
+  return unwrapResponse(response)
+}
+
+export async function unpinSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/unpin/`)
+  return unwrapResponse(response)
+}
+
+export async function archiveSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/archive/`)
+  return unwrapResponse(response)
+}
+
+export async function restoreSession(uuid) {
+  const response = await api.post(`/lens/sessions/${uuid}/restore/`)
+  return unwrapResponse(response)
 }
 
 export async function createRun(sessionUuid, payload) {

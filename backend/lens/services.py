@@ -12,6 +12,8 @@ from django.db import transaction
 from django.db.models import Max, Q
 from django.utils import timezone
 
+from accounts.models import normalize_answer_language
+
 from .assistant_lifecycle import lock_assistant_for_new_work
 from .attachments import (
     AttachmentError,
@@ -36,15 +38,13 @@ from .models import (
     RunExecution,
     RunOutputFile,
     RunStep,
+    RunTraceExport,
     Session,
 )
 from .runtime_events import public_step_detail, sanitize_termination_detail
+from .session_lifecycle import lock_active_session
 from .session_titles import fallback_session_title
-from .trace_context import (
-    root_observation_id_for_run,
-    trace_id_for_run,
-)
-from .trace_export import export_run_trace
+from .trace_context import root_observation_id_for_run, trace_id_for_run
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ QUERY_REWRITE_MAX_CHARS = 400
 QUERY_REWRITE_SYSTEM = (
     "You rewrite a user's latest question into ONE concise, self-contained "
     "search query for a document and code knowledge base. Resolve pronouns "
-    "and references (\"it\", \"that\", \"the above\") using the conversation. "
+    'and references ("it", "that", "the above") using the conversation. '
     "Keep entity, product, feature and command names. Prefer the terminology "
     "the documents likely use, and fix obvious typos or homophones toward the "
     "domain term. If the question is already clear and self-contained, return "
@@ -87,7 +87,7 @@ MULTIMODAL_INTENT_SYSTEM = (
     "Transcribe any error messages, stack traces, log lines, identifiers, "
     "component or file names, and visible UI state from the images into "
     "text, and merge them with the user's wording. Resolve references "
-    "(\"it\", \"this error\", \"the above\") using the conversation. Keep "
+    '("it", "this error", "the above") using the conversation. Keep '
     "entity, product, feature and command names. Answer in the SAME "
     "language as the question. Output ONLY the resulting query text — no "
     "quotes, no explanation."
@@ -176,15 +176,36 @@ def fail_active_runs_for_lensnode(lensnode_uuid):
     """
 
     now = timezone.now()
-    Run.objects.filter(
-        lensnode__uuid=lensnode_uuid,
-        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
-    ).update(
+    run_ids = list(
+        Run.objects.filter(
+            lensnode__uuid=lensnode_uuid,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        ).values_list("id", flat=True)
+    )
+    if not run_ids:
+        return 0
+    Run.objects.filter(id__in=run_ids).update(
         status=Run.Status.FAILED,
         error="LENSNODE_DISCONNECTED",
         finished_at=now,
         updated_at=now,
     )
+    fail_running_steps_for_runs(run_ids)
+    return len(run_ids)
+
+
+def fail_running_steps_for_runs(run_ids):
+    """Finalize in-flight steps for runs failed outside the step context.
+
+    Out-of-band failure paths (lensnode disconnect, orphan reconcile, idle
+    sweep) update the Run row directly, so their RUNNING RunStep rows would
+    otherwise stay RUNNING forever and disagree with the terminal Run state.
+    """
+
+    return RunStep.objects.filter(
+        run_id__in=run_ids,
+        status=RunStep.Status.RUNNING,
+    ).update(status=RunStep.Status.FAILED, updated_at=timezone.now())
 
 
 RECONCILE_GRACE_SECONDS = 60
@@ -266,11 +287,15 @@ def reconcile_lensnode_active_runs(lensnode_uuid, active_run_uuids):
 
     active = {str(value) for value in (active_run_uuids or [])}
     now = timezone.now()
-    candidates = Run.objects.filter(
-        lensnode__uuid=lensnode_uuid,
-        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
-        started_at__lt=now - timedelta(seconds=RECONCILE_GRACE_SECONDS),
-    ).exclude(uuid__in=active).values_list("uuid", flat=True)
+    candidates = (
+        Run.objects.filter(
+            lensnode__uuid=lensnode_uuid,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+            started_at__lt=now - timedelta(seconds=RECONCILE_GRACE_SECONDS),
+        )
+        .exclude(uuid__in=active)
+        .values_list("uuid", flat=True)
+    )
     count = 0
     for run_uuid in candidates:
         schedule_reconcile_orphan_confirmation(run_uuid)
@@ -281,7 +306,9 @@ def reconcile_lensnode_active_runs(lensnode_uuid, active_run_uuids):
 def _next_sequence(session):
     """Return next message sequence for a session."""
 
-    last_sequence = session.message_set.aggregate(Max("sequence"))["sequence__max"]
+    last_sequence = session.message_set.aggregate(Max("sequence"))[
+        "sequence__max"
+    ]
     return (last_sequence or 0) + 1
 
 
@@ -298,7 +325,7 @@ def create_execution_run(
     """Create a queued run for LensNode execution."""
 
     assistant = lock_assistant_for_new_work(session.assistant, user)
-    session = session.__class__.objects.select_for_update().get(pk=session.pk)
+    session = lock_active_session(session)
     session.assistant = assistant
 
     if idempotency_key:
@@ -451,9 +478,7 @@ def analyze_multimodal_intent(run):
     assistant = run.session.assistant
     original = run.input_message.content
     attachments = list(
-        run.input_message.attachments.filter(
-            kind=MessageAttachment.Kind.IMAGE
-        )
+        run.input_message.attachments.filter(kind=MessageAttachment.Kind.IMAGE)
     )
     if not attachments or not assistant.multimodal_model_ref:
         return {"question": original, "rewritten": False, "image_count": 0}
@@ -652,9 +677,7 @@ def validate_run_dispatch(run):
     if execution.task not in task_names(lensnode):
         raise LensNodeDispatchError("LENSNODE_TASK_UNAVAILABLE")
 
-    runtime_skills = resolve_loaded_skill_environment(
-        execution.loaded_skills
-    )
+    runtime_skills = resolve_loaded_skill_environment(execution.loaded_skills)
     if execution.task == "general_chat":
         if not runtime_skills:
             raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
@@ -665,9 +688,7 @@ def validate_run_dispatch(run):
                 raise LensNodeDispatchError("LENSNODE_DIR_UNAVAILABLE")
 
     for skill in runtime_skills:
-        declarations = (skill.get("definition") or {}).get(
-            "environment"
-        ) or []
+        declarations = (skill.get("definition") or {}).get("environment") or []
         required = {
             item["name"]
             for item in declarations
@@ -729,6 +750,15 @@ def create_run_execution_snapshot(run):
 
     assistant = run.session.assistant
     token_budget = token_budget_for_profile(assistant.token_budget_profile)
+    profile = getattr(run.session.user, "profile", None)
+    answer_language = normalize_answer_language(
+        getattr(profile, "language", None)
+    )
+    runtime_snapshot = _build_run_runtime_snapshot(
+        assistant,
+        run.lensnode,
+        answer_language,
+    )
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
         defaults={
@@ -737,14 +767,13 @@ def create_run_execution_snapshot(run):
             "loaded_skills": build_loaded_skills(assistant),
             "loaded_mcps": build_loaded_mcps(assistant),
             "agent_rounds": assistant.agent_rounds,
-            "run_timeout_s": run_timeout_for_rounds(
-                assistant.agent_rounds
-            ),
+            "run_timeout_s": run_timeout_for_rounds(assistant.agent_rounds),
             "target_dirs": (
                 []
                 if assistant.selected_task == "general_chat"
                 else assistant.selected_dirs
             ),
+            "runtime_snapshot": runtime_snapshot,
             "token_budget_profile": token_budget["profile"],
             "token_budget_max_tokens": token_budget["max_tokens"],
             "token_budget_final_reserve_tokens": token_budget[
@@ -756,12 +785,69 @@ def create_run_execution_snapshot(run):
     return execution
 
 
+def _build_run_runtime_snapshot(assistant, lensnode, answer_language):
+    """Return execution provenance that later edits cannot change."""
+
+    model_refs = {
+        "agent": str(assistant.agent_model_ref or ""),
+        "multimodal": str(assistant.multimodal_model_ref or ""),
+    }
+    model_config_hashes = {
+        name: _llm_config_hash(model_ref)
+        for name, model_ref in model_refs.items()
+        if model_ref
+    }
+    settings_payload = assistant.settings or {}
+    return {
+        "assistant_uuid": str(assistant.uuid),
+        "assistant_updated_at": assistant.updated_at.isoformat(),
+        "lensnode_uuid": str(lensnode.uuid) if lensnode else "",
+        "lensnode_agent_version": (lensnode.agent_version if lensnode else ""),
+        "answer_language": normalize_answer_language(answer_language),
+        "model_refs": model_refs,
+        "model_config_hashes": model_config_hashes,
+        "settings": settings_payload,
+        "settings_hash": _canonical_hash(settings_payload),
+    }
+
+
+def _llm_config_hash(model_ref):
+    """Return a stable hash for the referenced model configuration."""
+
+    try:
+        from agentcore_metering.adapters.django.models import LLMConfig
+
+        config = (
+            LLMConfig.objects.filter(uuid=model_ref)
+            .values_list(
+                "config",
+                flat=True,
+            )
+            .first()
+        )
+    except (ImportError, ValueError):
+        return ""
+    return _canonical_hash(config) if config is not None else ""
+
+
+def _canonical_hash(value):
+    """Return the SHA-256 of canonical JSON data."""
+
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
 AGENT_TURNS_BY_ROUNDS = {
-    "flash":    5,
-    "fast":     13,
+    "flash": 5,
+    "fast": 13,
     "balanced": 26,
-    "deep":     50,
-    "max":      100,
+    "deep": 50,
+    "max": 100,
 }
 
 
@@ -837,6 +923,13 @@ def build_run_history_metadata(run):
     return metadata
 
 
+def build_run_history_manifest(run):
+    """Return identifiers and hashes for history actually sent to execution."""
+
+    _, metadata = _build_run_history_data(run)
+    return metadata["included_history"]
+
+
 def _build_run_history_data(run):
     """Build trusted history and the corresponding filter counts."""
 
@@ -867,6 +960,7 @@ def _build_run_history_data(run):
     ]
     latest_attempts = _latest_retry_attempts(prior_runs)
     limited_pairs = []
+    limited_manifests = []
     total_chars = 0
     for prior in reversed(latest_attempts):
         entries = _trusted_history_entries(prior)
@@ -875,14 +969,33 @@ def _build_run_history_data(run):
             break
         if entries:
             limited_pairs.append(entries)
+            message_by_role = {
+                "user": prior.input_message,
+                "assistant": prior.output_message,
+            }
+            limited_manifests.append(
+                {
+                    "run_uuid": str(prior.uuid),
+                    "messages": [
+                        {
+                            "message_uuid": str(
+                                message_by_role[item["role"]].uuid
+                            ),
+                            "role": item["role"],
+                            "chars": len(item["content"]),
+                            "sha256": hashlib.sha256(
+                                item["content"].encode()
+                            ).hexdigest(),
+                        }
+                        for item in entries
+                        if message_by_role[item["role"]] is not None
+                    ],
+                }
+            )
             total_chars += pair_chars
         if len(limited_pairs) >= HISTORY_MAX_PAIRS:
             break
-    history = [
-        item
-        for pair in reversed(limited_pairs)
-        for item in pair
-    ]
+    history = [item for pair in reversed(limited_pairs) for item in pair]
     metadata = {
         "history_runs_before_filtering": len(all_prior_runs),
         "history_runs_after_filtering": len(latest_attempts),
@@ -899,6 +1012,7 @@ def _build_run_history_data(run):
             and not _assistant_output_is_trusted(prior)
             for prior in latest_attempts
         ),
+        "included_history": list(reversed(limited_manifests)),
     }
     return history, metadata
 
@@ -928,10 +1042,7 @@ def _latest_retry_attempts(prior_runs):
         root_id = prior.pk
         current = prior
         seen = set()
-        while (
-            current.retry_of_run_id in runs_by_id
-            and current.pk not in seen
-        ):
+        while current.retry_of_run_id in runs_by_id and current.pk not in seen:
             seen.add(current.pk)
             current = runs_by_id[current.retry_of_run_id]
             root_id = current.pk
@@ -954,10 +1065,7 @@ def _trusted_history_entries(run):
                 "content": question[:HISTORY_MAX_MESSAGE_CHARS],
             }
         )
-    if (
-        _assistant_output_is_trusted(run)
-        and run.output_message_id
-    ):
+    if _assistant_output_is_trusted(run) and run.output_message_id:
         answer = (run.output_message.content or "").strip()
         if answer:
             entries.append(
@@ -972,19 +1080,17 @@ def _trusted_history_entries(run):
 def _assistant_output_is_trusted(run):
     """Return whether a Run's assistant output is safe as history."""
 
-    return (
-        run.status == Run.Status.DONE
-        and run.outcome in {"", Run.Outcome.COMPLETED}
-    )
+    return run.status == Run.Status.DONE and run.outcome in {
+        "",
+        Run.Outcome.COMPLETED,
+    }
 
 
 def _recent_history_context(run):
     """Return the recent turns as a 'role: content' text block."""
 
-    history = build_run_history(run)[-(QUERY_REWRITE_HISTORY_TURNS * 2):]
-    return "\n".join(
-        f"{item['role']}: {item['content']}" for item in history
-    )
+    history = build_run_history(run)[-(QUERY_REWRITE_HISTORY_TURNS * 2) :]
+    return "\n".join(f"{item['role']}: {item['content']}" for item in history)
 
 
 def rewrite_query(run):
@@ -1003,9 +1109,8 @@ def rewrite_query(run):
 
     context = _recent_history_context(run)
     user = (
-        (f"Conversation so far:\n{context}\n\n" if context else "")
-        + f"Latest question: {original}\n\nRewritten search query:"
-    )
+        f"Conversation so far:\n{context}\n\n" if context else ""
+    ) + f"Latest question: {original}\n\nRewritten search query:"
     try:
         result = run_completion(
             model_ref=assistant.preprocess_model_ref,
@@ -1041,6 +1146,11 @@ def dispatch_run_to_lensnode(
     """Send a run_start command to the connected LensNode."""
 
     execution = run.execution
+    runtime_snapshot = execution.runtime_snapshot or {}
+    model_refs = runtime_snapshot.get("model_refs") or {}
+    runtime_settings = runtime_snapshot.get("settings")
+    if not isinstance(runtime_settings, dict):
+        runtime_settings = run.session.assistant.settings
     if subject_documents is None:
         subject_documents = get_run_document_attachments(run.uuid)
     subject_documents = [
@@ -1070,11 +1180,14 @@ def dispatch_run_to_lensnode(
         agent_rounds
     )
     profile = getattr(run.session.user, "profile", None)
-    answer_language = getattr(profile, "language", "")
     history_artifacts = (
         build_run_history_artifacts(run)
         if execution.task == "general_chat"
         else []
+    )
+    answer_language = normalize_answer_language(
+        runtime_snapshot.get("answer_language")
+        or getattr(profile, "language", None)
     )
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),
@@ -1088,9 +1201,8 @@ def dispatch_run_to_lensnode(
                 "answer_language": answer_language,
                 "subject_documents": subject_documents,
                 "vision_model_ref": (
-                    str(run.session.assistant.multimodal_model_ref)
-                    if run.session.assistant.multimodal_model_ref
-                    else ""
+                    model_refs.get("multimodal")
+                    or str(run.session.assistant.multimodal_model_ref or "")
                 ),
                 "history": build_run_history(run),
                 "history_artifacts": history_artifacts,
@@ -1100,13 +1212,10 @@ def dispatch_run_to_lensnode(
                 ),
                 "loaded_mcps": execution.loaded_mcps,
                 "agent_model_ref": (
-                    str(run.session.assistant.agent_model_ref)
-                    if run.session.assistant.agent_model_ref
-                    else ""
+                    model_refs.get("agent")
+                    or str(run.session.assistant.agent_model_ref or "")
                 ),
-                "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(
-                    agent_rounds, 26
-                ),
+                "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(agent_rounds, 26),
                 "agent_rounds": agent_rounds,
                 "run_timeout_s": run_timeout_s,
                 "trace_context": {
@@ -1122,7 +1231,7 @@ def dispatch_run_to_lensnode(
                         execution.token_budget_final_reserve_tokens
                     ),
                 },
-                "settings": run.session.assistant.settings,
+                "settings": runtime_settings,
             },
         },
     )
@@ -1214,7 +1323,9 @@ def append_lensnode_output(
     elif reset:
         run.output_message.content = content_delta
     else:
-        run.output_message.content = f"{run.output_message.content}{content_delta}"
+        run.output_message.content = (
+            f"{run.output_message.content}{content_delta}"
+        )
     run.output_message.run = run
     run.output_message.save(update_fields=["content", "run"])
     touch_run_activity(run.pk)
@@ -1270,13 +1381,17 @@ def finish_lensnode_run(
 ):
     """Mark a LensNode-dispatched run finished."""
 
-    run = Run.objects.select_related(
-        "input_message",
-        "output_message",
-        "session",
-        "session__assistant",
-        "session__user",
-    ).select_for_update(of=("self",)).get(uuid=run_uuid)
+    run = (
+        Run.objects.select_related(
+            "input_message",
+            "output_message",
+            "session",
+            "session__assistant",
+            "session__user",
+        )
+        .select_for_update(of=("self",))
+        .get(uuid=run_uuid)
+    )
     if run.status in TERMINAL_RUN_STATUSES:
         return run
     now = timezone.now()
@@ -1375,12 +1490,23 @@ def finish_lensnode_run(
         )
 
     if _run_has_trace_observations(run):
+        trace_export, _created = RunTraceExport.objects.get_or_create(run=run)
         transaction.on_commit(
-            lambda run_pk=run.pk: export_run_trace(run_pk)
+            lambda export_uuid=trace_export.uuid: _enqueue_trace_export(
+                export_uuid
+            )
         )
 
     _promote_next_queued_run(run.session.assistant)
     return run
+
+
+def _enqueue_trace_export(export_uuid):
+    """Enqueue optional trace export after Run state is durable."""
+
+    from .tasks import export_run_trace_task
+
+    export_run_trace_task.delay(str(export_uuid))
 
 
 def _run_has_trace_observations(run):
@@ -1499,7 +1625,7 @@ def stream_run_events(run):
                     "type": "token_reset",
                     "ts": timezone.now().isoformat(),
                 }
-            delta = content[len(emitted_content):]
+            delta = content[len(emitted_content) :]
             emitted_content = content
             if delta:
                 yield {
@@ -1513,7 +1639,9 @@ def stream_run_events(run):
             return
 
         now = timezone.now()
-        if (now - last_ping_at).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
+        if (
+            now - last_ping_at
+        ).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
             last_ping_at = now
             yield {
                 "type": "ping",
@@ -1583,7 +1711,7 @@ async def stream_run_events_async(run):
                     "type": "token_reset",
                     "ts": timezone.now().isoformat(),
                 }
-            delta = content[len(emitted_content):]
+            delta = content[len(emitted_content) :]
             emitted_content = content
             if delta:
                 yield {
@@ -1597,7 +1725,9 @@ async def stream_run_events_async(run):
             return
 
         now = timezone.now()
-        if (now - last_ping_at).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
+        if (
+            now - last_ping_at
+        ).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
             last_ping_at = now
             yield {
                 "type": "ping",

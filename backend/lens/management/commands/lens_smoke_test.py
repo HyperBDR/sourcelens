@@ -19,9 +19,13 @@ EXPECTED_MODELS = {
     "MessageAttachment",
     "LensNode",
     "Run",
+    "RunDiagnostic",
+    "RunDiagnosticEvidence",
+    "RunDiagnosticTurn",
     "RunExecution",
     "RunOutputFile",
     "RunStep",
+    "RunTraceExport",
     "ScheduledTask",
     "Session",
     "SharedQA",
@@ -50,7 +54,8 @@ class Command(BaseCommand):
 
     def _check_model_set(self):
         model_names = {
-            model.__name__ for model in apps.get_app_config("lens").get_models()
+            model.__name__
+            for model in apps.get_app_config("lens").get_models()
         }
         return model_names == EXPECTED_MODELS
 
@@ -65,7 +70,10 @@ class Command(BaseCommand):
         return True
 
     def _check_asgi(self):
-        return getattr(settings, "ASGI_APPLICATION", "") == "core.asgi.application"
+        return (
+            getattr(settings, "ASGI_APPLICATION", "")
+            == "core.asgi.application"
+        )
 
     def _check_channels(self):
         try:
@@ -73,11 +81,15 @@ class Command(BaseCommand):
             from channels.routing import ProtocolTypeRouter
         except Exception:
             return False
-        return ProtocolTypeRouter is not None and get_channel_layer() is not None
+        return (
+            ProtocolTypeRouter is not None and get_channel_layer() is not None
+        )
 
     def _check_langgraph(self):
         try:
-            from langchain_core.language_models.chat_models import BaseChatModel
+            from langchain_core.language_models.chat_models import (
+                BaseChatModel,
+            )
             from langgraph.graph import StateGraph
         except Exception:
             return False

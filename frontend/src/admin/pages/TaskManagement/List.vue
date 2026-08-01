@@ -509,12 +509,7 @@ function toUserLabel(u) {
 
 async function fetchUserOptions() {
   try {
-    const data = await managementApi.getUsers({ page_size: 200 })
-    const list = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.results)
-        ? data.results
-        : []
+    const list = await managementApi.getAllUsers({ compact: 'true' })
     userOptions.value = list.map((u) => ({ id: u.id, label: toUserLabel(u) }))
   } catch {
     userOptions.value = []

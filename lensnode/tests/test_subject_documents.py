@@ -412,4 +412,6 @@ def test_knowledge_prompt_uses_explicit_answer_language():
         },
     )
 
-    assert "in English" in prompt
+    assert prompt.startswith("ANSWER LANGUAGE REQUIREMENT: English")
+    assert "Conversation history" in prompt
+    assert prompt.count("ANSWER LANGUAGE REQUIREMENT: English") == 2

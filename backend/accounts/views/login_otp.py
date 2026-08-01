@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from accounts.models import DEFAULT_ANSWER_LANGUAGE
 from ..serializers import (
     AuthTokenResponseSerializer,
     SendLoginCodeSerializer,
@@ -139,7 +140,7 @@ class VerifyLoginCodeView(APIView):
 
         email = serializer.validated_data['email']
         code = serializer.validated_data['code']
-        language = request.data.get('language', 'zh-CN')
+        language = request.data.get('language', DEFAULT_ANSWER_LANGUAGE)
         timezone_str = request.data.get('timezone', 'Asia/Shanghai')
 
         ok, reason = otp.verify_code(email, code)

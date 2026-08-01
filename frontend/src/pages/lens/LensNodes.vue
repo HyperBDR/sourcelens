@@ -18,7 +18,7 @@
                 {{
                   t('lensAdmin.total', {
                     label: t('lensAdmin.pages.lensnodes.label'),
-                    count: lensnodes.length
+                    count: totalLensNodes
                   })
                 }}
               </span>
@@ -69,7 +69,7 @@
               </thead>
               <tbody class="divide-y divide-line bg-surface">
                 <tr
-                  v-for="row in pagedLensNodes"
+                  v-for="row in lensnodes"
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
@@ -169,7 +169,7 @@
             v-if="!loading"
             v-model:page-size="pageSize"
             :current-page="currentPage"
-            :total="lensnodes.length"
+            :total="totalLensNodes"
             @page-size-change="handlePageSizeChange"
             @prev="goPrevPage"
             @next="goNextPage"
@@ -274,7 +274,7 @@ import {
   deleteLensNode,
   issueLensNodeToken,
   listGlobalSettings,
-  listLensNodes,
+  listLensNodePage,
   rejectLensNode,
   revokeLensNodeToken
 } from '@/api/lens'
@@ -303,6 +303,7 @@ const { showSuccess, showError } = useToast()
 const formatDateTime = useShortDateTime()
 
 const lensnodes = ref([])
+const totalLensNodes = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const globalSettings = ref([])
@@ -332,25 +333,24 @@ const columns = computed(() =>
 )
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(lensnodes.value.length / pageSize.value))
+  Math.max(1, Math.ceil(totalLensNodes.value / pageSize.value))
 )
-const pagedLensNodes = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  return lensnodes.value.slice(start, start + pageSize.value)
-})
 
 function handlePageSizeChange() {
   currentPage.value = 1
+  load()
 }
 
 function goPrevPage() {
   if (currentPage.value <= 1) return
   currentPage.value -= 1
+  load()
 }
 
 function goNextPage() {
   if (currentPage.value >= totalPages.value) return
   currentPage.value += 1
+  load()
 }
 
 const composeConfig = computed(() =>
@@ -375,10 +375,15 @@ async function load() {
   loading.value = true
   try {
     const [lensnodeRows, settingRows] = await Promise.all([
-      listLensNodes(),
+      listLensNodePage({
+        page: currentPage.value,
+        page_size: pageSize.value
+      }),
       listGlobalSettings()
     ])
     lensnodes.value = normalizeList(lensnodeRows)
+    const total = lensnodeRows?.count ?? lensnodes.value.length
+    totalLensNodes.value = Number(total)
     globalSettings.value = normalizeList(settingRows)
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))

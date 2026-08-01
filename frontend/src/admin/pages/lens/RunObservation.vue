@@ -352,24 +352,29 @@
                 {{ selectedUuid }}
               </span>
             </h2>
-            <button
-              class="text-gray-400 hover:text-gray-600"
-              @click="closeDetail"
-            >
-              <svg
-                class="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                data-testid="close-run-detail"
+                type="button"
+                class="rounded-md p-2 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                :aria-label="t('lensRuns.closeDetail')"
+                @click="closeDetail"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
+                <svg
+                  class="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <div class="flex-1 overflow-y-auto">
@@ -411,6 +416,16 @@
                   <span class="ml-1 text-xs text-gray-400">{{
                     (detail.output_files || []).length
                   }}</span>
+                </button>
+                <button
+                  class="detail-tab"
+                  data-testid="run-diagnosis-tab"
+                  :class="
+                    activeDetailTab === 'diagnosis' ? 'detail-tab-active' : ''
+                  "
+                  @click="activeDetailTab = 'diagnosis'"
+                >
+                  {{ t('lensRuns.tabDiagnosis') }}
                 </button>
               </div>
 
@@ -855,6 +870,14 @@
                 </section>
               </div>
 
+              <!-- Diagnosis tab -->
+              <RunDiagnosisPanel
+                v-show="activeDetailTab === 'diagnosis'"
+                :run-uuid="selectedUuid"
+                :active="activeDetailTab === 'diagnosis'"
+                @navigate="navigateFromEvidence"
+              />
+
               <!-- Trace tab -->
               <div
                 v-show="activeDetailTab === 'trace'"
@@ -1110,7 +1133,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
@@ -1121,6 +1144,7 @@ import { extractErrorMessage } from '@/utils/api'
 import { fetchDeliverableBlob, isPreviewable } from '@/utils/filePreview'
 import { getAdminRuns, getAdminRun, listAssistants } from '@/api/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
+import RunDiagnosisPanel from '@/admin/pages/lens/RunDiagnosisPanel.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -1464,6 +1488,16 @@ function closeDetail() {
   selectedUuid.value = null
   detail.value = null
   previewFile.value = null
+}
+
+function navigateFromEvidence(evidenceRef) {
+  if (String(evidenceRef).startsWith('E-FILE-')) {
+    activeDetailTab.value = 'files'
+  } else if (evidenceRef === 'E-RUN') {
+    activeDetailTab.value = 'overview'
+  } else {
+    activeDetailTab.value = 'trace'
+  }
 }
 
 async function fetchRuns() {

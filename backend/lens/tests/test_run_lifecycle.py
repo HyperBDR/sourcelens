@@ -6,9 +6,17 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
-from lens.models import Assistant, LensNode, Run, RunExecution, Session
+from lens.models import (
+    Assistant,
+    LensNode,
+    Run,
+    RunExecution,
+    RunStep,
+    Session,
+)
 from lens.services import (
     create_execution_run,
+    fail_active_runs_for_lensnode,
     reconcile_lensnode_active_runs,
     record_lensnode_run_event,
     touch_run_activity,
@@ -209,6 +217,45 @@ class RunLifecycleTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, Run.Status.FAILED)
         self.assertEqual(run.error, "LENSNODE_RECONNECT_ORPHANED")
+
+    def test_confirm_reconcile_orphan_finalizes_running_steps(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        step = RunStep.objects.create(
+            run=run,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            sequence=1,
+            status=RunStep.Status.RUNNING,
+        )
+
+        confirm_reconcile_orphan(str(run.uuid))
+
+        step.refresh_from_db()
+        self.assertEqual(step.status, RunStep.Status.FAILED)
+
+    def test_fail_active_runs_for_lensnode_finalizes_steps(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        step = RunStep.objects.create(
+            run=run,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            sequence=1,
+            status=RunStep.Status.RUNNING,
+        )
+
+        fail_active_runs_for_lensnode(self.lensnode.uuid)
+
+        run.refresh_from_db()
+        step.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.error, "LENSNODE_DISCONNECTED")
+        self.assertEqual(step.status, RunStep.Status.FAILED)
 
     def test_confirm_reconcile_orphan_noops_if_already_terminal(self):
         # The normal completion path (a late but durably-delivered run_done)

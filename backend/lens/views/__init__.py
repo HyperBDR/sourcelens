@@ -4,6 +4,10 @@ from .admin_access_subjects import (
     AdminGroupAccessDetailView,
     AdminUserAccessDetailView,
 )
+from .admin_run_diagnostics import (
+    AdminRunDiagnosticsView,
+    AdminRunDiagnosticTurnsView,
+)
 from .admin_runs import (
     AdminRunDetailView,
     AdminRunListView,
@@ -43,6 +47,8 @@ __all__ = [
     "AdminGroupAccessDetailView",
     "AdminRunDetailView",
     "AdminRunListView",
+    "AdminRunDiagnosticsView",
+    "AdminRunDiagnosticTurnsView",
     "AdminUserAccessDetailView",
     "AdminSharedQAViewSet",
     "AssistantViewSet",

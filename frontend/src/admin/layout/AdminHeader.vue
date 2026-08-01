@@ -109,10 +109,10 @@
                     {{ displayName }}
                   </div>
                 </div>
-                <div class="px-4 py-2">
+                <div class="contents">
                   <button
                     type="button"
-                    class="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink-700 transition-colors hover:bg-line-soft hover:text-ink-900"
+                    class="my-2 flex min-h-11 w-full items-center gap-2 px-4 py-1.5 text-left text-sm text-ink-700 transition-colors hover:bg-line-soft hover:text-ink-900"
                     @click="openSettings"
                   >
                     <svg

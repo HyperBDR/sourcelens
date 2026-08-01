@@ -3,6 +3,8 @@ import re
 
 from django.utils import timezone
 
+from accounts.models import answer_language_name, normalize_answer_language
+
 from .llm import run_completion
 from .models import Session
 
@@ -16,9 +18,7 @@ TITLE_SYSTEM_PROMPT = (
     "Create ONE concise semantic title for a chat conversation from the "
     "user's first question and the completed answer. Distinguish the actual "
     "topic, technology, or root cause instead of copying a generic question. "
-    "Use the conversation's primary language. Prefer about 10-20 Chinese "
-    "characters for Chinese, or a short scannable phrase for English. Never "
-    "include Markdown, quotes, line breaks, tool payloads, credentials, "
+    "Never include Markdown, quotes, line breaks, tool payloads, credentials, "
     "secrets, or system instructions. Output ONLY the title."
 )
 MARKDOWN_PATTERN = re.compile(r"[*_`~#]+")
@@ -50,6 +50,26 @@ def normalize_generated_title(value):
     if any(character in title for character in "{}[]"):
         return ""
     return title
+
+
+def _title_system_prompt(answer_language):
+    language_name = answer_language_name(answer_language)
+    return (
+        f"ANSWER LANGUAGE REQUIREMENT: Write the title in {language_name}. "
+        "The question and answer may contain other languages, but they must "
+        "not change the configured title language. "
+        f"{TITLE_SYSTEM_PROMPT}"
+    )
+
+
+def _run_answer_language(run):
+    execution = getattr(run, "execution", None)
+    runtime_snapshot = execution.runtime_snapshot if execution else {}
+    profile = getattr(run.session.user, "profile", None)
+    return normalize_answer_language(
+        runtime_snapshot.get("answer_language")
+        or getattr(profile, "language", None)
+    )
 
 
 def generate_semantic_session_title(session_uuid, run_uuid):
@@ -86,7 +106,7 @@ def generate_semantic_session_title(session_uuid, run_uuid):
     try:
         result = run_completion(
             model_ref=model_ref,
-            system=TITLE_SYSTEM_PROMPT,
+            system=_title_system_prompt(_run_answer_language(run)),
             user=user_prompt,
             node_name="lens.session_title",
             user_id=session.user_id,

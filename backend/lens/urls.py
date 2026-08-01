@@ -4,9 +4,11 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AdminGroupAccessDetailView,
     AdminRunDetailView,
+    AdminRunDiagnosticsView,
+    AdminRunDiagnosticTurnsView,
     AdminRunListView,
-    AdminUserAccessDetailView,
     AdminSharedQAViewSet,
+    AdminUserAccessDetailView,
     AssistantViewSet,
     DataSourceCredentialViewSet,
     DataSourceViewSet,
@@ -43,7 +45,9 @@ router.register(
     AdminSharedQAViewSet,
     basename="lens-admin-shares",
 )
-router.register("admin/lensnodes", LensNodeViewSet, basename="lens-admin-lensnodes")
+router.register(
+    "admin/lensnodes", LensNodeViewSet, basename="lens-admin-lensnodes"
+)
 router.register(
     "admin/datasources",
     DataSourceViewSet,
@@ -121,6 +125,19 @@ urlpatterns = [
         "admin/runs/<uuid:uuid>/",
         AdminRunDetailView.as_view(),
         name="lens-admin-run-detail",
+    ),
+    path(
+        "admin/runs/<uuid:run_uuid>/diagnostics/",
+        AdminRunDiagnosticsView.as_view(),
+        name="lens-admin-run-diagnostics",
+    ),
+    path(
+        (
+            "admin/runs/<uuid:run_uuid>/diagnostics/"
+            "<uuid:diagnostic_uuid>/turns/"
+        ),
+        AdminRunDiagnosticTurnsView.as_view(),
+        name="lens-admin-run-diagnostic-turns",
     ),
     path(
         "admin/global-settings/system-health/",
