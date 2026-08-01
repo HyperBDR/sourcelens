@@ -2382,12 +2382,83 @@ class LensApiTests(TestCase):
             filename="brief.html",
             content_type="text/html",
             byte_size=18,
+            content_hash=hashlib.sha256(b"<html>brief</html>").hexdigest(),
         )
         output.file.save(
             "brief.html", ContentFile(b"<html>brief</html>"), save=False
         )
         output.save()
         return session, run, output
+
+    def test_lensnode_can_download_prior_same_session_deliverable(self):
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        session, prior, output = self._make_output_file()
+        prior.status = Run.Status.DONE
+        prior.outcome = Run.Outcome.COMPLETED
+        prior.save(update_fields=["status", "outcome"])
+        current = create_execution_run(
+            session=session,
+            question="Translate the previous file",
+            enqueue=False,
+        )
+
+        try:
+            response = APIClient().get(
+                (
+                    f"/api/lens/lensnode/runs/{current.uuid}/"
+                    f"history-artifacts/{output.uuid}/"
+                ),
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                collect_stream(response.streaming_content),
+                b"<html>brief</html>",
+            )
+            self.assertEqual(
+                response["X-Attachment-Hash"],
+                output.content_hash,
+            )
+        finally:
+            output.file.delete(save=False)
+
+    def test_lensnode_cannot_download_deliverable_from_other_session(self):
+        from lens.models import Session
+        from lens.services import create_execution_run
+
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        other_session, prior, output = self._make_output_file()
+        prior.status = Run.Status.DONE
+        prior.outcome = Run.Outcome.COMPLETED
+        prior.save(update_fields=["status", "outcome"])
+        current_session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        current = create_execution_run(
+            session=current_session,
+            question="Read another conversation",
+            enqueue=False,
+        )
+
+        try:
+            response = APIClient().get(
+                (
+                    f"/api/lens/lensnode/runs/{current.uuid}/"
+                    f"history-artifacts/{output.uuid}/"
+                ),
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+            self.assertEqual(response.status_code, 404)
+        finally:
+            output.file.delete(save=False)
 
     def test_output_file_download_returns_attachment_to_owner(self):
         session, run, output = self._make_output_file()

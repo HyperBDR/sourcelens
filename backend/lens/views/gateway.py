@@ -414,6 +414,66 @@ class LensNodeRunAttachmentView(LensNodeAuthMixin, APIView):
         return response
 
 
+class LensNodeHistoryArtifactView(LensNodeAuthMixin, APIView):
+    """Serve one trusted prior deliverable to the assigned LensNode."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, run_uuid, uuid):
+        """Return bytes only within the current Run's conversation."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        current_run = Run.objects.select_related(
+            "input_message",
+            "session",
+        ).filter(uuid=run_uuid, lensnode=lensnode).first()
+        if current_run is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        output = (
+            RunOutputFile.objects.select_related(
+                "run",
+                "run__input_message",
+            )
+            .filter(
+                uuid=uuid,
+                session_id=current_run.session_id,
+                assistant_id=current_run.session.assistant_id,
+                run__status=Run.Status.DONE,
+                run__outcome__in=["", Run.Outcome.COMPLETED],
+                run__input_message__sequence__lt=(
+                    current_run.input_message.sequence
+                ),
+            )
+            .first()
+        )
+        if (
+            output is None
+            or not output.file
+            or len(output.content_hash or "") != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in (output.content_hash or "").lower()
+            )
+            or output.byte_size > settings.DELIVERABLE_MAX_BYTES
+        ):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        response = FileResponse(
+            output.file.open("rb"),
+            as_attachment=True,
+            filename=output.filename or "artifact",
+            content_type=output.content_type or "application/octet-stream",
+        )
+        response["Content-Length"] = output.byte_size
+        response["X-Attachment-Hash"] = output.content_hash
+        return response
+
+
 class LensNodeDeliverableUploadView(LensNodeAuthMixin, APIView):
     """Receive a run deliverable file produced by a LensNode.
 

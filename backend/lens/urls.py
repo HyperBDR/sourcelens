@@ -17,6 +17,7 @@ from .views import (
     LensAttachmentView,
     LensNodeAIGatewayView,
     LensNodeDeliverableUploadView,
+    LensNodeHistoryArtifactView,
     LensNodeRunAttachmentView,
     LensNodeSkillPackageView,
     LensNodeViewSet,
@@ -185,6 +186,11 @@ urlpatterns = [
         "lensnode/runs/<uuid:run_uuid>/attachments/<uuid:uuid>/",
         LensNodeRunAttachmentView.as_view(),
         name="lens-lensnode-run-attachment",
+    ),
+    path(
+        "lensnode/runs/<uuid:run_uuid>/history-artifacts/<uuid:uuid>/",
+        LensNodeHistoryArtifactView.as_view(),
+        name="lens-lensnode-history-artifact",
     ),
     path(
         "lensnode/deliverables/",

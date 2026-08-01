@@ -1250,6 +1250,41 @@ def test_route_selection_uses_history_to_resolve_an_action_follow_up():
     )
 
 
+def test_route_selection_exposes_prior_artifact_for_translation():
+    class Model:
+        def __init__(self):
+            self.messages = []
+
+        def invoke(self, messages, **_kwargs):
+            self.messages = messages
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"complex",'
+                    '"route":"plan_execute",'
+                    '"required_capabilities":["artifact_delivery"],'
+                    '"evidence_requirement":"artifact"}'
+                )
+            )
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "能再给我出一份中文版的吗？",
+        history_artifacts=[
+            {
+                "filename": "Original report.md",
+                "path": "/conversation-artifacts/report.md",
+            }
+        ],
+        available_tools=[SimpleNamespace(name="save_deliverable")],
+    )
+
+    prompt = model.messages[0].content
+    assert decision["route"] == "plan_execute"
+    assert "Original report.md" in prompt
+    assert "never direct_answer" in prompt
+
+
 def test_pure_model_request_remains_direct_answer_without_bound_tools():
     class Model:
         def invoke(self, _messages, **_kwargs):

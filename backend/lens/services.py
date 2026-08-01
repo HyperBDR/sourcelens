@@ -8,6 +8,7 @@ from time import sleep
 
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Max, Q
 from django.utils import timezone
@@ -36,6 +37,7 @@ from .models import (
     MessageAttachment,
     Run,
     RunExecution,
+    RunOutputFile,
     RunStep,
     RunTraceExport,
     Session,
@@ -64,6 +66,7 @@ RUN_CHECKPOINT_TTL_HOURS_CAPABILITY = "run_checkpoint_ttl_hours"
 HISTORY_MAX_PAIRS = 5
 HISTORY_MAX_MESSAGE_CHARS = 2000
 HISTORY_MAX_TOTAL_CHARS = 8000
+HISTORY_ARTIFACT_MAX_FILES = 3
 
 QUERY_REWRITE_HISTORY_TURNS = 3
 QUERY_REWRITE_MAX_CHARS = 400
@@ -1166,6 +1169,64 @@ def build_run_history(run):
     return history
 
 
+def build_run_history_artifacts(run):
+    """Return bounded deliverables from trusted prior Run attempts."""
+
+    all_prior_runs = list(
+        Run.objects.filter(
+            session=run.session,
+            input_message__sequence__lt=run.input_message.sequence,
+        )
+        .select_related("input_message")
+        .prefetch_related("output_files")
+        .order_by("input_message__sequence")
+    )
+    runs_by_id = {item.pk: item for item in all_prior_runs}
+    cutoff_sequence = run.input_message.sequence
+    if run.retry_of_run_id:
+        root, _ = _retry_chain_root(run, runs_by_id)
+        cutoff_sequence = root.input_message.sequence
+    prior_runs = [
+        item
+        for item in all_prior_runs
+        if item.input_message.sequence < cutoff_sequence
+    ]
+    latest_attempts = _latest_retry_attempts(prior_runs)
+    selected = []
+    total_bytes = 0
+    for prior in reversed(latest_attempts):
+        if not _assistant_output_is_trusted(prior):
+            continue
+        for output in reversed(list(prior.output_files.all())):
+            byte_size = int(output.byte_size or 0)
+            content_hash = (output.content_hash or "").lower()
+            if (
+                not output.file
+                or len(content_hash) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in content_hash
+                )
+                or byte_size > settings.DELIVERABLE_MAX_BYTES
+                or total_bytes + byte_size > settings.DELIVERABLE_MAX_BYTES
+            ):
+                continue
+            selected.append(
+                {
+                    "uuid": str(output.uuid),
+                    "filename": output.filename,
+                    "content_type": output.content_type,
+                    "byte_size": byte_size,
+                    "content_hash": content_hash,
+                    "source_run_uuid": str(prior.uuid),
+                }
+            )
+            total_bytes += byte_size
+            if len(selected) >= HISTORY_ARTIFACT_MAX_FILES:
+                return list(reversed(selected))
+    return list(reversed(selected))
+
+
 def build_run_history_metadata(run):
     """Return non-sensitive counts describing Run history filtering."""
 
@@ -1442,6 +1503,11 @@ def dispatch_run_to_lensnode(
     )
     remaining_run_timeout_s = max(run_timeout_s - elapsed_s, 0)
     profile = getattr(run.session.user, "profile", None)
+    history_artifacts = (
+        build_run_history_artifacts(run)
+        if execution.task == "general_chat"
+        else []
+    )
     answer_language = normalize_answer_language(
         runtime_snapshot.get("answer_language")
         or getattr(profile, "language", None)
@@ -1462,6 +1528,7 @@ def dispatch_run_to_lensnode(
                     or str(run.session.assistant.multimodal_model_ref or "")
                 ),
                 "history": build_run_history(run),
+                "history_artifacts": history_artifacts,
                 "target_dirs": execution.target_dirs,
                 "loaded_skills": resolve_loaded_skill_environment(
                     execution.loaded_skills
