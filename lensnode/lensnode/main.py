@@ -10,6 +10,13 @@ from urllib.parse import urlencode
 import httpx
 from websockets.asyncio.client import connect
 
+from .checkpoint import (
+    checkpoint_enabled,
+    checkpoint_ttl_hours,
+    cleanup_expired_checkpoints,
+    cleanup_run_checkpoint,
+    get_checkpoint_saver,
+)
 from .config import load_config
 from .datasource_sync import DataSourceSyncError
 from .datasource_sync import convert_managed_workspace
@@ -24,7 +31,10 @@ from .logging_utils import (
     task_log,
     utc_now,
 )
-from .runtime_resources import cleanup_stale_runtime_resources
+from .runtime_resources import (
+    cleanup_run_runtime_resources,
+    cleanup_stale_runtime_resources,
+)
 from .tls import create_config_ssl_context
 from .tls import warn_if_verification_disabled
 from .workspace import available_dirs
@@ -40,7 +50,10 @@ class LensNodeClient:
         self.config = config
         workspace_path = getattr(config, "workspace_path", None)
         if workspace_path:
-            cleanup_stale_runtime_resources(workspace_path)
+            cleanup_stale_runtime_resources(
+                workspace_path,
+                max_age_s=int(checkpoint_ttl_hours() * 3600),
+            )
         self.ssl_context = create_config_ssl_context(config)
         self.gateway_http_client = httpx.Client(
             timeout=config.request_timeout_s,
@@ -67,6 +80,8 @@ class LensNodeClient:
         self.last_report_signature = None
         self.running_tasks = {}
         self.datasource_conversion_cancels = {}
+        self.running_commands = {}
+        self._checkpoint_resume_ready = None
         # Durable outbound buffer, persistent across reconnects. A run started
         # on one connection keeps executing across a blue/green API recycle and
         # emits run_event/run_output/run_done frames while the socket is down;
@@ -178,6 +193,17 @@ class LensNodeClient:
             await asyncio.to_thread(
                 cleanup_stale_runtime_resources,
                 workspace_path,
+                int(checkpoint_ttl_hours() * 3600),
+            )
+            active_run_uuids = [
+                run_uuid
+                for run_uuid in self.running_tasks
+                if not run_uuid.startswith("datasource:")
+            ]
+            await asyncio.to_thread(
+                cleanup_expired_checkpoints,
+                workspace_path,
+                active_run_uuids,
             )
 
     async def stop(self):
@@ -397,8 +423,29 @@ class LensNodeClient:
         elif message_type == "run_cancel":
             run_uuid = str(message.get("run_uuid") or "")
             task = self.running_tasks.get(run_uuid)
+            command = None
             if task is not None:
-                task.cancel()
+                command = self.running_commands.get(run_uuid)
+                if command is not None:
+                    if not command.get("_explicit_cancel"):
+                        command["_explicit_cancel"] = True
+                        task.cancel()
+                else:
+                    task.cancel()
+            if task is None:
+                cleanup_run_checkpoint(
+                    run_uuid,
+                    getattr(self.config, "workspace_path", None),
+                )
+                cleanup_run_runtime_resources(
+                    getattr(self.config, "workspace_path", None),
+                    run_uuid,
+                )
+            elif command is None:
+                cleanup_run_checkpoint(
+                    run_uuid,
+                    getattr(self.config, "workspace_path", None),
+                )
             LOGGER.info(
                 task_log(
                     (
@@ -407,6 +454,16 @@ class LensNodeClient:
                     )
                 )
             )
+        elif message_type == "run_done_ack":
+            run_uuid = str(message.get("run_uuid") or "")
+            workspace_path = getattr(self.config, "workspace_path", None)
+            cleanup_deferred = self.executor.defer_cleanup_until_worker_stops(
+                run_uuid,
+                workspace_path,
+            )
+            if not cleanup_deferred:
+                cleanup_run_checkpoint(run_uuid, workspace_path)
+                cleanup_run_runtime_resources(workspace_path, run_uuid)
         elif message_type == "connected":
             LOGGER.info(
                 task_log(
@@ -456,6 +513,12 @@ class LensNodeClient:
             await self._send_busy(run_uuid, "LENSNODE_DRAINING")
             return
         if run_uuid in self.running_tasks:
+            if message.get("resume"):
+                LOGGER.info(
+                    "Ignored duplicate resume for active run %s.",
+                    run_uuid,
+                )
+                return
             await self._send_busy(run_uuid, "LENSNODE_RUN_ACTIVE")
             return
         max_runs = max(1, int(getattr(self.config, "max_concurrent_runs", 1)))
@@ -475,6 +538,7 @@ class LensNodeClient:
         task = asyncio.create_task(
             self._execute_command(run_uuid, message)
         )
+        self.running_commands[run_uuid] = message
         self.running_tasks[run_uuid] = task
         task.add_done_callback(lambda item: self._consume_task_exception(item))
 
@@ -780,6 +844,7 @@ class LensNodeClient:
                     await asyncio.sleep(0)
             finally:
                 self.running_tasks.pop(run_uuid, None)
+                self.running_commands.pop(run_uuid, None)
 
     def _consume_task_exception(self, task):
         """Consume task exceptions so cancelled runs do not leak warnings."""
@@ -833,6 +898,7 @@ class LensNodeClient:
             )
         )
         active_runs = self._reported_active_runs()
+        checkpoint_resume_ready = self._checkpoint_resume_available()
         await self.websocket.send(
             json.dumps(
                 {
@@ -847,11 +913,33 @@ class LensNodeClient:
                     "labels": {
                         "mode": "local",
                         "run_document_attachments": True,
+                        "run_checkpoint_resume": checkpoint_resume_ready,
+                        "run_checkpoint_ttl_hours": checkpoint_ttl_hours(),
                     },
                 },
                 ensure_ascii=False,
             )
         )
+
+    def _checkpoint_resume_available(self):
+        """Return whether durable checkpoint storage is usable."""
+
+        if self._checkpoint_resume_ready is not None:
+            return self._checkpoint_resume_ready
+        workspace_path = getattr(self.config, "workspace_path", None)
+        if not checkpoint_enabled() or not workspace_path:
+            self._checkpoint_resume_ready = False
+            return False
+        try:
+            get_checkpoint_saver(workspace_path)
+        except Exception:
+            LOGGER.exception(
+                "Disabling run checkpoint resume: storage is unavailable"
+            )
+            self._checkpoint_resume_ready = False
+            return False
+        self._checkpoint_resume_ready = True
+        return True
 
     async def _heartbeat_loop(self):
         """Periodically report workspace state while connected.

@@ -406,6 +406,21 @@ def cleanup_runtime_resources(resources):
     shutil.rmtree(resources.root, ignore_errors=True)
 
 
+def cleanup_run_runtime_resources(workspace_path, run_uuid):
+    """Remove one Run's deterministic runtime directory."""
+
+    if not workspace_path or not run_uuid:
+        return
+    runtime_root = (
+        Path(workspace_path)
+        / ".sourcelens"
+        / "runtime"
+        / "runs"
+        / str(run_uuid)
+    )
+    shutil.rmtree(runtime_root, ignore_errors=True)
+
+
 def cleanup_stale_runtime_resources(
     workspace_path,
     max_age_s=STALE_RUNTIME_MAX_AGE_S,

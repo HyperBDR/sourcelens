@@ -1,5 +1,6 @@
 import asyncio
 import json
+from unittest.mock import patch
 
 from lensnode.main import LensNodeClient
 
@@ -179,7 +180,8 @@ def test_reconnect_hello_claims_buffered_terminal_run_before_flush():
 
         ws = FakeWebSocket()
         client.websocket = ws
-        await client._send_hello()
+        with patch("lensnode.main.get_checkpoint_saver"):
+            await client._send_hello()
 
         loop_task = asyncio.create_task(client._send_loop(ws))
         await _wait_until(lambda: len(ws.sent) == 4)
@@ -194,6 +196,7 @@ def test_reconnect_hello_claims_buffered_terminal_run_before_flush():
             "running-run",
         ]
         assert frames[0]["labels"]["run_document_attachments"] is True
+        assert frames[0]["labels"]["run_checkpoint_resume"] is True
         assert [frame["type"] for frame in frames[1:]] == [
             "run_output",
             "run_output",
@@ -201,3 +204,117 @@ def test_reconnect_hello_claims_buffered_terminal_run_before_flush():
         ]
 
     asyncio.run(exercise())
+
+
+def test_hello_does_not_advertise_resume_when_checkpointing_is_disabled(
+    monkeypatch,
+):
+    async def exercise():
+        client = _make_client()
+        client.websocket = FakeWebSocket()
+
+        await client._send_hello()
+
+        frame = json.loads(client.websocket.sent[0])
+        assert frame["labels"]["run_checkpoint_resume"] is False
+
+    monkeypatch.setenv("LENSNODE_CHECKPOINT_ENABLED", "0")
+    asyncio.run(exercise())
+
+
+def test_hello_does_not_advertise_unusable_checkpoint_storage():
+    async def exercise():
+        client = _make_client()
+        client.websocket = FakeWebSocket()
+
+        with patch(
+            "lensnode.main.get_checkpoint_saver",
+            side_effect=OSError("read only"),
+        ):
+            await client._send_hello()
+
+        frame = json.loads(client.websocket.sent[0])
+        assert frame["labels"]["run_checkpoint_resume"] is False
+
+    asyncio.run(exercise())
+
+
+def test_run_done_ack_cleans_checkpoint_and_runtime_resources():
+    async def exercise():
+        client = _make_client()
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_done_ack",
+                    "run_uuid": "completed-run",
+                }
+            )
+        )
+
+    with (
+        patch("lensnode.main.cleanup_run_checkpoint") as checkpoint_cleanup,
+        patch(
+            "lensnode.main.cleanup_run_runtime_resources"
+        ) as runtime_cleanup,
+    ):
+        asyncio.run(exercise())
+
+    checkpoint_cleanup.assert_called_once_with(
+        "completed-run",
+        "/missing-test-workspace",
+    )
+    runtime_cleanup.assert_called_once_with(
+        "/missing-test-workspace",
+        "completed-run",
+    )
+
+
+def test_run_done_ack_waits_for_timed_out_worker_before_cleanup():
+    async def exercise(checkpoint_cleanup, runtime_cleanup):
+        client = _make_client()
+        worker_release = asyncio.Event()
+
+        async def worker():
+            await worker_release.wait()
+
+        worker_task = asyncio.create_task(worker())
+        client.executor._pending_workers = {"timed-out-run": worker_task}
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_done_ack",
+                    "run_uuid": "timed-out-run",
+                }
+            )
+        )
+
+        checkpoint_cleanup.assert_not_called()
+        runtime_cleanup.assert_not_called()
+
+        worker_release.set()
+        await _wait_until(lambda: checkpoint_cleanup.called)
+
+    with (
+        patch("lensnode.main.cleanup_run_checkpoint") as checkpoint_cleanup,
+        patch(
+            "lensnode.main.cleanup_run_runtime_resources"
+        ) as runtime_cleanup,
+        patch(
+            "lensnode.executor.cleanup_run_checkpoint",
+            checkpoint_cleanup,
+        ),
+        patch(
+            "lensnode.executor.cleanup_run_runtime_resources",
+            runtime_cleanup,
+        ),
+    ):
+        asyncio.run(exercise(checkpoint_cleanup, runtime_cleanup))
+
+    checkpoint_cleanup.assert_called_once_with(
+        "timed-out-run",
+        "/missing-test-workspace",
+    )
+    runtime_cleanup.assert_called_once_with(
+        "/missing-test-workspace",
+        "timed-out-run",
+    )
