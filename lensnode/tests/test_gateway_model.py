@@ -587,6 +587,138 @@ def test_run_token_budget_warns_then_suppresses_new_tool_calls(monkeypatch):
     }
 
 
+def test_resume_restores_token_and_loop_guardrail_state(monkeypatch):
+    def handler(_request):
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": "",
+                    "finish_reason": "tool_calls",
+                    "tool_calls": [
+                        {
+                            "id": "call_3",
+                            "type": "function",
+                            "function": {
+                                "name": "search_workspace",
+                                "arguments": '{"query":"same"}',
+                            },
+                        }
+                    ],
+                },
+                "usage": {"total_tokens": 30},
+            },
+        )
+
+    _install_transport(monkeypatch, handler)
+    previous_model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        general_chat_execution_gates=True,
+        loop_repeat_warn=2,
+        loop_repeat_hard=3,
+    )
+    repeated_call = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "call_1",
+                "name": "search_workspace",
+                "args": {"query": "same"},
+            }
+        ],
+    )
+    previous_model._apply_loop_detection(repeated_call)
+    previous_model._apply_loop_detection(repeated_call)
+    durable_state = previous_model.export_runtime_state()
+    durable_state["run_token_usage"] = {"total_tokens": 80}
+    persisted = []
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        general_chat_execution_gates=True,
+        token_budget_max_tokens=200,
+        token_budget_final_reserve_tokens=10,
+        loop_repeat_warn=2,
+        loop_repeat_hard=3,
+        on_runtime_state_change=persisted.append,
+    )
+    model.restore_runtime_state(
+        [AIMessage(content="compacted summary")],
+        durable_state,
+    )
+
+    result = model._generate([HumanMessage(content="continue")])
+    message = result.generations[0].message
+
+    assert model.token_usage["total_tokens"] == 110
+    assert message.tool_calls == []
+    assert message.response_metadata["loop_capped"] is True
+    assert len(persisted[-1]["tool_call_history"]) == 3
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected_reason"),
+    [
+        ({"loop_capped": True}, "loop_capped"),
+        ({"safety_terminated": True}, "safety_terminated"),
+        ({"model_length_capped": True}, "model_length_capped"),
+    ],
+)
+def test_resume_restores_terminal_guardrail_reason(
+    metadata,
+    expected_reason,
+):
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+    )
+
+    model.restore_runtime_state(
+        [AIMessage(content="partial", response_metadata=metadata)]
+    )
+
+    assert model.stop_reason == expected_reason
+
+
+def test_resume_reconciles_newer_message_usage_with_durable_state():
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+    )
+    message = AIMessage(
+        content="checkpointed answer",
+        response_metadata={
+            "run_token_usage": {
+                "prompt_tokens": 50,
+                "completion_tokens": 30,
+                "total_tokens": 80,
+            }
+        },
+    )
+
+    model.restore_runtime_state(
+        [message],
+        {
+            "run_token_usage": {
+                "prompt_tokens": 25,
+                "completion_tokens": 15,
+                "total_tokens": 40,
+            }
+        },
+    )
+
+    assert model.token_usage == {
+        "prompt_tokens": 50,
+        "completion_tokens": 30,
+        "total_tokens": 80,
+    }
+
+
 def test_final_synthesis_is_preserved_when_it_crosses_hard_budget(monkeypatch):
     responses = [
         {

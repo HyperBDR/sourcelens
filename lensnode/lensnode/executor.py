@@ -2,9 +2,12 @@ import asyncio
 import logging
 import math
 import threading
+from datetime import datetime, timezone
 
 from .agent_runtime import LensDeepAgentRuntime
+from .checkpoint import cleanup_run_checkpoint
 from .logging_utils import elapsed_since, format_duration, task_log, utc_now
+from .runtime_resources import cleanup_run_runtime_resources
 
 LOGGER = logging.getLogger("lensnode")
 
@@ -36,6 +39,34 @@ def _run_timeout_seconds(command):
         agent_rounds,
         RUN_TIMEOUT_SECONDS_BY_ROUNDS["balanced"],
     )
+
+
+def _remaining_run_timeout_seconds(command, now=None):
+    """Return the unspent wall-clock budget from the original Run start."""
+
+    timeout_s = _run_timeout_seconds(command)
+    remaining = command.get("remaining_run_timeout_s")
+    if (
+        isinstance(remaining, (int, float))
+        and not isinstance(remaining, bool)
+        and math.isfinite(remaining)
+        and remaining >= 0
+    ):
+        return min(remaining, timeout_s)
+    raw_started_at = command.get("run_started_at")
+    if not isinstance(raw_started_at, str) or not raw_started_at.strip():
+        return timeout_s
+    try:
+        started_at = datetime.fromisoformat(
+            raw_started_at.strip().replace("Z", "+00:00")
+        )
+    except ValueError:
+        return timeout_s
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    elapsed_s = max((current - started_at).total_seconds(), 0)
+    return max(timeout_s - elapsed_s, 0)
 
 
 def _wrapup_grace_seconds(timeout_s):
@@ -97,6 +128,27 @@ def _execution_step_type(command):
     if command.get("task") == "general_chat":
         return "general_chat"
     return "retrieval"
+
+
+async def _cleanup_after_cancelled_worker(
+    answer_task,
+    run_uuid,
+    workspace_path,
+):
+    """Clean durable Run state after its synchronous worker has stopped."""
+
+    while True:
+        try:
+            await asyncio.shield(answer_task)
+            break
+        except asyncio.CancelledError:
+            if answer_task.done():
+                break
+            continue
+        except Exception:
+            break
+    cleanup_run_checkpoint(run_uuid, workspace_path)
+    cleanup_run_runtime_resources(workspace_path, run_uuid)
 
 
 TASKS = [
@@ -170,6 +222,66 @@ class LensNodeExecutor:
 
     def __init__(self, config, http_client=None):
         self.agent = LensDeepAgentRuntime(config, http_client=http_client)
+        self._pending_workers = {}
+        self._pending_cleanup_runs = set()
+
+    def _track_pending_worker(self, run_uuid, worker_task):
+        """Track a timed-out agent task until its worker has stopped."""
+
+        pending_workers = getattr(self, "_pending_workers", None)
+        if pending_workers is None:
+            pending_workers = {}
+            self._pending_workers = pending_workers
+        pending_workers[run_uuid] = worker_task
+
+        def discard_finished_worker(task):
+            try:
+                task.exception()
+            except asyncio.CancelledError:
+                pass
+            if pending_workers.get(run_uuid) is task:
+                pending_workers.pop(run_uuid, None)
+
+        worker_task.add_done_callback(discard_finished_worker)
+
+    def defer_cleanup_until_worker_stops(self, run_uuid, workspace_path):
+        """Defer acknowledged terminal cleanup for an active worker."""
+
+        worker_task = getattr(self, "_pending_workers", {}).get(run_uuid)
+        if worker_task is None or worker_task.done():
+            return False
+        cleanup_runs = getattr(self, "_pending_cleanup_runs", None)
+        if cleanup_runs is None:
+            cleanup_runs = set()
+            self._pending_cleanup_runs = cleanup_runs
+        if run_uuid in cleanup_runs:
+            return True
+        cleanup_runs.add(run_uuid)
+
+        async def cleanup():
+            try:
+                await _cleanup_after_cancelled_worker(
+                    worker_task,
+                    run_uuid,
+                    workspace_path,
+                )
+            finally:
+                cleanup_runs.discard(run_uuid)
+
+        asyncio.create_task(cleanup())
+        return True
+
+    async def drain_pending_workers(self):
+        """Wait until cancelled synchronous Run workers have unwound."""
+
+        while True:
+            pending_workers = getattr(self, "_pending_workers", {})
+            tasks = [
+                task for task in pending_workers.values() if not task.done()
+            ]
+            if not tasks:
+                return
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def execute(self, command, emit):
         """Execute one run_start command and emit protocol frames."""
@@ -180,6 +292,8 @@ class LensNodeExecutor:
         step_type = _execution_step_type(command)
         target_dirs = command.get("target_dirs") or []
         timeout_s = _run_timeout_seconds(command)
+        cleanup_deferred = False
+        remaining_timeout_s = _remaining_run_timeout_seconds(command)
         idle_timeout_s = getattr(
             self.agent.config, "run_idle_timeout_s", 180
         )
@@ -190,6 +304,7 @@ class LensNodeExecutor:
             (
                 f"Starting to run command: {task}({run_uuid}). "
                 f"Run timeout {format_duration(timeout_s)}, "
+                f"remaining {format_duration(remaining_timeout_s)}, "
                 f"idle timeout {format_duration(idle_timeout_s)}."
             ),
             started_at,
@@ -211,6 +326,7 @@ class LensNodeExecutor:
                     "task": task,
                     "target_dirs": target_dirs,
                     "run_timeout_s": timeout_s,
+                    "remaining_run_timeout_s": remaining_timeout_s,
                     "idle_timeout_s": idle_timeout_s,
                 },
             }
@@ -222,7 +338,7 @@ class LensNodeExecutor:
                     f"Running command {task}({run_uuid}). Current status is "
                     "running Deep Agents. Elapsed time so far: "
                     f"{elapsed_since(started_at)}. Remaining Timeout: "
-                    f"{format_duration(timeout_s)}."
+                    f"{format_duration(remaining_timeout_s)}."
                 )
             )
             LOGGER.info(progress_message)
@@ -240,8 +356,10 @@ class LensNodeExecutor:
 
             loop = asyncio.get_running_loop()
             activity = {"at": loop.time()}
-            deadline_at = loop.time() + timeout_s
-            wrapup_at = deadline_at - _wrapup_grace_seconds(timeout_s)
+            deadline_at = loop.time() + remaining_timeout_s
+            wrapup_at = deadline_at - _wrapup_grace_seconds(
+                remaining_timeout_s
+            )
             cancel_event = threading.Event()
             wrapup_event = threading.Event()
 
@@ -300,21 +418,17 @@ class LensNodeExecutor:
                 )
             )
 
-            async def cancel_answer_task():
-                """Stop the coroutine and signal its worker thread."""
+            def stop_answer_task():
+                """Signal a timed-out worker and track it until it exits."""
 
                 cancel_event.set()
-                answer_task.cancel()
-                try:
-                    await answer_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+                self._track_pending_worker(run_uuid, answer_task)
 
             try:
                 while True:
                     remaining_s = deadline_at - loop.time()
                     if remaining_s <= 0:
-                        await cancel_answer_task()
+                        stop_answer_task()
                         raise RunDeadlineExceededError(
                             "Run exceeded total wall-clock timeout of "
                             f"{format_duration(timeout_s)}."
@@ -350,23 +464,37 @@ class LensNodeExecutor:
                         result = answer_task.result()
                         break
                     if loop.time() >= deadline_at:
-                        await cancel_answer_task()
+                        stop_answer_task()
                         raise RunDeadlineExceededError(
                             "Run exceeded total wall-clock timeout of "
                             f"{format_duration(timeout_s)}."
                         )
                     if loop.time() - activity["at"] > idle_timeout_s:
-                        await cancel_answer_task()
+                        stop_answer_task()
                         raise RunStalledError(
                             "Run saw no gateway activity for "
                             f"{format_duration(idle_timeout_s)}; aborting."
                         )
             except asyncio.CancelledError:
                 # run_cancel cancels this coroutine, which does not cancel
-                # answer_task or its worker thread on its own. Signal both
-                # so the agent stops issuing model calls for a dead run.
+                # answer_task or its worker thread on its own. Signal the
+                # worker and track it until it stops issuing model calls.
                 cancel_event.set()
-                answer_task.cancel()
+                self._track_pending_worker(run_uuid, answer_task)
+                if command.get("_explicit_cancel"):
+                    cleanup_deferred = True
+                    workspace_path = getattr(
+                        self.agent.config,
+                        "workspace_path",
+                        None,
+                    )
+                    asyncio.create_task(
+                        _cleanup_after_cancelled_worker(
+                            answer_task,
+                            run_uuid,
+                            workspace_path,
+                        )
+                    )
                 raise
             samples = result.get("samples") or []
             sample_paths = [item["path"] for item in samples]
@@ -467,3 +595,15 @@ class LensNodeExecutor:
                     },
                 }
             )
+        finally:
+            if command.get("_explicit_cancel") and not cleanup_deferred:
+                workspace_path = getattr(
+                    self.agent.config,
+                    "workspace_path",
+                    None,
+                )
+                cleanup_run_checkpoint(
+                    run_uuid,
+                    workspace_path,
+                )
+                cleanup_run_runtime_resources(workspace_path, run_uuid)

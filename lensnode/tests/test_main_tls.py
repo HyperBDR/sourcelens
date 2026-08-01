@@ -87,8 +87,8 @@ def test_runtime_cleanup_loop_repeats_until_stopped(monkeypatch):
         async def no_wait(_delay):
             return None
 
-        def cleanup(workspace_path):
-            calls.append(workspace_path)
+        def cleanup(workspace_path, max_age_s):
+            calls.append((workspace_path, max_age_s))
             if len(calls) == 2:
                 client.stopping.set()
 
@@ -97,12 +97,19 @@ def test_runtime_cleanup_loop_repeats_until_stopped(monkeypatch):
             "lensnode.main.cleanup_stale_runtime_resources",
             cleanup,
         )
+        monkeypatch.setattr(
+            "lensnode.main.cleanup_expired_checkpoints",
+            lambda *_args: None,
+        )
 
         await client._runtime_cleanup_loop()
 
     asyncio.run(exercise())
 
-    assert calls == ["/test-workspace", "/test-workspace"]
+    assert calls == [
+        ("/test-workspace", 24 * 60 * 60),
+        ("/test-workspace", 24 * 60 * 60),
+    ]
 
 
 def test_run_forever_starts_runtime_cleanup(monkeypatch):
