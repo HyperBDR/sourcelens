@@ -17,6 +17,7 @@ class GlobalSettingViewSet(BaseAdminViewSet):
     """CRUD for global settings."""
 
     queryset = GlobalSetting.objects.all()
+    pagination_class = None
     serializer_class = GlobalSettingSerializer
     lookup_field = "key"
     lookup_value_regex = "[^/]+"

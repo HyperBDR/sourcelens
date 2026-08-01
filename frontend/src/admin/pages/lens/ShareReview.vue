@@ -71,7 +71,7 @@
               </thead>
               <tbody class="divide-y divide-gray-200 bg-white">
                 <tr
-                  v-for="row in pagedRows"
+                  v-for="row in rows"
                   :key="row.uuid"
                   class="cursor-pointer transition-colors hover:bg-gray-50"
                   @click="openDetail(row)"
@@ -190,7 +190,7 @@
             v-if="!loading"
             v-model:page-size="pageSize"
             :current-page="currentPage"
-            :total="rows.length"
+            :total="totalCount"
             @page-size-change="handlePageSizeChange"
             @prev="goPrevPage"
             @next="goNextPage"
@@ -319,6 +319,7 @@ const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const rows = ref([])
+const totalCount = ref(0)
 const loading = ref(true)
 const activeTab = ref('pending')
 const currentPage = ref(1)
@@ -336,25 +337,24 @@ const tabs = computed(() => [
 ])
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(rows.value.length / pageSize.value))
+  Math.max(1, Math.ceil(totalCount.value / pageSize.value))
 )
-const pagedRows = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value
-  return rows.value.slice(start, start + pageSize.value)
-})
 
 function handlePageSizeChange() {
   currentPage.value = 1
+  load()
 }
 
 function goPrevPage() {
   if (currentPage.value <= 1) return
   currentPage.value -= 1
+  load()
 }
 
 function goNextPage() {
   if (currentPage.value >= totalPages.value) return
   currentPage.value += 1
+  load()
 }
 
 const TAB_PARAMS = {
@@ -373,10 +373,18 @@ function extractRows(data) {
 async function load() {
   loading.value = true
   try {
-    const data = await listAdminShares(TAB_PARAMS[activeTab.value])
+    const data = await listAdminShares({
+      ...TAB_PARAMS[activeTab.value],
+      page: currentPage.value,
+      page_size: pageSize.value
+    })
     rows.value = extractRows(data)
+    totalCount.value = Array.isArray(data)
+      ? data.length
+      : Number(data?.count ?? rows.value.length)
   } catch {
     rows.value = []
+    totalCount.value = 0
   } finally {
     loading.value = false
   }

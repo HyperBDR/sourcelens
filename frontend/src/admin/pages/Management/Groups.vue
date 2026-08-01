@@ -302,6 +302,7 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const totalCount = ref(0)
 const userOptions = ref([])
+const userOptionsLoaded = ref(false)
 const deleteTarget = ref(null)
 const deletingId = ref(null)
 const bulkLoadingKey = ref('')
@@ -414,9 +415,10 @@ function openGroupHistory(assistant) {
 }
 
 async function loadUsers() {
+  userOptionsLoaded.value = false
   try {
-    const data = await managementApi.getUsers({ page: 1, page_size: 1000 })
-    userOptions.value = Array.isArray(data) ? data : (data?.results ?? [])
+    userOptions.value = await managementApi.getAllUsers()
+    userOptionsLoaded.value = true
   } catch {
     userOptions.value = []
   }
@@ -476,9 +478,11 @@ async function submitGroup() {
 
   submitLoading.value = true
   try {
-    const payload = {
-      name,
-      user_ids: Array.isArray(form.value.user_ids) ? form.value.user_ids : []
+    const payload = { name }
+    if (userOptionsLoaded.value) {
+      payload.user_ids = Array.isArray(form.value.user_ids)
+        ? form.value.user_ids
+        : []
     }
     if (mode.value === 'create') {
       await managementApi.createGroup(payload)

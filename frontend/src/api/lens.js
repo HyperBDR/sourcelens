@@ -17,8 +17,12 @@ function unwrapList(payload) {
 }
 
 export async function listAssistants(params = {}) {
-  const response = await api.get('/lens/assistants/', { params })
-  return unwrapList(unwrapResponse(response))
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/assistants/', {
+      params: { page_size: 1000, ...params, page }
+    })
+    return unwrapResponse(response)
+  })
 }
 
 export async function getPublicAssistant(slug) {
@@ -52,8 +56,14 @@ export async function restoreAssistant(uuid) {
 }
 
 export async function listLensNodes() {
-  const response = await api.get('/lens/admin/lensnodes/')
-  return unwrapList(unwrapResponse(response))
+  return collectPaginatedResults(async (page) =>
+    listLensNodePage({ page, page_size: 1000 })
+  )
+}
+
+export async function listLensNodePage(params = {}) {
+  const response = await api.get('/lens/admin/lensnodes/', { params })
+  return unwrapResponse(response)
 }
 
 export async function getAdminRuns(params = {}) {

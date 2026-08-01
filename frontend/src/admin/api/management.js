@@ -2,6 +2,7 @@
  * Management portal API (admin-only): user list, etc.
  */
 import apiClient from '@/api/index'
+import { collectPaginatedResults } from '@/api/pagination'
 
 function extractData(res) {
   const body = res?.data
@@ -14,6 +15,17 @@ export const managementApi = {
     return apiClient
       .get('/v1/management/users/', { ...config, params })
       .then(extractData)
+  },
+
+  getAllUsers(params = {}, config = {}) {
+    return collectPaginatedResults((page) =>
+      apiClient
+        .get('/v1/management/users/', {
+          ...config,
+          params: { page_size: 1000, ...params, page }
+        })
+        .then(extractData)
+    )
   },
 
   createUser(body) {
@@ -36,6 +48,17 @@ export const managementApi = {
     return apiClient
       .get('/v1/management/groups/', { ...config, params })
       .then(extractData)
+  },
+
+  getAllGroups(params = {}, config = {}) {
+    return collectPaginatedResults((page) =>
+      apiClient
+        .get('/v1/management/groups/', {
+          ...config,
+          params: { page_size: 1000, ...params, page }
+        })
+        .then(extractData)
+    )
   },
 
   createGroup(body) {
