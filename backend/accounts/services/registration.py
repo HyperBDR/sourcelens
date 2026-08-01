@@ -12,7 +12,11 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
 
-from accounts.models import Profile
+from accounts.models import (
+    DEFAULT_ANSWER_LANGUAGE,
+    Profile,
+    normalize_answer_language,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +156,7 @@ class RegistrationService:
             username: Custom username for virtual email
             scene: User's selected scene (chat, product_issue, etc.)
             language: AI output language for summaries, titles,
-                      and metadata (zh-CN, en-US, es)
+                      and metadata (zh-CN, en-US)
             timezone_str: User's timezone
 
         Returns:
@@ -162,6 +166,7 @@ class RegistrationService:
             ValueError: If validation fails or configuration error
             Exception: If any step in the creation process fails
         """
+        language = normalize_answer_language(language)
         is_valid, error_msg = (
             RegistrationService.validate_virtual_email_alias(
                 username
@@ -251,6 +256,7 @@ class RegistrationService:
         Raises:
             ValueError: If user exists and registration is completed
         """
+        language = normalize_answer_language(language)
         token = RegistrationService.generate_registration_token()
         expires_at = (
             timezone.now() +
@@ -316,7 +322,7 @@ class RegistrationService:
     @transaction.atomic
     def get_or_create_otp_user(
         email: str,
-        language: str = 'zh-CN',
+        language: str = DEFAULT_ANSWER_LANGUAGE,
         timezone_str: str = 'Asia/Shanghai',
     ) -> User:
         """
@@ -336,6 +342,7 @@ class RegistrationService:
             User: The existing or newly created user
         """
         email = email.lower().strip()
+        language = normalize_answer_language(language)
         user = User.objects.filter(email__iexact=email).first()
 
         if not user:

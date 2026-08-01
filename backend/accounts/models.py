@@ -29,6 +29,32 @@ from django.db import models
 from accounts.access import normalize_feature_keys, normalize_platform_key
 
 
+ANSWER_LANGUAGE_CHOICES = (
+    ('en-US', 'English'),
+    ('zh-CN', '简体中文'),
+)
+DEFAULT_ANSWER_LANGUAGE = 'en-US'
+
+
+def normalize_answer_language(value):
+    """Return a canonical AI answer language choice."""
+
+    normalized = str(value or '').strip().replace('_', '-').lower()
+    prefix = normalized.split('-', 1)[0]
+    return {
+        'en': 'en-US',
+        'zh': 'zh-CN',
+    }.get(prefix, DEFAULT_ANSWER_LANGUAGE)
+
+
+def answer_language_name(value):
+    """Return the English display name used in model instructions."""
+
+    if normalize_answer_language(value) == 'zh-CN':
+        return 'Simplified Chinese'
+    return 'English'
+
+
 class Role(models.Model):
     """Role-based visibility definition for consoles and route groups."""
 
@@ -146,14 +172,8 @@ class Profile(models.Model):
 
     language = models.CharField(
         max_length=10,
-        default='zh-CN',
-        choices=[
-            ('en-US', 'English'),
-            ('zh-CN', '简体中文'),
-            ('es', 'Español'),
-            ('ja-JP', '日本語'),
-            ('ko-KR', '한국어'),
-        ],
+        default=DEFAULT_ANSWER_LANGUAGE,
+        choices=ANSWER_LANGUAGE_CHOICES,
         help_text=(
             "Specifies the language used by AI when generating summaries, "
             "titles, and metadata. This is a global setting shared across "

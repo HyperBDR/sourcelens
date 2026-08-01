@@ -162,6 +162,25 @@ class SessionTitleTests(TestCase):
         mock_completion.assert_called_once()
 
     @patch("lens.session_titles.run_completion")
+    def test_generated_title_uses_run_answer_language(self, mock_completion):
+        self.user.profile.language = "zh-CN"
+        self.user.profile.save(update_fields=["language"])
+        run = self._completed_run("How many orders were created?")
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
+        mock_completion.return_value = LensLLMResult(
+            content="订单数量",
+            usage={},
+            metered=True,
+        )
+
+        generate_semantic_session_title(self.session.uuid, run.uuid)
+
+        system_prompt = mock_completion.call_args.kwargs["system"]
+        self.assertIn("Simplified Chinese", system_prompt)
+        self.assertNotIn("conversation's primary language", system_prompt)
+
+    @patch("lens.session_titles.run_completion")
     def test_manual_rename_wins_while_generation_is_running(
         self,
         mock_completion,

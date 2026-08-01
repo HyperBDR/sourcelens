@@ -804,6 +804,33 @@ class LensServiceTests(TransactionTestCase):
         )
         self.assertEqual(payload["settings"], {"runtime_mode": "original"})
 
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_uses_answer_language_runtime_snapshot(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        self.user.profile.language = "zh-CN"
+        self.user.profile.save(update_fields=["language"])
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze frozen language",
+            enqueue=False,
+        )
+
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
+        dispatch_run_to_lensnode(run, "Analyze frozen language")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            run.execution.runtime_snapshot["answer_language"],
+            "zh-CN",
+        )
+        self.assertEqual(payload["answer_language"], "zh-CN")
+
     def test_execute_answer_run_fails_when_lensnode_offline(self):
         self.lensnode.status = LensNode.Status.OFFLINE
         self.lensnode.save(update_fields=["status"])

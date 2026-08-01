@@ -174,7 +174,8 @@ const handleVerifyCode = async () => {
   try {
     await userStore.loginWithCode({
       email: codeForm.email,
-      code: codeForm.code.trim()
+      code: codeForm.code.trim(),
+      language: locale.value
     })
     emit('success')
   } catch (error) {
