@@ -410,6 +410,12 @@ class DataSource(TimestampedUUIDModel):
     )
     availability_checked_at = models.DateTimeField(null=True, blank=True)
     availability_message = models.TextField(blank=True, default="")
+    last_conversion_status = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+    )
+    last_conversion_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
