@@ -10,7 +10,7 @@ from urllib import error, parse, request
 from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
 from . import datasource_manifest as manifest_store
-from .document_convert import post_process_documents
+from .document_convert import is_convertible, post_process_documents
 from .path_rules import normalize_excluded_roots
 from .path_rules import relative_path
 from .path_rules import safe_filename
@@ -232,6 +232,176 @@ def sync_datasource(command, workspace_path=WORKSPACE_ROOT, emit=None):
     return result
 
 
+def convert_managed_workspace(
+    command,
+    workspace_path=WORKSPACE_ROOT,
+    emit=None,
+):
+    """Convert files in a managed workspace without synchronizing it."""
+
+    if command.get("source_type") != "managed_workspace":
+        raise DataSourceSyncError("DATASOURCE_CONVERSION_NOT_SUPPORTED")
+    target = normalize_target_path(
+        command.get("target_path"),
+        workspace_path,
+    )
+    if not target.is_dir():
+        raise DataSourceSyncError("MANAGED_WORKSPACE_DIRECTORY_REQUIRED")
+
+    context = _sync_context(command, target)
+    items = _managed_workspace_conversion_items(target)
+    supported = [
+        item
+        for item in items
+        if is_convertible(target / item.local_path, context["conversion"])
+    ]
+    unsupported = [
+        item
+        for item in items
+        if not is_convertible(
+            target / item.local_path,
+            context["conversion"],
+        )
+    ]
+
+    def emit_progress(event):
+        if emit is None:
+            return
+        payload = dict(event)
+        current = int(payload.get("progress_current") or 0)
+        payload["summary"] = _managed_conversion_summary(
+            payload.get("summary") or {},
+            unsupported,
+            len(supported),
+            current,
+        )
+        payload["progress_total"] = len(items)
+        payload["progress_current"] = len(unsupported) + current
+        payload["progress_percent"] = _conversion_percent(
+            payload["progress_current"],
+            len(items),
+        )
+        emit(payload)
+
+    summary = post_process_documents(
+        context,
+        manifest_store.SyncResult(items=supported),
+        emit_progress,
+    )
+    summary = _managed_conversion_summary(
+        summary,
+        unsupported,
+        len(supported),
+        len(supported),
+    )
+    if summary["failed"]:
+        summary["warnings"] = list(
+            dict.fromkeys(
+                [
+                    *(summary.get("warnings") or []),
+                    "CONVERSION_PARTIAL_FAILED",
+                ]
+            )
+        )
+    _emit(
+        emit,
+        "conversion_complete",
+        "done",
+        "Managed workspace conversion completed.",
+        category="conversion",
+        progress_total=len(items),
+        progress_current=len(items),
+        progress_percent=100,
+        summary=summary,
+        conversion_summary=summary,
+    )
+    return {
+        "status": "success",
+        "target_path": str(target),
+        "conversion_summary": summary,
+        "warnings": summary.get("warnings") or [],
+    }
+
+
+def _managed_workspace_conversion_items(target):
+    """Return files found under a managed workspace conversion root."""
+
+    items = []
+    for path in sorted(target.rglob("*")):
+        if not path.is_file() or _is_generated_datasource_path(target, path):
+            continue
+        local_path = relative_path(target, path)
+        items.append(
+            manifest_store.SyncItem(
+                source_id=f"managed_workspace:{local_path}",
+                source_type="managed_workspace",
+                source_path=local_path,
+                local_path=local_path,
+                name=path.name,
+                kind="file",
+                extension=path.suffix.lower().lstrip("."),
+                status="cataloged",
+                metadata={"size": str(path.stat().st_size)},
+            )
+        )
+    return items
+
+
+def _managed_conversion_summary(
+    summary,
+    unsupported,
+    supported_total,
+    supported_current,
+):
+    """Add standalone conversion lifecycle counters and outcomes."""
+
+    result = dict(summary or {})
+    unsupported_items = [
+        {
+            "status": "unsupported",
+            "path": item.local_path,
+            "name": item.name,
+            "extension": item.extension,
+            "reason": "UNSUPPORTED_TYPE",
+            "stats": {},
+        }
+        for item in unsupported
+    ]
+    items = list(result.get("items") or [])
+    existing_paths = {item.get("path") for item in items}
+    items.extend(
+        item
+        for item in unsupported_items
+        if item["path"] not in existing_paths
+    )
+    completed = min(max(supported_current, 0), supported_total)
+    remaining = max(supported_total - completed, 0)
+    active = 1 if remaining else 0
+    result.update(
+        {
+            "total": supported_total + len(unsupported),
+            "waiting": max(remaining - active, 0),
+            "active": active,
+            "succeeded": int(result.get("success") or 0),
+            "unsupported": len(unsupported),
+            "items": items,
+        }
+    )
+    details = dict(result.get("details") or {})
+    if unsupported_items:
+        details["unsupported"] = unsupported_items[:DETAIL_ITEMS_LIMIT]
+    result["details"] = details
+    return result
+
+
+def _conversion_percent(current, total):
+    """Return a bounded integer conversion progress percentage."""
+
+    if total <= 0:
+        return 100
+    return min(100, int((current / total) * 100))
+
+
 def datasource_adapter_registry():
     """Return the datasource adapter registry."""
 
@@ -265,6 +435,8 @@ def _sync_context(command, target):
         "tls_skip_verify": bool(command.get("tls_skip_verify", False)),
         "tls_ca_file": command.get("tls_ca_file") or None,
         "vision_model_ref": conversion.get("vision_model_ref") or "",
+        "cancel_event": command.get("cancel_event"),
+        "on_activity": command.get("on_activity"),
     }
 
 

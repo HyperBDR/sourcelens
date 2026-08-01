@@ -439,12 +439,27 @@ def post_process_documents(context, sync_result, emit=None):
                 merge_summary_stats(summary, result.get("stats") or {})
                 merge_cost_stats(summary["cost"], result.get("cost") or {})
         except Exception as exc:
+            from .gateway_model import RunCancelledError
+
+            if isinstance(exc, RunCancelledError):
+                raise
             current_status = "failed"
-            current_reason = str(exc)
+            current_reason = conversion_error_reason(exc)
             summary["failed"] += 1
             warnings.append("CONVERSION_FILE_FAILED")
-            write_failed_meta(target, path, item, context, str(exc))
-            append_conversion_detail(summary, item, "failed", str(exc))
+            write_failed_meta(
+                target,
+                path,
+                item,
+                context,
+                current_reason,
+            )
+            append_conversion_detail(
+                summary,
+                item,
+                "failed",
+                current_reason,
+            )
         emit_conversion(
             emit,
             "conversion_progress",
@@ -472,6 +487,17 @@ def post_process_documents(context, sync_result, emit=None):
         current=total,
     )
     return summary
+
+
+def conversion_error_reason(exc):
+    """Return a safe machine-readable reason for conversion failures."""
+
+    message = str(exc or "").upper()
+    if "PASSWORD" in message or "ENCRYPT" in message:
+        return "PASSWORD_PROTECTED"
+    if "EMPTY" in message or "NO EXTRACTABLE" in message:
+        return "NO_EXTRACTABLE_TEXT"
+    return "CONVERSION_FILE_FAILED"
 
 
 def append_conversion_detail(summary, item, status, reason="", stats=None):
