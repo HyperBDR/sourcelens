@@ -974,6 +974,7 @@ def build_general_chat_tools(
     config=None,
     emit_event=None,
     runtime_evidence=None,
+    on_runtime_evidence=None,
 ):
     """Build tools for General Chat without workspace retrieval tools."""
 
@@ -1239,6 +1240,8 @@ def build_general_chat_tools(
 
         if normalized_operation == "validate_records":
             runtime_evidence["record_validation"] = result
+            if on_runtime_evidence is not None:
+                on_runtime_evidence(runtime_evidence)
 
         duration_ms = int((time.monotonic() - started) * 1000)
         output = _persist_json_analysis_output(

@@ -36,6 +36,9 @@ DEFAULT_EXCLUDED_EXTENSIONS = {
     ".map",
 }
 
+INTERNAL_CHECKPOINT_DIR = ".checkpoints"
+INTERNAL_RUN_PATH = (".sourcelens", "runtime", "runs")
+
 DEFAULT_CONTEXT_LINES = 2
 DEFAULT_MAX_SEARCH_MATCHES = 50
 MAX_SEARCH_MATCHES = 200
@@ -376,7 +379,7 @@ def _run_rg(cmd):
     return completed.stdout
 
 
-def _rg_glob_args(scope, policy, glob):
+def _rg_glob_args(root, scope, policy, glob):
     """Build ripgrep -g include/exclude args from scope and an extra glob.
 
     The trivial "**/*" include is skipped: ripgrep unions include globs,
@@ -393,7 +396,7 @@ def _rg_glob_args(scope, policy, glob):
         args.extend(["-g", pattern])
     if glob:
         args.extend(["-g", glob])
-    for pattern in _exclude_globs(scope, policy):
+    for pattern in _exclude_globs(root, scope, policy):
         args.extend(["-g", f"!{pattern}"])
     return args
 
@@ -436,7 +439,7 @@ def _rg_line_matches(
         str(max(1, max_line_chars)),
         "--max-columns-preview",
     ])
-    cmd.extend(_rg_glob_args(scope, policy, glob))
+    cmd.extend(_rg_glob_args(root, scope, policy, glob))
     for pattern in patterns:
         cmd.extend(["-e", pattern])
     cmd.append(str(root))
@@ -464,7 +467,7 @@ def _rg_files_with_matches(
         cmd.append("-i")
     if fixed:
         cmd.append("-F")
-    cmd.extend(_rg_glob_args(scope, policy, glob))
+    cmd.extend(_rg_glob_args(root, scope, policy, glob))
     for pattern in patterns:
         cmd.extend(["-e", pattern])
     cmd.append(str(root))
@@ -487,7 +490,7 @@ def _rg_counts(
         cmd.append("-i")
     if fixed:
         cmd.append("-F")
-    cmd.extend(_rg_glob_args(scope, policy, glob))
+    cmd.extend(_rg_glob_args(root, scope, policy, glob))
     for pattern in patterns:
         cmd.extend(["-e", pattern])
     cmd.append(str(root))
@@ -725,6 +728,13 @@ def is_path_excluded(root, path, scope, policy):
         relative = path if root is None else path.relative_to(root)
     except ValueError:
         return True
+    if INTERNAL_CHECKPOINT_DIR in path.parts:
+        return True
+    if (
+        _contains_path_parts(path.parts, INTERNAL_RUN_PATH)
+        and not _is_subject_runtime_root(root, scope)
+    ):
+        return True
     if _include_hidden(scope, policy):
         hidden_parts = ()
     elif _is_subject_runtime_root(root, scope):
@@ -764,10 +774,22 @@ def _is_subject_runtime_root(root, scope):
     )
 
 
-def _exclude_globs(scope, policy):
+def _contains_path_parts(parts, expected):
+    """Return whether expected appears contiguously in path parts."""
+
+    width = len(expected)
+    return any(
+        tuple(parts[index : index + width]) == expected
+        for index in range(len(parts) - width + 1)
+    )
+
+
+def _exclude_globs(root, scope, policy):
     """Build ripgrep glob exclusions from scope and policy."""
 
-    globs = []
+    globs = [f"**/{INTERNAL_CHECKPOINT_DIR}/**"]
+    if not _is_subject_runtime_root(root, scope):
+        globs.append("**/.sourcelens/runtime/runs/**")
     exclude_dirs = _option(scope, policy, "exclude_dirs", DEFAULT_EXCLUDED_DIRS)
     for dirname in exclude_dirs:
         globs.append(f"**/{dirname}/**")

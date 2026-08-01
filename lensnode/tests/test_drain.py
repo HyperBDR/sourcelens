@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 from lensnode.main import LensNodeClient
 
@@ -73,6 +74,35 @@ def test_drain_lets_in_flight_run_finish_then_stops():
         send_task.cancel()
 
     asyncio.run(exercise())
+
+
+def test_stop_closes_checkpoint_after_workers_finish(monkeypatch):
+    actions = []
+
+    async def exercise():
+        client = _make_client()
+
+        async def flush_outbox():
+            return None
+
+        async def drain_pending_workers():
+            actions.append("workers")
+
+        client._flush_outbox = flush_outbox
+        client.executor.drain_pending_workers = drain_pending_workers
+        client.gateway_http_client = SimpleNamespace(
+            close=lambda: actions.append("gateway")
+        )
+        monkeypatch.setattr(
+            "lensnode.main.close_checkpoint_saver",
+            lambda: actions.append("checkpoint"),
+        )
+
+        await client.stop()
+
+    asyncio.run(exercise())
+
+    assert actions == ["workers", "checkpoint", "gateway"]
 
 
 def test_drain_rejects_new_runs():

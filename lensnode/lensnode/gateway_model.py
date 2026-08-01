@@ -189,6 +189,7 @@ class LensGatewayChatModel(BaseChatModel):
     token_budget_final_reserve_tokens: int = 40000
     token_budget_warn_ratio: float = 0.8
     token_budget_wrapup_event: Optional[Any] = None
+    on_runtime_state_change: Optional[Any] = None
     loop_repeat_warn: int = 3
     loop_repeat_hard: int = 5
     loop_tool_warn: int = 30
@@ -242,6 +243,139 @@ class LensGatewayChatModel(BaseChatModel):
 
         with self._usage_lock:
             return self._stop_reason
+
+    def export_runtime_state(self):
+        """Return cumulative guardrails for durable checkpoint metadata."""
+
+        with self._usage_lock:
+            return {
+                "run_token_usage": dict(self._run_token_usage),
+                "stop_reason": self._stop_reason,
+                "tool_call_history": list(self._tool_call_history),
+                "tool_name_history": list(self._tool_name_history),
+                "loop_warned": sorted(self._loop_warned),
+                "tool_warned": sorted(self._tool_warned),
+                "budget_warned": self._budget_warned,
+            }
+
+    def _notify_runtime_state_change(self):
+        """Persist updated guardrails when checkpointing is active."""
+
+        if self.on_runtime_state_change is not None:
+            self.on_runtime_state_change(self.export_runtime_state())
+
+    def restore_runtime_state(self, messages, runtime_state=None):
+        """Restore cumulative guardrails from checkpointed AI messages."""
+
+        usage = None
+        stop_reason = None
+        fingerprints = []
+        tool_names = []
+        durable_state = runtime_state if isinstance(runtime_state, dict) else {}
+        if durable_state:
+            candidate = durable_state.get("run_token_usage")
+            if isinstance(candidate, dict):
+                usage = candidate
+            stop_reason = durable_state.get("stop_reason") or None
+            fingerprints = list(durable_state.get("tool_call_history") or [])
+            tool_names = list(durable_state.get("tool_name_history") or [])
+        message_fingerprints = []
+        message_tool_names = []
+        for message in messages or []:
+            if getattr(message, "type", "") != "ai":
+                continue
+            metadata = getattr(message, "response_metadata", None) or {}
+            if stop_reason is None:
+                for key, reason in (
+                    ("token_capped", "token_capped"),
+                    ("loop_capped", "loop_capped"),
+                    ("safety_terminated", "safety_terminated"),
+                    ("model_length_capped", "model_length_capped"),
+                ):
+                    if metadata.get(key):
+                        stop_reason = reason
+                        break
+            candidate = metadata.get("run_token_usage")
+            if isinstance(candidate, dict):
+                usage = {
+                    key: max(
+                        _usage_int(usage or {}, key),
+                        _usage_int(candidate, key),
+                    )
+                    for key in (
+                        "prompt_tokens",
+                        "completion_tokens",
+                        "total_tokens",
+                    )
+                }
+            calls = list(getattr(message, "tool_calls", None) or [])
+            if calls:
+                message_fingerprints.append(
+                    _tool_call_fingerprint(calls)
+                )
+                message_tool_names.extend(
+                    str(call.get("name") or "") for call in calls
+                )
+
+        fingerprints = _merge_runtime_history(
+            fingerprints,
+            message_fingerprints,
+        )
+        tool_names = _merge_runtime_history(
+            tool_names,
+            message_tool_names,
+        )
+
+        with self._usage_lock:
+            if stop_reason is not None:
+                self._stop_reason = stop_reason
+            if usage is not None:
+                self._run_token_usage = {
+                    "prompt_tokens": _usage_int(usage, "prompt_tokens"),
+                    "completion_tokens": _usage_int(
+                        usage,
+                        "completion_tokens",
+                    ),
+                    "total_tokens": _usage_int(usage, "total_tokens"),
+                }
+            self._tool_call_history.extend(fingerprints)
+            self._tool_name_history.extend(tool_names)
+            self._loop_warned.update(durable_state.get("loop_warned") or [])
+            self._tool_warned.update(durable_state.get("tool_warned") or [])
+            self._budget_warned = bool(durable_state.get("budget_warned"))
+
+            repeat_warn = max(int(self.loop_repeat_warn or 1), 1)
+            frequencies = Counter(self._tool_call_history)
+            self._loop_warned.update(
+                fingerprint
+                for fingerprint, count in frequencies.items()
+                if count >= repeat_warn
+            )
+            tool_warn = max(int(self.loop_tool_warn or 1), 1)
+            tool_frequencies = Counter(self._tool_name_history)
+            self._tool_warned.update(
+                name
+                for name, count in tool_frequencies.items()
+                if count >= tool_warn
+            )
+
+            limit = max(int(self.token_budget_max_tokens or 0), 0)
+            reserve = min(
+                max(int(self.token_budget_final_reserve_tokens or 0), 0),
+                limit,
+            )
+            total = self._run_token_usage["total_tokens"]
+            if limit and total >= limit:
+                self._stop_reason = "token_capped"
+                if self.token_budget_wrapup_event is not None:
+                    self.token_budget_wrapup_event.set()
+            elif limit and reserve and total >= limit - reserve:
+                self._stop_reason = "token_budget_wrapup"
+                if self.token_budget_wrapup_event is not None:
+                    self.token_budget_wrapup_event.set()
+            elif limit and total >= limit * self.token_budget_warn_ratio:
+                self._budget_warned = True
+                self._budget_warning_pending = True
 
     def bind_tools(
         self,
@@ -384,6 +518,7 @@ class LensGatewayChatModel(BaseChatModel):
         )
         message = self._apply_token_budget(message, data.get("usage") or {})
         message = self._apply_loop_detection(message)
+        self._notify_runtime_state_change()
         self._finish_model_observation(observation_id, "done")
         return ChatResult(
             generations=[ChatGeneration(message=message)],
@@ -550,6 +685,7 @@ class LensGatewayChatModel(BaseChatModel):
         )
         message = self._apply_token_budget(message, usage)
         message = self._apply_loop_detection(message)
+        self._notify_runtime_state_change()
         return ChatResult(
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": usage},
@@ -1128,6 +1264,22 @@ def _usage_int(usage, key, fallback_key=None):
         return max(int(value or 0), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _merge_runtime_history(durable_values, message_values):
+    """Merge histories without double-counting checkpointed calls."""
+
+    durable = list(durable_values or [])
+    messages = list(message_values or [])
+    target_counts = Counter(messages)
+    current_counts = Counter(durable)
+    merged = list(durable)
+    for value in messages:
+        if current_counts[value] >= target_counts[value]:
+            continue
+        merged.append(value)
+        current_counts[value] += 1
+    return merged
 
 
 def _tool_call_fingerprint(tool_calls):

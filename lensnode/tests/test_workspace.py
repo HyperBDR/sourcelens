@@ -300,6 +300,58 @@ def test_scope_include_hidden_applies_to_all_discovery_modes(tmp_path):
     assert str(hidden_file) in glob_files(target_dirs, "**/*")
 
 
+def test_include_hidden_never_exposes_internal_run_data(tmp_path):
+    root = tmp_path / "ws"
+    hidden = root / ".codex"
+    checkpoints = root / ".checkpoints"
+    other_run = (
+        root
+        / ".sourcelens"
+        / "runtime"
+        / "runs"
+        / "other-run"
+        / "subject-documents"
+    )
+    hidden.mkdir(parents=True)
+    checkpoints.mkdir()
+    other_run.mkdir(parents=True)
+    allowed_file = hidden / "instructions.md"
+    checkpoint_file = checkpoints / "messages.txt"
+    other_run_file = other_run / "private.txt"
+    allowed_file.write_text("shared marker\n", encoding="utf-8")
+    checkpoint_file.write_text("shared marker\n", encoding="utf-8")
+    other_run_file.write_text("shared marker\n", encoding="utf-8")
+    target_dirs = [
+        {
+            "path": str(root),
+            "retrieval_scope": {"include_hidden": True},
+        }
+    ]
+
+    result = search_workspace(target_dirs, "shared marker")
+    found = glob_files(target_dirs, "**/*")
+    tools = {
+        tool.name: tool
+        for tool in build_agent_tools(
+            {"target_dirs": target_dirs, "settings": {}}
+        )
+    }
+    checkpoint_read = json.loads(
+        tools["read_workspace_file"].invoke({"path": str(checkpoint_file)})
+    )
+    other_run_read = json.loads(
+        tools["read_workspace_file"].invoke({"path": str(other_run_file)})
+    )
+
+    assert [item["path"] for item in result["matches"]] == [
+        str(allowed_file)
+    ]
+    assert str(checkpoint_file) not in found
+    assert str(other_run_file) not in found
+    assert checkpoint_read["error"] == "PATH_NOT_ALLOWED"
+    assert other_run_read["error"] == "PATH_NOT_ALLOWED"
+
+
 def test_directory_scope_overrides_assistant_hidden_policy(tmp_path):
     root = tmp_path / "ws"
     hidden = root / ".claude"
