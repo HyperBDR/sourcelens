@@ -13,7 +13,7 @@ from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from accounts.models import Profile
+from accounts.models import DEFAULT_ANSWER_LANGUAGE, Profile
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def create_profile(user):
             user=user,
             defaults={
                 "registration_completed": False,
-                "language": "zh-CN",
+                "language": DEFAULT_ANSWER_LANGUAGE,
                 "timezone": "Asia/Shanghai",
             },
         )

@@ -37,3 +37,12 @@ test('password login messages identify email in both locales', async () => {
   assert.match(en.auth.loginFailedMessage, /email and password/)
   assert.match(zh.auth.loginFailedMessage, /邮箱和密码/)
 })
+
+test('email code verification submits the detected UI language', async () => {
+  const component = await source('components/auth/EmailCodeLogin.vue')
+
+  assert.match(
+    component,
+    /loginWithCode\(\{[\s\S]*language: locale\.value[\s\S]*\}\)/
+  )
+})

@@ -506,7 +506,7 @@ class RunDiagnosticsTests(TestCase):
         )
 
     @patch("lens.run_diagnostics.run_completion")
-    def test_diagnosis_language_matches_request_language(self, completion):
+    def test_diagnosis_language_matches_run_answer_language(self, completion):
         from django.utils import translation
 
         result = {
@@ -524,6 +524,10 @@ class RunDiagnosticsTests(TestCase):
             usage={},
             metered=True,
         )
+        runtime_snapshot = self.run.execution.runtime_snapshot
+        runtime_snapshot["answer_language"] = "zh-CN"
+        self.run.execution.runtime_snapshot = runtime_snapshot
+        self.run.execution.save(update_fields=["runtime_snapshot"])
         translation.activate("zh-hans")
         try:
             diagnostic, _created = create_run_diagnostic(self.run, self.admin)
@@ -533,7 +537,7 @@ class RunDiagnosticsTests(TestCase):
 
         self.assertTrue(completed)
         diagnostic.refresh_from_db()
-        self.assertEqual(diagnostic.language, "zh-hans")
+        self.assertEqual(diagnostic.language, "zh-CN")
         self.assertEqual(
             diagnostic.deterministic_findings[0]["title"],
             "终端运行状态",

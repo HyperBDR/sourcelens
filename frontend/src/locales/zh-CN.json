@@ -570,7 +570,11 @@
       "admin": "管理员",
       "user": "普通用户",
       "language": "语言",
+      "displayLanguage": "页面显示语言",
       "languageDesc": "切换界面显示语言",
+      "answerLanguage": "AI 回答语言",
+      "answerLanguageDesc": "用于回答、自动生成的会话标题和 Run 诊断，与页面显示语言相互独立。",
+      "answerLanguageError": "更新 AI 回答语言失败",
       "notifications": "通知",
       "notificationsDesc": "选择长时间运行的回答完成后，SourceLens 提醒你的方式。",
       "completionIndicator": "回答完成提醒",
@@ -599,6 +603,7 @@
       "timezoneDesc": "用于后端逻辑和日期时间显示的时区。",
       "languages": {
         "en": "English",
+        "en-US": "English",
         "zh-CN": "简体中文",
         "es": "Español"
       }

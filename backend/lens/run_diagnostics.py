@@ -6,10 +6,11 @@ import logging
 import re
 import uuid
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.utils import timezone, translation
+from django.utils import timezone
+
+from accounts.models import answer_language_name, normalize_answer_language
 
 from .llm import run_completion
 from .models import (
@@ -29,7 +30,7 @@ TERMINAL_RUN_STATUSES = {
     Run.Status.FAILED,
     Run.Status.CANCELLED,
 }
-DIAGNOSTIC_PROMPT_VERSION = "run-diagnosis-v3"
+DIAGNOSTIC_PROMPT_VERSION = "run-diagnosis-v4"
 STALE_EXECUTION_SECONDS = 600
 MAX_QUESTION_CHARS = 2000
 MAX_SUMMARY_CHARS = 4000
@@ -141,8 +142,7 @@ def create_run_diagnostic(run, requested_by, idempotency_key="initial-v1"):
         defaults={
             "evidence": evidence,
             "requested_by": requested_by,
-            "language": translation.get_language()
-            or settings.LANGUAGE_CODE,
+            "language": _run_answer_language(run),
             "model_ref": model_ref,
             "model_config_hash": model_config_hash,
             "prompt_version": DIAGNOSTIC_PROMPT_VERSION,
@@ -524,6 +524,7 @@ def _build_evidence_payload(run):
             "assistant_updated_at",
             "lensnode_uuid",
             "lensnode_agent_version",
+            "answer_language",
             "model_refs",
             "model_config_hashes",
             "settings_hash",
@@ -724,8 +725,18 @@ def _diagnostic_model_snapshot(run):
     return model_ref, config_hash
 
 
+def _run_answer_language(run):
+    execution = getattr(run, "execution", None)
+    runtime_snapshot = execution.runtime_snapshot if execution else {}
+    profile = getattr(run.session.user, "profile", None)
+    return normalize_answer_language(
+        runtime_snapshot.get("answer_language")
+        or getattr(profile, "language", None)
+    )
+
+
 def _deterministic_findings(run, evidence, language="en"):
-    zh = language == "zh-hans"
+    zh = normalize_answer_language(language) == "zh-CN"
     findings = [
         {
             "kind": "fact",
@@ -936,14 +947,9 @@ def _follow_up_system_prompt(language="en"):
 
 
 def _language_instruction(language):
-    """Return a prompt suffix pinning the output language to the UI."""
+    """Return a prompt suffix pinning the configured answer language."""
 
-    names = {
-        "zh-hans": "Simplified Chinese",
-        "zh": "Simplified Chinese",
-        "en": "English",
-    }
-    name = names.get((language or "en").lower(), "English")
+    name = answer_language_name(language)
     return (
         f" Respond in {name}: all summary, event titles and descriptions, "
         "cause categories, recommendation titles and actions, unknowns, and "

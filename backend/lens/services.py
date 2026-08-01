@@ -11,6 +11,8 @@ from django.db import transaction
 from django.db.models import Max, Q
 from django.utils import timezone
 
+from accounts.models import normalize_answer_language
+
 from .assistant_lifecycle import lock_assistant_for_new_work
 from .attachments import (
     AttachmentError,
@@ -745,7 +747,15 @@ def create_run_execution_snapshot(run):
 
     assistant = run.session.assistant
     token_budget = token_budget_for_profile(assistant.token_budget_profile)
-    runtime_snapshot = _build_run_runtime_snapshot(assistant, run.lensnode)
+    profile = getattr(run.session.user, "profile", None)
+    answer_language = normalize_answer_language(
+        getattr(profile, "language", None)
+    )
+    runtime_snapshot = _build_run_runtime_snapshot(
+        assistant,
+        run.lensnode,
+        answer_language,
+    )
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
         defaults={
@@ -772,7 +782,7 @@ def create_run_execution_snapshot(run):
     return execution
 
 
-def _build_run_runtime_snapshot(assistant, lensnode):
+def _build_run_runtime_snapshot(assistant, lensnode, answer_language):
     """Return execution provenance that later edits cannot change."""
 
     model_refs = {
@@ -790,6 +800,7 @@ def _build_run_runtime_snapshot(assistant, lensnode):
         "assistant_updated_at": assistant.updated_at.isoformat(),
         "lensnode_uuid": str(lensnode.uuid) if lensnode else "",
         "lensnode_agent_version": (lensnode.agent_version if lensnode else ""),
+        "answer_language": normalize_answer_language(answer_language),
         "model_refs": model_refs,
         "model_config_hashes": model_config_hashes,
         "settings": settings_payload,
@@ -1108,7 +1119,10 @@ def dispatch_run_to_lensnode(
         agent_rounds
     )
     profile = getattr(run.session.user, "profile", None)
-    answer_language = getattr(profile, "language", "")
+    answer_language = normalize_answer_language(
+        runtime_snapshot.get("answer_language")
+        or getattr(profile, "language", None)
+    )
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),
         {

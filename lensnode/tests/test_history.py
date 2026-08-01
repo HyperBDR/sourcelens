@@ -1537,6 +1537,20 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "Do not fan out per-record detail calls" in prompt
 
 
+def test_general_chat_prompt_repeats_configured_language_requirement():
+    prompt = _general_chat_system_prompt(
+        {
+            "question": "What were the October order totals?",
+            "answer_language": "zh-CN",
+            "runtime_route": "direct_execute",
+        }
+    )
+
+    assert prompt.startswith("ANSWER LANGUAGE REQUIREMENT: Chinese")
+    assert "Conversation history" in prompt
+    assert prompt.count("ANSWER LANGUAGE REQUIREMENT: Chinese") == 2
+
+
 def test_plan_execute_prompt_requires_a_stable_initial_plan():
     prompt = _general_chat_system_prompt(
         {
@@ -2852,6 +2866,10 @@ def test_synthesize_wrapup_answer_strips_dangling_call_and_returns_content():
     assert len(model.invoked_with) == 3
     assert model.invoked_with[-2].content == "partial reasoning"
     assert model.invoked_with[-1].type == "human"
+    assert (
+        "ANSWER LANGUAGE REQUIREMENT: English"
+        in model.invoked_with[-1].content
+    )
 
 
 def test_synthesize_wrapup_answer_returns_empty_on_failure():

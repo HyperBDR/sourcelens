@@ -623,9 +623,11 @@ class DocumentAttachmentTests(TestCase):
             payload["subject_documents"][0]["original_name"],
             "tender.pdf",
         )
-        self.assertEqual(payload["answer_language"], "zh-CN")
+        self.assertEqual(payload["answer_language"], "en-US")
 
     def test_document_only_run_dispatches_with_analysis_prompt(self):
+        self.user.profile.language = "zh-CN"
+        self.user.profile.save(update_fields=["language"])
         self.assistant.preprocess_model_ref = uuid.uuid4()
         self.assistant.save(update_fields=["preprocess_model_ref"])
         metadata = store_document_attachment(

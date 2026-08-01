@@ -1,7 +1,6 @@
 import logging
 import re
 
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
@@ -23,53 +22,13 @@ from accounts.access import (
     serialize_feature_options,
     serialize_platform_options,
 )
-from accounts.models import Profile
+from accounts.models import Profile, normalize_answer_language
 
 
 def normalize_language_code(value):
-    """
-    Normalize requested language using configured mappings.
+    """Normalize browser or API language variants for AI answers."""
 
-    This function:
-    1. Uses settings.LANGUAGES to get supported languages (no hardcoding)
-    2. Uses settings.LANGUAGE_CODE_MAPPING for variant mappings
-    3. Falls back to settings.LANGUAGE_CODE if not found
-    4. Ensures returned code is always in LANGUAGES list
-
-    This approach is fully extensible - adding new languages only requires
-    updating settings.LANGUAGES and optionally LANGUAGE_CODE_MAPPING.
-    """
-    languages = settings.LANGUAGES
-    if not languages:
-        return settings.LANGUAGE_CODE
-
-    configured_codes = {
-        code.lower(): code
-        for code, _ in languages
-    }
-
-    default_language = settings.LANGUAGE_CODE
-    if default_language.lower() not in configured_codes:
-        default_language = languages[0][0]
-
-    if not value:
-        return default_language
-
-    raw_value = value.strip().lower()
-    if not raw_value:
-        return default_language
-
-    normalized_value = raw_value.replace('_', '-')
-    mapping = settings.LANGUAGE_CODE_MAPPING
-    mapped_value = mapping.get(normalized_value)
-    if mapped_value and mapped_value.lower() in configured_codes:
-        return configured_codes[mapped_value.lower()]
-
-    direct_match = configured_codes.get(normalized_value)
-    if direct_match:
-        return direct_match
-
-    return default_language
+    return normalize_answer_language(value)
 
 
 def check_username_uniqueness(username):
@@ -755,7 +714,7 @@ class UserDetailsSerializer(serializers.ModelSerializer):
                 default_lang = (
                     normalize_language_code(profile_language)
                     if profile_language
-                    else 'zh-CN'
+                    else Profile._meta.get_field('language').default
                 )
                 default_tz = (
                     profile_timezone.strip()

@@ -21,7 +21,12 @@ from accounts.access import (
     serialize_feature_options,
     serialize_platform_options,
 )
-from accounts.models import Profile, Role
+from accounts.models import (
+    DEFAULT_ANSWER_LANGUAGE,
+    Profile,
+    Role,
+    normalize_answer_language,
+)
 from accounts.permissions import HasRequiredFeature
 from accounts.services.management_bulk import (
     BulkMutationError,
@@ -63,7 +68,7 @@ def _user_payload(u):
         profile = u.profile
     except Profile.DoesNotExist:
         profile = None
-    language = profile.language if profile else 'zh-CN'
+    language = profile.language if profile else DEFAULT_ANSWER_LANGUAGE
     timezone = profile.timezone if profile else 'Asia/Shanghai'
     preferred_platform = (
         normalize_platform_key(profile.preferred_platform)
@@ -238,7 +243,7 @@ class ManagementUserListView(APIView):
             group_ids = []
         if not isinstance(role_ids, list):
             role_ids = []
-        language = (request.data.get('language') or '').strip() or 'zh-CN'
+        language = normalize_answer_language(request.data.get('language'))
         timezone = (request.data.get('timezone') or '').strip() or 'Asia/Shanghai'
         preferred_platform = normalize_platform_key(
             request.data.get('preferred_platform')
@@ -391,13 +396,13 @@ class ManagementUserDetailView(APIView):
         profile, _ = Profile.objects.get_or_create(
             user=user,
             defaults={
-                'language': 'zh-CN',
+                'language': DEFAULT_ANSWER_LANGUAGE,
                 'timezone': 'Asia/Shanghai',
             },
         )
         profile_update_fields = []
         if language is not None:
-            profile.language = str(language).strip() or 'zh-CN'
+            profile.language = normalize_answer_language(language)
             profile_update_fields.append('language')
         if timezone is not None:
             profile.timezone = str(timezone).strip() or 'Asia/Shanghai'
