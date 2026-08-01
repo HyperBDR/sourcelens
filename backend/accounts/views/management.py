@@ -162,6 +162,7 @@ class ManagementUserListView(APIView):
         page_size = _safe_int(
             request.query_params.get('page_size'),
             default=20,
+            max_value=1000,
         )
         compact = str(
             request.query_params.get('compact') or ''
@@ -485,6 +486,7 @@ class ManagementGroupListView(APIView):
         page_size = _safe_int(
             request.query_params.get('page_size'),
             default=20,
+            max_value=1000,
         )
         compact = str(
             request.query_params.get('compact') or ''
@@ -674,6 +676,7 @@ class ManagementRoleListView(APIView):
         page_size = _safe_int(
             request.query_params.get('page_size'),
             default=20,
+            max_value=1000,
         )
         qs = Role.objects.annotate(
             user_count=Count('users', distinct=True),

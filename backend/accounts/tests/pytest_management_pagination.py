@@ -397,6 +397,32 @@ class TestManagementUsersPagination:
         assert data["page_size"] == 10
         assert len(data["results"]) == 10
 
+    def test_users_list_allows_bulk_reads_up_to_one_thousand(self):
+        admin = User.objects.create_user(
+            username="admin_for_bulk_user_read",
+            password="x",
+            is_staff=True,
+        )
+        User.objects.bulk_create(
+            [
+                User(username=f"bulk_user_{idx}")
+                for idx in range(101)
+            ]
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/users/",
+            {"compact": "true", "page": 1, "page_size": 1000},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 102
+        assert data["page_size"] == 1000
+        assert len(data["results"]) == 102
+
     def test_users_list_invalid_pagination_falls_back_and_caps(self):
         admin = User.objects.create_user(
             username="admin_for_users_invalid",
@@ -419,7 +445,7 @@ class TestManagementUsersPagination:
         assert response.status_code == 200
         data = _payload(response)
         assert data["page"] == 1
-        assert data["page_size"] == 100
+        assert data["page_size"] == 1000
         assert "results" in data
 
     def test_users_list_non_positive_page_is_clamped_to_one(self):
@@ -544,6 +570,29 @@ class TestManagementGroupsPagination:
         assert data["page"] == 2
         assert data["page_size"] == 10
         assert len(data["results"]) == 10
+
+    def test_groups_list_allows_bulk_reads_up_to_one_thousand(self):
+        admin = User.objects.create_user(
+            username="admin_for_bulk_group_read",
+            password="x",
+            is_staff=True,
+        )
+        Group.objects.bulk_create(
+            [Group(name=f"bulk_group_{idx}") for idx in range(101)]
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        response = client.get(
+            "/api/v1/management/groups/",
+            {"compact": "true", "page": 1, "page_size": 1000},
+        )
+
+        assert response.status_code == 200
+        data = _payload(response)
+        assert data["count"] == 101
+        assert data["page_size"] == 1000
+        assert len(data["results"]) == 101
 
     def test_groups_list_non_positive_page_is_clamped_to_one(self):
         admin = User.objects.create_user(

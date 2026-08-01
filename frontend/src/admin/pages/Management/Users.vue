@@ -554,13 +554,9 @@ function openUserHistory(assistant) {
 
 async function loadOptions() {
   try {
-    const groupsData = await managementApi.getGroups({
-      page: 1,
-      page_size: 1000
+    groupOptions.value = await managementApi.getAllGroups({
+      compact: 'true'
     })
-    groupOptions.value = Array.isArray(groupsData)
-      ? groupsData
-      : (groupsData?.results ?? [])
   } catch {
     groupOptions.value = []
   }

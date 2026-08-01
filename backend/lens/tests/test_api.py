@@ -548,6 +548,23 @@ class LensApiTests(TestCase):
             "016d5cf7-2245-4015-b242-d6323e795b58",
         )
 
+    def test_global_setting_list_returns_every_setting(self):
+        GlobalSetting.objects.bulk_create(
+            [
+                GlobalSetting(
+                    key=f"pagination.test.{index}",
+                    value=index,
+                )
+                for index in range(11)
+            ]
+        )
+
+        response = self.client.get("/api/lens/admin/global-settings/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.data, list)
+        self.assertEqual(len(response.data), 11)
+
     def test_skill_beautify_requires_generator_model(self):
         response = self.client.post(
             "/api/lens/admin/skills/beautify/",
