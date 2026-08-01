@@ -545,8 +545,16 @@ class RunViewSet(BaseAuthenticatedViewSet):
         now = timezone.now()
         with transaction.atomic():
             run.status = Run.Status.CANCELLED
+            run.resume_by = None
             run.finished_at = now
-            run.save(update_fields=["status", "finished_at", "updated_at"])
+            run.save(
+                update_fields=[
+                    "status",
+                    "resume_by",
+                    "finished_at",
+                    "updated_at",
+                ]
+            )
             if hasattr(run, "execution"):
                 run.execution.status = RunExecution.Status.CANCELLED
                 run.execution.finished_at = now

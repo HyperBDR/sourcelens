@@ -1727,6 +1727,9 @@ const showCursor = computed(
 )
 
 const liveStatusText = computed(() => {
+  if (currentRun.value?.resume_by) {
+    return t('lens.chat.awaitingResume')
+  }
   if (currentRun.value?.status === 'streaming') {
     return t('lens.chat.generating')
   }
@@ -2006,8 +2009,14 @@ const liveStructuredProgressText = computed(() =>
     : ''
 )
 
-const liveProgressText = computed(() =>
-  selectLiveProgressText({
+const liveProgressText = computed(() => {
+  if (currentRun.value?.resume_by) {
+    // The node owning this run is disconnected; its progress is frozen
+    // (and the run may resume on a reconnect), so surface that state
+    // instead of the stale plan/stage text.
+    return t('lens.chat.awaitingResume')
+  }
+  return selectLiveProgressText({
     finalAnswerProgressText: liveFinalAnswerProgressText.value,
     structuredProgressText: liveStructuredProgressText.value,
     planProgressText: livePlanProgressText.value,
@@ -2017,7 +2026,7 @@ const liveProgressText = computed(() =>
     phaseText: runtimePhaseText.value,
     fallbackText: liveStatusText.value
   })
-)
+})
 
 function runtimeStateFor(thinking) {
   let state = createRuntimeState()
@@ -2978,7 +2987,11 @@ async function readSse(runUuid) {
 function handleEvent(event) {
   runtimeState.value = applyRuntimeEvent(runtimeState.value, event)
   if (event.type === 'sync' || event.type === 'status') {
-    currentRun.value = { ...currentRun.value, status: event.status }
+    currentRun.value = {
+      ...currentRun.value,
+      status: event.status,
+      resume_by: event.resume_by ?? null
+    }
     if (event.status !== 'queued') queuePosition.value = null
     if (event.type === 'sync') {
       event.steps?.forEach((step) => handleStepEvent(step, event.ts))

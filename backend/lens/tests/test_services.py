@@ -588,6 +588,30 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(retry.retry_of_run, first)
         self.assertEqual(self.session.message_set.count(), 4)
 
+    def test_awaiting_resume_run_counts_toward_assistant_concurrency(self):
+        self.assistant.max_concurrency = 1
+        self.assistant.save(update_fields=["max_concurrency"])
+        awaiting = create_execution_run(
+            session=self.session,
+            question="First",
+            enqueue=False,
+        )
+        awaiting.status = Run.Status.RUNNING
+        awaiting.resume_by = timezone.now() + timedelta(hours=1)
+        awaiting.save(update_fields=["status", "resume_by"])
+        queued = create_execution_run(
+            session=self.session,
+            question="Second",
+            enqueue=False,
+        )
+
+        with patch("lens.tasks.enqueue_answer_run_task") as enqueue:
+            execute_answer_run(queued, dispatch=False)
+
+        queued.refresh_from_db()
+        self.assertEqual(queued.status, Run.Status.QUEUED)
+        enqueue.assert_called_once_with(queued.uuid, 0, countdown=3)
+
     def test_execute_answer_run_creates_execution_snapshot(self):
         self.assistant.agent_rounds = "max"
         self.assistant.token_budget_profile = "deep"
@@ -746,16 +770,23 @@ class LensServiceTests(TransactionTestCase):
             question="Analyze everything",
             enqueue=False,
         )
+        run.started_at = timezone.now() - timedelta(minutes=5)
+        run.save(update_fields=["started_at"])
         execution = run.execution
 
         self.assistant.agent_rounds = "flash"
         self.assistant.save(update_fields=["agent_rounds"])
-        dispatch_run_to_lensnode(run, "Analyze everything")
+        with patch(
+            "lens.services.timezone.now",
+            return_value=run.started_at + timedelta(minutes=5),
+        ):
+            dispatch_run_to_lensnode(run, "Analyze everything")
 
         payload = sender.call_args.args[1]["payload"]
         self.assertEqual(payload["agent_rounds"], "max")
         self.assertEqual(payload["max_agent_turns"], 100)
         self.assertEqual(payload["run_timeout_s"], 3600)
+        self.assertEqual(payload["remaining_run_timeout_s"], 3300)
         self.assertEqual(execution.agent_rounds, "max")
         self.assertEqual(execution.run_timeout_s, 3600)
 
@@ -772,6 +803,8 @@ class LensServiceTests(TransactionTestCase):
             "22222222-2222-2222-2222-222222222222"
         )
         self.assistant.settings = {"runtime_mode": "original"}
+        self.user.profile.language = "zh-CN"
+        self.user.profile.save(update_fields=["language"])
         self.assistant.save(
             update_fields=[
                 "agent_model_ref",
@@ -788,6 +821,8 @@ class LensServiceTests(TransactionTestCase):
         self.assistant.agent_model_ref = "33333333-3333-3333-3333-333333333333"
         self.assistant.multimodal_model_ref = None
         self.assistant.settings = {"runtime_mode": "changed"}
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
         self.assistant.save(
             update_fields=[
                 "agent_model_ref",
@@ -806,6 +841,7 @@ class LensServiceTests(TransactionTestCase):
             payload["vision_model_ref"],
             "22222222-2222-2222-2222-222222222222",
         )
+        self.assertEqual(payload["answer_language"], "zh-CN")
         self.assertEqual(payload["settings"], {"runtime_mode": "original"})
 
     @patch("lens.services.async_to_sync")
@@ -960,10 +996,13 @@ class LensServiceTests(TransactionTestCase):
                 ],
             },
         )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
 
         event = _build_sync_event(run)
         detail = event["steps"][0]["detail"]
 
+        self.assertEqual(event["resume_by"], run.resume_by.isoformat())
         self.assertNotIn("secret", str(detail))
         self.assertNotIn("Authorization", str(detail))
         self.assertEqual(
@@ -1795,6 +1834,13 @@ class LensServiceTests(TransactionTestCase):
                 "run_uuid": str(run.uuid),
                 "status": "done",
             }
+        )
+        self.assertEqual(
+            await communicator.receive_json_from(),
+            {
+                "type": "run_done_ack",
+                "run_uuid": str(run.uuid),
+            },
         )
         await communicator.disconnect()
 

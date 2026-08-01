@@ -276,6 +276,7 @@
       "queued": "Queued, please wait",
       "queuedNext": "Almost your turn",
       "queuedPosition": "{position} ahead of you in the queue",
+      "awaitingResume": "Node disconnected, waiting to resume…",
       "running": "Analyzing",
       "generating": "Generating",
       "agentActivity": "Agent activity",

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
@@ -12,6 +13,7 @@ from lens.models import (
     GlobalSetting,
     LensNode,
     Run,
+    RunExecution,
     Session,
 )
 from lens.services import (
@@ -19,6 +21,7 @@ from lens.services import (
     RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT,
     create_execution_run,
     get_lensnode_disconnect_grace_seconds,
+    get_awaiting_resume_ttl_hours,
     get_reconcile_confirm_grace_seconds,
 )
 from lens.tasks import check_lensnode_disconnect_grace_period
@@ -47,6 +50,10 @@ class LensNodeDisconnectGraceTests(TransactionTestCase):
             workspace_path="/workspace",
             available_dirs=[{"path": "/workspace/repo"}],
             tasks=[{"name": "knowledge_qa"}],
+            labels={
+                "run_checkpoint_resume": True,
+                "run_checkpoint_ttl_hours": 24,
+            },
         )
         self.assistant = Assistant.objects.create(
             name="Advisor",
@@ -90,7 +97,17 @@ class LensNodeDisconnectGraceTests(TransactionTestCase):
         )
         self.assertEqual(get_reconcile_confirm_grace_seconds(), 7)
 
-    def test_check_fails_runs_when_still_offline(self):
+    def test_resume_ttl_is_capped_by_node_retention(self):
+        GlobalSetting.objects.create(key="lensnode.resume_ttl_h", value=48)
+        self.lensnode.labels["run_checkpoint_ttl_hours"] = 12
+        self.lensnode.save(update_fields=["labels"])
+
+        self.assertEqual(
+            get_awaiting_resume_ttl_hours(self.lensnode),
+            12,
+        )
+
+    def test_check_parks_runs_when_still_offline(self):
         run = self._make_running_run()
         stamp = timezone.now()
         self.lensnode.status = LensNode.Status.OFFLINE
@@ -102,8 +119,50 @@ class LensNodeDisconnectGraceTests(TransactionTestCase):
         )
 
         run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.assertIsNotNone(run.resume_by)
+
+    def test_check_expires_run_past_original_wall_clock_budget(self):
+        run = self._make_running_run()
+        run.started_at = timezone.now() - timedelta(seconds=61)
+        run.execution.run_timeout_s = 60
+        run.execution.status = RunExecution.Status.RUNNING
+        run.execution.save(update_fields=["run_timeout_s", "status"])
+        run.save(update_fields=["started_at"])
+        stamp = timezone.now()
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.disconnected_at = stamp
+        self.lensnode.save(update_fields=["status", "disconnected_at"])
+
+        check_lensnode_disconnect_grace_period(
+            str(self.lensnode.uuid), stamp.isoformat()
+        )
+
+        run.refresh_from_db()
+        run.execution.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.error, "LENSNODE_RESUME_EXPIRED")
+        self.assertIsNone(run.resume_by)
+        self.assertEqual(run.execution.status, RunExecution.Status.FAILED)
+
+    def test_check_fails_run_when_node_cannot_resume_checkpoint(self):
+        run = self._make_running_run()
+        stamp = timezone.now()
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.disconnected_at = stamp
+        self.lensnode.labels = {}
+        self.lensnode.save(
+            update_fields=["status", "disconnected_at", "labels"]
+        )
+
+        check_lensnode_disconnect_grace_period(
+            str(self.lensnode.uuid), stamp.isoformat()
+        )
+
+        run.refresh_from_db()
         self.assertEqual(run.status, Run.Status.FAILED)
         self.assertEqual(run.error, "LENSNODE_DISCONNECTED")
+        self.assertIsNone(run.resume_by)
 
     def test_check_noops_when_node_reconnected(self):
         run = self._make_running_run()

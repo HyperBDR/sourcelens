@@ -1180,14 +1180,14 @@ def check_lensnode_disconnect_grace_period(lensnode_uuid, disconnected_at_iso):
     if node.status == LensNode.Status.ONLINE or not is_same_episode():
         return
 
-    from .services import fail_active_runs_for_lensnode
+    from .services import mark_active_runs_awaiting_resume
 
     logger.warning(
-        "LensNode %s still disconnected after the grace period; failing its "
-        "RUNNING/STREAMING runs",
+        "LensNode %s still disconnected after the grace period; marking "
+        "its RUNNING/STREAMING runs as awaiting resume",
         lensnode_uuid,
     )
-    fail_active_runs_for_lensnode(lensnode_uuid)
+    mark_active_runs_awaiting_resume(lensnode_uuid)
 
 
 @shared_task(
@@ -1196,7 +1196,7 @@ def check_lensnode_disconnect_grace_period(lensnode_uuid, disconnected_at_iso):
     ignore_result=True,
 )
 def confirm_reconcile_orphan(run_uuid):
-    """Fail a run only if it's still non-terminal after the confirm window.
+    """Park a run only if it's still non-terminal after the confirm window.
 
     Scheduled (with a countdown) by
     lens.services.schedule_reconcile_orphan_confirmation when a reconnecting
@@ -1209,18 +1209,52 @@ def confirm_reconcile_orphan(run_uuid):
     overwritable LensNode.disconnected_at field): this only ever acts on the
     one run_uuid it was scheduled for, and a run that already left
     RUNNING/STREAMING simply won't match the filter.
+
+    The run stays RUNNING with resume_by set rather than introducing a new
+    persisted status that an older blue/green rollback cannot understand.
     """
 
     now = timezone.now()
-    updated = Run.objects.filter(
-        uuid=run_uuid,
-        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
-    ).update(
-        status=Run.Status.FAILED,
-        error="LENSNODE_RECONNECT_ORPHANED",
-        finished_at=now,
-        updated_at=now,
+    from .services import (
+        get_reconcile_confirm_grace_seconds,
+        get_run_resume_deadline,
+        schedule_awaiting_run_expiration,
     )
+
+    activity_cutoff = now - timedelta(
+        seconds=get_reconcile_confirm_grace_seconds()
+    )
+    stale_activity = Q(last_activity_at__isnull=True) | Q(
+        last_activity_at__lte=activity_cutoff
+    )
+    run = (
+        Run.objects.select_related("lensnode", "execution")
+        .filter(
+            uuid=run_uuid,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        )
+        .filter(stale_activity)
+        .first()
+    )
+    if run is None:
+        return
+    resume_by = get_run_resume_deadline(run, now=now)
+    updates = {
+        "status": Run.Status.RUNNING,
+        "resume_by": resume_by,
+        "updated_at": now,
+    }
+    if resume_by <= now:
+        updates.update(
+            status=Run.Status.FAILED,
+            error="LENSNODE_RESUME_EXPIRED",
+            resume_by=None,
+            finished_at=now,
+        )
+    updated = Run.objects.filter(
+        pk=run.pk,
+        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+    ).filter(stale_activity).update(**updates)
     if updated:
         from .services import fail_running_steps_for_runs
 
@@ -1231,11 +1265,113 @@ def confirm_reconcile_orphan(run_uuid):
         )
         if run_id:
             fail_running_steps_for_runs([run_id])
+        if resume_by <= now:
+            RunExecution.objects.filter(
+                run_id=run_id,
+                status__in=[
+                    RunExecution.Status.QUEUED,
+                    RunExecution.Status.DISPATCHED,
+                    RunExecution.Status.RUNNING,
+                ],
+            ).update(
+                status=RunExecution.Status.FAILED,
+                finished_at=now,
+            )
         logger.warning(
             "Run %s still non-terminal after the reconcile confirm grace "
-            "window; marking it failed (LENSNODE_RECONNECT_ORPHANED)",
+            "window; %s",
             run_uuid,
+            (
+                "parking it as awaiting resume"
+                if resume_by > now
+                else "its original timeout has expired"
+            ),
         )
+        if resume_by > now:
+            schedule_awaiting_run_expiration(run.uuid, resume_by)
+        if resume_by > now and LensNode.objects.filter(
+            pk=run.lensnode_id,
+            status=LensNode.Status.ONLINE,
+        ).exists():
+            from .services import resume_awaiting_runs_for_lensnode
+
+            resume_awaiting_runs_for_lensnode(run.lensnode.uuid)
+
+
+@shared_task(
+    name="lens.expire_awaiting_run",
+    queue="lens",
+    ignore_result=True,
+)
+def expire_awaiting_run(run_uuid):
+    """Fail one parked Run when its precise resume deadline passes."""
+
+    now = timezone.now()
+    run = (
+        Run.objects.filter(
+            uuid=run_uuid,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+            resume_by__isnull=False,
+        )
+        .values("id", "resume_by")
+        .first()
+    )
+    if run is None:
+        return 0
+    if run["resume_by"] > now:
+        from .services import schedule_awaiting_run_expiration
+
+        schedule_awaiting_run_expiration(run_uuid, run["resume_by"])
+        return 0
+    updated = Run.objects.filter(
+        id=run["id"],
+        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        resume_by__lte=now,
+    ).update(
+        status=Run.Status.FAILED,
+        error="LENSNODE_RESUME_EXPIRED",
+        resume_by=None,
+        finished_at=now,
+        updated_at=now,
+    )
+    if not updated:
+        return 0
+    from .services import fail_running_steps_for_runs
+
+    fail_running_steps_for_runs([run["id"]])
+    RunExecution.objects.filter(
+        run_id=run["id"],
+        status__in=[
+            RunExecution.Status.QUEUED,
+            RunExecution.Status.DISPATCHED,
+            RunExecution.Status.RUNNING,
+        ],
+    ).update(status=RunExecution.Status.FAILED, finished_at=now)
+    return 1
+
+
+@shared_task(
+    name="lens.retry_awaiting_run_resume",
+    queue="lens",
+    ignore_result=True,
+)
+def retry_awaiting_run_resume(run_uuid):
+    """Retry checkpoint admission while its bounded deadline remains valid."""
+
+    run = (
+        Run.objects.select_related("lensnode")
+        .filter(
+            uuid=run_uuid,
+            status=Run.Status.RUNNING,
+            resume_by__gt=timezone.now(),
+        )
+        .first()
+    )
+    if run is None or run.lensnode is None:
+        return 0
+    from .services import resume_awaiting_runs_for_lensnode
+
+    return resume_awaiting_runs_for_lensnode(run.lensnode.uuid)
 
 
 @shared_task(name="lens.lensnode_health", queue="lens")
@@ -1311,6 +1447,7 @@ def lensnode_cleanup_task():
     abs_cutoff = now - timedelta(seconds=timeout_s)
     stale = Run.objects.filter(
         status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        resume_by__isnull=True,
     ).filter(
         Q(last_activity_at__lt=idle_cutoff)
         | Q(last_activity_at__isnull=True, started_at__lt=idle_cutoff)
@@ -1325,6 +1462,25 @@ def lensnode_cleanup_task():
     stale.update(
         status=Run.Status.FAILED,
         error="LENS_RUN_TIMEOUT",
+        finished_at=now,
+        updated_at=now,
+    )
+    # Fail awaiting-resume runs whose node never came back before the resume
+    # deadline (see services.get_awaiting_resume_ttl_hours).
+    expired_resume = Run.objects.filter(
+        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        resume_by__lt=now,
+    )
+    expired_resume_ids = list(expired_resume.values_list("id", flat=True))
+    expired_count = len(expired_resume_ids)
+    if expired_count:
+        from .services import fail_running_steps_for_runs
+
+        fail_running_steps_for_runs(expired_resume_ids)
+    expired_resume.update(
+        status=Run.Status.FAILED,
+        error="LENSNODE_RESUME_EXPIRED",
+        resume_by=None,
         finished_at=now,
         updated_at=now,
     )
@@ -1344,6 +1500,7 @@ def lensnode_cleanup_task():
     record.last_status = ScheduledTask.Status.SUCCESS
     record.last_metrics = {
         "failed": count,
+        "resume_expired": expired_count,
         "idle_timeout_s": idle_timeout_s,
         "timeout_s": timeout_s,
         "datasource_sync": datasource_sync_metrics,
