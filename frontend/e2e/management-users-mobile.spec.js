@@ -20,14 +20,33 @@ async function mockManagement(page) {
       }
     } else if (pathname === '/api/v1/management/users/') {
       data = {
-        count: 1,
+        count: 3,
         results: [
           {
             id: 1,
             username: 'admin',
-            email: 'admin@example.com',
+            display_name: 'admin',
+            email: 'admin',
             is_active: true,
             is_staff: true,
+            groups: []
+          },
+          {
+            id: 2,
+            username: 'operator',
+            display_name: 'Operations Owner',
+            email: 'operator@example.com',
+            is_active: true,
+            is_staff: true,
+            groups: []
+          },
+          {
+            id: 3,
+            username: `long-${'username-'.repeat(30)}end`,
+            display_name: '',
+            email: 'long-user@example.com',
+            is_active: true,
+            is_staff: false,
             groups: []
           }
         ]
@@ -73,4 +92,39 @@ test('user filters keep distinct rows and usable widths on mobile', async ({
   expect(usernameBox.y).toBe(emailBox.y)
   expect(searchBox.y).toBe(resetBox.y)
   expect(searchBox.y).toBeGreaterThan(usernameBox.y + usernameBox.height)
+})
+
+test('user identities stay distinct and row actions remain reachable', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1512, height: 945 })
+  await mockManagement(page)
+  await page.goto('/management/users')
+
+  const identities = page.getByTestId('user-identity')
+  await expect(identities).toHaveCount(3)
+  await expect(identities.nth(0).getByTestId('secondary-identity')).toHaveCount(
+    0
+  )
+  await expect(identities.nth(1).getByTestId('secondary-identity')).toHaveText(
+    'Operations Owner'
+  )
+  await expect(page.getByTestId('user-email').nth(0)).toHaveText('—')
+  await expect(page.getByTestId('user-email').nth(1)).toHaveText(
+    'operator@example.com'
+  )
+
+  const longUsername = `long-${'username-'.repeat(30)}end`
+  await expect(
+    identities.nth(2).getByTestId('user-detail-trigger')
+  ).toHaveAttribute('title', longUsername)
+
+  const table = page.getByTestId('user-table-scroll')
+  const actions = page.getByTestId('user-actions').first()
+  const scrollWidth = await table.evaluate((element) => element.scrollWidth)
+  const actionsBox = await actions.boundingBox()
+
+  expect(scrollWidth).toBeLessThan(1300)
+  expect(actionsBox).not.toBeNull()
+  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(1512)
 })

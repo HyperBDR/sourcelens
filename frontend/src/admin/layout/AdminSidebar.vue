@@ -17,7 +17,7 @@
   <aside
     id="admin-sidebar"
     :class="[
-      'layout-admin-sidebar flex h-full w-64 flex-shrink-0 flex-col border-r border-ink-800 bg-ink-900 transition-transform duration-300 ease-in-out',
+      'layout-admin-sidebar flex h-full w-64 flex-shrink-0 flex-col border-r border-ink-700 bg-ink-900 transition-transform duration-300 ease-in-out',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
@@ -59,7 +59,14 @@
       </button>
     </div>
 
-    <nav class="flex flex-1 flex-col space-y-1 overflow-y-auto px-3 py-4">
+    <nav
+      ref="navigation"
+      :aria-label="t('management.adminConsole')"
+      class="admin-sidebar-navigation flex flex-1 flex-col space-y-1 overflow-y-auto px-3 py-4"
+      tabindex="0"
+      @keydown="handleNavigationKeydown"
+      @scroll.passive="saveScrollPosition"
+    >
       <div class="flex-1 space-y-1">
         <div
           v-if="userStore.userHasFeature('admin_console')"
@@ -99,6 +106,7 @@
             </svg>
           </button>
           <Transition
+            @after-enter="keepActiveItemVisible"
             enter-active-class="transition-all duration-200 ease-out"
             enter-from-class="opacity-0 max-h-0"
             enter-to-class="opacity-100 max-h-96"
@@ -281,6 +289,7 @@
             </svg>
           </button>
           <Transition
+            @after-enter="keepActiveItemVisible"
             enter-active-class="transition-all duration-200 ease-out"
             enter-from-class="opacity-0 max-h-0"
             enter-to-class="opacity-100 max-h-96"
@@ -505,6 +514,7 @@
             </svg>
           </button>
           <Transition
+            @after-enter="keepActiveItemVisible"
             enter-active-class="transition-all duration-200 ease-out"
             enter-from-class="opacity-0 max-h-0"
             enter-to-class="opacity-100 max-h-96"
@@ -603,6 +613,7 @@
             </svg>
           </button>
           <Transition
+            @after-enter="keepActiveItemVisible"
             enter-active-class="transition-all duration-200 ease-out"
             enter-from-class="opacity-0 max-h-0"
             enter-to-class="opacity-100 max-h-96"
@@ -759,6 +770,7 @@
             </svg>
           </button>
           <Transition
+            @after-enter="keepActiveItemVisible"
             enter-active-class="transition-all duration-200 ease-out"
             enter-from-class="opacity-0 max-h-0"
             enter-to-class="opacity-100 max-h-96"
@@ -891,6 +903,7 @@
             </svg>
           </button>
           <Transition
+            @after-enter="keepActiveItemVisible"
             enter-active-class="transition-all duration-200 ease-out"
             enter-from-class="opacity-0 max-h-0"
             enter-to-class="opacity-100 max-h-96"
@@ -1046,11 +1059,12 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { useUiStore } from '@/store/ui'
 import { useUserStore } from '@/store/user'
 
 defineProps({
@@ -1065,8 +1079,10 @@ defineEmits(['close'])
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const uiStore = useUiStore()
 const userStore = useUserStore()
 
+const navigation = ref(null)
 const userManagementMenuOpen = ref(true)
 const lensMenuOpen = ref(true)
 const dataManagementMenuOpen = ref(true)
@@ -1075,6 +1091,45 @@ const taskManagementMenuOpen = ref(true)
 const notificationManagementMenuOpen = ref(true)
 
 const { isMobile } = useIsMobile()
+
+const saveScrollPosition = () => {
+  if (!navigation.value) return
+  uiStore.adminSidebarScrollTop = navigation.value.scrollTop
+}
+
+const handleNavigationKeydown = (event) => {
+  const container = navigation.value
+  if (!container || event.target !== container) return
+
+  const scrollAmounts = {
+    ArrowDown: 40,
+    ArrowUp: -40,
+    PageDown: container.clientHeight,
+    PageUp: -container.clientHeight
+  }
+  const top = scrollAmounts[event.key]
+  if (top === undefined) return
+
+  event.preventDefault()
+  container.scrollBy({ top })
+}
+
+const keepActiveItemVisible = () => {
+  const container = navigation.value
+  const activeItem = container?.querySelector('.admin-nav-item-active')
+  if (!container || !activeItem) return
+
+  const containerRect = container.getBoundingClientRect()
+  const activeRect = activeItem.getBoundingClientRect()
+
+  if (activeRect.top < containerRect.top) {
+    container.scrollTop -= containerRect.top - activeRect.top
+  } else if (activeRect.bottom > containerRect.bottom) {
+    container.scrollTop += activeRect.bottom - containerRect.bottom
+  }
+
+  uiStore.adminSidebarScrollTop = container.scrollTop
+}
 
 const isActive = (path) => {
   return route.path === path || route.path.startsWith(path + '/')
@@ -1106,7 +1161,7 @@ const toggleNotificationManagementMenu = () => {
 
 watch(
   () => route.path,
-  (newPath) => {
+  async (newPath) => {
     if (
       newPath.startsWith('/management/users') ||
       newPath.startsWith('/management/groups')
@@ -1123,9 +1178,20 @@ watch(
       taskManagementMenuOpen.value = true
     if (newPath.startsWith('/management/notifier'))
       notificationManagementMenuOpen.value = true
+
+    if (navigation.value) {
+      await nextTick()
+      keepActiveItemVisible()
+    }
   },
   { immediate: true }
 )
+
+onMounted(async () => {
+  await nextTick()
+  navigation.value.scrollTop = uiStore.adminSidebarScrollTop
+  keepActiveItemVisible()
+})
 
 const preloadCache = new Set()
 const preloadRoute = (path) => {
@@ -1147,6 +1213,16 @@ const preloadRoute = (path) => {
 </script>
 
 <style scoped>
+.admin-sidebar-navigation {
+  scrollbar-width: none;
+}
+
+.admin-sidebar-navigation::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .admin-nav-item {
   @apply flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
 }
