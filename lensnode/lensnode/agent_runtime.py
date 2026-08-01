@@ -3071,9 +3071,8 @@ def _emit_new_tool_calls(
                     "revision": 0
                 }
                 state["revision"] = int(state.get("revision") or 0) + 1
-                incoming_steps = _normalize_plan_steps(
-                    (call.get("args") or {}).get("todos")
-                )
+                todos = (call.get("args") or {}).get("todos") or []
+                incoming_steps = _normalize_plan_steps(todos)
                 initial_steps = state.get("steps") or []
                 if initial_steps:
                     incoming_by_id = {
@@ -3102,6 +3101,23 @@ def _emit_new_tool_calls(
                         },
                     },
                 )
+                if (
+                    todos
+                    and all(
+                        item.get("status") == "completed" for item in todos
+                    )
+                    and not state.get("answering_phase_emitted")
+                ):
+                    state["answering_phase_emitted"] = True
+                    state["execution_phase_emitted"] = True
+                    emit_event(
+                        "workflow.phase.changed",
+                        {
+                            "event_type": "phase.changed",
+                            "visibility": "user",
+                            "payload": {"phase": "answering"},
+                        },
+                    )
                 continue
             if (
                 plan_state is not None

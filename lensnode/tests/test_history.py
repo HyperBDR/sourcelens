@@ -392,9 +392,51 @@ def test_write_todos_preserves_full_completion_before_run_terminal():
             plan_state=plan_state,
         )
 
-    assert events[-1][1]["payload"]["steps"] == [
+    assert events[-2][1]["payload"]["steps"] == [
         {"id": "step-1", "title": "Query orders", "status": "completed"},
         {"id": "step-2", "title": "Return answer", "status": "completed"},
+    ]
+    assert events[-1] == (
+        "workflow.phase.changed",
+        {
+            "event_type": "phase.changed",
+            "visibility": "user",
+            "payload": {"phase": "answering"},
+        },
+    )
+
+
+def test_write_todos_does_not_answer_before_hidden_steps_complete():
+    events = []
+    todos = [
+        {
+            "content": f"Visible step {index}",
+            "status": "completed",
+        }
+        for index in range(1, 13)
+    ]
+    todos.append({"content": "Hidden step", "status": "pending"})
+
+    _emit_new_tool_calls(
+        [
+            _Msg(
+                "ai",
+                tool_calls=[
+                    {
+                        "id": "call-plan",
+                        "name": "write_todos",
+                        "args": {"todos": todos},
+                    }
+                ],
+            )
+        ],
+        set(),
+        lambda name, detail: events.append((name, detail)),
+        plan_state={"revision": 0},
+    )
+
+    assert [name for name, _detail in events] == [
+        "workflow.plan.updated"
     ]
 
 
