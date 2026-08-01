@@ -17,9 +17,17 @@ from lens.datasource_services import (
 )
 from lens.models import DataSource, ScheduledTask
 from lens.periodic_tasks import ensure_datasource_periodic_task
-from lens.serializers import DataSourceSerializer
-from lens.services import cancel_datasource_sync_on_lensnode
+from lens.serializers import (
+    DataSourceConversionRequestSerializer,
+    DataSourceSerializer,
+)
+from lens.services import (
+    cancel_datasource_conversion_on_lensnode,
+    cancel_datasource_sync_on_lensnode,
+)
 from lens.tasks import (
+    datasource_conversion_task,
+    register_datasource_conversion_task,
     register_datasource_sync_task,
     release_datasource_lock,
     source_sync_task,
@@ -221,6 +229,56 @@ class DataSourceViewSet(BaseAdminViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @action(detail=True, methods=["post"])
+    def convert(self, request, uuid=None):
+        """Enqueue explicit conversion for a managed workspace."""
+
+        datasource = self.get_object()
+        if datasource.source_type != DataSource.SourceType.MANAGED_WORKSPACE:
+            return Response(
+                {"detail": "DATASOURCE_CONVERSION_NOT_SUPPORTED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if datasource.status == DataSource.Status.DISABLED:
+            return Response(
+                {"detail": "DATASOURCE_DISABLED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        serializer = DataSourceConversionRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        conversion = serializer.validated_data["conversion"]
+        force = serializer.validated_data["force"]
+        task_id = uuid_mod.uuid4().hex
+        celery_task_id = uuid_mod.uuid4().hex
+        task_execution = register_datasource_conversion_task(
+            datasource,
+            task_id,
+            conversion,
+            force=force,
+            created_by=request.user,
+            metadata={"celery_task_id": celery_task_id},
+        )
+        datasource.last_conversion_status = "PENDING"
+        datasource.save(update_fields=["last_conversion_status", "updated_at"])
+        datasource_conversion_task.apply_async(
+            args=[
+                str(datasource.uuid),
+                conversion,
+                force,
+                task_id,
+            ],
+            task_id=celery_task_id,
+        )
+        return Response(
+            {
+                "uuid": str(datasource.uuid),
+                "task_id": task_id,
+                "task_execution_id": task_execution.id,
+                "status": task_execution.status,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
     @action(detail=True, methods=["post"], url_path="set-enabled")
     def set_enabled(self, request, uuid=None):
         """Enable or disable a datasource and sync its schedule."""
@@ -309,6 +367,27 @@ class DataSourceViewSet(BaseAdminViewSet):
         serializer = TaskExecutionListSerializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["get"], url_path="conversion-tasks")
+    def conversion_tasks(self, request, uuid=None):
+        """List managed workspace conversion tasks (paginated)."""
+
+        from agentcore_task.adapters.django.models import TaskExecution
+        from agentcore_task.adapters.django.serializers import (
+            TaskExecutionListSerializer,
+        )
+
+        datasource = self.get_object()
+        queryset = TaskExecution.objects.filter(
+            module="lens_datasource_conversion",
+            metadata__datasource_uuid=str(datasource.uuid),
+        ).order_by("-created_at")
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = TaskExecutionListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = TaskExecutionListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
     @action(detail=True, methods=["post"], url_path="cancel-sync")
     def cancel_sync(self, request, uuid=None):
         """Cancel the latest running synchronization for this datasource."""
@@ -355,6 +434,76 @@ class DataSourceViewSet(BaseAdminViewSet):
                 "finished_at",
                 "error",
                 "metadata",
+            ]
+        )
+        return Response(
+            {
+                "uuid": str(datasource.uuid),
+                "task_id": task.task_id,
+                "task_execution_id": task.id,
+                "status": task.status,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="cancel-conversion")
+    def cancel_conversion(self, request, uuid=None):
+        """Cancel the latest active managed workspace conversion."""
+
+        from agentcore_task.adapters.django.models import TaskExecution
+        from agentcore_task.constants import TaskStatus
+        from core.celery import app
+
+        datasource = self.get_object()
+        task = (
+            TaskExecution.objects.filter(
+                module="lens_datasource_conversion",
+                metadata__datasource_uuid=str(datasource.uuid),
+                status__in=[
+                    TaskStatus.PENDING,
+                    *TaskStatus.get_running_statuses(),
+                ],
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if task is None:
+            return Response(
+                {"detail": "No running datasource conversion task."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        metadata = dict(task.metadata or {})
+        celery_task_id = metadata.get("celery_task_id") or task.task_id
+        app.control.revoke(celery_task_id, terminate=False)
+        cancel_datasource_conversion_on_lensnode(
+            datasource.lensnode,
+            task.task_id,
+        )
+        release_datasource_lock(
+            datasource.uuid,
+            token=metadata.get("lock_token") or task.task_id,
+        )
+        now = timezone.now()
+        metadata["manual_revoked_at"] = now.isoformat()
+        metadata["manual_revoked_by"] = request.user.pk
+        task.status = TaskStatus.REVOKED
+        task.finished_at = now
+        task.error = "DATASOURCE_CONVERSION_CANCELLED"
+        task.metadata = metadata
+        task.save(
+            update_fields=[
+                "status",
+                "finished_at",
+                "error",
+                "metadata",
+            ]
+        )
+        datasource.last_conversion_status = TaskStatus.REVOKED
+        datasource.last_conversion_at = now
+        datasource.save(
+            update_fields=[
+                "last_conversion_status",
+                "last_conversion_at",
+                "updated_at",
             ]
         )
         return Response(
