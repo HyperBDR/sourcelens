@@ -17,6 +17,15 @@ test('passes the clicked assistant reply to the retry handler', async () => {
   assert.match(chat, /@click="retryLastQuestion\(message\)"/)
 })
 
+test('keeps empty-answer Retry clicks from becoming a message', async () => {
+  const chat = await readFile(
+    new URL('../src/pages/lens/Chat.vue', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(chat, /@click="retryLastQuestion\(\)"/)
+})
+
 test('finds the user question for a historical assistant reply', () => {
   const messages = [
     { uuid: 'question-1', role: 'user', content: 'First question' },
