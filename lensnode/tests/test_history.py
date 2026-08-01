@@ -109,6 +109,39 @@ def test_build_initial_messages_without_history():
     ]
 
 
+def test_build_initial_messages_labels_foreign_language_history():
+    history = [
+        {"role": "user", "content": "2025年8月共有 37 个订单。"},
+        {"role": "assistant", "content": "はい、その通りです。"},
+    ]
+
+    messages = _build_initial_messages(
+        history, "How many orders were there?", answer_language="English"
+    )
+
+    assert messages[0]["content"].startswith(
+        "[Prior message written in Chinese.]"
+    )
+    assert messages[1]["content"].startswith(
+        "[Prior message written in Japanese.]"
+    )
+
+
+def test_build_initial_messages_keeps_same_language_history_untouched():
+    history = [
+        {"role": "user", "content": "What caused this error?"},
+        {"role": "assistant", "content": "A lock timeout caused it."},
+    ]
+
+    messages = _build_initial_messages(
+        history, "And how do I fix it?", answer_language="English"
+    )
+
+    assert messages == history + [
+        {"role": "user", "content": "And how do I fix it?"}
+    ]
+
+
 def test_build_initial_messages_contains_current_retry_question_once():
     history = [
         {"role": "user", "content": "context question"},

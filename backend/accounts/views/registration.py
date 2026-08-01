@@ -68,7 +68,7 @@ class SendRegistrationEmailView(APIView):
             )
 
         email = serializer.validated_data['email']
-        language = request.data.get('language', 'en-US')
+        language = request.data.get('language', 'en')
 
         try:
             logger.info(

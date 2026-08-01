@@ -13,6 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import Profile
+from accounts.serializers import normalize_language_code
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ class RegistrationService:
             username: Custom username for virtual email
             scene: User's selected scene (chat, product_issue, etc.)
             language: AI output language for summaries, titles,
-                      and metadata (zh-CN, en-US, es)
+                      and metadata (en, zh-hans)
             timezone_str: User's timezone
 
         Returns:
@@ -278,6 +279,7 @@ class RegistrationService:
             user.save()
             logger.info(f"Created new user: {username} for email: {email}")
 
+        language = normalize_language_code(language)
         profile, profile_created = Profile.objects.get_or_create(
             user=user,
             defaults={
@@ -316,7 +318,7 @@ class RegistrationService:
     @transaction.atomic
     def get_or_create_otp_user(
         email: str,
-        language: str = 'zh-CN',
+        language: str = 'en',
         timezone_str: str = 'Asia/Shanghai',
     ) -> User:
         """
@@ -355,6 +357,7 @@ class RegistrationService:
             user.save()
             logger.info(f"Auto-provisioned OTP user: {username} ({email})")
 
+        language = normalize_language_code(language)
         profile, created = Profile.objects.get_or_create(
             user=user,
             defaults={

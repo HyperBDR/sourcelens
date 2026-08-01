@@ -1446,7 +1446,9 @@ class LensDeepAgentRuntime:
                 invoke_detail,
             )
             messages = _build_initial_messages(
-                command.get("history"), question
+                command.get("history"),
+                question,
+                answer_language=_command_answer_language(command),
             )
             (
                 answer,
@@ -2210,6 +2212,7 @@ def _answer_general_chat_directly(
         *_build_initial_messages(
             command.get("history"),
             command.get("question", ""),
+            answer_language=_command_answer_language(command),
         ),
     ]
     response = model.invoke(messages, runtime_control_call=True)
@@ -2280,6 +2283,12 @@ def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
     context_guidance = _context_guidance(context_skill_contents or [])
     return (
         f"{scenario['prompt']}\n\n"
+        f"ANSWER LANGUAGE POLICY: The configured answer language is "
+        f"{answer_language}. Write your ENTIRE final answer in "
+        f"{answer_language} regardless of the question language, the "
+        f"conversation history, or the language of any files and tool "
+        f"results you read. Never switch to the language of the source "
+        f"files.\n\n"
         "You are running inside SourceLens LensNode. The control plane has "
         "selected the workspace directories below.\n\n"
         "Workspace and scratch space:\n"
@@ -2371,8 +2380,8 @@ def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
         f"User-uploaded subject documents:\n{subjects or '- none'}\n\n"
         f"Reference directories:\n{references or '- none'}"
         f"{context_guidance}"
-        f"\n\nFINAL REMINDER ON LANGUAGE: The user's question is written "
-        f"in {answer_language}. You MUST write your ENTIRE final answer "
+        f"\n\nFINAL REMINDER ON LANGUAGE: The configured answer language "
+        f"is {answer_language}. You MUST write your ENTIRE final answer "
         f"in {answer_language}, even when the workspace files you read "
         f"are in another language. Never switch to the language of the "
         f"source files you read."
@@ -2386,6 +2395,11 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
     skill_guidance = _general_chat_guidance(context_skill_contents or [])
     return (
         "You are running inside SourceLens LensNode as General Chat.\n\n"
+        f"ANSWER LANGUAGE POLICY: The configured answer language is "
+        f"{answer_language}. Write your ENTIRE final answer in "
+        f"{answer_language} regardless of the question language, the "
+        f"conversation history, or the language of any data and tool "
+        f"results.\n\n"
         "The bound Skills are your primary behavior contract. Follow their "
         "SKILL.md instructions and use bundled resources only when the Skill "
         "indicates they are relevant. Do not search or inspect local "
@@ -2465,8 +2479,8 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         "from actual tool results in this run; when no such result exists, "
         "state that the request could not be verified."
         f"{skill_guidance}"
-        f"\n\nFINAL REMINDER ON LANGUAGE: The user's question is written "
-        f"in {answer_language}. You MUST write your ENTIRE final answer "
+        f"\n\nFINAL REMINDER ON LANGUAGE: The configured answer language "
+        f"is {answer_language}. You MUST write your ENTIRE final answer "
         f"in {answer_language}."
         f"{_route_guidance(command.get('runtime_route'))}"
     )
@@ -2653,11 +2667,14 @@ def _activity_from_event(event):
     return "running"
 
 
-def _build_initial_messages(history, question):
+def _build_initial_messages(history, question, answer_language="English"):
     """Prepend prior conversation turns to the current question.
 
     Only user/assistant turns with content are kept; tool traces are
-    never carried across turns, so the context stays bounded.
+    never carried across turns, so the context stays bounded. Prior
+    turns whose detected script differs from the configured answer
+    language are labeled, so a foreign-language history cannot silently
+    drag the answer away from the configured language.
     """
 
     messages = []
@@ -2665,6 +2682,12 @@ def _build_initial_messages(history, question):
         role = item.get("role")
         content = item.get("content")
         if role in ("user", "assistant") and content:
+            detected = _detect_answer_language(content)
+            if detected != answer_language:
+                content = (
+                    f"[Prior message written in {detected}.] "
+                    f"{content}"
+                )
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": question})
     return messages

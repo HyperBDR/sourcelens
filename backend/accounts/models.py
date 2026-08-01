@@ -146,13 +146,10 @@ class Profile(models.Model):
 
     language = models.CharField(
         max_length=10,
-        default='zh-CN',
+        default='en',
         choices=[
-            ('en-US', 'English'),
-            ('zh-CN', '简体中文'),
-            ('es', 'Español'),
-            ('ja-JP', '日本語'),
-            ('ko-KR', '한국어'),
+            ('en', 'English'),
+            ('zh-hans', '简体中文'),
         ],
         help_text=(
             "Specifies the language used by AI when generating summaries, "

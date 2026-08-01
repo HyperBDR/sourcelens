@@ -21,6 +21,7 @@ export function prepareRunSubmission({
   attachmentUuids = [],
   retryDraft = null,
   pendingSubmission = null,
+  answerLanguage = '',
   randomUUID = () => globalThis.crypto.randomUUID()
 }) {
   const retryOfRunUuid =
@@ -40,7 +41,8 @@ export function prepareRunSubmission({
     run_inline: false,
     enqueue: true,
     attachment_uuids: [...attachmentUuids],
-    idempotency_key: idempotencyKey
+    idempotency_key: idempotencyKey,
+    answer_language: answerLanguage
   }
   if (retryOfRunUuid) {
     payload.retry_of_run_uuid = retryOfRunUuid

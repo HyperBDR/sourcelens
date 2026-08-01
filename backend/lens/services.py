@@ -316,12 +316,23 @@ def create_execution_run(
     enqueue=True,
     attachment_uuids=None,
     user=None,
+    answer_language="",
 ):
-    """Create a queued run for LensNode execution."""
+    """Create a queued run for LensNode execution.
+
+    ``answer_language`` is the per-request language sent by the client;
+    when absent it falls back to the user's Profile.language so the run
+    always records the language its answer should follow.
+    """
 
     assistant = lock_assistant_for_new_work(session.assistant, user)
     session = lock_active_session(session)
     session.assistant = assistant
+
+    if not answer_language:
+        answer_language = getattr(
+            getattr(session.user, "profile", None), "language", ""
+        )
 
     if idempotency_key:
         existing = (
@@ -368,6 +379,7 @@ def create_execution_run(
         retry_of_run=retry_of_run,
         lensnode=session.assistant.lensnode,
         idempotency_key=idempotency_key,
+        answer_language=answer_language,
     )
     input_message.run = run
     input_message.save(update_fields=["run"])
@@ -1108,7 +1120,7 @@ def dispatch_run_to_lensnode(
         agent_rounds
     )
     profile = getattr(run.session.user, "profile", None)
-    answer_language = getattr(profile, "language", "")
+    answer_language = run.answer_language or getattr(profile, "language", "")
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),
         {

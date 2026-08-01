@@ -755,7 +755,7 @@ class UserDetailsSerializer(serializers.ModelSerializer):
                 default_lang = (
                     normalize_language_code(profile_language)
                     if profile_language
-                    else 'zh-CN'
+                    else settings.LANGUAGE_CODE
                 )
                 default_tz = (
                     profile_timezone.strip()

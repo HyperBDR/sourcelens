@@ -389,7 +389,7 @@ msgid "Get available scenes"
 msgstr ""
 
 #: accounts/views/scenes.py:33
-msgid "Language code (e.g., 'zh-CN', 'en-US')"
+msgid "Language code (e.g., 'zh-hans', 'en')"
 msgstr ""
 
 #: accounts/views/scenes.py:60

@@ -254,7 +254,7 @@ class SendPasswordSetupCodeView(APIView):
             purpose=otp.PASSWORD_SETUP_PURPOSE,
         )
         profile = getattr(user, "profile", None)
-        language = getattr(profile, "language", "en-US")
+        language = getattr(profile, "language", "en")
         delivered = PasswordSetupEmailService.send_password_setup_code_email(
             email,
             code,

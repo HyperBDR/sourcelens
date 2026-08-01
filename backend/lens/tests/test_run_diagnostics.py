@@ -506,9 +506,7 @@ class RunDiagnosticsTests(TestCase):
         )
 
     @patch("lens.run_diagnostics.run_completion")
-    def test_diagnosis_language_matches_request_language(self, completion):
-        from django.utils import translation
-
+    def test_diagnosis_language_matches_profile_language(self, completion):
         result = {
             "summary": "A bounded summary.",
             "severity": "low",
@@ -524,12 +522,13 @@ class RunDiagnosticsTests(TestCase):
             usage={},
             metered=True,
         )
-        translation.activate("zh-hans")
-        try:
-            diagnostic, _created = create_run_diagnostic(self.run, self.admin)
-            completed = execute_diagnostic(diagnostic.uuid)
-        finally:
-            translation.deactivate()
+        self.admin.profile.language = "zh-hans"
+        self.admin.profile.save(update_fields=["language"])
+        self.run.answer_language = "zh-hans"
+        self.run.save(update_fields=["answer_language"])
+
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+        completed = execute_diagnostic(diagnostic.uuid)
 
         self.assertTrue(completed)
         diagnostic.refresh_from_db()

@@ -55,7 +55,7 @@ class SendLoginCodeView(APIView):
 
         email = serializer.validated_data['email']
         token = serializer.validated_data.get('turnstile_token', '')
-        language = request.data.get('language', 'en-US')
+        language = request.data.get('language', 'en')
         client_ip = request.META.get('REMOTE_ADDR')
 
         ok, errors = turnstile.verify_token(token, client_ip)
@@ -139,7 +139,7 @@ class VerifyLoginCodeView(APIView):
 
         email = serializer.validated_data['email']
         code = serializer.validated_data['code']
-        language = request.data.get('language', 'zh-CN')
+        language = request.data.get('language', 'en')
         timezone_str = request.data.get('timezone', 'Asia/Shanghai')
 
         ok, reason = otp.verify_code(email, code)

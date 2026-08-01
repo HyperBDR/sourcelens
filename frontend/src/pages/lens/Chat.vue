@@ -3035,7 +3035,8 @@ async function submit() {
     question: optimisticText,
     attachmentUuids,
     retryDraft: retryDraftAtSubmit,
-    pendingSubmission: pendingRunSubmission.value
+    pendingSubmission: pendingRunSubmission.value,
+    answerLanguage: preferencesStore.language
   })
   pendingRunSubmission.value = preparedSubmission.submission
   attachments.value = []

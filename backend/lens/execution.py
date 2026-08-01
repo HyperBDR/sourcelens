@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 def _document_analysis_prompt(run):
-    """Return the document-only prompt in the user's AI language."""
+    """Return the document-only prompt in the run's requested language."""
 
     profile = getattr(run.session.user, "profile", None)
-    language = str(getattr(profile, "language", "") or "").lower()
+    language = str(
+        run.answer_language or getattr(profile, "language", "") or ""
+    ).lower()
     if language.startswith("zh"):
         return "请分析所附文档"
     return "Analyze the attached document."

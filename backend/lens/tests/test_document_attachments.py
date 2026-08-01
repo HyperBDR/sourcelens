@@ -585,6 +585,8 @@ class DocumentAttachmentTests(TestCase):
         )
 
     def test_upload_and_run_dispatch_without_database_attachment(self):
+        self.user.profile.language = "zh-hans"
+        self.user.profile.save(update_fields=["language"])
         self.client.force_authenticate(self.user)
         upload = self.client.post(
             f"/api/lens/sessions/{self.session.uuid}/attachments/",
@@ -623,9 +625,11 @@ class DocumentAttachmentTests(TestCase):
             payload["subject_documents"][0]["original_name"],
             "tender.pdf",
         )
-        self.assertEqual(payload["answer_language"], "zh-CN")
+        self.assertEqual(payload["answer_language"], "zh-hans")
 
     def test_document_only_run_dispatches_with_analysis_prompt(self):
+        self.user.profile.language = "zh-hans"
+        self.user.profile.save(update_fields=["language"])
         self.assistant.preprocess_model_ref = uuid.uuid4()
         self.assistant.save(update_fields=["preprocess_model_ref"])
         metadata = store_document_attachment(
@@ -675,6 +679,27 @@ class DocumentAttachmentTests(TestCase):
             dispatch.call_args.args[1],
             "Analyze the attached document.",
         )
+
+    def test_run_request_language_overrides_profile(self):
+        self.user.profile.language = "zh-hans"
+        self.user.profile.save(update_fields=["language"])
+        run = create_execution_run(
+            session=self.session,
+            question="How many orders were there?",
+            enqueue=False,
+            answer_language="en",
+        )
+
+        self.assertEqual(run.answer_language, "en")
+        with (
+            patch("lens.services.get_channel_layer"),
+            patch("lens.services.async_to_sync") as async_to_sync,
+        ):
+            sender = async_to_sync.return_value
+            dispatch_run_to_lensnode(run, "How many orders were there?")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(payload["answer_language"], "en")
 
     def test_run_pdf_lists_transient_document(self):
         metadata = store_document_attachment(

@@ -747,6 +747,15 @@ class Run(models.Model):
         related_name="runs",
     )
     metering_ref = models.UUIDField(null=True, blank=True)
+    answer_language = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text=(
+            "Answer language requested with this run; falls back to the "
+            "user's Profile.language when not provided."
+        ),
+    )
     error = models.TextField(blank=True, default="")
     outcome = models.CharField(
         max_length=16,

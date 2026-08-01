@@ -47,7 +47,7 @@ class PasswordResetEmailServiceTests(SimpleTestCase):
             email='person@example.com',
             uid='uid-value',
             token='token-value',
-            language='en-US',
+            language='en',
         )
 
         assert sent is True
@@ -66,7 +66,7 @@ class PasswordResetEmailServiceTests(SimpleTestCase):
             email='person@example.com',
             uid='uid-value',
             token='token-value',
-            language='zh-CN',
+            language='zh-hans',
         )
 
         assert sent is True
@@ -86,6 +86,17 @@ class PasswordResetEmailServiceTests(SimpleTestCase):
         assert sent is True
         assert 'Reset password' in mail.outbox[0].alternatives[0][0]
 
+    def test_legacy_language_codes_still_resolve(self):
+        sent = PasswordResetEmailService.send_password_reset_email(
+            email='person@example.com',
+            uid='uid-value',
+            token='token-value',
+            language='zh-CN',
+        )
+
+        assert sent is True
+        assert '重置密码' in mail.outbox[0].alternatives[0][0]
+
 
 @override_settings(
     DEFAULT_FROM_EMAIL='noreply@example.com',
@@ -102,12 +113,12 @@ class VerificationCodeEmailStyleTests(SimpleTestCase):
         login_sent = OtpLoginEmailService.send_login_code_email(
             email='person@example.com',
             code='123456',
-            language='en-US',
+            language='en',
         )
         setup_sent = PasswordSetupEmailService.send_password_setup_code_email(
             email='person@example.com',
             code='654321',
-            language='en-US',
+            language='en',
         )
 
         assert login_sent is True
@@ -129,7 +140,7 @@ class VerificationCodeEmailStyleTests(SimpleTestCase):
         sent = PasswordSetupEmailService.send_password_setup_code_email(
             email='person@example.com',
             code='654321',
-            language='zh-CN',
+            language='zh-hans',
         )
 
         assert sent is True

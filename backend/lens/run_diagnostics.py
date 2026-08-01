@@ -105,6 +105,24 @@ class RunDiagnosticStateError(RuntimeError):
         self.code = code
 
 
+def _diagnostic_language(run):
+    """Return the canonical answer language for the Run's owner.
+
+    Drives the diagnosis from the run's recorded request language (the
+    same source as the main answer) so the two can no longer disagree.
+    Falls back to the owner's Profile.language and then the project
+    default.
+    """
+
+    profile = getattr(run.session.user, "profile", None)
+    stored = run.answer_language or getattr(profile, "language", "") or ""
+    if stored:
+        if str(stored).lower().split("-", 1)[0] == "zh":
+            return "zh-hans"
+        return "en"
+    return translation.get_language() or settings.LANGUAGE_CODE
+
+
 class DiagnosticResultError(ValueError):
     """Raised when untrusted model output violates the result contract."""
 
@@ -141,8 +159,7 @@ def create_run_diagnostic(run, requested_by, idempotency_key="initial-v1"):
         defaults={
             "evidence": evidence,
             "requested_by": requested_by,
-            "language": translation.get_language()
-            or settings.LANGUAGE_CODE,
+            "language": _diagnostic_language(run),
             "model_ref": model_ref,
             "model_config_hash": model_config_hash,
             "prompt_version": DIAGNOSTIC_PROMPT_VERSION,
@@ -936,7 +953,7 @@ def _follow_up_system_prompt(language="en"):
 
 
 def _language_instruction(language):
-    """Return a prompt suffix pinning the output language to the UI."""
+    """Return a prompt suffix pinning the output language to the answer."""
 
     names = {
         "zh-hans": "Simplified Chinese",

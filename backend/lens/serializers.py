@@ -2138,6 +2138,7 @@ class RunSerializer(serializers.ModelSerializer):
             "retry_of_run_uuid",
             "lensnode",
             "metering_ref",
+            "answer_language",
             "error",
             "outcome",
             "termination_detail",
@@ -2309,6 +2310,25 @@ class RunCreateSerializer(serializers.Serializer):
         required=False,
         default=list,
     )
+    answer_language = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text=(
+            "Answer language requested for this run (en or zh-hans). "
+            "Falls back to the user's Profile.language when omitted."
+        ),
+    )
+
+    def validate_answer_language(self, value):
+        """Normalize the requested language to a supported code."""
+
+        code = str(value or "").lower().split("-", 1)[0]
+        if code == "zh":
+            return "zh-hans"
+        if code == "en":
+            return "en"
+        return ""
 
     def validate(self, attrs):
         """Require text or an attachment, and cap attachment count."""
@@ -2358,6 +2378,7 @@ class RunCreateSerializer(serializers.Serializer):
                     for value in validated_data.get("attachment_uuids", [])
                 ],
                 user=request.user if request else None,
+                answer_language=validated_data.get("answer_language", ""),
             )
         except AssistantNotRunnableError:
             raise PermissionDenied(

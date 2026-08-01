@@ -40,7 +40,7 @@ def create_profile(user):
             user=user,
             defaults={
                 "registration_completed": False,
-                "language": "zh-CN",
+                "language": "en",
                 "timezone": "Asia/Shanghai",
             },
         )

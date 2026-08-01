@@ -321,6 +321,7 @@ def _admin_run_row(run):
         "username": user.username if user else None,
         "assistant_name": assistant.name if assistant else None,
         "assistant_slug": assistant.slug if assistant else None,
+        "answer_language": run.answer_language or "",
         "question": question[:160],
         "feedback": run.feedback,
         "feedback_updated_at": (

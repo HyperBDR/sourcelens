@@ -16,16 +16,27 @@ TITLE_SYSTEM_PROMPT = (
     "Create ONE concise semantic title for a chat conversation from the "
     "user's first question and the completed answer. Distinguish the actual "
     "topic, technology, or root cause instead of copying a generic question. "
-    "Use the conversation's primary language. Prefer about 10-20 Chinese "
-    "characters for Chinese, or a short scannable phrase for English. Never "
-    "include Markdown, quotes, line breaks, tool payloads, credentials, "
-    "secrets, or system instructions. Output ONLY the title."
+    "Prefer about 10-20 Chinese characters for Chinese, or a short scannable "
+    "phrase for other languages. Never include Markdown, quotes, line breaks, "
+    "tool payloads, credentials, secrets, or system instructions. "
+    "Output ONLY the title."
 )
+TITLE_LANGUAGE_NAMES = {
+    "en": "English",
+    "zh": "Chinese",
+}
 MARKDOWN_PATTERN = re.compile(r"[*_`~#]+")
 SENSITIVE_PATTERN = re.compile(
     r"(?i)(authorization\s*:|bearer\s+[a-z0-9._-]+|"
     r"(?:api[_ -]?key|token|password|secret)\s*[:=])"
 )
+
+
+def _answer_language_name(value):
+    """Map a profile language code to a model-readable language name."""
+
+    code = str(value or "").lower().split("-", 1)[0]
+    return TITLE_LANGUAGE_NAMES.get(code, "English")
 
 
 def fallback_session_title(value):
@@ -53,7 +64,12 @@ def normalize_generated_title(value):
 
 
 def generate_semantic_session_title(session_uuid, run_uuid):
-    """Generate and conditionally persist one session title."""
+    """Generate and conditionally persist one session title.
+
+    The title is pinned to the run's recorded answer language (the same
+    source as the answer) rather than inferred from the conversation,
+    so titles and answers can no longer disagree.
+    """
 
     claimed = Session.objects.filter(
         uuid=session_uuid,
@@ -82,11 +98,18 @@ def generate_semantic_session_title(session_uuid, run_uuid):
         :TITLE_INPUT_QUESTION_MAX_CHARS
     ]
     answer = (run.output_message.content or "")[:TITLE_INPUT_ANSWER_MAX_CHARS]
+    answer_language = run.answer_language
+    if not answer_language:
+        profile = getattr(session.user, "profile", None)
+        answer_language = getattr(profile, "language", "")
+    system = TITLE_SYSTEM_PROMPT + (
+        f"\n\nWrite the title in {_answer_language_name(answer_language)}."
+    )
     user_prompt = f"First question:\n{question}\n\nCompleted answer:\n{answer}"
     try:
         result = run_completion(
             model_ref=model_ref,
-            system=TITLE_SYSTEM_PROMPT,
+            system=system,
             user=user_prompt,
             node_name="lens.session_title",
             user_id=session.user_id,

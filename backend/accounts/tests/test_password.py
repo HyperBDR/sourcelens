@@ -38,7 +38,7 @@ class PasswordRecoveryTests(TestCase):
         )
         Profile.objects.update_or_create(
             user=self.user,
-            defaults={"registration_completed": True, "language": "en-US"},
+            defaults={"registration_completed": True, "language": "en"},
         )
 
     def request_reset(self, email):
@@ -248,7 +248,7 @@ class FirstTimePasswordSetupTests(TestCase):
         self.user.save(update_fields=["password"])
         Profile.objects.update_or_create(
             user=self.user,
-            defaults={"registration_completed": True, "language": "en-US"},
+            defaults={"registration_completed": True, "language": "en"},
         )
         self.token = str(AccessToken.for_user(self.user))
         self.client = APIClient()
