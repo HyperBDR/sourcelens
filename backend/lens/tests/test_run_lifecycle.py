@@ -1,11 +1,13 @@
 import uuid
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
 
+from lens.consumers import LensNodeConsumer
 from lens.models import (
     Assistant,
     LensNode,
@@ -16,18 +18,29 @@ from lens.models import (
 )
 from lens.services import (
     create_execution_run,
-    fail_active_runs_for_lensnode,
+    finish_lensnode_run,
+    mark_active_runs_awaiting_resume,
     reconcile_lensnode_active_runs,
     record_lensnode_run_event,
+    resume_awaiting_runs_for_lensnode,
     touch_run_activity,
 )
-from lens.tasks import confirm_reconcile_orphan, lensnode_cleanup_task
+from lens.tasks import (
+    confirm_reconcile_orphan,
+    expire_awaiting_run,
+    lensnode_cleanup_task,
+)
 
 User = get_user_model()
 
 
 class RunLifecycleTests(TestCase):
     def setUp(self):
+        expiration_patcher = patch(
+            "lens.tasks.expire_awaiting_run.apply_async"
+        )
+        self.expiration_apply_async = expiration_patcher.start()
+        self.addCleanup(expiration_patcher.stop)
         self.user = User.objects.create_user(
             username="rl-user",
             email="rl-user@example.com",
@@ -38,6 +51,7 @@ class RunLifecycleTests(TestCase):
             status=LensNode.Status.ONLINE,
             enrollment_status=LensNode.EnrollmentStatus.APPROVED,
             workspace_path="/workspace",
+            labels={"run_checkpoint_resume": True},
         )
         self.assistant = Assistant.objects.create(
             name="Code Advisor",
@@ -114,6 +128,25 @@ class RunLifecycleTests(TestCase):
         self.assertIsNotNone(step)
         self.assertEqual(run.steps.count(), 1)
 
+    def test_first_resume_event_acknowledges_node_admission(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+
+        record_lensnode_run_event(
+            run.uuid,
+            "retrieval",
+            "running",
+            {"message": "accepted"},
+        )
+
+        run.refresh_from_db()
+        self.assertIsNone(run.resume_by)
+
     def test_idle_reaper_fails_silent_run(self):
         run = self._run(
             Run.Status.STREAMING,
@@ -166,6 +199,8 @@ class RunLifecycleTests(TestCase):
             timedelta(minutes=5),
             timedelta(minutes=5),
         )
+        run.execution.status = RunExecution.Status.RUNNING
+        run.execution.save(update_fields=["status"])
 
         with patch(
             "lens.tasks.confirm_reconcile_orphan.apply_async"
@@ -180,7 +215,24 @@ class RunLifecycleTests(TestCase):
         self.assertEqual(kwargs["args"][0], str(run.uuid))
         self.assertIn("countdown", kwargs)
 
-    def test_reconcile_keeps_claimed_and_fresh_runs(self):
+    def test_reconcile_skips_run_already_awaiting_resume(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+
+        with patch(
+            "lens.tasks.confirm_reconcile_orphan.apply_async"
+        ) as apply_async:
+            count = reconcile_lensnode_active_runs(self.lensnode.uuid, [])
+
+        self.assertEqual(count, 0)
+        apply_async.assert_not_called()
+
+    def test_reconcile_keeps_claimed_and_defers_fresh_run(self):
         claimed = self._run(
             Run.Status.STREAMING,
             timedelta(minutes=5),
@@ -191,21 +243,65 @@ class RunLifecycleTests(TestCase):
             timedelta(seconds=10),
             timedelta(seconds=10),
         )
+        for run in (claimed, fresh):
+            run.execution.status = RunExecution.Status.RUNNING
+            run.execution.save(update_fields=["status"])
 
         with patch(
             "lens.tasks.confirm_reconcile_orphan.apply_async"
         ) as apply_async:
-            reconcile_lensnode_active_runs(
+            count = reconcile_lensnode_active_runs(
                 self.lensnode.uuid, [str(claimed.uuid)]
             )
 
         claimed.refresh_from_db()
         fresh.refresh_from_db()
+        self.assertEqual(count, 1)
         self.assertEqual(claimed.status, Run.Status.STREAMING)
+        self.assertEqual(fresh.status, Run.Status.RUNNING)
+        apply_async.assert_called_once()
+        kwargs = apply_async.call_args.kwargs
+        self.assertEqual(kwargs["args"], [str(fresh.uuid)])
+        self.assertGreater(kwargs["countdown"], 40)
+
+    def test_reconcile_skips_fresh_run_on_legacy_node(self):
+        self.lensnode.labels = {}
+        self.lensnode.save(update_fields=["labels"])
+        fresh = self._run(
+            Run.Status.RUNNING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        fresh.execution.status = RunExecution.Status.RUNNING
+        fresh.execution.save(update_fields=["status"])
+
+        with patch(
+            "lens.tasks.confirm_reconcile_orphan.apply_async"
+        ) as apply_async:
+            count = reconcile_lensnode_active_runs(self.lensnode.uuid, [])
+
+        fresh.refresh_from_db()
+        self.assertEqual(count, 0)
         self.assertEqual(fresh.status, Run.Status.RUNNING)
         apply_async.assert_not_called()
 
-    def test_confirm_reconcile_orphan_fails_still_running_run(self):
+    def test_reconcile_skips_run_that_has_not_been_dispatched(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+
+        with patch(
+            "lens.tasks.confirm_reconcile_orphan.apply_async"
+        ) as apply_async:
+            count = reconcile_lensnode_active_runs(self.lensnode.uuid, [])
+
+        self.assertEqual(run.execution.status, RunExecution.Status.QUEUED)
+        self.assertEqual(count, 0)
+        apply_async.assert_not_called()
+
+    def test_confirm_reconcile_orphan_parks_still_running_run(self):
         run = self._run(
             Run.Status.STREAMING,
             timedelta(minutes=5),
@@ -215,8 +311,8 @@ class RunLifecycleTests(TestCase):
         confirm_reconcile_orphan(str(run.uuid))
 
         run.refresh_from_db()
-        self.assertEqual(run.status, Run.Status.FAILED)
-        self.assertEqual(run.error, "LENSNODE_RECONNECT_ORPHANED")
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.assertIsNotNone(run.resume_by)
 
     def test_confirm_reconcile_orphan_finalizes_running_steps(self):
         run = self._run(
@@ -236,7 +332,20 @@ class RunLifecycleTests(TestCase):
         step.refresh_from_db()
         self.assertEqual(step.status, RunStep.Status.FAILED)
 
-    def test_fail_active_runs_for_lensnode_finalizes_steps(self):
+    def test_confirm_reconcile_orphan_skips_recent_resume_activity(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(minutes=5),
+            timedelta(seconds=1),
+        )
+
+        confirm_reconcile_orphan(str(run.uuid))
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.STREAMING)
+        self.assertIsNone(run.resume_by)
+
+    def test_mark_active_runs_awaiting_resume_finalizes_steps(self):
         run = self._run(
             Run.Status.RUNNING,
             timedelta(minutes=5),
@@ -249,13 +358,351 @@ class RunLifecycleTests(TestCase):
             status=RunStep.Status.RUNNING,
         )
 
-        fail_active_runs_for_lensnode(self.lensnode.uuid)
+        mark_active_runs_awaiting_resume(self.lensnode.uuid)
+
+        run.refresh_from_db()
+        step.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.assertIsNotNone(run.resume_by)
+        self.assertEqual(step.status, RunStep.Status.FAILED)
+        self.expiration_apply_async.assert_called_once()
+
+    def test_mark_active_runs_awaiting_resume_skips_terminal_runs(self):
+        done = self._run(
+            Run.Status.DONE,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+
+        mark_active_runs_awaiting_resume(self.lensnode.uuid)
+
+        done.refresh_from_db()
+        self.assertEqual(done.status, Run.Status.DONE)
+
+    def test_resume_awaiting_runs_redispatch(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+
+        with patch(
+            "lens.services.dispatch_run_to_lensnode"
+        ) as dispatch:
+            count = resume_awaiting_runs_for_lensnode(
+                self.lensnode.uuid
+            )
+
+        run.refresh_from_db()
+        self.assertEqual(count, 1)
+        self.assertEqual(dispatch.call_count, 1)
+        args, kwargs = dispatch.call_args
+        self.assertEqual(str(args[0].uuid), str(run.uuid))
+        self.assertEqual(kwargs["resume"], True)
+        self.assertEqual(run.status, Run.Status.STREAMING)
+        self.assertIsNotNone(run.resume_by)
+
+    def test_resume_skips_run_reported_active_by_reconnected_node(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+
+        with patch(
+            "lens.services.dispatch_run_to_lensnode"
+        ) as dispatch:
+            count = resume_awaiting_runs_for_lensnode(
+                self.lensnode.uuid,
+                [str(run.uuid)],
+            )
+
+        run.refresh_from_db()
+        self.assertEqual(count, 0)
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.assertIsNotNone(run.resume_by)
+        dispatch.assert_not_called()
+
+    def test_resume_claim_prevents_reentrant_duplicate_dispatch(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        nested_counts = []
+
+        def dispatch_once(*args, **kwargs):
+            del args, kwargs
+            if not nested_counts:
+                nested_counts.append(
+                    resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
+                )
+
+        with patch(
+            "lens.services.dispatch_run_to_lensnode",
+            side_effect=dispatch_once,
+        ) as dispatch:
+            count = resume_awaiting_runs_for_lensnode(
+                self.lensnode.uuid
+            )
+
+        self.assertEqual(count, 1)
+        self.assertEqual(nested_counts, [0])
+        self.assertEqual(dispatch.call_count, 1)
+
+    def test_new_node_report_retries_unacknowledged_resume_claim(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(minutes=5),
+            timedelta(minutes=1),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        LensNode.objects.filter(pk=self.lensnode.pk).update(
+            updated_at=timezone.now()
+        )
+
+        with patch(
+            "lens.services.dispatch_run_to_lensnode"
+        ) as dispatch:
+            count = resume_awaiting_runs_for_lensnode(
+                self.lensnode.uuid
+            )
+
+        self.assertEqual(count, 1)
+        dispatch.assert_called_once()
+
+    def test_confirm_orphan_resumes_when_node_is_still_online(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+
+        with patch(
+            "lens.services.dispatch_run_to_lensnode"
+        ) as dispatch:
+            confirm_reconcile_orphan(str(run.uuid))
+
+        run.refresh_from_db()
+        self.assertEqual(dispatch.call_count, 1)
+        self.assertEqual(run.status, Run.Status.STREAMING)
+        self.assertIsNotNone(run.resume_by)
+
+    def test_resume_awaiting_runs_keeps_run_parked_on_failure(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+
+        with patch(
+            "lens.services.dispatch_run_to_lensnode",
+            side_effect=Exception("boom"),
+        ):
+            count = resume_awaiting_runs_for_lensnode(
+                self.lensnode.uuid
+            )
+
+        run.refresh_from_db()
+        self.assertEqual(count, 0)
+        self.assertEqual(run.status, Run.Status.RUNNING)
+
+    def test_resume_fails_safely_when_node_lacks_capability(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        self.lensnode.labels = {}
+        self.lensnode.save(update_fields=["labels"])
+
+        with patch("lens.services.dispatch_run_to_lensnode") as dispatch:
+            count = resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
+
+        run.refresh_from_db()
+        self.assertEqual(count, 0)
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.error, "LENSNODE_RESUME_UNSUPPORTED")
+        self.assertIsNone(run.resume_by)
+        dispatch.assert_not_called()
+
+    def test_resume_busy_response_keeps_run_awaiting(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(hours=1),
+            timedelta(minutes=5),
+        )
+        deadline = timezone.now() + timedelta(hours=1)
+        run.resume_by = deadline
+        run.save(update_fields=["resume_by"])
+
+        with patch(
+            "lens.tasks.retry_awaiting_run_resume.apply_async"
+        ) as retry:
+            record_lensnode_run_event(
+                run.uuid,
+                "retrieval",
+                "failed",
+                {"error": "LENSNODE_BUSY"},
+            )
+            finish_lensnode_run(
+                run.uuid,
+                Run.Status.FAILED,
+                error="LENSNODE_BUSY",
+            )
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.assertEqual(run.resume_by, deadline)
+        retry.assert_called_once_with(
+            args=[str(run.uuid)],
+            countdown=5,
+        )
+
+    def test_resume_draining_response_keeps_run_awaiting(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(hours=1),
+            timedelta(minutes=5),
+        )
+        deadline = timezone.now() + timedelta(hours=1)
+        run.resume_by = deadline
+        run.save(update_fields=["resume_by"])
+
+        with patch(
+            "lens.tasks.retry_awaiting_run_resume.apply_async"
+        ) as retry:
+            finish_lensnode_run(
+                run.uuid,
+                Run.Status.FAILED,
+                error="LENSNODE_DRAINING",
+            )
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.RUNNING)
+        self.assertEqual(run.resume_by, deadline)
+        retry.assert_called_once_with(
+            args=[str(run.uuid)],
+            countdown=5,
+        )
+
+    def test_buffered_terminal_frame_clears_resume_deadline(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+
+        finish_lensnode_run(run.uuid, Run.Status.DONE)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.DONE)
+        self.assertIsNone(run.resume_by)
+
+    def test_busy_resume_result_is_not_acknowledged_as_terminal(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(hours=1),
+            timedelta(minutes=5),
+        )
+        consumer = LensNodeConsumer()
+        consumer.send_json = AsyncMock()
+
+        with patch(
+            "lens.consumers.finish_lensnode_run",
+            return_value=run,
+        ):
+            async_to_sync(consumer._handle_run_done)(
+                {
+                    "run_uuid": str(run.uuid),
+                    "status": Run.Status.FAILED,
+                    "error": "LENSNODE_BUSY",
+                }
+            )
+
+        consumer.send_json.assert_not_awaited()
+
+    def test_cancelled_completion_race_is_acknowledged(self):
+        run = self._run(
+            Run.Status.CANCELLED,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        consumer = LensNodeConsumer()
+        consumer.send_json = AsyncMock()
+
+        with patch(
+            "lens.consumers.finish_lensnode_run",
+            return_value=run,
+        ):
+            async_to_sync(consumer._handle_run_done)(
+                {
+                    "run_uuid": str(run.uuid),
+                    "status": Run.Status.DONE,
+                }
+            )
+
+        consumer.send_json.assert_awaited_once_with(
+            {
+                "type": "run_done_ack",
+                "run_uuid": str(run.uuid),
+            }
+        )
+
+    def test_idle_reaper_expires_stale_awaiting_resume(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(hours=25),
+            timedelta(hours=25),
+        )
+        run.resume_by = timezone.now() - timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        step = RunStep.objects.create(
+            run=run,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            sequence=1,
+            status=RunStep.Status.RUNNING,
+        )
+
+        lensnode_cleanup_task()
 
         run.refresh_from_db()
         step.refresh_from_db()
         self.assertEqual(run.status, Run.Status.FAILED)
-        self.assertEqual(run.error, "LENSNODE_DISCONNECTED")
+        self.assertEqual(run.error, "LENSNODE_RESUME_EXPIRED")
         self.assertEqual(step.status, RunStep.Status.FAILED)
+
+    def test_deadline_task_expires_one_awaiting_resume_run(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(hours=1),
+            timedelta(hours=1),
+        )
+        run.resume_by = timezone.now() - timedelta(seconds=1)
+        run.save(update_fields=["resume_by"])
+
+        count = expire_awaiting_run(str(run.uuid))
+
+        run.refresh_from_db()
+        run.execution.refresh_from_db()
+        self.assertEqual(count, 1)
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.error, "LENSNODE_RESUME_EXPIRED")
+        self.assertIsNone(run.resume_by)
+        self.assertEqual(run.execution.status, RunExecution.Status.FAILED)
 
     def test_confirm_reconcile_orphan_noops_if_already_terminal(self):
         # The normal completion path (a late but durably-delivered run_done)

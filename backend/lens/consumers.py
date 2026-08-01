@@ -15,6 +15,7 @@ from .services import (
     lensnode_group_name,
     reconcile_lensnode_active_runs,
     record_lensnode_run_event,
+    resume_awaiting_runs_for_lensnode,
     schedule_lensnode_disconnect_grace_check,
 )
 
@@ -199,10 +200,17 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def _handle_hello(self, content):
+        active_runs = content.get("active_runs") or []
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self._update_lensnode_report(content, require_versions=True)
         await database_sync_to_async(reconcile_lensnode_active_runs)(
-            self.lensnode.uuid, content.get("active_runs") or []
+            self.lensnode.uuid, active_runs
+        )
+        # A node that (re)connected may own RUNNING runs with a resume
+        # deadline whose checkpoints survived on its workspace volume.
+        await database_sync_to_async(resume_awaiting_runs_for_lensnode)(
+            self.lensnode.uuid,
+            active_runs,
         )
         await self.send_json({"type": "hello_ack"})
 
@@ -327,7 +335,7 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         status = content.get("status") or Run.Status.DONE
         if status not in [Run.Status.DONE, Run.Status.FAILED]:
             status = Run.Status.FAILED
-        await database_sync_to_async(finish_lensnode_run)(
+        run = await database_sync_to_async(finish_lensnode_run)(
             run_uuid,
             status,
             error=content.get("error") or "",
@@ -340,6 +348,17 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             status,
             content.get("error") or "",
         )
+        if run.status in [
+            Run.Status.DONE,
+            Run.Status.FAILED,
+            Run.Status.CANCELLED,
+        ]:
+            await self.send_json(
+                {
+                    "type": "run_done_ack",
+                    "run_uuid": str(run_uuid),
+                }
+            )
 
     def _parse_uuid(self, value):
         """Parse a UUID value or return None."""

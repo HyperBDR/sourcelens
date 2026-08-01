@@ -2177,6 +2177,7 @@ class RunSerializer(serializers.ModelSerializer):
             "feedback_updated_at",
             "started_at",
             "finished_at",
+            "resume_by",
             "created_at",
             "idempotency_key",
             "steps",

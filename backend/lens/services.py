@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 from datetime import timedelta
 from time import sleep
 
@@ -57,6 +58,8 @@ STREAM_PING_INTERVAL_SECONDS = 15
 BUSY_RETRY_INTERVAL_S = 5
 BUSY_RETRY_WINDOW_S = 120
 DOCUMENT_ATTACHMENT_CAPABILITY = "run_document_attachments"
+RUN_CHECKPOINT_RESUME_CAPABILITY = "run_checkpoint_resume"
+RUN_CHECKPOINT_TTL_HOURS_CAPABILITY = "run_checkpoint_ttl_hours"
 
 HISTORY_MAX_PAIRS = 5
 HISTORY_MAX_MESSAGE_CHARS = 2000
@@ -161,16 +164,84 @@ def schedule_lensnode_disconnect_grace_check(lensnode_uuid, disconnected_at):
         )
 
 
-def fail_active_runs_for_lensnode(lensnode_uuid):
-    """Mark all non-terminal runs for a lensnode as failed.
+AWAITING_RESUME_TTL_HOURS = 24
 
-    Called from the grace-period check once a node is confirmed still gone
-    (see lens.tasks.check_lensnode_disconnect_grace_period), NOT directly on
-    every disconnect — a brief drop during a blue/green switch must not fail
-    runs the node is still executing and will report on reconnect. The
-    status=RUNNING/STREAMING filter is itself the guard against a run that
-    finished (left those states) while the node was reconnecting.
+
+def get_awaiting_resume_ttl_hours(lensnode=None):
+    """Return how long an orphaned run waits for its node to come back.
+
+    Admin-tunable via the GlobalSetting key ``lensnode.resume_ttl_h``. Once
+    the deadline passes, the run is failed by the idle sweep instead of
+    waiting indefinitely for a node that may never return. The deadline is
+    capped by the node's advertised local checkpoint retention so the control
+    plane never promises a resume after the checkpoint may have been deleted.
     """
+
+    setting = GlobalSetting.objects.filter(
+        key="lensnode.resume_ttl_h"
+    ).first()
+    try:
+        value = int(setting.value if setting else AWAITING_RESUME_TTL_HOURS)
+    except (TypeError, ValueError):
+        value = AWAITING_RESUME_TTL_HOURS
+    labels = lensnode.labels if lensnode else {}
+    try:
+        node_ttl = float(
+            labels.get(
+                RUN_CHECKPOINT_TTL_HOURS_CAPABILITY,
+                AWAITING_RESUME_TTL_HOURS,
+            )
+            if isinstance(labels, dict)
+            else AWAITING_RESUME_TTL_HOURS
+        )
+    except (TypeError, ValueError):
+        node_ttl = AWAITING_RESUME_TTL_HOURS
+    if not math.isfinite(node_ttl):
+        node_ttl = AWAITING_RESUME_TTL_HOURS
+    return min(max(1, value), max(1, node_ttl))
+
+
+def get_run_resume_deadline(run, now=None):
+    """Bound checkpoint retention by the Run's original wall-clock budget."""
+
+    current = now or timezone.now()
+    ttl_deadline = current + timedelta(
+        hours=get_awaiting_resume_ttl_hours(run.lensnode)
+    )
+    if run.started_at is None:
+        return ttl_deadline
+    try:
+        execution = run.execution
+    except RunExecution.DoesNotExist:
+        return ttl_deadline
+    timeout_s = execution.run_timeout_s
+    if not timeout_s:
+        timeout_s = run_timeout_for_rounds(execution.agent_rounds)
+    run_deadline = run.started_at + timedelta(seconds=timeout_s)
+    return min(ttl_deadline, run_deadline)
+
+
+def schedule_awaiting_run_expiration(run_uuid, resume_by):
+    """Schedule precise expiry for one checkpoint-resumable Run."""
+
+    from .tasks import expire_awaiting_run
+
+    countdown_s = max((resume_by - timezone.now()).total_seconds(), 0)
+    try:
+        expire_awaiting_run.apply_async(
+            args=[str(run_uuid)],
+            countdown=countdown_s,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to schedule awaiting-resume expiration for run %s; "
+            "it will be reaped by the idle sweep instead",
+            run_uuid,
+        )
+
+
+def fail_active_runs_for_lensnode(lensnode_uuid):
+    """Fail active runs when their node cannot provide durable resume."""
 
     now = timezone.now()
     run_ids = list(
@@ -184,11 +255,217 @@ def fail_active_runs_for_lensnode(lensnode_uuid):
     Run.objects.filter(id__in=run_ids).update(
         status=Run.Status.FAILED,
         error="LENSNODE_DISCONNECTED",
+        resume_by=None,
         finished_at=now,
         updated_at=now,
     )
     fail_running_steps_for_runs(run_ids)
     return len(run_ids)
+
+
+def mark_active_runs_awaiting_resume(lensnode_uuid):
+    """Mark a confirmed-gone node's active runs as awaiting resume.
+
+    Called from the grace-period check once a node is confirmed still gone
+    (see lens.tasks.check_lensnode_disconnect_grace_period), NOT directly on
+    every disconnect — a brief drop during a blue/green switch must not fail
+    runs the node is still executing and will report on reconnect. The
+    status=RUNNING/STREAMING filter is itself the guard against a run that
+    finished (left those states) while the node was reconnecting.
+
+    Waiting is represented by RUNNING plus a non-null resume_by deadline.
+    Older application versions therefore continue to count the Run as active
+    during a blue/green rollback instead of silently ignoring a new status.
+    """
+
+    lensnode = LensNode.objects.filter(uuid=lensnode_uuid).first()
+    if not supports_run_checkpoint_resume(lensnode):
+        return fail_active_runs_for_lensnode(lensnode_uuid)
+
+    now = timezone.now()
+    runs = list(
+        Run.objects.filter(
+            lensnode__uuid=lensnode_uuid,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        ).select_related("execution", "lensnode")
+    )
+    if not runs:
+        return 0
+    updated_ids = []
+    expired_ids = []
+    scheduled_expirations = []
+    for run in runs:
+        resume_by = get_run_resume_deadline(run, now=now)
+        updates = {
+            "status": Run.Status.RUNNING,
+            "resume_by": resume_by,
+            "updated_at": now,
+        }
+        if resume_by <= now:
+            updates.update(
+                status=Run.Status.FAILED,
+                error="LENSNODE_RESUME_EXPIRED",
+                resume_by=None,
+                finished_at=now,
+            )
+        updated = Run.objects.filter(
+            id=run.id,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        ).update(**updates)
+        if not updated:
+            continue
+        updated_ids.append(run.id)
+        if resume_by <= now:
+            expired_ids.append(run.id)
+        else:
+            scheduled_expirations.append((run.uuid, resume_by))
+    fail_running_steps_for_runs(updated_ids)
+    if expired_ids:
+        RunExecution.objects.filter(
+            run_id__in=expired_ids,
+            status__in=[
+                RunExecution.Status.QUEUED,
+                RunExecution.Status.DISPATCHED,
+                RunExecution.Status.RUNNING,
+            ],
+        ).update(status=RunExecution.Status.FAILED, finished_at=now)
+    for run_uuid, resume_by in scheduled_expirations:
+        schedule_awaiting_run_expiration(run_uuid, resume_by)
+    return len(updated_ids)
+
+
+def resume_awaiting_runs_for_lensnode(
+    lensnode_uuid,
+    reported_active_run_uuids=(),
+):
+    """Re-dispatch a reconnected node's awaiting-resume runs.
+
+    Runs whose node died mid-answer keep RUNNING plus a resume deadline, with
+    their checkpoints preserved on the node's workspace volume. When the node
+    reconnects (fresh hello), each such run is dispatched again with the
+    same run_uuid; the node's checkpointer resumes the run from its last
+    checkpoint instead of starting over.
+
+    Runs reported active by the reconnecting node are not re-dispatched. This
+    includes both executions that survived the connection drop and completed
+    runs whose durable terminal frame is still waiting in the node outbox.
+    A failed dispatch is unexpected; the run is kept waiting so a later
+    reconnect retries it.
+    """
+
+    reported_active = {
+        str(run_uuid) for run_uuid in reported_active_run_uuids or ()
+    }
+    lensnode = LensNode.objects.filter(uuid=lensnode_uuid).first()
+    if not supports_run_checkpoint_resume(lensnode):
+        now = timezone.now()
+        unsupported = Run.objects.filter(
+            lensnode=lensnode,
+            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+            resume_by__isnull=False,
+        ).exclude(uuid__in=reported_active)
+        run_ids = list(unsupported.values_list("id", flat=True))
+        unsupported.update(
+            status=Run.Status.FAILED,
+            error="LENSNODE_RESUME_UNSUPPORTED",
+            resume_by=None,
+            finished_at=now,
+            updated_at=now,
+        )
+        if run_ids:
+            fail_running_steps_for_runs(run_ids)
+            RunExecution.objects.filter(
+                run_id__in=run_ids,
+                status__in=[
+                    RunExecution.Status.QUEUED,
+                    RunExecution.Status.DISPATCHED,
+                    RunExecution.Status.RUNNING,
+                ],
+            ).update(
+                status=RunExecution.Status.FAILED,
+                finished_at=now,
+            )
+        return 0
+
+    report_at = lensnode.updated_at
+    awaiting_status = Q(status=Run.Status.RUNNING) | Q(
+        status=Run.Status.STREAMING,
+        last_activity_at__lt=report_at,
+    ) | Q(
+        status=Run.Status.STREAMING,
+        last_activity_at__isnull=True,
+    )
+    run_ids = (
+        Run.objects.filter(
+            lensnode__uuid=lensnode_uuid,
+            resume_by__gt=timezone.now(),
+        )
+        .exclude(uuid__in=reported_active)
+        .filter(awaiting_status)
+        .values_list("id", flat=True)
+    )
+    resumed = 0
+    for run_id in run_ids:
+        try:
+            with transaction.atomic():
+                run = (
+                    Run.objects.select_related(
+                        "execution",
+                        "input_message",
+                    )
+                    .select_for_update(of=("self",))
+                    .filter(
+                        id=run_id,
+                        lensnode__uuid=lensnode_uuid,
+                    )
+                    .first()
+                )
+                claimed_on_current_report = bool(
+                    run is not None
+                    and run.status == Run.Status.STREAMING
+                    and (
+                        run.last_activity_at is None
+                        or run.last_activity_at >= report_at
+                    )
+                )
+                if (
+                    run is None
+                    or run.status
+                    not in [Run.Status.RUNNING, Run.Status.STREAMING]
+                    or claimed_on_current_report
+                    or run.resume_by is None
+                    or run.resume_by <= timezone.now()
+                ):
+                    continue
+                now = timezone.now()
+                run.status = Run.Status.STREAMING
+                run.last_activity_at = now
+                run.save(
+                    update_fields=[
+                        "status",
+                        "last_activity_at",
+                        "updated_at",
+                    ]
+                )
+                if hasattr(run, "execution"):
+                    run.execution.status = RunExecution.Status.RUNNING
+                    run.execution.save(update_fields=["status"])
+                dispatch_run_to_lensnode(
+                    run,
+                    run.input_message.content,
+                    resume=True,
+                )
+        except Exception:
+            logger.exception(
+                "run %s: resume dispatch failed; keeping it awaiting",
+                run_id,
+            )
+            continue
+        logger.info(
+            "run %s: resumed on lensnode %s", run.uuid, lensnode_uuid
+        )
+        resumed += 1
+    return resumed
 
 
 def fail_running_steps_for_runs(run_ids):
@@ -237,7 +514,10 @@ def get_reconcile_confirm_grace_seconds():
     return max(1, value)
 
 
-def schedule_reconcile_orphan_confirmation(run_uuid):
+def schedule_reconcile_orphan_confirmation(
+    run_uuid,
+    minimum_countdown_s=0,
+):
     """Schedule the delayed check that fails a run if it's still non-terminal.
 
     Called from reconcile_lensnode_active_runs for each candidate instead of
@@ -252,11 +532,14 @@ def schedule_reconcile_orphan_confirmation(run_uuid):
 
     from .tasks import confirm_reconcile_orphan
 
-    grace_s = get_reconcile_confirm_grace_seconds()
+    countdown_s = max(
+        get_reconcile_confirm_grace_seconds(),
+        minimum_countdown_s,
+    )
     try:
         confirm_reconcile_orphan.apply_async(
             args=[str(run_uuid)],
-            countdown=grace_s,
+            countdown=countdown_s,
         )
     except Exception:
         logger.exception(
@@ -277,25 +560,43 @@ def reconcile_lensnode_active_runs(lensnode_uuid, active_run_uuids):
     legitimately unreported while its result is still in flight. Rather than
     failing candidates inline, this schedules a delayed confirmation per
     candidate so the normal completion path gets a chance to resolve it
-    first (see schedule_reconcile_orphan_confirmation). A short grace window
-    on run age avoids even considering a run that was just dispatched but
-    not yet started node-side.
+    first (see schedule_reconcile_orphan_confirmation). A run that was just
+    dispatched is checked only after it reaches the age guard, so a fast node
+    restart cannot make it disappear from both reconciliation and resume.
     """
 
     active = {str(value) for value in (active_run_uuids or [])}
     now = timezone.now()
-    candidates = (
-        Run.objects.filter(
-            lensnode__uuid=lensnode_uuid,
-            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
-            started_at__lt=now - timedelta(seconds=RECONCILE_GRACE_SECONDS),
+    lensnode = LensNode.objects.filter(uuid=lensnode_uuid).first()
+    candidates = Run.objects.filter(
+        lensnode=lensnode,
+        status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+        execution__status__in=[
+            RunExecution.Status.DISPATCHED,
+            RunExecution.Status.RUNNING,
+        ],
+        resume_by__isnull=True,
+    ).exclude(uuid__in=active)
+    if not supports_run_checkpoint_resume(lensnode):
+        age_cutoff = now - timedelta(seconds=RECONCILE_GRACE_SECONDS)
+        candidates = candidates.filter(
+            Q(started_at__isnull=True) | Q(started_at__lte=age_cutoff)
         )
-        .exclude(uuid__in=active)
-        .values_list("uuid", flat=True)
-    )
+    candidates = candidates.values_list("uuid", "started_at")
     count = 0
-    for run_uuid in candidates:
-        schedule_reconcile_orphan_confirmation(run_uuid)
+    for run_uuid, started_at in candidates:
+        run_age_s = (
+            max((now - started_at).total_seconds(), 0)
+            if started_at is not None
+            else 0
+        )
+        schedule_reconcile_orphan_confirmation(
+            run_uuid,
+            minimum_countdown_s=max(
+                RECONCILE_GRACE_SECONDS - run_age_s,
+                0,
+            ),
+        )
         count += 1
     return count
 
@@ -451,6 +752,16 @@ def supports_document_attachments(lensnode):
     return bool(
         isinstance(labels, dict)
         and labels.get(DOCUMENT_ATTACHMENT_CAPABILITY) is True
+    )
+
+
+def supports_run_checkpoint_resume(lensnode):
+    """Return whether a LensNode can safely continue a checkpointed Run."""
+
+    labels = lensnode.labels if lensnode else {}
+    return bool(
+        isinstance(labels, dict)
+        and labels.get(RUN_CHECKPOINT_RESUME_CAPABILITY) is True
     )
 
 
@@ -1081,8 +1392,14 @@ def dispatch_run_to_lensnode(
     run,
     rewritten_question,
     subject_documents=None,
+    resume=False,
 ):
-    """Send a run_start command to the connected LensNode."""
+    """Send a run_start command to the connected LensNode.
+
+    ``resume`` marks a re-dispatch of a run that already has a checkpoint on
+    the node: the node skips re-injecting the question/history and continues
+    the run from its last checkpoint.
+    """
 
     execution = run.execution
     runtime_snapshot = execution.runtime_snapshot or {}
@@ -1118,6 +1435,12 @@ def dispatch_run_to_lensnode(
     run_timeout_s = execution.run_timeout_s or run_timeout_for_rounds(
         agent_rounds
     )
+    elapsed_s = (
+        max((timezone.now() - run.started_at).total_seconds(), 0)
+        if run.started_at
+        else 0
+    )
+    remaining_run_timeout_s = max(run_timeout_s - elapsed_s, 0)
     profile = getattr(run.session.user, "profile", None)
     answer_language = normalize_answer_language(
         runtime_snapshot.get("answer_language")
@@ -1150,7 +1473,9 @@ def dispatch_run_to_lensnode(
                 ),
                 "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(agent_rounds, 26),
                 "agent_rounds": agent_rounds,
+                "resume": resume,
                 "run_timeout_s": run_timeout_s,
+                "remaining_run_timeout_s": remaining_run_timeout_s,
                 "trace_context": {
                     "trace_id": trace_id_for_run(run.uuid),
                     "root_observation_id": root_observation_id_for_run(
@@ -1304,6 +1629,11 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
             run.status,
         )
         return None
+    if run.resume_by is not None and status == RunStep.Status.RUNNING:
+        Run.objects.filter(pk=run.pk, resume_by__isnull=False).update(
+            resume_by=None
+        )
+        run.resume_by = None
     sequence = _step_sequence(step_type)
     step, _ = RunStep.objects.get_or_create(
         run=run,
@@ -1350,7 +1680,36 @@ def finish_lensnode_run(
         return run
     now = timezone.now()
 
-    if status == Run.Status.FAILED and error == "LENSNODE_BUSY":
+    retryable_admission_error = error == "LENSNODE_BUSY" or (
+        error == "LENSNODE_DRAINING" and run.resume_by is not None
+    )
+    if status == Run.Status.FAILED and retryable_admission_error:
+        if run.resume_by is not None:
+            logger.info(
+                "run %s: resume admission rejected; keeping it awaiting",
+                run_uuid,
+            )
+            run.status = Run.Status.RUNNING
+            run.error = ""
+            run.outcome = ""
+            run.termination_detail = {}
+            run.save(
+                update_fields=[
+                    "status",
+                    "error",
+                    "outcome",
+                    "termination_detail",
+                    "updated_at",
+                ]
+            )
+            if run.resume_by > now:
+                from .tasks import retry_awaiting_run_resume
+
+                retry_awaiting_run_resume.apply_async(
+                    args=[str(run.uuid)],
+                    countdown=BUSY_RETRY_INTERVAL_S,
+                )
+            return run
         elapsed = (now - run.created_at).total_seconds()
         if elapsed < BUSY_RETRY_WINDOW_S:
             logger.warning(
@@ -1410,6 +1769,7 @@ def finish_lensnode_run(
     run.termination_detail = sanitize_termination_detail(
         termination_detail or {}
     )
+    run.resume_by = None
     run.finished_at = now
     run.save(
         update_fields=[
@@ -1417,6 +1777,7 @@ def finish_lensnode_run(
             "error",
             "outcome",
             "termination_detail",
+            "resume_by",
             "finished_at",
             "updated_at",
         ]
@@ -1526,6 +1887,7 @@ def stream_run_events(run):
     emitted_steps = set()
     emitted_content = ""
     last_status = None
+    last_resume_by = None
     last_queue_position = None
     last_ping_at = timezone.now()
 
@@ -1539,11 +1901,14 @@ def stream_run_events(run):
         run = _load_run_stream_state(run.pk)
         content = _run_content(run)
 
-        if run.status != last_status:
+        resume_by = run.resume_by.isoformat() if run.resume_by else None
+        if run.status != last_status or resume_by != last_resume_by:
             last_status = run.status
+            last_resume_by = resume_by
             yield {
                 "type": "status",
                 "status": run.status,
+                "resume_by": resume_by,
                 "ts": timezone.now().isoformat(),
             }
 
@@ -1611,6 +1976,7 @@ async def stream_run_events_async(run):
     emitted_steps = set()
     emitted_content = ""
     last_status = None
+    last_resume_by = None
     last_queue_position = None
     last_ping_at = timezone.now()
     run_pk = run.pk
@@ -1625,11 +1991,14 @@ async def stream_run_events_async(run):
         run = await sync_to_async(_load_run_stream_state)(run_pk)
         content = _run_content(run)
 
-        if run.status != last_status:
+        resume_by = run.resume_by.isoformat() if run.resume_by else None
+        if run.status != last_status or resume_by != last_resume_by:
             last_status = run.status
+            last_resume_by = resume_by
             yield {
                 "type": "status",
                 "status": run.status,
+                "resume_by": resume_by,
                 "ts": timezone.now().isoformat(),
             }
 
@@ -1725,6 +2094,7 @@ def _build_sync_event(run):
     return {
         "type": "sync",
         "status": run.status,
+        "resume_by": run.resume_by.isoformat() if run.resume_by else None,
         "outcome": run.outcome,
         "termination_detail": sanitize_termination_detail(
             run.termination_detail
