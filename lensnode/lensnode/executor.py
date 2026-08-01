@@ -271,6 +271,18 @@ class LensNodeExecutor:
         asyncio.create_task(cleanup())
         return True
 
+    async def drain_pending_workers(self):
+        """Wait until cancelled synchronous Run workers have unwound."""
+
+        while True:
+            pending_workers = getattr(self, "_pending_workers", {})
+            tasks = [
+                task for task in pending_workers.values() if not task.done()
+            ]
+            if not tasks:
+                return
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def execute(self, command, emit):
         """Execute one run_start command and emit protocol frames."""
 
@@ -465,9 +477,10 @@ class LensNodeExecutor:
                         )
             except asyncio.CancelledError:
                 # run_cancel cancels this coroutine, which does not cancel
-                # answer_task or its worker thread on its own. Signal both
-                # so the agent stops issuing model calls for a dead run.
+                # answer_task or its worker thread on its own. Signal the
+                # worker and track it until it stops issuing model calls.
                 cancel_event.set()
+                self._track_pending_worker(run_uuid, answer_task)
                 if command.get("_explicit_cancel"):
                     cleanup_deferred = True
                     workspace_path = getattr(
@@ -482,8 +495,6 @@ class LensNodeExecutor:
                             workspace_path,
                         )
                     )
-                else:
-                    answer_task.cancel()
                 raise
             samples = result.get("samples") or []
             sample_paths = [item["path"] for item in samples]

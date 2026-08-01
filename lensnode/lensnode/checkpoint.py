@@ -20,12 +20,14 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+from langchain_core.messages import ToolMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 LOGGER = logging.getLogger("lensnode")
 
 _CHECKPOINT_FILE = "lensnode.sqlite"
+_METADATA_SCHEMA_VERSION = 1
 _saver = None
 _saver_lock = threading.Lock()
 _database_lock = threading.RLock()
@@ -44,9 +46,13 @@ class ResumeState:
     messages: tuple
     route_decision: dict
     history_assistant_turns: int
+    checkpoint_step: int = -1
     capability_state: dict = field(default_factory=dict)
     runtime_evidence: dict = field(default_factory=dict)
     guardrail_state: dict = field(default_factory=dict)
+    pending_write_tool_call_ids: frozenset = field(
+        default_factory=frozenset
+    )
 
 
 def checkpoint_enabled() -> bool:
@@ -109,6 +115,8 @@ def get_checkpoint_saver(workspace_path) -> SqliteSaver:
                         route_decision TEXT NOT NULL,
                         history_assistant_turns INTEGER NOT NULL,
                         runtime_state TEXT NOT NULL DEFAULT '{}',
+                        checkpoint_id TEXT,
+                        schema_version INTEGER NOT NULL DEFAULT 1,
                         updated_at REAL NOT NULL,
                         orphaned_at REAL
                     )
@@ -130,6 +138,17 @@ def get_checkpoint_saver(workspace_path) -> SqliteSaver:
                         "ALTER TABLE lensnode_run_metadata "
                         "ADD COLUMN orphaned_at REAL"
                     )
+                if "checkpoint_id" not in columns:
+                    connection.execute(
+                        "ALTER TABLE lensnode_run_metadata "
+                        "ADD COLUMN checkpoint_id TEXT"
+                    )
+                if "schema_version" not in columns:
+                    connection.execute(
+                        "ALTER TABLE lensnode_run_metadata "
+                        "ADD COLUMN schema_version INTEGER "
+                        "NOT NULL DEFAULT 1"
+                    )
                 # A fresh process means every retained thread may have just
                 # become orphaned. Start a full local retention window now so
                 # it cannot expire before the control plane's advertised
@@ -146,6 +165,19 @@ def get_checkpoint_saver(workspace_path) -> SqliteSaver:
                 _saver = saver
                 LOGGER.info("Agent run checkpoints enabled: %s", path)
     return _saver
+
+
+def close_checkpoint_saver() -> bool:
+    """Close and clear the process-wide checkpoint saver."""
+
+    global _saver
+    with _saver_lock:
+        if _saver is None:
+            return False
+        with _database_lock:
+            _saver.conn.close()
+            _saver = None
+    return True
 
 
 def thread_config(run_uuid):
@@ -172,7 +204,7 @@ def save_resume_metadata(
     with _database_lock:
         saver.conn.execute(
             """
-            INSERT OR REPLACE INTO lensnode_run_metadata (
+            INSERT INTO lensnode_run_metadata (
                 run_uuid,
                 route_decision,
                 history_assistant_turns,
@@ -180,6 +212,11 @@ def save_resume_metadata(
                 updated_at,
                 orphaned_at
             ) VALUES (?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(run_uuid) DO UPDATE SET
+                route_decision = excluded.route_decision,
+                history_assistant_turns = excluded.history_assistant_turns,
+                updated_at = excluded.updated_at,
+                orphaned_at = NULL
             """,
             (
                 str(run_uuid),
@@ -198,12 +235,33 @@ def save_initial_checkpoint(run_uuid, workspace_path, messages):
     saver = get_checkpoint_saver(workspace_path)
     saved = empty_checkpoint()
     saved["channel_values"] = {"messages": list(messages or [])}
-    saver.put(
-        thread_config(run_uuid),
-        saved,
-        {"source": "input", "step": -1, "parents": {}},
-        {},
-    )
+    with _database_lock:
+        saved_config = saver.put(
+            thread_config(run_uuid),
+            saved,
+            {"source": "input", "step": -1, "parents": {}},
+            {},
+        )
+        checkpoint_id = _config_checkpoint_id(saved_config)
+        cursor = saver.conn.execute(
+            """
+            UPDATE lensnode_run_metadata
+            SET checkpoint_id = ?, schema_version = ?, updated_at = ?
+            WHERE run_uuid = ?
+            """,
+            (
+                checkpoint_id,
+                _METADATA_SCHEMA_VERSION,
+                time.time(),
+                str(run_uuid),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise CheckpointResumeError(
+                "Cannot bind checkpoint without checkpoint metadata."
+            )
+        saver.conn.commit()
+    return saved_config
 
 
 def save_runtime_state(
@@ -223,13 +281,26 @@ def save_runtime_state(
         "guardrail_state": guardrail_state or {},
     }
     with _database_lock:
+        snapshot = saver.get_tuple(thread_config(run_uuid))
+        if snapshot is None:
+            raise CheckpointResumeError(
+                "Cannot persist runtime state without a checkpoint."
+            )
+        checkpoint_id = _config_checkpoint_id(snapshot.config)
         cursor = saver.conn.execute(
             """
             UPDATE lensnode_run_metadata
-            SET runtime_state = ?, updated_at = ?
+            SET runtime_state = ?, checkpoint_id = ?, schema_version = ?,
+                updated_at = ?
             WHERE run_uuid = ?
             """,
-            (json.dumps(payload, sort_keys=True), time.time(), str(run_uuid)),
+            (
+                json.dumps(payload, sort_keys=True),
+                checkpoint_id,
+                _METADATA_SCHEMA_VERSION,
+                time.time(),
+                str(run_uuid),
+            ),
         )
         if cursor.rowcount != 1:
             raise CheckpointResumeError(
@@ -251,12 +322,23 @@ def load_resume_state(run_uuid, workspace_path) -> ResumeState:
             snapshot = saver.get_tuple(thread_config(run_uuid))
             row = saver.conn.execute(
                 """
-                SELECT route_decision, history_assistant_turns, runtime_state
+                SELECT route_decision, history_assistant_turns, runtime_state,
+                       checkpoint_id, schema_version
                 FROM lensnode_run_metadata
                 WHERE run_uuid = ?
                 """,
                 (str(run_uuid),),
             ).fetchone()
+            checkpoint_version_valid = bool(
+                snapshot is not None
+                and row is not None
+                and row[3]
+                and _checkpoint_is_ancestor(
+                    saver,
+                    str(row[3]),
+                    snapshot,
+                )
+            )
     except CheckpointResumeError:
         raise
     except Exception as exc:
@@ -271,6 +353,15 @@ def load_resume_state(run_uuid, workspace_path) -> ResumeState:
         raise CheckpointResumeError(
             "Cannot resume run because its checkpoint metadata is missing."
         )
+    if row[4] != _METADATA_SCHEMA_VERSION:
+        raise CheckpointResumeError(
+            "Cannot resume run because its checkpoint schema is unsupported."
+        )
+    if not checkpoint_version_valid:
+        raise CheckpointResumeError(
+            "Cannot resume run because its checkpoint version does not match "
+            "its runtime metadata."
+        )
     try:
         route_decision = json.loads(row[0])
         runtime_state = json.loads(row[2])
@@ -283,14 +374,74 @@ def load_resume_state(run_uuid, workspace_path) -> ResumeState:
             "Cannot resume run because its runtime state is invalid."
         )
     channel_values = snapshot.checkpoint.get("channel_values") or {}
+    checkpoint_step = (snapshot.metadata or {}).get("step", -1)
+    if not isinstance(checkpoint_step, int) or isinstance(
+        checkpoint_step,
+        bool,
+    ):
+        raise CheckpointResumeError(
+            "Cannot resume run because its checkpoint step is invalid."
+        )
     return ResumeState(
         messages=tuple(channel_values.get("messages") or ()),
         route_decision=route_decision,
         history_assistant_turns=max(int(row[1] or 0), 0),
+        checkpoint_step=checkpoint_step,
         capability_state=runtime_state.get("capability_state") or {},
         runtime_evidence=runtime_state.get("runtime_evidence") or {},
         guardrail_state=runtime_state.get("guardrail_state") or {},
+        pending_write_tool_call_ids=_pending_write_tool_call_ids(
+            snapshot.pending_writes
+        ),
     )
+
+
+def _config_checkpoint_id(config):
+    """Return the required checkpoint identifier from a saver config."""
+
+    configurable = (config or {}).get("configurable") or {}
+    checkpoint_id = configurable.get("checkpoint_id")
+    if not checkpoint_id:
+        raise CheckpointResumeError("Checkpoint has no version identifier.")
+    return str(checkpoint_id)
+
+
+def _checkpoint_is_ancestor(saver, ancestor_id, snapshot):
+    """Return whether metadata is bound to this head or an ancestor."""
+
+    current = snapshot
+    visited = set()
+    while current is not None:
+        checkpoint_id = _config_checkpoint_id(current.config)
+        if checkpoint_id == ancestor_id:
+            return True
+        if checkpoint_id in visited or current.parent_config is None:
+            return False
+        visited.add(checkpoint_id)
+        current = saver.get_tuple(current.parent_config)
+    return False
+
+
+def _pending_write_tool_call_ids(pending_writes):
+    """Return tool call IDs whose results are durable pending writes."""
+
+    tool_call_ids = set()
+
+    def collect(value):
+        if isinstance(value, ToolMessage):
+            tool_call_id = getattr(value, "tool_call_id", None)
+            if tool_call_id:
+                tool_call_ids.add(str(tool_call_id))
+            return
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+
+    for pending_write in pending_writes or ():
+        if len(pending_write) < 3 or pending_write[1] != "messages":
+            continue
+        collect(pending_write[2])
+    return frozenset(tool_call_ids)
 
 
 def _cleanup_expired_checkpoints(saver, active_run_uuids=()):

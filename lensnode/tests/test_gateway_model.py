@@ -684,6 +684,41 @@ def test_resume_restores_terminal_guardrail_reason(
     assert model.stop_reason == expected_reason
 
 
+def test_resume_reconciles_newer_message_usage_with_durable_state():
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+    )
+    message = AIMessage(
+        content="checkpointed answer",
+        response_metadata={
+            "run_token_usage": {
+                "prompt_tokens": 50,
+                "completion_tokens": 30,
+                "total_tokens": 80,
+            }
+        },
+    )
+
+    model.restore_runtime_state(
+        [message],
+        {
+            "run_token_usage": {
+                "prompt_tokens": 25,
+                "completion_tokens": 15,
+                "total_tokens": 40,
+            }
+        },
+    )
+
+    assert model.token_usage == {
+        "prompt_tokens": 50,
+        "completion_tokens": 30,
+        "total_tokens": 80,
+    }
+
+
 def test_final_synthesis_is_preserved_when_it_crosses_hard_budget(monkeypatch):
     responses = [
         {

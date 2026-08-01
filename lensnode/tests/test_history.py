@@ -214,6 +214,116 @@ def test_general_chat_resume_reuses_frozen_route(monkeypatch, tmp_path):
     assert cleanup_called["value"] is False
 
 
+def test_general_chat_resume_reselects_incomplete_route_checkpoint(
+    monkeypatch,
+    tmp_path,
+):
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 0}
+
+        def __init__(self, **_kwargs):
+            self.calls = 0
+
+        def restore_runtime_state(self, *_args):
+            pass
+
+        def export_runtime_state(self):
+            return {"run_token_usage": {"total_tokens": 8}}
+
+        def invoke(self, _messages, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(
+                    content=(
+                        '{"intent":"informational","complexity":"simple",'
+                        '"route":"direct_answer",'
+                        '"required_capabilities":[],'
+                        '"evidence_requirement":"none"}'
+                    )
+                )
+            return SimpleNamespace(content="recovered answer")
+
+    resources = SimpleNamespace(
+        root=tmp_path,
+        context_skill_contents=[],
+        mcp_configs=[],
+        skill_paths=[],
+    )
+    config = SimpleNamespace(
+        workspace_path=str(tmp_path),
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+    )
+    state = ResumeState(
+        messages=(HumanMessage(content="question"),),
+        route_decision={},
+        history_assistant_turns=0,
+        checkpoint_step=-1,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_resume_state",
+        lambda *_args, **_kwargs: state,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_general_chat_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "get_checkpoint_saver",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "save_resume_metadata",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "save_runtime_state",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = agent_runtime.LensDeepAgentRuntime(config)._answer_sync(
+        {
+            "run_uuid": "00000000-0000-0000-0000-000000000022",
+            "resume": True,
+            "task": "general_chat",
+            "question": "question",
+            "agent_model_ref": "model-ref",
+        }
+    )
+
+    assert result["answer"] == "recovered answer"
+
+
 def test_resume_rejects_pending_non_idempotent_write():
     messages = (
         AIMessage(
@@ -289,6 +399,32 @@ def test_resume_allows_pending_write_with_trusted_idempotent_metadata():
     )
 
     agent_runtime._reject_unsafe_resume_tool_replay(messages, [tool])
+
+
+def test_resume_allows_write_with_a_persisted_pending_tool_result():
+    messages = (
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "mcp__billing__create_invoice",
+                    "args": {"amount": 100},
+                    "id": "write-1",
+                    "type": "tool_call",
+                }
+            ],
+        ),
+    )
+    tool = SimpleNamespace(
+        name="mcp__billing__create_invoice",
+        metadata={"operation": "write"},
+    )
+
+    agent_runtime._reject_unsafe_resume_tool_replay(
+        messages,
+        [tool],
+        pending_write_tool_call_ids={"write-1"},
+    )
 
 
 def test_resume_rejects_pending_tool_missing_from_safety_inventory():
@@ -1217,11 +1353,13 @@ def test_direct_answer_persists_resume_state_before_model_call(
         calls = 0
 
         def __init__(self, **_kwargs):
-            pass
+            self.runtime_state = {}
 
         def invoke(self, _messages, **_kwargs):
             self.calls += 1
             if self.calls == 1:
+                actions.append("route_model")
+                self.runtime_state = {"consumed_tokens": 17}
                 return SimpleNamespace(
                     content=(
                         '{"intent":"informational","complexity":"simple",'
@@ -1232,6 +1370,9 @@ def test_direct_answer_persists_resume_state_before_model_call(
                 )
             actions.append("model")
             return SimpleNamespace(content="直接回答")
+
+        def export_runtime_state(self):
+            return self.runtime_state
 
     resources = SimpleNamespace(
         root=tmp_path,
@@ -1290,6 +1431,13 @@ def test_direct_answer_persists_resume_state_before_model_call(
     )
     monkeypatch.setattr(
         agent_runtime,
+        "save_runtime_state",
+        lambda *_args, **kwargs: actions.append(
+            ("runtime_state", kwargs["guardrail_state"])
+        ),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
         "save_initial_checkpoint",
         lambda *_args, **_kwargs: actions.append("checkpoint"),
     )
@@ -1304,7 +1452,15 @@ def test_direct_answer_persists_resume_state_before_model_call(
     )
 
     assert result["answer"] == "直接回答"
-    assert actions == ["saver", "metadata", "checkpoint", "model"]
+    assert actions == [
+        "saver",
+        "metadata",
+        "checkpoint",
+        "route_model",
+        "metadata",
+        ("runtime_state", {"consumed_tokens": 17}),
+        "model",
+    ]
 
 
 def test_unmatched_capability_returns_before_any_tool_call(monkeypatch):
@@ -3436,6 +3592,34 @@ def test_turn_limit_excludes_historical_assistant_turns():
     assert termination_reason == "turn_limit"
     # stops at the 3rd NEW turn; without baseline it would stop at the 2nd
     assert "answer 3" in answer
+
+
+def test_streamed_state_rebinds_runtime_metadata_to_checkpoint_head():
+    agent = _FakeStreamAgent([], new_ai_turns=2)
+    persisted = []
+
+    _run_agent_with_turn_limit(
+        agent,
+        [],
+        max_turns=3,
+        on_checkpoint_state=lambda: persisted.append(True),
+    )
+
+    assert persisted == [True, True]
+
+
+def test_seeded_checkpoint_starts_graph_without_duplicating_messages():
+    messages = [{"role": "user", "content": "question"}]
+    agent = _FakeStreamAgent([], new_ai_turns=1)
+
+    _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=3,
+        input_checkpoint_seeded=True,
+    )
+
+    assert agent.input == {"messages": []}
 
 
 def test_resume_keeps_consumed_turns_in_original_run_budget():

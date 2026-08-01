@@ -82,10 +82,15 @@ _POTENTIALLY_SIDE_EFFECTING_TOOLS = {
 }
 
 
-def _pending_checkpoint_tool_calls(messages):
+def _pending_checkpoint_tool_calls(
+    messages,
+    pending_write_tool_call_ids=(),
+):
     """Return tool calls whose result is absent from checkpoint messages."""
 
-    completed = set()
+    completed = {
+        str(tool_call_id) for tool_call_id in pending_write_tool_call_ids
+    }
     for message in reversed(tuple(messages or ())):
         if isinstance(message, ToolMessage):
             tool_call_id = getattr(message, "tool_call_id", None)
@@ -103,7 +108,11 @@ def _pending_checkpoint_tool_calls(messages):
     return []
 
 
-def _reject_unsafe_resume_tool_replay(messages, tools):
+def _reject_unsafe_resume_tool_replay(
+    messages,
+    tools,
+    pending_write_tool_call_ids=(),
+):
     """Fail closed if resume could repeat an external write operation."""
 
     tools_by_name = {
@@ -121,7 +130,10 @@ def _reject_unsafe_resume_tool_replay(messages, tools):
                     "Cannot resume a checkpoint that depends on ephemeral "
                     "Skill API session values."
                 )
-    for call in _pending_checkpoint_tool_calls(messages):
+    for call in _pending_checkpoint_tool_calls(
+        messages,
+        pending_write_tool_call_ids,
+    ):
         name = str(call.get("name") or "")
         tool = tools_by_name.get(name)
         if tool is None:
@@ -1381,11 +1393,29 @@ class LensDeepAgentRuntime:
             on_activity=on_activity,
         )
         try:
+            initial_messages = _build_initial_messages(
+                command.get("history"),
+                question,
+            )
+            history_assistant_turns = sum(
+                1
+                for item in command.get("history") or []
+                if item.get("role") == "assistant"
+            )
             runtime_evidence = dict(
                 resume_state.runtime_evidence if resume_state else {}
             )
             capability_middleware = None
             checkpoint_ready = resume_state is not None
+            initial_checkpoint_seeded = False
+            resume_from_graph_checkpoint = resume_state is not None
+            if (
+                runtime_mode.execution_gates
+                and resume_state is not None
+                and resume_state.checkpoint_step < 0
+            ):
+                initial_checkpoint_seeded = True
+                resume_from_graph_checkpoint = False
 
             def persist_execution_state(
                 capability_state=None,
@@ -1494,17 +1524,41 @@ class LensDeepAgentRuntime:
                 _reject_unsafe_resume_tool_replay(
                     resume_state.messages,
                     [*tools, *mcp_tools],
+                    resume_state.pending_write_tool_call_ids,
                 )
             evidence_requirement = "none"
             required_capabilities = []
             if runtime_mode.execution_gates:
-                if resume_state is not None:
+                route_was_resumed = bool(
+                    resume_state is not None
+                    and resume_state.route_decision.get("route")
+                )
+                if route_was_resumed:
                     route_decision = resume_state.route_decision
-                    if not route_decision.get("route"):
-                        raise CheckpointResumeError(
-                            "Resume checkpoint has no runtime route."
-                        )
                 else:
+                    if resume_state is None and checkpoint_enabled():
+                        try:
+                            get_checkpoint_saver(
+                                self.config.workspace_path
+                            )
+                            save_resume_metadata(
+                                run_uuid,
+                                self.config.workspace_path,
+                                history_assistant_turns=(
+                                    history_assistant_turns
+                                ),
+                            )
+                            save_initial_checkpoint(
+                                run_uuid,
+                                self.config.workspace_path,
+                                initial_messages,
+                            )
+                            checkpoint_ready = True
+                            initial_checkpoint_seeded = True
+                        except Exception:
+                            LOGGER.exception(
+                                "Failed to enable route checkpoint"
+                            )
                     route_decision = _select_general_chat_route(
                         model,
                         question,
@@ -1515,6 +1569,14 @@ class LensDeepAgentRuntime:
                         available_tools=[*tools, *mcp_tools],
                         has_bound_skills=bool(resources.skill_paths),
                     )
+                    if checkpoint_ready:
+                        save_resume_metadata(
+                            run_uuid,
+                            self.config.workspace_path,
+                            route_decision=route_decision,
+                            history_assistant_turns=history_assistant_turns,
+                        )
+                        persist_execution_state()
                 command = {
                     **command,
                     "runtime_route": route_decision["route"],
@@ -1522,7 +1584,7 @@ class LensDeepAgentRuntime:
                 emit_user_event(
                     (
                         "route.resumed"
-                        if resume_state is not None
+                        if route_was_resumed
                         else "route.selected"
                     ),
                     route_decision,
@@ -1533,38 +1595,6 @@ class LensDeepAgentRuntime:
                 required_capabilities = route_decision[
                     "required_capabilities"
                 ]
-                if (
-                    route_decision["route"]
-                    in {"capability_unavailable", "direct_answer"}
-                    and resume_state is None
-                    and checkpoint_enabled()
-                ):
-                    try:
-                        get_checkpoint_saver(self.config.workspace_path)
-                        initial_messages = _build_initial_messages(
-                            command.get("history"),
-                            question,
-                        )
-                        save_resume_metadata(
-                            run_uuid,
-                            self.config.workspace_path,
-                            route_decision=route_decision,
-                            history_assistant_turns=sum(
-                                1
-                                for item in command.get("history") or []
-                                if item.get("role") == "assistant"
-                            ),
-                        )
-                        save_initial_checkpoint(
-                            run_uuid,
-                            self.config.workspace_path,
-                            initial_messages,
-                        )
-                        checkpoint_ready = True
-                    except Exception:
-                        LOGGER.exception(
-                            "Failed to enable direct run checkpoint"
-                        )
                 if route_decision["route"] == "capability_unavailable":
                     required = route_decision["required_capabilities"]
                     capability = next(
@@ -1760,6 +1790,10 @@ class LensDeepAgentRuntime:
                         self.config.workspace_path
                     )
                     checkpoint_ready = True
+                elif checkpoint_ready:
+                    kwargs["checkpointer"] = get_checkpoint_saver(
+                        self.config.workspace_path
+                    )
                 else:
                     try:
                         kwargs["checkpointer"] = get_checkpoint_saver(
@@ -1773,10 +1807,8 @@ class LensDeepAgentRuntime:
                                 if runtime_mode.execution_gates
                                 else {}
                             ),
-                            history_assistant_turns=sum(
-                                1
-                                for item in command.get("history") or []
-                                if item.get("role") == "assistant"
+                            history_assistant_turns=(
+                                history_assistant_turns
                             ),
                         )
                         checkpoint_ready = True
@@ -1804,9 +1836,7 @@ class LensDeepAgentRuntime:
                 "deepagents.agent.invoke",
                 invoke_detail,
             )
-            messages = _build_initial_messages(
-                command.get("history"), question
-            )
+            messages = initial_messages
             turn_baseline_ai = None
             event_baseline_ai = None
             if resume_state is not None:
@@ -1838,7 +1868,7 @@ class LensDeepAgentRuntime:
                 thread=checkpoint_thread,
                 turn_baseline_ai=turn_baseline_ai,
                 event_baseline_ai=event_baseline_ai,
-                resume_from_checkpoint=resume_state is not None,
+                resume_from_checkpoint=resume_from_graph_checkpoint,
                 emit_event=emit_agent_event,
                 answer_language=_command_answer_language(command),
                 cancel_event=cancel_event,
@@ -1846,6 +1876,10 @@ class LensDeepAgentRuntime:
                     wrapup_event if runtime_mode.execution_gates else None
                 ),
                 token_budget_wrapup_event=token_budget_wrapup_event,
+                on_checkpoint_state=(
+                    persist_execution_state if checkpoint_ready else None
+                ),
+                input_checkpoint_seeded=initial_checkpoint_seeded,
             )
             if truncated:
                 emit_agent_event(
@@ -3143,6 +3177,8 @@ def _run_agent_with_turn_limit(
     cancel_event=None,
     wrapup_event=None,
     token_budget_wrapup_event=None,
+    on_checkpoint_state=None,
+    input_checkpoint_seeded=False,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -3186,7 +3222,12 @@ def _run_agent_with_turn_limit(
     )
     seeded_baseline = False
 
-    graph_input = None if resume_from_checkpoint else {"messages": messages}
+    if resume_from_checkpoint:
+        graph_input = None
+    elif input_checkpoint_seeded:
+        graph_input = {"messages": []}
+    else:
+        graph_input = {"messages": messages}
     for state in agent.stream(
         graph_input,
         stream_mode="values",
@@ -3200,6 +3241,8 @@ def _run_agent_with_turn_limit(
                 "Run was cancelled; stopping the agent loop."
             )
         last_state = state
+        if on_checkpoint_state is not None:
+            on_checkpoint_state()
         current = state.get("messages", [])
         if not seeded_baseline:
             # Seed the historical assistant turns by their (now-assigned)

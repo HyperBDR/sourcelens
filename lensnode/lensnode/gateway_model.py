@@ -279,11 +279,13 @@ class LensGatewayChatModel(BaseChatModel):
             stop_reason = durable_state.get("stop_reason") or None
             fingerprints = list(durable_state.get("tool_call_history") or [])
             tool_names = list(durable_state.get("tool_name_history") or [])
-        else:
-            for message in messages or []:
-                if getattr(message, "type", "") != "ai":
-                    continue
-                metadata = getattr(message, "response_metadata", None) or {}
+        message_fingerprints = []
+        message_tool_names = []
+        for message in messages or []:
+            if getattr(message, "type", "") != "ai":
+                continue
+            metadata = getattr(message, "response_metadata", None) or {}
+            if stop_reason is None:
                 for key, reason in (
                     ("token_capped", "token_capped"),
                     ("loop_capped", "loop_capped"),
@@ -293,15 +295,36 @@ class LensGatewayChatModel(BaseChatModel):
                     if metadata.get(key):
                         stop_reason = reason
                         break
-                candidate = metadata.get("run_token_usage")
-                if isinstance(candidate, dict):
-                    usage = candidate
-                calls = list(getattr(message, "tool_calls", None) or [])
-                if calls:
-                    fingerprints.append(_tool_call_fingerprint(calls))
-                    tool_names.extend(
-                        str(call.get("name") or "") for call in calls
+            candidate = metadata.get("run_token_usage")
+            if isinstance(candidate, dict):
+                usage = {
+                    key: max(
+                        _usage_int(usage or {}, key),
+                        _usage_int(candidate, key),
                     )
+                    for key in (
+                        "prompt_tokens",
+                        "completion_tokens",
+                        "total_tokens",
+                    )
+                }
+            calls = list(getattr(message, "tool_calls", None) or [])
+            if calls:
+                message_fingerprints.append(
+                    _tool_call_fingerprint(calls)
+                )
+                message_tool_names.extend(
+                    str(call.get("name") or "") for call in calls
+                )
+
+        fingerprints = _merge_runtime_history(
+            fingerprints,
+            message_fingerprints,
+        )
+        tool_names = _merge_runtime_history(
+            tool_names,
+            message_tool_names,
+        )
 
         with self._usage_lock:
             if stop_reason is not None:
@@ -1241,6 +1264,22 @@ def _usage_int(usage, key, fallback_key=None):
         return max(int(value or 0), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _merge_runtime_history(durable_values, message_values):
+    """Merge histories without double-counting checkpointed calls."""
+
+    durable = list(durable_values or [])
+    messages = list(message_values or [])
+    target_counts = Counter(messages)
+    current_counts = Counter(durable)
+    merged = list(durable)
+    for value in messages:
+        if current_counts[value] >= target_counts[value]:
+            continue
+        merged.append(value)
+        current_counts[value] += 1
+    return merged
 
 
 def _tool_call_fingerprint(tool_calls):

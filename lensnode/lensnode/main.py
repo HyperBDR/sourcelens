@@ -13,6 +13,7 @@ from websockets.asyncio.client import connect
 from .checkpoint import (
     checkpoint_enabled,
     checkpoint_ttl_hours,
+    close_checkpoint_saver,
     cleanup_expired_checkpoints,
     cleanup_run_checkpoint,
     get_checkpoint_saver,
@@ -245,9 +246,13 @@ class LensNodeClient:
         try:
             await self._drain_running_tasks()
             await self._flush_outbox()
+        finally:
             self.stopping.set()
             if self.websocket is not None:
-                await self.websocket.close()
+                try:
+                    await self.websocket.close()
+                except Exception:
+                    LOGGER.exception("Failed to close LensNode websocket")
             for task in list(self.running_tasks.values()):
                 task.cancel()
             if self.running_tasks:
@@ -255,8 +260,11 @@ class LensNodeClient:
                     *self.running_tasks.values(),
                     return_exceptions=True,
                 )
-        finally:
-            self.gateway_http_client.close()
+            await self.executor.drain_pending_workers()
+            try:
+                close_checkpoint_saver()
+            finally:
+                self.gateway_http_client.close()
 
     async def _drain_running_tasks(self):
         """Wait for in-flight runs to finish, bounded by the drain timeout."""
