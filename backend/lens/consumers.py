@@ -91,6 +91,10 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_datasource_sync_event(content)
         elif frame_type == "datasource_sync_done":
             await self._handle_datasource_sync_done(content)
+        elif frame_type == "datasource_convert_event":
+            await self._handle_datasource_sync_event(content)
+        elif frame_type == "datasource_convert_done":
+            await self._handle_datasource_conversion_done(content)
         else:
             await self.send_json(
                 {
@@ -725,6 +729,31 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         task_id = resolve_datasource_sync_task_id(request_id, content)
         if task_id:
             complete_datasource_sync_task(task_id, content)
+
+    async def _handle_datasource_conversion_done(self, content):
+        """Complete managed workspace conversion from LensNode result."""
+
+        request_id = content.get("request_id") or ""
+        task_id = content.get("task_id") or ""
+        if not request_id and not task_id:
+            return
+        await database_sync_to_async(
+            self._complete_datasource_conversion_done
+        )(request_id, content)
+
+    @staticmethod
+    def _complete_datasource_conversion_done(request_id, content):
+        from .tasks import (
+            complete_datasource_conversion_task,
+            resolve_datasource_conversion_task_id,
+        )
+
+        task_id = resolve_datasource_conversion_task_id(
+            request_id,
+            content,
+        )
+        if task_id:
+            complete_datasource_conversion_task(task_id, content)
 
     async def _send_bad_frame(self, message):
         await self.send_json(

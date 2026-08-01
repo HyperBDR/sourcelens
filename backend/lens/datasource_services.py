@@ -247,6 +247,51 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
     return request_id
 
 
+def dispatch_datasource_conversion_async(
+    datasource,
+    task_id,
+    conversion,
+    force=False,
+):
+    """Dispatch managed workspace conversion without running sync adapters."""
+
+    datasource = DataSource.objects.select_related("lensnode").get(
+        pk=datasource.pk
+    )
+    if datasource.source_type != DataSource.SourceType.MANAGED_WORKSPACE:
+        raise DataSourceDispatchError("DATASOURCE_CONVERSION_NOT_SUPPORTED")
+    validate_datasource_lensnode(datasource.lensnode)
+    conversion = dict(conversion or {})
+    for key, value in datasource_conversion_defaults().items():
+        if value and not conversion.get(key):
+            conversion[key] = value
+    request_id = uuid.uuid4().hex
+    _send_lensnode_command(
+        datasource.lensnode,
+        {
+            "type": "datasource_convert",
+            "request_id": request_id,
+            "task_id": task_id,
+            "datasource_uuid": str(datasource.uuid),
+            "source_type": datasource.source_type,
+            "name": datasource.name,
+            "conversion": conversion,
+            "target_path": datasource.target_path,
+            "force": bool(force),
+            "max_workers": get_datasource_sync_max_workers(),
+            "excluded_datasource_roots": excluded_datasource_roots(
+                datasource
+            ),
+        },
+    )
+    cache.set(
+        f"lens:datasource_conversion_request:{request_id}",
+        task_id,
+        timeout=get_datasource_sync_timeout_s(),
+    )
+    return request_id
+
+
 def datasource_conversion_policy(sync_policy):
     """Return datasource conversion policy with global defaults applied."""
 

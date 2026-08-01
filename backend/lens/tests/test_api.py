@@ -3439,6 +3439,178 @@ class LensApiTests(TestCase):
         )
         apply_async.assert_not_called()
 
+    def test_managed_workspace_conversion_registers_trackable_task(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+
+        with patch(
+            "lens.views.datasources.datasource_conversion_task.apply_async"
+        ) as apply_async:
+            response = self.client.post(
+                f"/api/lens/admin/datasources/{datasource.uuid}/convert/",
+                {
+                    "conversion": {
+                        "document": True,
+                        "max_file_size_mb": 100,
+                    },
+                    "force": False,
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 202, response.data)
+        task_id = response.data["task_id"]
+        task = TaskExecution.objects.get(task_id=task_id)
+        self.assertEqual(response.data["task_execution_id"], task.id)
+        self.assertEqual(task.module, "lens_datasource_conversion")
+        self.assertEqual(task.status, "PENDING")
+        self.assertEqual(task.created_by, self.user)
+        self.assertEqual(
+            task.metadata["conversion"],
+            {"document": True, "max_file_size_mb": 100},
+        )
+        apply_async.assert_called_once_with(
+            args=[
+                str(datasource.uuid),
+                {"document": True, "max_file_size_mb": 100},
+                False,
+                task_id,
+            ],
+            task_id=ANY,
+        )
+        datasource.refresh_from_db()
+        self.assertEqual(datasource.last_conversion_status, "PENDING")
+        self.assertIsNone(datasource.last_conversion_at)
+        detail = self.client.get(
+            f"/api/lens/admin/datasources/{datasource.uuid}/"
+        )
+        self.assertEqual(detail.data["last_conversion_status"], "PENDING")
+        self.assertIsNone(detail.data["last_conversion_at"])
+        tasks = self.client.get(
+            f"/api/lens/admin/datasources/{datasource.uuid}/"
+            "conversion-tasks/"
+        )
+        self.assertEqual(tasks.status_code, 200)
+        self.assertEqual(tasks.data["results"][0]["task_id"], task_id)
+
+    def test_non_managed_datasource_conversion_is_rejected(self):
+        with patch(
+            "lens.views.datasources.datasource_conversion_task.apply_async"
+        ) as apply_async:
+            response = self.client.post(
+                f"/api/lens/admin/datasources/{self.datasource.uuid}/convert/",
+                {"conversion": {"document": True}},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "DATASOURCE_CONVERSION_NOT_SUPPORTED",
+        )
+        apply_async.assert_not_called()
+
+    def test_managed_workspace_conversion_validates_policy(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+
+        response = self.client.post(
+            f"/api/lens/admin/datasources/{datasource.uuid}/convert/",
+            {"conversion": {"document": "yes"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("conversion.document", response.data["conversion"][0])
+
+    def test_managed_workspace_conversion_requires_admin(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        user = User.objects.create_user(
+            username="regular-user",
+            email="regular-user@example.com",
+            password="pass12345",
+        )
+        self.client.force_authenticate(user)
+
+        response = self.client.post(
+            f"/api/lens/admin/datasources/{datasource.uuid}/convert/",
+            {"conversion": {"document": True}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_cancel_managed_workspace_conversion_releases_lock(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+            last_conversion_status="STARTED",
+        )
+        task = TaskExecution.objects.create(
+            task_id="running-conversion",
+            task_name="datasource_convert:Managed Snapshot",
+            module="lens_datasource_conversion",
+            status="STARTED",
+            metadata={
+                "datasource_uuid": str(datasource.uuid),
+                "lock_token": "running-conversion",
+                "celery_task_id": "celery-conversion",
+            },
+        )
+        acquire_datasource_lock(
+            datasource.uuid,
+            token="running-conversion",
+            ttl_s=60,
+        )
+
+        with (
+            patch("core.celery.app.control.revoke") as revoke,
+            patch(
+                "lens.views.datasources."
+                "cancel_datasource_conversion_on_lensnode"
+            ) as cancel,
+        ):
+            response = self.client.post(
+                f"/api/lens/admin/datasources/{datasource.uuid}/"
+                "cancel-conversion/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        revoke.assert_called_once_with("celery-conversion", terminate=False)
+        cancel.assert_called_once_with(self.lensnode, "running-conversion")
+        task.refresh_from_db()
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "REVOKED")
+        self.assertEqual(datasource.last_conversion_status, "REVOKED")
+        self.assertIsNotNone(datasource.last_conversion_at)
+
+        acquire_datasource_lock(
+            datasource.uuid,
+            token="new-conversion",
+            ttl_s=60,
+        )
+        release_datasource_lock(
+            datasource.uuid,
+            token="new-conversion",
+        )
+
     @patch("lens.views.datasources.check_datasource_path")
     def test_managed_workspace_refresh_updates_availability(self, check_path):
         datasource = DataSource.objects.create(

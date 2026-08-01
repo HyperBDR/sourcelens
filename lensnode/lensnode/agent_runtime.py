@@ -353,6 +353,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         self.capability_correction_counts = defaultdict(int)
         self.success_count = 0
         self.successful_capabilities = set()
+        self.successful_evidence = []
         self.failed_capabilities = set()
         self.recovered_capabilities = set()
         self.correction_recovery_count = 0
@@ -494,11 +495,35 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
                 },
             )
 
-    def _record_success(self, capability, tool_name):
+    @staticmethod
+    def _evidence_source(capability, tool_name, request):
+        """Return a secret-safe source label for verified evidence."""
+
+        tool_call = request.tool_call or {}
+        arguments = tool_call.get("args") or {}
+        if capability == "skill" and isinstance(arguments, dict):
+            skill = str(arguments.get("skill") or "").strip()[:128]
+            if skill:
+                return f"skill:{skill}"
+        return tool_name
+
+    def _record_success(self, capability, tool_name, request):
         if capability is None:
             return
         self.success_count += 1
         self.successful_capabilities.add(capability)
+        self.successful_evidence.append(
+            {
+                "capability": capability,
+                "tool": tool_name,
+                "source": self._evidence_source(
+                    capability,
+                    tool_name,
+                    request,
+                ),
+                "request_sha256": self._normalized_arguments(request),
+            }
+        )
         self._record_recovery(capability, tool_name)
 
     def _record_warning(self, key, capability, error_type, tool_name):
@@ -589,11 +614,11 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             if not tool_name.startswith("mcp__"):
                 return result
             if getattr(result, "status", None) != "error":
-                self._record_success("mcp", tool_name)
+                self._record_success("mcp", tool_name, request)
                 return result
             payload = {"ok": False, "error": "MCP_TOOL_FAILED"}
         if payload.get("ok") is True:
-            self._record_success(capability, tool_name)
+            self._record_success(capability, tool_name, request)
             if payload.get("call_budget_exhausted") is True:
                 self.blocked_tools.add(tool_name)
             return result
@@ -1241,6 +1266,7 @@ class LensDeepAgentRuntime:
                         resources.context_skill_contents
                     ),
                     available_tools=[*tools, *mcp_tools],
+                    has_bound_skills=bool(resources.skill_paths),
                 )
                 command = {
                     **command,
@@ -1788,6 +1814,7 @@ def _select_general_chat_route(
     history_artifacts=None,
     context_skill_contents=None,
     available_tools=None,
+    has_bound_skills=None,
 ):
     """Classify one General Chat request without exposing control output."""
 
@@ -1796,11 +1823,16 @@ def _select_general_chat_route(
         history_artifacts or [],
         ensure_ascii=False,
     )[:4000]
+    if has_bound_skills is None:
+        has_bound_skills = bool(context_skill_contents)
     tool_inventory = []
     seen_tools = set()
     for tool in available_tools or []:
         name = str(getattr(tool, "name", "") or "").strip()[:128]
         if not name or name in seen_tools:
+            continue
+        capability = CapabilityBoundaryMiddleware._evidence_capability(name)
+        if capability == "skill" and not has_bound_skills:
             continue
         seen_tools.add(name)
         description = str(
@@ -1861,6 +1893,7 @@ def _select_general_chat_route(
                 *_build_initial_messages(history, question),
             ],
             runtime_control_call=True,
+            temperature=0,
         )
     except RunCancelledError:
         raise
@@ -1871,10 +1904,16 @@ def _select_general_chat_route(
     return _normalize_route_evidence_capabilities(
         decision,
         available_tools,
+        has_bound_skills=has_bound_skills,
     )
 
 
-def _normalize_route_evidence_capabilities(decision, available_tools):
+def _normalize_route_evidence_capabilities(
+    decision,
+    available_tools,
+    *,
+    has_bound_skills=True,
+):
     """Repair incomplete route evidence using available evidence families."""
 
     normalized = dict(decision)
@@ -1890,19 +1929,47 @@ def _normalize_route_evidence_capabilities(decision, available_tools):
         if capability in capability_order
     ]
     evidence_requirement = normalized.get("evidence_requirement")
+    available_capabilities = {
+        CapabilityBoundaryMiddleware._evidence_capability(
+            str(getattr(tool, "name", "") or "")
+        )
+        for tool in available_tools or []
+    }
+    available_capabilities.discard(None)
+    if not has_bound_skills:
+        available_capabilities.discard("skill")
     if evidence_requirement == "tool_result":
         required = [
             capability
             for capability in required
             if capability in {"skill", "mcp", "workspace"}
         ]
+        discarded = [
+            capability
+            for capability in required
+            if capability not in available_capabilities
+        ]
+        required = [
+            capability
+            for capability in required
+            if capability in available_capabilities
+        ]
+        if discarded:
+            derived = [
+                capability
+                for capability in capability_order
+                if capability in {"skill", "mcp", "workspace"}
+                and capability in available_capabilities
+                and capability not in required
+            ]
+            required.extend(derived)
+            normalized["capability_repair"] = {
+                "discarded": discarded,
+                "derived": derived,
+            }
+            if not required:
+                normalized["route"] = "capability_unavailable"
     if evidence_requirement == "tool_result" and not required:
-        available_capabilities = {
-            CapabilityBoundaryMiddleware._evidence_capability(
-                str(getattr(tool, "name", "") or "")
-            )
-            for tool in available_tools or []
-        }
         required.extend(
             capability
             for capability in capability_order
@@ -1979,13 +2046,27 @@ def _finalize_runtime_outcome(
             }
         return "completed", {}
 
-    successful = set(
-        getattr(
-            capability_middleware,
-            "successful_capabilities",
-            set(),
-        )
+    successful_evidence = getattr(
+        capability_middleware,
+        "successful_evidence",
+        None,
     )
+    if successful_evidence is None:
+        successful = set(
+            getattr(
+                capability_middleware,
+                "successful_capabilities",
+                set(),
+            )
+        )
+    else:
+        successful = {
+            str(evidence.get("capability") or "")
+            for evidence in successful_evidence
+            if isinstance(evidence, dict)
+            and evidence.get("tool")
+            and evidence.get("request_sha256")
+        }
     required = {
         capability
         for capability in required_capabilities or []
@@ -2475,7 +2556,13 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         "preflight authentication; run "
         "an auth command only after a business command reports that auth is "
         "required. Choose the needed result scope and output format before "
-        "the first business query. If a tool reports a request, usage, or "
+        "the first business query. When a loaded Skill documents a typed "
+        "command for the requested record type and filter, use that command "
+        "before unrelated discovery queries. For requests naming multiple "
+        "identifiers, cover every requested identifier or state which one "
+        "was not queried; ask a concise clarification question before "
+        "claiming a complete result when the record type is ambiguous. If a "
+        "tool reports a request, usage, or "
         "invalid-argument error, reread the Skill command reference and "
         "retry only with documented arguments. Never invent flags.\n\n"
         "Always end with a written answer to the user; never finish with an "

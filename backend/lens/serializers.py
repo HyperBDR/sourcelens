@@ -1049,6 +1049,8 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "availability_status",
             "availability_checked_at",
             "availability_message",
+            "last_conversion_status",
+            "last_conversion_at",
             "status",
             "created_at",
             "updated_at",
@@ -1063,6 +1065,8 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "availability_status",
             "availability_checked_at",
             "availability_message",
+            "last_conversion_status",
+            "last_conversion_at",
             "created_at",
             "updated_at",
         ]
@@ -1072,6 +1076,34 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 "required": False,
             },
         }
+
+
+class DataSourceConversionRequestSerializer(serializers.Serializer):
+    """Validate one explicit managed workspace conversion request."""
+
+    conversion = serializers.JSONField(required=False)
+    force = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        """Apply the shared datasource conversion policy contract."""
+
+        conversion = attrs.get("conversion")
+        if conversion is None:
+            conversion = {"document": True}
+        _validate_conversion_policy(conversion, field_name="conversion")
+        if not any(
+            conversion.get(key)
+            for key in ["document", "image", "embedded_image"]
+        ):
+            raise serializers.ValidationError(
+                {
+                    "conversion": (
+                        "At least one conversion type must be enabled"
+                    )
+                }
+            )
+        attrs["conversion"] = conversion
+        return attrs
 
 
 def _validate_datasource_config_secret_fields(config):
@@ -1426,12 +1458,12 @@ def _validate_sync_policy(sync_policy):
         )
 
 
-def _validate_conversion_policy(conversion):
+def _validate_conversion_policy(conversion, field_name="sync_policy"):
     """Validate datasource conversion settings."""
 
     if not isinstance(conversion, dict):
         raise serializers.ValidationError(
-            {"sync_policy": "conversion must be an object"}
+            {field_name: "conversion must be an object"}
         )
     for key in [
         "document",
@@ -1444,12 +1476,12 @@ def _validate_conversion_policy(conversion):
         value = conversion.get(key)
         if value is not None and not isinstance(value, bool):
             raise serializers.ValidationError(
-                {"sync_policy": f"conversion.{key} must be a boolean"}
+                {field_name: f"conversion.{key} must be a boolean"}
             )
     if conversion.get("embedded_image") and not conversion.get("document"):
         raise serializers.ValidationError(
             {
-                "sync_policy": (
+                field_name: (
                     "conversion.embedded_image requires "
                     "conversion.document"
                 )
@@ -1469,7 +1501,7 @@ def _validate_conversion_policy(conversion):
             not isinstance(value, int) or value <= 0
         ):
             raise serializers.ValidationError(
-                {"sync_policy": f"conversion.{key} must be positive"}
+                {field_name: f"conversion.{key} must be positive"}
             )
     ratio = conversion.get("pdf_min_image_area_ratio")
     if ratio is not None and (
@@ -1477,7 +1509,7 @@ def _validate_conversion_policy(conversion):
     ):
         raise serializers.ValidationError(
             {
-                "sync_policy": (
+                field_name: (
                     "conversion.pdf_min_image_area_ratio must be "
                     "between 0 and 1"
                 )
@@ -1487,7 +1519,7 @@ def _validate_conversion_policy(conversion):
         value = conversion.get(key)
         if value is not None and not isinstance(value, str):
             raise serializers.ValidationError(
-                {"sync_policy": f"conversion.{key} must be a string"}
+                {field_name: f"conversion.{key} must be a string"}
             )
 
 

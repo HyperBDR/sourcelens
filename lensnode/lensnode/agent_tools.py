@@ -10,6 +10,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from itertools import islice
@@ -1017,11 +1018,8 @@ def build_general_chat_tools(
     artifact_calls = {"count": 0}
     artifact_output_refs = []
     artifact_request_counts = {}
-    artifact_progress = {
-        "last_signature": None,
-        "streak": 0,
-        "stalled": False,
-    }
+    artifact_progress = {}
+    artifact_state_lock = threading.Lock()
     structured_analysis_max_calls = min(
         _positive_int(
             tool_policy.get("structured_analysis_max_calls"),
@@ -1949,9 +1947,55 @@ def build_general_chat_tools(
             return _json({"ok": False, "error": error})
 
         display_name = f"{skill_dir.name}/{artifact_name}"
-        artifact_calls["count"] += 1
-        call_count = artifact_calls["count"]
-        if call_count > artifact_max_calls:
+        request_signature = hashlib.sha256(
+            json.dumps(
+                [
+                    skill_dir.name,
+                    artifact_name,
+                    args,
+                    hashlib.sha256(stdin.encode("utf-8")).hexdigest(),
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        command_family = []
+        for value in args:
+            if value.startswith("-"):
+                break
+            command_family.append(value.casefold())
+            if len(command_family) >= 2:
+                break
+        progress_family = (
+            skill_dir.name,
+            artifact_name,
+            tuple(command_family),
+        )
+        with artifact_state_lock:
+            artifact_calls["count"] += 1
+            call_count = artifact_calls["count"]
+            request_count = (
+                artifact_request_counts.get(request_signature, 0) + 1
+            )
+            artifact_request_counts[request_signature] = request_count
+            progress_state = artifact_progress.setdefault(
+                progress_family,
+                {
+                    "result_counts": {},
+                    "stalled": False,
+                    "in_flight": 0,
+                },
+            )
+            progress_stalled = progress_state["stalled"]
+            call_limit_exceeded = call_count > artifact_max_calls
+            request_repeated = request_count > 2
+            if not (
+                call_limit_exceeded
+                or request_repeated
+                or progress_stalled
+            ):
+                progress_state["in_flight"] += 1
+        if call_limit_exceeded:
             detail = {
                 "skill": skill_dir.name,
                 "artifact": artifact_name,
@@ -1975,45 +2019,7 @@ def build_general_chat_tools(
                     ),
                 }
             )
-        if artifact_progress["stalled"]:
-            detail = {
-                "skill": skill_dir.name,
-                "artifact": artifact_name,
-                "args_redacted": _redact_command_args(args),
-                "call_count": call_count,
-                "max_calls": artifact_max_calls,
-                "invocation_id": invocation_id,
-                "summary": f"{display_name} · progress stalled",
-            }
-            emit("tool.run_skill_artifact.stalled", detail)
-            return _json(
-                {
-                    "ok": False,
-                    "error": "ARTIFACT_STALLED",
-                    "call_count": call_count,
-                    "max_calls": artifact_max_calls,
-                    "available_output_refs": artifact_output_refs,
-                    "instruction": (
-                        "Artifact results stopped changing. Stop calling it "
-                        "and synthesize the answer from existing evidence."
-                    ),
-                }
-            )
-        request_signature = hashlib.sha256(
-            json.dumps(
-                [
-                    skill_dir.name,
-                    artifact_name,
-                    args,
-                    hashlib.sha256(stdin.encode("utf-8")).hexdigest(),
-                ],
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        request_count = artifact_request_counts.get(request_signature, 0) + 1
-        artifact_request_counts[request_signature] = request_count
-        if request_count > 2:
+        if request_repeated:
             detail = {
                 "skill": skill_dir.name,
                 "artifact": artifact_name,
@@ -2037,6 +2043,31 @@ def build_general_chat_tools(
                         "This exact Artifact request has already been run. "
                         "Stop repeating it and synthesize the answer from "
                         "the existing results."
+                    ),
+                }
+            )
+        if progress_stalled:
+            detail = {
+                "skill": skill_dir.name,
+                "artifact": artifact_name,
+                "args_redacted": _redact_command_args(args),
+                "call_count": call_count,
+                "max_calls": artifact_max_calls,
+                "invocation_id": invocation_id,
+                "summary": f"{display_name} · progress stalled",
+            }
+            emit("tool.run_skill_artifact.stalled", detail)
+            return _json(
+                {
+                    "ok": False,
+                    "error": "ARTIFACT_STALLED",
+                    "call_count": call_count,
+                    "max_calls": artifact_max_calls,
+                    "available_output_refs": artifact_output_refs,
+                    "instruction": (
+                        "Artifact results stopped changing for this command "
+                        "family. Stop calling it and synthesize the answer "
+                        "from existing evidence."
                     ),
                 }
             )
@@ -2066,6 +2097,8 @@ def build_general_chat_tools(
                 timeout=timeout_s,
             )
         except subprocess.TimeoutExpired as exc:
+            with artifact_state_lock:
+                artifact_progress[progress_family]["in_flight"] -= 1
             duration_ms = int((time.monotonic() - started) * 1000)
             stdout = _persist_large_tool_output(
                 resources.root,
@@ -2111,6 +2144,8 @@ def build_general_chat_tools(
                 }
             )
         except OSError:
+            with artifact_state_lock:
+                artifact_progress[progress_family]["in_flight"] -= 1
             emit(
                 "tool.run_skill_artifact.failed",
                 {
@@ -2152,14 +2187,20 @@ def build_general_chat_tools(
             payload["stdout_sha256"],
             payload["stderr_sha256"],
         )
-        if progress_signature == artifact_progress["last_signature"]:
-            artifact_progress["streak"] += 1
-        else:
-            artifact_progress["last_signature"] = progress_signature
-            artifact_progress["streak"] = 1
-        artifact_progress["stalled"] = artifact_progress["streak"] >= 3
-        payload["progress_streak"] = artifact_progress["streak"]
-        payload["progress_stalled"] = artifact_progress["stalled"]
+        with artifact_state_lock:
+            progress_state = artifact_progress[progress_family]
+            result_counts = progress_state["result_counts"]
+            progress_streak = result_counts.get(progress_signature, 0) + 1
+            result_counts[progress_signature] = progress_streak
+            progress_state["in_flight"] -= 1
+            progress_stalled = (
+                progress_state["in_flight"] == 0
+                and len(result_counts) == 1
+                and progress_streak >= 3
+            )
+            progress_state["stalled"] = progress_stalled
+        payload["progress_streak"] = progress_streak
+        payload["progress_stalled"] = progress_stalled
         if payload["stdout_truncated"]:
             artifact_output_refs.append(payload["stdout_ref"])
             if payload["stdout_format"] == "json":
@@ -2174,10 +2215,11 @@ def build_general_chat_tools(
                     "bounded view. Do not rerun the Artifact merely to "
                     "change pagination or output format."
                 )
-        if artifact_progress["stalled"]:
+        if progress_stalled:
             payload["instruction"] = (
-                "Artifact results have stopped changing. Stop calling it "
-                "and synthesize the answer from the evidence collected."
+                "Artifact results have stopped changing for this command "
+                "family. Stop calling it and synthesize the answer from the "
+                "evidence collected."
             )
         emit(
             "tool.run_skill_artifact.done",
@@ -2194,8 +2236,8 @@ def build_general_chat_tools(
                 "stderr_bytes": payload["stderr_bytes"],
                 "stderr_ref": payload["stderr_ref"],
                 "stderr_truncated": payload["stderr_truncated"],
-                "progress_streak": artifact_progress["streak"],
-                "progress_stalled": artifact_progress["stalled"],
+                "progress_streak": progress_streak,
+                "progress_stalled": progress_stalled,
                 "summary": f"{display_name} · rc={completed.returncode}",
             },
         )

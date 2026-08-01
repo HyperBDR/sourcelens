@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
+import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -473,9 +474,11 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     class Model:
         def __init__(self):
             self.messages = []
+            self.options = {}
 
-        def invoke(self, messages, **_kwargs):
+        def invoke(self, messages, **kwargs):
             self.messages = messages
+            self.options = kwargs
             return SimpleNamespace(
                 content=(
                     '{"intent":"action","complexity":"simple",'
@@ -505,6 +508,7 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert "query existing orders only" in prompt
     assert "run_skill_artifact" in prompt
     assert "creating an order" in prompt
+    assert model.options["temperature"] == 0
 
 
 def test_route_selection_recovers_missing_tool_evidence_capabilities():
@@ -537,6 +541,68 @@ def test_route_selection_recovers_missing_tool_evidence_capabilities():
 
     assert decision["evidence_requirement"] == "tool_result"
     assert decision["required_capabilities"] == ["skill"]
+
+
+def test_route_selection_repairs_impossible_mcp_evidence_to_skill():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"simple",'
+                    '"route":"direct_execute",'
+                    '"required_capabilities":["mcp"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "查询 agione-fabric 的充值记录",
+        context_skill_contents=[
+            "Use the Income Artifact payment list command for recharge data."
+        ],
+        available_tools=[
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            )
+        ],
+    )
+
+    assert decision["route"] == "direct_execute"
+    assert decision["required_capabilities"] == ["skill"]
+    assert decision["capability_repair"] == {
+        "discarded": ["mcp"],
+        "derived": ["skill"],
+    }
+
+
+def test_route_selection_does_not_derive_an_unbound_skill_capability():
+    class Model:
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"action","complexity":"simple",'
+                    '"route":"direct_execute",'
+                    '"required_capabilities":["mcp"],'
+                    '"evidence_requirement":"tool_result"}'
+                )
+            )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "查询充值记录",
+        context_skill_contents=[],
+        available_tools=[
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            )
+        ],
+    )
+
+    assert decision["route"] == "capability_unavailable"
+    assert decision["required_capabilities"] == []
 
 
 def test_route_selection_requires_delivery_for_artifact_evidence():
@@ -616,7 +682,12 @@ def test_route_selection_uses_history_to_resolve_an_action_follow_up():
             },
         ],
         context_skill_contents=["This Skill can query Income orders."],
-        available_tools=[],
+        available_tools=[
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            )
+        ],
     )
 
     assert decision["route"] == "direct_execute"
@@ -850,9 +921,11 @@ def test_unmatched_capability_returns_before_any_tool_call(monkeypatch):
     assert tool_calls["count"] == 0
 
 
+@pytest.mark.parametrize("classified_capabilities", [[], ["mcp"]])
 def test_successful_skill_evidence_preserves_the_final_answer(
     monkeypatch,
     tmp_path,
+    classified_capabilities,
 ):
     captured = {}
 
@@ -865,11 +938,14 @@ def test_successful_skill_evidence_preserves_the_final_answer(
 
         def invoke(self, _messages, **_kwargs):
             return SimpleNamespace(
-                content=(
-                    '{"intent":"action","complexity":"complex",'
-                    '"route":"plan_execute",'
-                    '"required_capabilities":[],'
-                    '"evidence_requirement":"tool_result"}'
+                content=json.dumps(
+                    {
+                        "intent": "action",
+                        "complexity": "complex",
+                        "route": "plan_execute",
+                        "required_capabilities": classified_capabilities,
+                        "evidence_requirement": "tool_result",
+                    }
                 )
             )
 
@@ -953,6 +1029,20 @@ def test_successful_skill_evidence_preserves_the_final_answer(
             "artifact_delivery",
             "skill",
         }
+        captured["boundary"].successful_evidence = [
+            {
+                "capability": "skill",
+                "tool": "run_skill_artifact",
+                "source": "skill:income",
+                "request_sha256": "1" * 64,
+            },
+            {
+                "capability": "artifact_delivery",
+                "tool": "save_deliverable",
+                "source": "save_deliverable",
+                "request_sha256": "2" * 64,
+            },
+        ]
         return "已生成并交付订单流程图。", True, "token_budget_wrapup"
 
     monkeypatch.setattr(
@@ -1570,6 +1660,8 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "Never invent flags" in prompt
     assert "validate_records" in prompt
     assert "Do not fan out per-record detail calls" in prompt
+    assert "cover every requested identifier" in prompt
+    assert "typed command" in prompt
 
 
 def test_general_chat_prompt_repeats_configured_language_requirement():
@@ -2330,7 +2422,11 @@ def test_capability_boundary_counts_raw_mcp_success_as_evidence():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
     request = SimpleNamespace(
         tool=SimpleNamespace(name="mcp__orders__lookup"),
-        tool_call={"name": "mcp__orders__lookup", "id": "call-1"},
+        tool_call={
+            "name": "mcp__orders__lookup",
+            "id": "call-1",
+            "args": {"order_id": "HWINSTAD2025071509"},
+        },
     )
 
     middleware.wrap_tool_call(
@@ -2344,6 +2440,31 @@ def test_capability_boundary_counts_raw_mcp_success_as_evidence():
 
     assert middleware.success_count == 1
     assert middleware.successful_capabilities == {"mcp"}
+    assert len(middleware.successful_evidence) == 1
+    evidence = middleware.successful_evidence[0]
+    assert evidence["capability"] == "mcp"
+    assert evidence["tool"] == "mcp__orders__lookup"
+    assert evidence["source"] == "mcp__orders__lookup"
+    assert len(evidence["request_sha256"]) == 64
+    assert "HWINSTAD2025071509" not in json.dumps(evidence)
+
+
+def test_finalization_ignores_success_without_invocation_provenance():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["skill"]
+    )
+    middleware.successful_capabilities.add("skill")
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "blocked"
+    assert termination_detail["reason"] == "evidence_unavailable"
 
 
 def test_capability_boundary_rejects_raw_mcp_error_as_evidence():

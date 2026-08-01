@@ -3,6 +3,7 @@ import io
 import json
 import platform
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -282,7 +283,12 @@ def test_run_skill_artifact_stops_after_results_stagnate(tmp_path):
                 {
                     "skill": "income-cli",
                     "artifact": "income",
-                    "args": [str(index)],
+                    "args": [
+                        "payment",
+                        "list",
+                        "--search",
+                        str(index),
+                    ],
                 }
             )
         )
@@ -292,6 +298,102 @@ def test_run_skill_artifact_stops_after_results_stagnate(tmp_path):
     assert results[2]["progress_stalled"] is True
     assert "synthesize" in results[2]["instruction"]
     assert results[3]["error"] == "ARTIFACT_STALLED"
+
+
+def test_identical_empty_results_from_different_families_do_not_stall(
+    tmp_path,
+):
+    resources = _resources(tmp_path, b"#!/bin/sh\nprintf '[]'\n")
+    artifact = _artifact_tool(resources)
+    commands = [
+        ["product", "list", "--search", "fabric"],
+        ["enterprise", "list", "--search", "fabric"],
+        ["order", "list", "--search", "agione-fabric"],
+        ["payment", "list", "--search", "agione-fabric"],
+    ]
+
+    results = [
+        json.loads(
+            artifact.invoke(
+                {
+                    "skill": "income-cli",
+                    "artifact": "income",
+                    "args": command,
+                }
+            )
+        )
+        for command in commands
+    ]
+
+    assert all(result["ok"] is True for result in results)
+    assert all(result["progress_stalled"] is False for result in results)
+    assert [result["progress_streak"] for result in results] == [1, 1, 1, 1]
+
+
+def test_artifact_stagnation_is_deterministic_across_parallel_completion(
+    tmp_path,
+):
+    resources = _resources(tmp_path, b"#!/bin/sh\nprintf '[]'\n")
+    artifact = _artifact_tool(resources)
+    resource_names = ["product", "enterprise", "order"]
+
+    def invoke(resource):
+        return json.loads(
+            artifact.invoke(
+                {
+                    "skill": "income-cli",
+                    "artifact": "income",
+                    "args": [
+                        resource,
+                        "list",
+                        "--search",
+                        "fabric",
+                    ],
+                }
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(executor.map(invoke, resource_names))
+
+    payment = invoke("payment")
+
+    assert all(result["progress_streak"] == 1 for result in results)
+    assert all(result["progress_stalled"] is False for result in results)
+    assert payment["ok"] is True
+    assert payment["progress_streak"] == 1
+
+
+def test_parallel_progress_prevents_same_family_from_stalling(tmp_path):
+    content = (
+        b"#!/bin/sh\n"
+        b"case \"$4\" in\n"
+        b"  a|b|c) printf 'same' ;;\n"
+        b"  *) printf '%s' \"$4\" ;;\n"
+        b"esac\n"
+    )
+    resources = _resources(tmp_path, content)
+    artifact = _artifact_tool(resources)
+
+    def invoke(search):
+        return json.loads(
+            artifact.invoke(
+                {
+                    "skill": "income-cli",
+                    "artifact": "income",
+                    "args": ["payment", "list", "--search", search],
+                }
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(invoke, ["a", "b", "c", "different"]))
+
+    next_result = invoke("next")
+
+    assert {result["stdout"] for result in results} == {"same", "different"}
+    assert next_result["ok"] is True
+    assert next_result["stdout"] == "next"
 
 
 def test_run_skill_artifact_redacts_sensitive_args_in_history(tmp_path):
