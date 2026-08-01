@@ -3,10 +3,12 @@ import json
 import subprocess
 import threading
 import time
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
-from lensnode.agent_tools import _skill_script_environment, build_agent_tools
 from lensnode.agent_runtime import _system_prompt
-from lensnode.executor import LensNodeExecutor
+from lensnode.agent_tools import _skill_script_environment, build_agent_tools
+from lensnode.executor import LensNodeExecutor, _remaining_run_timeout_seconds
 from lensnode.gateway_model import RunCancelledError
 from lensnode.main import LensNodeClient
 from lensnode.runtime_resources import cleanup_runtime_resources
@@ -88,6 +90,229 @@ def test_executor_emits_streamed_output_delta():
         "reason": "capability_unavailable",
         "capability": "skill",
     }
+
+
+def test_terminal_result_retains_checkpoint_until_acknowledged():
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    executor.agent = FakeAgent()
+
+    with (
+        patch(
+            "lensnode.executor.cleanup_run_checkpoint"
+        ) as checkpoint_cleanup,
+        patch(
+            "lensnode.executor.cleanup_run_runtime_resources"
+        ) as runtime_cleanup,
+    ):
+        asyncio.run(
+            executor.execute(
+                {
+                    "run_uuid": "00000000-0000-0000-0000-000000000017",
+                    "task": "knowledge_qa",
+                    "target_dirs": [],
+                },
+                lambda _payload: None,
+            )
+        )
+
+    checkpoint_cleanup.assert_not_called()
+    runtime_cleanup.assert_not_called()
+
+
+def test_executor_cancellation_preserves_checkpoint():
+    started = asyncio.Event()
+
+    class CancellableAgent:
+        class Config:
+            request_timeout_s = 240
+            workspace_path = "/workspace"
+
+        config = Config()
+
+        async def answer(self, command, **kwargs):
+            del command, kwargs
+            started.set()
+            await asyncio.sleep(3600)
+
+    async def exercise():
+        executor = LensNodeExecutor.__new__(LensNodeExecutor)
+        executor.agent = CancellableAgent()
+        task = asyncio.create_task(
+            executor.execute(
+                {
+                    "run_uuid": "00000000-0000-0000-0000-000000000009",
+                    "task": "knowledge_qa",
+                    "target_dirs": [],
+                },
+                lambda payload: None,
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    with patch("lensnode.executor.cleanup_run_checkpoint") as cleanup:
+        asyncio.run(exercise())
+
+    cleanup.assert_not_called()
+
+
+def test_explicit_cancellation_cleans_after_agent_stops():
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+    release = asyncio.Event()
+
+    class CancelAwareAgent:
+        class Config:
+            request_timeout_s = 240
+            workspace_path = "/workspace"
+
+        config = Config()
+
+        async def answer(self, command, cancel_event=None, **kwargs):
+            del command, kwargs
+            started.set()
+            while not cancel_event.is_set():
+                await asyncio.sleep(0)
+            await release.wait()
+            stopped.set()
+
+    cleanup_observations = []
+
+    async def exercise():
+        executor = LensNodeExecutor.__new__(LensNodeExecutor)
+        executor.agent = CancelAwareAgent()
+        command = {
+            "run_uuid": "00000000-0000-0000-0000-000000000016",
+            "task": "knowledge_qa",
+            "target_dirs": [],
+            "_explicit_cancel": True,
+        }
+        task = asyncio.create_task(executor.execute(command, lambda _p: None))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        await asyncio.wait_for(
+            asyncio.gather(task, return_exceptions=True),
+            timeout=1,
+        )
+        assert not stopped.is_set()
+        release.set()
+        await asyncio.wait_for(stopped.wait(), timeout=1)
+        while len(cleanup_observations) < 2:
+            await asyncio.sleep(0)
+
+    def observe_cleanup(*_args):
+        cleanup_observations.append(stopped.is_set())
+
+    with (
+        patch(
+            "lensnode.executor.cleanup_run_checkpoint",
+            side_effect=observe_cleanup,
+        ),
+        patch(
+            "lensnode.executor.cleanup_run_runtime_resources",
+            side_effect=observe_cleanup,
+        ),
+    ):
+        asyncio.run(exercise())
+
+    assert cleanup_observations == [True, True]
+
+
+def test_duplicate_resume_for_active_run_is_idempotent():
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "max_concurrent_runs": 1,
+            },
+        )()
+        client = LensNodeClient(config)
+        executor = BlockingExecutor()
+        client.executor = executor
+        run_uuid = "00000000-0000-0000-0000-000000000010"
+        message = {
+            "type": "run_start",
+            "run_uuid": run_uuid,
+            "task": "knowledge_qa",
+            "target_dirs": [],
+            "resume": True,
+        }
+
+        await client._handle_message(json.dumps(message))
+        await asyncio.wait_for(executor.started.wait(), timeout=1)
+        await client._handle_message(json.dumps(message))
+
+        assert not any(
+            frame.get("error") == "LENSNODE_RUN_ACTIVE"
+            for frame in client._outbox
+        )
+        client.running_tasks[run_uuid].cancel()
+        await asyncio.gather(
+            client.running_tasks[run_uuid],
+            return_exceptions=True,
+        )
+
+    asyncio.run(exercise())
+
+
+def test_control_plane_cancel_cleans_idle_checkpoint_and_runtime_files():
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "workspace_path": "/workspace",
+            },
+        )()
+        client = LensNodeClient(config)
+        run_uuid = "00000000-0000-0000-0000-000000000011"
+
+        await client._handle_message(
+            json.dumps({"type": "run_cancel", "run_uuid": run_uuid})
+        )
+
+    with (
+        patch("lensnode.main.cleanup_run_checkpoint") as checkpoint_cleanup,
+        patch(
+            "lensnode.main.cleanup_run_runtime_resources"
+        ) as runtime_cleanup,
+    ):
+        asyncio.run(exercise())
+
+    checkpoint_cleanup.assert_called_once_with(
+        "00000000-0000-0000-0000-000000000011",
+        "/workspace",
+    )
+    runtime_cleanup.assert_called_once_with(
+        "/workspace",
+        "00000000-0000-0000-0000-000000000011",
+    )
+
+
+def test_resume_uses_remaining_original_wall_clock_budget():
+    now = datetime(2026, 8, 1, 8, 0, tzinfo=timezone.utc)
+    started_at = now - timedelta(seconds=70)
+
+    remaining = _remaining_run_timeout_seconds(
+        {
+            "run_timeout_s": 100,
+            "remaining_run_timeout_s": 30,
+            "run_started_at": started_at.isoformat(),
+            "resume": True,
+        },
+        now=now,
+    )
+
+    assert remaining == 30
 
 
 def test_executor_derives_run_timeout_from_agent_rounds():

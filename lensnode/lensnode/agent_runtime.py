@@ -32,6 +32,16 @@ from .agent_tools import (
     build_agent_tools,
     build_general_chat_tools,
 )
+from .checkpoint import (
+    CheckpointResumeError,
+    checkpoint_enabled,
+    get_checkpoint_saver,
+    load_resume_state,
+    save_initial_checkpoint,
+    save_resume_metadata,
+    save_runtime_state,
+    thread_config,
+)
 from .gateway_model import (
     LensGatewayChatModel,
     RunCancelledError,
@@ -61,6 +71,98 @@ class EmptyAgentResponseError(RuntimeError):
     """The agent and its one recovery attempt both returned no text."""
 
     code = "EMPTY_AGENT_RESPONSE"
+
+
+_POTENTIALLY_SIDE_EFFECTING_TOOLS = {
+    "call_skill_api",
+    "run_skill_artifact",
+    "run_skill_script",
+    "run_skill_transform",
+    "save_deliverable",
+}
+
+
+def _pending_checkpoint_tool_calls(
+    messages,
+    pending_write_tool_call_ids=(),
+):
+    """Return tool calls whose result is absent from checkpoint messages."""
+
+    completed = {
+        str(tool_call_id) for tool_call_id in pending_write_tool_call_ids
+    }
+    for message in reversed(tuple(messages or ())):
+        if isinstance(message, ToolMessage):
+            tool_call_id = getattr(message, "tool_call_id", None)
+            if tool_call_id:
+                completed.add(str(tool_call_id))
+            continue
+        tool_calls = getattr(message, "tool_calls", None) or []
+        pending = [
+            call
+            for call in tool_calls
+            if str(call.get("id") or "") not in completed
+        ]
+        if pending:
+            return pending
+    return []
+
+
+def _reject_unsafe_resume_tool_replay(
+    messages,
+    tools,
+    pending_write_tool_call_ids=(),
+):
+    """Fail closed if resume could repeat an external write operation."""
+
+    tools_by_name = {
+        str(getattr(tool, "name", "") or ""): tool for tool in tools or []
+    }
+    for message in tuple(messages or ()):
+        for call in getattr(message, "tool_calls", None) or []:
+            arguments = call.get("args") or {}
+            if (
+                call.get("name") == "call_skill_api"
+                and isinstance(arguments, dict)
+                and arguments.get("capture")
+            ):
+                raise CheckpointResumeError(
+                    "Cannot resume a checkpoint that depends on ephemeral "
+                    "Skill API session values."
+                )
+    for call in _pending_checkpoint_tool_calls(
+        messages,
+        pending_write_tool_call_ids,
+    ):
+        name = str(call.get("name") or "")
+        tool = tools_by_name.get(name)
+        if tool is None:
+            raise CheckpointResumeError(
+                "Cannot resume a checkpoint with an unclassified pending "
+                "tool operation."
+            )
+        metadata = getattr(tool, "metadata", None) or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if metadata.get("idempotent") is True:
+            continue
+        if (
+            metadata.get("read_only") is True
+            or metadata.get("operation") == "read"
+        ):
+            continue
+        is_write = (
+            metadata.get("operation") == "write"
+            or metadata.get("read_only") is False
+            or metadata.get("side_effects") is True
+            or name.startswith("mcp__")
+            or name in _POTENTIALLY_SIDE_EFFECTING_TOOLS
+        )
+        if is_write:
+            raise CheckpointResumeError(
+                "Cannot resume a checkpoint with a pending non-idempotent "
+                "write operation."
+            )
 
 
 class TraceObservationMiddleware(AgentMiddleware):
@@ -341,10 +443,12 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         emit_event=None,
         required_capabilities=None,
         require_initial_plan=False,
+        on_state_change=None,
     ):
         self.emit_event = emit_event
         self.required_capabilities = set(required_capabilities or [])
         self.require_initial_plan = require_initial_plan
+        self.on_state_change = on_state_change
         self.initial_plan_exists = False
         self.blocked_tools = set()
         self.blocked_capabilities = set()
@@ -361,6 +465,113 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         self.termination_detail = {}
         self.exhaustion_details = []
         self.failure_records = {}
+
+    def export_state(self):
+        """Return a JSON-safe snapshot of execution-gate state."""
+
+        return {
+            "initial_plan_exists": self.initial_plan_exists,
+            "blocked_tools": sorted(self.blocked_tools),
+            "blocked_capabilities": sorted(self.blocked_capabilities),
+            "failure_counts": [
+                [*key, count]
+                for key, count in sorted(self.failure_counts.items())
+            ],
+            "capability_failure_counts": dict(
+                self.capability_failure_counts
+            ),
+            "capability_correction_counts": dict(
+                self.capability_correction_counts
+            ),
+            "success_count": self.success_count,
+            "successful_capabilities": sorted(
+                self.successful_capabilities
+            ),
+            "successful_evidence": [
+                dict(item) for item in self.successful_evidence
+            ],
+            "failed_capabilities": sorted(self.failed_capabilities),
+            "recovered_capabilities": sorted(
+                self.recovered_capabilities
+            ),
+            "correction_recovery_count": self.correction_recovery_count,
+            "alternative_recovery_count": self.alternative_recovery_count,
+            "termination_detail": dict(self.termination_detail),
+            "exhaustion_details": list(self.exhaustion_details),
+            "failure_records": [
+                [*key, detail]
+                for key, detail in self.failure_records.items()
+            ],
+        }
+
+    def restore_state(self, state):
+        """Restore a previously exported execution-gate snapshot."""
+
+        if not isinstance(state, dict):
+            raise CheckpointResumeError(
+                "Resume checkpoint has invalid execution-gate state."
+            )
+        try:
+            self.initial_plan_exists = bool(
+                state.get("initial_plan_exists", False)
+            )
+            self.blocked_tools = set(state.get("blocked_tools") or [])
+            self.blocked_capabilities = set(
+                state.get("blocked_capabilities") or []
+            )
+            self.failure_counts = defaultdict(
+                int,
+                {
+                    tuple(item[:3]): int(item[3])
+                    for item in state.get("failure_counts") or []
+                },
+            )
+            self.capability_failure_counts = defaultdict(
+                int,
+                state.get("capability_failure_counts") or {},
+            )
+            self.capability_correction_counts = defaultdict(
+                int,
+                state.get("capability_correction_counts") or {},
+            )
+            self.success_count = int(state.get("success_count") or 0)
+            self.successful_capabilities = set(
+                state.get("successful_capabilities") or []
+            )
+            self.successful_evidence = [
+                dict(item)
+                for item in state.get("successful_evidence") or []
+            ]
+            self.failed_capabilities = set(
+                state.get("failed_capabilities") or []
+            )
+            self.recovered_capabilities = set(
+                state.get("recovered_capabilities") or []
+            )
+            self.correction_recovery_count = int(
+                state.get("correction_recovery_count") or 0
+            )
+            self.alternative_recovery_count = int(
+                state.get("alternative_recovery_count") or 0
+            )
+            self.termination_detail = dict(
+                state.get("termination_detail") or {}
+            )
+            self.exhaustion_details = list(
+                state.get("exhaustion_details") or []
+            )
+            self.failure_records = {
+                tuple(item[:3]): dict(item[3])
+                for item in state.get("failure_records") or []
+            }
+        except (TypeError, ValueError, IndexError) as exc:
+            raise CheckpointResumeError(
+                "Resume checkpoint has invalid execution-gate state."
+            ) from exc
+
+    def _notify_state_change(self):
+        if self.on_state_change is not None:
+            self.on_state_change(self.export_state())
 
     @property
     def warning_count(self):
@@ -578,12 +789,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         )
         if not is_write:
             return False
-        arguments = (request.tool_call or {}).get("args") or {}
-        has_idempotency_key = bool(
-            isinstance(arguments, dict)
-            and arguments.get("idempotency_key")
-        )
-        return not (metadata.get("idempotent") or has_idempotency_key)
+        return metadata.get("idempotent") is not True
 
     def _failure_budget(self, request, error_type):
         if error_type == "transient" and self._is_non_idempotent_write(
@@ -810,7 +1016,9 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             return self._deny_blocked_call(request)
         result = handler(request)
         self._observe_plan_call(request, result)
-        return self._record_result(request, result)
+        result = self._record_result(request, result)
+        self._notify_state_change()
+        return result
 
     async def awrap_tool_call(self, request, handler):
         """Classify one asynchronous tool result and enforce its budget."""
@@ -822,7 +1030,9 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             return self._deny_blocked_call(request)
         result = await handler(request)
         self._observe_plan_call(request, result)
-        return self._record_result(request, result)
+        result = self._record_result(request, result)
+        self._notify_state_change()
+        return result
 
 
 SCENARIOS = {
@@ -1102,6 +1312,13 @@ class LensDeepAgentRuntime:
 
         started_at = utc_now()
         question = command.get("question", "")
+        run_uuid = str(command.get("run_uuid") or "")
+        resume_state = None
+        if command.get("resume"):
+            resume_state = load_resume_state(
+                run_uuid,
+                self.config.workspace_path,
+            )
         scenario = _scenario_for_task(command.get("task"))
         runtime_mode = runtime_mode_for(command)
         model_ref = command.get("agent_model_ref")
@@ -1176,8 +1393,49 @@ class LensDeepAgentRuntime:
             on_activity=on_activity,
         )
         try:
-            run_uuid = str(command.get("run_uuid") or "")
-            runtime_evidence = {}
+            initial_messages = _build_initial_messages(
+                command.get("history"),
+                question,
+            )
+            history_assistant_turns = sum(
+                1
+                for item in command.get("history") or []
+                if item.get("role") == "assistant"
+            )
+            runtime_evidence = dict(
+                resume_state.runtime_evidence if resume_state else {}
+            )
+            capability_middleware = None
+            checkpoint_ready = resume_state is not None
+            initial_checkpoint_seeded = False
+            resume_from_graph_checkpoint = resume_state is not None
+            if (
+                runtime_mode.execution_gates
+                and resume_state is not None
+                and resume_state.checkpoint_step < 0
+            ):
+                initial_checkpoint_seeded = True
+                resume_from_graph_checkpoint = False
+
+            def persist_execution_state(
+                capability_state=None,
+                guardrail_state=None,
+            ):
+                if not checkpoint_ready:
+                    return
+                if capability_state is None and capability_middleware:
+                    capability_state = capability_middleware.export_state()
+                save_runtime_state(
+                    run_uuid,
+                    self.config.workspace_path,
+                    capability_state=capability_state or {},
+                    runtime_evidence=runtime_evidence,
+                    guardrail_state=(
+                        guardrail_state
+                        if guardrail_state is not None
+                        else model.export_runtime_state()
+                    ),
+                )
             token_budget = _resolve_token_budget(self.config, command)
             token_budget_wrapup_event = (
                 threading.Event() if runtime_mode.execution_gates else None
@@ -1210,7 +1468,15 @@ class LensDeepAgentRuntime:
                     0.8,
                 ),
                 token_budget_wrapup_event=token_budget_wrapup_event,
+                on_runtime_state_change=lambda state: (
+                    persist_execution_state(guardrail_state=state)
+                ),
             )
+            if resume_state is not None:
+                model.restore_runtime_state(
+                    resume_state.messages,
+                    resume_state.guardrail_state,
+                )
             if runtime_mode.general_chat:
                 tools = build_general_chat_tools(
                     command,
@@ -1218,6 +1484,9 @@ class LensDeepAgentRuntime:
                     self.config,
                     emit_event=emit_agent_event,
                     runtime_evidence=runtime_evidence,
+                    on_runtime_evidence=lambda _state: (
+                        persist_execution_state()
+                    ),
                 )
             else:
                 tools = build_agent_tools(
@@ -1251,28 +1520,78 @@ class LensDeepAgentRuntime:
                 )
             )
             tools.extend(registered_mcp_tools)
-            capability_middleware = None
+            if resume_state is not None:
+                _reject_unsafe_resume_tool_replay(
+                    resume_state.messages,
+                    [*tools, *mcp_tools],
+                    resume_state.pending_write_tool_call_ids,
+                )
             evidence_requirement = "none"
             required_capabilities = []
             if runtime_mode.execution_gates:
-                route_decision = _select_general_chat_route(
-                    model,
-                    question,
-                    history=command.get("history"),
-                    history_artifacts=command.get(
-                        "history_artifact_paths"
-                    ),
-                    context_skill_contents=(
-                        resources.context_skill_contents
-                    ),
-                    available_tools=[*tools, *mcp_tools],
-                    has_bound_skills=bool(resources.skill_paths),
+                route_was_resumed = bool(
+                    resume_state is not None
+                    and resume_state.route_decision.get("route")
                 )
+                if route_was_resumed:
+                    route_decision = resume_state.route_decision
+                else:
+                    if resume_state is None and checkpoint_enabled():
+                        try:
+                            get_checkpoint_saver(
+                                self.config.workspace_path
+                            )
+                            save_resume_metadata(
+                                run_uuid,
+                                self.config.workspace_path,
+                                history_assistant_turns=(
+                                    history_assistant_turns
+                                ),
+                            )
+                            save_initial_checkpoint(
+                                run_uuid,
+                                self.config.workspace_path,
+                                initial_messages,
+                            )
+                            checkpoint_ready = True
+                            initial_checkpoint_seeded = True
+                        except Exception:
+                            LOGGER.exception(
+                                "Failed to enable route checkpoint"
+                            )
+                    route_decision = _select_general_chat_route(
+                        model,
+                        question,
+                        history=command.get("history"),
+                        history_artifacts=command.get(
+                            "history_artifact_paths"
+                        ),
+                        context_skill_contents=(
+                            resources.context_skill_contents
+                        ),
+                        available_tools=[*tools, *mcp_tools],
+                        has_bound_skills=bool(resources.skill_paths),
+                    )
+                    if checkpoint_ready:
+                        save_resume_metadata(
+                            run_uuid,
+                            self.config.workspace_path,
+                            route_decision=route_decision,
+                            history_assistant_turns=history_assistant_turns,
+                        )
+                        persist_execution_state()
                 command = {
                     **command,
                     "runtime_route": route_decision["route"],
                 }
-                emit_user_event("route.selected", route_decision)
+                emit_user_event(
+                    (
+                        "route.resumed"
+                        if route_was_resumed
+                        else "route.selected"
+                    ),
+                    route_decision,
+                )
                 evidence_requirement = route_decision[
                     "evidence_requirement"
                 ]
@@ -1321,6 +1640,8 @@ class LensDeepAgentRuntime:
                     }
                 if route_decision["route"] == "direct_answer":
                     emit_user_event("phase.changed", {"phase": "answering"})
+                    if resume_state is not None and emit_output is not None:
+                        emit_output("", reset=True)
                     runtime_mode.emit_model_round(
                         emit_agent_event,
                         "start",
@@ -1334,6 +1655,11 @@ class LensDeepAgentRuntime:
                                 scenario,
                                 command,
                                 resources.context_skill_contents,
+                            ),
+                            messages=(
+                                resume_state.messages
+                                if resume_state is not None
+                                else None
                             ),
                             emit_event=emit_agent_event,
                             emit_output=emit_output,
@@ -1372,7 +1698,12 @@ class LensDeepAgentRuntime:
                     require_initial_plan=(
                         route_decision["route"] == "plan_execute"
                     ),
+                    on_state_change=persist_execution_state,
                 )
+                if resume_state is not None:
+                    capability_middleware.restore_state(
+                        resume_state.capability_state
+                    )
                 phase = (
                     "planning"
                     if route_decision["route"] == "plan_execute"
@@ -1455,6 +1786,40 @@ class LensDeepAgentRuntime:
                     "mcp_config_path": str(resources.mcp_config_path),
                 },
             )
+            checkpoint_thread = thread_config(run_uuid)
+            if checkpoint_enabled():
+                if resume_state is not None:
+                    kwargs["checkpointer"] = get_checkpoint_saver(
+                        self.config.workspace_path
+                    )
+                    checkpoint_ready = True
+                elif checkpoint_ready:
+                    kwargs["checkpointer"] = get_checkpoint_saver(
+                        self.config.workspace_path
+                    )
+                else:
+                    try:
+                        kwargs["checkpointer"] = get_checkpoint_saver(
+                            self.config.workspace_path
+                        )
+                        save_resume_metadata(
+                            run_uuid,
+                            self.config.workspace_path,
+                            route_decision=(
+                                route_decision
+                                if runtime_mode.execution_gates
+                                else {}
+                            ),
+                            history_assistant_turns=(
+                                history_assistant_turns
+                            ),
+                        )
+                        checkpoint_ready = True
+                    except Exception:
+                        kwargs.pop("checkpointer", None)
+                        LOGGER.exception(
+                            "Failed to enable agent run checkpoints"
+                        )
             agent = create_deep_agent(**kwargs)
             max_turns = command.get("max_agent_turns", 26)
             invoke_detail = {"max_agent_turns": max_turns}
@@ -1474,9 +1839,26 @@ class LensDeepAgentRuntime:
                 "deepagents.agent.invoke",
                 invoke_detail,
             )
-            messages = _build_initial_messages(
-                command.get("history"), question
-            )
+            messages = initial_messages
+            turn_baseline_ai = None
+            event_baseline_ai = None
+            if resume_state is not None:
+                if emit_output is not None:
+                    emit_output("", reset=True)
+                messages = list(resume_state.messages)
+                turn_baseline_ai = resume_state.history_assistant_turns
+                event_baseline_ai = sum(
+                    1
+                    for message in resume_state.messages
+                    if getattr(message, "type", "") == "ai"
+                )
+                emit_agent_event(
+                    "deepagents.runtime.resume",
+                    {
+                        "checkpoint_ai_turns": event_baseline_ai,
+                        "history_ai_turns": turn_baseline_ai,
+                    },
+                )
             (
                 answer,
                 truncated,
@@ -1486,6 +1868,10 @@ class LensDeepAgentRuntime:
                 messages,
                 max_turns,
                 model=model,
+                thread=checkpoint_thread,
+                turn_baseline_ai=turn_baseline_ai,
+                event_baseline_ai=event_baseline_ai,
+                resume_from_checkpoint=resume_from_graph_checkpoint,
                 emit_event=emit_agent_event,
                 answer_language=_command_answer_language(command),
                 cancel_event=cancel_event,
@@ -1493,6 +1879,10 @@ class LensDeepAgentRuntime:
                     wrapup_event if runtime_mode.execution_gates else None
                 ),
                 token_budget_wrapup_event=token_budget_wrapup_event,
+                on_checkpoint_state=(
+                    persist_execution_state if checkpoint_ready else None
+                ),
+                input_checkpoint_seeded=initial_checkpoint_seeded,
             )
             if truncated:
                 emit_agent_event(
@@ -1557,7 +1947,8 @@ class LensDeepAgentRuntime:
                 "termination_detail": termination_detail,
             }
         finally:
-            cleanup_runtime_resources(resources)
+            if cancel_event is None or not cancel_event.is_set():
+                cleanup_runtime_resources(resources)
 
 
 def _resolve_token_budget(config, command):
@@ -2300,6 +2691,7 @@ def _answer_general_chat_directly(
     model,
     command,
     system_prompt,
+    messages=None,
     emit_event=None,
     emit_output=None,
 ):
@@ -2314,9 +2706,13 @@ def _answer_general_chat_directly(
     )
     messages = [
         SystemMessage(content=direct_prompt),
-        *_build_initial_messages(
-            command.get("history"),
-            command.get("question", ""),
+        *(
+            list(messages)
+            if messages is not None
+            else _build_initial_messages(
+                command.get("history"),
+                command.get("question", ""),
+            )
         ),
     ]
     response = model.invoke(messages, runtime_control_call=True)
@@ -2812,17 +3208,27 @@ def _run_agent_with_turn_limit(
     messages,
     max_turns,
     model=None,
+    thread=None,
+    turn_baseline_ai=None,
+    event_baseline_ai=None,
+    resume_from_checkpoint=False,
     emit_event=None,
     answer_language="English",
     cancel_event=None,
     wrapup_event=None,
     token_budget_wrapup_event=None,
+    on_checkpoint_state=None,
+    input_checkpoint_seeded=False,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
     `messages` may be prefixed with prior conversation turns. Historical
     assistant turns are excluded from both the turn count and event
     emission, so the limit and trace reflect only the current run.
+
+    On resume, ``turn_baseline_ai`` remains the original history count so
+    turns already consumed by this Run still count. ``event_baseline_ai``
+    suppresses re-emitting model events already present in the checkpoint.
 
     A subagent ``task`` delegation runs to completion inside a single
     parent-graph step (deepagents calls it via a plain, synchronous
@@ -2838,40 +3244,68 @@ def _run_agent_with_turn_limit(
     preserves the gate that requested wrap-up.
     """
 
-    last_state = None
+    last_state = {"messages": messages} if resume_from_checkpoint else None
     truncated = False
     truncation_reason = None
     seen_tool_calls = set()
     seen_model_calls = set()
     plan_state = {"revision": 0}
-    baseline_ai = sum(1 for m in messages if m.get("role") == "assistant")
+    baseline_ai = (
+        turn_baseline_ai
+        if turn_baseline_ai is not None
+        else sum(1 for m in messages if m.get("role") == "assistant")
+    )
+    emitted_baseline_ai = (
+        event_baseline_ai
+        if event_baseline_ai is not None
+        else baseline_ai
+    )
     seeded_baseline = False
 
+    if resume_from_checkpoint:
+        graph_input = None
+    elif input_checkpoint_seeded:
+        graph_input = {"messages": []}
+    else:
+        graph_input = {"messages": messages}
     for state in agent.stream(
-        {"messages": messages},
+        graph_input,
         stream_mode="values",
-        config={"recursion_limit": 500},
+        config={
+            "recursion_limit": 500,
+            **(thread or {}),
+        },
     ):
         if cancel_event is not None and cancel_event.is_set():
             raise RunCancelledError(
                 "Run was cancelled; stopping the agent loop."
             )
         last_state = state
+        if on_checkpoint_state is not None:
+            on_checkpoint_state()
         current = state.get("messages", [])
         if not seeded_baseline:
             # Seed the historical assistant turns by their (now-assigned)
-            # message id so they are never emitted or counted as new turns.
-            # Dedup keys on message id, so an integer preseed would never
-            # match and would re-emit the carried-over history.
+            # message and tool-call ids so they are never emitted or counted
+            # as new turns. Reusing the tool event reducer also restores its
+            # plan revision/state without publishing the old events again.
+            baseline_messages = []
             ai_count = 0
             for message in current:
                 if getattr(message, "type", "") != "ai":
                     continue
                 ai_count += 1
-                if ai_count <= baseline_ai:
+                if ai_count <= emitted_baseline_ai:
+                    baseline_messages.append(message)
                     seen_model_calls.add(
                         getattr(message, "id", None) or id(message)
                     )
+            _emit_new_tool_calls(
+                baseline_messages,
+                seen_tool_calls,
+                lambda _name, _detail: None,
+                plan_state=plan_state,
+            )
             seeded_baseline = True
         if emit_event is not None:
             _emit_new_model_calls(current, seen_model_calls, emit_event)

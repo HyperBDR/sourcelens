@@ -5,6 +5,7 @@ import tempfile
 import threading
 import uuid
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
@@ -3011,6 +3012,10 @@ class LensApiTests(TestCase):
         self.assertEqual(run_response.status_code, 201)
         self.assertEqual(run_response.data["status"], "queued")
         self.assertIsNotNone(run_response.data["created_at"])
+        Run.objects.filter(uuid=run_response.data["uuid"]).update(
+            status=Run.Status.RUNNING,
+            resume_by=timezone.now() + timedelta(hours=1),
+        )
 
         cancel_response = self.client.post(
             f"/api/lens/runs/{run_response.data['uuid']}/cancel/"
@@ -3018,6 +3023,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(cancel_response.status_code, 200)
         self.assertEqual(cancel_response.data["status"], "cancelled")
+        self.assertIsNone(cancel_response.data["resume_by"])
         self.assertEqual(
             cancel_response.data["execution"]["status"],
             RunExecution.Status.CANCELLED,

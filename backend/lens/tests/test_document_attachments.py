@@ -1117,6 +1117,31 @@ class DocumentAttachmentTests(TestCase):
         self.assertEqual(response.data["detail"], "ATTACHMENT_IN_USE")
         self.assertIsNotNone(get_document_attachment(metadata["uuid"]))
 
+    def test_owner_cannot_delete_document_bound_to_awaiting_run(self):
+        metadata = store_document_attachment(
+            self.session,
+            self.user,
+            _pdf_upload(),
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze it",
+            enqueue=False,
+            attachment_uuids=[metadata["uuid"]],
+        )
+        run.status = Run.Status.RUNNING
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["status", "resume_by"])
+        self.client.force_authenticate(self.user)
+
+        response = self.client.delete(
+            f"/api/lens/attachments/{metadata['uuid']}/"
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["detail"], "ATTACHMENT_IN_USE")
+        self.assertIsNotNone(get_document_attachment(metadata["uuid"]))
+
     def test_owner_can_delete_document_after_run_finishes(self):
         metadata = store_document_attachment(
             self.session,

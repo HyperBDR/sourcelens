@@ -15,6 +15,7 @@ from lensnode.agent_runtime import (
 )
 from lensnode.gateway_model import RunCancelledError
 from lensnode.runtime_resources import (
+    cleanup_run_runtime_resources,
     cleanup_runtime_resources,
     cleanup_stale_runtime_resources,
     prepare_runtime_resources,
@@ -357,6 +358,44 @@ def test_cleanup_stale_runtime_resources_keeps_recent_runs(tmp_path):
     assert removed == 1
     assert not stale.exists()
     assert recent.exists()
+
+
+def test_cleanup_run_runtime_resources_rejects_parent_traversal(tmp_path):
+    runs_root = tmp_path / ".sourcelens" / "runtime" / "runs"
+    victim = tmp_path / ".sourcelens" / "victim"
+    victim.mkdir(parents=True)
+    (victim / "keep.txt").write_text("keep", encoding="utf-8")
+    runs_root.mkdir(parents=True)
+
+    removed = cleanup_run_runtime_resources(
+        tmp_path,
+        "../../../victim",
+    )
+
+    assert removed is False
+    assert (victim / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_prepare_runtime_resources_rejects_parent_traversal(tmp_path):
+    command = _command(b"content")
+    command["run_uuid"] = "../../../victim"
+
+    with pytest.raises(ValueError, match="Invalid Run identifier"):
+        prepare_runtime_resources(_config(tmp_path), command)
+
+
+def test_cleanup_run_runtime_resources_removes_safe_run_directory(tmp_path):
+    run_uuid = "00000000-0000-0000-0000-000000000013"
+    run_root = (
+        tmp_path / ".sourcelens" / "runtime" / "runs" / run_uuid
+    )
+    run_root.mkdir(parents=True)
+    (run_root / "temporary.txt").write_text("remove", encoding="utf-8")
+
+    removed = cleanup_run_runtime_resources(tmp_path, run_uuid)
+
+    assert removed is True
+    assert not run_root.exists()
 
 
 def test_knowledge_prompt_separates_subject_from_reference_material():

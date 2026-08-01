@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import queue
+import re
 import shutil
 import stat
 import tempfile
@@ -29,6 +30,7 @@ MAX_FILENAME_COMPONENT_BYTES = 255
 STALE_RUNTIME_MAX_AGE_S = 24 * 60 * 60
 RUNTIME_ACTIVITY_INTERVAL_S = 15
 RUNTIME_CONVERSION_POLL_S = 0.25
+RUN_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 @dataclass(frozen=True)
@@ -58,7 +60,7 @@ def prepare_runtime_resources(
     workspace = Path(config.workspace_path)
     base = workspace / ".sourcelens"
     cache_root = base / "cache"
-    runtime_root = base / "runtime" / "runs" / command["run_uuid"]
+    runtime_root = _run_runtime_path(workspace, command["run_uuid"])
     skills_root = runtime_root / "skills"
     mcp_root = runtime_root / "mcp"
 
@@ -552,6 +554,45 @@ def cleanup_runtime_resources(resources):
     """Remove per-run runtime resources but keep shared cache."""
 
     shutil.rmtree(resources.root, ignore_errors=True)
+
+
+def cleanup_run_runtime_resources(workspace_path, run_uuid):
+    """Remove one Run's deterministic runtime directory."""
+
+    if not workspace_path or not run_uuid:
+        return False
+    try:
+        runtime_root = _run_runtime_path(workspace_path, run_uuid)
+    except (OSError, ValueError):
+        return False
+    shutil.rmtree(runtime_root, ignore_errors=True)
+    return not runtime_root.exists()
+
+
+def _run_runtime_path(workspace_path, run_uuid):
+    """Return a contained runtime path for one validated Run identifier."""
+
+    identifier = str(run_uuid).strip()
+    if not RUN_IDENTIFIER_PATTERN.fullmatch(identifier):
+        raise ValueError("Invalid Run identifier")
+
+    workspace_root = Path(workspace_path).resolve()
+    runs_root = workspace_root / ".sourcelens" / "runtime" / "runs"
+    resolved_runs_root = runs_root.resolve()
+    try:
+        resolved_runs_root.relative_to(workspace_root)
+    except ValueError as exc:
+        raise ValueError("Runtime root escapes workspace") from exc
+
+    runtime_root = runs_root / identifier
+    if runtime_root.is_symlink():
+        raise ValueError("Run runtime path cannot be a symlink")
+    resolved_runtime_root = runtime_root.resolve()
+    try:
+        resolved_runtime_root.relative_to(resolved_runs_root)
+    except ValueError as exc:
+        raise ValueError("Run runtime path escapes runtime root") from exc
+    return resolved_runtime_root
 
 
 def cleanup_stale_runtime_resources(

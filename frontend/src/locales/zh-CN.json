@@ -276,6 +276,7 @@
       "queued": "排队中，请稍候",
       "queuedNext": "即将为您处理",
       "queuedPosition": "您前面还有 {position} 人在排队",
+      "awaitingResume": "节点中断，等待恢复运行…",
       "running": "正在分析",
       "generating": "正在生成",
       "agentActivity": "Agent 活动",
