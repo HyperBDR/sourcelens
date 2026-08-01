@@ -849,7 +849,7 @@
                     v-if="canRetryLastQuestion()"
                     type="button"
                     class="retry-hint-btn"
-                    @click="retryLastQuestion"
+                    @click="retryLastQuestion()"
                   >
                     {{ t('lens.chat.retryAction') }}
                   </button>
