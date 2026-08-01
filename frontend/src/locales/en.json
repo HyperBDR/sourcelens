@@ -285,6 +285,7 @@
         "planProgress": "Completed {completed}/{total}",
         "planProgressCurrent": "Completed {completed}/{total} · Current: {currentTitle}",
         "planCompleted": "Completed {completed}/{total}",
+        "planCompletedAnswering": "Plan completed {completed}/{total} · Generating final answer…",
         "planEnded": "Ended {completed}/{total}",
         "stageProgress": "Completed {completed}/{total}",
         "stageProgressCurrent": "Completed {completed}/{total} · Current: {currentTitle}",

@@ -292,6 +292,19 @@ test('shows real plan completion before lower-level execution details', () => {
   )
 })
 
+test('shows final answer synthesis after all plan steps complete', () => {
+  assert.equal(
+    selectLiveProgressText({
+      finalAnswerProgressText: 'Plan completed 4/4 · Generating final answer…',
+      structuredProgressText: 'Completed 4/4',
+      planProgressText: 'Completed 4/4',
+      phaseText: 'Preparing the answer',
+      fallbackText: 'Generating'
+    }),
+    'Plan completed 4/4 · Generating final answer…'
+  )
+})
+
 test('keeps the legacy stage status for non-General Chat modes', () => {
   assert.equal(
     selectLiveProgressText({

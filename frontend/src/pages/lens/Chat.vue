@@ -1076,15 +1076,7 @@
                     </div>
                   </div>
                   <div class="runtime-progress-footer">
-                    <span>
-                      {{
-                        ['workflow', 'activity'].includes(
-                          liveStructuredProgress.kind
-                        )
-                          ? structuredProgressText(runtimeState)
-                          : liveProgressText
-                      }}
-                    </span>
+                    <span>{{ liveProgressText }}</span>
                     <span v-if="elapsedText"> · {{ elapsedText }}</span>
                   </div>
                 </div>
@@ -1984,16 +1976,40 @@ watch(
   }
 )
 
+const livePlanProgress = computed(() =>
+  summarizePlanProgress(runtimeState.value.plan)
+)
+
 const livePlanProgressText = computed(() =>
   planProgressText(runtimeState.value.plan)
 )
+
+const liveFinalAnswerProgressText = computed(() => {
+  const progress = livePlanProgress.value
+  if (
+    !isRunActive.value ||
+    !progress?.isComplete ||
+    runtimeState.value.phase !== 'answering'
+  ) {
+    return ''
+  }
+  return t('lens.chat.runtime.planCompletedAnswering', progress)
+})
 
 const liveStageProgressText = computed(() =>
   stageProgressText(runtimeState.value.stages)
 )
 
+const liveStructuredProgressText = computed(() =>
+  ['workflow', 'activity'].includes(liveStructuredProgress.value.kind)
+    ? structuredProgressText(runtimeState.value)
+    : ''
+)
+
 const liveProgressText = computed(() =>
   selectLiveProgressText({
+    finalAnswerProgressText: liveFinalAnswerProgressText.value,
+    structuredProgressText: liveStructuredProgressText.value,
     planProgressText: livePlanProgressText.value,
     stageProgressText: runtimeState.value.route
       ? ''

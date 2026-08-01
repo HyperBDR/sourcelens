@@ -515,6 +515,8 @@ export function summarizeStageProgress(stages, { terminal = false } = {}) {
 }
 
 export function selectLiveProgressText({
+  finalAnswerProgressText,
+  structuredProgressText,
   planProgressText,
   stageProgressText,
   latestStep,
@@ -523,6 +525,8 @@ export function selectLiveProgressText({
   fallbackText
 }) {
   return (
+    finalAnswerProgressText ||
+    structuredProgressText ||
     planProgressText ||
     stageProgressText ||
     phaseText ||

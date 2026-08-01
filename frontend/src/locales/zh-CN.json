@@ -285,6 +285,7 @@
         "planProgress": "已完成 {completed}/{total}",
         "planProgressCurrent": "已完成 {completed}/{total} · 当前：{currentTitle}",
         "planCompleted": "已完成 {completed}/{total}",
+        "planCompletedAnswering": "计划已完成 {completed}/{total} · 正在生成最终回答……",
         "planEnded": "已结束 {completed}/{total}",
         "stageProgress": "已完成 {completed}/{total}",
         "stageProgressCurrent": "已完成 {completed}/{total} · 当前：{currentTitle}",
