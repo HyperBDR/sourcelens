@@ -1212,6 +1212,27 @@ def cancel_datasource_sync_on_lensnode(lensnode, task_id):
     return None
 
 
+def cancel_datasource_conversion_on_lensnode(lensnode, task_id):
+    """Request safe cancellation of a managed workspace conversion."""
+
+    if lensnode is None or not task_id:
+        return None
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return None
+    async_to_sync(channel_layer.group_send)(
+        lensnode_group_name(lensnode.uuid),
+        {
+            "type": "lensnode.command",
+            "payload": {
+                "type": "datasource_convert_cancel",
+                "task_id": str(task_id),
+            },
+        },
+    )
+    return None
+
+
 RUN_ACTIVITY_THROTTLE_SECONDS = 15
 
 

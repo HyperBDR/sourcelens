@@ -115,7 +115,8 @@ class MarkItDownDocumentConverter(BaseConverter):
         result = MarkItDown().convert(str(path))
         _check_runtime_cancelled(context)
         _touch_runtime_activity(context)
-        text = getattr(result, "text_content", "") or str(result)
+        text_content = getattr(result, "text_content", None)
+        text = str(result) if text_content is None else text_content
         stats = document_stats(path)
         cost = empty_cost_stats()
         image_context = document_image_context(context, path, text)
@@ -126,6 +127,13 @@ class MarkItDownDocumentConverter(BaseConverter):
             text = f"{text.rstrip()}\n\n{embedded['markdown']}"
         stats.update(embedded["stats"])
         merge_cost_stats(cost, embedded["cost"])
+        if not text.strip():
+            return ConversionOutput(
+                skipped=True,
+                reason="NO_EXTRACTABLE_TEXT",
+                stats=stats,
+                cost=cost,
+            )
         return ConversionOutput(text=text, stats=stats, cost=cost)
 
     def version(self):
@@ -439,12 +447,27 @@ def post_process_documents(context, sync_result, emit=None):
                 merge_summary_stats(summary, result.get("stats") or {})
                 merge_cost_stats(summary["cost"], result.get("cost") or {})
         except Exception as exc:
+            from .gateway_model import RunCancelledError
+
+            if isinstance(exc, RunCancelledError):
+                raise
             current_status = "failed"
-            current_reason = str(exc)
+            current_reason = conversion_error_reason(exc)
             summary["failed"] += 1
             warnings.append("CONVERSION_FILE_FAILED")
-            write_failed_meta(target, path, item, context, str(exc))
-            append_conversion_detail(summary, item, "failed", str(exc))
+            write_failed_meta(
+                target,
+                path,
+                item,
+                context,
+                current_reason,
+            )
+            append_conversion_detail(
+                summary,
+                item,
+                "failed",
+                current_reason,
+            )
         emit_conversion(
             emit,
             "conversion_progress",
@@ -472,6 +495,17 @@ def post_process_documents(context, sync_result, emit=None):
         current=total,
     )
     return summary
+
+
+def conversion_error_reason(exc):
+    """Return a safe machine-readable reason for conversion failures."""
+
+    message = str(exc or "").upper()
+    if "PASSWORD" in message or "ENCRYPT" in message:
+        return "PASSWORD_PROTECTED"
+    if "EMPTY" in message or "NO EXTRACTABLE" in message:
+        return "NO_EXTRACTABLE_TEXT"
+    return "CONVERSION_FILE_FAILED"
 
 
 def append_conversion_detail(summary, item, status, reason="", stats=None):
@@ -719,6 +753,20 @@ def convert_one(target, path, item, context):
     if size > limits["max_file_size"]:
         write_skipped_meta(target, path, item, context, "FILE_TOO_LARGE")
         return {"skipped": True, "reason": "FILE_TOO_LARGE"}
+    page_count = pdf_page_count(path)
+    if page_count > limits["max_pages"]:
+        write_skipped_meta(
+            target,
+            path,
+            item,
+            context,
+            "PAGE_LIMIT_EXCEEDED",
+        )
+        return {
+            "skipped": True,
+            "reason": "PAGE_LIMIT_EXCEEDED",
+            "stats": {"pdf_pages": page_count},
+        }
 
     digest = source_sha256(path)
     fingerprint = conversion_fingerprint(path, digest, context)
@@ -726,7 +774,8 @@ def convert_one(target, path, item, context):
     content_path = sidecar_path(path) / "content.md"
     meta = read_json(meta_path)
     if (
-        meta.get("conversion", {}).get("fingerprint") == fingerprint
+        not context.get("force")
+        and meta.get("conversion", {}).get("fingerprint") == fingerprint
         and meta.get("conversion", {}).get("status") == "success"
         and content_path.is_file()
     ):
@@ -810,6 +859,25 @@ def document_stats(path):
     if suffix == ".xlsx":
         return xlsx_stats(path)
     return {"pages": 0}
+
+
+def pdf_page_count(path):
+    """Return a PDF page count when it can be inspected safely."""
+
+    if Path(path).suffix.lower() != ".pdf":
+        return 0
+    try:
+        import fitz
+
+        document = fitz.open(path)
+        try:
+            if document.needs_pass:
+                return 0
+            return int(document.page_count or 0)
+        finally:
+            document.close()
+    except Exception:
+        return 0
 
 
 def xlsx_stats(path):
@@ -950,6 +1018,13 @@ def conversion_fingerprint(path, digest, context):
             "image": bool(conversion.get("image")),
             "embedded_image": bool(conversion.get("embedded_image")),
             "document_model_ref": conversion.get("document_model_ref") or "",
+            "max_file_size_mb": int(
+                conversion.get("max_file_size_mb") or DEFAULT_MAX_FILE_SIZE_MB
+            ),
+            "max_images": int(
+                conversion.get("max_images") or DEFAULT_MAX_IMAGES
+            ),
+            "max_pages": int(conversion.get("max_pages") or DEFAULT_MAX_PAGES),
             "image_jpeg_quality": int(
                 conversion.get("image_jpeg_quality")
                 or DEFAULT_IMAGE_JPEG_QUALITY

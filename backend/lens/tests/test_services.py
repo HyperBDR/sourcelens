@@ -22,6 +22,7 @@ from core.periodic_registry import TASK_REGISTRY
 from lens.consumers import LensNodeConsumer
 from lens.datasource_services import (
     DataSourceDispatchError,
+    dispatch_datasource_conversion_async,
     dispatch_datasource_sync_async,
 )
 from lens.execution import execute_answer_run
@@ -64,9 +65,12 @@ from lens.services import (
 from lens.tasks import (
     acquire_datasource_lock,
     cleanup_stale_datasource_sync_tasks,
+    complete_datasource_conversion_task,
     complete_datasource_sync_task,
+    datasource_conversion_task,
     datasource_lock,
     lensnode_health_task,
+    register_datasource_conversion_task,
     register_datasource_sync_task,
     release_datasource_lock,
     source_sync_task,
@@ -1794,6 +1798,32 @@ class LensServiceTests(TransactionTestCase):
         )
         await communicator.disconnect()
 
+    async def _exercise_lensnode_conversion_done(self, token, task_id):
+        """Send a managed conversion completion frame over the node socket."""
+
+        communicator = WebsocketCommunicator(
+            application,
+            f"/ws/lens/lensnodes/?token={token}",
+        )
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        await communicator.receive_json_from()
+        await communicator.send_json_to(
+            {
+                "type": "datasource_convert_done",
+                "task_id": task_id,
+                "status": "success",
+                "conversion_summary": {
+                    "total": 1,
+                    "success": 1,
+                    "failed": 0,
+                    "skipped": 0,
+                    "unsupported": 0,
+                },
+            }
+        )
+        await communicator.disconnect()
+
     def test_source_sync_task_dispatches_without_waiting_for_result(self):
         with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
             dispatch.return_value = "request-1"
@@ -1871,6 +1901,317 @@ class LensServiceTests(TransactionTestCase):
                 datasource,
                 task_id="managed-sync",
             )
+
+    def test_managed_workspace_conversion_dispatches_without_sync_adapter(
+        self,
+    ):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+
+        with patch("lens.datasource_services._send_lensnode_command") as send:
+            request_id = dispatch_datasource_conversion_async(
+                datasource,
+                task_id="managed-conversion",
+                conversion={"document": True},
+                force=True,
+            )
+
+        self.assertTrue(request_id)
+        payload = send.call_args.args[1]
+        self.assertEqual(payload["type"], "datasource_convert")
+        self.assertEqual(payload["source_type"], "managed_workspace")
+        self.assertEqual(payload["conversion"], {"document": True})
+        self.assertTrue(payload["force"])
+        self.assertNotIn("config", payload)
+        self.assertNotIn("sync_policy", payload)
+
+    def test_managed_workspace_conversion_task_is_callback_completed(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        register_datasource_conversion_task(
+            datasource,
+            "managed-conversion",
+            {"document": True},
+            created_by=self.user,
+        )
+
+        with patch(
+            "lens.tasks.dispatch_datasource_conversion_async"
+        ) as dispatch:
+            dispatch.return_value = "conversion-request"
+            result = datasource_conversion_task(
+                str(datasource.uuid),
+                {"document": True},
+                False,
+                "managed-conversion",
+            )
+
+        self.assertEqual(result, 0)
+        task = TaskExecution.objects.get(task_id="managed-conversion")
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "STARTED")
+        self.assertEqual(
+            task.metadata["datasource_conversion_request_id"],
+            "conversion-request",
+        )
+        self.assertEqual(datasource.last_conversion_status, "STARTED")
+
+    def test_complete_managed_workspace_conversion_persists_summary(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        register_datasource_conversion_task(
+            datasource,
+            "managed-conversion",
+            {"document": True},
+        )
+
+        complete_datasource_conversion_task(
+            "managed-conversion",
+            {
+                "status": "success",
+                "conversion_summary": {
+                    "total": 3,
+                    "success": 1,
+                    "failed": 1,
+                    "skipped": 1,
+                    "unsupported": 0,
+                    "items": [
+                        {
+                            "path": "report.docx",
+                            "status": "converted",
+                            "reason": "",
+                        }
+                    ],
+                },
+            },
+        )
+
+        task = TaskExecution.objects.get(task_id="managed-conversion")
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "SUCCESS")
+        self.assertEqual(task.result["overall_status"], "succeeded")
+        self.assertEqual(task.result["conversion_summary"]["failed"], 1)
+        self.assertEqual(datasource.last_conversion_status, "SUCCESS")
+        self.assertIsNotNone(datasource.last_conversion_at)
+
+    def test_lensnode_conversion_done_frame_completes_task(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        task = register_datasource_conversion_task(
+            datasource,
+            "conversion-frame",
+            {"document": True},
+        )
+        token = issue_lensnode_token(self.lensnode)
+
+        async_to_sync(self._exercise_lensnode_conversion_done)(
+            token,
+            task.task_id,
+        )
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "SUCCESS")
+        self.assertEqual(task.result["overall_status"], "succeeded")
+        self.assertEqual(task.result["conversion_summary"]["success"], 1)
+
+    def test_late_conversion_callback_does_not_override_cancellation(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+            last_conversion_status="REVOKED",
+            last_conversion_at=timezone.now(),
+        )
+        task = register_datasource_conversion_task(
+            datasource,
+            "cancelled-conversion",
+            {"document": True},
+        )
+        task.status = "REVOKED"
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "finished_at"])
+
+        complete_datasource_conversion_task(
+            task.task_id,
+            {
+                "status": "success",
+                "conversion_summary": {"success": 1},
+            },
+        )
+
+        task.refresh_from_db()
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "REVOKED")
+        self.assertEqual(datasource.last_conversion_status, "REVOKED")
+        self.assertEqual(
+            task.metadata["conversion_summary"]["success"],
+            1,
+        )
+
+    def test_revoked_conversion_is_not_dispatched_when_celery_starts_late(
+        self,
+    ):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+            last_conversion_status="REVOKED",
+            last_conversion_at=timezone.now(),
+        )
+        task = register_datasource_conversion_task(
+            datasource,
+            "revoked-conversion",
+            {"document": True},
+        )
+        task.status = "REVOKED"
+        task.finished_at = timezone.now()
+        task.save(update_fields=["status", "finished_at"])
+
+        with patch(
+            "lens.tasks.dispatch_datasource_conversion_async"
+        ) as dispatch:
+            result = datasource_conversion_task(
+                str(datasource.uuid),
+                {"document": True},
+                False,
+                task.task_id,
+            )
+
+        self.assertEqual(result, 0)
+        dispatch.assert_not_called()
+        task.refresh_from_db()
+        self.assertEqual(task.status, "REVOKED")
+
+    def test_conversion_cancelled_during_dispatch_stays_revoked(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        task = register_datasource_conversion_task(
+            datasource,
+            "cancelled-during-dispatch",
+            {"document": True},
+        )
+
+        def dispatch(*args, **kwargs):
+            del args, kwargs
+            execution = TaskExecution.objects.get(task_id=task.task_id)
+            execution.status = "REVOKED"
+            execution.finished_at = timezone.now()
+            execution.save(update_fields=["status", "finished_at"])
+            return "late-conversion-request"
+
+        with (
+            patch(
+                "lens.tasks.dispatch_datasource_conversion_async",
+                side_effect=dispatch,
+            ),
+            patch(
+                "lens.services."
+                "cancel_datasource_conversion_on_lensnode"
+            ) as cancel,
+        ):
+            datasource_conversion_task(
+                str(datasource.uuid),
+                {"document": True},
+                False,
+                task.task_id,
+            )
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, "REVOKED")
+        cancel.assert_called_once_with(self.lensnode, task.task_id)
+
+    def test_conversion_callback_maps_safe_cancellation_to_revoked(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        register_datasource_conversion_task(
+            datasource,
+            "cancelled-by-node",
+            {"document": True},
+        )
+
+        complete_datasource_conversion_task(
+            "cancelled-by-node",
+            {
+                "status": "cancelled",
+                "error": "DATASOURCE_CONVERSION_CANCELLED",
+            },
+        )
+
+        task = TaskExecution.objects.get(task_id="cancelled-by-node")
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "REVOKED")
+        self.assertEqual(task.result["overall_status"], "cancelled")
+        self.assertEqual(datasource.last_conversion_status, "REVOKED")
+
+    def test_conversion_progress_persists_lifecycle_counts(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        register_datasource_conversion_task(
+            datasource,
+            "live-managed-conversion",
+            {"document": True},
+        )
+
+        LensNodeConsumer._record_datasource_sync_event(
+            "live-managed-conversion",
+            {
+                "step": "conversion_progress",
+                "status": "running",
+                "category": "conversion",
+                "message": "Converted 1/3 datasource files.",
+                "progress_total": 3,
+                "progress_current": 1,
+                "progress_percent": 33,
+                "summary": {
+                    "total": 3,
+                    "waiting": 1,
+                    "active": 1,
+                    "succeeded": 1,
+                    "failed": 0,
+                    "skipped": 0,
+                    "unsupported": 0,
+                },
+                "current_file": "report.docx",
+                "current_status": "converted",
+            },
+        )
+
+        task = TaskExecution.objects.get(task_id="live-managed-conversion")
+        summary = task.metadata["conversion_summary"]
+        self.assertEqual(task.metadata["progress_percent"], 33)
+        self.assertEqual(summary["waiting"], 1)
+        self.assertEqual(summary["active"], 1)
+        self.assertEqual(summary["succeeded"], 1)
 
     def test_source_sync_task_reuses_registered_task_id(self):
         task_id = "manual-sync"
@@ -2282,6 +2623,65 @@ class LensServiceTests(TransactionTestCase):
             ttl_s=60,
         )
         release_datasource_lock(self.datasource.uuid, token="new-sync")
+
+    def test_cleanup_stale_datasource_conversion_releases_lock(self):
+        GlobalSetting.objects.create(
+            key="lens.datasource_sync.timeout_s",
+            value="1",
+        )
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+            last_conversion_status="STARTED",
+        )
+        task = TaskExecution.objects.create(
+            task_id="stale-conversion",
+            task_name="datasource_convert:Managed Snapshot",
+            module="lens_datasource_conversion",
+            status="STARTED",
+            started_at=timezone.now() - timedelta(seconds=2),
+            metadata={
+                "datasource_uuid": str(datasource.uuid),
+                "lock_token": "stale-conversion",
+            },
+        )
+        acquire_datasource_lock(
+            datasource.uuid,
+            token="stale-conversion",
+            ttl_s=60,
+        )
+
+        with patch(
+            "lens.services.cancel_datasource_conversion_on_lensnode"
+        ) as cancel:
+            result = cleanup_stale_datasource_sync_tasks()
+
+        task.refresh_from_db()
+        datasource.refresh_from_db()
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(task.status, "FAILURE")
+        self.assertEqual(task.error, "DATASOURCE_CONVERSION_TIMEOUT")
+        self.assertEqual(datasource.last_conversion_status, "FAILURE")
+        self.assertIsNotNone(datasource.last_conversion_at)
+        cancel.assert_called_once_with(self.lensnode, "stale-conversion")
+        self.assertFalse(
+            ScheduledTask.objects.filter(
+                target_type="datasource",
+                target_id=datasource.uuid,
+            ).exists()
+        )
+
+        acquire_datasource_lock(
+            datasource.uuid,
+            token="new-conversion",
+            ttl_s=60,
+        )
+        release_datasource_lock(
+            datasource.uuid,
+            token="new-conversion",
+        )
 
     def test_startup_cleanup_keeps_fresh_datasource_sync_running(self):
         GlobalSetting.objects.create(

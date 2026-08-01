@@ -1,10 +1,13 @@
 import asyncio
 import json
 import subprocess
+import threading
+import time
 
 from lensnode.agent_tools import _skill_script_environment, build_agent_tools
 from lensnode.agent_runtime import _system_prompt
 from lensnode.executor import LensNodeExecutor
+from lensnode.gateway_model import RunCancelledError
 from lensnode.main import LensNodeClient
 from lensnode.runtime_resources import cleanup_runtime_resources
 from lensnode.runtime_resources import prepare_runtime_resources
@@ -671,5 +674,80 @@ def test_lensnode_run_cancel_cancels_running_task():
 
         await asyncio.wait_for(executor.cancelled.wait(), timeout=1)
         assert run_uuid not in client.running_tasks
+
+    asyncio.run(exercise())
+
+
+def test_lensnode_datasource_conversion_reports_safe_cancellation(
+    monkeypatch,
+):
+    """Managed conversion cancellation stops at a cooperative boundary."""
+
+    started = threading.Event()
+
+    def convert_managed_workspace(command, workspace_path, emit):
+        del workspace_path, emit
+        started.set()
+        while not command["cancel_event"].is_set():
+            time.sleep(0.01)
+        raise RunCancelledError("cancelled")
+
+    monkeypatch.setattr(
+        "lensnode.main.convert_managed_workspace",
+        convert_managed_workspace,
+    )
+
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "max_concurrent_runs": 1,
+                "workspace_path": "/workspace",
+                "ai_gateway_url": "http://gateway",
+                "token": "node-token",
+            },
+        )()
+        client = LensNodeClient(config)
+        task_id = "conversion-task"
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "datasource_convert",
+                    "request_id": "conversion-request",
+                    "task_id": task_id,
+                    "source_type": "managed_workspace",
+                    "target_path": "/workspace/documents",
+                    "conversion": {"document": True},
+                }
+            )
+        )
+        await asyncio.wait_for(
+            asyncio.to_thread(started.wait),
+            timeout=1,
+        )
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "datasource_convert_cancel",
+                    "task_id": task_id,
+                }
+            )
+        )
+        task = client.running_tasks[f"datasource-convert:{task_id}"]
+        await asyncio.wait_for(task, timeout=1)
+
+        done = [
+            item
+            for item in client._outbox
+            if item.get("type") == "datasource_convert_done"
+        ]
+        assert done[-1]["status"] == "cancelled"
+        assert done[-1]["error"] == "DATASOURCE_CONVERSION_CANCELLED"
+        assert f"datasource-convert:{task_id}" not in client.running_tasks
 
     asyncio.run(exercise())

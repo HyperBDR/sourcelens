@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import signal
+import threading
 from urllib.parse import urlencode
 
 import httpx
@@ -11,9 +12,11 @@ from websockets.asyncio.client import connect
 
 from .config import load_config
 from .datasource_sync import DataSourceSyncError
+from .datasource_sync import convert_managed_workspace
 from .datasource_sync import inspect_datasource_path, sync_datasource
 from .datasource_sync import test_datasource_connection
 from .executor import TASKS, LensNodeExecutor
+from .gateway_model import RunCancelledError
 from .logging_utils import (
     elapsed_since,
     format_duration,
@@ -63,6 +66,7 @@ class LensNodeClient:
         self.heartbeat_count = 0
         self.last_report_signature = None
         self.running_tasks = {}
+        self.datasource_conversion_cancels = {}
         # Durable outbound buffer, persistent across reconnects. A run started
         # on one connection keeps executing across a blue/green API recycle and
         # emits run_event/run_output/run_done frames while the socket is down;
@@ -361,6 +365,21 @@ class LensNodeClient:
             await self._handle_datasource_test_connection(message)
         elif message_type == "datasource_sync":
             await self._start_datasource_sync(message)
+        elif message_type == "datasource_convert":
+            await self._start_datasource_conversion(message)
+        elif message_type == "datasource_convert_cancel":
+            task_id = str(message.get("task_id") or "")
+            cancel_event = self.datasource_conversion_cancels.get(task_id)
+            if cancel_event is not None:
+                cancel_event.set()
+            LOGGER.info(
+                task_log(
+                    (
+                        "Requested safe cancellation for command "
+                        f"datasource_convert {task_id}."
+                    )
+                )
+            )
         elif message_type == "datasource_cancel":
             task_id = str(message.get("task_id") or "")
             task_key = f"datasource:{task_id}"
@@ -614,6 +633,102 @@ class LensNodeClient:
         finally:
             self.running_tasks.pop(task_key, None)
 
+    async def _start_datasource_conversion(self, message):
+        """Start one managed workspace conversion in a worker thread."""
+
+        request_id = str(message.get("request_id") or "")
+        task_id = str(message.get("task_id") or request_id)
+        if not task_id:
+            return
+        task_key = f"datasource-convert:{task_id}"
+        if task_key in self.running_tasks:
+            return
+        cancel_event = threading.Event()
+        self.datasource_conversion_cancels[task_id] = cancel_event
+        task = asyncio.create_task(
+            self._execute_datasource_conversion(
+                {**message, "cancel_event": cancel_event}
+            )
+        )
+        self.running_tasks[task_key] = task
+        task.add_done_callback(lambda item: self._consume_task_exception(item))
+
+    async def _execute_datasource_conversion(self, message):
+        """Execute managed workspace conversion and emit safe results."""
+
+        request_id = str(message.get("request_id") or "")
+        task_id = str(message.get("task_id") or request_id)
+        task_key = f"datasource-convert:{task_id}"
+        loop = asyncio.get_running_loop()
+
+        def emit(event):
+            payload = {
+                "type": "datasource_convert_event",
+                "request_id": request_id,
+                "task_id": task_id,
+                **event,
+            }
+            loop.call_soon_threadsafe(self._enqueue, payload)
+
+        try:
+            command = {
+                **message,
+                "ai_gateway_url": self.config.ai_gateway_url,
+                "lensnode_token": self.config.token,
+                "gateway_http_client": self.gateway_http_client,
+                "tls_skip_verify": getattr(
+                    self.config,
+                    "tls_skip_verify",
+                    False,
+                ),
+                "tls_ca_file": getattr(
+                    self.config,
+                    "tls_ca_file",
+                    None,
+                ),
+            }
+            result = await asyncio.to_thread(
+                convert_managed_workspace,
+                command,
+                self.config.workspace_path,
+                emit,
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_convert_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    **result,
+                }
+            )
+        except RunCancelledError:
+            self._enqueue(
+                {
+                    "type": "datasource_convert_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "cancelled",
+                    "error": "DATASOURCE_CONVERSION_CANCELLED",
+                }
+            )
+        except Exception:
+            LOGGER.exception(
+                "Managed datasource conversion failed task_id=%s",
+                task_id,
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_convert_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "error": "DATASOURCE_CONVERSION_FAILED",
+                }
+            )
+        finally:
+            self.datasource_conversion_cancels.pop(task_id, None)
+            self.running_tasks.pop(task_key, None)
+
     async def _send_busy(self, run_uuid, reason):
         """Report a run that cannot start because local capacity is full."""
 
@@ -682,7 +797,7 @@ class LensNodeClient:
         active_runs = {
             key
             for key in self.running_tasks
-            if not key.startswith("datasource:")
+            if not key.startswith(("datasource:", "datasource-convert:"))
         }
         active_runs.update(
             str(payload["run_uuid"])
