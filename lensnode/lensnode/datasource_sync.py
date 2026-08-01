@@ -11,6 +11,7 @@ from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
 from . import datasource_manifest as manifest_store
 from .document_convert import is_convertible, post_process_documents
+from .path_rules import is_excluded_path
 from .path_rules import normalize_excluded_roots
 from .path_rules import relative_path
 from .path_rules import safe_filename
@@ -249,7 +250,10 @@ def convert_managed_workspace(
         raise DataSourceSyncError("MANAGED_WORKSPACE_DIRECTORY_REQUIRED")
 
     context = _sync_context(command, target)
-    items = _managed_workspace_conversion_items(target)
+    items = _managed_workspace_conversion_items(
+        target,
+        context["excluded_datasource_roots"],
+    )
     supported = [
         item
         for item in items
@@ -323,14 +327,19 @@ def convert_managed_workspace(
     }
 
 
-def _managed_workspace_conversion_items(target):
+def _managed_workspace_conversion_items(target, excluded_roots):
     """Return files found under a managed workspace conversion root."""
 
     items = []
     for path in sorted(target.rglob("*")):
         if not path.is_file() or _is_generated_datasource_path(target, path):
             continue
-        local_path = relative_path(target, path)
+        if is_excluded_path(path, excluded_roots):
+            continue
+        try:
+            local_path = relative_path(target, path)
+        except ValueError:
+            continue
         items.append(
             manifest_store.SyncItem(
                 source_id=f"managed_workspace:{local_path}",
@@ -369,11 +378,13 @@ def _managed_conversion_summary(
     ]
     items = list(result.get("items") or [])
     existing_paths = {item.get("path") for item in items}
-    items.extend(
+    available = max(DETAIL_ITEMS_LIMIT - len(items), 0)
+    new_items = [
         item
         for item in unsupported_items
         if item["path"] not in existing_paths
-    )
+    ]
+    items.extend(new_items[:available])
     completed = min(max(supported_current, 0), supported_total)
     remaining = max(supported_total - completed, 0)
     active = 1 if remaining else 0
@@ -385,6 +396,8 @@ def _managed_conversion_summary(
             "succeeded": int(result.get("success") or 0),
             "unsupported": len(unsupported),
             "items": items,
+            "items_truncated": int(result.get("items_truncated") or 0)
+            + max(len(new_items) - available, 0),
         }
     )
     details = dict(result.get("details") or {})
@@ -435,6 +448,7 @@ def _sync_context(command, target):
         "tls_skip_verify": bool(command.get("tls_skip_verify", False)),
         "tls_ca_file": command.get("tls_ca_file") or None,
         "vision_model_ref": conversion.get("vision_model_ref") or "",
+        "force": bool(command.get("force", False)),
         "cancel_event": command.get("cancel_event"),
         "on_activity": command.get("on_activity"),
     }
