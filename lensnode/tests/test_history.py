@@ -1307,6 +1307,50 @@ def test_pure_model_request_remains_direct_answer_without_bound_tools():
     assert decision["evidence_requirement"] == "none"
 
 
+def test_long_model_only_checklist_ignores_bound_business_skill():
+    class Model:
+        def __init__(self):
+            self.messages = []
+
+        def invoke(self, messages, **_kwargs):
+            self.messages = messages
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational","complexity":"simple",'
+                    '"route":"direct_answer","required_capabilities":[],'
+                    '"evidence_requirement":"none"}'
+                )
+            )
+
+    model = Model()
+    decision = agent_runtime._select_general_chat_route(
+        model,
+        "不要调用工具，请列出 120 条简短的软件发布检查项。",
+        context_skill_contents=[
+            "This Skill can query current customer license records."
+        ],
+        available_tools=[
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            )
+        ],
+    )
+
+    prompt = model.messages[0].content
+    assert (
+        "Output length, item count, and formatting constraints alone never "
+        "require tools or plan_execute." in prompt
+    )
+    assert (
+        "An explicit no-tools constraint never permits inventing current "
+        "external or business facts or actions" in prompt
+    )
+    assert decision["route"] == "direct_answer"
+    assert decision["required_capabilities"] == []
+    assert decision["evidence_requirement"] == "none"
+
+
 def test_direct_answer_recovers_an_unfulfilled_action_promise():
     class Model:
         def __init__(self):

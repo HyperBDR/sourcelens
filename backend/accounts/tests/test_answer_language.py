@@ -1,4 +1,4 @@
-"""AI answer language preference tests."""
+"""Unified user language preference tests."""
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
@@ -10,15 +10,27 @@ from accounts.serializers import normalize_language_code
 from accounts.services.registration import RegistrationService
 
 
-class AnswerLanguageTests(TestCase):
-    """Keep AI language choices canonical and independent from UI locales."""
+class LanguagePreferenceTests(TestCase):
+    """Use one profile language for both the UI and generated content."""
 
-    def test_new_profiles_default_to_english(self):
-        """Generic user creation must not silently force Chinese answers."""
+    def test_new_profiles_keep_existing_language_default(self):
+        """Removing the split setting must not require a schema migration."""
 
         user = User.objects.create_user(username="answer-language-default")
 
-        self.assertEqual(user.profile.language, "en-US")
+        self.assertEqual(user.profile.language, "zh-CN")
+
+    def test_profile_language_keeps_existing_migration_choices(self):
+        """The unified field keeps its established migration contract."""
+
+        language_field = User._meta.apps.get_model(
+            "accounts", "Profile"
+        )._meta.get_field("language")
+
+        self.assertEqual(
+            [value for value, _label in language_field.choices],
+            ["en-US", "zh-CN", "es", "ja-JP", "ko-KR"],
+        )
 
     def test_language_variants_normalize_to_supported_choices(self):
         """Only English and Chinese variants remain supported."""
@@ -47,8 +59,8 @@ class AnswerLanguageTests(TestCase):
         self.assertEqual(user.profile.language, "en-US")
 
     @override_settings(ROOT_URLCONF="accounts.tests.urls")
-    def test_user_can_update_answer_language_through_profile_api(self):
-        """The profile API persists and returns the canonical language."""
+    def test_user_can_update_unified_language_through_profile_api(self):
+        """The profile API persists the shared UI and output language."""
 
         user = User.objects.create_user(username="answer-language-api")
         client = APIClient()

@@ -486,7 +486,7 @@ def fail_running_steps_for_runs(run_ids):
 
 
 RECONCILE_GRACE_SECONDS = 60
-RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT = 20
+RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT = 10
 
 
 def get_reconcile_confirm_grace_seconds():

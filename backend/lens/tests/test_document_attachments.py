@@ -623,7 +623,7 @@ class DocumentAttachmentTests(TestCase):
             payload["subject_documents"][0]["original_name"],
             "tender.pdf",
         )
-        self.assertEqual(payload["answer_language"], "en-US")
+        self.assertEqual(payload["answer_language"], "zh-CN")
 
     def test_document_only_run_dispatches_with_analysis_prompt(self):
         self.user.profile.language = "zh-CN"

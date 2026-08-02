@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
+import { usePreferencesStore } from '@/store/preferences'
 import {
   getAvailablePlatforms,
   getLandingPath,
@@ -10,6 +11,8 @@ import {
 } from '@/utils/platformAccess'
 
 export const useUserStore = defineStore('user', () => {
+  const preferencesStore = usePreferencesStore()
+
   // State
   const user = ref(null)
   const token = ref(localStorage.getItem('access_token'))
@@ -23,9 +26,10 @@ export const useUserStore = defineStore('user', () => {
   const availablePlatforms = computed(() => getAvailablePlatforms(user.value))
   const landingPath = computed(() => getLandingPath(user.value))
 
-  // No-op: UI language is managed separately (localStorage); Profile.language is for
-  // backend/AI only. Kept for future use if we need to load other preferences here.
-  const loadUserPreferences = async () => {}
+  const loadUserPreferences = async () => {
+    const language = user.value?.profile?.language
+    if (language) await preferencesStore.setLanguage(language)
+  }
 
   // Actions
   const login = async (credentials) => {
@@ -209,6 +213,13 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  const updateLanguage = async (language) => {
+    if (isAuthenticated.value) {
+      await updateProfile({ profile_language: language })
+    }
+    await preferencesStore.setLanguage(language)
+  }
+
   const setUser = (userData) => {
     user.value = userData
   }
@@ -250,6 +261,7 @@ export const useUserStore = defineStore('user', () => {
     checkAuth,
     checkAuthStatus,
     updateProfile,
+    updateLanguage,
     setUser,
     setToken,
     userHasFeature,

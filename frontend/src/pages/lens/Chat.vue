@@ -314,7 +314,11 @@
       </header>
       <MySharesPanel v-if="mySharesOpen" />
       <template v-else>
-        <div ref="scrollRef" class="thread-scroll">
+        <div
+          ref="scrollRef"
+          class="thread-scroll"
+          @scroll.passive="handleThreadScroll"
+        >
           <div v-if="!booted" class="thread-loading">
             <BaseLoading />
           </div>
@@ -1470,6 +1474,7 @@ import {
   activitiesForNode,
   applyRuntimeEvent,
   calculateRunElapsedSeconds,
+  createConversationAutoScroller,
   createRuntimeState,
   formatActivityProgressText,
   formatDuration,
@@ -1554,6 +1559,12 @@ const liveActivityScrollRef = ref(null)
 const elapsedSeconds = ref(0)
 let elapsedTimer = null
 let reviewingUnreadSession = false
+const answerAutoScroller = createConversationAutoScroller({
+  getElement: () => scrollRef.value,
+  waitForRender: nextTick,
+  schedule: (callback) => window.setTimeout(callback, 100),
+  cancel: (timerId) => window.clearTimeout(timerId)
+})
 
 const publicAssistant = ref(null)
 const showLoginModal = ref(false)
@@ -2296,7 +2307,7 @@ async function finishSubmittedRun(runUuid, sessionUuid) {
     await nextTick()
     resetStreamState()
   }
-  await nextTick(scrollToBottom)
+  answerAutoScroller.request()
 }
 
 function pushAgentActivity(item) {
@@ -2305,13 +2316,18 @@ function pushAgentActivity(item) {
 
 function appendAnswerDelta(content) {
   partialAnswer.value += content
-  nextTick(scrollToBottom)
+  answerAutoScroller.request()
+}
+
+function handleThreadScroll() {
+  answerAutoScroller.handleScroll()
 }
 
 function scrollToBottom() {
   const el = scrollRef.value
   if (!el) return
   el.scrollTop = el.scrollHeight
+  answerAutoScroller.handleScroll()
 }
 
 async function bootstrap() {
@@ -3518,6 +3534,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('focus', handleCompletionVisibility)
   document.removeEventListener('visibilitychange', handleCompletionVisibility)
   streamController.value?.abort()
+  answerAutoScroller.dispose()
   clearInterval(elapsedTimer)
 })
 </script>
@@ -3763,6 +3780,8 @@ onBeforeUnmount(() => {
 
 .thread-scroll {
   @apply min-h-0 flex-1 overflow-y-auto;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
 }
 
 .thread-loading {

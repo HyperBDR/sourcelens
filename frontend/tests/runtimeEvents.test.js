@@ -6,6 +6,7 @@ import {
   applyRuntimeEvent,
   buildWorkflowTree,
   calculateRunElapsedSeconds,
+  createConversationAutoScroller,
   createRuntimeState,
   formatActivityProgressText,
   getMessageTimestamp,
@@ -21,6 +22,37 @@ import {
   terminalSyncEvent,
   workflowProgressSource
 } from '../src/pages/lens/runtimeEvents.js'
+
+test('coalesces streamed answer scrolling and pauses after manual scroll', async () => {
+  const element = {
+    clientHeight: 100,
+    scrollHeight: 640,
+    scrollTop: 540
+  }
+  const frames = []
+  const scroller = createConversationAutoScroller({
+    getElement: () => element,
+    waitForRender: async () => {},
+    schedule: (callback) => {
+      frames.push(callback)
+      return frames.length
+    },
+    cancel: () => {}
+  })
+
+  assert.equal(scroller.request(), true)
+  assert.equal(scroller.request(), false)
+  assert.equal(frames.length, 1)
+
+  element.scrollHeight = 720
+  await frames.shift()()
+  assert.equal(element.scrollTop, 720)
+
+  element.scrollTop = 400
+  scroller.handleScroll()
+  assert.equal(scroller.request(), false)
+  assert.equal(frames.length, 0)
+})
 
 test('waits for the conversation to render before scrolling to the bottom', async () => {
   let container = null
@@ -956,6 +988,48 @@ test('uses plan tasks for the progress count when a plan exists', () => {
   assert.equal(source.kind, 'plan')
   assert.equal(progress.completed, 3)
   assert.equal(progress.total, 4)
+})
+
+test('completes a plan task when all of its workflow stages complete', () => {
+  const tasks = buildWorkflowTree(
+    [{ id: 'step-1', title: 'Query orders', status: 'in_progress' }],
+    [
+      {
+        id: 'query-orders',
+        taskId: 'step-1',
+        stageId: 'step-1:order_query',
+        stageKind: 'order_query',
+        kind: 'query_orders',
+        status: 'completed',
+        structured: true
+      }
+    ]
+  )
+
+  assert.equal(tasks[0].status, 'completed')
+})
+
+test('does not regress an explicit plan terminal state from child activity', () => {
+  const activity = {
+    id: 'query-orders',
+    taskId: 'step-1',
+    stageId: 'step-1:order_query',
+    stageKind: 'order_query',
+    kind: 'query_orders',
+    structured: true
+  }
+
+  const completed = buildWorkflowTree(
+    [{ id: 'step-1', title: 'Query orders', status: 'completed' }],
+    [{ ...activity, status: 'in_progress' }]
+  )
+  const failed = buildWorkflowTree(
+    [{ id: 'step-1', title: 'Query orders', status: 'failed' }],
+    [{ ...activity, status: 'completed' }]
+  )
+
+  assert.equal(completed[0].status, 'completed')
+  assert.equal(failed[0].status, 'failed')
 })
 
 test('keeps plan task titles stable across later revisions', () => {

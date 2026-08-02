@@ -307,6 +307,8 @@ class RunLifecycleTests(TestCase):
             timedelta(minutes=5),
             timedelta(minutes=5),
         )
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.save(update_fields=["status"])
 
         confirm_reconcile_orphan(str(run.uuid))
 

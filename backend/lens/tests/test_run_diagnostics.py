@@ -245,6 +245,100 @@ class RunDiagnosticsTests(TestCase):
         ]
         self.assertEqual(error_code, "'str' object has no attribute 'get'")
 
+    def test_negative_feedback_evidence_captures_target_response(self):
+        self.run.output_message.content = (
+            "A technically successful but unhelpful answer."
+        )
+        self.run.output_message.save(update_fields=["content"])
+        self.run.status = Run.Status.DONE
+        self.run.outcome = Run.Outcome.COMPLETED
+        self.run.error = ""
+        self.run.feedback = Run.Feedback.NEGATIVE
+        self.run.feedback_updated_at = timezone.now()
+        self.run.save(
+            update_fields=[
+                "status",
+                "outcome",
+                "error",
+                "feedback",
+                "feedback_updated_at",
+                "updated_at",
+            ]
+        )
+
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+
+        response = diagnostic.evidence.payload["evidence"]["E-RESPONSE"]
+        self.assertEqual(response["kind"], "response_quality")
+        self.assertEqual(
+            response["data"]["question"],
+            "Why did this Run fail?",
+        )
+        self.assertEqual(
+            response["data"]["answer"],
+            "A technically successful but unhelpful answer.",
+        )
+        self.assertEqual(response["data"]["feedback"], "negative")
+        self.assertIsNotNone(response["data"]["feedback_updated_at"])
+
+    @patch("lens.run_diagnostics.run_completion")
+    def test_negative_feedback_adds_quality_finding(self, completion):
+        self.run.output_message.content = "An incomplete answer."
+        self.run.output_message.save(update_fields=["content"])
+        self.run.status = Run.Status.DONE
+        self.run.outcome = Run.Outcome.COMPLETED
+        self.run.error = ""
+        self.run.feedback = Run.Feedback.NEGATIVE
+        self.run.feedback_updated_at = timezone.now()
+        self.run.save(
+            update_fields=[
+                "status",
+                "outcome",
+                "error",
+                "feedback",
+                "feedback_updated_at",
+                "updated_at",
+            ]
+        )
+        completion.return_value = LensLLMResult(
+            content=json.dumps(
+                {
+                    "summary": "The answer received negative feedback.",
+                    "severity": "medium",
+                    "confidence": 0.9,
+                    "events": [],
+                    "root_cause": {
+                        "title": "Answer quality issue",
+                        "description": (
+                            "The response did not satisfy the user."
+                        ),
+                        "evidence_refs": ["E-RESPONSE"],
+                    },
+                    "cause_categories": ["answer_quality"],
+                    "recommendations": [],
+                    "unknowns": [],
+                }
+            ),
+            usage={},
+            metered=True,
+        )
+        diagnostic, _created = create_run_diagnostic(self.run, self.admin)
+
+        completed = execute_diagnostic(diagnostic.uuid)
+
+        self.assertTrue(completed)
+        diagnostic.refresh_from_db()
+        self.assertEqual(
+            diagnostic.deterministic_findings[1]["evidence_refs"],
+            ["E-RESPONSE"],
+        )
+        self.assertIn(
+            diagnostic.deterministic_findings[1]["title"],
+            {"Negative user feedback", "用户负面反馈"},
+        )
+        _, kwargs = completion.call_args
+        self.assertIn("answer quality", kwargs["system"].lower())
+
     def test_stale_running_diagnostic_is_reset_and_reenqueued(self):
         diagnostic, _created = create_run_diagnostic(self.run, self.admin)
         diagnostic.status = RunDiagnostic.Status.RUNNING

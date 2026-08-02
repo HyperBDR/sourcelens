@@ -88,6 +88,7 @@ class LensNodeDisconnectGraceTests(TransactionTestCase):
         self.assertEqual(get_lensnode_disconnect_grace_seconds(), 42)
 
     def test_reconcile_confirm_grace_seconds_default_and_override(self):
+        self.assertEqual(RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT, 10)
         self.assertEqual(
             get_reconcile_confirm_grace_seconds(),
             RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT,

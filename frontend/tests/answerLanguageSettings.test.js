@@ -5,20 +5,20 @@ import test from 'node:test'
 const source = (path) =>
   readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
-test('settings keep UI and AI answer languages independent', async () => {
-  const [component, languages] = await Promise.all([
+test('one language setting controls both UI and AI output', async () => {
+  const [component, switcher, userStore, languages] = await Promise.all([
     source('components/settings/UserSettingsModal.vue'),
+    source('components/ui/LanguageSwitcher.vue'),
+    source('store/user.js'),
     source('utils/languages.js')
   ])
 
   assert.match(component, /id="ui-language"/)
-  assert.match(component, /id="answer-language"/)
-  assert.match(component, /profile_language: language/)
-  assert.match(component, /userInfo\?\.profile\?\.language/)
-  for (const language of ['en-US', 'zh-CN']) {
-    assert.match(languages, new RegExp(`['"]${language}['"]`))
-  }
-  for (const language of ['es', 'ja-JP', 'ko-KR']) {
-    assert.doesNotMatch(languages, new RegExp(`['"]${language}['"]`))
-  }
+  assert.doesNotMatch(component, /id="answer-language"/)
+  assert.doesNotMatch(component, /getAnswerLanguageOptions/)
+  assert.match(component, /userStore\.updateLanguage\(language\)/)
+  assert.match(switcher, /userStore\.updateLanguage\(language\)/)
+  assert.match(userStore, /profile_language: language/)
+  assert.match(userStore, /preferencesStore\.setLanguage/)
+  assert.doesNotMatch(languages, /ANSWER_LANGUAGES/)
 })

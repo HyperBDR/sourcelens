@@ -29,22 +29,12 @@ export const usePreferencesStore = defineStore('preferences', {
   },
 
   actions: {
-    async setLanguage(language, saveToBackend = false) {
-      // UI display language - only save to localStorage, not to backend Profile
-      // Profile.language is for AI generation and backend logic, not UI display
+    async setLanguage(language) {
       const normalizedLanguage = normalizeUiLanguage(language)
       this.language = normalizedLanguage
       i18n.global.locale.value = normalizedLanguage
       document.documentElement.lang = normalizedLanguage
       localStorage.setItem('userLanguage', normalizedLanguage)
-
-      // Note: saveToBackend is kept for backward compatibility but should not be used
-      // UI language switching should not affect Profile.language
-      if (saveToBackend) {
-        console.warn(
-          'setLanguage with saveToBackend=true is deprecated. UI language should not sync to Profile.language'
-        )
-      }
     },
 
     setTimezone(timezone) {
@@ -96,10 +86,8 @@ export const usePreferencesStore = defineStore('preferences', {
     },
 
     loadFromBackend(preferences) {
-      // This method is deprecated - language is now loaded from user.profile.language
-      // Keep for backward compatibility with settings API
       if (preferences.language) {
-        this.setLanguage(preferences.language, false) // Don't save to backend when loading from settings
+        this.setLanguage(preferences.language)
       }
 
       if (preferences.scene) {

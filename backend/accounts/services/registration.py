@@ -155,8 +155,7 @@ class RegistrationService:
             password: User's password
             username: Custom username for virtual email
             scene: User's selected scene (chat, product_issue, etc.)
-            language: AI output language for summaries, titles,
-                      and metadata (zh-CN, en-US)
+            language: User language for the interface and generated content
             timezone_str: User's timezone
 
         Returns:
@@ -335,7 +334,7 @@ class RegistrationService:
 
         Args:
             email: User's email address
-            language: Preferred language for AI output
+            language: Preferred user language
             timezone_str: User's timezone
 
         Returns:
@@ -344,8 +343,9 @@ class RegistrationService:
         email = email.lower().strip()
         language = normalize_answer_language(language)
         user = User.objects.filter(email__iexact=email).first()
+        user_created = user is None
 
-        if not user:
+        if user_created:
             base_username = re.sub(
                 r'[^a-zA-Z0-9._-]', '', email.split('@')[0]
             )[:140]
@@ -370,11 +370,26 @@ class RegistrationService:
                 'timezone': timezone_str,
             },
         )
-        if not created and not profile.registration_completed:
-            profile.registration_completed = True
-            profile.registration_token = None
-            profile.registration_token_expires = None
-            profile.save()
+        if not created:
+            update_fields = []
+            if user_created:
+                profile.language = language
+                profile.timezone = timezone_str
+                update_fields.extend(['language', 'timezone'])
+                user.profile = profile
+            if not profile.registration_completed:
+                profile.registration_completed = True
+                profile.registration_token = None
+                profile.registration_token_expires = None
+                update_fields.extend(
+                    [
+                        'registration_completed',
+                        'registration_token',
+                        'registration_token_expires',
+                    ]
+                )
+            if update_fields:
+                profile.save(update_fields=update_fields)
 
         return user
 
