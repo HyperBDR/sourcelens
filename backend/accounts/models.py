@@ -29,10 +29,6 @@ from django.db import models
 from accounts.access import normalize_feature_keys, normalize_platform_key
 
 
-ANSWER_LANGUAGE_CHOICES = (
-    ('en-US', 'English'),
-    ('zh-CN', '简体中文'),
-)
 DEFAULT_ANSWER_LANGUAGE = 'en-US'
 
 
@@ -172,8 +168,14 @@ class Profile(models.Model):
 
     language = models.CharField(
         max_length=10,
-        default=DEFAULT_ANSWER_LANGUAGE,
-        choices=ANSWER_LANGUAGE_CHOICES,
+        default='zh-CN',
+        choices=[
+            ('en-US', 'English'),
+            ('zh-CN', '简体中文'),
+            ('es', 'Español'),
+            ('ja-JP', '日本語'),
+            ('ko-KR', '한국어'),
+        ],
         help_text=(
             "Specifies the language used by AI when generating summaries, "
             "titles, and metadata. This is a global setting shared across "

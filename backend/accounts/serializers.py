@@ -486,8 +486,8 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False,
         help_text=_(
-            "User's preferred language for AI generation "
-            "and backend logic (not UI display)"
+            "User's preferred language for the interface, "
+            "AI generation, and backend logic"
         )
     )
     profile_timezone = serializers.CharField(

@@ -104,6 +104,46 @@ export async function scrollConversationToBottomAfterRender(
   return true
 }
 
+export function createConversationAutoScroller({
+  getElement,
+  waitForRender,
+  schedule,
+  cancel,
+  bottomThreshold = 96
+}) {
+  let scheduledId = null
+  let following = true
+
+  function handleScroll() {
+    const element = getElement()
+    if (!element) return
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight
+    following = distanceFromBottom <= bottomThreshold
+  }
+
+  function request({ force = false } = {}) {
+    if (force) following = true
+    if (!following || scheduledId !== null) return false
+    scheduledId = schedule(async () => {
+      scheduledId = null
+      await waitForRender()
+      const element = getElement()
+      if (!element || !following) return
+      element.scrollTop = element.scrollHeight
+    })
+    return true
+  }
+
+  function dispose() {
+    if (scheduledId === null) return
+    cancel(scheduledId)
+    scheduledId = null
+  }
+
+  return { dispose, handleScroll, request }
+}
+
 export function createRuntimeState() {
   return {
     route: null,
@@ -605,8 +645,14 @@ export function buildWorkflowTree(plan, activities) {
     task.stages.forEach((stage, index) => {
       stage.order = index + 1
     })
+    if (
+      task.stages.length > 0 &&
+      ['pending', 'in_progress'].includes(task.status)
+    ) {
+      const childStatus = workflowNodeStatus(task.stages)
+      if (childStatus !== 'pending') task.status = childStatus
+    }
     if (!task.title) {
-      task.status = workflowNodeStatus(task.stages)
       const steps = task.stages.flatMap((stage) => stage.steps || [])
       const detailStep = steps.find((step) => step.kind === 'get_order_detail')
       const queryStep = steps.find((step) => step.kind === 'query_orders')

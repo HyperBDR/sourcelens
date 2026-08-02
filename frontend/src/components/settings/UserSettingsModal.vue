@@ -161,18 +161,10 @@
               </div>
 
               <!-- Language section -->
-              <div v-if="activeSection === 'language'" class="space-y-5">
-                <div class="space-y-2">
-                  <label
-                    for="ui-language"
-                    class="text-sm font-medium text-gray-800"
-                  >
-                    {{ t('settings.modal.displayLanguage') }}
-                  </label>
-                  <p class="text-sm text-gray-500">
-                    {{ t('settings.modal.languageDesc') }}
-                  </p>
-                </div>
+              <div v-if="activeSection === 'language'" class="space-y-3">
+                <p class="text-sm text-gray-500">
+                  {{ t('settings.modal.languageDesc') }}
+                </p>
                 <div class="relative">
                   <select
                     id="ui-language"
@@ -206,62 +198,6 @@
                     </svg>
                   </div>
                 </div>
-
-                <div class="space-y-3 border-t border-line pt-5">
-                  <div class="space-y-2">
-                    <label
-                      for="answer-language"
-                      class="text-sm font-medium text-gray-800"
-                    >
-                      {{ t('settings.modal.answerLanguage') }}
-                    </label>
-                    <p class="text-sm text-gray-500">
-                      {{ t('settings.modal.answerLanguageDesc') }}
-                    </p>
-                  </div>
-                  <div class="relative">
-                    <select
-                      id="answer-language"
-                      :value="answerLanguage"
-                      :disabled="answerLanguageSaving"
-                      class="w-full appearance-none rounded-xl border border-line bg-white py-2.5 pl-3 pr-9 text-sm text-gray-800 transition-colors focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100 disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-500"
-                      @change="selectAnswerLanguage($event.target.value)"
-                    >
-                      <option
-                        v-for="lang in answerLanguages"
-                        :key="lang.value"
-                        :value="lang.value"
-                      >
-                        {{ lang.flag }} {{ lang.label }}
-                      </option>
-                    </select>
-                    <div
-                      class="pointer-events-none absolute inset-y-0 right-3 flex items-center"
-                    >
-                      <svg
-                        class="h-4 w-4 text-gray-400"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="m6 9 6 6 6-6"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
-                    </div>
-                  </div>
-                  <p
-                    v-if="answerLanguageError"
-                    role="alert"
-                    class="text-sm text-red-600"
-                  >
-                    {{ answerLanguageError }}
-                  </p>
-                </div>
               </div>
 
               <AnswerNotificationSettings
@@ -284,11 +220,7 @@ import { useRouter } from 'vue-router'
 import AnswerNotificationSettings from '@/components/settings/AnswerNotificationSettings.vue'
 import PasswordChangeSettings from '@/components/settings/PasswordChangeSettings.vue'
 import { getPasswordManagementText } from '@/locales/passwordManagement'
-import {
-  getAnswerLanguageOptions,
-  getUiLanguageOptions
-} from '@/utils/languages'
-import { usePreferencesStore } from '@/store/preferences'
+import { getUiLanguageOptions } from '@/utils/languages'
 import { useUiStore } from '@/store/ui'
 import { useUserStore } from '@/store/user'
 
@@ -301,15 +233,8 @@ const emit = defineEmits(['close'])
 const { t, locale } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
-const preferencesStore = usePreferencesStore()
 const uiStore = useUiStore()
 const languages = computed(() => getUiLanguageOptions(t))
-const answerLanguages = computed(() => getAnswerLanguageOptions(t))
-const answerLanguage = computed(
-  () => userStore.userInfo?.profile?.language || 'en-US'
-)
-const answerLanguageSaving = ref(false)
-const answerLanguageError = ref('')
 const activeSection = ref('profile')
 
 const UserIcon = {
@@ -367,21 +292,7 @@ const avatarBgColor = computed(() => {
 })
 
 const selectLanguage = async (language) => {
-  await preferencesStore.setLanguage(language, false)
-  locale.value = language
-}
-
-const selectAnswerLanguage = async (language) => {
-  if (language === answerLanguage.value) return
-  answerLanguageSaving.value = true
-  answerLanguageError.value = ''
-  try {
-    await userStore.updateProfile({ profile_language: language })
-  } catch {
-    answerLanguageError.value = t('settings.modal.answerLanguageError')
-  } finally {
-    answerLanguageSaving.value = false
-  }
+  await userStore.updateLanguage(language)
 }
 
 const handleLogout = async () => {

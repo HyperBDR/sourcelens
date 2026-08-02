@@ -71,7 +71,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { usePreferencesStore } from '@/store/preferences'
+import { useUserStore } from '@/store/user'
 import { getUiLanguageOptions } from '@/utils/languages'
 
 defineProps({
@@ -83,7 +83,7 @@ defineProps({
 })
 
 const { t, locale } = useI18n()
-const preferencesStore = usePreferencesStore()
+const userStore = useUserStore()
 
 const showDropdown = ref(false)
 const dropdownRef = ref(null)
@@ -100,10 +100,7 @@ const toggleDropdown = () => {
 }
 
 const selectLanguage = async (language) => {
-  // Only update UI display language, do not sync to backend Profile
-  // Profile.language is for AI generation and backend logic, not UI display
-  await preferencesStore.setLanguage(language, false)
-  locale.value = language
+  await userStore.updateLanguage(language)
   showDropdown.value = false
 }
 

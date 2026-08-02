@@ -561,11 +561,7 @@
       "admin": "Admin",
       "user": "User",
       "language": "Language",
-      "displayLanguage": "Display language",
-      "languageDesc": "Switch the UI language",
-      "answerLanguage": "AI answer language",
-      "answerLanguageDesc": "Used for answers, generated conversation titles, and Run diagnostics. It is independent from the display language.",
-      "answerLanguageError": "Failed to update the AI answer language",
+      "languageDesc": "Used for the interface and AI-generated content",
       "notifications": "Notifications",
       "notificationsDesc": "Choose how SourceLens tells you when a long-running answer is ready.",
       "completionIndicator": "Answer completion reminders",
@@ -594,7 +590,6 @@
       "timezoneDesc": "Timezone for backend logic and date/time display.",
       "languages": {
         "en": "English",
-        "en-US": "English",
         "zh-CN": "简体中文",
         "es": "Español"
       }
