@@ -1,0 +1,58 @@
+name: Release Notes
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-notes-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout pull request history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install release-note tooling dependency
+        run: python -m pip install 'PyYAML==6.0.3'
+
+      - name: Test release-note tooling
+        run: python -m unittest scripts.test_release_notes
+
+      - name: Validate pull request release-note decision
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKIP_RELEASE_NOTE: >-
+            ${{ contains(github.event.pull_request.labels.*.name,
+            'skip-release-note') }}
+        run: |
+          set -euo pipefail
+          args=(
+            --base "${BASE_SHA}"
+            --head "${HEAD_SHA}"
+          )
+          if [ "${SKIP_RELEASE_NOTE}" = "true" ]; then
+            args+=(--skip-release-note)
+          fi
+          python scripts/release_notes.py validate-pr "${args[@]}"

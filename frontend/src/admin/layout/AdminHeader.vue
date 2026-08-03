@@ -135,6 +135,14 @@
                       />
                     </svg>
                     <span>{{ t('common.settings') }}</span>
+                    <span
+                      v-if="uiStore.hasUnreadReleaseNotes"
+                      class="ml-auto h-2 w-2 shrink-0 rounded-full bg-brand-500"
+                    >
+                      <span class="sr-only">
+                        {{ t('settings.modal.releaseNotesUnread') }}
+                      </span>
+                    </span>
                   </button>
                 </div>
                 <div class="border-t border-line px-4 py-2 min-[430px]:hidden">

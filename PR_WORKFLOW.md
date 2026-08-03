@@ -97,12 +97,21 @@ issues, the reviewer MUST:
 2. Map every concrete linked-Issue requirement and PR acceptance claim to the
    changed implementation and available evidence. Ambiguous requirements must
    require human verification; they must not be silently treated as complete.
-3. Read changed tests first, then trace every changed behavior across its
+3. When an Issue is linked, inspect the target-branch behavior and determine
+   whether the reported problem or product gap exists at the code level,
+   whether a code change is necessary, whether the changed execution path
+   addresses the root cause, and whether the resulting behavior resolves the
+   Issue. If the supplied context cannot establish any of these points, require
+   human verification and do not issue a green or merge-ready conclusion.
+4. Read changed tests first, then trace every changed behavior across its
    input, validation, persistence, shared references, dispatch or transport,
    runtime use, response, and failure cleanup as applicable.
-4. Apply every relevant mandatory invariant in this policy, including negative
+5. For every added, changed, or deleted database migration, compare the entire
+   pull request with the current target-branch migration graph and apply the
+   Database Migration Focus checks below.
+6. Apply every relevant mandatory invariant in this policy, including negative
    and partial-failure scenarios. Happy-path coverage alone is insufficient.
-5. State material evidence gaps. A successful Action, author-reported test, or
+7. State material evidence gaps. A successful Action, author-reported test, or
    manual-verification claim must not be converted into reviewer-verified fact.
 
 If the pull request changes more than one runtime unit or introduces a new
@@ -141,6 +150,16 @@ For each requirement, determine whether it is:
 
 Check that:
 
+- For a linked bug Issue, the target-branch code can produce the reported
+  failure, the pull request changes the actual root-cause path, and a
+  regression test covers the original trigger. The reviewer must reason
+  whether the test would fail before the fix and pass after it without claiming
+  it was executed unless explicit execution evidence is supplied.
+- For a linked feature Issue, the target branch lacks the required behavior and
+  the changed implementation closes that gap across every applicable acceptance
+  path.
+- A code change is not presented as necessary when the available evidence shows
+  that the root cause is data, configuration, deployment, or operation only.
 - The change resolves the user-visible problem rather than only modifying
   related code.
 - Core acceptance criteria map to implementation and verification evidence.
@@ -255,6 +274,43 @@ callbacks. Do not treat TaskExecution as part of every answer Run.
 - Store timestamps in UTC and let the frontend present user-local time.
 - Treat dependency and lockfile changes as supply-chain changes. Check version
   compatibility, integrity, licensing where relevant, and image build impact.
+
+## Database Migration Focus
+
+Database migrations are a mandatory, blocking review focus. Review them
+against the pull request's current target branch, not only against the source
+branch or the migration files visible in the pull request.
+
+- A migration version means one Django migration graph node, normally one
+  numbered Python migration file. Migration package `__init__.py` files do not
+  count as versions.
+- Across the entire pull request, each Django application MUST introduce no
+  more than one new migration version. Different applications may each add one
+  migration version in the same pull request.
+- Compare added, changed, and deleted migration files with the target branch.
+  A migration already present on the target branch MUST NOT be modified,
+  renamed, or deleted by the pull request.
+- Compare every new migration name, number, dependency, and resulting leaf node
+  with the corresponding application migration graph on the current target
+  branch. A migration generated from an outdated source branch is not safe
+  merely because its local graph is valid.
+- A new migration MUST depend on the current target-branch leaf migration for
+  its application. Duplicate names or numbers, parallel leaves, missing
+  dependencies, and dependencies that bypass a target-branch migration are
+  BLOCKING.
+- When the target branch has advanced, require the author to synchronize the
+  source branch and regenerate or renumber the migration as appropriate. A
+  merge migration added only to preserve an avoidable feature-branch fork does
+  not resolve the conflict.
+- If the supplied context cannot establish the complete base-to-head migration
+  set or the current target-branch migration graph, require human verification
+  and do not issue a green or merge-ready conclusion.
+- A migration review becomes stale when the target-branch migration graph
+  changes. The migration comparison MUST be repeated before merge.
+- Migration ordering MUST preserve expand/contract deployment compatibility.
+  Review existing-data transformations, reversibility, constraints, indexes,
+  locks, and compatibility with both old and new application versions during
+  the blue/green observation window.
 
 ## Lens Domain and Authorization Focus
 
