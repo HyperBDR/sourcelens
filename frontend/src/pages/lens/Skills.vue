@@ -281,7 +281,8 @@
                     tabindex="0"
                     :aria-label="t('lensAdmin.skills.packageGuideTitle')"
                     class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-line bg-surface-sunken p-3 font-mono text-xs leading-5 text-ink-700"
-                    >{{ packageGuidePrompt }}</pre>
+                    >{{ packageGuidePrompt }}</pre
+                  >
                 </div>
               </details>
             </div>
@@ -584,7 +585,6 @@ import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
-import { extractErrorMessage } from '@/utils/api'
 
 import BooleanRow from './components/BooleanRow.vue'
 import FormRow from './components/FormRow.vue'
@@ -592,15 +592,15 @@ import RowActions from './components/RowActions.vue'
 import SkillEnvironmentEditor from './components/SkillEnvironmentEditor.vue'
 import { normalizeList } from './adminHelpers'
 import { buildSkillEnvironment, skillEnvironmentForm } from './skillEnvironment'
+import { skillErrorMessage } from './skillErrorMessage'
 import {
   buildSkillPackagingPrompt,
   copySkillPackagingPrompt
 } from './skillPackagingGuide'
+import { skillPackageValidationError } from './skillPackageValidation'
 
 const { t, tm } = useI18n()
 const { showSuccess, showError } = useToast()
-
-const MAX_SKILL_PACKAGE_BYTES = 20 * 1024 * 1024
 
 const packageGuidePrompt = computed(() =>
   buildSkillPackagingPrompt(
@@ -840,7 +840,7 @@ async function load() {
   try {
     skills.value = normalizeList(await listSkills())
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
+    showError(skillErrorMessage(error, t, t('lensAdmin.messages.loadFailed')))
   } finally {
     loading.value = false
   }
@@ -863,15 +863,9 @@ function setPackageFile(file) {
   if (!file) {
     return
   }
-  if (!file.name.toLowerCase().endsWith('.zip')) {
-    const message = t('lensAdmin.skills.packageFileInvalidType')
-    formError.value = message
-    showError(message)
-    clearPackageFile()
-    return
-  }
-  if (file.size > MAX_SKILL_PACKAGE_BYTES) {
-    const message = t('lensAdmin.skills.packageFileTooLarge')
+  const validationError = skillPackageValidationError(file)
+  if (validationError) {
+    const message = t(`lensAdmin.skills.${validationError}`)
     formError.value = message
     showError(message)
     clearPackageFile()
@@ -952,7 +946,7 @@ async function beautify() {
       showSuccess(t('lensAdmin.skills.beautifySuccess'))
     }
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.skills.beautifyFailed')))
+    showError(skillErrorMessage(error, t, t('lensAdmin.skills.beautifyFailed')))
   } finally {
     beautifying.value = false
   }
@@ -1015,8 +1009,9 @@ async function save() {
     closeModal()
     await load()
   } catch (error) {
-    formError.value = extractErrorMessage(
+    formError.value = skillErrorMessage(
       error,
+      t,
       t('lensAdmin.messages.saveFailed')
     )
     showError(formError.value)
@@ -1039,7 +1034,7 @@ async function remove(row) {
     showSuccess(t('lensAdmin.messages.deleteSuccess'))
     await load()
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.messages.deleteFailed')))
+    showError(skillErrorMessage(error, t, t('lensAdmin.messages.deleteFailed')))
   }
 }
 
@@ -1061,7 +1056,7 @@ async function confirmForceDelete() {
     closeDeleteModal()
     await load()
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.messages.deleteFailed')))
+    showError(skillErrorMessage(error, t, t('lensAdmin.messages.deleteFailed')))
   } finally {
     deleting.value = false
   }
@@ -1081,7 +1076,7 @@ async function download(row) {
     link.click()
     URL.revokeObjectURL(url)
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.skills.downloadFailed')))
+    showError(skillErrorMessage(error, t, t('lensAdmin.skills.downloadFailed')))
   }
 }
 
