@@ -166,10 +166,9 @@
                   {{ t('settings.modal.languageDesc') }}
                 </p>
                 <div class="relative">
-                  <select
+                  <BaseSelect
                     id="ui-language"
-                    :value="locale"
-                    class="w-full appearance-none rounded-xl border border-line bg-white py-2.5 pl-3 pr-9 text-sm text-gray-800 transition-colors focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                    :model-value="locale"
                     @change="selectLanguage($event.target.value)"
                   >
                     <option
@@ -179,7 +178,7 @@
                     >
                       {{ lang.flag }} {{ lang.label }}
                     </option>
-                  </select>
+                  </BaseSelect>
                   <div
                     class="pointer-events-none absolute inset-y-0 right-3 flex items-center"
                   >
@@ -219,6 +218,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import AnswerNotificationSettings from '@/components/settings/AnswerNotificationSettings.vue'
 import PasswordChangeSettings from '@/components/settings/PasswordChangeSettings.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import { getPasswordManagementText } from '@/locales/passwordManagement'
 import { getUiLanguageOptions } from '@/utils/languages'
 import { useUiStore } from '@/store/ui'

@@ -36,19 +36,21 @@
                 class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-36"
                 @input="onUsernameChanged"
               />
-              <select
+              <BaseSelect
                 v-model="filters.assistant"
-                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-40"
+                class="md:w-40"
+                mobile-touch
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('lensRuns.assistantAll') }}</option>
                 <option v-for="a in assistants" :key="a.slug" :value="a.slug">
                   {{ a.name }}
                 </option>
-              </select>
-              <select
+              </BaseSelect>
+              <BaseSelect
                 v-model="filters.status"
-                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-32"
+                class="md:w-32"
+                mobile-touch
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('lensRuns.statusAll') }}</option>
@@ -61,7 +63,7 @@
                 <option value="cancelled">
                   {{ t('lensRuns.statusCancelled') }}
                 </option>
-              </select>
+              </BaseSelect>
               <input
                 v-model="filters.start_date"
                 type="date"
@@ -1148,6 +1150,7 @@ import RunDiagnosisPanel from '@/admin/pages/lens/RunDiagnosisPanel.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'

@@ -24,9 +24,10 @@
               >
                 {{ t('taskManagement.list.taskTypeFilter') }}
               </label>
-              <select
+              <BaseSelect
                 v-model="filterModule"
-                class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 min-w-[10rem]"
+                class="min-w-[10rem]"
+                :full-width="false"
                 @change="onFilterChange"
               >
                 <option value="">
@@ -41,15 +42,16 @@
                 <option value="lens_datasource">
                   {{ t('taskManagement.list.taskTypeDatasource') }}
                 </option>
-              </select>
+              </BaseSelect>
               <label
                 class="text-sm font-medium text-gray-700 whitespace-nowrap"
               >
                 {{ t('taskManagement.list.userFilter') }}
               </label>
-              <select
+              <BaseSelect
                 v-model="filterUserId"
-                class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 min-w-[10rem]"
+                class="min-w-[10rem]"
+                :full-width="false"
                 @change="onFilterChange"
               >
                 <option value="">
@@ -58,7 +60,7 @@
                 <option v-for="u in userOptions" :key="u.id" :value="u.id">
                   {{ u.label }}
                 </option>
-              </select>
+              </BaseSelect>
               <span class="text-sm text-gray-600 whitespace-nowrap">{{
                 t('taskManagement.list.dateRange')
               }}</span>
@@ -267,6 +269,7 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import TaskExecutionDetailPanel from '@/components/task-management/TaskExecutionDetailPanel.vue'

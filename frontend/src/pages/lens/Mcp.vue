@@ -113,10 +113,10 @@
           </FormRow>
           <div class="grid gap-4 md:grid-cols-2">
             <FormRow :label="t('lensAdmin.fields.transport')">
-              <select v-model="form.transport" class="form-input">
+              <BaseSelect v-model="form.transport">
                 <option value="url">url</option>
                 <option value="stdio">stdio</option>
-              </select>
+              </BaseSelect>
             </FormRow>
             <FormRow :label="t('lensAdmin.fields.endpoint')">
               <input v-model="form.endpoint" class="form-input" />
@@ -165,6 +165,7 @@ import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { extractErrorMessage } from '@/utils/api'

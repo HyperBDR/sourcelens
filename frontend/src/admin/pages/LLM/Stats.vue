@@ -23,16 +23,18 @@
             >
               {{ t('llm.stats.filterByUser') }}
             </label>
-            <select
+            <BaseSelect
               v-model="selectedUserId"
-              class="stats-filter-control stats-user-select rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 min-w-[140px] hover:border-gray-300 transition-colors"
+              class="stats-filter-control stats-user-select min-w-[140px]"
+              :full-width="false"
+              mobile-touch
               @change="fetchStats"
             >
               <option value="">{{ t('llm.stats.allUsers') }}</option>
               <option v-for="u in userOptions" :key="u.id" :value="u.id">
                 {{ u.label }}
               </option>
-            </select>
+            </BaseSelect>
           </div>
           <div class="flex flex-col gap-1.5">
             <label
@@ -88,15 +90,18 @@
               />
             </template>
             <template v-else-if="granularity === 'year'">
-              <select
+              <BaseSelect
                 v-model.number="selectedYear"
-                class="stats-filter-control rounded-lg border border-gray-200 px-3 py-2 text-sm w-24 bg-white focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                class="stats-filter-control w-24"
+                :full-width="false"
+                mobile-touch
+                size="sm"
                 @change="fetchStats"
               >
                 <option v-for="y in yearOptions" :key="y" :value="y">
                   {{ y }}
                 </option>
-              </select>
+              </BaseSelect>
             </template>
           </div>
         </div>
@@ -507,6 +512,7 @@ import { llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 
 ChartJS.register(
   CategoryScale,
