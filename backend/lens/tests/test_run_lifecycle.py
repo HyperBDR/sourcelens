@@ -272,6 +272,36 @@ class RunLifecycleTests(TestCase):
             checkpoint_ready_at,
         )
 
+    def test_checkpoint_ready_before_admission_records_both_states(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        dispatch_id = uuid.uuid4()
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        run.execution.status = RunExecution.Status.DISPATCHED
+        run.execution.dispatch_id = dispatch_id
+        run.execution.save(update_fields=["status", "dispatch_id"])
+
+        acknowledged = acknowledge_run_checkpoint_ready(
+            run.uuid,
+            dispatch_id,
+            self.lensnode.uuid,
+        )
+
+        run.refresh_from_db()
+        run.execution.refresh_from_db()
+        self.assertTrue(acknowledged)
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.RUNNING,
+        )
+        self.assertIsNotNone(run.execution.admitted_at)
+        self.assertIsNotNone(run.execution.checkpoint_ready_at)
+        self.assertIsNone(run.resume_by)
+
     def test_dispatch_acknowledgement_from_wrong_lensnode_is_ignored(self):
         run = self._run(
             Run.Status.STREAMING,
