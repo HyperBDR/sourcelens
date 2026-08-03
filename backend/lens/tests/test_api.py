@@ -188,6 +188,20 @@ def skill_zip_upload_with_file(name, file_size):
     )
 
 
+def datasource_zip_upload(files, name="documents.zip"):
+    """Return one datasource ZIP upload containing the requested members."""
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+    return SimpleUploadedFile(
+        name,
+        buffer.getvalue(),
+        content_type="application/zip",
+    )
+
+
 class RetrievalPolicyValidationTests(SimpleTestCase):
     def test_hidden_file_retrieval_options_accept_booleans(self):
         self.assertEqual(
@@ -4642,3 +4656,196 @@ class AssistantArchiveConcurrencyTests(TransactionTestCase):
             MessageAttachment.objects.count(),
             initial_count + 1,
         )
+
+
+@override_settings(CACHES=TEST_CACHES, CHANNEL_LAYERS=TEST_CHANNEL_LAYERS)
+class DataSourceArchiveUploadTests(TestCase):
+    """Cover file datasource upload validation and private delivery."""
+
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        self.settings_override.enable()
+        self.user = User.objects.create_user(
+            username="archive-admin",
+            email="archive-admin@example.com",
+            password="pass12345",
+            is_staff=True,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.token = "archive-node-token"
+        self.lensnode = LensNode.objects.create(
+            name="Archive LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            workspace_path="/workspace",
+            auth_token_hash=hash_lensnode_token(self.token),
+        )
+
+    def tearDown(self):
+        self.settings_override.disable()
+        self.media.cleanup()
+
+    def _metadata(self, **overrides):
+        payload = {
+            "name": "Uploaded Documents",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "target_path": "/workspace/uploaded-documents",
+            "config": {},
+            "sync_policy": {"conversion": {"document": True}},
+            "status": "active",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_upload_creates_file_datasource_and_trackable_task(self):
+        with patch(
+            "lens.views.datasources.source_sync_task.apply_async"
+        ) as apply_async:
+            response = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload(
+                        {"docs/readme.txt": "hello"}
+                    ),
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        datasource = DataSource.objects.get(uuid=response.data["uuid"])
+        self.assertEqual(datasource.source_type, DataSource.SourceType.FILE)
+        self.assertFalse(
+            ScheduledTask.objects.filter(target_id=datasource.uuid).exists()
+        )
+        task = TaskExecution.objects.get(
+            task_id=response.data["initial_sync_task_id"]
+        )
+        self.assertEqual(task.metadata["archive"]["archive_type"], "zip")
+        self.assertEqual(len(task.metadata["archive"]["content_hash"]), 64)
+        apply_async.assert_called_once()
+
+    def test_upload_rejects_archive_path_traversal(self):
+        response = self.client.post(
+            "/api/lens/admin/datasources/upload/",
+            {
+                "metadata": json.dumps(self._metadata()),
+                "file": datasource_zip_upload({"../escape.txt": "unsafe"}),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("DATASOURCE_ARCHIVE_PATH_INVALID", str(response.data))
+        self.assertFalse(
+            DataSource.objects.filter(
+                source_type=DataSource.SourceType.FILE
+            ).exists()
+        )
+
+    def test_upload_rejects_excessive_compression_ratio(self):
+        response = self.client.post(
+            "/api/lens/admin/datasources/upload/",
+            {
+                "metadata": json.dumps(self._metadata()),
+                "file": datasource_zip_upload(
+                    {"highly-compressible.txt": b"0" * (2 * 1024 * 1024)}
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("DATASOURCE_ARCHIVE_RATIO_TOO_HIGH", str(response.data))
+
+    def test_disabled_file_datasource_allows_metadata_updates(self):
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            created = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload({"readme.txt": "hello"}),
+                },
+                format="multipart",
+            )
+        datasource_uuid = created.data["uuid"]
+        disabled = self.client.patch(
+            f"/api/lens/admin/datasources/{datasource_uuid}/",
+            {"status": "disabled"},
+            format="json",
+        )
+        updated = self.client.patch(
+            f"/api/lens/admin/datasources/{datasource_uuid}/",
+            {"name": "Renamed Upload"},
+            format="json",
+        )
+
+        self.assertEqual(disabled.status_code, 200, disabled.data)
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.data["name"], "Renamed Upload")
+
+    def test_reupload_registers_full_replace_task(self):
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            created = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload({"old.txt": "old"}),
+                },
+                format="multipart",
+            )
+            response = self.client.post(
+                (
+                    f"/api/lens/admin/datasources/{created.data['uuid']}/"
+                    "reupload/"
+                ),
+                {
+                    "metadata": json.dumps({}),
+                    "file": datasource_zip_upload({"new.txt": "new"}),
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 202, response.data)
+        task = TaskExecution.objects.get(task_id=response.data["task_id"])
+        self.assertEqual(task.metadata["trigger"], "reupload")
+        self.assertEqual(
+            task.metadata["archive"]["original_name"],
+            "documents.zip",
+        )
+
+    def test_archive_download_is_lensnode_and_task_bound(self):
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            response = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload({"readme.txt": "hello"}),
+                },
+                format="multipart",
+            )
+        datasource_uuid = response.data["uuid"]
+        task_id = response.data["initial_sync_task_id"]
+        node_client = APIClient()
+        download = node_client.get(
+            (
+                f"/api/lens/lensnode/datasources/{datasource_uuid}/"
+                f"archives/{task_id}/"
+            ),
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        self.assertEqual(download.status_code, 200)
+        self.assertTrue(download["X-Archive-Hash"])
+        self.assertTrue(collect_stream(download.streaming_content))
+
+        denied = node_client.get(
+            (
+                f"/api/lens/lensnode/datasources/{datasource_uuid}/"
+                f"archives/{task_id}/"
+            ),
+            HTTP_AUTHORIZATION="Bearer wrong-token",
+        )
+        self.assertEqual(denied.status_code, 401)

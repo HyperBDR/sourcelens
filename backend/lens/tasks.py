@@ -217,8 +217,15 @@ def register_datasource_sync_task(
     """Register a datasource sync execution before Celery starts it."""
 
     from agentcore_task.adapters.django import TaskTracker
+    from agentcore_task.adapters.django.models import TaskExecution
 
+    existing = TaskExecution.objects.filter(task_id=task_id).first()
     task_metadata = _datasource_task_metadata(datasource, trigger)
+    if existing is not None:
+        for key in ["archive", "celery_task_id"]:
+            value = (existing.metadata or {}).get(key)
+            if value:
+                task_metadata[key] = value
     task_metadata.update(metadata or {})
     return TaskTracker.register_task(
         task_id=task_id,
@@ -328,6 +335,7 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled", task_id=None):
         return 0
     record = _get_or_create_source_sync_record(datasource)
     if datasource.status == DataSource.Status.DISABLED:
+        _delete_task_datasource_archive(task_id)
         if record.enabled:
             record.enabled = False
             record.save(update_fields=["enabled"])
@@ -374,6 +382,7 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled", task_id=None):
             },
         )
     except SourceSyncBusy as exc:
+        _delete_task_datasource_archive(task_id)
         record.last_error = str(exc)
         record.last_run_at = timezone.now()
         record.save(update_fields=["last_error", "last_run_at"])
@@ -390,6 +399,7 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled", task_id=None):
         )
         return 0
     except Exception as exc:
+        _delete_task_datasource_archive(task_id)
         release_datasource_lock(datasource.uuid, token=task_id)
         datasource.last_error = str(exc)
         datasource.save(update_fields=["last_error", "updated_at"])
@@ -679,6 +689,7 @@ def complete_datasource_sync_task(task_id, result):
     if task is None:
         return None
     metadata = task.metadata or {}
+    _delete_task_datasource_archive(task_id, metadata=metadata)
     datasource_uuid = metadata.get("datasource_uuid")
     datasource = DataSource.objects.filter(uuid=datasource_uuid).first()
     record = None
@@ -838,6 +849,19 @@ def resolve_datasource_sync_task_id(request_id, content):
         metadata__datasource_sync_request_id=request_id,
     ).first()
     return task.task_id if task else ""
+
+
+def _delete_task_datasource_archive(task_id, metadata=None):
+    """Delete the private archive attached to a datasource task."""
+
+    if metadata is None:
+        from agentcore_task.adapters.django.models import TaskExecution
+
+        task = TaskExecution.objects.filter(task_id=task_id).first()
+        metadata = task.metadata if task else {}
+    from .datasource_archives import delete_datasource_archive
+
+    delete_datasource_archive((metadata or {}).get("archive") or {})
 
 
 def acquire_datasource_lock(datasource_uuid, token, ttl_s=600):

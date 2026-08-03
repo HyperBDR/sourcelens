@@ -218,6 +218,21 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
     config = datasource_runtime_config(datasource)
     sync_policy = datasource.sync_policy or {}
     conversion = datasource_conversion_policy(sync_policy)
+    archive = {}
+    if datasource.source_type == DataSource.SourceType.FILE:
+        from agentcore_task.adapters.django.models import TaskExecution
+
+        task = TaskExecution.objects.filter(task_id=task_id).first()
+        archive_metadata = (task.metadata or {}).get("archive") if task else None
+        if not archive_metadata:
+            raise DataSourceDispatchError("DATASOURCE_ARCHIVE_MISSING")
+        archive = {
+            "task_id": task_id,
+            "original_name": archive_metadata.get("original_name") or "",
+            "archive_type": archive_metadata.get("archive_type") or "",
+            "byte_size": int(archive_metadata.get("byte_size") or 0),
+            "content_hash": archive_metadata.get("content_hash") or "",
+        }
     request_id = uuid.uuid4().hex
     _send_lensnode_command(
         datasource.lensnode,
@@ -229,6 +244,7 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
             "source_type": datasource.source_type,
             "name": datasource.name,
             "config": config,
+            "archive": archive,
             "conversion": conversion,
             "sync_policy": sync_policy,
             "target_path": datasource.target_path,

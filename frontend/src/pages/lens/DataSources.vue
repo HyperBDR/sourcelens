@@ -331,7 +331,11 @@
                   <td class="table-cell" @click.stop>
                     <div class="flex flex-wrap gap-2">
                       <BaseButton
-                        v-if="row.source_type !== 'managed_workspace'"
+                        v-if="
+                          !['file', 'managed_workspace'].includes(
+                            row.source_type
+                          )
+                        "
                         size="sm"
                         variant="outline"
                         :disabled="
@@ -342,7 +346,7 @@
                         {{ t('lensAdmin.actions.sync') }}
                       </BaseButton>
                       <BaseButton
-                        v-else
+                        v-if="row.source_type === 'managed_workspace'"
                         size="sm"
                         variant="outline"
                         @click="refreshAvailability(row)"
@@ -449,10 +453,12 @@ import {
   listDataSources,
   listLensNodes,
   refreshDataSourceAvailability,
+  reuploadDataSourceArchive,
   setDataSourceEnabled,
   syncDataSource,
   testLensNodeDataSourceConnection,
-  updateDataSource
+  updateDataSource,
+  uploadDataSourceArchive
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -783,6 +789,9 @@ function formatSourceType(sourceType) {
   if (sourceType === 'managed_workspace') {
     return t('lensAdmin.datasourceWizard.managedWorkspace')
   }
+  if (sourceType === 'file') {
+    return t('lensAdmin.datasourceWizard.fileUpload')
+  }
   return sourceType || emptyValue
 }
 
@@ -979,6 +988,7 @@ function defaultForm() {
     target_path: '',
     credential_uuid: '',
     credential_configured: false,
+    archive_file: null,
     conversion_document: true,
     conversion_document_model_ref: '',
     conversion_image: false,
@@ -1017,6 +1027,7 @@ function formFromRow(row) {
     target_path: row.target_path || '',
     credential_uuid: row.credential || '',
     credential_configured: !!row.credential_configured,
+    archive_file: null,
     conversion_document: row.sync_policy?.conversion?.document === true,
     conversion_document_model_ref:
       row.sync_policy?.conversion?.document_model_ref || '',
@@ -1117,8 +1128,12 @@ function handleDatasourceTypeChange(seed = null) {
   resetDatasourceSyncPolicy()
   if (!seed) {
     form.value.credential_uuid = ''
+    form.value.archive_file = null
   }
   const sourceType = seed?.source_type || form.value.source_type
+  if (!seed && sourceType === 'file') {
+    form.value.status = 'active'
+  }
   if (isGitSourceType(sourceType)) {
     datasourceConfig.value = {
       repo_url: '',
@@ -1167,20 +1182,28 @@ async function save() {
   formError.value = ''
   try {
     if (
-      form.value.source_type !== 'managed_workspace' &&
+      !['file', 'managed_workspace'].includes(form.value.source_type) &&
       !canSaveDatasource()
     ) {
       throw new Error(t('lensAdmin.datasourceWizard.connectionRequired'))
     }
     const uuid = form.value.uuid
     if (mode.value === 'create') {
-      const payloads = await buildCreatePayloads()
-      for (const payload of payloads) {
-        await createDataSource(payload)
+      if (form.value.source_type === 'file') {
+        await uploadDataSourceArchive(buildPayload(), form.value.archive_file)
+      } else {
+        const payloads = await buildCreatePayloads()
+        for (const payload of payloads) {
+          await createDataSource(payload)
+        }
       }
     } else {
       const payload = buildPayload()
-      await updateDataSource(uuid, payload)
+      if (form.value.source_type === 'file' && form.value.archive_file) {
+        await reuploadDataSourceArchive(uuid, payload, form.value.archive_file)
+      } else {
+        await updateDataSource(uuid, payload)
+      }
     }
     showSuccess(t('lensAdmin.messages.saveSuccess'))
     closeDrawer()
@@ -1198,13 +1221,19 @@ async function save() {
 
 function buildPayload() {
   const managedWorkspace = form.value.source_type === 'managed_workspace'
+  const fileUpload = form.value.source_type === 'file'
+  const syncPolicy = buildDatasourceSyncPolicy()
   return {
     name: form.value.name,
     source_type: normalizedSourceType(form.value.source_type),
     lensnode_uuid: form.value.lensnode_uuid,
     target_path: datasourceTargetPath(),
-    config: managedWorkspace ? {} : buildDatasourceConfig(),
-    sync_policy: managedWorkspace ? {} : buildDatasourceSyncPolicy(),
+    config: managedWorkspace || fileUpload ? {} : buildDatasourceConfig(),
+    sync_policy: managedWorkspace
+      ? {}
+      : fileUpload
+        ? { conversion: syncPolicy.conversion }
+        : syncPolicy,
     status: form.value.status || 'active',
     credential_uuid: shouldUseDatasourceCredential()
       ? form.value.credential_uuid

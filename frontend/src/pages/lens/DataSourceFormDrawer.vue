@@ -67,8 +67,33 @@
       <FormRow :label="t('lensAdmin.fields.status')" required>
         <select v-model="form.status" class="form-input">
           <option value="active">{{ t('common.status.active') }}</option>
-          <option value="disabled">{{ t('common.status.disabled') }}</option>
+          <option
+            value="disabled"
+            :disabled="isFileUpload && mode === 'create'"
+          >
+            {{ t('common.status.disabled') }}
+          </option>
         </select>
+      </FormRow>
+      <FormRow
+        v-if="isFileUpload"
+        :label="t('lensAdmin.datasourceWizard.archiveFile')"
+        :required="mode === 'create'"
+      >
+        <input
+          accept=".zip,.tar.gz,.tgz,application/zip,application/gzip"
+          class="form-input"
+          type="file"
+          @change="handleArchiveChange"
+        />
+        <p class="mt-1 text-xs text-ink-500">
+          {{
+            form.archive_file?.name ||
+            (mode === 'edit'
+              ? t('lensAdmin.datasourceWizard.reuploadOptional')
+              : t('lensAdmin.datasourceWizard.archiveHint'))
+          }}
+        </p>
       </FormRow>
     </div>
 
@@ -729,7 +754,7 @@
         </p>
       </FormRow>
       <FormRow
-        v-if="!isManagedWorkspace"
+        v-if="!isManualSource"
         :label="t('lensAdmin.fields.syncPolicy')"
         required
       >
@@ -743,7 +768,7 @@
         </select>
       </FormRow>
       <FormRow
-        v-if="!isManagedWorkspace && syncPolicyMode === 'interval'"
+        v-if="!isManualSource && syncPolicyMode === 'interval'"
         :label="t('lensAdmin.fields.syncInterval')"
         required
       >
@@ -757,7 +782,7 @@
           {{ t('lensAdmin.datasourceWizard.intervalHint') }}
         </p>
       </FormRow>
-      <div v-else-if="!isManagedWorkspace" class="grid gap-4 md:grid-cols-2">
+      <div v-else-if="!isManualSource" class="grid gap-4 md:grid-cols-2">
         <FormRow :label="t('lensAdmin.fields.cron')" required>
           <input
             v-model="syncCron"
@@ -1153,7 +1178,7 @@
             :disabled="
               !canProceedWizard ||
               pathResult?.status === 'blocked' ||
-              (!isManagedWorkspace && connectionResult?.status !== 'success')
+              (!isManualSource && connectionResult?.status !== 'success')
             "
             @click="$emit('save')"
           >
@@ -1395,6 +1420,11 @@ const sourceTypes = computed(() => [
     description: t('lensAdmin.datasourceWizard.feishuDesc')
   },
   {
+    value: 'file',
+    label: t('lensAdmin.datasourceWizard.fileUpload'),
+    description: t('lensAdmin.datasourceWizard.fileUploadDesc')
+  },
+  {
     value: 'managed_workspace',
     label: t('lensAdmin.datasourceWizard.managedWorkspace'),
     description: t('lensAdmin.datasourceWizard.managedWorkspaceDesc')
@@ -1411,6 +1441,10 @@ const selectedSourceTypeDescription = computed(() => {
 const isManagedWorkspace = computed(
   () => props.form.source_type === 'managed_workspace'
 )
+const isFileUpload = computed(() => props.form.source_type === 'file')
+const isManualSource = computed(
+  () => isManagedWorkspace.value || isFileUpload.value
+)
 
 const wizardStepsMeta = computed(() => {
   const steps = [
@@ -1422,6 +1456,9 @@ const wizardStepsMeta = computed(() => {
   ]
   if (isManagedWorkspace.value) {
     return steps.filter((step) => ['basic', 'node', 'sync'].includes(step.key))
+  }
+  if (isFileUpload.value) {
+    return steps.filter((step) => step.key !== 'connection')
   }
   return steps
 })
@@ -1529,7 +1566,13 @@ const connectionResultMessage = computed(() => {
 
 const canProceedWizard = computed(() => {
   if (activeStepKey.value === 'basic') {
-    return !!props.form.name?.trim() && !!props.form.source_type
+    return (
+      !!props.form.name?.trim() &&
+      !!props.form.source_type &&
+      (!isFileUpload.value ||
+        props.mode === 'edit' ||
+        !!props.form.archive_file)
+    )
   }
   if (activeStepKey.value === 'node') {
     return !!props.form.lensnode_uuid
@@ -1642,6 +1685,10 @@ const filteredCredentials = computed(() => {
 
 function isGitSourceType(sourceType) {
   return ['git', 'github', 'gitlab'].includes(sourceType)
+}
+
+function handleArchiveChange(event) {
+  props.form.archive_file = event.target.files?.[0] || null
 }
 
 function credentialOptionLabel(credential) {

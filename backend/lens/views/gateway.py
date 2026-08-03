@@ -7,6 +7,7 @@ import re
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -19,7 +20,7 @@ from lens.document_attachments import (
     document_attachment_storage,
     get_document_attachment,
 )
-from lens.models import Run, RunOutputFile, Skill
+from lens.models import DataSource, Run, RunOutputFile, Skill
 from lens.skill_packages import package_zip_bytes
 
 from .base import EventStreamRenderer, LensNodeAuthMixin
@@ -368,6 +369,52 @@ class LensNodeSkillPackageView(LensNodeAuthMixin, APIView):
             content_type="application/zip",
         )
         response["X-Skill-Package-Hash"] = skill.package_hash
+        return response
+
+
+class LensNodeDataSourceArchiveView(LensNodeAuthMixin, APIView):
+    """Serve one task-bound private datasource archive to its LensNode."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, datasource_uuid, task_id):
+        """Return archive bytes after node, datasource, and task checks."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        datasource = DataSource.objects.filter(
+            uuid=datasource_uuid,
+            lensnode=lensnode,
+            source_type=DataSource.SourceType.FILE,
+        ).first()
+        if datasource is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        from agentcore_task.adapters.django.models import TaskExecution
+
+        task = TaskExecution.objects.filter(
+            task_id=task_id,
+            module="lens_datasource",
+            metadata__datasource_uuid=str(datasource.uuid),
+            metadata__lensnode_uuid=str(lensnode.uuid),
+        ).first()
+        archive = (task.metadata or {}).get("archive") if task else None
+        storage_name = str((archive or {}).get("storage_name") or "")
+        if not storage_name or not default_storage.exists(storage_name):
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        response = FileResponse(
+            default_storage.open(storage_name, "rb"),
+            as_attachment=True,
+            filename=archive.get("original_name") or "datasource.zip",
+            content_type="application/octet-stream",
+        )
+        response["Content-Length"] = int(archive.get("byte_size") or 0)
+        response["X-Archive-Hash"] = archive.get("content_hash") or ""
         return response
 
 

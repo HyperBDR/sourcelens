@@ -274,11 +274,13 @@ def _datasource_target_path_conflict(
             )
         except DataSourcePathError:
             continue
-        managed_overlap = (
-            source_type == DataSource.SourceType.MANAGED_WORKSPACE
-            or datasource.source_type
-            == DataSource.SourceType.MANAGED_WORKSPACE
-        )
+        managed_overlap = source_type in {
+            DataSource.SourceType.FILE,
+            DataSource.SourceType.MANAGED_WORKSPACE,
+        } or datasource.source_type in {
+            DataSource.SourceType.FILE,
+            DataSource.SourceType.MANAGED_WORKSPACE,
+        }
         if existing == target or (
             managed_overlap and _datasource_paths_overlap(existing, target)
         ):

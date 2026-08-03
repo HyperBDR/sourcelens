@@ -280,6 +280,28 @@ export async function createDataSource(payload) {
   return unwrapResponse(response)
 }
 
+export async function uploadDataSourceArchive(payload, file) {
+  const form = new FormData()
+  form.append('metadata', JSON.stringify(payload))
+  form.append('file', file)
+  const response = await api.post('/lens/admin/datasources/upload/', form, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+  return unwrapResponse(response)
+}
+
+export async function reuploadDataSourceArchive(uuid, payload, file) {
+  const form = new FormData()
+  form.append('metadata', JSON.stringify(payload))
+  form.append('file', file)
+  const response = await api.post(
+    `/lens/admin/datasources/${uuid}/reupload/`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return unwrapResponse(response)
+}
+
 export async function updateDataSource(uuid, payload) {
   const response = await api.patch(`/lens/admin/datasources/${uuid}/`, payload)
   return unwrapResponse(response)

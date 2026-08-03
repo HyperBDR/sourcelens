@@ -14,6 +14,7 @@ from .assistant_lifecycle import (
     create_assistant_session,
 )
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE, AttachmentError
+from .datasource_archives import validate_datasource_archive
 from .datasource_services import (
     check_datasource_path,
     DataSourceDispatchError,
@@ -846,6 +847,49 @@ class DataSourceSerializer(serializers.ModelSerializer):
             attrs["credential"] = None
             attrs["config"] = {}
             attrs["sync_policy"] = {}
+        elif source_type == DataSource.SourceType.FILE:
+            if self.instance is None and not self.context.get("archive_upload"):
+                raise serializers.ValidationError(
+                    {"source_type": "DATASOURCE_ARCHIVE_UPLOAD_REQUIRED"}
+                )
+            if credential is not None:
+                raise serializers.ValidationError(
+                    {"credential_uuid": "File uploads do not use credentials"}
+                )
+            if config:
+                raise serializers.ValidationError(
+                    {"config": "File uploads do not use connection config"}
+                )
+            datasource_status = attrs.get(
+                "status",
+                getattr(self.instance, "status", DataSource.Status.ACTIVE),
+            )
+            if (
+                self.context.get("archive_upload")
+                and datasource_status == DataSource.Status.DISABLED
+            ):
+                raise serializers.ValidationError(
+                    {"status": "File upload must be active while importing"}
+                )
+            unsupported_policy = set(sync_policy) - {"conversion"}
+            if unsupported_policy:
+                raise serializers.ValidationError(
+                    {"sync_policy": "File uploads do not support schedules"}
+                )
+            if self.instance is not None and (
+                self.instance.source_type != source_type
+                or self.instance.lensnode_id != lensnode.pk
+                or self.instance.target_path != attrs["target_path"]
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "target_path": (
+                            "File upload location cannot be changed"
+                        )
+                    }
+                )
+            attrs["credential"] = None
+            attrs["config"] = {}
         elif source_type == DataSource.SourceType.GIT:
             _validate_datasource_credential_type(
                 credential,
@@ -1103,6 +1147,27 @@ class DataSourceConversionRequestSerializer(serializers.Serializer):
                 }
             )
         attrs["conversion"] = conversion
+        return attrs
+
+
+class DataSourceArchiveUploadSerializer(serializers.Serializer):
+    """Validate one datasource archive upload request."""
+
+    file = serializers.FileField()
+    metadata = serializers.JSONField()
+
+    def validate(self, attrs):
+        """Validate archive bytes before creating or updating a datasource."""
+
+        metadata = attrs.get("metadata")
+        if not isinstance(metadata, dict):
+            raise serializers.ValidationError(
+                {"metadata": "metadata must be an object"}
+            )
+        metadata = dict(metadata)
+        metadata["source_type"] = DataSource.SourceType.FILE
+        attrs["metadata"] = metadata
+        attrs["archive"] = validate_datasource_archive(attrs["file"])
         return attrs
 
 
@@ -1547,11 +1612,13 @@ def _validate_unique_datasource_target_path(
             )
         except DataSourcePathError:
             continue
-        managed_overlap = (
-            source_type == DataSource.SourceType.MANAGED_WORKSPACE
-            or datasource.source_type
-            == DataSource.SourceType.MANAGED_WORKSPACE
-        )
+        managed_overlap = source_type in {
+            DataSource.SourceType.FILE,
+            DataSource.SourceType.MANAGED_WORKSPACE,
+        } or datasource.source_type in {
+            DataSource.SourceType.FILE,
+            DataSource.SourceType.MANAGED_WORKSPACE,
+        }
         paths_overlap = _paths_overlap(existing, target)
         if existing == target or (managed_overlap and paths_overlap):
             raise serializers.ValidationError(

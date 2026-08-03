@@ -8,8 +8,13 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
+from lens.datasource_archives import (
+    delete_datasource_archive,
+    store_datasource_archive,
+)
 from lens.datasource_services import (
     DataSourceDispatchError,
     DataSourcePathError,
@@ -18,6 +23,7 @@ from lens.datasource_services import (
 from lens.models import DataSource, ScheduledTask
 from lens.periodic_tasks import ensure_datasource_periodic_task
 from lens.serializers import (
+    DataSourceArchiveUploadSerializer,
     DataSourceConversionRequestSerializer,
     DataSourceSerializer,
 )
@@ -172,8 +178,122 @@ class DataSourceViewSet(BaseAdminViewSet):
         datasource = serializer.save()
         ensure_datasource_periodic_task(datasource)
 
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="upload",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload(self, request):
+        """Create a file datasource from one uploaded archive."""
+
+        upload_serializer = DataSourceArchiveUploadSerializer(
+            data=request.data,
+        )
+        upload_serializer.is_valid(raise_exception=True)
+        datasource_serializer = DataSourceSerializer(
+            data=upload_serializer.validated_data["metadata"],
+            context={"request": request, "archive_upload": True},
+        )
+        datasource_serializer.is_valid(raise_exception=True)
+        datasource = datasource_serializer.save()
+        try:
+            task_id = self._enqueue_archive_upload(
+                datasource,
+                upload_serializer.validated_data,
+                "initial_upload",
+                request.user,
+            )
+        except Exception:
+            datasource.delete()
+            raise
+        payload = DataSourceSerializer(datasource).data
+        payload["initial_sync_task_id"] = task_id
+        return Response(payload, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="reupload",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def reupload(self, request, uuid=None):
+        """Replace a file datasource using one newly uploaded archive."""
+
+        datasource = self.get_object()
+        if datasource.source_type != DataSource.SourceType.FILE:
+            return Response(
+                {"detail": "DATASOURCE_ARCHIVE_UPLOAD_NOT_SUPPORTED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if datasource.status == DataSource.Status.DISABLED:
+            return Response(
+                {"detail": "DATASOURCE_DISABLED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        upload_serializer = DataSourceArchiveUploadSerializer(data=request.data)
+        upload_serializer.is_valid(raise_exception=True)
+        metadata = upload_serializer.validated_data["metadata"]
+        metadata.setdefault("name", datasource.name)
+        metadata.setdefault("lensnode_uuid", str(datasource.lensnode.uuid))
+        metadata.setdefault("target_path", datasource.target_path)
+        metadata.setdefault("config", {})
+        metadata.setdefault("sync_policy", datasource.sync_policy)
+        metadata.setdefault("status", datasource.status)
+        datasource_serializer = DataSourceSerializer(
+            datasource,
+            data=metadata,
+            partial=True,
+            context={"request": request, "archive_upload": True},
+        )
+        datasource_serializer.is_valid(raise_exception=True)
+        datasource = datasource_serializer.save()
+        task_id = self._enqueue_archive_upload(
+            datasource,
+            upload_serializer.validated_data,
+            "reupload",
+            request.user,
+        )
+        payload = DataSourceSerializer(datasource).data
+        payload["task_id"] = task_id
+        return Response(payload, status=status.HTTP_202_ACCEPTED)
+
+    def _enqueue_archive_upload(
+        self,
+        datasource,
+        upload_data,
+        trigger,
+        user,
+    ):
+        """Persist an archive and enqueue its one-time datasource task."""
+
+        task_id = uuid_mod.uuid4().hex
+        stored_archive = store_datasource_archive(
+            upload_data["file"],
+            upload_data["archive"],
+            task_id,
+        )
+        try:
+            self._enqueue_datasource_sync(
+                datasource,
+                task_id,
+                trigger,
+                user,
+                metadata={"archive": stored_archive},
+            )
+        except Exception:
+            delete_datasource_archive(stored_archive)
+            raise
+        return task_id
+
     @staticmethod
-    def _enqueue_datasource_sync(datasource, task_id, trigger, user=None):
+    def _enqueue_datasource_sync(
+        datasource,
+        task_id,
+        trigger,
+        user=None,
+        metadata=None,
+    ):
         """Register and enqueue one datasource sync task."""
 
         if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
@@ -186,6 +306,7 @@ class DataSourceViewSet(BaseAdminViewSet):
             task_id,
             trigger,
             created_by=user,
+            metadata=metadata,
         )
         metadata = dict(task_execution.metadata or {})
         metadata["celery_task_id"] = celery_task_id
@@ -202,7 +323,10 @@ class DataSourceViewSet(BaseAdminViewSet):
         """Enqueue datasource synchronization on its LensNode."""
 
         datasource = self.get_object()
-        if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+        if datasource.source_type in {
+            DataSource.SourceType.FILE,
+            DataSource.SourceType.MANAGED_WORKSPACE,
+        }:
             return Response(
                 {"detail": "DATASOURCE_SYNC_NOT_SUPPORTED"},
                 status=status.HTTP_409_CONFLICT,
@@ -419,6 +543,7 @@ class DataSourceViewSet(BaseAdminViewSet):
         celery_task_id = metadata.get("celery_task_id") or task.task_id
         app.control.revoke(celery_task_id, terminate=True, signal="SIGTERM")
         cancel_datasource_sync_on_lensnode(datasource.lensnode, task.task_id)
+        delete_datasource_archive(metadata.get("archive") or {})
 
         lock_token = metadata.get("lock_token") or task.task_id
         release_datasource_lock(datasource.uuid, token=lock_token)

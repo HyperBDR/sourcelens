@@ -370,6 +370,7 @@ class DataSource(TimestampedUUIDModel):
     class SourceType(models.TextChoices):
         GIT = "git", "Git"
         FEISHU = "feishu", "Feishu"
+        FILE = "file", "File Upload"
         MANAGED_WORKSPACE = "managed_workspace", "Managed Workspace"
 
     class Status(models.TextChoices):

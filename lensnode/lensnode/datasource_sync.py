@@ -9,6 +9,7 @@ from urllib import error, parse, request
 
 from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
+from .datasource_archives import sync_file_archive
 from . import datasource_manifest as manifest_store
 from .document_convert import is_convertible, post_process_documents
 from .path_rules import is_excluded_path
@@ -421,6 +422,7 @@ def datasource_adapter_registry():
     registry = DataSourceAdapterRegistry()
     registry.register(FunctionDataSourceAdapter("git", _sync_git))
     registry.register(FunctionDataSourceAdapter("feishu", _sync_feishu))
+    registry.register(FunctionDataSourceAdapter("file", sync_file_archive))
     return registry
 
 

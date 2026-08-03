@@ -16,6 +16,7 @@ from .views import (
     GlobalSettingViewSet,
     LensAttachmentView,
     LensNodeAIGatewayView,
+    LensNodeDataSourceArchiveView,
     LensNodeDeliverableUploadView,
     LensNodeHistoryArtifactView,
     LensNodeRunAttachmentView,
@@ -181,6 +182,14 @@ urlpatterns = [
         "lensnode/skills/<uuid:uuid>/package/",
         LensNodeSkillPackageView.as_view(),
         name="lens-lensnode-skill-package",
+    ),
+    path(
+        (
+            "lensnode/datasources/<uuid:datasource_uuid>/archives/"
+            "<str:task_id>/"
+        ),
+        LensNodeDataSourceArchiveView.as_view(),
+        name="lens-lensnode-datasource-archive",
     ),
     path(
         "lensnode/runs/<uuid:run_uuid>/attachments/<uuid:uuid>/",
