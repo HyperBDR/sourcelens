@@ -31,6 +31,9 @@ STALE_RUNTIME_MAX_AGE_S = 24 * 60 * 60
 RUNTIME_ACTIVITY_INTERVAL_S = 15
 RUNTIME_CONVERSION_POLL_S = 0.25
 RUN_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+MCP_ENVIRONMENT_REFERENCE_PATTERN = re.compile(
+    r"\$\{([A-Z_][A-Z0-9_]*)\}"
+)
 
 
 @dataclass(frozen=True)
@@ -825,11 +828,20 @@ def _materialize_mcp(mcp_root, mcp):
 
     runtime_dir = mcp_root / name
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    environment = mcp.get("environment") or {}
+    if not isinstance(environment, dict):
+        environment = {}
     payload = {
         "name": mcp.get("mcp_name"),
         "transport": mcp.get("transport"),
-        "endpoint": mcp.get("endpoint"),
-        "config": mcp.get("config") or {},
+        "endpoint": _expand_mcp_environment(
+            mcp.get("endpoint"),
+            environment,
+        ),
+        "config": _expand_mcp_environment(
+            mcp.get("config") or {},
+            environment,
+        ),
         "load_config": mcp.get("load_config") or {},
     }
     _write_private_json(
@@ -838,6 +850,29 @@ def _materialize_mcp(mcp_root, mcp):
     )
     _write_json(runtime_dir / "metadata.json", _mcp_metadata(mcp))
     return payload
+
+
+def _expand_mcp_environment(value, environment):
+    """Expand declared ${NAME} references in an ephemeral MCP payload."""
+
+    if isinstance(value, dict):
+        return {
+            key: _expand_mcp_environment(item, environment)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _expand_mcp_environment(item, environment)
+            for item in value
+        ]
+    if not isinstance(value, str):
+        return value
+    return MCP_ENVIRONMENT_REFERENCE_PATTERN.sub(
+        lambda match: str(
+            environment.get(match.group(1), match.group(0))
+        ),
+        value,
+    )
 
 
 def _skill_markdown(skill):

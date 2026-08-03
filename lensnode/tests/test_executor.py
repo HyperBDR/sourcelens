@@ -860,6 +860,54 @@ def test_mcp_credentials_are_materialized_only_in_run_directory(tmp_path):
         cleanup_runtime_resources(resources)
 
 
+def test_mcp_environment_expands_runtime_placeholders_only(tmp_path):
+    config = type(
+        "Config",
+        (),
+        {
+            "workspace_path": str(tmp_path),
+        },
+    )()
+    secret = "runtime-environment-secret"
+    command = {
+        "run_uuid": "00000000-0000-0000-0000-000000000009",
+        "loaded_skills": [],
+        "loaded_mcps": [
+            {
+                "mcp_uuid": "22222222-2222-2222-2222-222222222223",
+                "mcp_name": "Environment API",
+                "content_hash": "sha256:environment",
+                "transport": "url",
+                "endpoint": "https://${MCP_HOST}/api",
+                "config": {
+                    "headers": {
+                        "Authorization": "Bearer ${MCP_TOKEN}",
+                    }
+                },
+                "environment": {
+                    "MCP_HOST": "mcp.example.com",
+                    "MCP_TOKEN": secret,
+                },
+                "load_config": {},
+            }
+        ],
+    }
+
+    resources = prepare_runtime_resources(config, command)
+
+    try:
+        runtime_mcp = resources.mcp_configs[0]
+        assert runtime_mcp["endpoint"] == "https://mcp.example.com/api"
+        assert runtime_mcp["config"]["headers"] == {
+            "Authorization": f"Bearer {secret}"
+        }
+        runtime_text = resources.mcp_config_path.read_text(encoding="utf-8")
+        assert secret not in runtime_text
+        assert "MCP_TOKEN" not in runtime_text
+    finally:
+        cleanup_runtime_resources(resources)
+
+
 def test_system_prompt_includes_context_skill_guidance():
     prompt = _system_prompt(
         {

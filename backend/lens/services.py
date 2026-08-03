@@ -966,9 +966,9 @@ def build_loaded_mcps(assistant):
     """Snapshot active MCP bindings for LensNode dispatch."""
 
     loaded = []
-    for binding in assistant.mcp_bindings.select_related("mcp").filter(
-        enabled=True
-    ):
+    for binding in assistant.mcp_bindings.select_related(
+        "mcp", "environment_variable_set"
+    ).filter(enabled=True):
         loaded.append(
             {
                 "mcp_uuid": str(binding.mcp.uuid),
@@ -979,12 +979,19 @@ def build_loaded_mcps(assistant):
                         "transport": binding.mcp.transport,
                         "endpoint": binding.mcp.endpoint,
                         "config": binding.mcp.config,
+                        "environment": binding.mcp.environment,
                     }
                 ),
                 "transport": binding.mcp.transport,
                 "endpoint": binding.mcp.endpoint,
                 "config": binding.mcp.config,
                 "load_config": binding.load_config,
+                "environment_schema": binding.mcp.environment,
+                "environment_variable_set_uuid": (
+                    str(binding.environment_variable_set.uuid)
+                    if binding.environment_variable_set
+                    else None
+                ),
             }
         )
     return loaded
@@ -1024,6 +1031,35 @@ def resolve_loaded_skill_environment(loaded_skills):
         }
         runtime_skills.append(runtime_skill)
     return runtime_skills
+
+
+def resolve_loaded_mcp_environment(loaded_mcps):
+    """Add decrypted per-MCP values to an ephemeral runtime payload."""
+
+    runtime_mcps = []
+    for mcp in loaded_mcps or []:
+        runtime_mcp = dict(mcp)
+        variable_set_uuid = mcp.get("environment_variable_set_uuid")
+        variable_set = None
+        if variable_set_uuid:
+            variable_set = EnvironmentVariableSet.objects.filter(
+                uuid=variable_set_uuid,
+                enabled=True,
+            ).first()
+        values = variable_set.get_values() if variable_set else {}
+        declarations = mcp.get("environment_schema") or []
+        declared_names = {
+            item.get("name")
+            for item in declarations
+            if isinstance(item, dict) and item.get("name")
+        }
+        runtime_mcp["environment"] = {
+            name: str(values[name])
+            for name in declared_names
+            if name in values
+        }
+        runtime_mcps.append(runtime_mcp)
+    return runtime_mcps
 
 
 def task_names(lensnode):
@@ -1070,6 +1106,7 @@ def validate_run_dispatch(run):
         raise LensNodeDispatchError("LENSNODE_TASK_UNAVAILABLE")
 
     runtime_skills = resolve_loaded_skill_environment(execution.loaded_skills)
+    runtime_mcps = resolve_loaded_mcp_environment(execution.loaded_mcps)
     if execution.task == "general_chat":
         if not runtime_skills:
             raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
@@ -1091,6 +1128,19 @@ def validate_run_dispatch(run):
         values = skill.get("environment") or {}
         if any(not str(values.get(name) or "") for name in required):
             raise LensNodeDispatchError("SKILL_ENVIRONMENT_REQUIRED")
+
+    for mcp in runtime_mcps:
+        declarations = mcp.get("environment_schema") or []
+        required = {
+            item["name"]
+            for item in declarations
+            if isinstance(item, dict)
+            and item.get("required")
+            and item.get("name")
+        }
+        values = mcp.get("environment") or {}
+        if any(not str(values.get(name) or "") for name in required):
+            raise LensNodeDispatchError("MCP_ENVIRONMENT_REQUIRED")
 
 
 TOKEN_BUDGET_PROFILES = {
@@ -1616,7 +1666,9 @@ def dispatch_run_to_lensnode(
                 "loaded_skills": resolve_loaded_skill_environment(
                     execution.loaded_skills
                 ),
-                "loaded_mcps": execution.loaded_mcps,
+                "loaded_mcps": resolve_loaded_mcp_environment(
+                    execution.loaded_mcps
+                ),
                 "agent_model_ref": (
                     model_refs.get("agent")
                     or str(run.session.assistant.agent_model_ref or "")

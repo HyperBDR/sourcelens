@@ -39,6 +39,7 @@ from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
     Assistant,
     AssistantAccess,
+    AssistantMCP,
     AssistantSkill,
     DataSource,
     DataSourceCredential,
@@ -62,8 +63,10 @@ from lens.serializers import (
 )
 from lens.services import (
     LensNodeDispatchError,
+    build_loaded_mcps,
     build_loaded_skills,
     create_execution_run,
+    resolve_loaded_mcp_environment,
     resolve_loaded_skill_environment,
     validate_run_dispatch,
 )
@@ -279,6 +282,176 @@ class LensApiTests(TestCase):
             transport="url",
             endpoint="https://mcp.example.com/github",
         )
+
+    def test_mcp_api_masks_sensitive_config_and_preserves_masked_updates(self):
+        self.mcp.config = {
+            "api_key": "mcp-secret-key",
+            "region": "us-east-1",
+            "headers": {
+                "Authorization": "Bearer mcp-secret-token",
+                "X-Client": "sourcelens",
+            },
+        }
+        self.mcp.save(update_fields=["config"])
+
+        response = self.client.get(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["config"]["api_key"], "********")
+        self.assertEqual(
+            response.data["config"]["headers"]["Authorization"],
+            "********",
+        )
+        self.assertEqual(response.data["config"]["region"], "us-east-1")
+        self.assertNotIn("mcp-secret", str(response.data))
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {
+                "config": {
+                    "api_key": "",
+                    "region": "eu-west-1",
+                    "headers": {
+                        "Authorization": "********",
+                        "X-Client": "updated-client",
+                    },
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.mcp.refresh_from_db()
+        self.assertEqual(self.mcp.config["api_key"], "mcp-secret-key")
+        self.assertEqual(
+            self.mcp.config["headers"]["Authorization"],
+            "Bearer mcp-secret-token",
+        )
+        self.assertEqual(self.mcp.config["region"], "eu-west-1")
+        self.assertEqual(
+            self.mcp.config["headers"]["X-Client"],
+            "updated-client",
+        )
+        self.assertEqual(response.data["config"]["api_key"], "********")
+        self.assertNotIn("mcp-secret", str(response.data))
+
+    def test_mcp_api_accepts_environment_declarations(self):
+        environment = [
+            {
+                "name": "GITHUB_TOKEN",
+                "description": "GitHub access token",
+                "required": True,
+                "secret": True,
+            }
+        ]
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"environment": environment},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.mcp.refresh_from_db()
+        self.assertEqual(self.mcp.environment, environment)
+        self.assertEqual(response.data["environment"], environment)
+
+    def test_assistant_mcp_resolves_environment_without_leaking(self):
+        self.mcp.environment = [
+            {
+                "name": "GITHUB_TOKEN",
+                "description": "GitHub access token",
+                "required": True,
+                "secret": True,
+            }
+        ]
+        self.mcp.save(update_fields=["environment"])
+
+        response = self.client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {
+                "mcp_bindings": [
+                    {
+                        "mcp_uuid": str(self.mcp.uuid),
+                        "environment_variable_set_name": "GitHub MCP",
+                        "environment_values": [
+                            {
+                                "key": "GITHUB_TOKEN",
+                                "value": "runtime-secret",
+                            }
+                        ],
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertNotIn("runtime-secret", str(response.data))
+        binding = self.assistant.mcp_bindings.get(mcp=self.mcp)
+        self.assertEqual(
+            binding.environment_variable_set.get_values(),
+            {"GITHUB_TOKEN": "runtime-secret"},
+        )
+
+        loaded = build_loaded_mcps(self.assistant)
+        runtime = resolve_loaded_mcp_environment(loaded)
+
+        self.assertNotIn("runtime-secret", str(loaded))
+        self.assertEqual(
+            runtime[0]["environment"],
+            {"GITHUB_TOKEN": "runtime-secret"},
+        )
+
+    def test_environment_variable_set_lists_skill_and_mcp_usages(self):
+        variable_set = EnvironmentVariableSet.objects.create(
+            name="Shared Integration Credentials"
+        )
+        variable_set.set_values({"TOKEN": "secret-value"})
+        variable_set.save(update_fields=["encrypted_values"])
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=self.skill,
+            environment_variable_set=variable_set,
+        )
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+            environment_variable_set=variable_set,
+        )
+
+        response = self.client.get(
+            "/api/lens/admin/environment-variable-sets/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        row = next(
+            item
+            for item in response.data["results"]
+            if item["uuid"] == str(variable_set.uuid)
+        )
+        self.assertEqual(
+            row["usages"],
+            [
+                {
+                    "type": "mcp",
+                    "resource_uuid": str(self.mcp.uuid),
+                    "resource_name": self.mcp.name,
+                    "assistant_uuid": str(self.assistant.uuid),
+                    "assistant_name": self.assistant.name,
+                },
+                {
+                    "type": "skill",
+                    "resource_uuid": str(self.skill.uuid),
+                    "resource_name": self.skill.name,
+                    "assistant_uuid": str(self.assistant.uuid),
+                    "assistant_name": self.assistant.name,
+                },
+            ],
+        )
+        self.assertNotIn("secret-value", str(response.data))
 
     def test_assistant_create_saves_lensnode_and_bindings(self):
         payload = {
@@ -1791,6 +1964,33 @@ class LensApiTests(TestCase):
             build_loaded_skills(self.assistant)
         )
         self.assertEqual(runtime[0]["environment"], {})
+
+    def test_dispatch_rejects_missing_mcp_environment(self):
+        self.mcp.environment = [
+            {
+                "name": "GITHUB_TOKEN",
+                "required": True,
+                "secret": True,
+            }
+        ]
+        self.mcp.save(update_fields=["environment"])
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Search GitHub", enqueue=False)
+
+        with self.assertRaises(LensNodeDispatchError) as context:
+            validate_run_dispatch(run)
+
+        self.assertEqual(
+            str(context.exception),
+            "MCP_ENVIRONMENT_REQUIRED",
+        )
 
     def test_dispatch_rejects_run_queued_before_assistant_was_archived(self):
         session = Session.objects.create(

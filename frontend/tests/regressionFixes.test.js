@@ -63,8 +63,9 @@ test('task statistics request all users unless a user is selected', async () => 
 
 test('drawer leave transition completes when animations are suspended', async () => {
   const drawer = await source('components/ui/BaseDrawer.vue')
-  const { runDrawerTransition } =
-    await import('../src/components/ui/drawerTransition.js')
+  const { runDrawerTransition } = await import(
+    '../src/components/ui/drawerTransition.js'
+  )
 
   let cancelledAnimations = 0
   const suspendedAnimation = () => ({
@@ -98,8 +99,9 @@ test('drawer leave transition completes when animations are suspended', async ()
 })
 
 test('drawer skips visual transitions in a hidden document', async () => {
-  const { runDrawerTransition } =
-    await import('../src/components/ui/drawerTransition.js')
+  const { runDrawerTransition } = await import(
+    '../src/components/ui/drawerTransition.js'
+  )
   let animationCount = 0
   let completed = false
   const panel = {
@@ -137,4 +139,95 @@ test('assistant token budget offers an unlimited profile', async () => {
   assert.equal(chinese.lensAdmin.tokenBudget.unlimited, '无限制')
   assert.match(english.lensAdmin.tokenBudget.unlimitedHint, /token cap/i)
   assert.match(chinese.lensAdmin.tokenBudget.unlimitedHint, /Token 预算/)
+})
+
+test('assistant Skill picker supports search and environment configuration', async () => {
+  const [drawer, english, chinese] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('admin/locales/en.json').then(JSON.parse),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(drawer, /v-model="skillSearch"/)
+  assert.match(drawer, /type="search"/)
+  assert.match(drawer, /class="form-input skill-search-input"/)
+  assert.match(drawer, /\.skill-search-input\s*{\s*@apply pl-9;/)
+  assert.match(drawer, /v-for="skill in filteredSelectableSkills"/)
+  assert.match(drawer, /filterSelectableSkills/)
+  assert.match(drawer, /data-testid="assistant-skill-option"/)
+  assert.match(
+    drawer,
+    /isSkillSelected\(skill\.uuid\)\s*&& skillEnvironment\(skill\)\.length/
+  )
+  assert.match(drawer, /data-testid="assistant-skill-environments"/)
+  assert.match(drawer, /class="ml-8 border-l border-primary-200 pl-3"/)
+  assert.doesNotMatch(drawer, /selectedSkillsWithEnvironment/)
+  assert.equal(english.lensAdmin.wizard.searchSkills, 'Search Skills')
+  assert.equal(chinese.lensAdmin.wizard.searchSkills, '搜索 Skills')
+  assert.match(english.lensAdmin.wizard.skillSearchResults, /showing/i)
+  assert.match(chinese.lensAdmin.wizard.skillSearchResults, /显示/)
+  assert.equal(
+    english.lensAdmin.wizard.environmentSection,
+    'Environment variables'
+  )
+  assert.equal(chinese.lensAdmin.wizard.environmentSection, '环境变量')
+  assert.match(english.lensAdmin.wizard.environmentSectionHint, /this Skill/i)
+  assert.match(chinese.lensAdmin.wizard.environmentSectionHint, /当前 Skill/)
+})
+
+test('MCP config masks credential values while preserving edit feedback', async () => {
+  const [page, editor, english, chinese] = await Promise.all([
+    source('pages/lens/Mcp.vue'),
+    source('pages/lens/components/KeyValueEditor.vue'),
+    source('admin/locales/en.json').then(JSON.parse),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(page, /:mask-sensitive-values="true"/)
+  assert.match(page, /lensAdmin\.mcp\.sensitiveConfigHint/)
+  assert.match(editor, /isSensitiveMcpConfigKey/)
+  assert.match(editor, /:type="isSensitiveRow\(row\) \? 'password' : 'text'"/)
+  assert.match(editor, /isMaskedSensitiveRow\(row\)/)
+  assert.match(english.lensAdmin.mcp.sensitiveConfigHint, /masked/i)
+  assert.match(chinese.lensAdmin.mcp.sensitiveConfigHint, /掩码/)
+})
+
+test('MCP declarations and assistant bindings configure environment variables nearby', async () => {
+  const [mcpPage, drawer, english, chinese] = await Promise.all([
+    source('pages/lens/Mcp.vue'),
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('admin/locales/en.json').then(JSON.parse),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(mcpPage, /v-model="form\.environment"/)
+  assert.match(mcpPage, /environment: buildSkillEnvironment/)
+  assert.match(mcpPage, /mcpConfigToRows/)
+  assert.match(mcpPage, /mcpRowsToConfig/)
+  assert.match(
+    drawer,
+    /isMcpSelected\(mcp\.uuid\)\s*&& mcpEnvironment\(mcp\)\.length/
+  )
+  assert.match(drawer, /data-testid="assistant-mcp-environments"/)
+  assert.match(drawer, /mcp_environment_set_uuids/)
+  assert.match(english.lensAdmin.wizard.mcpEnvironmentSectionHint, /MCP Server/)
+  assert.match(chinese.lensAdmin.wizard.mcpEnvironmentSectionHint, /MCP Server/)
+  assert.match(
+    chinese.lensAdmin.mcp.environmentPlaceholderHint,
+    /\{placeholder\}/
+  )
+})
+
+test('environment variable sets show their Skill and MCP references', async () => {
+  const [page, english, chinese] = await Promise.all([
+    source('pages/lens/EnvironmentVariables.vue'),
+    source('admin/locales/en.json').then(JSON.parse),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(page, /row\.usages\?\.length/)
+  assert.match(page, /usage\.resource_name/)
+  assert.match(page, /usage\.assistant_name/)
+  assert.equal(english.lensAdmin.environmentVariables.usages, 'Referenced by')
+  assert.equal(chinese.lensAdmin.environmentVariables.usages, '引用方')
 })

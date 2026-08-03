@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildSkillEnvironmentBinding } from '../src/pages/lens/assistantEnvironment.js'
+import {
+  buildMcpEnvironmentBinding,
+  buildSkillEnvironmentBinding
+} from '../src/pages/lens/assistantEnvironment.js'
 
 const skill = {
   uuid: 'skill-uuid',
@@ -57,5 +60,29 @@ test('sends a named new set in the assistant payload', () => {
       { key: 'API_BASE_URL', value: 'https://jira.example.com' },
       { key: 'API_TOKEN', value: 'production-token' }
     ]
+  })
+})
+
+test('builds an MCP binding with only declared environment values', () => {
+  const binding = buildMcpEnvironmentBinding(
+    {
+      uuid: 'mcp-uuid',
+      environment: [{ name: 'GITHUB_TOKEN', required: true }]
+    },
+    '__new__',
+    {
+      name: 'GitHub MCP',
+      values: {
+        GITHUB_TOKEN: 'secret-token',
+        UNDECLARED: 'ignored'
+      }
+    }
+  )
+
+  assert.deepEqual(binding, {
+    mcp_uuid: 'mcp-uuid',
+    environment_variable_set_uuid: null,
+    environment_variable_set_name: 'GitHub MCP',
+    environment_values: [{ key: 'GITHUB_TOKEN', value: 'secret-token' }]
   })
 })

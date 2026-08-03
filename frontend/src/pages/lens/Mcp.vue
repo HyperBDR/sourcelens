@@ -127,8 +127,24 @@
               v-model="form.config_rows"
               :key-label="t('lensAdmin.fields.configKey')"
               :value-label="t('lensAdmin.fields.configValue')"
+              :mask-sensitive-values="true"
+              :configured-label="t('lensAdmin.mcp.secretConfigured')"
             />
+            <p class="mt-2 text-xs leading-5 text-ink-500">
+              {{ t('lensAdmin.mcp.sensitiveConfigHint') }}
+            </p>
           </FormRow>
+          <SkillEnvironmentEditor
+            v-model="form.environment"
+            :help-text="t('lensAdmin.mcp.environmentVariablesHelp')"
+          />
+          <p class="text-xs leading-5 text-ink-500">
+            {{
+              t('lensAdmin.mcp.environmentPlaceholderHint', {
+                placeholder: '${VARIABLE_NAME}'
+              })
+            }}
+          </p>
           <BooleanRow v-model="form.enabled" />
 
           <p v-if="formError" class="text-sm text-danger-700">
@@ -174,12 +190,10 @@ import BooleanRow from './components/BooleanRow.vue'
 import FormRow from './components/FormRow.vue'
 import KeyValueEditor from './components/KeyValueEditor.vue'
 import RowActions from './components/RowActions.vue'
-import {
-  EMPTY_VALUE as emptyValue,
-  normalizeList,
-  objectToRows,
-  rowsToObject
-} from './adminHelpers'
+import SkillEnvironmentEditor from './components/SkillEnvironmentEditor.vue'
+import { EMPTY_VALUE as emptyValue, normalizeList } from './adminHelpers'
+import { mcpConfigToRows, mcpRowsToConfig } from './mcpConfig'
+import { buildSkillEnvironment, skillEnvironmentForm } from './skillEnvironment'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
@@ -236,6 +250,7 @@ function defaultForm() {
     transport: 'url',
     endpoint: '',
     config_rows: [],
+    environment: [],
     enabled: true
   }
 }
@@ -246,7 +261,8 @@ function formFromRow(row) {
     name: row.name || '',
     transport: row.transport || 'url',
     endpoint: row.endpoint || '',
-    config_rows: objectToRows(row.config || {}),
+    config_rows: mcpConfigToRows(row.config || {}),
+    environment: skillEnvironmentForm(row.environment || []),
     enabled: row.enabled !== false
   }
 }
@@ -256,7 +272,8 @@ function buildPayload() {
     name: form.value.name,
     transport: form.value.transport,
     endpoint: form.value.endpoint,
-    config: rowsToObject(form.value.config_rows),
+    config: mcpRowsToConfig(form.value.config_rows),
+    environment: buildSkillEnvironment(form.value.environment),
     enabled: !!form.value.enabled
   }
 }

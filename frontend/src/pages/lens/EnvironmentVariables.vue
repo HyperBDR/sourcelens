@@ -34,6 +34,9 @@
                 <th class="px-5 py-3">
                   {{ t('lensAdmin.environmentVariables.keys') }}
                 </th>
+                <th class="px-5 py-3">
+                  {{ t('lensAdmin.environmentVariables.usages') }}
+                </th>
                 <th class="px-5 py-3">{{ t('lensAdmin.fields.status') }}</th>
                 <th class="px-5 py-3 text-right">{{ t('common.actions') }}</th>
               </tr>
@@ -52,6 +55,27 @@
                 </td>
                 <td class="px-5 py-4 font-mono text-xs text-ink-600">
                   {{ (row.keys || []).join(', ') || '—' }}
+                </td>
+                <td class="px-5 py-4">
+                  <div v-if="row.usages?.length" class="flex flex-wrap gap-1.5">
+                    <span
+                      v-for="usage in row.usages"
+                      :key="usageKey(usage)"
+                      class="inline-flex max-w-72 items-center gap-1 rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs text-ink-600"
+                      :title="usageTitle(usage)"
+                    >
+                      <span class="font-medium text-ink-700">
+                        {{ usageTypeLabel(usage.type) }}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span class="truncate">{{ usage.resource_name }}</span>
+                      <span aria-hidden="true">·</span>
+                      <span class="truncate text-ink-400">
+                        {{ usage.assistant_name }}
+                      </span>
+                    </span>
+                  </div>
+                  <span v-else class="text-xs text-ink-400">—</span>
                 </td>
                 <td class="px-5 py-4">
                   <StatusBadge :status="row.enabled ? 'enabled' : 'disabled'" />
@@ -257,6 +281,23 @@ function addValue() {
 
 function removeValue(index) {
   form.value.values.splice(index, 1)
+}
+
+function usageTypeLabel(type) {
+  return type === 'mcp'
+    ? t('lensAdmin.environmentVariables.mcpUsage')
+    : t('lensAdmin.environmentVariables.skillUsage')
+}
+
+function usageKey(usage) {
+  return `${usage.type}:${usage.resource_uuid}:${usage.assistant_uuid}`
+}
+
+function usageTitle(usage) {
+  return `${usageTypeLabel(usage.type)} · ${usage.resource_name} · ${t(
+    'lensAdmin.environmentVariables.assistantUsage',
+    { name: usage.assistant_name }
+  )}`
 }
 
 function payload() {

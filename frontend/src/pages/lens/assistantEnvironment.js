@@ -29,3 +29,49 @@ export function buildSkillEnvironmentBinding(
   }
   return binding
 }
+
+export function buildMcpEnvironmentBinding(
+  mcp,
+  selectedEnvironmentSetUuid,
+  draft = {}
+) {
+  return buildEnvironmentBinding(
+    'mcp_uuid',
+    mcp.uuid,
+    mcp.environment,
+    selectedEnvironmentSetUuid,
+    draft
+  )
+}
+
+function buildEnvironmentBinding(
+  resourceKey,
+  resourceUuid,
+  declarations,
+  selectedEnvironmentSetUuid,
+  draft
+) {
+  const selectedUuid =
+    selectedEnvironmentSetUuid === '__new__'
+      ? null
+      : selectedEnvironmentSetUuid || null
+  const binding = {
+    [resourceKey]: resourceUuid,
+    environment_variable_set_uuid: selectedUuid
+  }
+  const declaredNames = new Set((declarations || []).map((item) => item.name))
+  const environmentValues = Object.entries(draft.values || {})
+    .filter(
+      ([name, value]) =>
+        declaredNames.has(name) && String(value ?? '').trim().length > 0
+    )
+    .map(([key, value]) => ({ key, value }))
+
+  if (selectedEnvironmentSetUuid === '__new__' && draft.name?.trim()) {
+    binding.environment_variable_set_name = draft.name.trim()
+  }
+  if (environmentValues.length) {
+    binding.environment_values = environmentValues
+  }
+  return binding
+}
