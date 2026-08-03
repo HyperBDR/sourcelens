@@ -48,6 +48,7 @@
     "tabFiles": "生成文件",
     "overviewSummary": "运行概览",
     "overviewExecution": "执行配置",
+    "modelsUsed": "执行模型",
     "overviewTiming": "时间信息",
     "overviewResources": "运行资源",
     "noFiles": "没有生成文件",

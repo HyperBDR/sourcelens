@@ -51,6 +51,14 @@ test('run overview groups related fields and localizes analysis depth', async ()
   assert.doesNotMatch(contents, /· \{\{ detail\.agent_rounds \}\}/)
 })
 
+test('run overview shows the models actually used by the run', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-models-used"/)
+  assert.match(contents, /lensRuns\.modelsUsed/)
+  assert.match(contents, /detail\.models_used/)
+})
+
 test('run overview separates executor status from business outcome', async () => {
   const contents = await source()
 

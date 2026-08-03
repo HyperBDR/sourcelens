@@ -692,6 +692,17 @@
                     </div>
                     <div>
                       <dt class="overview-label">
+                        {{ t('lensRuns.modelsUsed') }}
+                      </dt>
+                      <dd
+                        data-testid="run-models-used"
+                        class="overview-value break-all"
+                      >
+                        {{ detail.models_used?.join(', ') || '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
                         {{ t('lensAdmin.fields.agentRounds') }}
                       </dt>
                       <dd class="mt-1">
