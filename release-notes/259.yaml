@@ -1,0 +1,4 @@
+type: improvement
+audience: admin
+en: Raised Skill package limits and localized upload and validation errors.
+zh-CN: 提升 Skill 压缩包限制，并本地化上传与校验错误提示。

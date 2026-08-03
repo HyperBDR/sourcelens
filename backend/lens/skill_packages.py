@@ -22,9 +22,9 @@ from .environment_variables import (
 )
 from .models import Skill
 
-MAX_ZIP_SIZE = 20 * 1024 * 1024
-MAX_UNPACKED_SIZE = 50 * 1024 * 1024
-MAX_FILE_SIZE = 10 * 1024 * 1024
+MAX_ZIP_SIZE = 50 * 1024 * 1024
+MAX_UNPACKED_SIZE = 100 * 1024 * 1024
+MAX_FILE_SIZE = 50 * 1024 * 1024
 MAX_SKILL_MD_SIZE = 256 * 1024
 MAX_FILE_COUNT = 300
 MAX_GITHUB_DOWNLOAD_SIZE = MAX_ZIP_SIZE
@@ -53,7 +53,7 @@ def import_skill_zip(
 
     data = _read_limited(file_obj, MAX_ZIP_SIZE + 1)
     if len(data) > MAX_ZIP_SIZE:
-        raise SkillPackageError("Skill package exceeds 20 MB.")
+        raise SkillPackageError("Skill package exceeds 50 MB.")
     if original_name and not str(original_name).lower().endswith(".zip"):
         raise SkillPackageError("Skill package must be a .zip file.")
     if not zipfile.is_zipfile(io.BytesIO(data)):
@@ -142,7 +142,7 @@ def update_skill_zip(
         )
     data = _read_limited(file_obj, MAX_ZIP_SIZE + 1)
     if len(data) > MAX_ZIP_SIZE:
-        raise SkillPackageError("Skill package exceeds 20 MB.")
+        raise SkillPackageError("Skill package exceeds 50 MB.")
     if original_name and not str(original_name).lower().endswith(".zip"):
         raise SkillPackageError("Skill package must be a .zip file.")
     if not zipfile.is_zipfile(io.BytesIO(data)):
@@ -258,7 +258,7 @@ def _github_skill_zip(url, importer):
     except urlerror.URLError as exc:
         raise SkillPackageError(f"GitHub download failed: {exc.reason}")
     if len(data) > MAX_GITHUB_DOWNLOAD_SIZE:
-        raise SkillPackageError("GitHub skill package exceeds 20 MB.")
+        raise SkillPackageError("GitHub skill package exceeds 50 MB.")
     return importer(
         file_obj=io.BytesIO(data),
         original_name="github-skill.zip",
@@ -381,7 +381,7 @@ def _safe_extract_zip(data, destination):
                 )
             total_size += info.file_size
             if total_size > MAX_UNPACKED_SIZE:
-                raise SkillPackageError("Skill package unpacks over 50 MB.")
+                raise SkillPackageError("Skill package unpacks over 100 MB.")
             _validate_zip_member(info)
         archive.extractall(destination)
         for info in archive.infolist():

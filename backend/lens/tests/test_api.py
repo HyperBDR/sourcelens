@@ -166,8 +166,12 @@ def skill_zip_upload(
     )
 
 
-def skill_zip_upload_with_file(name, file_size):
-    """Return a compressed Skill zip containing one generated package file."""
+def skill_zip_upload_with_file(
+    name,
+    file_size,
+    compression=zipfile.ZIP_DEFLATED,
+):
+    """Return a Skill zip containing one generated package file."""
 
     buffer = io.BytesIO()
     skill_md = (
@@ -177,7 +181,7 @@ def skill_zip_upload_with_file(name, file_size):
         "---\n"
         "Use the bundled executable.\n"
     )
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(buffer, "w", compression) as archive:
         archive.writestr(f"{name}/SKILL.md", skill_md)
         archive.writestr(f"{name}/bin/tool", b"\0" * file_size)
     buffer.seek(0)
@@ -705,7 +709,7 @@ class LensApiTests(TestCase):
             environment,
         )
 
-    def test_uploaded_skill_accepts_ten_megabyte_package_file(self):
+    def test_uploaded_skill_accepts_thirty_five_megabyte_package_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.settings(STORAGE_ROOT=temp_dir):
                 response = self.client.post(
@@ -713,7 +717,8 @@ class LensApiTests(TestCase):
                     {
                         "file": skill_zip_upload_with_file(
                             "binary-skill",
-                            10 * 1024 * 1024,
+                            35 * 1024 * 1024,
+                            zipfile.ZIP_STORED,
                         )
                     },
                     format="multipart",
@@ -721,7 +726,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    def test_uploaded_skill_rejects_package_file_over_ten_megabytes(self):
+    def test_uploaded_skill_rejects_package_file_over_fifty_megabytes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.settings(STORAGE_ROOT=temp_dir):
                 response = self.client.post(
@@ -729,7 +734,7 @@ class LensApiTests(TestCase):
                     {
                         "file": skill_zip_upload_with_file(
                             "oversized-binary-skill",
-                            10 * 1024 * 1024 + 1,
+                            50 * 1024 * 1024 + 1,
                         )
                     },
                     format="multipart",
@@ -739,6 +744,27 @@ class LensApiTests(TestCase):
         self.assertEqual(
             response.data["detail"],
             "Skill package contains an oversized file.",
+        )
+
+    def test_uploaded_skill_rejects_package_over_fifty_megabytes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload_with_file(
+                            "oversized-package-skill",
+                            50 * 1024 * 1024,
+                            zipfile.ZIP_STORED,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Skill package exceeds 50 MB.",
         )
 
     def test_uploaded_skill_accepts_environment_schema_override(self):
