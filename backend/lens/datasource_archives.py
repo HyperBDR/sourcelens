@@ -2,6 +2,7 @@
 
 import hashlib
 import stat
+import struct
 import tarfile
 import unicodedata
 import uuid
@@ -9,7 +10,7 @@ import zipfile
 from pathlib import PurePosixPath
 
 from django.conf import settings
-from django.core.files.storage import default_storage
+from django.core.files.storage import storages
 from rest_framework.exceptions import ValidationError
 
 ARCHIVE_EXTENSIONS = (".zip", ".tar.gz", ".tgz")
@@ -17,6 +18,15 @@ RESERVED_ROOT_NAMES = {
     ".sourcelens-datasource.json",
     "manifest.json",
 }
+ZIP_EOCD_SIGNATURE = b"PK\x05\x06"
+ZIP_EOCD_MIN_BYTES = 22
+ZIP_EOCD_SEARCH_BYTES = ZIP_EOCD_MIN_BYTES + 65_535
+
+
+def datasource_archive_storage():
+    """Return the dedicated non-public datasource archive storage."""
+
+    return storages["datasource_archives"]
 
 
 def validate_datasource_archive(upload):
@@ -60,8 +70,8 @@ def store_datasource_archive(upload, metadata, task_id):
     """Store a validated archive under a non-public random name."""
 
     extension = ".zip" if metadata["archive_type"] == "zip" else ".tar.gz"
-    storage_name = default_storage.save(
-        (f"datasource-archives/{task_id}/" f"{uuid.uuid4().hex}{extension}"),
+    storage_name = datasource_archive_storage().save(
+        f"{task_id}/{uuid.uuid4().hex}{extension}",
         upload,
     )
     return {**metadata, "storage_name": storage_name}
@@ -71,8 +81,9 @@ def delete_datasource_archive(metadata):
     """Delete a stored datasource archive if it still exists."""
 
     storage_name = str((metadata or {}).get("storage_name") or "")
-    if storage_name and default_storage.exists(storage_name):
-        default_storage.delete(storage_name)
+    storage = datasource_archive_storage()
+    if storage_name and storage.exists(storage_name):
+        storage.delete(storage_name)
 
 
 def _archive_type(name):
@@ -89,19 +100,22 @@ def _archive_type(name):
 def _validate_zip(upload, compressed_size):
     """Reject malformed or unsafe ZIP members."""
 
+    _validate_zip_directory_metadata(upload)
     if not zipfile.is_zipfile(upload):
         raise ValidationError({"file": "DATASOURCE_ARCHIVE_INVALID"})
     upload.seek(0)
     with zipfile.ZipFile(upload) as archive:
-        members = archive.infolist()
-        _validate_member_count(members)
         seen = set()
         total_size = 0
-        for member in members:
+        member_count = 0
+        for member in archive.infolist():
+            member_count = _increment_member_count(member_count)
             path = _validate_member_path(member.filename, seen)
             mode = member.external_attr >> 16
             if stat.S_ISLNK(mode):
-                raise ValidationError({"file": "DATASOURCE_ARCHIVE_LINK_UNSUPPORTED"})
+                raise ValidationError(
+                    {"file": "DATASOURCE_ARCHIVE_LINK_UNSUPPORTED"}
+                )
             if member.flag_bits & 0x1:
                 raise ValidationError({"file": "DATASOURCE_ARCHIVE_ENCRYPTED"})
             if member.compress_type not in {
@@ -121,6 +135,7 @@ def _validate_zip(upload, compressed_size):
                 total_size,
             )
             _validate_reserved_path(path)
+        _validate_archive_not_empty(member_count)
         _validate_total_compression_ratio(total_size, compressed_size)
 
 
@@ -128,15 +143,17 @@ def _validate_tar(upload, compressed_size):
     """Reject malformed or unsafe compressed TAR members."""
 
     upload.seek(0)
-    with tarfile.open(fileobj=upload, mode="r:gz") as archive:
-        members = archive.getmembers()
-        _validate_member_count(members)
+    with tarfile.open(fileobj=upload, mode="r|gz") as archive:
         seen = set()
         total_size = 0
-        for member in members:
+        member_count = 0
+        for member in archive:
+            member_count = _increment_member_count(member_count)
             path = _validate_member_path(member.name, seen)
             if not member.isdir() and not member.isfile():
-                raise ValidationError({"file": "DATASOURCE_ARCHIVE_LINK_UNSUPPORTED"})
+                raise ValidationError(
+                    {"file": "DATASOURCE_ARCHIVE_LINK_UNSUPPORTED"}
+                )
             if member.isfile():
                 total_size = _validate_member_size(
                     member.size,
@@ -144,16 +161,56 @@ def _validate_tar(upload, compressed_size):
                     total_size,
                 )
                 _validate_reserved_path(path)
+        _validate_archive_not_empty(member_count)
         _validate_total_compression_ratio(total_size, compressed_size)
 
 
-def _validate_member_count(members):
-    """Enforce the archive entry ceiling."""
+def _validate_zip_directory_metadata(upload):
+    """Reject oversized ZIP directories before ZipFile materializes them."""
 
-    if not members:
-        raise ValidationError({"file": "DATASOURCE_ARCHIVE_EMPTY"})
-    if len(members) > settings.DATASOURCE_ARCHIVE_MAX_MEMBERS:
+    upload.seek(0, 2)
+    size = upload.tell()
+    read_size = min(size, ZIP_EOCD_SEARCH_BYTES)
+    upload.seek(size - read_size)
+    tail = upload.read(read_size)
+    offset = tail.rfind(ZIP_EOCD_SIGNATURE)
+    if offset < 0 or len(tail) - offset < ZIP_EOCD_MIN_BYTES:
+        raise ValidationError({"file": "DATASOURCE_ARCHIVE_INVALID"})
+    fields = struct.unpack_from("<4s4H2LH", tail, offset)
+    disk_number, directory_disk = fields[1], fields[2]
+    disk_members, total_members = fields[3], fields[4]
+    directory_size = fields[5]
+    comment_size = fields[7]
+    if (
+        disk_number != 0
+        or directory_disk != 0
+        or disk_members != total_members
+        or comment_size != len(tail) - offset - ZIP_EOCD_MIN_BYTES
+    ):
+        raise ValidationError({"file": "DATASOURCE_ARCHIVE_INVALID"})
+    if total_members > settings.DATASOURCE_ARCHIVE_MAX_MEMBERS:
         raise ValidationError({"file": "DATASOURCE_ARCHIVE_TOO_MANY_MEMBERS"})
+    if directory_size > settings.DATASOURCE_ARCHIVE_MAX_DIRECTORY_BYTES:
+        raise ValidationError(
+            {"file": "DATASOURCE_ARCHIVE_DIRECTORY_TOO_LARGE"}
+        )
+    upload.seek(0)
+
+
+def _increment_member_count(member_count):
+    """Increment and enforce the archive entry ceiling."""
+
+    member_count += 1
+    if member_count > settings.DATASOURCE_ARCHIVE_MAX_MEMBERS:
+        raise ValidationError({"file": "DATASOURCE_ARCHIVE_TOO_MANY_MEMBERS"})
+    return member_count
+
+
+def _validate_archive_not_empty(member_count):
+    """Reject archives without entries."""
+
+    if member_count == 0:
+        raise ValidationError({"file": "DATASOURCE_ARCHIVE_EMPTY"})
 
 
 def _validate_member_path(name, seen):

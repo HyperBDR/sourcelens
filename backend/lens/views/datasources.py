@@ -231,7 +231,9 @@ class DataSourceViewSet(BaseAdminViewSet):
                 {"detail": "DATASOURCE_DISABLED"},
                 status=status.HTTP_409_CONFLICT,
             )
-        upload_serializer = DataSourceArchiveUploadSerializer(data=request.data)
+        upload_serializer = DataSourceArchiveUploadSerializer(
+            data=request.data
+        )
         upload_serializer.is_valid(raise_exception=True)
         metadata = upload_serializer.validated_data["metadata"]
         metadata.setdefault("name", datasource.name)

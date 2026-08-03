@@ -135,7 +135,13 @@ def get_datasource_sync_max_workers():
     return value if value > 0 else DEFAULT_DATASOURCE_SYNC_WORKERS
 
 
-def check_datasource_path(lensnode, target_path, source_type, config=None):
+def check_datasource_path(
+    lensnode,
+    target_path,
+    source_type,
+    config=None,
+    datasource_uuid=None,
+):
     """Ask a LensNode to inspect a datasource target path."""
 
     target_path = normalize_workspace_target_path(
@@ -151,6 +157,7 @@ def check_datasource_path(lensnode, target_path, source_type, config=None):
             "target_path": target_path,
             "source_type": source_type,
             "config": config or {},
+            "datasource_uuid": str(datasource_uuid or ""),
         },
     )
     return _wait_cache_result(
@@ -223,7 +230,9 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
         from agentcore_task.adapters.django.models import TaskExecution
 
         task = TaskExecution.objects.filter(task_id=task_id).first()
-        archive_metadata = (task.metadata or {}).get("archive") if task else None
+        archive_metadata = (
+            (task.metadata or {}).get("archive") if task else None
+        )
         if not archive_metadata:
             raise DataSourceDispatchError("DATASOURCE_ARCHIVE_MISSING")
         archive = {

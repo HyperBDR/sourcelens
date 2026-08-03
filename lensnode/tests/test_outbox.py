@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from unittest.mock import patch
 
 from lensnode.main import LensNodeClient
@@ -40,6 +41,33 @@ class FakeWebSocket:
             raise FakeSendError()
         self.sent.append(data)
         self._count += 1
+
+
+def test_datasource_cancel_sets_cooperative_event():
+    """Datasource cancellation reaches its background worker thread."""
+
+    async def exercise():
+        client = _make_client()
+        task_id = "archive-sync"
+        task = asyncio.create_task(asyncio.sleep(10))
+        cancel_event = threading.Event()
+        client.running_tasks[f"datasource:{task_id}"] = task
+        client.datasource_sync_cancels[task_id] = cancel_event
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "datasource_cancel",
+                    "task_id": task_id,
+                }
+            )
+        )
+        await asyncio.gather(task, return_exceptions=True)
+
+        assert cancel_event.is_set()
+        assert task.cancelled()
+
+    asyncio.run(exercise())
 
 
 async def _wait_until(predicate, timeout=1.0):

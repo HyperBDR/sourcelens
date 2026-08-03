@@ -7,7 +7,6 @@ import re
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.files.storage import default_storage
 from django.http import FileResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -20,6 +19,7 @@ from lens.document_attachments import (
     document_attachment_storage,
     get_document_attachment,
 )
+from lens.datasource_archives import datasource_archive_storage
 from lens.models import DataSource, Run, RunOutputFile, Skill
 from lens.skill_packages import package_zip_bytes
 
@@ -405,10 +405,11 @@ class LensNodeDataSourceArchiveView(LensNodeAuthMixin, APIView):
         ).first()
         archive = (task.metadata or {}).get("archive") if task else None
         storage_name = str((archive or {}).get("storage_name") or "")
-        if not storage_name or not default_storage.exists(storage_name):
+        storage = datasource_archive_storage()
+        if not storage_name or not storage.exists(storage_name):
             return Response(status=status.HTTP_404_NOT_FOUND)
         response = FileResponse(
-            default_storage.open(storage_name, "rb"),
+            storage.open(storage_name, "rb"),
             as_attachment=True,
             filename=archive.get("original_name") or "datasource.zip",
             content_type="application/octet-stream",

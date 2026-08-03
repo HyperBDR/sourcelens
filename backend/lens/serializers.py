@@ -848,7 +848,9 @@ class DataSourceSerializer(serializers.ModelSerializer):
             attrs["config"] = {}
             attrs["sync_policy"] = {}
         elif source_type == DataSource.SourceType.FILE:
-            if self.instance is None and not self.context.get("archive_upload"):
+            if self.instance is None and not self.context.get(
+                "archive_upload"
+            ):
                 raise serializers.ValidationError(
                     {"source_type": "DATASOURCE_ARCHIVE_UPLOAD_REQUIRED"}
                 )

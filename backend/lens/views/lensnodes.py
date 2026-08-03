@@ -202,6 +202,7 @@ class LensNodeViewSet(BaseAdminViewSet):
                 target_path,
                 request.data.get("source_type") or DataSource.SourceType.GIT,
                 config=request.data.get("config") or {},
+                datasource_uuid=request.data.get("datasource_uuid") or None,
             )
         except DataSourcePathError as exc:
             return Response(

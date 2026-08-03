@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
 
 import pytest
 
+from lensnode import datasource_manifest as manifest_store
 from lensnode.datasource_sync import (
     DataSourceSyncError,
     datasource_sync_workers,
@@ -95,6 +96,53 @@ def test_managed_workspace_rejects_symlink_outside_workspace(tmp_path):
             },
             workspace_path=tmp_path,
         )
+
+
+def test_file_path_preflight_blocks_unowned_nonempty_directory(tmp_path):
+    """File uploads reject non-empty targets without a matching marker."""
+
+    target = tmp_path / "documents"
+    target.mkdir()
+    (target / "existing.txt").write_text("keep")
+
+    result = inspect_datasource_path(
+        {
+            "source_type": "file",
+            "datasource_uuid": "source-1",
+            "target_path": str(target),
+        },
+        workspace_path=tmp_path,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["message_code"] == "file_target_not_owned"
+
+
+def test_file_path_preflight_allows_owned_target_replacement(tmp_path):
+    """File re-upload accepts a target with its datasource marker."""
+
+    target = tmp_path / "documents"
+    target.mkdir()
+    (target / "existing.txt").write_text("replace")
+    manifest_store.write_datasource_marker(
+        target,
+        {
+            "datasource_uuid": "source-1",
+            "source_type": "file",
+        },
+    )
+
+    result = inspect_datasource_path(
+        {
+            "source_type": "file",
+            "datasource_uuid": "source-1",
+            "target_path": str(target),
+        },
+        workspace_path=tmp_path,
+    )
+
+    assert result["status"] == "available"
+    assert result["message_code"] == "file_replace"
 
 
 def test_git_auth_url_uses_inline_access_token():

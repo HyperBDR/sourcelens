@@ -2,11 +2,14 @@ import hashlib
 import io
 import stat
 import tarfile
+import threading
 import zipfile
+from pathlib import Path
 
 import httpx
 import pytest
 
+from lensnode import datasource_archives
 from lensnode.datasource_archives import DataSourceArchiveError
 from lensnode.datasource_sync import sync_datasource
 
@@ -51,6 +54,26 @@ def _tar_symlink_bytes():
         info.type = tarfile.SYMTYPE
         info.linkname = "outside.txt"
         archive.addfile(info)
+    return buffer.getvalue()
+
+
+def _zip_many_members(member_count):
+    """Return a ZIP containing many empty entries."""
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        for index in range(member_count):
+            archive.writestr(f"entry-{index}.txt", b"")
+    return buffer.getvalue()
+
+
+def _tar_many_members(member_count):
+    """Return a TAR.GZ containing many empty entries."""
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for index in range(member_count):
+            archive.addfile(tarfile.TarInfo(f"entry-{index}.txt"))
     return buffer.getvalue()
 
 
@@ -202,3 +225,110 @@ def test_archive_rejects_excessive_compression_ratio(
         )
 
     assert not target.exists()
+
+
+def test_zip_member_limit_precedes_zipfile_materialization(
+    tmp_path,
+    monkeypatch,
+):
+    """ZIP entry count is bounded before ZipFile builds its member list."""
+
+    data = _zip_many_members(10_001)
+
+    def fail_zipfile(*args, **kwargs):
+        raise AssertionError("ZipFile must not be constructed")
+
+    monkeypatch.setattr(datasource_archives.zipfile, "ZipFile", fail_zipfile)
+    with pytest.raises(
+        DataSourceArchiveError,
+        match="DATASOURCE_ARCHIVE_TOO_MANY_MEMBERS",
+    ):
+        sync_datasource(
+            _command(data, "zip", tmp_path / "documents"),
+            workspace_path=tmp_path,
+        )
+
+
+def test_tar_member_limit_does_not_materialize_members(tmp_path, monkeypatch):
+    """TAR validation iterates entries instead of calling getmembers."""
+
+    data = _tar_many_members(10_001)
+
+    def fail_getmembers(*args, **kwargs):
+        raise AssertionError("getmembers must not be called")
+
+    monkeypatch.setattr(tarfile.TarFile, "getmembers", fail_getmembers)
+    with pytest.raises(
+        DataSourceArchiveError,
+        match="DATASOURCE_ARCHIVE_TOO_MANY_MEMBERS",
+    ):
+        sync_datasource(
+            _command(data, "tar.gz", tmp_path / "documents"),
+            workspace_path=tmp_path,
+        )
+
+
+def test_cancel_before_swap_preserves_previous_target(tmp_path, monkeypatch):
+    """A cooperative cancellation cannot commit extracted replacement data."""
+
+    target = tmp_path / "documents"
+    first = _zip_bytes({"old.txt": "old"})
+    sync_datasource(
+        _command(first, "zip", target),
+        workspace_path=tmp_path,
+    )
+    cancel_event = threading.Event()
+    original_hash = datasource_archives._source_sha256
+
+    def cancel_after_hash(path, event):
+        digest = original_hash(path, event)
+        cancel_event.set()
+        return digest
+
+    monkeypatch.setattr(
+        datasource_archives,
+        "_source_sha256",
+        cancel_after_hash,
+    )
+    command = _command(_zip_bytes({"new.txt": "new"}), "zip", target)
+    command["cancel_event"] = cancel_event
+
+    with pytest.raises(
+        DataSourceArchiveError,
+        match="DATASOURCE_SYNC_CANCELLED",
+    ):
+        sync_datasource(command, workspace_path=tmp_path)
+
+    assert (target / "old.txt").read_text() == "old"
+    assert not (target / "new.txt").exists()
+
+
+def test_cancel_during_swap_restores_previous_target(tmp_path, monkeypatch):
+    """Cancellation after backup rename restores the previous directory."""
+
+    target = tmp_path / "documents"
+    sync_datasource(
+        _command(_zip_bytes({"old.txt": "old"}), "zip", target),
+        workspace_path=tmp_path,
+    )
+    cancel_event = threading.Event()
+    original_rename = Path.rename
+
+    def cancel_after_backup(path, destination):
+        result = original_rename(path, destination)
+        if path == target:
+            cancel_event.set()
+        return result
+
+    monkeypatch.setattr(Path, "rename", cancel_after_backup)
+    command = _command(_zip_bytes({"new.txt": "new"}), "zip", target)
+    command["cancel_event"] = cancel_event
+
+    with pytest.raises(
+        DataSourceArchiveError,
+        match="DATASOURCE_SYNC_CANCELLED",
+    ):
+        sync_datasource(command, workspace_path=tmp_path)
+
+    assert (target / "old.txt").read_text() == "old"
+    assert not (target / "new.txt").exists()

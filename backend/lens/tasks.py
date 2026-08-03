@@ -987,6 +987,8 @@ def cleanup_stale_datasource_sync_tasks(startup=False):
             datasource_uuid,
             token=metadata.get("lock_token") or task.task_id,
         )
+        if not is_conversion:
+            _delete_task_datasource_archive(task.task_id, metadata=metadata)
         metadata["timeout_cancelled_at"] = now.isoformat()
         task.status = TaskStatus.FAILURE
         task.finished_at = now

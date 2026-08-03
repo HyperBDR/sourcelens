@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import tarfile
 import tempfile
 import threading
 import uuid
@@ -11,8 +12,10 @@ from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
 from asgiref.sync import async_to_sync
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.files.storage import default_storage, storages
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection
 from django.test import (
@@ -199,6 +202,34 @@ def datasource_zip_upload(files, name="documents.zip"):
         name,
         buffer.getvalue(),
         content_type="application/zip",
+    )
+
+
+def datasource_zip_many_members(member_count):
+    """Return a ZIP with many empty members."""
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        for index in range(member_count):
+            archive.writestr(f"entry-{index}.txt", b"")
+    return SimpleUploadedFile(
+        "many.zip",
+        buffer.getvalue(),
+        content_type="application/zip",
+    )
+
+
+def datasource_tar_many_members(member_count):
+    """Return a TAR.GZ with many empty members."""
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for index in range(member_count):
+            archive.addfile(tarfile.TarInfo(f"entry-{index}.txt"))
+    return SimpleUploadedFile(
+        "many.tar.gz",
+        buffer.getvalue(),
+        content_type="application/gzip",
     )
 
 
@@ -3275,6 +3306,10 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], "available")
         check_path.assert_called_once()
+        self.assertEqual(
+            check_path.call_args.kwargs["datasource_uuid"],
+            str(self.datasource.uuid),
+        )
 
     def test_datasource_create_enqueues_initial_sync(self):
         payload = {
@@ -4664,7 +4699,18 @@ class DataSourceArchiveUploadTests(TestCase):
 
     def setUp(self):
         self.media = tempfile.TemporaryDirectory()
-        self.settings_override = override_settings(MEDIA_ROOT=self.media.name)
+        self.archive_storage = tempfile.TemporaryDirectory()
+        storage_settings = {
+            **settings.STORAGES,
+            "datasource_archives": {
+                "BACKEND": "django.core.files.storage.FileSystemStorage",
+                "OPTIONS": {"location": self.archive_storage.name},
+            },
+        }
+        self.settings_override = override_settings(
+            MEDIA_ROOT=self.media.name,
+            STORAGES=storage_settings,
+        )
         self.settings_override.enable()
         self.user = User.objects.create_user(
             username="archive-admin",
@@ -4685,6 +4731,7 @@ class DataSourceArchiveUploadTests(TestCase):
 
     def tearDown(self):
         self.settings_override.disable()
+        self.archive_storage.cleanup()
         self.media.cleanup()
 
     def _metadata(self, **overrides):
@@ -4725,6 +4772,11 @@ class DataSourceArchiveUploadTests(TestCase):
         )
         self.assertEqual(task.metadata["archive"]["archive_type"], "zip")
         self.assertEqual(len(task.metadata["archive"]["content_hash"]), 64)
+        storage_name = task.metadata["archive"]["storage_name"]
+        self.assertTrue(
+            storages["datasource_archives"].exists(storage_name)
+        )
+        self.assertFalse(default_storage.exists(storage_name))
         apply_async.assert_called_once()
 
     def test_upload_rejects_archive_path_traversal(self):
@@ -4759,6 +4811,49 @@ class DataSourceArchiveUploadTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("DATASOURCE_ARCHIVE_RATIO_TOO_HIGH", str(response.data))
+
+    def test_zip_member_limit_is_checked_before_zipfile_materialization(self):
+        upload = datasource_zip_many_members(10_001)
+
+        with patch("lens.datasource_archives.zipfile.ZipFile") as zip_file:
+            response = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": upload,
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "DATASOURCE_ARCHIVE_TOO_MANY_MEMBERS",
+            str(response.data),
+        )
+        zip_file.assert_not_called()
+
+    def test_tar_member_limit_does_not_materialize_all_members(self):
+        upload = datasource_tar_many_members(10_001)
+
+        with patch.object(
+            tarfile.TarFile,
+            "getmembers",
+            side_effect=AssertionError("getmembers must not be used"),
+        ):
+            response = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": upload,
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "DATASOURCE_ARCHIVE_TOO_MANY_MEMBERS",
+            str(response.data),
+        )
 
     def test_disabled_file_datasource_allows_metadata_updates(self):
         with patch("lens.views.datasources.source_sync_task.apply_async"):

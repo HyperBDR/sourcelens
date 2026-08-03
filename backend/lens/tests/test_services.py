@@ -3,7 +3,7 @@ from datetime import timedelta
 import hashlib
 from importlib import import_module
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from agentcore_task.adapters.django.models import TaskExecution
 from asgiref.sync import async_to_sync
@@ -2757,6 +2757,7 @@ class LensServiceTests(TransactionTestCase):
             metadata={
                 "datasource_uuid": str(self.datasource.uuid),
                 "lock_token": "stale-sync",
+                "archive": {"storage_name": "stale/archive.zip"},
             },
         )
         acquire_datasource_lock(
@@ -2765,9 +2766,14 @@ class LensServiceTests(TransactionTestCase):
             ttl_s=60,
         )
 
-        with patch(
-            "lens.services.cancel_datasource_sync_on_lensnode"
-        ) as cancel:
+        with (
+            patch(
+                "lens.services.cancel_datasource_sync_on_lensnode"
+            ) as cancel,
+            patch(
+                "lens.tasks._delete_task_datasource_archive"
+            ) as delete_archive,
+        ):
             result = cleanup_stale_datasource_sync_tasks()
 
         task.refresh_from_db()
@@ -2782,6 +2788,10 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(record.last_status, "failed")
         self.assertEqual(record.last_error, "LENS_SOURCE_SYNC_TIMEOUT")
         cancel.assert_called_once_with(self.lensnode, "stale-sync")
+        delete_archive.assert_called_once_with(
+            "stale-sync",
+            metadata=ANY,
+        )
 
         acquire_datasource_lock(
             self.datasource.uuid,

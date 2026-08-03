@@ -5,6 +5,9 @@ import test from 'node:test'
 const source = (path) =>
   readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
+const repositoryFile = (path) =>
+  readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
+
 test('file datasource APIs send archives as multipart requests', async () => {
   const api = await source('api/lens.js')
 
@@ -32,4 +35,17 @@ test('datasource save selects create, reupload, or metadata update', async () =>
   assert.match(page, /reuploadDataSourceArchive\(uuid, payload,/)
   assert.match(page, /await updateDataSource\(uuid, payload\)/)
   assert.match(page, /\{ conversion: syncPolicy\.conversion \}/)
+})
+
+test('nginx blocks public access to private datasource archives', async () => {
+  const configs = await Promise.all([
+    repositoryFile('docker/nginx/conf.d/default.conf'),
+    repositoryFile('docker/nginx/default.standalone.conf'),
+    repositoryFile('docker/nginx/default.dev.conf')
+  ])
+
+  for (const config of configs) {
+    assert.match(config, /location \^~ \/media\/storage\/private\//)
+    assert.match(config, /media\/storage\/private\/[\s\S]*return 404/)
+  }
 })

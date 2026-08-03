@@ -80,6 +80,7 @@ class LensNodeClient:
         self.heartbeat_count = 0
         self.last_report_signature = None
         self.running_tasks = {}
+        self.datasource_sync_cancels = {}
         self.datasource_conversion_cancels = {}
         self.running_commands = {}
         self._checkpoint_resume_ready = None
@@ -253,6 +254,8 @@ class LensNodeClient:
                     await self.websocket.close()
                 except Exception:
                     LOGGER.exception("Failed to close LensNode websocket")
+            for cancel_event in self.datasource_sync_cancels.values():
+                cancel_event.set()
             for task in list(self.running_tasks.values()):
                 task.cancel()
             if self.running_tasks:
@@ -417,6 +420,9 @@ class LensNodeClient:
         elif message_type == "datasource_cancel":
             task_id = str(message.get("task_id") or "")
             task_key = f"datasource:{task_id}"
+            cancel_event = self.datasource_sync_cancels.get(task_id)
+            if cancel_event is not None:
+                cancel_event.set()
             task = self.running_tasks.get(task_key)
             if task is not None:
                 task.cancel()
@@ -653,8 +659,12 @@ class LensNodeClient:
             return
 
         task_key = f"datasource:{task_id}"
+        cancel_event = threading.Event()
+        self.datasource_sync_cancels[task_id] = cancel_event
         task = asyncio.create_task(
-            self._execute_datasource_sync(message)
+            self._execute_datasource_sync(
+                {**message, "cancel_event": cancel_event}
+            )
         )
         self.running_tasks[task_key] = task
         task.add_done_callback(lambda item: self._consume_task_exception(item))
@@ -723,6 +733,7 @@ class LensNodeClient:
                 }
             )
         finally:
+            self.datasource_sync_cancels.pop(task_id, None)
             self.running_tasks.pop(task_key, None)
 
     async def _start_datasource_conversion(self, message):

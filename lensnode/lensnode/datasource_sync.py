@@ -7,10 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
 
+from . import datasource_manifest as manifest_store
 from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
-from .datasource_archives import sync_file_archive
-from . import datasource_manifest as manifest_store
+from .datasource_archives import is_file_target_owned, sync_file_archive
 from .document_convert import is_convertible, post_process_documents
 from .path_rules import is_excluded_path
 from .path_rules import normalize_excluded_roots
@@ -133,6 +133,26 @@ def inspect_datasource_path(command, workspace_path=WORKSPACE_ROOT):
     if result["is_empty"]:
         result["message_code"] = "empty"
         result["message"] = "Directory is empty and can be used."
+        return result
+
+    if source_type == "file":
+        if not is_file_target_owned(
+            target,
+            command.get("datasource_uuid"),
+        ):
+            result.update(
+                {
+                    "source_compatible": False,
+                    "status": "blocked",
+                    "message_code": "file_target_not_owned",
+                    "message": (
+                        "Directory is not owned by this file datasource."
+                    ),
+                }
+            )
+            return result
+        result["message_code"] = "file_replace"
+        result["message"] = "Existing file datasource will be replaced."
         return result
 
     if source_type == "git" and config.get("git_organization_parent"):
