@@ -631,7 +631,10 @@
                           class="font-mono text-[11px] font-medium text-ink-700"
                         >
                           {{ item.name
-                          }}<span v-if="item.required" class="text-danger-600">
+                          }}<span
+                            v-if="isMcpEnvironmentRequired(mcp, item)"
+                            class="text-danger-600"
+                          >
                             *</span
                           >
                         </label>
@@ -983,6 +986,7 @@ import {
   assignmentFirstOptions,
   createLatestRequestRunner
 } from './assistantAccessSelectors'
+import { mcpRequiredEnvironmentNames } from './assistantEnvironment'
 import { filterSelectableSkills, skillDescription } from './assistantSkills'
 
 const props = defineProps({
@@ -1516,7 +1520,11 @@ function mcpEnvironment(mcp) {
 }
 
 function hasRequiredMcpEnvironment(mcp) {
-  return mcpEnvironment(mcp).some((item) => item.required)
+  return mcpRequiredEnvironmentNames(mcp).length > 0
+}
+
+function isMcpEnvironmentRequired(mcp, item) {
+  return mcpRequiredEnvironmentNames(mcp).includes(item.name)
 }
 
 function mcpEnvironmentDraft(mcpUuid) {
@@ -1548,7 +1556,10 @@ function selectedMcpEnvironmentsConfigured() {
   return (props.form.mcp_uuids || []).every((mcpUuid) => {
     const mcp = props.mcps.find((item) => item.uuid === mcpUuid)
     if (!mcp) return true
-    const required = mcpEnvironment(mcp).filter((item) => item.required)
+    const requiredNames = new Set(mcpRequiredEnvironmentNames(mcp))
+    const required = mcpEnvironment(mcp).filter((item) =>
+      requiredNames.has(item.name)
+    )
     const selectedUuid = props.form.mcp_environment_set_uuids?.[mcpUuid] || ''
     const draft = mcpEnvironmentDraft(mcpUuid)
     const hasEnteredValue = Object.values(draft.values || {}).some((value) =>

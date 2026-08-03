@@ -44,6 +44,33 @@ export function buildMcpEnvironmentBinding(
   )
 }
 
+export function mcpRequiredEnvironmentNames(mcp) {
+  const references = new Set(mcp?.environment_references || [])
+  environmentReferences({
+    endpoint: mcp?.endpoint,
+    config: mcp?.config
+  }).forEach((name) => references.add(name))
+  return (mcp?.environment || [])
+    .filter((item) => item.required || references.has(item.name))
+    .map((item) => item.name)
+}
+
+function environmentReferences(value) {
+  if (Array.isArray(value)) {
+    return value.reduce((references, item) => {
+      environmentReferences(item).forEach((name) => references.add(name))
+      return references
+    }, new Set())
+  }
+  if (value && typeof value === 'object') {
+    return environmentReferences(Object.values(value))
+  }
+  if (typeof value !== 'string') return new Set()
+  return new Set(
+    Array.from(value.matchAll(/\$\{([A-Z_][A-Z0-9_]*)\}/g), (match) => match[1])
+  )
+}
+
 function buildEnvironmentBinding(
   resourceKey,
   resourceUuid,

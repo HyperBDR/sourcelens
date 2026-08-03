@@ -5,7 +5,60 @@ from rest_framework import serializers
 
 
 ENVIRONMENT_KEY_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+ENVIRONMENT_REFERENCE_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 ALLOWED_SKILL_API_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+
+
+def environment_references(value):
+    """Return environment variable names referenced by nested values."""
+
+    if isinstance(value, dict):
+        references = set()
+        for item in value.values():
+            references.update(environment_references(item))
+        return references
+    if isinstance(value, list):
+        references = set()
+        for item in value:
+            references.update(environment_references(item))
+        return references
+    if not isinstance(value, str):
+        return set()
+    return set(ENVIRONMENT_REFERENCE_RE.findall(value))
+
+
+def declared_environment_references(value, declarations):
+    """Return references backed by MCP environment declarations."""
+
+    declared_names = {
+        item.get("name")
+        for item in declarations or []
+        if isinstance(item, dict) and item.get("name")
+    }
+    return environment_references(value) & declared_names
+
+
+def expand_environment_references(value, environment):
+    """Expand available environment references in nested runtime values."""
+
+    if isinstance(value, dict):
+        return {
+            key: expand_environment_references(item, environment)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            expand_environment_references(item, environment)
+            for item in value
+        ]
+    if not isinstance(value, str):
+        return value
+    return ENVIRONMENT_REFERENCE_RE.sub(
+        lambda match: str(
+            environment.get(match.group(1), match.group(0))
+        ),
+        value,
+    )
 
 
 def validate_environment_schema(value):

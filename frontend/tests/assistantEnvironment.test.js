@@ -3,7 +3,8 @@ import test from 'node:test'
 
 import {
   buildMcpEnvironmentBinding,
-  buildSkillEnvironmentBinding
+  buildSkillEnvironmentBinding,
+  mcpRequiredEnvironmentNames
 } from '../src/pages/lens/assistantEnvironment.js'
 
 const skill = {
@@ -85,4 +86,37 @@ test('builds an MCP binding with only declared environment values', () => {
     environment_variable_set_name: 'GitHub MCP',
     environment_values: [{ key: 'GITHUB_TOKEN', value: 'secret-token' }]
   })
+})
+
+test('treats referenced optional MCP variables as required', () => {
+  const required = mcpRequiredEnvironmentNames({
+    endpoint: 'https://${MCP_HOST}/api',
+    config: {
+      headers: [{ Authorization: 'Bearer ${MCP_TOKEN}' }],
+      literal: '${OPTIONAL_UNUSED}'
+    },
+    environment: [
+      { name: 'MCP_HOST', required: false },
+      { name: 'MCP_TOKEN', required: false },
+      { name: 'OPTIONAL_UNUSED', required: false },
+      { name: 'ALWAYS_REQUIRED', required: true }
+    ]
+  })
+
+  assert.deepEqual(required, [
+    'MCP_HOST',
+    'MCP_TOKEN',
+    'OPTIONAL_UNUSED',
+    'ALWAYS_REQUIRED'
+  ])
+})
+
+test('uses secret-safe MCP reference metadata when config is masked', () => {
+  const required = mcpRequiredEnvironmentNames({
+    config: { headers: { Authorization: '********' } },
+    environment_references: ['MCP_TOKEN'],
+    environment: [{ name: 'MCP_TOKEN', required: false }]
+  })
+
+  assert.deepEqual(required, ['MCP_TOKEN'])
 })

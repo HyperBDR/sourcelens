@@ -831,16 +831,29 @@ def _materialize_mcp(mcp_root, mcp):
     environment = mcp.get("environment") or {}
     if not isinstance(environment, dict):
         environment = {}
+    environment_resolution = mcp.get("environment_resolved")
+    environment_resolved = environment_resolution is True
+    require_all_environment = environment_resolution is False
     payload = {
         "name": mcp.get("mcp_name"),
         "transport": mcp.get("transport"),
-        "endpoint": _expand_mcp_environment(
-            mcp.get("endpoint"),
-            environment,
+        "endpoint": (
+            mcp.get("endpoint")
+            if environment_resolved
+            else _expand_mcp_environment(
+                mcp.get("endpoint"),
+                environment,
+                require_all=require_all_environment,
+            )
         ),
-        "config": _expand_mcp_environment(
-            mcp.get("config") or {},
-            environment,
+        "config": (
+            mcp.get("config") or {}
+            if environment_resolved
+            else _expand_mcp_environment(
+                mcp.get("config") or {},
+                environment,
+                require_all=require_all_environment,
+            )
         ),
         "load_config": mcp.get("load_config") or {},
     }
@@ -852,25 +865,40 @@ def _materialize_mcp(mcp_root, mcp):
     return payload
 
 
-def _expand_mcp_environment(value, environment):
+def _expand_mcp_environment(value, environment, *, require_all=True):
     """Expand declared ${NAME} references in an ephemeral MCP payload."""
 
     if isinstance(value, dict):
         return {
-            key: _expand_mcp_environment(item, environment)
+            key: _expand_mcp_environment(
+                item,
+                environment,
+                require_all=require_all,
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):
         return [
-            _expand_mcp_environment(item, environment)
+            _expand_mcp_environment(
+                item,
+                environment,
+                require_all=require_all,
+            )
             for item in value
         ]
     if not isinstance(value, str):
         return value
+
+    def replace_reference(match):
+        name = match.group(1)
+        if name not in environment:
+            if require_all:
+                raise ValueError(f"Missing MCP environment variable: {name}")
+            return match.group(0)
+        return str(environment[name])
+
     return MCP_ENVIRONMENT_REFERENCE_PATTERN.sub(
-        lambda match: str(
-            environment.get(match.group(1), match.group(0))
-        ),
+        replace_reference,
         value,
     )
 

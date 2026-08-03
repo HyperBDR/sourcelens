@@ -201,7 +201,7 @@ test('MCP declarations and assistant bindings configure environment variables ne
   ])
 
   assert.match(mcpPage, /v-model="form\.environment"/)
-  assert.match(mcpPage, /environment: buildSkillEnvironment/)
+  assert.match(mcpPage, /environment: buildMcpEnvironment/)
   assert.match(mcpPage, /mcpConfigToRows/)
   assert.match(mcpPage, /mcpRowsToConfig/)
   assert.match(
@@ -210,6 +210,7 @@ test('MCP declarations and assistant bindings configure environment variables ne
   )
   assert.match(drawer, /data-testid="assistant-mcp-environments"/)
   assert.match(drawer, /mcp_environment_set_uuids/)
+  assert.match(drawer, /mcpRequiredEnvironmentNames/)
   assert.match(english.lensAdmin.wizard.mcpEnvironmentSectionHint, /MCP Server/)
   assert.match(chinese.lensAdmin.wizard.mcpEnvironmentSectionHint, /MCP Server/)
   assert.match(

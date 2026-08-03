@@ -337,6 +337,188 @@ class LensApiTests(TestCase):
         self.assertEqual(response.data["config"]["api_key"], "********")
         self.assertNotIn("mcp-secret", str(response.data))
 
+    def test_mcp_api_preserves_non_secret_token_settings(self):
+        self.mcp.config = {
+            "github_token": "secret",
+            "max_tokens": 100,
+            "token_limit": 200,
+            "tokenizer": "cl100k_base",
+        }
+        self.mcp.save(update_fields=["config"])
+
+        response = self.client.get(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["config"]["github_token"], "********")
+        self.assertEqual(response.data["config"]["max_tokens"], 100)
+        self.assertEqual(response.data["config"]["token_limit"], 200)
+        self.assertEqual(response.data["config"]["tokenizer"], "cl100k_base")
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"config": response.data["config"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.mcp.refresh_from_db()
+        self.assertEqual(
+            self.mcp.config,
+            {
+                "github_token": "secret",
+                "max_tokens": 100,
+                "token_limit": 200,
+                "tokenizer": "cl100k_base",
+            },
+        )
+
+    def test_mcp_api_allows_blank_sensitive_fields_in_lists(self):
+        config = {"profiles": [{"name": "local", "token": ""}]}
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"config": config},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["config"], config)
+        self.mcp.refresh_from_db()
+        self.assertEqual(self.mcp.config, config)
+
+    def test_mcp_api_protects_masked_list_item_identity(self):
+        self.mcp.config = {
+            "region": "us-east-1",
+            "profiles": [
+                {"name": "production", "token": "production-secret"},
+                {"name": "staging", "token": "staging-secret"},
+            ]
+        }
+        self.mcp.save(update_fields=["config"])
+
+        detail = self.client.get(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
+        )
+        unchanged = detail.data["config"]
+        unchanged["region"] = "eu-west-1"
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"config": unchanged},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.mcp.refresh_from_db()
+        self.assertEqual(self.mcp.config["region"], "eu-west-1")
+        self.assertEqual(
+            [item["token"] for item in self.mcp.config["profiles"]],
+            ["production-secret", "staging-secret"],
+        )
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {
+                "config": {
+                    "profiles": [
+                        {"name": "staging", "token": "********"},
+                        {"name": "production", "token": "********"},
+                    ]
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.mcp.refresh_from_db()
+        self.assertEqual(
+            self.mcp.config["profiles"],
+            [
+                {"name": "production", "token": "production-secret"},
+                {"name": "staging", "token": "staging-secret"},
+            ],
+        )
+
+        self.mcp.config = {
+            "profiles": [
+                {"name": "production", "api_key": "production-secret"},
+                {"name": "staging", "api_key": "staging-secret"},
+            ]
+        }
+        self.mcp.save(update_fields=["config"])
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {
+                "config": {
+                    "profiles": [
+                        {"name": "staging", "api-key": "********"},
+                        {
+                            "name": "production",
+                            "api-key": "********",
+                        },
+                    ]
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.mcp.refresh_from_db()
+        self.assertEqual(
+            self.mcp.config["profiles"],
+            [
+                {"name": "production", "api_key": "production-secret"},
+                {"name": "staging", "api_key": "staging-secret"},
+            ],
+        )
+
+    def test_mcp_api_preserves_masked_secrets_in_nested_lists(self):
+        self.mcp.config = {
+            "groups": [[{"name": "production", "token": "secret"}]]
+        }
+        self.mcp.save(update_fields=["config"])
+
+        detail = self.client.get(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
+        )
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"config": detail.data["config"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.mcp.refresh_from_db()
+        self.assertEqual(
+            self.mcp.config,
+            {"groups": [[{"name": "production", "token": "secret"}]]},
+        )
+
+    def test_mcp_api_rejects_mask_for_renamed_sensitive_key(self):
+        self.mcp.config = {"api_key": "secret"}
+        self.mcp.save(update_fields=["config"])
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"config": {"access_token": "********"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.mcp.refresh_from_db()
+        self.assertEqual(self.mcp.config, {"api_key": "secret"})
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"config": {"auth": "********"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.mcp.refresh_from_db()
+        self.assertEqual(self.mcp.config, {"api_key": "secret"})
+
     def test_mcp_api_accepts_environment_declarations(self):
         environment = [
             {
@@ -358,7 +540,109 @@ class LensApiTests(TestCase):
         self.assertEqual(self.mcp.environment, environment)
         self.assertEqual(response.data["environment"], environment)
 
+    def test_mcp_api_rejects_undeclared_environment_references(self):
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {
+                "endpoint": "https://${MCP_HOST}/api",
+                "environment": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MCP_HOST", str(response.data))
+
+    def test_mcp_api_preserves_legacy_literal_environment_references(self):
+        self.mcp.endpoint = "https://mcp.example.com/${API_VERSION}"
+        self.mcp.config = {"template": "${LITERAL}"}
+        self.mcp.save(update_fields=["endpoint", "config"])
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {"name": "Legacy Template MCP"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["environment_references"], [])
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Use legacy MCP", enqueue=False)
+
+        validate_run_dispatch(run)
+        runtime = resolve_loaded_mcp_environment(run.execution.loaded_mcps)
+
+        self.assertEqual(
+            runtime[0]["endpoint"],
+            "https://mcp.example.com/${API_VERSION}",
+        )
+        self.assertEqual(runtime[0]["config"], {"template": "${LITERAL}"})
+        self.assertTrue(runtime[0]["environment_resolved"])
+
+    def test_mcp_api_validates_references_after_restoring_secrets(self):
+        self.mcp.config = {"api_token": "${MCP_TOKEN}"}
+        self.mcp.environment = [
+            {
+                "name": "MCP_TOKEN",
+                "required": False,
+                "secret": True,
+            }
+        ]
+        self.mcp.save(update_fields=["config", "environment"])
+
+        response = self.client.patch(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
+            {
+                "config": {"api_token": "********"},
+                "environment": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MCP_TOKEN", str(response.data))
+        self.mcp.refresh_from_db()
+        self.assertEqual(self.mcp.config, {"api_token": "${MCP_TOKEN}"})
+        self.assertEqual(len(self.mcp.environment), 1)
+
+    def test_mcp_api_exposes_secret_safe_environment_references(self):
+        self.mcp.config = {
+            "headers": {"Authorization": "Bearer ${MCP_TOKEN}"}
+        }
+        self.mcp.environment = [
+            {
+                "name": "MCP_TOKEN",
+                "required": False,
+                "secret": True,
+            }
+        ]
+        self.mcp.save(update_fields=["config", "environment"])
+
+        response = self.client.get(
+            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data["config"]["headers"]["Authorization"],
+            "********",
+        )
+        self.assertEqual(
+            response.data["environment_references"],
+            ["MCP_TOKEN"],
+        )
+
     def test_assistant_mcp_resolves_environment_without_leaking(self):
+        self.mcp.config = {
+            "headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}
+        }
         self.mcp.environment = [
             {
                 "name": "GITHUB_TOKEN",
@@ -367,7 +651,7 @@ class LensApiTests(TestCase):
                 "secret": True,
             }
         ]
-        self.mcp.save(update_fields=["environment"])
+        self.mcp.save(update_fields=["config", "environment"])
 
         response = self.client.patch(
             f"/api/lens/assistants/{self.assistant.uuid}/",
@@ -404,6 +688,69 @@ class LensApiTests(TestCase):
             runtime[0]["environment"],
             {"GITHUB_TOKEN": "runtime-secret"},
         )
+        self.assertEqual(
+            runtime[0]["config"]["headers"]["Authorization"],
+            "Bearer runtime-secret",
+        )
+        self.assertTrue(runtime[0]["environment_resolved"])
+
+    def test_dispatch_preserves_references_inside_mcp_environment_values(self):
+        self.mcp.config = {
+            "headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}
+        }
+        self.mcp.environment = [
+            {
+                "name": "GITHUB_TOKEN",
+                "required": True,
+                "secret": True,
+            }
+        ]
+        self.mcp.save(update_fields=["config", "environment"])
+        variable_set = EnvironmentVariableSet.objects.create(
+            name="GitHub token with literal reference"
+        )
+        variable_set.set_values(
+            {"GITHUB_TOKEN": "runtime-${HOME}-secret"}
+        )
+        variable_set.save(update_fields=["encrypted_values"])
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+            environment_variable_set=variable_set,
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Search GitHub", enqueue=False)
+
+        validate_run_dispatch(run)
+        runtime = resolve_loaded_mcp_environment(run.execution.loaded_mcps)
+
+        self.assertEqual(
+            runtime[0]["config"]["headers"]["Authorization"],
+            "Bearer runtime-${HOME}-secret",
+        )
+
+    def test_assistant_requires_referenced_optional_mcp_environment(self):
+        self.mcp.endpoint = "https://${MCP_TOKEN}/api"
+        self.mcp.environment = [
+            {
+                "name": "MCP_TOKEN",
+                "required": False,
+                "secret": True,
+            }
+        ]
+        self.mcp.save(update_fields=["endpoint", "environment"])
+
+        response = self.client.patch(
+            f"/api/lens/assistants/{self.assistant.uuid}/",
+            {"mcp_bindings": [{"mcp_uuid": str(self.mcp.uuid)}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("MCP_TOKEN", str(response.data))
 
     def test_environment_variable_set_lists_skill_and_mcp_usages(self):
         variable_set = EnvironmentVariableSet.objects.create(
@@ -1991,6 +2338,36 @@ class LensApiTests(TestCase):
             str(context.exception),
             "MCP_ENVIRONMENT_REQUIRED",
         )
+
+    def test_dispatch_requires_optional_mcp_environment_when_referenced(self):
+        self.mcp.endpoint = "https://${MCP_TOKEN}/api"
+        self.mcp.environment = [
+            {
+                "name": "MCP_TOKEN",
+                "required": False,
+                "secret": True,
+            }
+        ]
+        self.mcp.save(update_fields=["endpoint", "environment"])
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session, "Search API", enqueue=False)
+
+        with self.assertRaises(LensNodeDispatchError) as context:
+            validate_run_dispatch(run)
+
+        self.assertEqual(
+            str(context.exception),
+            "MCP_ENVIRONMENT_REQUIRED",
+        )
+        runtime = resolve_loaded_mcp_environment(run.execution.loaded_mcps)
+        self.assertFalse(runtime[0]["environment_resolved"])
 
     def test_dispatch_rejects_run_queued_before_assistant_was_archived(self):
         session = Session.objects.create(

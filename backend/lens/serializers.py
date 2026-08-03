@@ -1,3 +1,4 @@
+import re
 from pathlib import PurePosixPath
 from urllib import parse
 
@@ -22,6 +23,8 @@ from .datasource_services import (
     validate_datasource_lensnode,
 )
 from .environment_variables import (
+    declared_environment_references,
+    environment_references,
     missing_required_environment_values,
     validate_environment_schema,
     validate_environment_values,
@@ -394,6 +397,12 @@ class McpBindingsField(serializers.Field):
                 and declaration.get("required")
                 and declaration.get("name")
             }
+            required_names.update(
+                declared_environment_references(
+                    {"endpoint": mcp.endpoint, "config": mcp.config},
+                    declarations,
+                )
+            )
             missing = sorted(
                 name
                 for name in required_names
@@ -1970,11 +1979,13 @@ class EnvironmentVariableSetSerializer(serializers.ModelSerializer):
 class MCPServerSerializer(serializers.ModelSerializer):
     """MCP server serializer."""
 
+    environment_references = serializers.SerializerMethodField()
     secret_mask = "********"
-    sensitive_key_fragments = {
+    sensitive_key_names = {
         "apikey",
         "authorization",
         "credential",
+        "credentials",
         "password",
         "passwd",
         "privatekey",
@@ -1991,6 +2002,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
             "endpoint",
             "config",
             "environment",
+            "environment_references",
             "version",
             "enabled",
             "created_at",
@@ -2012,15 +2024,70 @@ class MCPServerSerializer(serializers.ModelSerializer):
 
         return validate_environment_schema(value)
 
-    def update(self, instance, validated_data):
-        """Preserve masked or blank sensitive values during edits."""
+    def get_environment_references(self, instance):
+        """Return referenced variable names without exposing configuration."""
 
-        if "config" in validated_data:
-            validated_data["config"] = self._merge_sensitive_values(
-                validated_data["config"],
-                instance.config or {},
+        return sorted(
+            declared_environment_references(
+                {"endpoint": instance.endpoint, "config": instance.config},
+                instance.environment,
             )
-        return super().update(instance, validated_data)
+        )
+
+    def validate(self, attrs):
+        """Require every MCP environment reference to be declared."""
+
+        attrs = super().validate(attrs)
+        if "config" in attrs:
+            attrs["config"] = self._merge_sensitive_values(
+                attrs["config"],
+                getattr(self.instance, "config", {}) or {},
+            )
+        endpoint = attrs.get(
+            "endpoint",
+            getattr(self.instance, "endpoint", ""),
+        )
+        config = attrs.get(
+            "config",
+            getattr(self.instance, "config", {}),
+        )
+        environment = attrs.get(
+            "environment",
+            getattr(self.instance, "environment", []),
+        )
+        declared = {
+            item["name"]
+            for item in environment or []
+            if isinstance(item, dict) and item.get("name")
+        }
+        references = environment_references(
+            {"endpoint": endpoint, "config": config}
+        )
+        existing_references = environment_references(
+            {
+                "endpoint": getattr(self.instance, "endpoint", ""),
+                "config": getattr(self.instance, "config", {}) or {},
+            }
+        )
+        existing_declared = {
+            item.get("name")
+            for item in getattr(self.instance, "environment", []) or []
+            if isinstance(item, dict) and item.get("name")
+        }
+        legacy_references = existing_references - existing_declared
+        undeclared = sorted(
+            references - declared - legacy_references
+        )
+        if undeclared:
+            raise serializers.ValidationError(
+                {
+                    "environment": (
+                        "Declare every referenced MCP environment variable: "
+                        f"{', '.join(undeclared)}."
+                    )
+                }
+            )
+        return attrs
 
     def to_representation(self, instance):
         """Mask sensitive MCP configuration values in every response."""
@@ -2040,10 +2107,36 @@ class MCPServerSerializer(serializers.ModelSerializer):
     @classmethod
     def _is_sensitive_key(cls, key):
         normalized = cls._normalize_key(key)
-        return any(
-            fragment in normalized
-            for fragment in cls.sensitive_key_fragments
+        if normalized in cls.sensitive_key_names:
+            return True
+        segmented_key = re.sub(
+            r"([a-z0-9])([A-Z])",
+            r"\1_\2",
+            str(key or ""),
         )
+        segments = [
+            segment.lower()
+            for segment in re.findall(r"[A-Za-z0-9]+", segmented_key)
+        ]
+        if any(
+            segment
+            in {
+                "authorization",
+                "credential",
+                "credentials",
+                "password",
+                "passwd",
+                "secret",
+            }
+            for segment in segments
+        ):
+            return True
+        if any(
+            pair in {("api", "key"), ("private", "key")}
+            for pair in zip(segments, segments[1:])
+        ):
+            return True
+        return bool(segments and segments[-1] == "token")
 
     @classmethod
     def _mask_sensitive_values(cls, value):
@@ -2080,6 +2173,14 @@ class MCPServerSerializer(serializers.ModelSerializer):
                 else None
             )
             if (
+                value == cls.secret_mask
+                and existing_value in (None, "")
+            ):
+                raise serializers.ValidationError(
+                    "Masked sensitive values require an existing value. "
+                    "Provide the new sensitive value."
+                )
+            if (
                 cls._is_sensitive_key(key)
                 and value in (None, "", cls.secret_mask)
                 and existing_value not in (None, "")
@@ -2094,21 +2195,119 @@ class MCPServerSerializer(serializers.ModelSerializer):
                 existing_items = (
                     existing_value if isinstance(existing_value, list) else []
                 )
-                merged[existing_key] = [
-                    cls._merge_sensitive_values(
-                        item,
-                        existing_items[index]
-                        if index < len(existing_items)
-                        and isinstance(existing_items[index], dict)
-                        else {},
+                if (
+                    cls._contains_sensitive_placeholder(
+                        value,
+                        existing_items,
                     )
-                    if isinstance(item, dict)
-                    else item
-                    for index, item in enumerate(value)
-                ]
+                    and not cls._masked_list_matches(value, existing_items)
+                ):
+                    raise serializers.ValidationError(
+                        "Lists containing masked sensitive values cannot be "
+                        "reordered or structurally edited. Provide every "
+                        "sensitive value to replace the list."
+                    )
+                merged[existing_key] = cls._merge_sensitive_list(
+                    value,
+                    existing_items,
+                )
             else:
                 merged[existing_key] = value
         return merged
+
+    @classmethod
+    def _merge_sensitive_list(cls, incoming, existing):
+        merged = []
+        for index, item in enumerate(incoming):
+            existing_item = existing[index] if index < len(existing) else None
+            if isinstance(item, dict):
+                merged.append(
+                    cls._merge_sensitive_values(
+                        item,
+                        existing_item
+                        if isinstance(existing_item, dict)
+                        else {},
+                    )
+                )
+            elif isinstance(item, list):
+                merged.append(
+                    cls._merge_sensitive_list(
+                        item,
+                        existing_item
+                        if isinstance(existing_item, list)
+                        else [],
+                    )
+                )
+            else:
+                merged.append(item)
+        return merged
+
+    @classmethod
+    def _contains_sensitive_placeholder(cls, value, existing=None):
+        if isinstance(value, dict):
+            existing_items = existing if isinstance(existing, dict) else {}
+            for key, item in value.items():
+                existing_key = key
+                if key not in existing_items:
+                    normalized_key = cls._normalize_key(key)
+                    existing_key = next(
+                        (
+                            candidate
+                            for candidate in existing_items
+                            if cls._normalize_key(candidate) == normalized_key
+                        ),
+                        key,
+                    )
+                existing_item = existing_items.get(existing_key)
+                if (
+                    cls._is_sensitive_key(key)
+                    and item in (None, "", cls.secret_mask)
+                    and existing_item not in (None, "")
+                ):
+                    return True
+                if cls._contains_sensitive_placeholder(item, existing_item):
+                    return True
+            return False
+        if isinstance(value, list):
+            existing_items = existing if isinstance(existing, list) else []
+            return any(
+                cls._contains_sensitive_placeholder(
+                    item,
+                    existing_items[index]
+                    if index < len(existing_items)
+                    else None,
+                )
+                for index, item in enumerate(value)
+            )
+        return False
+
+    @classmethod
+    def _masked_list_matches(cls, incoming, existing):
+        if isinstance(incoming, dict):
+            if (
+                not isinstance(existing, dict)
+                or incoming.keys() != existing.keys()
+            ):
+                return False
+            return all(
+                (
+                    cls._is_sensitive_key(key)
+                    and item in (None, "", cls.secret_mask)
+                    and existing[key] not in (None, "")
+                )
+                or cls._masked_list_matches(item, existing[key])
+                for key, item in incoming.items()
+            )
+        if isinstance(incoming, list):
+            return (
+                isinstance(existing, list)
+                and len(incoming) == len(existing)
+                and all(
+                    cls._masked_list_matches(item, existing[index])
+                    for index, item in enumerate(incoming)
+                )
+            )
+        return incoming == existing
 
 
 class GlobalSettingSerializer(serializers.ModelSerializer):

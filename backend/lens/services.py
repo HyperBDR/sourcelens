@@ -28,6 +28,10 @@ from .document_attachments import (
     get_run_document_expectation,
     set_run_document_expectation,
 )
+from .environment_variables import (
+    declared_environment_references,
+    expand_environment_references,
+)
 from .llm import run_completion, run_completion_multimodal
 from .models import (
     Assistant,
@@ -1058,6 +1062,25 @@ def resolve_loaded_mcp_environment(loaded_mcps):
             for name in declared_names
             if name in values
         }
+        references = declared_environment_references(
+            {
+                "endpoint": mcp.get("endpoint"),
+                "config": mcp.get("config") or {},
+            },
+            declarations,
+        )
+        runtime_mcp["endpoint"] = expand_environment_references(
+            mcp.get("endpoint"),
+            runtime_mcp["environment"],
+        )
+        runtime_mcp["config"] = expand_environment_references(
+            mcp.get("config") or {},
+            runtime_mcp["environment"],
+        )
+        runtime_mcp["environment_resolved"] = all(
+            str(runtime_mcp["environment"].get(name) or "")
+            for name in references
+        )
         runtime_mcps.append(runtime_mcp)
     return runtime_mcps
 
@@ -1129,7 +1152,11 @@ def validate_run_dispatch(run):
         if any(not str(values.get(name) or "") for name in required):
             raise LensNodeDispatchError("SKILL_ENVIRONMENT_REQUIRED")
 
-    for mcp in runtime_mcps:
+    for mcp, snapshot_mcp in zip(
+        runtime_mcps,
+        execution.loaded_mcps or [],
+        strict=True,
+    ):
         declarations = mcp.get("environment_schema") or []
         required = {
             item["name"]
@@ -1139,7 +1166,17 @@ def validate_run_dispatch(run):
             and item.get("name")
         }
         values = mcp.get("environment") or {}
-        if any(not str(values.get(name) or "") for name in required):
+        referenced = declared_environment_references(
+            {
+                "endpoint": snapshot_mcp.get("endpoint"),
+                "config": snapshot_mcp.get("config") or {},
+            },
+            declarations,
+        )
+        if any(
+            not str(values.get(name) or "")
+            for name in required | referenced
+        ):
             raise LensNodeDispatchError("MCP_ENVIRONMENT_REQUIRED")
 
 

@@ -6,13 +6,18 @@ import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
+
 from lensnode.agent_runtime import _system_prompt
 from lensnode.agent_tools import _skill_script_environment, build_agent_tools
 from lensnode.executor import LensNodeExecutor, _remaining_run_timeout_seconds
 from lensnode.gateway_model import RunCancelledError
 from lensnode.main import LensNodeClient
-from lensnode.runtime_resources import cleanup_runtime_resources
-from lensnode.runtime_resources import prepare_runtime_resources
+from lensnode.runtime_resources import (
+    _expand_mcp_environment,
+    cleanup_runtime_resources,
+    prepare_runtime_resources,
+)
 
 
 class FakeAgent:
@@ -904,6 +909,99 @@ def test_mcp_environment_expands_runtime_placeholders_only(tmp_path):
         runtime_text = resources.mcp_config_path.read_text(encoding="utf-8")
         assert secret not in runtime_text
         assert "MCP_TOKEN" not in runtime_text
+    finally:
+        cleanup_runtime_resources(resources)
+
+
+def test_mcp_environment_rejects_unresolved_placeholders():
+    with pytest.raises(
+        ValueError,
+        match="Missing MCP environment variable: MCP_TOKEN",
+    ):
+        _expand_mcp_environment(
+            {
+                "headers": {
+                    "Authorization": "Bearer ${MCP_TOKEN}",
+                }
+            },
+            {},
+        )
+
+
+def test_mcp_environment_preserves_preexpanded_values(tmp_path):
+    config = type(
+        "Config",
+        (),
+        {
+            "workspace_path": str(tmp_path),
+        },
+    )()
+    secret = "runtime-${HOME}-secret"
+    command = {
+        "run_uuid": "00000000-0000-0000-0000-000000000010",
+        "loaded_skills": [],
+        "loaded_mcps": [
+            {
+                "mcp_uuid": "22222222-2222-2222-2222-222222222224",
+                "mcp_name": "Resolved Environment API",
+                "content_hash": "sha256:resolved-environment",
+                "transport": "url",
+                "endpoint": "https://mcp.example.com/api",
+                "config": {
+                    "headers": {
+                        "Authorization": f"Bearer {secret}",
+                    }
+                },
+                "environment": {"MCP_TOKEN": secret},
+                "environment_resolved": True,
+                "load_config": {},
+            }
+        ],
+    }
+
+    resources = prepare_runtime_resources(config, command)
+
+    try:
+        assert resources.mcp_configs[0]["config"]["headers"] == {
+            "Authorization": f"Bearer {secret}"
+        }
+    finally:
+        cleanup_runtime_resources(resources)
+
+
+def test_mcp_environment_preserves_legacy_placeholder_literals(tmp_path):
+    config = type(
+        "Config",
+        (),
+        {
+            "workspace_path": str(tmp_path),
+        },
+    )()
+    command = {
+        "run_uuid": "00000000-0000-0000-0000-000000000011",
+        "loaded_skills": [],
+        "loaded_mcps": [
+            {
+                "mcp_uuid": "22222222-2222-2222-2222-222222222225",
+                "mcp_name": "Legacy Placeholder API",
+                "content_hash": "sha256:legacy-placeholder",
+                "transport": "url",
+                "endpoint": "https://mcp.example.com/${API_VERSION}",
+                "config": {"template": "${LITERAL}"},
+                "load_config": {},
+            }
+        ],
+    }
+
+    resources = prepare_runtime_resources(config, command)
+
+    try:
+        assert resources.mcp_configs[0]["endpoint"] == (
+            "https://mcp.example.com/${API_VERSION}"
+        )
+        assert resources.mcp_configs[0]["config"] == {
+            "template": "${LITERAL}"
+        }
     finally:
         cleanup_runtime_resources(resources)
 

@@ -192,8 +192,12 @@ import KeyValueEditor from './components/KeyValueEditor.vue'
 import RowActions from './components/RowActions.vue'
 import SkillEnvironmentEditor from './components/SkillEnvironmentEditor.vue'
 import { EMPTY_VALUE as emptyValue, normalizeList } from './adminHelpers'
-import { mcpConfigToRows, mcpRowsToConfig } from './mcpConfig'
-import { buildSkillEnvironment, skillEnvironmentForm } from './skillEnvironment'
+import {
+  buildMcpEnvironment,
+  mcpConfigToRows,
+  mcpEnvironmentForm,
+  mcpRowsToConfig
+} from './mcpConfig'
 
 const { t } = useI18n()
 const { showSuccess, showError } = useToast()
@@ -262,7 +266,7 @@ function formFromRow(row) {
     transport: row.transport || 'url',
     endpoint: row.endpoint || '',
     config_rows: mcpConfigToRows(row.config || {}),
-    environment: skillEnvironmentForm(row.environment || []),
+    environment: mcpEnvironmentForm(row.environment || []),
     enabled: row.enabled !== false
   }
 }
@@ -273,7 +277,7 @@ function buildPayload() {
     transport: form.value.transport,
     endpoint: form.value.endpoint,
     config: mcpRowsToConfig(form.value.config_rows),
-    environment: buildSkillEnvironment(form.value.environment),
+    environment: buildMcpEnvironment(form.value.environment),
     enabled: !!form.value.enabled
   }
 }
