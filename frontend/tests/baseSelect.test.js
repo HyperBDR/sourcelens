@@ -4,7 +4,12 @@ import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { applyModelModifiers } from '../src/components/ui/baseSelect.js'
+import {
+  applyModelModifiers,
+  extractSelectOptions,
+  findNextEnabledOption,
+  findTypeaheadOption
+} from '../src/components/ui/baseSelect.js'
 
 const source = (relativePath) =>
   readFile(new URL(`../src/${relativePath}`, import.meta.url), 'utf8')
@@ -37,10 +42,57 @@ test('BaseSelect exposes the native select contract and visual variants', async 
   assert.match(component, /'blur'/)
 })
 
+test('BaseSelect owns a themed listbox instead of the browser popup', async () => {
+  const component = await source('components/ui/BaseSelect.vue')
+
+  assert.match(component, /role="combobox"/)
+  assert.match(component, /aria-activedescendant/)
+  assert.match(component, /@keydown="handleTriggerKeydown"/)
+  assert.match(component, /<Teleport to="body">/)
+  assert.match(component, /role="listbox"/)
+  assert.match(component, /role="option"/)
+  assert.match(component, /bg-surface/)
+  assert.match(component, /shadow-lg/)
+})
+
+test('BaseSelect removes the listbox immediately when it closes', async () => {
+  const component = await source('components/ui/BaseSelect.vue')
+
+  assert.doesNotMatch(component, /<Transition/)
+  assert.match(component, /<ul\s+v-if="isOpen"/)
+})
+
 test('BaseSelect preserves values received from bound native options', () => {
   const objectValue = { id: 'model-a' }
 
   assert.equal(applyModelModifiers(objectValue), objectValue)
+})
+
+test('BaseSelect derives labels and values from nested option nodes', () => {
+  const objectValue = { id: 'model-a' }
+  const options = extractSelectOptions([
+    { type: 'option', props: { value: '' }, children: 'All models' },
+    {
+      type: Symbol('fragment'),
+      children: [
+        {
+          type: 'option',
+          props: { value: objectValue, disabled: true },
+          children: [{ children: 'Model A' }]
+        }
+      ]
+    }
+  ])
+
+  assert.deepEqual(options, [
+    { key: 'option-0', label: 'All models', value: '', disabled: false },
+    {
+      key: 'option-1',
+      label: 'Model A',
+      value: objectValue,
+      disabled: true
+    }
+  ])
 })
 
 test('BaseSelect applies the number model modifier to native string values', () => {
@@ -50,6 +102,31 @@ test('BaseSelect applies the number model modifier to native string values', () 
     'not-a-number'
   )
   assert.equal(applyModelModifiers('20'), '20')
+})
+
+test('BaseSelect keyboard navigation skips disabled options and wraps', () => {
+  const options = [
+    { label: 'All', disabled: false },
+    { label: 'Queued', disabled: true },
+    { label: 'Done', disabled: false }
+  ]
+
+  assert.equal(findNextEnabledOption(options, 0, 1), 2)
+  assert.equal(findNextEnabledOption(options, 2, 1), 0)
+  assert.equal(findNextEnabledOption(options, 0, -1), 2)
+})
+
+test('BaseSelect typeahead starts after the active option', () => {
+  const options = [
+    { label: 'All status', disabled: false },
+    { label: 'Done', disabled: false },
+    { label: 'Disabled', disabled: true },
+    { label: 'Draft', disabled: false }
+  ]
+
+  assert.equal(findTypeaheadOption(options, 'd', 0), 1)
+  assert.equal(findTypeaheadOption(options, 'd', 1), 3)
+  assert.equal(findTypeaheadOption(options, 'z', 0), -1)
 })
 
 test('all production selects use BaseSelect while prototypes stay native', async () => {

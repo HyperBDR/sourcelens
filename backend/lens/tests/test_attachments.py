@@ -392,6 +392,35 @@ class AttachmentServiceTests(TestCase):
         self.assertFalse(detail["model_calls"][0]["is_subagent"])
         self.assertTrue(detail["model_calls"][1]["is_subagent"])
 
+    def test_admin_run_detail_deduplicates_models_in_call_order(self):
+        from lens.views.admin_runs import _admin_run_detail
+
+        run = create_execution_run(
+            session=self.session,
+            question="q",
+            enqueue=False,
+        )
+        for model in (
+            "deepseek-v4-flash",
+            "qwen3-coder-plus",
+            "deepseek-v4-flash",
+        ):
+            LLMUsage.objects.create(
+                user=self.user,
+                model=model,
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+                metadata={"run_uuid": str(run.uuid)},
+            )
+
+        detail = _admin_run_detail(run)
+
+        self.assertEqual(
+            detail["models_used"],
+            ["deepseek-v4-flash", "qwen3-coder-plus"],
+        )
+
     def test_analyze_multimodal_intent_passthrough_without_model(self):
         self.assistant.multimodal_model_ref = None
         self.assistant.save(update_fields=["multimodal_model_ref"])
