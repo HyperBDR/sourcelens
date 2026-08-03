@@ -262,6 +262,105 @@ def test_duplicate_resume_for_active_run_is_idempotent():
     asyncio.run(exercise())
 
 
+def test_run_admission_echoes_dispatch_id_and_duplicate_is_idempotent():
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "max_concurrent_runs": 1,
+            },
+        )()
+        client = LensNodeClient(config)
+        executor = BlockingExecutor()
+        client.executor = executor
+        run_uuid = "00000000-0000-0000-0000-000000000018"
+        dispatch_id = "00000000-0000-0000-0000-000000000019"
+        duplicate_dispatch_id = "00000000-0000-0000-0000-000000000022"
+        message = {
+            "type": "run_start",
+            "run_uuid": run_uuid,
+            "dispatch_id": dispatch_id,
+            "task": "knowledge_qa",
+            "target_dirs": [],
+        }
+
+        await client._handle_message(json.dumps(message))
+        await asyncio.wait_for(executor.started.wait(), timeout=1)
+        await client._handle_message(
+            json.dumps(
+                {
+                    **message,
+                    "dispatch_id": duplicate_dispatch_id,
+                    "resume": True,
+                }
+            )
+        )
+
+        admissions = [
+            frame
+            for frame in client._outbox
+            if frame.get("type") == "run_admitted"
+        ]
+        assert admissions == [
+            {
+                "type": "run_admitted",
+                "run_uuid": run_uuid,
+                "dispatch_id": dispatch_id,
+            },
+            {
+                "type": "run_admitted",
+                "run_uuid": run_uuid,
+                "dispatch_id": duplicate_dispatch_id,
+            },
+        ]
+        assert not any(
+            frame.get("error") == "LENSNODE_RUN_ACTIVE"
+            for frame in client._outbox
+        )
+        client.running_tasks[run_uuid].cancel()
+        await asyncio.gather(
+            client.running_tasks[run_uuid],
+            return_exceptions=True,
+        )
+
+    asyncio.run(exercise())
+
+
+def test_executor_emits_checkpoint_ready_for_current_dispatch():
+    class CheckpointAwareAgent(FakeAgent):
+        async def answer(self, command, on_checkpoint_ready=None, **kwargs):
+            if on_checkpoint_ready is not None:
+                on_checkpoint_ready()
+            return await super().answer(command, **kwargs)
+
+    executor = LensNodeExecutor.__new__(LensNodeExecutor)
+    executor.agent = CheckpointAwareAgent()
+    events = []
+    run_uuid = "00000000-0000-0000-0000-000000000020"
+    dispatch_id = "00000000-0000-0000-0000-000000000021"
+
+    asyncio.run(
+        executor.execute(
+            {
+                "run_uuid": run_uuid,
+                "dispatch_id": dispatch_id,
+                "task": "knowledge_qa",
+                "target_dirs": [],
+            },
+            events.append,
+        )
+    )
+
+    assert {
+        "type": "run_checkpoint_ready",
+        "run_uuid": run_uuid,
+        "dispatch_id": dispatch_id,
+    } in events
+
+
 def test_control_plane_cancel_cleans_idle_checkpoint_and_runtime_files():
     async def exercise():
         config = type(

@@ -1,4 +1,5 @@
 import logging
+import uuid
 from contextlib import contextmanager
 
 from django.db import transaction
@@ -132,15 +133,25 @@ def _lensnode_dispatch(state):
         execution.save(update_fields=["loaded_skills"])
         validate_run_dispatch(run)
         execution.status = RunExecution.Status.DISPATCHED
-        execution.started_at = timezone.now()
-        execution.save(update_fields=["status", "started_at"])
+        execution.started_at = execution.started_at or timezone.now()
+        execution.dispatch_id = uuid.uuid4()
+        execution.admitted_at = None
+        execution.checkpoint_ready_at = None
+        execution.save(
+            update_fields=[
+                "status",
+                "started_at",
+                "dispatch_id",
+                "admitted_at",
+                "checkpoint_ready_at",
+            ]
+        )
         dispatch_run_to_lensnode(
             run,
             question,
             subject_documents=subject_documents,
+            dispatch_id=execution.dispatch_id,
         )
-        execution.status = RunExecution.Status.RUNNING
-        execution.save(update_fields=["status"])
         step.detail = {
             "lensnode_uuid": str(run.lensnode.uuid),
             "task": execution.task,

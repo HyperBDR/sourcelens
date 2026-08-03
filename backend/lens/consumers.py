@@ -10,6 +10,8 @@ from django.utils import timezone
 from .lensnode_auth import hash_lensnode_token
 from .models import LensNode, Run
 from .services import (
+    acknowledge_run_admitted,
+    acknowledge_run_checkpoint_ready,
     append_lensnode_output,
     finish_lensnode_run,
     lensnode_group_name,
@@ -78,6 +80,10 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_node_draining(content)
         elif frame_type == "run_event":
             await self._handle_run_event(content)
+        elif frame_type == "run_admitted":
+            await self._handle_run_admitted(content)
+        elif frame_type == "run_checkpoint_ready":
+            await self._handle_run_checkpoint_ready(content)
         elif frame_type == "run_output":
             await self._handle_run_output(content)
         elif frame_type == "run_done":
@@ -291,6 +297,32 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             run_uuid,
             content.get("step_type") or "retrieval",
             content.get("status") or "running",
+        )
+
+    async def _handle_run_admitted(self, content):
+        """Persist a LensNode admission acknowledgement for one dispatch."""
+
+        run_uuid = self._parse_uuid(content.get("run_uuid"))
+        if run_uuid is None:
+            await self._send_bad_frame("run_uuid is invalid")
+            return
+        await database_sync_to_async(acknowledge_run_admitted)(
+            run_uuid,
+            content.get("dispatch_id"),
+            self.lensnode.uuid,
+        )
+
+    async def _handle_run_checkpoint_ready(self, content):
+        """Persist durable checkpoint readiness for one dispatch."""
+
+        run_uuid = self._parse_uuid(content.get("run_uuid"))
+        if run_uuid is None:
+            await self._send_bad_frame("run_uuid is invalid")
+            return
+        await database_sync_to_async(acknowledge_run_checkpoint_ready)(
+            run_uuid,
+            content.get("dispatch_id"),
+            self.lensnode.uuid,
         )
 
     async def _handle_run_output(self, content):

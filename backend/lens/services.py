@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import math
+import uuid
 from datetime import timedelta
 from time import sleep
 
@@ -62,6 +63,7 @@ BUSY_RETRY_WINDOW_S = 120
 DOCUMENT_ATTACHMENT_CAPABILITY = "run_document_attachments"
 RUN_CHECKPOINT_RESUME_CAPABILITY = "run_checkpoint_resume"
 RUN_CHECKPOINT_TTL_HOURS_CAPABILITY = "run_checkpoint_ttl_hours"
+RUN_ADMISSION_CHECKPOINT_CAPABILITY = "run_admission_checkpoint_v1"
 
 HISTORY_MAX_PAIRS = 5
 HISTORY_MAX_MESSAGE_CHARS = 2000
@@ -360,35 +362,6 @@ def resume_awaiting_runs_for_lensnode(
         str(run_uuid) for run_uuid in reported_active_run_uuids or ()
     }
     lensnode = LensNode.objects.filter(uuid=lensnode_uuid).first()
-    if not supports_run_checkpoint_resume(lensnode):
-        now = timezone.now()
-        unsupported = Run.objects.filter(
-            lensnode=lensnode,
-            status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
-            resume_by__isnull=False,
-        ).exclude(uuid__in=reported_active)
-        run_ids = list(unsupported.values_list("id", flat=True))
-        unsupported.update(
-            status=Run.Status.FAILED,
-            error="LENSNODE_RESUME_UNSUPPORTED",
-            resume_by=None,
-            finished_at=now,
-            updated_at=now,
-        )
-        if run_ids:
-            fail_running_steps_for_runs(run_ids)
-            RunExecution.objects.filter(
-                run_id__in=run_ids,
-                status__in=[
-                    RunExecution.Status.QUEUED,
-                    RunExecution.Status.DISPATCHED,
-                    RunExecution.Status.RUNNING,
-                ],
-            ).update(
-                status=RunExecution.Status.FAILED,
-                finished_at=now,
-            )
-        return 0
 
     report_at = lensnode.updated_at
     awaiting_status = Q(status=Run.Status.RUNNING) | Q(
@@ -407,7 +380,7 @@ def resume_awaiting_runs_for_lensnode(
         .filter(awaiting_status)
         .values_list("id", flat=True)
     )
-    resumed = 0
+    recovered = 0
     for run_id in run_ids:
         try:
             with transaction.atomic():
@@ -441,6 +414,100 @@ def resume_awaiting_runs_for_lensnode(
                 ):
                     continue
                 now = timezone.now()
+                execution = (
+                    RunExecution.objects.select_for_update()
+                    .filter(run=run)
+                    .first()
+                )
+                if execution is None:
+                    continue
+                if execution.status in [
+                    RunExecution.Status.QUEUED,
+                    RunExecution.Status.DISPATCHED,
+                ]:
+                    run.status = Run.Status.QUEUED
+                    run.resume_by = None
+                    run.last_activity_at = now
+                    run.error = ""
+                    run.outcome = ""
+                    run.termination_detail = {}
+                    run.save(
+                        update_fields=[
+                            "status",
+                            "resume_by",
+                            "last_activity_at",
+                            "error",
+                            "outcome",
+                            "termination_detail",
+                            "updated_at",
+                        ]
+                    )
+                    execution.status = RunExecution.Status.QUEUED
+                    execution.dispatch_id = None
+                    execution.admitted_at = None
+                    execution.checkpoint_ready_at = None
+                    execution.save(
+                        update_fields=[
+                            "status",
+                            "dispatch_id",
+                            "admitted_at",
+                            "checkpoint_ready_at",
+                        ]
+                    )
+                    expected_document_count = get_run_document_expectation(
+                        run.uuid
+                    )
+                    transaction.on_commit(
+                        lambda run_uuid=run.uuid, count=(
+                            expected_document_count
+                            if expected_document_count is not None
+                            else -1
+                        ): _enqueue_answer_run(run_uuid, count)
+                    )
+                    logger.warning(
+                        "never-admitted run requeued run_uuid=%s "
+                        "lensnode_uuid=%s",
+                        run.uuid,
+                        lensnode_uuid,
+                    )
+                    recovered += 1
+                    continue
+                if execution.status != RunExecution.Status.RUNNING:
+                    continue
+                recovery_error = None
+                if not supports_run_checkpoint_resume(lensnode):
+                    recovery_error = "LENSNODE_RESUME_UNSUPPORTED"
+                elif (
+                    supports_run_admission_checkpoint(lensnode)
+                    and execution.checkpoint_ready_at is None
+                ):
+                    recovery_error = "LENSNODE_CHECKPOINT_NOT_READY"
+                if recovery_error:
+                    run.status = Run.Status.FAILED
+                    run.error = recovery_error
+                    run.resume_by = None
+                    run.finished_at = now
+                    run.save(
+                        update_fields=[
+                            "status",
+                            "error",
+                            "resume_by",
+                            "finished_at",
+                            "updated_at",
+                        ]
+                    )
+                    execution.status = RunExecution.Status.FAILED
+                    execution.finished_at = now
+                    execution.save(update_fields=["status", "finished_at"])
+                    fail_running_steps_for_runs([run.id])
+                    logger.error(
+                        "run resume rejected run_uuid=%s lensnode_uuid=%s "
+                        "reason=%s",
+                        run.uuid,
+                        lensnode_uuid,
+                        recovery_error,
+                    )
+                    continue
                 run.status = Run.Status.STREAMING
                 run.last_activity_at = now
                 run.save(
@@ -450,13 +517,13 @@ def resume_awaiting_runs_for_lensnode(
                         "updated_at",
                     ]
                 )
-                if hasattr(run, "execution"):
-                    run.execution.status = RunExecution.Status.RUNNING
-                    run.execution.save(update_fields=["status"])
+                execution.dispatch_id = uuid.uuid4()
+                execution.save(update_fields=["dispatch_id"])
                 dispatch_run_to_lensnode(
                     run,
                     run.input_message.content,
                     resume=True,
+                    dispatch_id=execution.dispatch_id,
                 )
         except Exception:
             logger.exception(
@@ -465,10 +532,14 @@ def resume_awaiting_runs_for_lensnode(
             )
             continue
         logger.info(
-            "run %s: resumed on lensnode %s", run.uuid, lensnode_uuid
+            "run resume attempted run_uuid=%s lensnode_uuid=%s "
+            "dispatch_id=%s",
+            run.uuid,
+            lensnode_uuid,
+            execution.dispatch_id,
         )
-        resumed += 1
-    return resumed
+        recovered += 1
+    return recovered
 
 
 def fail_running_steps_for_runs(run_ids):
@@ -765,6 +836,16 @@ def supports_run_checkpoint_resume(lensnode):
     return bool(
         isinstance(labels, dict)
         and labels.get(RUN_CHECKPOINT_RESUME_CAPABILITY) is True
+    )
+
+
+def supports_run_admission_checkpoint(lensnode):
+    """Return whether a LensNode acknowledges admission and checkpoints."""
+
+    labels = lensnode.labels if lensnode else {}
+    return bool(
+        isinstance(labels, dict)
+        and labels.get(RUN_ADMISSION_CHECKPOINT_CAPABILITY) is True
     )
 
 
@@ -1454,6 +1535,7 @@ def dispatch_run_to_lensnode(
     rewritten_question,
     subject_documents=None,
     resume=False,
+    dispatch_id=None,
 ):
     """Send a run_start command to the connected LensNode.
 
@@ -1519,6 +1601,7 @@ def dispatch_run_to_lensnode(
             "payload": {
                 "type": "run_start",
                 "run_uuid": str(run.uuid),
+                "dispatch_id": str(dispatch_id) if dispatch_id else None,
                 "task": execution.task,
                 "question": rewritten_question,
                 "answer_language": answer_language,
@@ -1559,6 +1642,12 @@ def dispatch_run_to_lensnode(
                 "settings": runtime_settings,
             },
         },
+    )
+    logger.info(
+        "run command published run_uuid=%s dispatch_id=%s resume=%s",
+        run.uuid,
+        dispatch_id,
+        resume,
     )
 
 
@@ -1678,6 +1767,117 @@ def append_lensnode_output(
     return run
 
 
+def _parse_dispatch_id(dispatch_id):
+    """Return a UUID for a protocol dispatch identifier or None."""
+
+    try:
+        return uuid.UUID(str(dispatch_id))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+@transaction.atomic
+def _acknowledge_run_protocol_state(
+    run_uuid,
+    dispatch_id,
+    lensnode_uuid,
+    *,
+    checkpoint_ready,
+):
+    """Persist a current dispatch acknowledgement and reject stale frames."""
+
+    parsed_dispatch_id = _parse_dispatch_id(dispatch_id)
+    if parsed_dispatch_id is None:
+        logger.warning(
+            "run acknowledgement ignored reason=invalid_dispatch_id "
+            "run_uuid=%s lensnode_uuid=%s",
+            run_uuid,
+            lensnode_uuid,
+        )
+        return False
+    run = (
+        Run.objects.select_for_update()
+        .filter(
+            uuid=run_uuid,
+            lensnode__uuid=lensnode_uuid,
+        )
+        .first()
+    )
+    execution = (
+        RunExecution.objects.select_for_update().filter(run=run).first()
+        if run is not None
+        else None
+    )
+    if execution is None or execution.dispatch_id != parsed_dispatch_id:
+        logger.warning(
+            "stale dispatch acknowledgement ignored run_uuid=%s "
+            "dispatch_id=%s lensnode_uuid=%s",
+            run_uuid,
+            parsed_dispatch_id,
+            lensnode_uuid,
+        )
+        return False
+    if run.status in TERMINAL_RUN_STATUSES:
+        logger.warning(
+            "late dispatch acknowledgement ignored run_uuid=%s "
+            "dispatch_id=%s status=%s",
+            run_uuid,
+            parsed_dispatch_id,
+            run.status,
+        )
+        return False
+
+    now = timezone.now()
+    update_fields = []
+    if execution.status == RunExecution.Status.DISPATCHED:
+        execution.status = RunExecution.Status.RUNNING
+        update_fields.append("status")
+    if execution.admitted_at is None:
+        execution.admitted_at = now
+        update_fields.append("admitted_at")
+    if checkpoint_ready and execution.checkpoint_ready_at is None:
+        execution.checkpoint_ready_at = now
+        update_fields.append("checkpoint_ready_at")
+    if update_fields:
+        execution.save(update_fields=update_fields)
+    if run.resume_by is not None:
+        Run.objects.filter(pk=run.pk).update(
+            resume_by=None,
+            updated_at=now,
+        )
+    logger.info(
+        "run %s run_uuid=%s dispatch_id=%s lensnode_uuid=%s",
+        "checkpoint ready" if checkpoint_ready else "admitted",
+        run_uuid,
+        parsed_dispatch_id,
+        lensnode_uuid,
+    )
+    return True
+
+
+def acknowledge_run_admitted(run_uuid, dispatch_id, lensnode_uuid):
+    """Record that the current dispatch was accepted by its LensNode."""
+
+    return _acknowledge_run_protocol_state(
+        run_uuid,
+        dispatch_id,
+        lensnode_uuid,
+        checkpoint_ready=False,
+    )
+
+
+def acknowledge_run_checkpoint_ready(run_uuid, dispatch_id, lensnode_uuid):
+    """Record that the current dispatch has a durable initial checkpoint."""
+
+    return _acknowledge_run_protocol_state(
+        run_uuid,
+        dispatch_id,
+        lensnode_uuid,
+        checkpoint_ready=True,
+    )
+
+
+@transaction.atomic
 def record_lensnode_run_event(run_uuid, step_type, status, detail):
     """Persist a structured LensNode event into a RunStep row.
 
@@ -1687,7 +1887,7 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
     makes orphan-thread activity observable.
     """
 
-    run = Run.objects.get(uuid=run_uuid)
+    run = Run.objects.select_for_update().get(uuid=run_uuid)
     if run.status in TERMINAL_RUN_STATUSES:
         logger.warning(
             "run %s: dropping late %s event (run already %s)",
@@ -1696,6 +1896,26 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
             run.status,
         )
         return None
+    if status == RunStep.Status.RUNNING:
+        execution = (
+            RunExecution.objects.select_for_update()
+            .filter(run=run)
+            .first()
+        )
+    else:
+        execution = None
+    if (
+        execution is not None
+        and execution.status == RunExecution.Status.DISPATCHED
+    ):
+        execution.status = RunExecution.Status.RUNNING
+        execution.admitted_at = execution.admitted_at or timezone.now()
+        execution.save(update_fields=["status", "admitted_at"])
+        logger.info(
+            "run admitted by first event run_uuid=%s dispatch_id=%s",
+            run_uuid,
+            execution.dispatch_id,
+        )
     if run.resume_by is not None and status == RunStep.Status.RUNNING:
         Run.objects.filter(pk=run.pk, resume_by__isnull=False).update(
             resume_by=None

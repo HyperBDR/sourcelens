@@ -1821,6 +1821,7 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
 ):
     model_options = []
     run_options = []
+    checkpoint_actions = []
 
     class Model:
         stop_reason = None
@@ -1837,6 +1838,7 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
         mcp_config_path=tmp_path / "mcp.json",
     )
     config = SimpleNamespace(
+        workspace_path=str(tmp_path),
         ai_gateway_url="http://gateway/ai/",
         token="token",
         request_timeout_s=30,
@@ -1880,6 +1882,22 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
         "create_deep_agent",
         lambda **_kwargs: object(),
     )
+    monkeypatch.setattr(agent_runtime, "checkpoint_enabled", lambda: True)
+    monkeypatch.setattr(
+        agent_runtime,
+        "get_checkpoint_saver",
+        lambda _workspace: checkpoint_actions.append("saver") or object(),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "save_resume_metadata",
+        lambda *_args, **_kwargs: checkpoint_actions.append("metadata"),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "save_initial_checkpoint",
+        lambda *_args, **_kwargs: checkpoint_actions.append("checkpoint"),
+    )
 
     def run_agent(*_args, **options):
         run_options.append(options)
@@ -1902,6 +1920,9 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
                 "agent_model_ref": "model-ref",
             },
             wrapup_event=wrapup_event,
+            on_checkpoint_ready=lambda task=task: checkpoint_actions.append(
+                ("ready", task)
+            ),
         )
 
         assert result["answer"] == "legacy answer"
@@ -1916,6 +1937,17 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
         assert options["wrapup_event"] is None
         assert options["token_budget_wrapup_event"] is None
         assert "capability_stop_event" not in options
+        assert options["input_checkpoint_seeded"] is True
+    assert checkpoint_actions == [
+        "saver",
+        "metadata",
+        "checkpoint",
+        ("ready", "knowledge_qa"),
+        "saver",
+        "metadata",
+        "checkpoint",
+        ("ready", "code_analysis"),
+    ]
 
 
 def test_unverified_answer_distinguishes_unavailable_from_execution_failure():
