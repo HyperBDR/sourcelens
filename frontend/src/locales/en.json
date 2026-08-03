@@ -564,6 +564,8 @@
       "user": "User",
       "language": "Language",
       "languageDesc": "Used for the interface and AI-generated content",
+      "releaseNotes": "What's New",
+      "releaseNotesUnread": "New release notes are available",
       "notifications": "Notifications",
       "notificationsDesc": "Choose how SourceLens tells you when a long-running answer is ready.",
       "completionIndicator": "Answer completion reminders",
@@ -582,6 +584,18 @@
       "assistantFallback": "Current assistant",
       "noteTitle": "Note",
       "noteBody": "More settings will be folded into this panel later. For now, it keeps only the most commonly used account information and language selection."
+    },
+    "releaseNotes": {
+      "currentVersion": "Current version",
+      "releaseDate": "Release date",
+      "entryCount": "{count} change(s)",
+      "adminOnly": "Administrators",
+      "empty": "No user-facing changes were included in this release.",
+      "categories": {
+        "feature": "Features",
+        "improvement": "Improvements",
+        "fix": "Fixes"
+      }
     },
     "preferences": {
       "title": "Global Language & Timezone",

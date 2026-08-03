@@ -574,6 +574,8 @@
       "user": "普通用户",
       "language": "语言",
       "languageDesc": "用于界面显示和 AI 生成内容",
+      "releaseNotes": "更新日志",
+      "releaseNotesUnread": "有新的更新日志",
       "notifications": "通知",
       "notificationsDesc": "选择长时间运行的回答完成后，SourceLens 提醒你的方式。",
       "completionIndicator": "回答完成提醒",
@@ -592,6 +594,18 @@
       "assistantFallback": "当前助手",
       "noteTitle": "说明",
       "noteBody": "后续更多设置项会继续收拢到这里，当前只保留最常用的账户信息和语言选择。"
+    },
+    "releaseNotes": {
+      "currentVersion": "当前版本",
+      "releaseDate": "发布日期",
+      "entryCount": "{count} 项变更",
+      "adminOnly": "仅管理员",
+      "empty": "此版本没有面向用户的变更。",
+      "categories": {
+        "feature": "新功能",
+        "improvement": "改进",
+        "fix": "问题修复"
+      }
     },
     "preferences": {
       "title": "全局语言与时区",

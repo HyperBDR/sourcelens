@@ -28,9 +28,9 @@
         >
           <!-- Left nav -->
           <nav
-            class="flex w-44 shrink-0 flex-col border-r border-line bg-gray-50 py-3"
+            class="flex w-14 shrink-0 flex-col border-r border-line bg-gray-50 py-3 sm:w-44"
           >
-            <div class="px-3 pb-2 pt-1">
+            <div class="hidden px-3 pb-2 pt-1 sm:block">
               <div
                 class="text-xs font-semibold uppercase tracking-wide text-gray-400"
               >
@@ -43,7 +43,8 @@
                 v-for="section in sections"
                 :key="section.key"
                 type="button"
-                class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors"
+                class="flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm transition-colors sm:justify-start sm:px-3"
+                :aria-label="section.label"
                 :class="
                   activeSection === section.key
                     ? 'bg-white font-medium text-gray-900 shadow-sm'
@@ -52,14 +53,28 @@
                 @click="activeSection = section.key"
               >
                 <component :is="section.icon" class="h-4 w-4 shrink-0" />
-                {{ section.label }}
+                <span class="hidden min-w-0 flex-1 truncate sm:block">
+                  {{ section.label }}
+                </span>
+                <span
+                  v-if="
+                    section.key === 'release-notes' &&
+                    uiStore.hasUnreadReleaseNotes
+                  "
+                  class="h-2 w-2 shrink-0 rounded-full bg-primary-500"
+                >
+                  <span class="sr-only">
+                    {{ t('settings.modal.releaseNotesUnread') }}
+                  </span>
+                </span>
               </button>
             </div>
 
             <div class="border-t border-line px-2 pt-2">
               <button
                 type="button"
-                class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                class="flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:justify-start sm:px-3"
+                :aria-label="t('common.logout')"
                 @click="handleLogout"
               >
                 <svg
@@ -82,7 +97,7 @@
                   />
                   <line x1="21" y1="12" x2="9" y2="12" stroke-linecap="round" />
                 </svg>
-                {{ t('common.logout') }}
+                <span class="hidden sm:block">{{ t('common.logout') }}</span>
               </button>
             </div>
           </nav>
@@ -90,7 +105,7 @@
           <!-- Right content -->
           <div class="flex min-w-0 flex-1 flex-col">
             <header
-              class="flex items-center justify-between border-b border-line px-5 py-4"
+              class="flex items-center justify-between border-b border-line px-4 py-4 sm:px-5"
             >
               <h2 class="text-base font-semibold text-gray-900">
                 {{ sections.find((s) => s.key === activeSection)?.label }}
@@ -118,7 +133,7 @@
               </button>
             </header>
 
-            <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+            <div class="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
               <!-- Profile section -->
               <div v-if="activeSection === 'profile'" class="space-y-5">
                 <div class="flex items-center gap-4">
@@ -203,6 +218,8 @@
                 v-if="activeSection === 'notifications'"
               />
 
+              <ReleaseNotesSettings v-if="activeSection === 'release-notes'" />
+
               <PasswordChangeSettings v-if="activeSection === 'security'" />
             </div>
           </div>
@@ -218,6 +235,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import AnswerNotificationSettings from '@/components/settings/AnswerNotificationSettings.vue'
 import PasswordChangeSettings from '@/components/settings/PasswordChangeSettings.vue'
+import ReleaseNotesSettings from '@/components/settings/ReleaseNotesSettings.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import { getPasswordManagementText } from '@/locales/passwordManagement'
 import { getUiLanguageOptions } from '@/utils/languages'
@@ -246,12 +264,20 @@ const GlobeIcon = {
 const BellIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 21h4" stroke-linecap="round"/></svg>`
 }
+const ReleaseNotesIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5" stroke-linecap="round"/></svg>`
+}
 const LockIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg>`
 }
 
 const sections = computed(() => [
   { key: 'profile', label: t('settings.modal.title'), icon: UserIcon },
+  {
+    key: 'release-notes',
+    label: t('settings.modal.releaseNotes'),
+    icon: ReleaseNotesIcon
+  },
   { key: 'language', label: t('settings.modal.language'), icon: GlobeIcon },
   {
     key: 'notifications',
@@ -311,6 +337,16 @@ watch(
     if (show) activeSection.value = uiStore.settingsTab || 'profile'
     if (typeof document !== 'undefined')
       document.body.style.overflow = show ? 'hidden' : ''
+  },
+  { immediate: true }
+)
+
+watch(
+  [() => props.show, activeSection],
+  ([show, section]) => {
+    if (show && section === 'release-notes') {
+      uiStore.markReleaseNotesViewed()
+    }
   },
   { immediate: true }
 )
