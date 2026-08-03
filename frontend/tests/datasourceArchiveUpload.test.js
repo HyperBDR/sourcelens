@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import {
+  availableDatasourceLensNodes,
+  supportsDatasourceArchiveUpload
+} from '../src/pages/lens/datasourceCapabilities.js'
+
 const source = (path) =>
   readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
@@ -48,4 +53,50 @@ test('nginx blocks public access to private datasource archives', async () => {
     assert.match(config, /location \^~ \/media\/storage\/private\//)
     assert.match(config, /media\/storage\/private\/[\s\S]*return 404/)
   }
+})
+
+test('archive capability requires an exact true LensNode label', () => {
+  assert.equal(
+    supportsDatasourceArchiveUpload({
+      labels: { datasource_archive_upload: true }
+    }),
+    true
+  )
+  assert.equal(
+    supportsDatasourceArchiveUpload({
+      labels: { datasource_archive_upload: 'true' }
+    }),
+    false
+  )
+  assert.equal(supportsDatasourceArchiveUpload({ labels: {} }), false)
+})
+
+test('file datasource choices require archive support', () => {
+  const supported = {
+    uuid: 'supported',
+    status: 'online',
+    enrollment_status: 'approved',
+    token_revoked: false,
+    labels: { datasource_archive_upload: true }
+  }
+  const legacy = {
+    uuid: 'legacy',
+    status: 'online',
+    enrollment_status: 'approved',
+    token_revoked: false,
+    labels: {}
+  }
+
+  assert.deepEqual(
+    availableDatasourceLensNodes([supported, legacy], 'file').map(
+      (node) => node.uuid
+    ),
+    ['supported']
+  )
+  assert.deepEqual(
+    availableDatasourceLensNodes([supported, legacy], 'git').map(
+      (node) => node.uuid
+    ),
+    ['supported', 'legacy']
+  )
 })

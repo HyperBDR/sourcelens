@@ -213,44 +213,69 @@ def sync_datasource(command, workspace_path=WORKSPACE_ROOT, emit=None):
     target = Path(result.get("target_path") or "").resolve()
     if not target:
         return result
-    context = _sync_context(command, target)
-    manifest_store.write_datasource_marker(target, context)
-    sync_items = result.pop("_sync_items", [])
-    changed_paths = result.pop("_changed_paths", [])
-    deleted_paths = result.pop("_deleted_paths", [])
-    sync_result = manifest_store.SyncResult(
-        items=sync_items,
-        changed_paths=changed_paths,
-        deleted_paths=deleted_paths,
-        stats=_sync_summary_from_result(result),
-    )
-    sync_details = _sync_details_by_metric(
-        sync_items,
-        changed_paths,
-        deleted_paths,
-    )
-    if sync_details["details"]:
-        result["details"] = sync_details["details"]
-        result["details_truncated"] = sync_details["details_truncated"]
-    changed_details = sync_details["details"].get("changed") or []
-    if changed_details:
-        result["changed_items"] = changed_details
-        result["changed_items_truncated"] = sync_details[
-            "details_truncated"
-        ].get("changed", 0)
-    if sync_items:
-        manifest_payload = manifest_store.build_manifest(context, sync_result)
-        manifest_payload["synced_at"] = utc_timestamp()
-        manifest_store.write_manifest(target, manifest_payload)
+    target_transaction = result.pop("_target_transaction", None)
+    try:
+        if target_transaction:
+            target_transaction.check_cancelled()
+        context = _sync_context(command, target)
+        manifest_store.write_datasource_marker(target, context)
+        if target_transaction:
+            target_transaction.check_cancelled()
+        sync_items = result.pop("_sync_items", [])
+        changed_paths = result.pop("_changed_paths", [])
+        deleted_paths = result.pop("_deleted_paths", [])
+        sync_result = manifest_store.SyncResult(
+            items=sync_items,
+            changed_paths=changed_paths,
+            deleted_paths=deleted_paths,
+            stats=_sync_summary_from_result(result),
+        )
+        sync_details = _sync_details_by_metric(
+            sync_items,
+            changed_paths,
+            deleted_paths,
+        )
+        if sync_details["details"]:
+            result["details"] = sync_details["details"]
+            result["details_truncated"] = sync_details[
+                "details_truncated"
+            ]
+        changed_details = sync_details["details"].get("changed") or []
+        if changed_details:
+            result["changed_items"] = changed_details
+            result["changed_items_truncated"] = sync_details[
+                "details_truncated"
+            ].get("changed", 0)
+        if sync_items:
+            manifest_payload = manifest_store.build_manifest(
+                context,
+                sync_result,
+            )
+            manifest_payload["synced_at"] = utc_timestamp()
+            manifest_store.write_manifest(target, manifest_payload)
+        if target_transaction:
+            target_transaction.check_cancelled()
 
-    deleted_sidecars = manifest_store.cleanup_deleted_sidecars(
-        target,
-        deleted_paths,
-        context["excluded_datasource_roots"],
-    )
-    conversion_summary = post_process_documents(context, sync_result, emit)
-    conversion_summary["deleted_sidecars"] = deleted_sidecars
-    result["conversion_summary"] = conversion_summary
+        deleted_sidecars = manifest_store.cleanup_deleted_sidecars(
+            target,
+            deleted_paths,
+            context["excluded_datasource_roots"],
+        )
+        if target_transaction:
+            target_transaction.check_cancelled()
+        conversion_summary = post_process_documents(
+            context,
+            sync_result,
+            emit,
+        )
+        conversion_summary["deleted_sidecars"] = deleted_sidecars
+        result["conversion_summary"] = conversion_summary
+        if target_transaction:
+            target_transaction.commit()
+    except BaseException:
+        if target_transaction:
+            target_transaction.rollback()
+        raise
     return result
 
 

@@ -1208,6 +1208,7 @@ import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 
 import { formatLLMConfigLabel } from './adminHelpers'
+import { availableDatasourceLensNodes } from './datasourceCapabilities'
 
 const props = defineProps({
   show: Boolean,
@@ -1461,12 +1462,7 @@ const activeStepKey = computed(
 )
 
 const onlineLensNodes = computed(() =>
-  props.lensnodes.filter(
-    (node) =>
-      node.status === 'online' &&
-      node.enrollment_status === 'approved' &&
-      !node.token_revoked
-  )
+  availableDatasourceLensNodes(props.lensnodes, props.form.source_type)
 )
 
 const selectedLensNode = computed(() =>

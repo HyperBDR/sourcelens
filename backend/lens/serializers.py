@@ -81,6 +81,17 @@ def _task_names(lensnode):
     return names
 
 
+def _supports_datasource_archive_upload(lensnode):
+    """Return whether a LensNode explicitly supports archive imports."""
+
+    return (
+        (getattr(lensnode, "labels", None) or {}).get(
+            "datasource_archive_upload"
+        )
+        is True
+    )
+
+
 def _dir_paths(lensnode):
     """Return available directory paths reported by a LensNode."""
 
@@ -853,6 +864,16 @@ class DataSourceSerializer(serializers.ModelSerializer):
             ):
                 raise serializers.ValidationError(
                     {"source_type": "DATASOURCE_ARCHIVE_UPLOAD_REQUIRED"}
+                )
+            if self.context.get(
+                "archive_upload"
+            ) and not _supports_datasource_archive_upload(lensnode):
+                raise serializers.ValidationError(
+                    {
+                        "lensnode_uuid": (
+                            "DATASOURCE_ARCHIVE_LENSNODE_UNSUPPORTED"
+                        )
+                    }
                 )
             if credential is not None:
                 raise serializers.ValidationError(

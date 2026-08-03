@@ -41,6 +41,23 @@ from lens.tasks import (
 from .base import BaseAdminViewSet
 
 
+def _active_archive_upload_exists(datasource):
+    """Return whether a file datasource already has an active upload."""
+
+    from agentcore_task.adapters.django.models import TaskExecution
+    from agentcore_task.constants import TaskStatus
+
+    return TaskExecution.objects.filter(
+        module="lens_datasource",
+        metadata__datasource_uuid=str(datasource.uuid),
+        metadata__trigger__in=["initial_upload", "reupload"],
+        status__in=[
+            TaskStatus.PENDING,
+            *TaskStatus.get_running_statuses(),
+        ],
+    ).exists()
+
+
 class DataSourceViewSet(BaseAdminViewSet):
     """CRUD for datasources."""
 
@@ -196,17 +213,14 @@ class DataSourceViewSet(BaseAdminViewSet):
             context={"request": request, "archive_upload": True},
         )
         datasource_serializer.is_valid(raise_exception=True)
-        datasource = datasource_serializer.save()
-        try:
+        with transaction.atomic():
+            datasource = datasource_serializer.save()
             task_id = self._enqueue_archive_upload(
                 datasource,
                 upload_serializer.validated_data,
                 "initial_upload",
                 request.user,
             )
-        except Exception:
-            datasource.delete()
-            raise
         payload = DataSourceSerializer(datasource).data
         payload["initial_sync_task_id"] = task_id
         return Response(payload, status=status.HTTP_201_CREATED)
@@ -220,13 +234,13 @@ class DataSourceViewSet(BaseAdminViewSet):
     def reupload(self, request, uuid=None):
         """Replace a file datasource using one newly uploaded archive."""
 
-        datasource = self.get_object()
-        if datasource.source_type != DataSource.SourceType.FILE:
+        datasource_ref = self.get_object()
+        if datasource_ref.source_type != DataSource.SourceType.FILE:
             return Response(
                 {"detail": "DATASOURCE_ARCHIVE_UPLOAD_NOT_SUPPORTED"},
                 status=status.HTTP_409_CONFLICT,
             )
-        if datasource.status == DataSource.Status.DISABLED:
+        if datasource_ref.status == DataSource.Status.DISABLED:
             return Response(
                 {"detail": "DATASOURCE_DISABLED"},
                 status=status.HTTP_409_CONFLICT,
@@ -235,27 +249,41 @@ class DataSourceViewSet(BaseAdminViewSet):
             data=request.data
         )
         upload_serializer.is_valid(raise_exception=True)
-        metadata = upload_serializer.validated_data["metadata"]
-        metadata.setdefault("name", datasource.name)
-        metadata.setdefault("lensnode_uuid", str(datasource.lensnode.uuid))
-        metadata.setdefault("target_path", datasource.target_path)
-        metadata.setdefault("config", {})
-        metadata.setdefault("sync_policy", datasource.sync_policy)
-        metadata.setdefault("status", datasource.status)
-        datasource_serializer = DataSourceSerializer(
-            datasource,
-            data=metadata,
-            partial=True,
-            context={"request": request, "archive_upload": True},
-        )
-        datasource_serializer.is_valid(raise_exception=True)
-        datasource = datasource_serializer.save()
-        task_id = self._enqueue_archive_upload(
-            datasource,
-            upload_serializer.validated_data,
-            "reupload",
-            request.user,
-        )
+        with transaction.atomic():
+            datasource = (
+                DataSource.objects.select_for_update()
+                .select_related("lensnode", "credential")
+                .get(pk=datasource_ref.pk)
+            )
+            if _active_archive_upload_exists(datasource):
+                return Response(
+                    {"detail": "DATASOURCE_ARCHIVE_UPLOAD_ACTIVE"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            metadata = upload_serializer.validated_data["metadata"]
+            metadata.setdefault("name", datasource.name)
+            metadata.setdefault(
+                "lensnode_uuid",
+                str(datasource.lensnode.uuid),
+            )
+            metadata.setdefault("target_path", datasource.target_path)
+            metadata.setdefault("config", {})
+            metadata.setdefault("sync_policy", datasource.sync_policy)
+            metadata.setdefault("status", datasource.status)
+            datasource_serializer = DataSourceSerializer(
+                datasource,
+                data=metadata,
+                partial=True,
+                context={"request": request, "archive_upload": True},
+            )
+            datasource_serializer.is_valid(raise_exception=True)
+            datasource = datasource_serializer.save()
+            task_id = self._enqueue_archive_upload(
+                datasource,
+                upload_serializer.validated_data,
+                "reupload",
+                request.user,
+            )
         payload = DataSourceSerializer(datasource).data
         payload["task_id"] = task_id
         return Response(payload, status=status.HTTP_202_ACCEPTED)

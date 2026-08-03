@@ -34,6 +34,40 @@ class DataSourceArchiveError(RuntimeError):
     """Raised when an uploaded datasource archive is unsafe or invalid."""
 
 
+class ArchiveTargetTransaction:
+    """Retain a reversible archive target swap until the sync commits."""
+
+    def __init__(self, target, backup, cancel_event):
+        self.target = target
+        self.backup = backup
+        self.cancel_event = cancel_event
+        self.active = True
+
+    def check_cancelled(self):
+        """Raise if cancellation was requested before the final commit."""
+
+        _check_cancelled(self.cancel_event)
+
+    def commit(self):
+        """Remove the previous target after the full pipeline succeeds."""
+
+        self.check_cancelled()
+        if self.backup.exists():
+            shutil.rmtree(self.backup, ignore_errors=True)
+        self.active = False
+
+    def rollback(self):
+        """Remove the replacement and restore the previous target."""
+
+        if not self.active:
+            return
+        if self.target.exists():
+            shutil.rmtree(self.target)
+        if self.backup.exists():
+            self.backup.rename(self.target)
+        self.active = False
+
+
 def sync_file_archive(command, workspace_path, emit=None):
     """Download, extract, and fully replace one file datasource directory."""
 
@@ -74,7 +108,11 @@ def sync_file_archive(command, workspace_path, emit=None):
         )
         previous_paths = _previous_paths(target)
         folders = _archive_folder_count(contents, cancel_event)
-        _replace_target(target, contents, cancel_event)
+        target_transaction = _replace_target(
+            target,
+            contents,
+            cancel_event,
+        )
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -95,6 +133,7 @@ def sync_file_archive(command, workspace_path, emit=None):
         "_sync_items": items,
         "_changed_paths": changed_paths,
         "_deleted_paths": deleted_paths,
+        "_target_transaction": target_transaction,
     }
 
 
@@ -392,7 +431,7 @@ def is_file_target_owned(target, datasource_uuid):
 
 
 def _replace_target(target, contents, cancel_event=None):
-    """Replace the target directory and restore it if the swap fails."""
+    """Replace the target and return its reversible transaction."""
 
     _check_cancelled(cancel_event)
     backup = target.parent / f".sourcelens-backup-{uuid.uuid4().hex}"
@@ -407,8 +446,7 @@ def _replace_target(target, contents, cancel_event=None):
         if moved_old and not target.exists() and backup.exists():
             backup.rename(target)
         raise
-    if backup.exists():
-        shutil.rmtree(backup)
+    return ArchiveTargetTransaction(target, backup, cancel_event)
 
 
 def _previous_paths(target):

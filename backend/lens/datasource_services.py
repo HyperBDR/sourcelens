@@ -225,16 +225,20 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
     config = datasource_runtime_config(datasource)
     sync_policy = datasource.sync_policy or {}
     conversion = datasource_conversion_policy(sync_policy)
+    target_path = datasource.target_path
     archive = {}
     if datasource.source_type == DataSource.SourceType.FILE:
         from agentcore_task.adapters.django.models import TaskExecution
 
         task = TaskExecution.objects.filter(task_id=task_id).first()
-        archive_metadata = (
-            (task.metadata or {}).get("archive") if task else None
-        )
+        task_metadata = (task.metadata or {}) if task else {}
+        archive_metadata = task_metadata.get("archive")
         if not archive_metadata:
             raise DataSourceDispatchError("DATASOURCE_ARCHIVE_MISSING")
+        config = {}
+        sync_policy = task_metadata.get("sync_policy") or {}
+        conversion = task_metadata.get("conversion") or {}
+        target_path = task_metadata.get("target_path") or target_path
         archive = {
             "task_id": task_id,
             "original_name": archive_metadata.get("original_name") or "",
@@ -256,7 +260,7 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
             "archive": archive,
             "conversion": conversion,
             "sync_policy": sync_policy,
-            "target_path": datasource.target_path,
+            "target_path": target_path,
             "trigger": trigger,
             "max_workers": get_datasource_sync_max_workers(),
             "excluded_datasource_roots": excluded_datasource_roots(

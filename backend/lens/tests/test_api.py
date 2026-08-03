@@ -4753,6 +4753,7 @@ class DataSourceArchiveUploadTests(TestCase):
             enrollment_status=LensNode.EnrollmentStatus.APPROVED,
             workspace_path="/workspace",
             auth_token_hash=hash_lensnode_token(self.token),
+            labels={"datasource_archive_upload": True},
         )
 
     def tearDown(self):
@@ -4817,6 +4818,33 @@ class DataSourceArchiveUploadTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("DATASOURCE_ARCHIVE_PATH_INVALID", str(response.data))
+        self.assertFalse(
+            DataSource.objects.filter(
+                source_type=DataSource.SourceType.FILE
+            ).exists()
+        )
+
+    def test_upload_rejects_lensnode_without_archive_capability(self):
+        self.lensnode.labels = {}
+        self.lensnode.save(update_fields=["labels"])
+
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            response = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload(
+                        {"readme.txt": "hello"}
+                    ),
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "DATASOURCE_ARCHIVE_LENSNODE_UNSUPPORTED",
+            str(response.data),
+        )
         self.assertFalse(
             DataSource.objects.filter(
                 source_type=DataSource.SourceType.FILE
@@ -4917,6 +4945,9 @@ class DataSourceArchiveUploadTests(TestCase):
                 },
                 format="multipart",
             )
+            TaskExecution.objects.filter(
+                task_id=created.data["initial_sync_task_id"]
+            ).update(status="SUCCESS")
             response = self.client.post(
                 (
                     f"/api/lens/admin/datasources/{created.data['uuid']}/"
@@ -4935,6 +4966,110 @@ class DataSourceArchiveUploadTests(TestCase):
         self.assertEqual(
             task.metadata["archive"]["original_name"],
             "documents.zip",
+        )
+
+    def test_reupload_rejects_an_active_archive_upload(self):
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            created = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload({"old.txt": "old"}),
+                },
+                format="multipart",
+            )
+            archive_root = Path(self.archive_storage.name)
+            original_files = {
+                path.relative_to(archive_root)
+                for path in archive_root.rglob("*")
+                if path.is_file()
+            }
+            response = self.client.post(
+                (
+                    f"/api/lens/admin/datasources/{created.data['uuid']}/"
+                    "reupload/"
+                ),
+                {
+                    "metadata": json.dumps({}),
+                    "file": datasource_zip_upload({"new.txt": "new"}),
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertEqual(
+            TaskExecution.objects.filter(module="lens_datasource").count(),
+            1,
+        )
+        self.assertEqual(
+            {
+                path.relative_to(archive_root)
+                for path in archive_root.rglob("*")
+                if path.is_file()
+            },
+            original_files,
+        )
+
+    def test_reupload_broker_failure_rolls_back_database_and_archive(self):
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            created = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload({"old.txt": "old"}),
+                },
+                format="multipart",
+            )
+        datasource = DataSource.objects.get(uuid=created.data["uuid"])
+        TaskExecution.objects.filter(
+            task_id=created.data["initial_sync_task_id"]
+        ).update(status="SUCCESS")
+        original_task_ids = set(
+            TaskExecution.objects.filter(
+                module="lens_datasource"
+            ).values_list("task_id", flat=True)
+        )
+        archive_root = Path(self.archive_storage.name)
+        original_files = {
+            path.relative_to(archive_root)
+            for path in archive_root.rglob("*")
+            if path.is_file()
+        }
+
+        with patch(
+            "lens.views.datasources.source_sync_task.apply_async",
+            side_effect=RuntimeError("broker unavailable"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "broker unavailable"):
+                self.client.post(
+                    (
+                        f"/api/lens/admin/datasources/{datasource.uuid}/"
+                        "reupload/"
+                    ),
+                    {
+                        "metadata": json.dumps({"name": "Renamed Upload"}),
+                        "file": datasource_zip_upload({"new.txt": "new"}),
+                    },
+                    format="multipart",
+                )
+
+        datasource.refresh_from_db()
+        self.assertEqual(datasource.name, "Uploaded Documents")
+        self.assertEqual(
+            set(
+                TaskExecution.objects.filter(
+                    module="lens_datasource"
+                ).values_list("task_id", flat=True)
+            ),
+            original_task_ids,
+        )
+        self.assertEqual(
+            {
+                path.relative_to(archive_root)
+                for path in archive_root.rglob("*")
+                if path.is_file()
+            },
+            original_files,
         )
 
     def test_archive_download_is_lensnode_and_task_bound(self):

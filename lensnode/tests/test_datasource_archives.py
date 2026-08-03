@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from lensnode import datasource_archives
+from lensnode import datasource_manifest as manifest_store
 from lensnode.datasource_archives import DataSourceArchiveError
 from lensnode.datasource_sync import sync_datasource
 
@@ -332,3 +333,115 @@ def test_cancel_during_swap_restores_previous_target(tmp_path, monkeypatch):
 
     assert (target / "old.txt").read_text() == "old"
     assert not (target / "new.txt").exists()
+
+
+@pytest.mark.parametrize(
+    "writer_name",
+    ["write_datasource_marker", "write_manifest"],
+)
+def test_pipeline_failure_restores_previous_target(
+    tmp_path,
+    monkeypatch,
+    writer_name,
+):
+    """Post-swap metadata failures preserve the last valid import."""
+
+    target = tmp_path / "documents"
+    sync_datasource(
+        _command(_zip_bytes({"old.txt": "old"}), "zip", target),
+        workspace_path=tmp_path,
+    )
+
+    def fail_write(*args, **kwargs):
+        raise RuntimeError("metadata write failed")
+
+    monkeypatch.setattr(manifest_store, writer_name, fail_write)
+    with pytest.raises(RuntimeError, match="metadata write failed"):
+        sync_datasource(
+            _command(_zip_bytes({"new.txt": "new"}), "zip", target),
+            workspace_path=tmp_path,
+        )
+
+    assert (target / "old.txt").read_text() == "old"
+    assert not (target / "new.txt").exists()
+    assert not list(tmp_path.glob(".sourcelens-backup-*"))
+
+
+def test_cancel_after_target_rename_restores_previous_target(
+    tmp_path,
+    monkeypatch,
+):
+    """Cancellation after replacement rolls back the complete pipeline."""
+
+    target = tmp_path / "documents"
+    sync_datasource(
+        _command(_zip_bytes({"old.txt": "old"}), "zip", target),
+        workspace_path=tmp_path,
+    )
+    cancel_event = threading.Event()
+    original_write = manifest_store.write_datasource_marker
+
+    def cancel_after_marker(*args, **kwargs):
+        original_write(*args, **kwargs)
+        cancel_event.set()
+
+    monkeypatch.setattr(
+        manifest_store,
+        "write_datasource_marker",
+        cancel_after_marker,
+    )
+    command = _command(_zip_bytes({"new.txt": "new"}), "zip", target)
+    command["cancel_event"] = cancel_event
+
+    with pytest.raises(
+        DataSourceArchiveError,
+        match="DATASOURCE_SYNC_CANCELLED",
+    ):
+        sync_datasource(command, workspace_path=tmp_path)
+
+    assert (target / "old.txt").read_text() == "old"
+    assert not (target / "new.txt").exists()
+    assert not list(tmp_path.glob(".sourcelens-backup-*"))
+
+
+def test_failed_first_import_removes_uncommitted_target(
+    tmp_path,
+    monkeypatch,
+):
+    """A failed initial metadata write leaves no imported target."""
+
+    target = tmp_path / "documents"
+
+    def fail_marker(*args, **kwargs):
+        raise RuntimeError("marker write failed")
+
+    monkeypatch.setattr(
+        manifest_store,
+        "write_datasource_marker",
+        fail_marker,
+    )
+    with pytest.raises(RuntimeError, match="marker write failed"):
+        sync_datasource(
+            _command(_zip_bytes({"new.txt": "new"}), "zip", target),
+            workspace_path=tmp_path,
+        )
+
+    assert not target.exists()
+    assert not list(tmp_path.glob(".sourcelens-backup-*"))
+
+
+def test_successful_reupload_removes_target_backup(tmp_path):
+    """A fully committed re-upload removes its rollback backup."""
+
+    target = tmp_path / "documents"
+    sync_datasource(
+        _command(_zip_bytes({"old.txt": "old"}), "zip", target),
+        workspace_path=tmp_path,
+    )
+    sync_datasource(
+        _command(_zip_bytes({"new.txt": "new"}), "zip", target),
+        workspace_path=tmp_path,
+    )
+
+    assert (target / "new.txt").read_text() == "new"
+    assert not list(tmp_path.glob(".sourcelens-backup-*"))

@@ -951,6 +951,7 @@ class LensNodeClient:
                     "active_runs": active_runs,
                     "labels": {
                         "mode": "local",
+                        "datasource_archive_upload": True,
                         "run_document_attachments": True,
                         "run_checkpoint_resume": checkpoint_resume_ready,
                         "run_admission_checkpoint_v1": True,

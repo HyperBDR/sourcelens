@@ -2454,6 +2454,57 @@ class LensServiceTests(TransactionTestCase):
         payload = send.call_args.args[1]
         self.assertEqual(payload["max_workers"], 8)
 
+    def test_file_sync_dispatch_uses_registered_task_snapshot(self):
+        self.datasource.source_type = DataSource.SourceType.FILE
+        self.datasource.target_path = "/workspace/original"
+        self.datasource.config = {}
+        self.datasource.sync_policy = {
+            "conversion": {"document": True},
+        }
+        self.datasource.save(
+            update_fields=[
+                "source_type",
+                "target_path",
+                "config",
+                "sync_policy",
+            ]
+        )
+        register_datasource_sync_task(
+            self.datasource,
+            "archive-snapshot",
+            "reupload",
+            metadata={
+                "archive": {
+                    "archive_type": "zip",
+                    "byte_size": 10,
+                    "content_hash": "abc123",
+                    "original_name": "documents.zip",
+                }
+            },
+        )
+        self.datasource.target_path = "/workspace/mutated"
+        self.datasource.sync_policy = {
+            "conversion": {"image": True},
+        }
+        self.datasource.save(
+            update_fields=["target_path", "sync_policy"]
+        )
+
+        with patch("lens.datasource_services._send_lensnode_command") as send:
+            dispatch_datasource_sync_async(
+                self.datasource,
+                task_id="archive-snapshot",
+                trigger="reupload",
+            )
+
+        payload = send.call_args.args[1]
+        self.assertEqual(payload["target_path"], "/workspace/original")
+        self.assertEqual(payload["conversion"], {"document": True})
+        self.assertEqual(
+            payload["sync_policy"],
+            {"conversion": {"document": True}},
+        )
+
     def test_complete_datasource_sync_task_updates_records(self):
         with patch("lens.tasks.dispatch_datasource_sync_async") as dispatch:
             dispatch.return_value = "request-1"

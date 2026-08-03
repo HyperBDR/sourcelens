@@ -224,6 +224,7 @@ def test_reconnect_hello_claims_buffered_terminal_run_before_flush():
             "running-run",
         ]
         assert frames[0]["labels"]["run_document_attachments"] is True
+        assert frames[0]["labels"]["datasource_archive_upload"] is True
         assert frames[0]["labels"]["run_checkpoint_resume"] is True
         assert (
             frames[0]["labels"]["run_admission_checkpoint_v1"] is True
