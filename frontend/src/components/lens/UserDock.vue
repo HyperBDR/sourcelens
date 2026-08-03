@@ -96,6 +96,14 @@
           <button type="button" class="dock-link" @click="openSettings">
             <Settings :size="18" :stroke-width="2" aria-hidden="true" />
             <span class="truncate">{{ t('common.settings') }}</span>
+            <span
+              v-if="uiStore.hasUnreadReleaseNotes"
+              class="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary-500"
+            >
+              <span class="sr-only">
+                {{ t('settings.modal.releaseNotesUnread') }}
+              </span>
+            </span>
           </button>
           <button type="button" class="dock-link" @click="handleLogout">
             <LogOut :size="18" :stroke-width="2" aria-hidden="true" />

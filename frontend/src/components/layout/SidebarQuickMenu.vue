@@ -80,6 +80,14 @@
           </div>
           <button type="button" class="quick-menu-link" @click="openSettings">
             <span class="truncate">{{ t('common.settings') }}</span>
+            <span
+              v-if="uiStore.hasUnreadReleaseNotes"
+              class="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary-500"
+            >
+              <span class="sr-only">
+                {{ t('settings.modal.releaseNotesUnread') }}
+              </span>
+            </span>
           </button>
           <button type="button" class="quick-menu-link" @click="handleLogout">
             <span class="truncate">{{ t('common.logout') }}</span>
