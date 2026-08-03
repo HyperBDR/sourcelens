@@ -3,8 +3,12 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
+  attachmentUploadError,
   classifyAttachment,
   hasAttachmentErrorCode,
+  MAX_IMAGE_ASPECT_RATIO,
+  MAX_IMAGE_PIXELS,
+  validateImageDimensions,
   validateAttachment
 } from '../src/pages/lens/chatAttachments.js'
 
@@ -60,6 +64,47 @@ test('enforces type, capability, size and shared count limits', () => {
     ).error,
     'attachmentTooMany'
   )
+})
+
+test('enforces image pixel and aspect-ratio boundaries', () => {
+  assert.equal(validateImageDimensions(2500, MAX_IMAGE_PIXELS / 2500), '')
+  assert.equal(validateImageDimensions(1000 * MAX_IMAGE_ASPECT_RATIO, 1000), '')
+  assert.equal(validateImageDimensions(2501, 2000), 'imageDimensionsTooLarge')
+  assert.equal(
+    validateImageDimensions(1000, 1000 * MAX_IMAGE_ASPECT_RATIO + 1),
+    'imageAspectUnsupported'
+  )
+})
+
+test('maps backend dimension errors to actionable upload messages', () => {
+  const apiError = (code) => ({ response: { data: { errors: [code] } } })
+
+  assert.equal(
+    attachmentUploadError(apiError('ATTACHMENT_DIMENSIONS_TOO_LARGE')),
+    'imageDimensionsTooLarge'
+  )
+  assert.equal(
+    attachmentUploadError(apiError('ATTACHMENT_ASPECT_UNSUPPORTED')),
+    'imageAspectUnsupported'
+  )
+  assert.equal(
+    attachmentUploadError(new Error('network')),
+    'attachmentUploadFailed'
+  )
+})
+
+test('checks browser image dimensions before uploading', async () => {
+  const source = await readFile(
+    new URL('../src/pages/lens/Chat.vue', import.meta.url),
+    'utf8'
+  )
+  const dimensionCheck = source.indexOf('await readImageDimensions(file)')
+  const uploadStart = source.indexOf(
+    'const result = await uploadAttachment(sessionUuid, file)'
+  )
+
+  assert.notEqual(dimensionCheck, -1)
+  assert.ok(dimensionCheck < uploadStart)
 })
 
 test('preserves uploaded document metadata in optimistic messages', async () => {
