@@ -1,0 +1,1372 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SourceLens LensNode 会话与异常恢复流程图</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --paper: #faf9f6;
+        --canvas: #f3eee7;
+        --ink: #282421;
+        --muted: #756d66;
+        --line: #c9c0b7;
+        --terracotta: #bd654c;
+        --terracotta-soft: #f4ded7;
+        --sage: #738b73;
+        --sage-soft: #e1e9df;
+        --plum: #756079;
+        --plum-soft: #e9e0eb;
+        --rose: #aa6670;
+        --rose-soft: #f2dfe2;
+        --white: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        min-height: 100vh;
+        padding: 40px 28px;
+        color: var(--ink);
+        background: var(--paper);
+        font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      .page {
+        max-width: 1480px;
+        margin: 0 auto;
+      }
+
+      .eyebrow,
+      .card-label,
+      .footer {
+        font-family: "JetBrains Mono", monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow {
+        margin-bottom: 8px;
+        color: var(--terracotta);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      h1 {
+        font-family: "Instrument Serif", "Songti SC", serif;
+        font-size: clamp(32px, 4vw, 52px);
+        font-weight: 400;
+        line-height: 1.05;
+      }
+
+      .subtitle {
+        max-width: 980px;
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 22px 0 18px;
+      }
+
+      .chip {
+        border: 1px solid rgba(40, 36, 33, 0.12);
+        border-radius: 999px;
+        padding: 7px 11px;
+        background: var(--white);
+        color: var(--muted);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+      }
+
+      .toolbar {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .toolbar button {
+        border: 1px solid rgba(40, 36, 33, 0.16);
+        border-radius: 6px;
+        padding: 7px 12px;
+        background: var(--white);
+        color: var(--ink);
+        cursor: pointer;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+      }
+
+      .toolbar button:hover {
+        border-color: var(--terracotta);
+        color: var(--terracotta);
+      }
+
+      .diagram-shell {
+        overflow: auto;
+        border: 1px solid rgba(40, 36, 33, 0.14);
+        border-radius: 12px;
+        padding: 18px;
+        background: var(--canvas);
+        box-shadow: 0 20px 55px rgba(78, 62, 50, 0.08);
+      }
+
+      #diagram {
+        display: block;
+        width: 100%;
+        min-width: 1120px;
+        height: auto;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 18px;
+      }
+
+      .card {
+        min-height: 170px;
+        border: 1px solid rgba(40, 36, 33, 0.12);
+        border-radius: 9px;
+        padding: 18px;
+        background: var(--white);
+      }
+
+      .card-label {
+        margin-bottom: 10px;
+        color: #9a9087;
+        font-size: 9px;
+      }
+
+      .card h3 {
+        margin-bottom: 9px;
+        font-size: 14px;
+      }
+
+      .card ul {
+        list-style: none;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.65;
+      }
+
+      .card li + li {
+        margin-top: 4px;
+      }
+
+      .card li::before {
+        margin-right: 7px;
+        color: var(--terracotta);
+        content: "•";
+      }
+
+      .footer {
+        margin-top: 22px;
+        border-top: 1px solid rgba(40, 36, 33, 0.08);
+        padding-top: 14px;
+        color: #9a9087;
+        font-size: 9px;
+        text-align: center;
+      }
+
+      svg .lane-bg {
+        fill: rgba(255, 255, 255, 0.35);
+        stroke: rgba(40, 36, 33, 0.08);
+      }
+
+      svg .lane-title {
+        fill: var(--muted);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+      }
+
+      svg .section-title {
+        fill: var(--ink);
+        font-family: "Instrument Serif", "Songti SC", serif;
+        font-size: 28px;
+      }
+
+      svg .section-subtitle {
+        fill: var(--muted);
+        font-family: Inter, "PingFang SC", sans-serif;
+        font-size: 12px;
+      }
+
+      svg .node rect,
+      svg .node polygon,
+      svg .node circle {
+        fill: var(--paper);
+        stroke: var(--ink);
+        stroke-width: 1.2;
+      }
+
+      svg .node.control rect {
+        fill: var(--terracotta-soft);
+        stroke: var(--terracotta);
+      }
+
+      svg .node.runtime rect {
+        fill: var(--sage-soft);
+        stroke: var(--sage);
+      }
+
+      svg .node.storage rect {
+        fill: var(--plum-soft);
+        stroke: var(--plum);
+      }
+
+      svg .node.client rect {
+        fill: var(--white);
+        stroke: #8b8178;
+      }
+
+      svg .node.failure rect,
+      svg .node.failure polygon {
+        fill: var(--rose-soft);
+        stroke: var(--rose);
+      }
+
+      svg .node.optional rect {
+        fill: rgba(255, 255, 255, 0.45);
+        stroke: #9a9087;
+        stroke-dasharray: 6 5;
+      }
+
+      svg .node-title {
+        fill: var(--ink);
+        font-family: Inter, "PingFang SC", sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        text-anchor: middle;
+      }
+
+      svg .node-copy {
+        fill: var(--muted);
+        font-family: Inter, "PingFang SC", sans-serif;
+        font-size: 10px;
+        text-anchor: middle;
+      }
+
+      svg .node-code,
+      svg .edge-label,
+      svg .stage-label {
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      svg .node-code {
+        fill: var(--plum);
+        font-size: 9px;
+        text-anchor: middle;
+      }
+
+      svg .stage-label {
+        fill: #9a9087;
+        font-size: 9px;
+        letter-spacing: 0.12em;
+      }
+
+      svg .edge {
+        fill: none;
+        stroke: #786f68;
+        stroke-width: 1.35;
+        marker-end: url(#arrow);
+      }
+
+      svg .edge.accent {
+        stroke: var(--terracotta);
+        stroke-width: 1.7;
+        marker-end: url(#arrow-accent);
+      }
+
+      svg .edge.success {
+        stroke: var(--sage);
+        marker-end: url(#arrow-success);
+      }
+
+      svg .edge.failure {
+        stroke: var(--rose);
+        stroke-dasharray: 7 5;
+        marker-end: url(#arrow-failure);
+      }
+
+      svg .edge.optional {
+        stroke: #9a9087;
+        stroke-dasharray: 5 5;
+      }
+
+      svg .label-bg {
+        fill: var(--paper);
+        opacity: 0.96;
+      }
+
+      svg .edge-label {
+        fill: var(--muted);
+        font-size: 9px;
+        text-anchor: middle;
+      }
+
+      svg .divider {
+        stroke: rgba(40, 36, 33, 0.14);
+        stroke-dasharray: 3 5;
+      }
+
+      @media (max-width: 900px) {
+        body {
+          padding: 24px 14px;
+        }
+
+        .cards {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media print {
+        body {
+          padding: 0;
+        }
+
+        .toolbar {
+          display: none;
+        }
+
+        .diagram-shell {
+          border: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <p class="eyebrow">Flowchart · Run Lifecycle · Failure Recovery</p>
+        <h1>LensNode 会话与异常恢复流程</h1>
+        <p class="subtitle">
+          SourceLens 的 Session 负责保存消息，每个用户轮次被拆成独立 Run。
+          本图展示从事务创建、Celery 派发、LensNode 接纳、Checkpoint、Deep
+          Agent
+          执行到终态确认的完整闭环，并展开网络断连、进程崩溃、恢复、取消、超时和停机路径。
+        </p>
+        <div class="meta">
+          <span class="chip">Session → Message → Run</span>
+          <span class="chip">RunExecution 三阶段确认</span>
+          <span class="chip">SQLite Checkpoint</span>
+          <span class="chip">At-least-once Frames</span>
+          <span class="chip">Fail-closed Resume</span>
+          <span class="chip">source snapshot @ 944572b</span>
+        </div>
+      </header>
+
+      <div class="toolbar" aria-label="Diagram zoom controls">
+        <button type="button" data-zoom="out">− 缩小</button>
+        <button type="button" data-zoom="reset">适应宽度</button>
+        <button type="button" data-zoom="in">＋ 放大</button>
+      </div>
+
+      <section
+        class="diagram-shell"
+        aria-label="LensNode session run flowchart"
+      >
+        <svg
+          id="diagram"
+          viewBox="0 0 1500 2880"
+          role="img"
+          aria-labelledby="diagram-title diagram-desc"
+        >
+          <title id="diagram-title">
+            SourceLens LensNode 会话与异常恢复完整流程图
+          </title>
+          <desc id="diagram-desc">
+            四泳道流程图，上半部分展示正常 Run
+            生命周期，下半部分展示网络断连、进程崩溃、恢复判定、取消、超时和优雅停机。
+          </desc>
+          <defs>
+            <marker
+              id="arrow"
+              markerWidth="9"
+              markerHeight="7"
+              refX="8"
+              refY="3.5"
+              orient="auto"
+            >
+              <polygon points="0 0, 9 3.5, 0 7" fill="#786f68" />
+            </marker>
+            <marker
+              id="arrow-accent"
+              markerWidth="9"
+              markerHeight="7"
+              refX="8"
+              refY="3.5"
+              orient="auto"
+            >
+              <polygon points="0 0, 9 3.5, 0 7" fill="#bd654c" />
+            </marker>
+            <marker
+              id="arrow-success"
+              markerWidth="9"
+              markerHeight="7"
+              refX="8"
+              refY="3.5"
+              orient="auto"
+            >
+              <polygon points="0 0, 9 3.5, 0 7" fill="#738b73" />
+            </marker>
+            <marker
+              id="arrow-failure"
+              markerWidth="9"
+              markerHeight="7"
+              refX="8"
+              refY="3.5"
+              orient="auto"
+            >
+              <polygon points="0 0, 9 3.5, 0 7" fill="#aa6670" />
+            </marker>
+            <pattern
+              id="dots"
+              width="24"
+              height="24"
+              patternUnits="userSpaceOnUse"
+            >
+              <circle cx="1" cy="1" r="0.8" fill="rgba(40,36,33,0.10)" />
+            </pattern>
+          </defs>
+
+          <rect width="1500" height="2880" rx="10" fill="#faf9f6" />
+          <rect
+            width="1500"
+            height="2880"
+            rx="10"
+            fill="url(#dots)"
+            opacity="0.52"
+          />
+
+          <!-- Swimlane backgrounds -->
+          <rect
+            class="lane-bg"
+            x="30"
+            y="78"
+            width="270"
+            height="2740"
+            rx="9"
+          />
+          <rect
+            class="lane-bg"
+            x="320"
+            y="78"
+            width="420"
+            height="2740"
+            rx="9"
+          />
+          <rect
+            class="lane-bg"
+            x="760"
+            y="78"
+            width="410"
+            height="2740"
+            rx="9"
+          />
+          <rect
+            class="lane-bg"
+            x="1190"
+            y="78"
+            width="280"
+            height="2740"
+            rx="9"
+          />
+
+          <text class="lane-title" x="165" y="108" text-anchor="middle">
+            CLIENT / SESSION
+          </text>
+          <text class="lane-title" x="530" y="108" text-anchor="middle">
+            CONTROL PLANE
+          </text>
+          <text class="lane-title" x="965" y="108" text-anchor="middle">
+            LENSNODE RUNTIME
+          </text>
+          <text class="lane-title" x="1330" y="108" text-anchor="middle">
+            DURABLE STATE
+          </text>
+
+          <text class="section-title" x="55" y="158">
+            A · 正常会话与 Run 闭环
+          </text>
+          <text class="section-subtitle" x="55" y="182">
+            单轮问题不会创建常驻会话进程；LensNode
+            只处理携带可信历史与冻结配置的 run_start。
+          </text>
+
+          <!-- =========================================================
+             A. ARROWS FIRST
+             ========================================================= -->
+          <path class="edge accent" d="M275 250 H365" />
+          <path class="edge" d="M530 292 V332" />
+          <path class="edge" d="M530 414 V454" />
+          <path class="edge" d="M530 536 V576" />
+          <path class="edge accent" d="M695 617 H815" />
+          <path class="edge" d="M965 658 V696" />
+          <path class="edge success" d="M965 776 H700 V832 H695" />
+          <path class="edge" d="M965 776 V822" />
+          <path class="edge failure" d="M1050 737 H1060" />
+          <path class="edge optional" d="M1105 767 H1160 V610 H695" />
+          <path class="edge accent" d="M1110 866 H1208" />
+          <path class="edge success" d="M1330 928 V950 H1150 V1000 H695" />
+          <path class="edge" d="M695 1000 H780 V1060 H965 V1082" />
+          <path class="edge accent" d="M820 1133 H695" />
+          <path class="edge accent" d="M365 1133 H275" />
+          <path class="edge" d="M965 1184 V1222" />
+          <path class="edge success" d="M965 1304 V1328 H895 V1352" />
+          <path class="edge failure" d="M1050 1263 H1090 V1352" />
+          <path class="edge success" d="M895 1436 V1468 H500 V1518" />
+          <path class="edge failure" d="M1090 1436 V1490 H560 V1518" />
+          <path class="edge" d="M365 1561 H275" />
+          <path class="edge success" d="M695 1561 H820" />
+          <path class="edge" d="M1110 1561 H1208" />
+          <path class="edge" d="M1330 1618 V1650 H965 V1678" />
+
+          <!-- Edge labels A -->
+          <rect
+            class="label-bg"
+            x="292"
+            y="230"
+            width="58"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="321" y="243">POST</text>
+          <rect
+            class="label-bg"
+            x="722"
+            y="597"
+            width="70"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="757" y="610">run_start</text>
+          <rect
+            class="label-bg"
+            x="718"
+            y="812"
+            width="92"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="764" y="825">run_admitted</text>
+          <rect
+            class="label-bg"
+            x="1118"
+            y="846"
+            width="78"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="1157" y="859">SQLite</text>
+          <rect
+            class="label-bg"
+            x="700"
+            y="980"
+            width="108"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="754" y="993">checkpoint_ready</text>
+          <rect
+            class="label-bg"
+            x="710"
+            y="1113"
+            width="96"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="758" y="1126">event / output</text>
+          <rect
+            class="label-bg"
+            x="287"
+            y="1113"
+            width="62"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="318" y="1126">SSE</text>
+          <rect
+            class="label-bg"
+            x="688"
+            y="1448"
+            width="82"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="729" y="1461">run_done</text>
+          <rect
+            class="label-bg"
+            x="704"
+            y="1541"
+            width="102"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="755" y="1554">run_done_ack</text>
+
+          <!-- A. NODES -->
+          <g class="node client">
+            <rect x="55" y="210" width="220" height="80" rx="40" />
+            <text class="node-title" x="165" y="240">用户提交一轮问题</text>
+            <text class="node-copy" x="165" y="260">Session 必须 active</text>
+            <text class="node-code" x="165" y="278">
+              question + attachments
+            </text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="208" width="330" height="84" rx="8" />
+            <text class="node-title" x="530" y="234">
+              事务创建 Message + Run
+            </text>
+            <text class="node-copy" x="530" y="254">
+              锁 Assistant → Session · 幂等键去重
+            </text>
+            <text class="node-code" x="530" y="274">Run = queued</text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="332" width="330" height="82" rx="8" />
+            <text class="node-title" x="530" y="357">
+              冻结 RunExecution 快照
+            </text>
+            <text class="node-copy" x="530" y="377">
+              模型 · Settings · Skills/MCP · 语言
+            </text>
+            <text class="node-code" x="530" y="397">
+              RunExecution = queued
+            </text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="454" width="330" height="82" rx="8" />
+            <text class="node-title" x="530" y="479">
+              事务提交后进入 Celery
+            </text>
+            <text class="node-copy" x="530" y="499">
+              并发门禁 · 附件期望数 · Query Rewrite
+            </text>
+            <text class="node-code" x="530" y="519">Run = running</text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="576" width="330" height="82" rx="8" />
+            <text class="node-title" x="530" y="601">组装可信历史并派发</text>
+            <text class="node-copy" x="530" y="621">
+              仅 done + completed · Retry 链折叠
+            </text>
+            <text class="node-code" x="530" y="641">
+              dispatched + dispatch_id
+            </text>
+          </g>
+
+          <g class="node runtime">
+            <rect x="815" y="576" width="300" height="82" rx="8" />
+            <text class="node-title" x="965" y="601">收到 run_start</text>
+            <text class="node-copy" x="965" y="621">
+              同 Run UUID · 冻结配置 · 剩余时限
+            </text>
+            <text class="node-code" x="965" y="641">resume = false</text>
+          </g>
+
+          <g class="node runtime">
+            <polygon points="965,696 1050,737 965,778 880,737" />
+            <text class="node-title" x="965" y="733">可接纳？</text>
+            <text class="node-copy" x="965" y="750">
+              非 draining · 有并发槽
+            </text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="792" width="330" height="80" rx="8" />
+            <text class="node-title" x="530" y="818">确认节点已经接纳</text>
+            <text class="node-copy" x="530" y="838">
+              仅接受当前 dispatch_id
+            </text>
+            <text class="node-code" x="530" y="856">
+              RunExecution = running
+            </text>
+          </g>
+
+          <g class="node runtime">
+            <rect x="820" y="822" width="290" height="88" rx="8" />
+            <text class="node-title" x="965" y="848">创建异步任务并 ACK</text>
+            <text class="node-copy" x="965" y="868">
+              重复投递只重复确认，不重复启动
+            </text>
+            <text class="node-code" x="965" y="888">
+              run_admitted(dispatch_id)
+            </text>
+          </g>
+
+          <g class="node failure">
+            <rect x="1060" y="707" width="90" height="60" rx="8" />
+            <text class="node-title" x="1105" y="731">Busy /</text>
+            <text class="node-title" x="1105" y="749">Draining</text>
+          </g>
+
+          <g class="node storage">
+            <rect x="1208" y="826" width="244" height="102" rx="8" />
+            <text class="node-title" x="1330" y="852">写初始 Checkpoint</text>
+            <text class="node-copy" x="1330" y="873">
+              messages · route · runtime state
+            </text>
+            <text class="node-copy" x="1330" y="891">
+              checkpoint_id + schema_version
+            </text>
+            <text class="node-code" x="1330" y="911">
+              workspace/.checkpoints
+            </text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="960" width="330" height="80" rx="8" />
+            <text class="node-title" x="530" y="986">确认可持久恢复</text>
+            <text class="node-copy" x="530" y="1006">
+              旧 dispatch / 迟到帧被忽略
+            </text>
+            <text class="node-code" x="530" y="1024">
+              checkpoint_ready_at = now
+            </text>
+          </g>
+
+          <g class="node runtime">
+            <rect x="820" y="1082" width="290" height="102" rx="8" />
+            <text class="node-title" x="965" y="1108">Deep Agent 执行</text>
+            <text class="node-copy" x="965" y="1129">
+              软截止收尾 · 硬墙钟 · 无活动门禁
+            </text>
+            <text class="node-copy" x="965" y="1147">
+              模型 / Tool / Skill / MCP
+            </text>
+            <text class="node-code" x="965" y="1166">
+              cancel_event + checkpoint thread
+            </text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="1092" width="330" height="82" rx="8" />
+            <text class="node-title" x="530" y="1118">持久化事件与回答</text>
+            <text class="node-copy" x="530" y="1138">
+              RunStep · output_message · activity
+            </text>
+            <text class="node-code" x="530" y="1156">Run = streaming</text>
+          </g>
+
+          <g class="node client">
+            <rect x="55" y="1093" width="220" height="80" rx="8" />
+            <text class="node-title" x="165" y="1119">前端持续展示</text>
+            <text class="node-copy" x="165" y="1139">
+              状态 · 计划 · 增量回答
+            </text>
+            <text class="node-code" x="165" y="1157">SSE /api/.../stream</text>
+          </g>
+
+          <g class="node runtime">
+            <polygon points="965,1222 1050,1263 965,1304 880,1263" />
+            <text class="node-title" x="965" y="1259">执行成功？</text>
+            <text class="node-copy" x="965" y="1276">
+              结果与业务 outcome 分离
+            </text>
+          </g>
+
+          <g class="node runtime">
+            <rect x="780" y="1352" width="230" height="84" rx="8" />
+            <text class="node-title" x="895" y="1378">发送最终回答与终态</text>
+            <text class="node-copy" x="895" y="1398">
+              final_content → run_done(done)
+            </text>
+            <text class="node-code" x="895" y="1417">
+              completed / partial / blocked
+            </text>
+          </g>
+
+          <g class="node failure">
+            <rect x="1030" y="1352" width="120" height="84" rx="8" />
+            <text class="node-title" x="1090" y="1378">失败帧</text>
+            <text class="node-copy" x="1090" y="1398">run_event(failed)</text>
+            <text class="node-code" x="1090" y="1417">run_done(failed)</text>
+          </g>
+
+          <g class="node control">
+            <rect x="365" y="1518" width="330" height="86" rx="8" />
+            <text class="node-title" x="530" y="1544">原子写入终态</text>
+            <text class="node-copy" x="530" y="1564">
+              done / failed · 清 resume_by
+            </text>
+            <text class="node-code" x="530" y="1584">
+              late frames do not overwrite
+            </text>
+          </g>
+
+          <g class="node client">
+            <rect x="55" y="1521" width="220" height="80" rx="8" />
+            <text class="node-title" x="165" y="1547">用户看到终态</text>
+            <text class="node-copy" x="165" y="1567">回答 / 错误 / Retry</text>
+            <text class="node-code" x="165" y="1585">
+              done | failed | cancelled
+            </text>
+          </g>
+
+          <g class="node runtime">
+            <rect x="820" y="1519" width="290" height="84" rx="8" />
+            <text class="node-title" x="965" y="1545">收到 run_done_ack</text>
+            <text class="node-copy" x="965" y="1565">
+              终态已在控制面持久化
+            </text>
+            <text class="node-code" x="965" y="1584">safe to cleanup</text>
+          </g>
+
+          <g class="node storage">
+            <rect x="1208" y="1519" width="244" height="99" rx="8" />
+            <text class="node-title" x="1330" y="1545">删除 Run 本地状态</text>
+            <text class="node-copy" x="1330" y="1565">Checkpoint thread</text>
+            <text class="node-copy" x="1330" y="1583">Runtime 临时资源</text>
+            <text class="node-code" x="1330" y="1602">
+              ACK after durability
+            </text>
+          </g>
+
+          <circle cx="965" cy="1690" r="7" fill="#282421" />
+          <text class="node-copy" x="965" y="1714">本轮 Run 闭环完成</text>
+
+          <!-- Section divider -->
+          <line class="divider" x1="55" y1="1750" x2="1445" y2="1750" />
+          <text class="section-title" x="55" y="1805">
+            B · 异常中断与恢复决策
+          </text>
+          <text class="section-subtitle" x="55" y="1829">
+            恢复以“已发布、已接纳、Checkpoint
+            就绪”三阶段为依据；不能证明安全时失败关闭。
+          </text>
+
+          <!-- =========================================================
+             B. ARROWS FIRST
+             ========================================================= -->
+          <!-- Network disconnect row -->
+          <path class="edge failure" d="M275 1924 H365" />
+          <path class="edge" d="M695 1924 H820" />
+          <path class="edge" d="M965 1966 V2000" />
+          <path class="edge success" d="M820 2042 H695" />
+          <path class="edge" d="M530 2084 V2118" />
+          <path class="edge success" d="M445 2160 H275" />
+          <path class="edge failure" d="M615 2160 H730 V2256 H695" />
+
+          <!-- Crash and protocol decision row -->
+          <path class="edge failure" d="M965 1966 V2214" />
+          <path class="edge" d="M820 2256 H695" />
+          <path class="edge" d="M530 2298 V2338" />
+          <path class="edge" d="M450 2418 H210 V2540" />
+          <path class="edge success" d="M610 2418 H1208" />
+          <path class="edge failure" d="M530 2498 V2540" />
+          <path class="edge success" d="M1330 2500 V2550 H1110" />
+          <path class="edge failure" d="M1330 2500 V2640 H530 V2624" />
+          <path class="edge optional" d="M365 2582 H320 V610 H365" />
+          <path class="edge optional" d="M820 2582 H760 V1133 H820" />
+
+          <!-- Cancel, timeout, shutdown row -->
+          <path class="edge failure" d="M275 2694 H365" />
+          <path class="edge failure" d="M695 2694 H820" />
+          <path class="edge" d="M275 2780 H365" />
+          <path class="edge failure" d="M695 2780 H820" />
+          <path class="edge failure" d="M1110 2780 H1208" />
+
+          <!-- Labels B -->
+          <rect
+            class="label-bg"
+            x="292"
+            y="1904"
+            width="58"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="321" y="1917">disconnect</text>
+          <rect
+            class="label-bg"
+            x="706"
+            y="1904"
+            width="102"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="757" y="1917">Run 仍执行</text>
+          <rect
+            class="label-bg"
+            x="700"
+            y="2022"
+            width="108"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="754" y="2035">hello(active_runs)</text>
+          <rect
+            class="label-bg"
+            x="288"
+            y="2140"
+            width="86"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="331" y="2153">仍在活动</text>
+          <rect
+            class="label-bg"
+            x="682"
+            y="2140"
+            width="96"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="730" y="2153">未上报</text>
+          <rect
+            class="label-bg"
+            x="285"
+            y="2398"
+            width="78"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="324" y="2411">未接纳</text>
+          <rect
+            class="label-bg"
+            x="682"
+            y="2398"
+            width="126"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="745" y="2411">已接纳 + CP 就绪</text>
+          <rect
+            class="label-bg"
+            x="465"
+            y="2510"
+            width="130"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="530" y="2523">不可证明安全 / 过期</text>
+          <rect
+            class="label-bg"
+            x="704"
+            y="2562"
+            width="104"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="756" y="2575">resume=true</text>
+          <rect
+            class="label-bg"
+            x="704"
+            y="2620"
+            width="72"
+            height="18"
+            rx="3"
+          />
+          <text class="edge-label" x="740" y="2633">校验拒绝</text>
+
+          <!-- B. NODES -->
+          <text class="stage-label" x="55" y="1872">
+            B1 · CONTROL CHANNEL DROP
+          </text>
+
+          <g class="node client optional">
+            <rect x="55" y="1884" width="220" height="80" rx="8" />
+            <text class="node-title" x="165" y="1910">
+              网络 / API 蓝绿切换
+            </text>
+            <text class="node-copy" x="165" y="1930">WebSocket 短暂断开</text>
+            <text class="node-code" x="165" y="1948">非执行失败证据</text>
+          </g>
+
+          <g class="node control failure">
+            <rect x="365" y="1882" width="330" height="84" rx="8" />
+            <text class="node-title" x="530" y="1908">节点标记 offline</text>
+            <text class="node-copy" x="530" y="1928">
+              按 connection_id CAS 防旧连接误伤
+            </text>
+            <text class="node-code" x="530" y="1948">
+              180s disconnect grace
+            </text>
+          </g>
+
+          <g class="node runtime optional">
+            <rect x="820" y="1882" width="290" height="84" rx="8" />
+            <text class="node-title" x="965" y="1908">Run 不因断网停止</text>
+            <text class="node-copy" x="965" y="1928">
+              事件进入有界内存 outbox
+            </text>
+            <text class="node-code" x="965" y="1948">
+              reconnect backoff 1..30s
+            </text>
+          </g>
+
+          <g class="node runtime">
+            <rect x="820" y="2000" width="290" height="84" rx="8" />
+            <text class="node-title" x="965" y="2026">重连并发送新 hello</text>
+            <text class="node-copy" x="965" y="2046">
+              活动任务 + 待 ACK run_done
+            </text>
+            <text class="node-code" x="965" y="2066">active_runs[]</text>
+          </g>
+
+          <g class="node control">
+            <polygon points="530,2118 615,2160 530,2202 445,2160" />
+            <text class="node-title" x="530" y="2156">hello 仍声明</text>
+            <text class="node-title" x="530" y="2173">该 Run？</text>
+          </g>
+
+          <g class="node client optional">
+            <rect x="55" y="2121" width="220" height="78" rx="8" />
+            <text class="node-title" x="165" y="2147">继续原执行</text>
+            <text class="node-copy" x="165" y="2167">
+              刷新 outbox · at-least-once
+            </text>
+            <text class="node-code" x="165" y="2185">
+              无需 checkpoint resume
+            </text>
+          </g>
+
+          <text class="stage-label" x="55" y="2250">
+            B2 · PROCESS CRASH / ORPHAN RECONCILE
+          </text>
+
+          <g class="node runtime failure">
+            <rect x="820" y="2214" width="290" height="84" rx="8" />
+            <text class="node-title" x="965" y="2240">进程崩溃 / SIGKILL</text>
+            <text class="node-copy" x="965" y="2260">
+              内存任务与 outbox 丢失
+            </text>
+            <text class="node-code" x="965" y="2280">
+              SQLite checkpoint survives
+            </text>
+          </g>
+
+          <g class="node control failure">
+            <rect x="365" y="2214" width="330" height="84" rx="8" />
+            <text class="node-title" x="530" y="2240">
+              Reconcile 确认孤儿 Run
+            </text>
+            <text class="node-copy" x="530" y="2260">
+              先等 run_done 重放确认窗
+            </text>
+            <text class="node-code" x="530" y="2280">default 10s</text>
+          </g>
+
+          <g class="node control">
+            <polygon points="530,2338 610,2418 530,2498 450,2418" />
+            <text class="node-title" x="530" y="2398">协议状态？</text>
+            <text class="node-copy" x="530" y="2418">RunExecution +</text>
+            <text class="node-copy" x="530" y="2434">checkpoint_ready_at</text>
+          </g>
+
+          <g class="node client optional">
+            <rect x="55" y="2540" width="310" height="84" rx="8" />
+            <text class="node-title" x="210" y="2566">Fresh requeue</text>
+            <text class="node-copy" x="210" y="2586">
+              queued / dispatched = 从未接纳
+            </text>
+            <text class="node-code" x="210" y="2606">
+              清 dispatch_id → 回到正常派发
+            </text>
+          </g>
+
+          <g class="node runtime">
+            <rect x="820" y="2540" width="290" height="84" rx="8" />
+            <text class="node-title" x="965" y="2566">同 UUID 恢复执行</text>
+            <text class="node-copy" x="965" y="2586">
+              新 dispatch_id · 原墙钟余量
+            </text>
+            <text class="node-code" x="965" y="2606">resume = true</text>
+          </g>
+
+          <g class="node storage">
+            <rect x="1208" y="2376" width="244" height="124" rx="8" />
+            <text class="node-title" x="1330" y="2402">
+              Checkpoint 安全验证
+            </text>
+            <text class="node-copy" x="1330" y="2422">
+              schema · head/ancestor
+            </text>
+            <text class="node-copy" x="1330" y="2440">
+              route · evidence · guardrail
+            </text>
+            <text class="node-copy" x="1330" y="2458">拒绝待重放非幂等写</text>
+            <text class="node-code" x="1330" y="2480">fail closed</text>
+          </g>
+
+          <g class="node failure">
+            <rect x="365" y="2540" width="330" height="84" rx="8" />
+            <text class="node-title" x="530" y="2566">恢复失败并进入终态</text>
+            <text class="node-copy" x="530" y="2586">
+              未就绪 / 不支持 / 缺失 / 过期
+            </text>
+            <text class="node-code" x="530" y="2606">
+              CHECKPOINT_UNAVAILABLE
+            </text>
+          </g>
+
+          <text class="stage-label" x="55" y="2655">
+            B3 · EXPLICIT TERMINATION / WATCHDOG / SHUTDOWN
+          </text>
+
+          <g class="node client failure">
+            <rect x="55" y="2664" width="220" height="60" rx="8" />
+            <text class="node-title" x="165" y="2690">用户主动取消</text>
+            <text class="node-code" x="165" y="2708">POST /cancel</text>
+          </g>
+
+          <g class="node control failure">
+            <rect x="365" y="2654" width="330" height="80" rx="8" />
+            <text class="node-title" x="530" y="2680">先原子写 cancelled</text>
+            <text class="node-copy" x="530" y="2700">再发送 run_cancel</text>
+            <text class="node-code" x="530" y="2718">late frames ignored</text>
+          </g>
+
+          <g class="node runtime failure">
+            <rect x="820" y="2654" width="290" height="80" rx="8" />
+            <text class="node-title" x="965" y="2680">
+              取消 asyncio + worker
+            </text>
+            <text class="node-copy" x="965" y="2700">
+              cancel_event 屏蔽迟到输出
+            </text>
+            <text class="node-code" x="965" y="2718">退出后清理资源</text>
+          </g>
+
+          <g class="node client optional">
+            <rect x="55" y="2750" width="220" height="60" rx="8" />
+            <text class="node-title" x="165" y="2776">超时 / 停机信号</text>
+            <text class="node-code" x="165" y="2794">watchdog | SIGTERM</text>
+          </g>
+
+          <g class="node control failure">
+            <rect x="365" y="2740" width="330" height="80" rx="8" />
+            <text class="node-title" x="530" y="2766">控制面兜底终态</text>
+            <text class="node-copy" x="530" y="2786">
+              300s idle · 4h absolute · resume expiry
+            </text>
+            <text class="node-code" x="530" y="2804">LENS_RUN_TIMEOUT</text>
+          </g>
+
+          <g class="node runtime failure">
+            <rect x="820" y="2740" width="290" height="80" rx="8" />
+            <text class="node-title" x="965" y="2766">
+              软收尾 / 硬截止 / Drain
+            </text>
+            <text class="node-copy" x="965" y="2786">
+              等待在途任务，超时才取消
+            </text>
+            <text class="node-code" x="965" y="2804">
+              flush outbox → close saver
+            </text>
+          </g>
+
+          <g class="node storage optional">
+            <rect x="1208" y="2740" width="244" height="80" rx="8" />
+            <text class="node-title" x="1330" y="2766">TTL 清理孤儿状态</text>
+            <text class="node-copy" x="1330" y="2786">
+              默认 24h，受原墙钟约束
+            </text>
+            <text class="node-code" x="1330" y="2804">orphaned_at</text>
+          </g>
+
+          <!-- Legend -->
+          <line
+            x1="55"
+            y1="2842"
+            x2="1445"
+            y2="2842"
+            stroke="rgba(40,36,33,0.14)"
+          />
+          <text class="stage-label" x="55" y="2868">LEGEND</text>
+          <rect
+            x="150"
+            y="2852"
+            width="24"
+            height="14"
+            rx="3"
+            fill="#f4ded7"
+            stroke="#bd654c"
+          />
+          <text class="edge-label" x="210" y="2864">控制面</text>
+          <rect
+            x="270"
+            y="2852"
+            width="24"
+            height="14"
+            rx="3"
+            fill="#e1e9df"
+            stroke="#738b73"
+          />
+          <text class="edge-label" x="330" y="2864">LensNode</text>
+          <rect
+            x="390"
+            y="2852"
+            width="24"
+            height="14"
+            rx="3"
+            fill="#e9e0eb"
+            stroke="#756079"
+          />
+          <text class="edge-label" x="452" y="2864">持久状态</text>
+          <rect
+            x="520"
+            y="2852"
+            width="24"
+            height="14"
+            rx="3"
+            fill="#f2dfe2"
+            stroke="#aa6670"
+          />
+          <text class="edge-label" x="580" y="2864">异常路径</text>
+          <line
+            x1="650"
+            y1="2859"
+            x2="690"
+            y2="2859"
+            stroke="#738b73"
+            stroke-width="1.5"
+          />
+          <text class="edge-label" x="744" y="2864">安全继续</text>
+          <line
+            x1="810"
+            y1="2859"
+            x2="850"
+            y2="2859"
+            stroke="#aa6670"
+            stroke-width="1.5"
+            stroke-dasharray="7 5"
+          />
+          <text class="edge-label" x="918" y="2864">失败关闭</text>
+          <line
+            x1="990"
+            y1="2859"
+            x2="1030"
+            y2="2859"
+            stroke="#9a9087"
+            stroke-width="1.5"
+            stroke-dasharray="5 5"
+          />
+          <text class="edge-label" x="1110" y="2864">回到主流程</text>
+        </svg>
+      </section>
+
+      <section class="cards" aria-label="Flowchart summary">
+        <article class="card">
+          <p class="card-label">STATE MODEL</p>
+          <h3>三层状态各司其职</h3>
+          <ul>
+            <li>Run：用户可见生命周期</li>
+            <li>RunExecution：派发与恢复协议</li>
+            <li>RunStep：结构化执行轨迹</li>
+            <li>RUNNING + resume_by 表示等待恢复</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <p class="card-label">ADMISSION PROTOCOL</p>
+          <h3>三阶段避免假恢复</h3>
+          <ul>
+            <li>DISPATCHED：只证明 Channels 已发布</li>
+            <li>run_admitted：LensNode 已创建任务</li>
+            <li>checkpoint_ready：可从持久状态恢复</li>
+            <li>每次重派使用新的 dispatch_id</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <p class="card-label">RECOVERY SAFETY</p>
+          <h3>恢复默认失败关闭</h3>
+          <ul>
+            <li>从未接纳：Fresh requeue</li>
+            <li>已接纳且就绪：同 UUID 恢复</li>
+            <li>Checkpoint 不完整：明确失败</li>
+            <li>未完成非幂等写禁止重放</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <p class="card-label">IMPORTANT BOUNDARY</p>
+          <h3>Outbox 只跨连接存活</h3>
+          <ul>
+            <li>当前 outbox 是进程内 deque</li>
+            <li>WebSocket 重连可以重放</li>
+            <li>进程崩溃后依赖 SQLite Checkpoint</li>
+            <li>终态 ACK 后才清理本地状态</li>
+          </ul>
+        </article>
+      </section>
+
+      <footer class="footer">
+        sourcelens · lensnode session / run lifecycle · source snapshot @
+        944572b
+      </footer>
+    </main>
+
+    <script>
+      const diagram = document.getElementById("diagram");
+      const diagramShell = diagram.parentElement;
+      let zoom = 1;
+
+      function getFitWidth() {
+        const styles = window.getComputedStyle(diagramShell);
+        const horizontalPadding =
+          Number.parseFloat(styles.paddingLeft) +
+          Number.parseFloat(styles.paddingRight);
+        return Math.max(1120, diagramShell.clientWidth - horizontalPadding);
+      }
+
+      function applyZoom() {
+        diagram.style.setProperty("min-width", "0", "important");
+        diagram.style.setProperty(
+          "width",
+          `${getFitWidth() * zoom}px`,
+          "important",
+        );
+      }
+
+      document.querySelectorAll("[data-zoom]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const action = button.dataset.zoom;
+          if (action === "in") {
+            zoom = Math.min(2, zoom + 0.15);
+          } else if (action === "out") {
+            zoom = Math.max(0.65, zoom - 0.15);
+          } else {
+            zoom = 1;
+          }
+          applyZoom();
+        });
+      });
+
+      window.addEventListener("resize", applyZoom);
+    </script>
+  </body>
+</html>
