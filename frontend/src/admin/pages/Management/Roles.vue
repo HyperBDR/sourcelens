@@ -152,16 +152,17 @@
               <label class="text-sm text-gray-600"
                 >{{ t('common.pagination.itemsPerPage') }}:</label
               >
-              <select
+              <BaseSelect
                 v-model.number="pageSize"
-                class="rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                :full-width="false"
+                size="sm"
                 @change="handlePageSizeChange"
               >
                 <option :value="10">10</option>
                 <option :value="20">20</option>
                 <option :value="50">50</option>
                 <option :value="100">100</option>
-              </select>
+              </BaseSelect>
               <BaseButton
                 variant="outline"
                 size="sm"
@@ -250,10 +251,7 @@
             <label class="mb-1 block text-sm font-medium text-gray-700">{{
               t('management.defaultPlatform')
             }}</label>
-            <select
-              v-model="form.preferred_platform"
-              class="form-input bg-white"
-            >
+            <BaseSelect v-model="form.preferred_platform">
               <option value="">{{ t('management.noDefaultPlatform') }}</option>
               <option
                 v-for="platform in selectedPlatformOptions"
@@ -262,7 +260,7 @@
               >
                 {{ platform.label }}
               </option>
-            </select>
+            </BaseSelect>
           </div>
           <div class="flex items-center gap-3">
             <input
@@ -308,6 +306,7 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import RowActionMenu from '@/components/ui/RowActionMenu.vue'
 import TableBulkActions from '@/components/ui/TableBulkActions.vue'
 import { useTableSelection } from '@/composables/useTableSelection'

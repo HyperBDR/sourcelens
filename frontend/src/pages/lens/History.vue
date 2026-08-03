@@ -39,16 +39,17 @@
             <label class="text-sm text-ink-500">
               {{ t('common.pagination.itemsPerPage') }}:
             </label>
-            <select
+            <BaseSelect
               v-model.number="sessionPageSize"
-              class="rounded-md border border-line bg-surface px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              :full-width="false"
+              size="sm"
               @change="handleSessionPageSizeChange"
             >
               <option :value="10">10</option>
               <option :value="20">20</option>
               <option :value="50">50</option>
               <option :value="100">100</option>
-            </select>
+            </BaseSelect>
             <BaseButton
               variant="outline"
               size="sm"
@@ -174,6 +175,7 @@ import { useI18n } from 'vue-i18n'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { listAssistants, listMessages, listSessions } from '@/api/lens'
 

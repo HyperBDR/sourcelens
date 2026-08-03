@@ -13,15 +13,17 @@
         <label class="text-sm text-gray-600">
           {{ t('common.pagination.itemsPerPage') }}:
         </label>
-        <select
-          :value="pageSize"
-          class="min-h-11 rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0"
+        <BaseSelect
+          :model-value="pageSize"
+          :full-width="false"
+          mobile-touch
+          size="sm"
           @change="updatePageSize"
         >
           <option v-for="size in pageSizeOptions" :key="size" :value="size">
             {{ size }}
           </option>
-        </select>
+        </BaseSelect>
       </div>
       <div
         class="grid w-full grid-cols-[2.75rem_1fr_2.75rem] items-center gap-2 md:flex md:w-auto md:gap-3"
@@ -90,6 +92,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import BaseButton from './BaseButton.vue'
+import BaseSelect from './BaseSelect.vue'
 
 const props = defineProps({
   currentPage: { type: Number, required: true },

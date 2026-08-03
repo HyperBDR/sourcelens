@@ -20,6 +20,8 @@ from lens.models import (
 )
 from lens.serializers import RunCreateSerializer
 from lens.attachments import (
+    ATTACHMENT_MAX_ASPECT_RATIO,
+    ATTACHMENT_MAX_PIXELS,
     AttachmentError,
     bind_attachments_to_message,
     store_message_attachment,
@@ -90,6 +92,49 @@ class AttachmentServiceTests(TestCase):
         )
         with self.assertRaises(AttachmentError):
             store_message_attachment(self.session, self.user, bad)
+
+    def test_store_rejects_extreme_aspect_ratio(self):
+        with self.assertRaisesRegex(
+            AttachmentError,
+            "ATTACHMENT_ASPECT_UNSUPPORTED",
+        ):
+            store_message_attachment(
+                self.session,
+                self.user,
+                _png_upload(size=(3001, 1000)),
+            )
+
+        self.assertEqual(MessageAttachment.objects.count(), 0)
+
+    def test_store_rejects_excessive_pixel_count(self):
+        with self.assertRaisesRegex(
+            AttachmentError,
+            "ATTACHMENT_DIMENSIONS_TOO_LARGE",
+        ):
+            store_message_attachment(
+                self.session,
+                self.user,
+                _png_upload(size=(2501, 2000)),
+            )
+
+        self.assertEqual(MessageAttachment.objects.count(), 0)
+
+    def test_store_accepts_dimension_boundaries(self):
+        aspect_boundary = store_message_attachment(
+            self.session,
+            self.user,
+            _png_upload(
+                size=(int(1000 * ATTACHMENT_MAX_ASPECT_RATIO), 1000)
+            ),
+        )
+        pixel_boundary = store_message_attachment(
+            self.session,
+            self.user,
+            _png_upload(size=(2500, ATTACHMENT_MAX_PIXELS // 2500)),
+        )
+
+        self.assertIsNotNone(aspect_boundary.pk)
+        self.assertIsNotNone(pixel_boundary.pk)
 
     def test_bind_links_in_order_and_ignores_foreign(self):
         first = store_message_attachment(
@@ -342,6 +387,7 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(detail["total_tokens"], 350)
         self.assertEqual(detail["cached_tokens"], 240)
         self.assertEqual(detail["reasoning_tokens"], 15)
+        self.assertEqual(detail["models_used"], ["deepseek-v4-flash"])
         self.assertEqual(len(detail["model_calls"]), 2)
         self.assertFalse(detail["model_calls"][0]["is_subagent"])
         self.assertTrue(detail["model_calls"][1]["is_subagent"])
@@ -462,3 +508,23 @@ class AttachmentEndpointTests(TestCase):
             format="multipart",
         )
         self.assertEqual(resp.status_code, 400)
+
+    def test_upload_rejects_unsupported_image_dimensions(self):
+        self.client.force_authenticate(self.user)
+        cases = (
+            ((3001, 1000), "ATTACHMENT_ASPECT_UNSUPPORTED"),
+            ((2501, 2000), "ATTACHMENT_DIMENSIONS_TOO_LARGE"),
+        )
+
+        for size, error_code in cases:
+            with self.subTest(error_code=error_code):
+                response = self.client.post(
+                    f"/api/lens/sessions/{self.session.uuid}/attachments/",
+                    {"file": _png_upload(size=size)},
+                    format="multipart",
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(error_code.encode(), response.content)
+
+        self.assertEqual(MessageAttachment.objects.count(), 0)

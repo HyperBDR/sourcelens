@@ -17,6 +17,8 @@ from lens.models import (
     Session,
 )
 from lens.services import (
+    acknowledge_run_admitted,
+    acknowledge_run_checkpoint_ready,
     create_execution_run,
     finish_lensnode_run,
     mark_active_runs_awaiting_resume,
@@ -80,6 +82,13 @@ class RunLifecycleTests(TestCase):
         run.refresh_from_db()
         return run
 
+    def _mark_execution_running(self, run):
+        """Mark a fixture as admitted by its LensNode."""
+
+        run.execution.status = RunExecution.Status.RUNNING
+        run.execution.admitted_at = timezone.now()
+        run.execution.save(update_fields=["status", "admitted_at"])
+
     def test_touch_run_activity_throttles(self):
         run = self._run(
             Run.Status.STREAMING,
@@ -127,6 +136,173 @@ class RunLifecycleTests(TestCase):
 
         self.assertIsNotNone(step)
         self.assertEqual(run.steps.count(), 1)
+
+    def test_first_running_event_marks_dispatched_execution_admitted(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        run.execution.status = RunExecution.Status.DISPATCHED
+        run.execution.save(update_fields=["status"])
+
+        record_lensnode_run_event(
+            run.uuid,
+            "retrieval",
+            "running",
+            {"message": "accepted"},
+        )
+
+        run.execution.refresh_from_db()
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.RUNNING,
+        )
+        self.assertIsNotNone(run.execution.admitted_at)
+
+    def test_stale_dispatch_acknowledgements_are_ignored(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        current_dispatch_id = uuid.uuid4()
+        run.execution.status = RunExecution.Status.DISPATCHED
+        run.execution.dispatch_id = current_dispatch_id
+        run.execution.save(update_fields=["status", "dispatch_id"])
+
+        admitted = acknowledge_run_admitted(
+            run.uuid,
+            uuid.uuid4(),
+            self.lensnode.uuid,
+        )
+        checkpoint_ready = acknowledge_run_checkpoint_ready(
+            run.uuid,
+            uuid.uuid4(),
+            self.lensnode.uuid,
+        )
+
+        run.execution.refresh_from_db()
+        self.assertFalse(admitted)
+        self.assertFalse(checkpoint_ready)
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.DISPATCHED,
+        )
+        self.assertIsNone(run.execution.admitted_at)
+        self.assertIsNone(run.execution.checkpoint_ready_at)
+
+    def test_consumer_routes_admission_protocol_frames(self):
+        consumer = LensNodeConsumer()
+        consumer._handle_run_admitted = AsyncMock()
+        consumer._handle_run_checkpoint_ready = AsyncMock()
+        admitted_frame = {
+            "type": "run_admitted",
+            "run_uuid": str(uuid.uuid4()),
+            "dispatch_id": str(uuid.uuid4()),
+        }
+        checkpoint_frame = {
+            "type": "run_checkpoint_ready",
+            "run_uuid": str(uuid.uuid4()),
+            "dispatch_id": str(uuid.uuid4()),
+        }
+
+        async_to_sync(consumer.receive_json)(admitted_frame)
+        async_to_sync(consumer.receive_json)(checkpoint_frame)
+
+        consumer._handle_run_admitted.assert_awaited_once_with(
+            admitted_frame
+        )
+        consumer._handle_run_checkpoint_ready.assert_awaited_once_with(
+            checkpoint_frame
+        )
+
+    def test_current_dispatch_acknowledgements_are_idempotent(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        dispatch_id = uuid.uuid4()
+        run.execution.status = RunExecution.Status.DISPATCHED
+        run.execution.dispatch_id = dispatch_id
+        run.execution.save(update_fields=["status", "dispatch_id"])
+
+        self.assertTrue(
+            acknowledge_run_admitted(
+                run.uuid,
+                dispatch_id,
+                self.lensnode.uuid,
+            )
+        )
+        self.assertTrue(
+            acknowledge_run_checkpoint_ready(
+                run.uuid,
+                dispatch_id,
+                self.lensnode.uuid,
+            )
+        )
+        run.execution.refresh_from_db()
+        admitted_at = run.execution.admitted_at
+        checkpoint_ready_at = run.execution.checkpoint_ready_at
+
+        self.assertTrue(
+            acknowledge_run_admitted(
+                run.uuid,
+                dispatch_id,
+                self.lensnode.uuid,
+            )
+        )
+        self.assertTrue(
+            acknowledge_run_checkpoint_ready(
+                run.uuid,
+                dispatch_id,
+                self.lensnode.uuid,
+            )
+        )
+
+        run.execution.refresh_from_db()
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.RUNNING,
+        )
+        self.assertEqual(run.execution.admitted_at, admitted_at)
+        self.assertEqual(
+            run.execution.checkpoint_ready_at,
+            checkpoint_ready_at,
+        )
+
+    def test_dispatch_acknowledgement_from_wrong_lensnode_is_ignored(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        dispatch_id = uuid.uuid4()
+        run.execution.status = RunExecution.Status.DISPATCHED
+        run.execution.dispatch_id = dispatch_id
+        run.execution.save(update_fields=["status", "dispatch_id"])
+        other_lensnode = LensNode.objects.create(
+            name="Other LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            workspace_path="/other-workspace",
+        )
+
+        acknowledged = acknowledge_run_checkpoint_ready(
+            run.uuid,
+            dispatch_id,
+            other_lensnode.uuid,
+        )
+
+        run.execution.refresh_from_db()
+        self.assertFalse(acknowledged)
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.DISPATCHED,
+        )
+        self.assertIsNone(run.execution.admitted_at)
+        self.assertIsNone(run.execution.checkpoint_ready_at)
 
     def test_first_resume_event_acknowledges_node_admission(self):
         run = self._run(
@@ -309,6 +485,7 @@ class RunLifecycleTests(TestCase):
         )
         self.lensnode.status = LensNode.Status.OFFLINE
         self.lensnode.save(update_fields=["status"])
+        self._mark_execution_running(run)
 
         confirm_reconcile_orphan(str(run.uuid))
 
@@ -328,6 +505,7 @@ class RunLifecycleTests(TestCase):
             sequence=1,
             status=RunStep.Status.RUNNING,
         )
+        self._mark_execution_running(run)
 
         confirm_reconcile_orphan(str(run.uuid))
 
@@ -389,6 +567,7 @@ class RunLifecycleTests(TestCase):
         )
         run.resume_by = timezone.now() + timedelta(hours=1)
         run.save(update_fields=["resume_by"])
+        self._mark_execution_running(run)
 
         with patch(
             "lens.services.dispatch_run_to_lensnode"
@@ -405,6 +584,111 @@ class RunLifecycleTests(TestCase):
         self.assertEqual(kwargs["resume"], True)
         self.assertEqual(run.status, Run.Status.STREAMING)
         self.assertIsNotNone(run.resume_by)
+
+    def test_never_admitted_run_is_requeued_through_normal_dispatch_once(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        run.execution.status = RunExecution.Status.DISPATCHED
+        run.execution.dispatch_id = uuid.uuid4()
+        run.execution.save(update_fields=["status", "dispatch_id"])
+
+        with (
+            patch(
+                "lens.services.get_run_document_expectation",
+                return_value=2,
+            ),
+            patch("lens.tasks.enqueue_answer_run_task") as enqueue,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first = resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
+            second = resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
+
+        run.refresh_from_db()
+        run.execution.refresh_from_db()
+        self.assertEqual((first, second), (1, 0))
+        self.assertEqual(run.status, Run.Status.QUEUED)
+        self.assertIsNone(run.resume_by)
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.QUEUED,
+        )
+        self.assertIsNone(run.execution.dispatch_id)
+        enqueue.assert_called_once_with(run.uuid, 2)
+
+    def test_admitted_run_without_checkpoint_readiness_fails_closed(self):
+        self.lensnode.labels["run_admission_checkpoint_v1"] = True
+        self.lensnode.save(update_fields=["labels"])
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        run.execution.status = RunExecution.Status.RUNNING
+        run.execution.dispatch_id = uuid.uuid4()
+        run.execution.admitted_at = timezone.now()
+        run.execution.save(
+            update_fields=["status", "dispatch_id", "admitted_at"]
+        )
+
+        with patch("lens.services.dispatch_run_to_lensnode") as dispatch:
+            count = resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
+
+        run.refresh_from_db()
+        run.execution.refresh_from_db()
+        self.assertEqual(count, 0)
+        self.assertEqual(run.status, Run.Status.FAILED)
+        self.assertEqual(run.error, "LENSNODE_CHECKPOINT_NOT_READY")
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.FAILED,
+        )
+        dispatch.assert_not_called()
+
+    def test_checkpoint_ready_run_resumes_with_fresh_dispatch_id(self):
+        self.lensnode.labels["run_admission_checkpoint_v1"] = True
+        self.lensnode.save(update_fields=["labels"])
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        old_dispatch_id = uuid.uuid4()
+        ready_at = timezone.now() - timedelta(minutes=1)
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        run.execution.status = RunExecution.Status.RUNNING
+        run.execution.dispatch_id = old_dispatch_id
+        run.execution.admitted_at = ready_at
+        run.execution.checkpoint_ready_at = ready_at
+        run.execution.save(
+            update_fields=[
+                "status",
+                "dispatch_id",
+                "admitted_at",
+                "checkpoint_ready_at",
+            ]
+        )
+
+        with patch(
+            "lens.services.dispatch_run_to_lensnode"
+        ) as dispatch:
+            count = resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
+
+        run.execution.refresh_from_db()
+        self.assertEqual(count, 1)
+        self.assertNotEqual(run.execution.dispatch_id, old_dispatch_id)
+        self.assertEqual(
+            dispatch.call_args.kwargs["dispatch_id"],
+            run.execution.dispatch_id,
+        )
+        self.assertTrue(dispatch.call_args.kwargs["resume"])
 
     def test_resume_skips_run_reported_active_by_reconnected_node(self):
         run = self._run(
@@ -437,6 +721,7 @@ class RunLifecycleTests(TestCase):
         )
         run.resume_by = timezone.now() + timedelta(hours=1)
         run.save(update_fields=["resume_by"])
+        self._mark_execution_running(run)
         nested_counts = []
 
         def dispatch_once(*args, **kwargs):
@@ -466,6 +751,7 @@ class RunLifecycleTests(TestCase):
         )
         run.resume_by = timezone.now() + timedelta(hours=1)
         run.save(update_fields=["resume_by"])
+        self._mark_execution_running(run)
         LensNode.objects.filter(pk=self.lensnode.pk).update(
             updated_at=timezone.now()
         )
@@ -486,6 +772,7 @@ class RunLifecycleTests(TestCase):
             timedelta(minutes=5),
             timedelta(minutes=5),
         )
+        self._mark_execution_running(run)
 
         with patch(
             "lens.services.dispatch_run_to_lensnode"
@@ -505,6 +792,7 @@ class RunLifecycleTests(TestCase):
         )
         run.resume_by = timezone.now() + timedelta(hours=1)
         run.save(update_fields=["resume_by"])
+        self._mark_execution_running(run)
 
         with patch(
             "lens.services.dispatch_run_to_lensnode",
@@ -526,6 +814,7 @@ class RunLifecycleTests(TestCase):
         )
         run.resume_by = timezone.now() + timedelta(hours=1)
         run.save(update_fields=["resume_by"])
+        self._mark_execution_running(run)
         self.lensnode.labels = {}
         self.lensnode.save(update_fields=["labels"])
 

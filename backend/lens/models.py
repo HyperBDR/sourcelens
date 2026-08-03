@@ -863,6 +863,9 @@ class RunExecution(models.Model):
         default=None,
     )
     run_timeout_s = models.PositiveIntegerField(null=True, default=None)
+    dispatch_id = models.UUIDField(null=True, blank=True, editable=False)
+    admitted_at = models.DateTimeField(null=True, blank=True)
+    checkpoint_ready_at = models.DateTimeField(null=True, blank=True)
     token_budget_profile = models.CharField(
         max_length=16,
         choices=Assistant.TokenBudgetProfile.choices,

@@ -25,16 +25,17 @@
               <span class="text-sm text-gray-600 whitespace-nowrap">{{
                 t('llm.usage.filterByUser')
               }}</span>
-              <select
+              <BaseSelect
                 v-model="selectedUserId"
-                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-56"
+                class="md:w-56"
+                mobile-touch
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('llm.usage.allUsers') }}</option>
                 <option v-for="u in userOptions" :key="u.id" :value="u.id">
                   {{ u.label }}
                 </option>
-              </select>
+              </BaseSelect>
               <input
                 v-model="filters.model"
                 type="text"
@@ -42,15 +43,16 @@
                 class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-44"
                 @input="onModelInput"
               />
-              <select
+              <BaseSelect
                 v-model="filters.success"
-                class="min-h-11 w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-28"
+                class="md:w-28"
+                mobile-touch
                 @change="onFiltersChanged"
               >
                 <option value="">{{ t('llm.usage.filterSuccess') }}</option>
                 <option value="true">{{ t('common.yes') }}</option>
                 <option value="false">{{ t('common.no') }}</option>
-              </select>
+              </BaseSelect>
               <div
                 class="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center"
               >
@@ -668,6 +670,7 @@ import { llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t, locale } = useI18n()

@@ -30,9 +30,11 @@
                 class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-40 focus:outline-none focus:ring-1 focus:ring-primary-500"
                 @input="onFiltersChanged"
               />
-              <select
+              <BaseSelect
                 v-model="filters.status"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm w-36 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                class="w-36"
+                :full-width="false"
+                size="sm"
                 @change="onFiltersChanged"
               >
                 <option value="">
@@ -53,7 +55,7 @@
                 <option value="pending">
                   {{ t('notificationManagement.records.statusPending') }}
                 </option>
-              </select>
+              </BaseSelect>
               <input
                 v-model="filters.start_date"
                 type="date"
@@ -478,6 +480,7 @@ import { notificationsAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t, locale } = useI18n()

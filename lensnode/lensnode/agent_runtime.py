@@ -1286,6 +1286,7 @@ class LensDeepAgentRuntime:
         on_activity=None,
         cancel_event=None,
         wrapup_event=None,
+        on_checkpoint_ready=None,
     ):
         """Execute a run_start command with create_deep_agent."""
 
@@ -1297,6 +1298,7 @@ class LensDeepAgentRuntime:
             on_activity,
             cancel_event,
             wrapup_event,
+            on_checkpoint_ready,
         )
 
     def _answer_sync(
@@ -1307,6 +1309,7 @@ class LensDeepAgentRuntime:
         on_activity=None,
         cancel_event=None,
         wrapup_event=None,
+        on_checkpoint_ready=None,
     ):
         """Synchronous Deep Agents invocation run in a worker thread."""
 
@@ -1409,6 +1412,17 @@ class LensDeepAgentRuntime:
             checkpoint_ready = resume_state is not None
             initial_checkpoint_seeded = False
             resume_from_graph_checkpoint = resume_state is not None
+            checkpoint_ready_notified = False
+
+            def notify_checkpoint_ready():
+                nonlocal checkpoint_ready_notified
+                if checkpoint_ready_notified or on_checkpoint_ready is None:
+                    return
+                on_checkpoint_ready()
+                checkpoint_ready_notified = True
+
+            if checkpoint_ready:
+                notify_checkpoint_ready()
             if (
                 runtime_mode.execution_gates
                 and resume_state is not None
@@ -1555,6 +1569,7 @@ class LensDeepAgentRuntime:
                             )
                             checkpoint_ready = True
                             initial_checkpoint_seeded = True
+                            notify_checkpoint_ready()
                         except Exception:
                             LOGGER.exception(
                                 "Failed to enable route checkpoint"
@@ -1814,7 +1829,14 @@ class LensDeepAgentRuntime:
                                 history_assistant_turns
                             ),
                         )
+                        save_initial_checkpoint(
+                            run_uuid,
+                            self.config.workspace_path,
+                            initial_messages,
+                        )
                         checkpoint_ready = True
+                        initial_checkpoint_seeded = True
+                        notify_checkpoint_ready()
                     except Exception:
                         kwargs.pop("checkpointer", None)
                         LOGGER.exception(

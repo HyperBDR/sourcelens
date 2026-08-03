@@ -245,9 +245,8 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">{{
               t('notificationManagement.channels.channelType')
             }}</label>
-            <select
+            <BaseSelect
               v-model="form.channel_type"
-              class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 bg-white"
               :disabled="!!editingId"
               required
             >
@@ -257,7 +256,7 @@
               <option value="email">
                 {{ t('notificationManagement.channels.typeEmail') }}
               </option>
-            </select>
+            </BaseSelect>
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">{{
@@ -277,15 +276,11 @@
               <label class="block text-sm font-medium text-gray-700 mb-1">{{
                 t('notificationManagement.channels.providerType')
               }}</label>
-              <select
-                v-model="form.config.provider_type"
-                class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 bg-white"
-                required
-              >
+              <BaseSelect v-model="form.config.provider_type" required>
                 <option value="feishu">飞书</option>
                 <option value="wecom">WeCom</option>
                 <option value="wechat">企业微信</option>
-              </select>
+              </BaseSelect>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">{{
@@ -318,17 +313,14 @@
               <label class="block text-sm font-medium text-gray-700 mb-1">{{
                 t('notificationManagement.channels.language')
               }}</label>
-              <select
-                v-model="form.config.language"
-                class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 bg-white"
-              >
+              <BaseSelect v-model="form.config.language">
                 <option value="zh-hans">
                   {{ t('notificationManagement.channels.languageZhHans') }}
                 </option>
                 <option value="en">
                   {{ t('notificationManagement.channels.languageEn') }}
                 </option>
-              </select>
+              </BaseSelect>
               <p class="mt-1 text-xs text-gray-500">
                 {{ t('notificationManagement.channels.languageDesc') }}
               </p>
@@ -770,6 +762,7 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import RowActionMenu from '@/components/ui/RowActionMenu.vue'
 import TableBulkActions from '@/components/ui/TableBulkActions.vue'

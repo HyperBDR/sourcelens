@@ -234,6 +234,8 @@
       "attachFile": "Upload image or document",
       "removeAttachment": "Remove attachment",
       "imageTooLarge": "Image is too large; max 10MB each.",
+      "imageDimensionsTooLarge": "Image resolution is too high. Crop or resize it to about one page and try again.",
+      "imageAspectUnsupported": "Image is too long. Crop it to about one page and try again.",
       "documentTooLarge": "Document is too large; max 25MB each.",
       "attachmentUnsupported": "Only PNG, JPEG, WebP, GIF, PDF, DOCX, PPTX and XLSX files are supported.",
       "attachmentTooMany": "Up to {max} attachments per message.",

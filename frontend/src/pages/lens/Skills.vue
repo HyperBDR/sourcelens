@@ -170,11 +170,7 @@
             "
             required
           >
-            <select
-              v-if="mode === 'create'"
-              v-model="createMethod"
-              class="form-input"
-            >
+            <BaseSelect v-if="mode === 'create'" v-model="createMethod">
               <option
                 v-for="option in createMethodOptions"
                 :key="option.value"
@@ -182,7 +178,7 @@
               >
                 {{ option.label }}
               </option>
-            </select>
+            </BaseSelect>
             <div
               v-else
               class="rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm text-ink-700"
@@ -586,6 +582,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { extractErrorMessage } from '@/utils/api'
 

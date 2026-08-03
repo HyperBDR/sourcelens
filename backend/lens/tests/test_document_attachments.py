@@ -26,7 +26,14 @@ from lens.document_attachments import (
 )
 from lens.execution import execute_answer_run
 from lens.lensnode_auth import issue_lensnode_token
-from lens.models import Assistant, LensNode, MessageAttachment, Run, Session
+from lens.models import (
+    Assistant,
+    LensNode,
+    MessageAttachment,
+    Run,
+    RunExecution,
+    Session,
+)
 from lens.serializers import AssistantSerializer, MessageSerializer
 from lens.services import (
     LensNodeDispatchError,
@@ -651,6 +658,11 @@ class DocumentAttachmentTests(TestCase):
 
         rewrite_query.assert_not_called()
         self.assertEqual(dispatch.call_args.args[1], "请分析所附文档")
+        run.execution.refresh_from_db()
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.DISPATCHED,
+        )
 
     def test_english_document_only_run_uses_english_prompt(self):
         self.user.profile.language = "en-US"

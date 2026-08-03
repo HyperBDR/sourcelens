@@ -73,25 +73,25 @@
         <input v-model="form.slug" class="form-input" required />
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.agentModel') + ' *'">
-        <select v-model="form.agent_model_ref" class="form-input" required>
+        <BaseSelect v-model="form.agent_model_ref" required>
           <option value="">
             {{ t('lensAdmin.placeholders.selectModel') }}
           </option>
           <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">
             {{ formatLLMConfigLabel(c) }}
           </option>
-        </select>
+        </BaseSelect>
         <p class="mt-1 text-xs text-ink-500">
           {{ t('lensAdmin.wizard.agentModelHint') }}
         </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.multimodalModel')">
-        <select v-model="form.multimodal_model_ref" class="form-input">
+        <BaseSelect v-model="form.multimodal_model_ref">
           <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
           <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">
             {{ formatLLMConfigLabel(c) }}
           </option>
-        </select>
+        </BaseSelect>
         <p class="mt-1 text-xs text-ink-500">
           {{ t('lensAdmin.wizard.multimodalModelHint') }}
         </p>
@@ -166,17 +166,17 @@
       <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step2Desc') }}</p>
       <div class="grid gap-4 md:grid-cols-2">
         <FormRow :label="t('lensAdmin.fields.lensnode')">
-          <select v-model="form.lensnode_uuid" class="form-input" required>
+          <BaseSelect v-model="form.lensnode_uuid" required>
             <option value="">
               {{ t('lensAdmin.placeholders.selectLensNode') }}
             </option>
             <option v-for="ln in lensnodes" :key="ln.uuid" :value="ln.uuid">
               {{ ln.name }}
             </option>
-          </select>
+          </BaseSelect>
         </FormRow>
         <FormRow :label="t('lensAdmin.fields.type')">
-          <select v-model="form.selected_task" class="form-input" required>
+          <BaseSelect v-model="form.selected_task" required>
             <option value="">
               {{ t('lensAdmin.placeholders.selectType') }}
             </option>
@@ -188,7 +188,7 @@
             >
               {{ formatAssistantType(task.name, t, task.title || task.name) }}
             </option>
-          </select>
+          </BaseSelect>
         </FormRow>
       </div>
       <div v-if="!isGeneralChatTask">
@@ -220,10 +220,10 @@
             {{ t('common.refresh') }}
           </button>
         </div>
-        <select
+        <BaseSelect
           v-if="selectedLensNodeDirs.length"
           v-model="selectedDirPath"
-          class="form-input font-mono"
+          class="font-mono"
         >
           <option value="">{{ t('lensAdmin.placeholders.selectDir') }}</option>
           <option
@@ -233,7 +233,7 @@
           >
             {{ dir.path }}
           </option>
-        </select>
+        </BaseSelect>
         <div
           v-else
           class="rounded-md border border-line bg-surface-sunken p-3 text-sm text-ink-500"
@@ -398,9 +398,8 @@
                   }}
                 </p>
               </div>
-              <select
+              <BaseSelect
                 v-model="form.skill_environment_set_uuids[skill.uuid]"
-                class="form-input"
                 :aria-label="t('lensAdmin.wizard.selectEnvironmentSet')"
               >
                 <option value="">
@@ -416,7 +415,7 @@
                 >
                   {{ variableSet.name }}
                 </option>
-              </select>
+              </BaseSelect>
               <input
                 v-if="
                   form.skill_environment_set_uuids[skill.uuid] === '__new__'
@@ -809,6 +808,7 @@ import { useI18n } from 'vue-i18n'
 import { managementApi } from '@/admin/api/management'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import {
