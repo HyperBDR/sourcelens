@@ -2491,10 +2491,10 @@ class LensServiceTests(TransactionTestCase):
         )
 
         with patch("lens.datasource_services._send_lensnode_command") as send:
-            dispatch_datasource_sync_async(
-                self.datasource,
-                task_id="archive-snapshot",
-                trigger="reupload",
+            source_sync_task(
+                str(self.datasource.uuid),
+                "reupload",
+                "archive-snapshot",
             )
 
         payload = send.call_args.args[1]
