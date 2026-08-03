@@ -521,6 +521,13 @@ class LensNodeClient:
             await self._send_busy(run_uuid, "LENSNODE_DRAINING")
             return
         if run_uuid in self.running_tasks:
+            if message.get("dispatch_id"):
+                self._send_run_admitted(run_uuid, message["dispatch_id"])
+                LOGGER.info(
+                    "Acknowledged duplicate delivery for active run %s.",
+                    run_uuid,
+                )
+                return
             if message.get("resume"):
                 LOGGER.info(
                     "Ignored duplicate resume for active run %s.",
@@ -548,7 +555,20 @@ class LensNodeClient:
         )
         self.running_commands[run_uuid] = message
         self.running_tasks[run_uuid] = task
+        if message.get("dispatch_id"):
+            self._send_run_admitted(run_uuid, message["dispatch_id"])
         task.add_done_callback(lambda item: self._consume_task_exception(item))
+
+    def _send_run_admitted(self, run_uuid, dispatch_id):
+        """Acknowledge one accepted dispatch without exposing its payload."""
+
+        self._enqueue(
+            {
+                "type": "run_admitted",
+                "run_uuid": run_uuid,
+                "dispatch_id": str(dispatch_id),
+            }
+        )
 
     async def _handle_list_dirs(self, message):
         """List immediate subdirectories for requested paths and reply."""
@@ -922,6 +942,7 @@ class LensNodeClient:
                         "mode": "local",
                         "run_document_attachments": True,
                         "run_checkpoint_resume": checkpoint_resume_ready,
+                        "run_admission_checkpoint_v1": True,
                         "run_checkpoint_ttl_hours": checkpoint_ttl_hours(),
                     },
                 },

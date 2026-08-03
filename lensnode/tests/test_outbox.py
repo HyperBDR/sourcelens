@@ -197,6 +197,9 @@ def test_reconnect_hello_claims_buffered_terminal_run_before_flush():
         ]
         assert frames[0]["labels"]["run_document_attachments"] is True
         assert frames[0]["labels"]["run_checkpoint_resume"] is True
+        assert (
+            frames[0]["labels"]["run_admission_checkpoint_v1"] is True
+        )
         assert [frame["type"] for frame in frames[1:]] == [
             "run_output",
             "run_output",

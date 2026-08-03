@@ -398,6 +398,18 @@ class LensNodeExecutor:
                     }
                 )
 
+            def emit_checkpoint_ready():
+                dispatch_id = command.get("dispatch_id")
+                if not dispatch_id or cancel_event.is_set():
+                    return
+                emit(
+                    {
+                        "type": "run_checkpoint_ready",
+                        "run_uuid": run_uuid,
+                        "dispatch_id": str(dispatch_id),
+                    }
+                )
+
             # Inactivity watchdog on TRANSPORT activity, not user-visible
             # output: any gateway SSE event (heartbeats, reasoning and
             # tool-call tokens) refreshes the clock via on_activity, so a
@@ -407,15 +419,19 @@ class LensNodeExecutor:
             # Cancelling the asyncio task cannot stop the agent worker
             # thread, so cancel_event tells the thread to unwind at its
             # next chunk or model-call boundary and mutes its late emits.
-            answer_task = asyncio.create_task(
-                self.agent.answer(
-                    command,
-                    emit_progress=emit_progress,
-                    emit_output=emit_output,
-                    on_activity=touch_activity,
-                    cancel_event=cancel_event,
-                    wrapup_event=wrapup_event,
+            answer_options = {
+                "emit_progress": emit_progress,
+                "emit_output": emit_output,
+                "on_activity": touch_activity,
+                "cancel_event": cancel_event,
+                "wrapup_event": wrapup_event,
+            }
+            if command.get("dispatch_id"):
+                answer_options["on_checkpoint_ready"] = (
+                    emit_checkpoint_ready
                 )
+            answer_task = asyncio.create_task(
+                self.agent.answer(command, **answer_options)
             )
 
             def stop_answer_task():
