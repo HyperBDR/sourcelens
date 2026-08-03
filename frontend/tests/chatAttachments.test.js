@@ -8,6 +8,7 @@ import {
   hasAttachmentErrorCode,
   MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_PIXELS,
+  readImageDimensions,
   validateImageDimensions,
   validateAttachment
 } from '../src/pages/lens/chatAttachments.js'
@@ -105,6 +106,59 @@ test('checks browser image dimensions before uploading', async () => {
 
   assert.notEqual(dimensionCheck, -1)
   assert.ok(dimensionCheck < uploadStart)
+})
+
+test('releases the browser image URL after reading dimensions', async (t) => {
+  const originalImage = globalThis.Image
+  const originalCreateObjectURL = URL.createObjectURL
+  const originalRevokeObjectURL = URL.revokeObjectURL
+  const revoked = []
+
+  t.after(() => {
+    globalThis.Image = originalImage
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
+  URL.createObjectURL = () => 'blob:dimensions-success'
+  URL.revokeObjectURL = (url) => revoked.push(url)
+  globalThis.Image = class {
+    set src(_value) {
+      this.naturalWidth = 1200
+      this.naturalHeight = 800
+      queueMicrotask(() => this.onload())
+    }
+  }
+
+  const dimensions = await readImageDimensions({ name: 'screen.png' })
+
+  assert.deepEqual(dimensions, { width: 1200, height: 800 })
+  assert.deepEqual(revoked, ['blob:dimensions-success'])
+})
+
+test('releases the browser image URL when dimensions fail', async (t) => {
+  const originalImage = globalThis.Image
+  const originalCreateObjectURL = URL.createObjectURL
+  const originalRevokeObjectURL = URL.revokeObjectURL
+  const revoked = []
+
+  t.after(() => {
+    globalThis.Image = originalImage
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
+  URL.createObjectURL = () => 'blob:dimensions-error'
+  URL.revokeObjectURL = (url) => revoked.push(url)
+  globalThis.Image = class {
+    set src(_value) {
+      queueMicrotask(() => this.onerror())
+    }
+  }
+
+  await assert.rejects(
+    readImageDimensions({ name: 'broken.png' }),
+    /IMAGE_DIMENSIONS_UNAVAILABLE/
+  )
+  assert.deepEqual(revoked, ['blob:dimensions-error'])
 })
 
 test('preserves uploaded document metadata in optimistic messages', async () => {
