@@ -234,6 +234,8 @@
       "attachFile": "上传图片或文档",
       "removeAttachment": "移除附件",
       "imageTooLarge": "图片过大，单张不超过 10MB。",
+      "imageDimensionsTooLarge": "图片分辨率过高，请缩小或裁剪为大约一页后重试。",
+      "imageAspectUnsupported": "图片过长，请裁剪为大约一页后重试。",
       "documentTooLarge": "文档过大，单个不超过 25MB。",
       "attachmentUnsupported": "仅支持 PNG、JPEG、WebP、GIF、PDF、DOCX、PPTX 和 XLSX 文件。",
       "attachmentTooMany": "每条消息最多上传 {max} 个附件。",

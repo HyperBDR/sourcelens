@@ -16,6 +16,8 @@ from .session_lifecycle import lock_active_session
 ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 ATTACHMENT_MAX_PER_MESSAGE = 4
 ATTACHMENT_MAX_DIMENSION = 1600
+ATTACHMENT_MAX_PIXELS = 5_000_000
+ATTACHMENT_MAX_ASPECT_RATIO = 3
 _IMAGE_FORMAT_MAP = {
     "PNG": ("PNG", "image/png", "png"),
     "JPEG": ("JPEG", "image/jpeg", "jpg"),
@@ -63,7 +65,8 @@ def store_message_attachment(session, user, uploaded_file):
 
     try:
         image = Image.open(uploaded_file)
-        image.load()
+    except Image.DecompressionBombError:
+        raise AttachmentError("ATTACHMENT_DIMENSIONS_TOO_LARGE")
     except (UnidentifiedImageError, OSError):
         raise AttachmentError("ATTACHMENT_UNSUPPORTED_TYPE")
 
@@ -72,6 +75,19 @@ def store_message_attachment(session, user, uploaded_file):
         (None, None, None),
     )
     if out_format is None:
+        raise AttachmentError("ATTACHMENT_UNSUPPORTED_TYPE")
+
+    width, height = image.size
+    if width * height > ATTACHMENT_MAX_PIXELS:
+        raise AttachmentError("ATTACHMENT_DIMENSIONS_TOO_LARGE")
+    if max(width, height) > min(width, height) * ATTACHMENT_MAX_ASPECT_RATIO:
+        raise AttachmentError("ATTACHMENT_ASPECT_UNSUPPORTED")
+
+    try:
+        image.load()
+    except Image.DecompressionBombError:
+        raise AttachmentError("ATTACHMENT_DIMENSIONS_TOO_LARGE")
+    except OSError:
         raise AttachmentError("ATTACHMENT_UNSUPPORTED_TYPE")
 
     image = _downscale_image(image, ATTACHMENT_MAX_DIMENSION)

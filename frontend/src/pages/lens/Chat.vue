@@ -1462,8 +1462,11 @@ import {
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import {
   ATTACHMENT_ACCEPT,
+  attachmentUploadError,
   hasAttachmentErrorCode,
   MAX_ATTACHMENTS,
+  readImageDimensions,
+  validateImageDimensions,
   validateAttachment
 } from '@/pages/lens/chatAttachments'
 import {
@@ -2774,6 +2777,19 @@ async function addAttachment(file) {
     )
     return
   }
+  if (validation.kind === 'image') {
+    try {
+      const { width, height } = await readImageDimensions(file)
+      const dimensionError = validateImageDimensions(width, height)
+      if (dimensionError) {
+        showError(t(`lens.chat.${dimensionError}`))
+        return
+      }
+    } catch {
+      showError(t('lens.chat.attachmentUploadFailed'))
+      return
+    }
+  }
   const sessionUuid = selectedSessionUuid.value
   if (!sessionUuid) return
   const item = {
@@ -2802,9 +2818,9 @@ async function addAttachment(file) {
     }
     item.status = 'done'
     attachments.value = [...attachments.value]
-  } catch {
+  } catch (error) {
     removeAttachment(item)
-    showError(t('lens.chat.attachmentUploadFailed'))
+    showError(t(`lens.chat.${attachmentUploadError(error)}`))
   }
 }
 
