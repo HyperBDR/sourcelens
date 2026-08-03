@@ -1,0 +1,4 @@
+type: feature
+audience: admin
+en: Added ZIP and TAR.GZ uploads as fully replaceable data sources.
+zh-CN: 新增 ZIP 和 TAR.GZ 文件上传数据源，并支持完整替换更新。
