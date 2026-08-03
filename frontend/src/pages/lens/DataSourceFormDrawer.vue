@@ -47,11 +47,7 @@
         <input v-model="form.name" class="form-input" required />
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.type')" required>
-        <select
-          v-model="form.source_type"
-          class="form-input"
-          @change="$emit('type-change')"
-        >
+        <BaseSelect v-model="form.source_type" @change="$emit('type-change')">
           <option
             v-for="type in sourceTypes"
             :key="type.value"
@@ -59,16 +55,16 @@
           >
             {{ type.label }}
           </option>
-        </select>
+        </BaseSelect>
         <p class="mt-1 text-xs text-ink-500">
           {{ selectedSourceTypeDescription }}
         </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.status')" required>
-        <select v-model="form.status" class="form-input">
+        <BaseSelect v-model="form.status">
           <option value="active">{{ t('common.status.active') }}</option>
           <option value="disabled">{{ t('common.status.disabled') }}</option>
-        </select>
+        </BaseSelect>
       </FormRow>
     </div>
 
@@ -83,7 +79,7 @@
         }}
       </p>
       <FormRow :label="t('lensAdmin.fields.lensnode')" required>
-        <select v-model="form.lensnode_uuid" class="form-input" required>
+        <BaseSelect v-model="form.lensnode_uuid" required>
           <option value="">
             {{ t('lensAdmin.placeholders.selectLensNode') }}
           </option>
@@ -94,7 +90,7 @@
           >
             {{ node.name }} · {{ node.workspace_path || '/workspace' }}
           </option>
-        </select>
+        </BaseSelect>
         <p class="mt-1 text-xs text-ink-500">
           {{ t('lensAdmin.datasourceWizard.onlineNodeHint') }}
         </p>
@@ -115,9 +111,8 @@
         <FormRow :label="t('lensAdmin.fields.credential')" required>
           <div class="flex flex-col gap-2">
             <div class="flex gap-2">
-              <select
-                :value="form.credential_uuid"
-                class="form-input"
+              <BaseSelect
+                :model-value="form.credential_uuid"
                 @change="handleCredentialChange"
               >
                 <option value="">
@@ -130,7 +125,7 @@
                 >
                   {{ credentialOptionLabel(credential) }}
                 </option>
-              </select>
+              </BaseSelect>
               <BaseButton
                 class="shrink-0"
                 size="sm"
@@ -186,7 +181,7 @@
           :label="t('lensAdmin.fields.branch')"
           required
         >
-          <select v-model="config.branch" class="form-input">
+          <BaseSelect v-model="config.branch">
             <option value="">
               {{ t('lensAdmin.datasourceWizard.branchPlaceholder') }}
             </option>
@@ -197,16 +192,15 @@
             >
               {{ branch }}
             </option>
-          </select>
+          </BaseSelect>
         </FormRow>
       </template>
       <template v-else>
         <FormRow :label="t('lensAdmin.fields.credential')" required>
           <div class="flex flex-col gap-2">
             <div class="flex gap-2">
-              <select
-                :value="form.credential_uuid"
-                class="form-input"
+              <BaseSelect
+                :model-value="form.credential_uuid"
                 @change="handleCredentialChange"
               >
                 <option value="">
@@ -219,7 +213,7 @@
                 >
                   {{ credentialOptionLabel(credential) }}
                 </option>
-              </select>
+              </BaseSelect>
               <BaseButton
                 class="shrink-0"
                 size="sm"
@@ -403,9 +397,9 @@
                 </span>
               </span>
             </label>
-            <select
+            <BaseSelect
               v-model="repo.branch"
-              class="form-input h-9"
+              size="sm"
               :disabled="!repo.selected || !repo.branches?.length"
             >
               <option value="">
@@ -418,7 +412,7 @@
               >
                 {{ branch }}
               </option>
-            </select>
+            </BaseSelect>
           </div>
         </div>
         <p class="text-xs text-ink-500">
@@ -733,14 +727,14 @@
         :label="t('lensAdmin.fields.syncPolicy')"
         required
       >
-        <select v-model="syncPolicyMode" class="form-input w-56">
+        <BaseSelect v-model="syncPolicyMode" class="w-56">
           <option value="interval">
             {{ t('lensAdmin.datasourceWizard.syncPolicyInterval') }}
           </option>
           <option value="crontab">
             {{ t('lensAdmin.datasourceWizard.syncPolicyCrontab') }}
           </option>
-        </select>
+        </BaseSelect>
       </FormRow>
       <FormRow
         v-if="!isManagedWorkspace && syncPolicyMode === 'interval'"
@@ -855,10 +849,7 @@
           :label="t('lensAdmin.fields.documentModel')"
           :hint="t('lensAdmin.datasourceWizard.documentModelTooltip')"
         >
-          <select
-            v-model="form.conversion_document_model_ref"
-            class="form-input"
-          >
+          <BaseSelect v-model="form.conversion_document_model_ref">
             <option value="">
               {{ t('lensAdmin.placeholders.noModel') }}
             </option>
@@ -869,7 +860,7 @@
             >
               {{ formatLLMConfigLabel(config) }}
             </option>
-          </select>
+          </BaseSelect>
           <p class="mt-1 text-xs text-ink-500">
             {{ t('lensAdmin.datasourceWizard.documentModelHint') }}
           </p>
@@ -1065,7 +1056,7 @@
           :label="t('lensAdmin.fields.visionModel')"
           :hint="t('lensAdmin.datasourceWizard.visionModelTooltip')"
         >
-          <select v-model="form.conversion_vision_model_ref" class="form-input">
+          <BaseSelect v-model="form.conversion_vision_model_ref">
             <option value="">
               {{ t('lensAdmin.placeholders.noModel') }}
             </option>
@@ -1076,7 +1067,7 @@
             >
               {{ formatLLMConfigLabel(config) }}
             </option>
-          </select>
+          </BaseSelect>
           <p class="mt-1 text-xs text-ink-500">
             {{ t('lensAdmin.datasourceWizard.visionModelHint') }}
           </p>
@@ -1189,6 +1180,7 @@ import { useI18n } from 'vue-i18n'
 
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 
 import { formatLLMConfigLabel } from './adminHelpers'
 

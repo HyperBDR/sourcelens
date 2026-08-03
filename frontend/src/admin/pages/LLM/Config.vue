@@ -778,28 +778,21 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">{{
               t('llm.config.scopeLabel')
             }}</label>
-            <select
-              v-model="form.scope"
-              class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
-            >
+            <BaseSelect v-model="form.scope">
               <option value="global">{{ t('llm.config.scopeGlobal') }}</option>
               <option value="user">{{ t('llm.config.scopeUser') }}</option>
-            </select>
+            </BaseSelect>
           </div>
           <div v-if="!editingId && form.scope === 'user'">
             <label class="block text-sm font-medium text-gray-700 mb-1">{{
               t('llm.config.user')
             }}</label>
-            <select
-              v-model="form.user_id"
-              class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500"
-              :required="userList.length > 0"
-            >
+            <BaseSelect v-model="form.user_id" :required="userList.length > 0">
               <option value="">{{ t('llm.config.user') }}…</option>
               <option v-for="u in userList" :key="u.id" :value="u.id">
                 {{ u.username || u.id }}
               </option>
-            </select>
+            </BaseSelect>
             <p v-if="userList.length === 0" class="mt-1 text-sm text-amber-600">
               {{ t('llm.config.noUsersHint') }}
             </p>
@@ -812,9 +805,12 @@
               class="flex items-center gap-2 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm"
             >
               <ProviderIcon :provider="form.provider" size="sm" />
-              <select
+              <BaseSelect
                 v-model="form.provider"
-                class="min-w-0 flex-1 border-0 bg-transparent p-0 focus:ring-0"
+                class="min-w-0 flex-1"
+                :full-width="false"
+                size="sm"
+                variant="unstyled"
                 @change="onProviderChange"
               >
                 <option
@@ -824,7 +820,7 @@
                 >
                   {{ p.label }}
                 </option>
-              </select>
+              </BaseSelect>
             </div>
           </div>
           <div>
@@ -1078,6 +1074,7 @@ import ProviderIcon from '@/components/llm/ProviderIcon.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import RowActionMenu from '@/components/ui/RowActionMenu.vue'

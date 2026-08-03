@@ -88,10 +88,10 @@
                             min="1"
                             class="settings-input w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           />
-                          <select
+                          <BaseSelect
                             v-else-if="setting.type === 'model_ref'"
                             v-model="settingsForm[setting.key]"
-                            class="settings-input min-w-0 w-full max-w-lg rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                            class="min-w-0 max-w-lg"
                           >
                             <option value="">
                               {{ t('lensAdmin.placeholders.noModel') }}
@@ -103,7 +103,7 @@
                             >
                               {{ formatLLMConfigLabel(config) }}
                             </option>
-                          </select>
+                          </BaseSelect>
                           <input
                             v-else-if="setting.type === 'text'"
                             v-model="settingsForm[setting.key]"
@@ -258,6 +258,7 @@ import {
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import {

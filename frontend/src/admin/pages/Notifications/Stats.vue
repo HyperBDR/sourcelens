@@ -23,9 +23,10 @@
             >
               {{ t('notificationManagement.stats.userScope') }}
             </label>
-            <select
+            <BaseSelect
               v-model="userScope"
-              class="rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 min-w-[140px] hover:border-gray-300 transition-colors"
+              class="min-w-[140px]"
+              :full-width="false"
               @change="fetchStats"
             >
               <option value="">
@@ -38,7 +39,7 @@
               >
                 {{ u.display }}
               </option>
-            </select>
+            </BaseSelect>
           </div>
           <div class="flex flex-col gap-1.5">
             <label
@@ -88,35 +89,41 @@
               v-else-if="granularity === 'month'"
               class="flex items-center gap-2"
             >
-              <select
+              <BaseSelect
                 v-model="selectedYear"
-                class="rounded-lg border border-gray-200 px-3 py-2 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                class="w-24"
+                :full-width="false"
+                size="sm"
                 @change="onMonthYearChange"
               >
                 <option v-for="y in yearOptions" :key="y" :value="y">
                   {{ y }}
                 </option>
-              </select>
-              <select
+              </BaseSelect>
+              <BaseSelect
                 v-model="selectedMonth"
-                class="rounded-lg border border-gray-200 px-3 py-2 text-sm w-28 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                class="w-28"
+                :full-width="false"
+                size="sm"
                 @change="onMonthYearChange"
               >
                 <option v-for="m in 12" :key="m" :value="m">
                   {{ String(m).padStart(2, '0') }}
                 </option>
-              </select>
+              </BaseSelect>
             </div>
             <div v-else class="flex items-center gap-2">
-              <select
+              <BaseSelect
                 v-model="selectedYear"
-                class="rounded-lg border border-gray-200 px-3 py-2 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                class="w-24"
+                :full-width="false"
+                size="sm"
                 @change="onYearChange"
               >
                 <option v-for="y in yearOptions" :key="y" :value="y">
                   {{ y }}
                 </option>
-              </select>
+              </BaseSelect>
             </div>
           </div>
         </div>
@@ -405,6 +412,7 @@ import { notificationsAdminApi, llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 
 ChartJS.register(
   ArcElement,

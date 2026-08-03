@@ -56,20 +56,20 @@
               <span class="mb-1 block text-xs font-medium text-ink-600">
                 {{ t('lensAdmin.credentials.providerFilter') }}
               </span>
-              <select v-model="providerFilter" class="form-input">
+              <BaseSelect v-model="providerFilter">
                 <option value="all">
                   {{ t('lensAdmin.credentials.allProviders') }}
                 </option>
                 <option value="github">GitHub</option>
                 <option value="gitlab">GitLab</option>
                 <option value="feishu">Feishu</option>
-              </select>
+              </BaseSelect>
             </label>
             <label class="block">
               <span class="mb-1 block text-xs font-medium text-ink-600">
                 {{ t('lensAdmin.credentials.validationFilter') }}
               </span>
-              <select v-model="validationFilter" class="form-input">
+              <BaseSelect v-model="validationFilter">
                 <option value="all">
                   {{ t('lensAdmin.credentials.allValidationStatuses') }}
                 </option>
@@ -82,13 +82,13 @@
                 <option value="unchecked">
                   {{ t('lensAdmin.credentials.validationUnchecked') }}
                 </option>
-              </select>
+              </BaseSelect>
             </label>
             <label class="block">
               <span class="mb-1 block text-xs font-medium text-ink-600">
                 {{ t('lensAdmin.credentials.sortLabel') }}
               </span>
-              <select v-model="sortOption" class="form-input">
+              <BaseSelect v-model="sortOption">
                 <option value="default">
                   {{ t('lensAdmin.credentials.sortDefault') }}
                 </option>
@@ -101,7 +101,7 @@
                 <option value="validated_desc">
                   {{ t('lensAdmin.credentials.sortValidated') }}
                 </option>
-              </select>
+              </BaseSelect>
             </label>
           </div>
           <p class="mt-2 text-xs text-ink-500" role="status">
@@ -395,18 +395,17 @@
             for-id="credential-provider"
             required
           >
-            <select
+            <BaseSelect
               id="credential-provider"
               v-model="form.provider"
               name="provider"
-              class="form-input"
               aria-describedby="credential-provider-hint"
               required
             >
               <option value="github">GitHub</option>
               <option value="gitlab">GitLab</option>
               <option value="feishu">Feishu</option>
-            </select>
+            </BaseSelect>
             <p id="credential-provider-hint" class="mt-1 text-xs text-ink-500">
               {{ t('lensAdmin.credentials.providerHint') }}
             </p>
@@ -463,12 +462,11 @@
             :label="t('lensAdmin.fields.authScheme')"
             :for-id="form.provider === 'feishu' ? '' : 'credential-auth-scheme'"
           >
-            <select
+            <BaseSelect
               v-if="form.provider !== 'feishu'"
               id="credential-auth-scheme"
               v-model="form.auth_type"
               name="auth_type"
-              class="form-input"
               aria-describedby="credential-auth-hint"
               required
             >
@@ -478,7 +476,7 @@
               <option value="none">
                 {{ credentialAuthTypeLabel('none') }}
               </option>
-            </select>
+            </BaseSelect>
             <div v-else class="form-input bg-surface-sunken text-ink-500">
               {{ credentialAuthTypeLabel(credentialFormAuthType) }}
             </div>
@@ -694,6 +692,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 

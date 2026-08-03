@@ -88,10 +88,9 @@
                             min="1"
                             class="settings-input w-full max-w-40 rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           />
-                          <select
+                          <BaseSelect
                             v-else-if="setting.type === 'model_ref'"
                             v-model="settingsForm[setting.key]"
-                            class="settings-input w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                           >
                             <option value="">
                               {{ t('lensAdmin.placeholders.noModel') }}
@@ -103,7 +102,7 @@
                             >
                               {{ formatLLMConfigLabel(config) }}
                             </option>
-                          </select>
+                          </BaseSelect>
                           <input
                             v-else
                             v-model="settingsForm[setting.key]"
@@ -167,6 +166,7 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import { useToast } from '@/composables/useToast'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSelect from '@/components/ui/BaseSelect.vue'
 
 import { formatLLMConfigLabel, normalizeList } from './adminHelpers'
 
