@@ -210,6 +210,11 @@ def _admin_run_model_usage(run):
         return None
     return {
         "llm_calls": len(calls),
+        "models_used": list(
+            dict.fromkeys(
+                item["model"] for item in calls if item["model"]
+            )
+        ),
         "subagent_model_calls": sum(
             1 for item in calls if item["is_subagent"]
         ),
@@ -446,6 +451,7 @@ def _admin_run_detail(run):
             "cached_tokens": 0,
             "reasoning_tokens": 0,
             "subagent_model_calls": 0,
+            "models_used": [],
             "model_calls": [],
         })
     return row

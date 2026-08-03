@@ -342,6 +342,7 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(detail["total_tokens"], 350)
         self.assertEqual(detail["cached_tokens"], 240)
         self.assertEqual(detail["reasoning_tokens"], 15)
+        self.assertEqual(detail["models_used"], ["deepseek-v4-flash"])
         self.assertEqual(len(detail["model_calls"]), 2)
         self.assertFalse(detail["model_calls"][0]["is_subagent"])
         self.assertTrue(detail["model_calls"][1]["is_subagent"])

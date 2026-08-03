@@ -48,6 +48,7 @@
     "tabFiles": "Files",
     "overviewSummary": "Run overview",
     "overviewExecution": "Execution configuration",
+    "modelsUsed": "Models used",
     "overviewTiming": "Timing",
     "overviewResources": "Runtime resources",
     "noFiles": "No generated files",
