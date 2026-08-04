@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("lens", "0039_runexecution_admission_state"),
+        ("lens", "0040_mcp_environment_bindings"),
     ]
 
     operations = [
