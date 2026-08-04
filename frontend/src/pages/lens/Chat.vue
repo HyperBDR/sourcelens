@@ -4318,9 +4318,9 @@ onBeforeUnmount(() => {
   @apply pointer-events-none absolute inset-x-0 bottom-0 z-20 px-6 pb-5;
   background: linear-gradient(
     to top,
-    rgba(255, 255, 255, 0.98) 36%,
-    rgba(255, 255, 255, 0.78) 72%,
-    rgba(255, 255, 255, 0) 100%
+    rgb(var(--sl-bg-surface-rgb) / 98%) 36%,
+    rgb(var(--sl-bg-surface-rgb) / 78%) 72%,
+    rgb(var(--sl-bg-surface-rgb) / 0%) 100%
   );
 }
 

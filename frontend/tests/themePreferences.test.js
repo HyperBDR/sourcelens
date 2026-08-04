@@ -702,6 +702,15 @@ test('user logo consumers avoid dark assets and blend geometry hacks', () => {
   assert.match(activityStackSource, /BrandLogo[\s\S]*variant="mark"/)
 })
 
+test('chat composer gradient uses semantic surface opacity tokens', () => {
+  const composerWrap = chatLogoSource.match(/\.composer-wrap\s*\{([^}]*)\}/)
+
+  assert.ok(composerWrap, 'Missing .composer-wrap CSS block')
+  assert.match(composerWrap[1], /rgb\(var\(--sl-bg-surface-rgb\)\s*\/\s*98%\)/)
+  assert.match(composerWrap[1], /rgb\(var\(--sl-bg-surface-rgb\)\s*\/\s*78%\)/)
+  assert.doesNotMatch(composerWrap[1], /rgba\(255,\s*255,\s*255/)
+})
+
 test('administration keeps its existing explicit logo treatment', () => {
   assert.match(adminSidebarSource, /tone="dark"/)
   assert.match(adminSidebarSource, /\[&_img\]:!w-52/)

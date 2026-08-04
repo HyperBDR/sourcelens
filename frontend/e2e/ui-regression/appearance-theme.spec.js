@@ -112,6 +112,6 @@ test('user-facing logo keeps its source and geometry across themes', async ({
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   const darkSource = await logo.getAttribute('src')
   expect(darkSource).not.toBe(lightSource)
-  expect(darkSource).toContain('logo_with_text_dark_transparent.png')
+  expect(darkSource).toContain('logo_dark_transparent.png')
   expect(await logo.boundingBox()).toEqual(lightBox)
 })
