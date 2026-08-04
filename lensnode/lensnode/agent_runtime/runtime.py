@@ -11,7 +11,6 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends.filesystem import FilesystemBackend
-from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain_core.messages import HumanMessage
 
 from ..agent_tools import (
@@ -35,6 +34,7 @@ from ..gateway_model import (
 from ..logging_utils import elapsed_since, task_log, utc_now
 from ..mcp_tools import build_deferred_mcp_tools, load_mcp_tools
 from ..runtime_modes import runtime_mode_for
+from .assembly import _agent_middleware, _fast_subagent
 from .capabilities import CapabilityBoundaryMiddleware
 from .direct_answer import (
     _answer_general_chat_directly,
@@ -926,61 +926,6 @@ class LensDeepAgentRuntime:
 
 
 
-def _agent_middleware(
-    command,
-    summarizer,
-    emit_event=None,
-    *,
-    capability_middleware=None,
-    mcp_middleware=None,
-    trace_middleware=None,
-):
-    """Return task-specific middleware for one Deep Agent run."""
-
-    middleware = []
-    if summarizer is not None:
-        middleware.append(summarizer)
-    if _is_general_chat(command):
-        middleware.append(_NoTaskMiddleware(emit_event))
-        if capability_middleware is not None:
-            middleware.append(capability_middleware)
-    if trace_middleware is not None:
-        middleware.append(trace_middleware)
-    if mcp_middleware is not None:
-        middleware.append(mcp_middleware)
-    return middleware
-
-
-def _fast_subagent(mcp_middleware=None, trace_middleware=None):
-    """General-purpose subagent that parallelizes its own tool calls.
-
-    By default a delegated subagent runs deepagents' stock prompt and
-    tends to do serial ReAct (one file at a time) — the main reason a
-    subtask is slow. Overriding the same-named general-purpose subagent
-    and prepending the parallel guidance makes it batch its reads and
-    searches like the main agent. Tools and model are inherited from the
-    parent (tools default to the parent's set).
-    """
-
-    parallel = (
-        "Work in parallel whenever steps are independent — this is the "
-        "biggest lever on speed. When several files or searches are "
-        "needed, issue those tool calls together in one message so they "
-        "run concurrently; do not read and validate hits one at a time. "
-        "Keep the number of parallel calls reasonable.\n\n"
-    )
-    subagent = {
-        **GENERAL_PURPOSE_SUBAGENT,
-        "system_prompt": parallel + GENERAL_PURPOSE_SUBAGENT["system_prompt"],
-    }
-    middleware = [
-        item
-        for item in (trace_middleware, mcp_middleware)
-        if item is not None
-    ]
-    if middleware:
-        subagent["middleware"] = middleware
-    return subagent
 
 
 
