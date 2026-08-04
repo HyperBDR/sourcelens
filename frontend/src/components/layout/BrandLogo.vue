@@ -11,7 +11,10 @@
 </template>
 
 <script setup>
+import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
+
+import { usePreferencesStore } from '@/store/preferences'
 
 const props = defineProps({
   altText: {
@@ -25,8 +28,8 @@ const props = defineProps({
   },
   tone: {
     type: String,
-    default: 'light',
-    validator: (value) => ['light', 'dark'].includes(value)
+    default: null,
+    validator: (value) => value === null || value === 'dark'
   },
   wrapperClass: {
     type: String,
@@ -34,15 +37,25 @@ const props = defineProps({
   }
 })
 
-const markSrc = computed(() =>
-  props.tone === 'dark' ? '/brand/logo_dark.png' : '/brand/logo_transparent.png'
+const { resolvedTheme } = storeToRefs(usePreferencesStore())
+
+const useDarkUserAsset = computed(
+  () => props.tone === null && resolvedTheme.value === 'dark'
 )
 
-const wordmarkSrc = computed(() =>
-  props.tone === 'dark'
-    ? '/brand/logo_with_text_dark.png'
+const markSrc = computed(() => {
+  if (props.tone === 'dark') return '/brand/logo_dark.png'
+  return useDarkUserAsset.value
+    ? '/brand/logo_dark_transparent.png'
+    : '/brand/logo_transparent.png'
+})
+
+const wordmarkSrc = computed(() => {
+  if (props.tone === 'dark') return '/brand/logo_with_text_dark.png'
+  return useDarkUserAsset.value
+    ? '/brand/logo_with_text_dark_transparent.png'
     : '/brand/logo_with_text_transparent.png'
-)
+})
 
 const showMark = computed(() => props.variant !== 'wordmark')
 const showWordmark = computed(() => props.variant !== 'mark')
