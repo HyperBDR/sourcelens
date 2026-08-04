@@ -4,7 +4,6 @@ import json
 import logging
 import re
 import threading
-import uuid
 from collections import defaultdict
 
 from deepagents import (
@@ -69,6 +68,10 @@ from .resume import (
     pending_checkpoint_tool_calls as _pending_checkpoint_tool_calls,
     reject_unsafe_resume_tool_replay as _reject_unsafe_resume_tool_replay,
 )
+from .tracing import (
+    TraceObservationMiddleware,
+    observation_timestamp as _observation_timestamp,
+)
 from ..runtime_resources import (
     cleanup_runtime_resources,
     prepare_runtime_resources,
@@ -90,85 +93,6 @@ class EmptyAgentResponseError(RuntimeError):
     """The agent and its one recovery attempt both returned no text."""
 
     code = "EMPTY_AGENT_RESPONSE"
-
-
-class TraceObservationMiddleware(AgentMiddleware):
-    """Emit privacy-bounded spans around synchronous and async tool calls."""
-
-    def __init__(self, emit_observation, root_observation_id):
-        self.emit_observation = emit_observation
-        self.root_observation_id = root_observation_id
-
-    def wrap_tool_call(self, request, handler):
-        """Wrap one synchronous tool call in a trace observation."""
-
-        observation_id = self._start(request)
-        try:
-            result = handler(request)
-        except Exception as exc:
-            self._finish(observation_id, "failed", exc)
-            raise
-        status = (
-            "failed"
-            if getattr(result, "status", None) == "error"
-            else "done"
-        )
-        self._finish(observation_id, status)
-        return result
-
-    async def awrap_tool_call(self, request, handler):
-        """Wrap one asynchronous tool call in a trace observation."""
-
-        observation_id = self._start(request)
-        try:
-            result = await handler(request)
-        except Exception as exc:
-            self._finish(observation_id, "failed", exc)
-            raise
-        status = (
-            "failed"
-            if getattr(result, "status", None) == "error"
-            else "done"
-        )
-        self._finish(observation_id, status)
-        return result
-
-    def _start(self, request):
-        """Emit a start event without tool arguments."""
-
-        observation_id = uuid.uuid4().hex
-        tool = getattr(request, "tool", None)
-        raw_name = getattr(tool, "name", None) or "unknown"
-        tool_name = re.sub(r"[^A-Za-z0-9._-]", "_", str(raw_name))[:96]
-        self.emit_observation(
-            {
-                "action": "start",
-                "id": observation_id,
-                "parent_observation_id": self.root_observation_id,
-                "name": f"tool.{tool_name or 'unknown'}",
-                "started_at": _observation_timestamp(),
-            }
-        )
-        return observation_id
-
-    def _finish(self, observation_id, status, error=None):
-        """Emit an end event without tool output or exception text."""
-
-        event = {
-            "action": "end",
-            "id": observation_id,
-            "status": status,
-            "ended_at": _observation_timestamp(),
-        }
-        if error is not None:
-            event["error_type"] = type(error).__name__
-        self.emit_observation(event)
-
-
-def _observation_timestamp():
-    """Return an ingestion-compatible UTC timestamp."""
-
-    return utc_now().isoformat().replace("+00:00", "Z")
 
 
 class _NoTaskMiddleware(AgentMiddleware):
