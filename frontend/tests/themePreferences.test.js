@@ -13,6 +13,7 @@ import {
   normalizeThemeMode,
   resolveTheme
 } from '../src/utils/theme.js'
+import { inspectThemedLogoPair } from './helpers/pngPixels.js'
 
 const frontendRoot = fileURLToPath(new URL('..', import.meta.url))
 const mainSource = readFileSync(
@@ -685,6 +686,47 @@ test('user theme switches transparent logo colors without geometry hacks', () =>
   assert.doesNotMatch(logoSource, /brightness-0 invert/)
   assert.doesNotMatch(logoSource, /mix-blend/)
   assert.doesNotMatch(logoSource, /object-cover/)
+})
+
+test('dark transparent logo pairs preserve the pixel contract', () => {
+  const pairs = [
+    {
+      dark: new URL(
+        '../public/brand/logo_dark_transparent.png',
+        import.meta.url
+      ),
+      light: new URL('../public/brand/logo_transparent.png', import.meta.url),
+      name: 'mark'
+    },
+    {
+      dark: new URL(
+        '../public/brand/logo_with_text_dark_transparent.png',
+        import.meta.url
+      ),
+      light: new URL(
+        '../public/brand/logo_with_text_transparent.png',
+        import.meta.url
+      ),
+      name: 'wordmark'
+    }
+  ]
+
+  for (const pair of pairs) {
+    const result = inspectThemedLogoPair(pair.light, pair.dark)
+    const prefix = `${pair.name} logo`
+
+    assert.equal(result.darkWidth, result.lightWidth, `${prefix} width`)
+    assert.equal(result.darkHeight, result.lightHeight, `${prefix} height`)
+    assert.equal(result.alphaMismatchCount, 0, `${prefix} alpha plane`)
+    assert.ok(result.accentPixelCount > 0, `${prefix} accent pixels`)
+    assert.equal(result.accentMismatchCount, 0, `${prefix} accent RGBA`)
+    assert.ok(result.visibleBodyPixelCount > 0, `${prefix} visible body pixels`)
+    assert.equal(
+      result.visibleBodyMismatchCount,
+      0,
+      `${prefix} visible dark body RGB`
+    )
+  }
 })
 
 test('user logo consumers avoid dark assets and blend geometry hacks', () => {

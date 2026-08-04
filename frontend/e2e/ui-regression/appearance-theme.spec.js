@@ -115,3 +115,54 @@ test('user-facing logo keeps its source and geometry across themes', async ({
   expect(darkSource).toContain('logo_dark_transparent.png')
   expect(await logo.boundingBox()).toEqual(lightBox)
 })
+
+test('user-facing wordmark switches source without moving', async ({
+  page
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('userLanguage', 'en')
+    if (!localStorage.getItem('userThemeMode')) {
+      localStorage.setItem('userThemeMode', 'light')
+    }
+  })
+  await page.route(
+    '**/api/lens/public/assistants/appearance-wordmark/qa/**',
+    async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            assistant: {
+              name: 'Appearance Wordmark',
+              slug: 'appearance-wordmark'
+            },
+            next_offset: null,
+            results: [],
+            total: 0
+          }
+        })
+      })
+    }
+  )
+  await page.goto('/lens/assistants/appearance-wordmark/qa')
+
+  const wordmark = page.getByRole('img', { name: 'SourceLens' })
+  await expect(wordmark).toHaveCount(1)
+  await expect(wordmark).toHaveAttribute(
+    'src',
+    /logo_with_text_transparent\.png/
+  )
+  const lightSource = await wordmark.getAttribute('src')
+  const lightBox = await wordmark.boundingBox()
+
+  await page.evaluate(() => {
+    localStorage.setItem('userThemeMode', 'dark')
+  })
+  await page.reload()
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  const darkSource = await wordmark.getAttribute('src')
+  expect(darkSource).not.toBe(lightSource)
+  expect(darkSource).toContain('logo_with_text_dark_transparent.png')
+  expect(await wordmark.boundingBox()).toEqual(lightBox)
+})
