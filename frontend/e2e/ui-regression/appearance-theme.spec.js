@@ -152,6 +152,11 @@ test('user-facing wordmark switches source without moving', async ({
     'src',
     /logo_with_text_transparent\.png/
   )
+  await expect
+    .poll(() =>
+      wordmark.evaluate((image) => image.complete && image.naturalWidth > 0)
+    )
+    .toBe(true)
   const lightSource = await wordmark.getAttribute('src')
   const lightBox = await wordmark.boundingBox()
 
@@ -164,5 +169,10 @@ test('user-facing wordmark switches source without moving', async ({
   const darkSource = await wordmark.getAttribute('src')
   expect(darkSource).not.toBe(lightSource)
   expect(darkSource).toContain('logo_with_text_dark_transparent.png')
+  await expect
+    .poll(() =>
+      wordmark.evaluate((image) => image.complete && image.naturalWidth > 0)
+    )
+    .toBe(true)
   expect(await wordmark.boundingBox()).toEqual(lightBox)
 })
