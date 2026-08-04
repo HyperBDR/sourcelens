@@ -7,7 +7,15 @@ from django.test import TestCase
 from PIL import Image
 from rest_framework.test import APIClient
 
-from lens.models import Assistant, LensNode, Run, Session, SharedQA
+from lens.models import (
+    Assistant,
+    LensNode,
+    Run,
+    RunDiagnostic,
+    RunDiagnosticEvidence,
+    Session,
+    SharedQA,
+)
 from lens.services import create_execution_run
 
 
@@ -194,6 +202,37 @@ class SessionManagementTests(TestCase):
 
         self.assertTrue(rows[str(self.first.uuid)]["has_shareable_answer"])
         self.assertFalse(rows[str(self.second.uuid)]["has_shareable_answer"])
+
+    def test_delete_session_with_run_diagnostic_history(self):
+        run = create_execution_run(
+            self.first,
+            "Diagnosed question",
+            enqueue=False,
+            user=self.user,
+        )
+        evidence = RunDiagnosticEvidence.objects.create(
+            run=run,
+            payload={"events": []},
+        )
+        diagnostic = RunDiagnostic.objects.create(
+            run=run,
+            evidence=evidence,
+            requested_by=self.user,
+        )
+
+        response = self.client.delete(
+            f"/api/lens/sessions/{self.first.uuid}/"
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Session.objects.filter(pk=self.first.pk).exists())
+        self.assertFalse(Run.objects.filter(pk=run.pk).exists())
+        self.assertFalse(
+            RunDiagnostic.objects.filter(pk=diagnostic.pk).exists()
+        )
+        self.assertFalse(
+            RunDiagnosticEvidence.objects.filter(pk=evidence.pk).exists()
+        )
 
     def test_other_users_cannot_manage_sessions_they_do_not_own(self):
         self.client.force_authenticate(self.other)
