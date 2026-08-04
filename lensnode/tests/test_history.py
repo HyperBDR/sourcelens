@@ -717,6 +717,16 @@ def test_capability_boundary_state_round_trips_for_resume():
     assert detail == {}
 
 
+def test_capability_boundary_rejects_invalid_resume_state():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+
+    with pytest.raises(
+        CheckpointResumeError,
+        match="invalid execution-gate state",
+    ):
+        middleware.restore_state(None)
+
+
 def test_model_event_records_cache_reasoning_and_latency():
     events = []
     message = _Msg(
