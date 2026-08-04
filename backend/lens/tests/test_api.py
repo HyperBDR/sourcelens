@@ -74,7 +74,11 @@ from lens.services import (
     validate_run_dispatch,
 )
 from lens.skill_packages import package_zip_bytes
-from lens.tasks import acquire_datasource_lock, release_datasource_lock
+from lens.tasks import (
+    acquire_datasource_lock,
+    release_datasource_lock,
+    source_sync_task,
+)
 
 User = get_user_model()
 
@@ -5511,6 +5515,69 @@ class DataSourceArchiveUploadTests(TestCase):
         self.assertEqual(disabled.status_code, 200, disabled.data)
         self.assertEqual(updated.status_code, 200, updated.data)
         self.assertEqual(updated.data["name"], "Renamed Upload")
+
+    def test_disabled_pending_upload_does_not_block_later_reupload(self):
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            created = self.client.post(
+                "/api/lens/admin/datasources/upload/",
+                {
+                    "metadata": json.dumps(self._metadata()),
+                    "file": datasource_zip_upload({"old.txt": "old"}),
+                },
+                format="multipart",
+            )
+        datasource = DataSource.objects.get(uuid=created.data["uuid"])
+        task_id = created.data["initial_sync_task_id"]
+        archive = TaskExecution.objects.get(task_id=task_id).metadata[
+            "archive"
+        ]
+
+        disabled = self.client.patch(
+            f"/api/lens/admin/datasources/{datasource.uuid}/",
+            {"status": "disabled"},
+            format="json",
+        )
+        self.assertEqual(disabled.status_code, 200, disabled.data)
+
+        source_sync_task(
+            str(datasource.uuid),
+            "initial_upload",
+            task_id,
+        )
+
+        task = TaskExecution.objects.get(task_id=task_id)
+        record = ScheduledTask.objects.get(target_id=datasource.uuid)
+        self.assertEqual(task.status, "REVOKED")
+        self.assertEqual(task.error, "DATASOURCE_DISABLED")
+        self.assertFalse(record.enabled)
+        self.assertEqual(record.last_status, ScheduledTask.Status.FAILED)
+        self.assertEqual(record.last_error, "DATASOURCE_DISABLED")
+        self.assertFalse(
+            storages["datasource_archives"].exists(
+                archive["storage_name"]
+            )
+        )
+
+        enabled = self.client.patch(
+            f"/api/lens/admin/datasources/{datasource.uuid}/",
+            {"status": "active"},
+            format="json",
+        )
+        with patch("lens.views.datasources.source_sync_task.apply_async"):
+            reupload = self.client.post(
+                (
+                    f"/api/lens/admin/datasources/{datasource.uuid}/"
+                    "reupload/"
+                ),
+                {
+                    "metadata": json.dumps({}),
+                    "file": datasource_zip_upload({"new.txt": "new"}),
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(enabled.status_code, 200, enabled.data)
+        self.assertEqual(reupload.status_code, 202, reupload.data)
 
     def test_reupload_registers_full_replace_task(self):
         with patch("lens.views.datasources.source_sync_task.apply_async"):

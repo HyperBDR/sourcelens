@@ -336,9 +336,23 @@ def source_sync_task(self, datasource_uuid, trigger="scheduled", task_id=None):
     record = _get_or_create_source_sync_record(datasource)
     if datasource.status == DataSource.Status.DISABLED:
         _delete_task_datasource_archive(task_id)
-        if record.enabled:
-            record.enabled = False
-            record.save(update_fields=["enabled"])
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.REVOKED,
+            error="DATASOURCE_DISABLED",
+        )
+        record.enabled = False
+        record.last_status = ScheduledTask.Status.FAILED
+        record.last_error = "DATASOURCE_DISABLED"
+        record.last_run_at = timezone.now()
+        record.save(
+            update_fields=[
+                "enabled",
+                "last_status",
+                "last_error",
+                "last_run_at",
+            ]
+        )
         return 0
 
     now = timezone.now()
