@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Improved answer reliability by retrying temporary model-service failures
+  before returning an error.
+zh-CN: >-
+  提升回答可靠性，在模型服务临时失败时先自动重试，再决定是否返回错误。
