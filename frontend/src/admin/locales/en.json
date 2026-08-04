@@ -823,6 +823,12 @@
         "action": "Create Setting"
       }
     },
+    "mcp": {
+      "secretConfigured": "Configured",
+      "sensitiveConfigHint": "Password, secret, token, API key, authorization, credential, and private-key values are masked. Leave a masked value unchanged to keep it, enter a new value to replace it, or remove the row to clear it.",
+      "environmentVariablesHelp": "List the variables this MCP Server needs. You'll provide their values when adding the MCP Server to an Assistant.",
+      "environmentPlaceholderHint": "Reference a declared variable in the endpoint or Config with {placeholder}. SourceLens expands it only in the private per-Run MCP configuration."
+    },
     "skills": {
       "beautify": "Beautify",
       "beautifyHint": "Polish or generate the SKILL.md with the configured generator model",
@@ -919,6 +925,10 @@
     "environmentVariables": {
       "empty": "No variable sets yet.",
       "keys": "Variables",
+      "usages": "Referenced by",
+      "skillUsage": "Skill",
+      "mcpUsage": "MCP",
+      "assistantUsage": "Assistant: {name}",
       "values": "Environment variables",
       "value": "Value",
       "addValue": "Add variable",
@@ -1519,6 +1529,12 @@
       "skillsSection": "Skills",
       "skillsSectionRequired": "Skills *",
       "generalChatSkillsHint": "Select at least one Skill. General Chat runs from bound Skill instructions, bundled scripts, and declared executable Artifacts.",
+      "searchSkills": "Search Skills",
+      "skillSearchResults": "Showing {count} of {total} Skills",
+      "noMatchingSkills": "No Skills match your search",
+      "environmentSection": "Environment variables",
+      "environmentSectionHint": "These values apply only to this Skill. Configure every required variable before continuing.",
+      "environmentRequired": "Required",
       "environmentConfiguration": "Environment variables",
       "environmentConfigurationHint": "This Skill needs {count} environment variables. Choose an existing variable set or create a new one.",
       "selectEnvironmentSet": "Choose a variable set",
@@ -1527,6 +1543,8 @@
       "environmentConfigured": "Saved",
       "environmentMissing": "Not set",
       "mcpSection": "MCP Servers",
+      "mcpEnvironmentSectionHint": "These values apply only to this MCP Server. Configure every required variable before continuing.",
+      "mcpEnvironmentConfigurationHint": "This MCP Server needs {count} environment variables. Choose an existing variable set or create a new one.",
       "noSkills": "No Skills available — create one in the Skill Library first",
       "noMcp": "No MCP Servers available — create one in the MCP Server Library first",
       "visibilityHint": "Admins can always access every assistant."

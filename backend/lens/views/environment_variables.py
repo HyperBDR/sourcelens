@@ -9,9 +9,14 @@ from .base import BaseAdminViewSet
 
 
 class EnvironmentVariableSetViewSet(BaseAdminViewSet):
-    """Admin-only CRUD for encrypted Skill environment values."""
+    """Admin-only CRUD for encrypted Skill and MCP environment values."""
 
-    queryset = EnvironmentVariableSet.objects.all()
+    queryset = EnvironmentVariableSet.objects.prefetch_related(
+        "skill_bindings__skill",
+        "skill_bindings__assistant",
+        "mcp_bindings__mcp",
+        "mcp_bindings__assistant",
+    )
     serializer_class = EnvironmentVariableSetSerializer
 
     def destroy(self, request, *args, **kwargs):

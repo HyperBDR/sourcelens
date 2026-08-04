@@ -347,10 +347,12 @@ export async function deleteCredential(uuid) {
 }
 
 export async function listEnvironmentVariableSets() {
-  const response = await api.get('/lens/admin/environment-variable-sets/', {
-    params: { page_size: 10000 }
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/admin/environment-variable-sets/', {
+      params: { page_size: 1000, page }
+    })
+    return unwrapResponse(response)
   })
-  return unwrapList(unwrapResponse(response))
 }
 
 export async function createEnvironmentVariableSet(payload) {
@@ -414,8 +416,12 @@ export async function cancelDataSourceSync(uuid) {
 }
 
 export async function listSkills() {
-  const response = await api.get('/lens/admin/skills/')
-  return unwrapList(unwrapResponse(response))
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/admin/skills/', {
+      params: { page_size: 1000, page }
+    })
+    return unwrapResponse(response)
+  })
 }
 
 export async function createSkill(payload) {
@@ -498,8 +504,12 @@ export async function beautifySkill(payload) {
 }
 
 export async function listMcpServers() {
-  const response = await api.get('/lens/admin/mcp-servers/')
-  return unwrapList(unwrapResponse(response))
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/admin/mcp-servers/', {
+      params: { page_size: 1000, page }
+    })
+    return unwrapResponse(response)
+  })
 }
 
 export async function createMcpServer(payload) {
