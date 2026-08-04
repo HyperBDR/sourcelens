@@ -781,6 +781,12 @@ class LensDeepAgentRuntime:
                     persist_execution_state if checkpoint_ready else None
                 ),
                 input_checkpoint_seeded=initial_checkpoint_seeded,
+                stream_recovery_attempts=1 if checkpoint_ready else 0,
+                on_stream_recovery=(
+                    (lambda: emit_output("", reset=True))
+                    if emit_output is not None
+                    else None
+                ),
             )
             if truncated:
                 emit_agent_event(
