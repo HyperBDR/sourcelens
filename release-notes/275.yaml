@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Improved long-running answer reliability by resuming interrupted model
+  streams from saved progress.
+zh-CN: >-
+  提升长时间回答的可靠性，在模型流意外中断时从已保存进度继续执行。
