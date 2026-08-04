@@ -108,11 +108,15 @@ Existing broad form-control overrides must be converted to token values.
 
 Logo layout is theme-independent:
 
-- Use the same transparent source asset in light and dark modes.
+- Use transparent light and dark source assets with identical canvas
+  dimensions and transparent bounds.
 - Use the same DOM elements in both modes.
 - Preserve the existing width, height, object-fit, wrapper gap, alignment,
   margin, and positioning.
-- Dark mode may alter only the rendered colors of the transparent asset.
+- In dark mode, render the logo body and wordmark in white while preserving
+  the approved blue-purple center dot from the light asset.
+- Do not use a whole-image filter that turns the center dot white or otherwise
+  changes its brand color.
 - Do not switch to the current dark wordmark asset because its canvas aspect
   ratio differs from the light asset.
 - Do not use cropping, scaling compensation, blend-mode backgrounds, black
@@ -121,7 +125,22 @@ Logo layout is theme-independent:
 The same rule applies to wordmarks and assistant mark avatars.
 
 Automated tests must compare the logo bounding box before and after theme
-switching and require identical coordinates and dimensions.
+switching and require identical coordinates and dimensions. They must also
+require the dark transparent assets to preserve the branded center dot.
+
+## Shared Runtime Recovery
+
+The administration assistant records are not deleted. The shared development
+database contains seven active assistants, but the assistant API currently
+returns HTTP 500 because the runtime source expects unapplied Lens migrations.
+The missing columns include
+`lens_assistantmcp.environment_variable_set_id` and `lens_run.resume_by`.
+
+Restart the canonical shared API container so its supported entrypoint applies
+the existing migrations. Do not create replacement assistants, edit user
+grants, or change assistant list filtering. After migration, verify the
+assistant API succeeds and the administration page shows the existing seven
+active records.
 
 ## Component Migration
 
@@ -182,7 +201,7 @@ Write failing tests before implementation for:
 - Root attribute and `color-scheme` application
 - Administration route override and restoration
 - Settings modal wiring and translations
-- Logo single-asset and geometry invariants
+- Logo transparent-asset, accent-color, and geometry invariants
 
 ### Browser tests
 
@@ -193,6 +212,7 @@ Use Playwright with mocked authenticated users where possible:
 - Verify system changes with emulated media.
 - Verify scheduled behavior with a fixed browser clock.
 - Compare logo bounding boxes in light and dark modes.
+- Verify the blue-purple center dot remains branded in dark mode.
 - Check computed background, text, and border colors.
 - Capture chat and login screenshots in light and dark modes.
 - Verify representative administration routes stay light for every saved mode.
@@ -213,7 +233,9 @@ The browser console must contain no new errors or warnings.
 6. Migrate chat in visual slices.
 7. Add the administration light-theme route override.
 8. Remove theme-only administration and unrelated formatting changes.
-9. Add complete browser coverage and screenshot verification.
+9. Add transparent dark logo assets with unchanged geometry and preserved
+   blue-purple center dots.
+10. Add complete browser coverage and screenshot verification.
 
 Each stage must build and pass its focused tests before the next stage starts.
 
@@ -224,6 +246,7 @@ Each stage must build and pass its focused tests before the next stage starts.
 - No blue-tinted dark canvas or white separator remains.
 - Logo position and size are pixel-identical across themes.
 - No logo has a black rectangular background.
+- Every user-facing dark-mode logo keeps the approved blue-purple center dot.
 - Login and post-login pages resolve to the same effective appearance.
 - Every `/management/*` route remains in the current light administration
   appearance for all four saved modes.
@@ -234,3 +257,5 @@ Each stage must build and pass its focused tests before the next stage starts.
 - Refreshing preserves the selected mode.
 - System and scheduled modes update without manual refresh.
 - Light mode has no visual regression from the current baseline.
+- The shared administration assistant page lists the seven existing active
+  assistants after the canonical migrations run.
