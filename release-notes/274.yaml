@@ -1,0 +1,5 @@
+type: fix
+audience: user
+en: >-
+  Fixed session deletion when a session contains runs with diagnostic history.
+zh-CN: 修复会话包含运行诊断记录时无法删除的问题。
