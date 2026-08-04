@@ -50,6 +50,14 @@ from .gateway_model import (
 from .logging_utils import elapsed_since, task_log, utc_now
 from .mcp_tools import build_deferred_mcp_tools, load_mcp_tools
 from .runtime_modes import runtime_mode_for
+from .runtime_messages import (
+    activity_from_event as _activity_from_event,
+    build_initial_messages as _build_initial_messages,
+    detail_lines as _detail_lines,
+    extract_final_message as _extract_final_message,
+    normalize_plan_steps as _normalize_plan_steps,
+    tool_call_summary as _tool_call_summary,
+)
 from .runtime_resources import (
     cleanup_runtime_resources,
     prepare_runtime_resources,
@@ -3177,73 +3185,10 @@ def _general_chat_guidance(contents):
     )
 
 
-def _extract_final_message(response):
-    """Extract final assistant content from a Deep Agents response."""
-
-    if not isinstance(response, dict):
-        return str(response).strip()
-    messages = response.get("messages") or []
-    if not messages:
-        return ""
-    last = messages[-1]
-    content = getattr(last, "content", None)
-    if isinstance(content, str):
-        return content.strip()
-    return str(content or "").strip()
-
-
 def _scenario_for_task(task):
     """Return scenario metadata for a LensNode task name."""
 
     return SCENARIOS.get(task or "", SCENARIOS["knowledge_qa"])
-
-
-def _detail_lines(detail):
-    """Convert event detail dict to normalized log lines."""
-
-    if not detail:
-        return None
-    return [
-        f"{_title_key(key)}: {value}"
-        for key, value in detail.items()
-    ]
-
-
-def _title_key(value):
-    """Return compact TitleCase log key."""
-
-    return "".join(part.capitalize() for part in str(value).split("_"))
-
-
-def _activity_from_event(event):
-    """Return a compact frontend activity name for an agent event."""
-
-    if event.startswith("resources."):
-        return "loading_resources"
-    if event.startswith("tool."):
-        return "running_tool"
-    if event.endswith(".invoke"):
-        return "thinking"
-    if event.endswith(".done"):
-        return "completed"
-    return "running"
-
-
-def _build_initial_messages(history, question):
-    """Prepend prior conversation turns to the current question.
-
-    Only user/assistant turns with content are kept; tool traces are
-    never carried across turns, so the context stays bounded.
-    """
-
-    messages = []
-    for item in history or []:
-        role = item.get("role")
-        content = item.get("content")
-        if role in ("user", "assistant") and content:
-            messages.append({"role": role, "content": content})
-    messages.append({"role": "user", "content": question})
-    return messages
 
 
 def _run_agent_with_turn_limit(
@@ -3758,42 +3703,3 @@ def _emit_new_tool_calls(
                 f"tool.{name}.invoke",
                 {"tool": name, "summary": _tool_call_summary(call)},
             )
-
-
-def _normalize_plan_steps(todos):
-    """Return a bounded user-visible view of Deep Agents todos."""
-
-    if not isinstance(todos, list):
-        return []
-    steps = []
-    allowed_statuses = {"pending", "in_progress", "completed"}
-    for index, item in enumerate(todos[:12], start=1):
-        if not isinstance(item, dict):
-            continue
-        title = str(item.get("content") or item.get("title") or "").strip()
-        if not title:
-            continue
-        status = str(item.get("status") or "pending")
-        if status not in allowed_statuses:
-            status = "pending"
-        steps.append(
-            {
-                "id": f"step-{index}",
-                "title": title[:240],
-                "status": status,
-            }
-        )
-    return steps
-
-
-def _tool_call_summary(call):
-    """Return a short human summary of a tool call's arguments."""
-
-    args = call.get("args") or {}
-    if not isinstance(args, dict):
-        return ""
-    for key in ("path", "file_path", "query", "description", "ref"):
-        value = args.get(key)
-        if value:
-            return str(value)[:120]
-    return ""
