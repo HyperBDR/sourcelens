@@ -299,7 +299,7 @@ class Skill(TimestampedUUIDModel):
 
 
 class EnvironmentVariableSet(TimestampedUUIDModel):
-    """Reusable encrypted environment values for Skill bindings."""
+    """Reusable encrypted environment values for Skill and MCP bindings."""
 
     name = models.CharField(max_length=160, unique=True)
     description = models.TextField(blank=True, default="")
@@ -354,6 +354,7 @@ class MCPServer(TimestampedUUIDModel):
     transport = models.CharField(max_length=16, choices=Transport.choices)
     endpoint = models.CharField(max_length=500, blank=True, default="")
     config = models.JSONField(default=dict, blank=True)
+    environment = models.JSONField(default=list, blank=True)
     version = models.CharField(max_length=64, blank=True, default="1")
     enabled = models.BooleanField(default=True)
 
@@ -546,6 +547,13 @@ class AssistantMCP(models.Model):
         related_name="mcp_bindings",
     )
     mcp = models.ForeignKey(MCPServer, on_delete=models.PROTECT)
+    environment_variable_set = models.ForeignKey(
+        EnvironmentVariableSet,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="mcp_bindings",
+    )
     enabled = models.BooleanField(default=True)
     load_config = models.JSONField(default=dict, blank=True)
 

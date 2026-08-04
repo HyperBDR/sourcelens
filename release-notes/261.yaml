@@ -1,0 +1,4 @@
+type: improvement
+audience: admin
+en: Improved Assistant Skill and MCP configuration with complete resource loading, reusable environment bindings, and protected MCP credentials.
+zh-CN: 改进助手的 Skill 与 MCP 配置，支持完整资源加载、可复用环境变量绑定和 MCP 凭据保护。

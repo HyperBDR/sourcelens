@@ -341,7 +341,10 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import AssistantDetailDrawer from './AssistantDetailDrawer.vue'
 import AssistantFormDrawer from './AssistantFormDrawerDirectEnvironment.vue'
-import { buildSkillEnvironmentBinding } from './assistantEnvironment'
+import {
+  buildMcpEnvironmentBinding,
+  buildSkillEnvironmentBinding
+} from './assistantEnvironment'
 import {
   EMPTY_VALUE as emptyValue,
   formatAssistantType,
@@ -572,6 +575,8 @@ function defaultForm() {
     skill_environment_set_uuids: {},
     skill_environment_drafts: {},
     mcp_uuids: [],
+    mcp_environment_set_uuids: {},
+    mcp_environment_drafts: {},
     visibility: 'private',
     access_group_ids: [],
     access_user_ids: [],
@@ -641,6 +646,15 @@ function formFromRow(row) {
     mcp_uuids: (row.mcp_bindings || [])
       .map((b) => b.mcp_server?.uuid || b.mcp_uuid)
       .filter(Boolean),
+    mcp_environment_set_uuids: Object.fromEntries(
+      (row.mcp_bindings || [])
+        .filter((binding) => binding.environment_variable_set_uuid)
+        .map((binding) => [
+          binding.mcp_uuid,
+          binding.environment_variable_set_uuid
+        ])
+    ),
+    mcp_environment_drafts: {},
     visibility: row.visibility || 'public',
     access_group_ids: (row.access_grants || [])
       .filter((g) => g.type === 'group')
@@ -714,9 +728,17 @@ function buildPayload() {
         form.value.skill_environment_drafts?.[uuid]
       )
     }),
-    mcp_bindings: (form.value.mcp_uuids || []).map((uuid) => ({
-      mcp_uuid: uuid
-    })),
+    mcp_bindings: (form.value.mcp_uuids || []).map((uuid) => {
+      const mcp = mcps.value.find((item) => item.uuid === uuid) || {
+        uuid,
+        environment: []
+      }
+      return buildMcpEnvironmentBinding(
+        mcp,
+        form.value.mcp_environment_set_uuids?.[uuid],
+        form.value.mcp_environment_drafts?.[uuid]
+      )
+    }),
     visibility: form.value.visibility || 'public',
     access_grants: buildAccessGrants(),
     status: form.value.status || 'active'

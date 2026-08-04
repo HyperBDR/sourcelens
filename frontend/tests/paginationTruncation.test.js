@@ -5,7 +5,7 @@ import test from 'node:test'
 const readSource = (path) =>
   readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
-test('complete assistant and LensNode reads collect every API page', async () => {
+test('complete assistant resource reads collect every API page', async () => {
   const source = await readSource('api/lens.js')
   const assistants = source.slice(
     source.indexOf('export async function listAssistants'),
@@ -15,9 +15,24 @@ test('complete assistant and LensNode reads collect every API page', async () =>
     source.indexOf('export async function listLensNodes'),
     source.indexOf('export async function getAdminRuns')
   )
+  const skills = source.slice(
+    source.indexOf('export async function listSkills'),
+    source.indexOf('export async function createSkill')
+  )
+  const environmentSets = source.slice(
+    source.indexOf('export async function listEnvironmentVariableSets'),
+    source.indexOf('export async function createEnvironmentVariableSet')
+  )
+  const mcps = source.slice(
+    source.indexOf('export async function listMcpServers'),
+    source.indexOf('export async function createMcpServer')
+  )
 
   assert.match(assistants, /collectPaginatedResults/)
   assert.match(lensnodes, /collectPaginatedResults/)
+  assert.match(skills, /collectPaginatedResults/)
+  assert.match(environmentSets, /collectPaginatedResults/)
+  assert.match(mcps, /collectPaginatedResults/)
 })
 
 test('shared Q&A review uses backend pagination metadata', async () => {

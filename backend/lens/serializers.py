@@ -1,3 +1,4 @@
+import re
 from pathlib import PurePosixPath
 from urllib import parse
 
@@ -22,6 +23,8 @@ from .datasource_services import (
     validate_datasource_lensnode,
 )
 from .environment_variables import (
+    declared_environment_references,
+    environment_references,
     missing_required_environment_values,
     validate_environment_schema,
     validate_environment_values,
@@ -321,13 +324,25 @@ class McpBindingsField(serializers.Field):
     """Read/write field for assistant MCP bindings."""
 
     def to_representation(self, bindings):
-        bindings = bindings.select_related("mcp").all()
+        bindings = bindings.select_related(
+            "mcp", "environment_variable_set"
+        ).all()
         return [
             {
                 "mcp_uuid": str(binding.mcp.uuid),
                 "mcp_name": binding.mcp.name,
                 "enabled": binding.enabled,
                 "load_config": binding.load_config,
+                "environment_variable_set_uuid": (
+                    str(binding.environment_variable_set.uuid)
+                    if binding.environment_variable_set
+                    else None
+                ),
+                "environment_variable_set_name": (
+                    binding.environment_variable_set.name
+                    if binding.environment_variable_set
+                    else ""
+                ),
             }
             for binding in bindings
         ]
@@ -342,11 +357,79 @@ class McpBindingsField(serializers.Field):
                 raise serializers.ValidationError("Each binding must be an object.")
             if "mcp_uuid" not in item:
                 raise serializers.ValidationError("Missing mcp_uuid in binding.")
+            mcp = MCPServer.objects.filter(uuid=item["mcp_uuid"]).first()
+            if mcp is None:
+                raise serializers.ValidationError("MCP server does not exist.")
+            variable_set_uuid = item.get("environment_variable_set_uuid")
+            variable_set = None
+            if variable_set_uuid:
+                variable_set = EnvironmentVariableSet.objects.filter(
+                    uuid=variable_set_uuid,
+                    enabled=True,
+                ).first()
+                if variable_set is None:
+                    raise serializers.ValidationError(
+                        "The selected environment variable set is unavailable."
+                    )
+            environment_values = validate_environment_values(
+                item.get("environment_values")
+            )
+            declarations = mcp.environment or []
+            declared_names = {
+                declaration.get("name")
+                for declaration in declarations
+                if isinstance(declaration, dict)
+            }
+            unknown_names = sorted(set(environment_values) - declared_names)
+            if unknown_names:
+                raise serializers.ValidationError(
+                    "Environment values must be declared by the MCP server: "
+                    f'{", ".join(unknown_names)}.'
+                )
+            effective_values = (
+                variable_set.get_values() if variable_set is not None else {}
+            )
+            effective_values.update(environment_values)
+            required_names = {
+                declaration.get("name")
+                for declaration in declarations
+                if isinstance(declaration, dict)
+                and declaration.get("required")
+                and declaration.get("name")
+            }
+            required_names.update(
+                declared_environment_references(
+                    {"endpoint": mcp.endpoint, "config": mcp.config},
+                    declarations,
+                )
+            )
+            missing = sorted(
+                name
+                for name in required_names
+                if not str(effective_values.get(name) or "")
+            )
+            enabled = item.get("enabled", True)
+            if enabled and missing:
+                raise serializers.ValidationError(
+                    "Add values for the required environment variables for "
+                    f'"{mcp.name}": {", ".join(missing)}.'
+                )
+            variable_set_name = str(
+                item.get("environment_variable_set_name") or ""
+            ).strip()
+            if len(variable_set_name) > 160:
+                raise serializers.ValidationError(
+                    "The environment variable set name must be 160 "
+                    "characters or fewer."
+                )
             validated.append(
                 {
                     "mcp_uuid": item["mcp_uuid"],
-                    "enabled": item.get("enabled", True),
+                    "enabled": enabled,
                     "load_config": item.get("load_config", {}),
+                    "environment_variable_set": variable_set,
+                    "environment_variable_set_name": variable_set_name,
+                    "environment_values": environment_values,
                 }
             )
         return validated
@@ -555,10 +638,16 @@ class AssistantSerializer(serializers.ModelSerializer):
         skill_bindings = validated_data.pop("skill_bindings", None)
         mcp_bindings = validated_data.pop("mcp_bindings", None)
 
-        if skill_bindings is not None:
+        binding_groups = [
+            bindings
+            for bindings in (skill_bindings, mcp_bindings)
+            if bindings is not None
+        ]
+        if binding_groups:
             variable_set_ids = {
                 binding["environment_variable_set"].pk
-                for binding in skill_bindings
+                for bindings in binding_groups
+                for binding in bindings
                 if binding.get("environment_variable_set") is not None
                 and binding.get("environment_values")
             }
@@ -569,12 +658,18 @@ class AssistantSerializer(serializers.ModelSerializer):
                 if variable_set_ids
                 else {}
             )
-            for binding in skill_bindings:
-                variable_set = binding.get("environment_variable_set")
-                if variable_set is not None:
-                    binding["environment_variable_set"] = (
-                        locked_variable_sets.get(variable_set.pk, variable_set)
-                    )
+            for bindings in binding_groups:
+                for binding in bindings:
+                    variable_set = binding.get("environment_variable_set")
+                    if variable_set is not None:
+                        binding["environment_variable_set"] = (
+                            locked_variable_sets.get(
+                                variable_set.pk,
+                                variable_set,
+                            )
+                        )
+
+        if skill_bindings is not None:
             assistant.skill_bindings.all().delete()
             for binding in skill_bindings:
                 skill = Skill.objects.get(uuid=binding["skill_uuid"])
@@ -595,14 +690,20 @@ class AssistantSerializer(serializers.ModelSerializer):
             assistant.mcp_bindings.all().delete()
             for binding in mcp_bindings:
                 mcp = MCPServer.objects.get(uuid=binding["mcp_uuid"])
+                variable_set = self._sync_environment_variable_set(
+                    assistant,
+                    mcp,
+                    binding,
+                )
                 AssistantMCP.objects.create(
                     assistant=assistant,
                     mcp=mcp,
+                    environment_variable_set=variable_set,
                     enabled=binding.get("enabled", True),
                     load_config=binding.get("load_config", {}),
                 )
 
-    def _sync_environment_variable_set(self, assistant, skill, binding):
+    def _sync_environment_variable_set(self, assistant, resource, binding):
         """Apply inline values without mutating another Assistant's set."""
 
         variable_set = binding.get("environment_variable_set")
@@ -612,13 +713,17 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         merged_values = variable_set.get_values() if variable_set else {}
         merged_values.update(values)
-        if variable_set and not variable_set.skill_bindings.exists():
+        if (
+            variable_set
+            and not variable_set.skill_bindings.exists()
+            and not variable_set.mcp_bindings.exists()
+        ):
             variable_set.set_values(merged_values)
             variable_set.save(update_fields=["encrypted_values", "updated_at"])
             return variable_set
 
         requested_name = binding.get("environment_variable_set_name") or ""
-        base_name = requested_name or f"{assistant.name} · {skill.name}"
+        base_name = requested_name or f"{assistant.name} · {resource.name}"
         description = variable_set.description if variable_set else ""
         variable_set = EnvironmentVariableSet(
             name=self._next_environment_variable_set_name(base_name),
@@ -1790,6 +1895,7 @@ class EnvironmentVariableSetSerializer(serializers.ModelSerializer):
 
     values = serializers.JSONField(write_only=True, required=False)
     keys = serializers.ListField(read_only=True)
+    usages = serializers.SerializerMethodField()
 
     class Meta:
         model = EnvironmentVariableSet
@@ -1799,11 +1905,50 @@ class EnvironmentVariableSetSerializer(serializers.ModelSerializer):
             "description",
             "values",
             "keys",
+            "usages",
             "enabled",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["uuid", "keys", "created_at", "updated_at"]
+        read_only_fields = [
+            "uuid",
+            "keys",
+            "usages",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_usages(self, variable_set):
+        """Return secret-safe Skill and MCP binding references."""
+
+        usages = [
+            {
+                "type": "skill",
+                "resource_uuid": str(binding.skill.uuid),
+                "resource_name": binding.skill.name,
+                "assistant_uuid": str(binding.assistant.uuid),
+                "assistant_name": binding.assistant.name,
+            }
+            for binding in variable_set.skill_bindings.all()
+        ]
+        usages.extend(
+            {
+                "type": "mcp",
+                "resource_uuid": str(binding.mcp.uuid),
+                "resource_name": binding.mcp.name,
+                "assistant_uuid": str(binding.assistant.uuid),
+                "assistant_name": binding.assistant.name,
+            }
+            for binding in variable_set.mcp_bindings.all()
+        )
+        return sorted(
+            usages,
+            key=lambda item: (
+                item["type"],
+                item["resource_name"].casefold(),
+                item["assistant_name"].casefold(),
+            ),
+        )
 
     def validate_values(self, value):
         """Validate environment variable names and scalar values."""
@@ -1834,6 +1979,20 @@ class EnvironmentVariableSetSerializer(serializers.ModelSerializer):
 class MCPServerSerializer(serializers.ModelSerializer):
     """MCP server serializer."""
 
+    environment_references = serializers.SerializerMethodField()
+    secret_mask = "********"
+    sensitive_key_names = {
+        "apikey",
+        "authorization",
+        "credential",
+        "credentials",
+        "password",
+        "passwd",
+        "privatekey",
+        "secret",
+        "token",
+    }
+
     class Meta:
         model = MCPServer
         fields = [
@@ -1842,12 +2001,313 @@ class MCPServerSerializer(serializers.ModelSerializer):
             "transport",
             "endpoint",
             "config",
+            "environment",
+            "environment_references",
             "version",
             "enabled",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["uuid", "created_at", "updated_at"]
+
+    def validate_config(self, value):
+        """Require MCP configuration to remain a key-value object."""
+
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                "MCP configuration must be an object."
+            )
+        return value
+
+    def validate_environment(self, value):
+        """Validate MCP environment declarations like Skill declarations."""
+
+        return validate_environment_schema(value)
+
+    def get_environment_references(self, instance):
+        """Return referenced variable names without exposing configuration."""
+
+        return sorted(
+            declared_environment_references(
+                {"endpoint": instance.endpoint, "config": instance.config},
+                instance.environment,
+            )
+        )
+
+    def validate(self, attrs):
+        """Require every MCP environment reference to be declared."""
+
+        attrs = super().validate(attrs)
+        if "config" in attrs:
+            attrs["config"] = self._merge_sensitive_values(
+                attrs["config"],
+                getattr(self.instance, "config", {}) or {},
+            )
+        endpoint = attrs.get(
+            "endpoint",
+            getattr(self.instance, "endpoint", ""),
+        )
+        config = attrs.get(
+            "config",
+            getattr(self.instance, "config", {}),
+        )
+        environment = attrs.get(
+            "environment",
+            getattr(self.instance, "environment", []),
+        )
+        declared = {
+            item["name"]
+            for item in environment or []
+            if isinstance(item, dict) and item.get("name")
+        }
+        references = environment_references(
+            {"endpoint": endpoint, "config": config}
+        )
+        existing_references = environment_references(
+            {
+                "endpoint": getattr(self.instance, "endpoint", ""),
+                "config": getattr(self.instance, "config", {}) or {},
+            }
+        )
+        existing_declared = {
+            item.get("name")
+            for item in getattr(self.instance, "environment", []) or []
+            if isinstance(item, dict) and item.get("name")
+        }
+        legacy_references = existing_references - existing_declared
+        undeclared = sorted(
+            references - declared - legacy_references
+        )
+        if undeclared:
+            raise serializers.ValidationError(
+                {
+                    "environment": (
+                        "Declare every referenced MCP environment variable: "
+                        f"{', '.join(undeclared)}."
+                    )
+                }
+            )
+        return attrs
+
+    def to_representation(self, instance):
+        """Mask sensitive MCP configuration values in every response."""
+
+        payload = super().to_representation(instance)
+        payload["config"] = self._mask_sensitive_values(instance.config or {})
+        return payload
+
+    @classmethod
+    def _normalize_key(cls, key):
+        return "".join(
+            character.lower()
+            for character in str(key or "")
+            if character.isalnum()
+        )
+
+    @classmethod
+    def _is_sensitive_key(cls, key):
+        normalized = cls._normalize_key(key)
+        if normalized in cls.sensitive_key_names:
+            return True
+        segmented_key = re.sub(
+            r"([a-z0-9])([A-Z])",
+            r"\1_\2",
+            str(key or ""),
+        )
+        segments = [
+            segment.lower()
+            for segment in re.findall(r"[A-Za-z0-9]+", segmented_key)
+        ]
+        if any(
+            segment
+            in {
+                "authorization",
+                "credential",
+                "credentials",
+                "password",
+                "passwd",
+                "secret",
+            }
+            for segment in segments
+        ):
+            return True
+        if any(
+            pair in {("api", "key"), ("private", "key")}
+            for pair in zip(segments, segments[1:])
+        ):
+            return True
+        return bool(segments and segments[-1] == "token")
+
+    @classmethod
+    def _mask_sensitive_values(cls, value):
+        if isinstance(value, dict):
+            masked = {}
+            for key, item in value.items():
+                if cls._is_sensitive_key(key) and item not in (None, ""):
+                    masked[key] = cls.secret_mask
+                else:
+                    masked[key] = cls._mask_sensitive_values(item)
+            return masked
+        if isinstance(value, list):
+            return [cls._mask_sensitive_values(item) for item in value]
+        return value
+
+    @classmethod
+    def _merge_sensitive_values(cls, incoming, existing):
+        merged = {}
+        for key, value in incoming.items():
+            existing_key = key
+            if isinstance(existing, dict) and key not in existing:
+                normalized_key = cls._normalize_key(key)
+                existing_key = next(
+                    (
+                        candidate
+                        for candidate in existing
+                        if cls._normalize_key(candidate) == normalized_key
+                    ),
+                    key,
+                )
+            existing_value = (
+                existing.get(existing_key)
+                if isinstance(existing, dict)
+                else None
+            )
+            if (
+                value == cls.secret_mask
+                and existing_value in (None, "")
+            ):
+                raise serializers.ValidationError(
+                    "Masked sensitive values require an existing value. "
+                    "Provide the new sensitive value."
+                )
+            if (
+                cls._is_sensitive_key(key)
+                and value in (None, "", cls.secret_mask)
+                and existing_value not in (None, "")
+            ):
+                merged[existing_key] = existing_value
+            elif isinstance(value, dict):
+                merged[existing_key] = cls._merge_sensitive_values(
+                    value,
+                    existing_value if isinstance(existing_value, dict) else {},
+                )
+            elif isinstance(value, list):
+                existing_items = (
+                    existing_value if isinstance(existing_value, list) else []
+                )
+                if (
+                    cls._contains_sensitive_placeholder(
+                        value,
+                        existing_items,
+                    )
+                    and not cls._masked_list_matches(value, existing_items)
+                ):
+                    raise serializers.ValidationError(
+                        "Lists containing masked sensitive values cannot be "
+                        "reordered or structurally edited. Provide every "
+                        "sensitive value to replace the list."
+                    )
+                merged[existing_key] = cls._merge_sensitive_list(
+                    value,
+                    existing_items,
+                )
+            else:
+                merged[existing_key] = value
+        return merged
+
+    @classmethod
+    def _merge_sensitive_list(cls, incoming, existing):
+        merged = []
+        for index, item in enumerate(incoming):
+            existing_item = existing[index] if index < len(existing) else None
+            if isinstance(item, dict):
+                merged.append(
+                    cls._merge_sensitive_values(
+                        item,
+                        existing_item
+                        if isinstance(existing_item, dict)
+                        else {},
+                    )
+                )
+            elif isinstance(item, list):
+                merged.append(
+                    cls._merge_sensitive_list(
+                        item,
+                        existing_item
+                        if isinstance(existing_item, list)
+                        else [],
+                    )
+                )
+            else:
+                merged.append(item)
+        return merged
+
+    @classmethod
+    def _contains_sensitive_placeholder(cls, value, existing=None):
+        if isinstance(value, dict):
+            existing_items = existing if isinstance(existing, dict) else {}
+            for key, item in value.items():
+                existing_key = key
+                if key not in existing_items:
+                    normalized_key = cls._normalize_key(key)
+                    existing_key = next(
+                        (
+                            candidate
+                            for candidate in existing_items
+                            if cls._normalize_key(candidate) == normalized_key
+                        ),
+                        key,
+                    )
+                existing_item = existing_items.get(existing_key)
+                if (
+                    cls._is_sensitive_key(key)
+                    and item in (None, "", cls.secret_mask)
+                    and existing_item not in (None, "")
+                ):
+                    return True
+                if cls._contains_sensitive_placeholder(item, existing_item):
+                    return True
+            return False
+        if isinstance(value, list):
+            existing_items = existing if isinstance(existing, list) else []
+            return any(
+                cls._contains_sensitive_placeholder(
+                    item,
+                    existing_items[index]
+                    if index < len(existing_items)
+                    else None,
+                )
+                for index, item in enumerate(value)
+            )
+        return False
+
+    @classmethod
+    def _masked_list_matches(cls, incoming, existing):
+        if isinstance(incoming, dict):
+            if (
+                not isinstance(existing, dict)
+                or incoming.keys() != existing.keys()
+            ):
+                return False
+            return all(
+                (
+                    cls._is_sensitive_key(key)
+                    and item in (None, "", cls.secret_mask)
+                    and existing[key] not in (None, "")
+                )
+                or cls._masked_list_matches(item, existing[key])
+                for key, item in incoming.items()
+            )
+        if isinstance(incoming, list):
+            return (
+                isinstance(existing, list)
+                and len(incoming) == len(existing)
+                and all(
+                    cls._masked_list_matches(item, existing[index])
+                    for index, item in enumerate(incoming)
+                )
+            )
+        return incoming == existing
 
 
 class GlobalSettingSerializer(serializers.ModelSerializer):

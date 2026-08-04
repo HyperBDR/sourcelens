@@ -823,6 +823,12 @@
         "action": "新建配置"
       }
     },
+    "mcp": {
+      "secretConfigured": "已配置",
+      "sensitiveConfigHint": "密码、Secret、Token、API Key、Authorization、Credential 和私钥配置会以掩码显示。保留掩码表示不修改，输入新值表示覆盖，删除该行表示清除。",
+      "environmentVariablesHelp": "添加此 MCP Server 运行所需的变量；将 MCP Server 绑定到 Assistant 时再填写变量值。",
+      "environmentPlaceholderHint": "可在 Endpoint 或 Config 中使用 {placeholder} 引用已声明变量；SourceLens 只会在每次 Run 的私有 MCP 配置中解析。"
+    },
     "skills": {
       "beautify": "一键美化",
       "beautifyHint": "使用已配置的 Skill 生成模型润色 / 生成 SKILL.md 内容",
@@ -919,6 +925,10 @@
     "environmentVariables": {
       "empty": "暂无环境变量配置集。",
       "keys": "变量 Key",
+      "usages": "引用方",
+      "skillUsage": "Skill",
+      "mcpUsage": "MCP",
+      "assistantUsage": "Assistant：{name}",
       "values": "变量值",
       "value": "变量值",
       "addValue": "＋ 添加变量",
@@ -1514,6 +1524,12 @@
       "skillsSection": "Skills",
       "skillsSectionRequired": "Skills *",
       "generalChatSkillsHint": "请至少选择一个 Skill。通用对话会根据绑定 Skill 的指令、包内脚本和声明的可执行 Artifact 运行。",
+      "searchSkills": "搜索 Skills",
+      "skillSearchResults": "显示 {count} / {total} 个 Skills",
+      "noMatchingSkills": "没有匹配的 Skills",
+      "environmentSection": "环境变量",
+      "environmentSectionHint": "这些配置仅对当前 Skill 生效；继续前需配置全部必填变量。",
+      "environmentRequired": "必填",
       "environmentConfiguration": "环境配置",
       "environmentConfigurationHint": "该 Skill 声明了 {count} 个环境变量。请选择已有配置集，或在这里新建。",
       "selectEnvironmentSet": "请选择配置集",
@@ -1522,6 +1538,8 @@
       "environmentConfigured": "已保存",
       "environmentMissing": "未配置",
       "mcpSection": "MCP Servers",
+      "mcpEnvironmentSectionHint": "这些配置仅对当前 MCP Server 生效；继续前需配置全部必填变量。",
+      "mcpEnvironmentConfigurationHint": "该 MCP Server 声明了 {count} 个环境变量。请选择已有配置集，或在这里新建。",
       "noSkills": "暂无可用 Skill，请先在 Skill 资源库中创建",
       "noMcp": "暂无可用 MCP Server，请先在 MCP Server 资源库中创建",
       "visibilityHint": "管理员始终可访问全部助手。"

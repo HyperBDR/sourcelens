@@ -5,7 +5,7 @@
         class="flex items-center justify-between gap-3 border-b border-line bg-surface-sunken px-3 py-2.5"
       >
         <p class="text-sm leading-5 text-ink-600">
-          {{ t('lensAdmin.skills.environmentVariablesHelp') }}
+          {{ helpText || t('lensAdmin.skills.environmentVariablesHelp') }}
         </p>
         <BaseButton
           class="shrink-0"
@@ -66,6 +66,10 @@ import FormRow from './FormRow.vue'
 const { t } = useI18n()
 
 const props = defineProps({
+  helpText: {
+    type: String,
+    default: ''
+  },
   modelValue: {
     type: Array,
     default: () => []
