@@ -717,6 +717,16 @@ def test_capability_boundary_state_round_trips_for_resume():
     assert detail == {}
 
 
+def test_capability_boundary_rejects_invalid_resume_state():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+
+    with pytest.raises(
+        CheckpointResumeError,
+        match="invalid execution-gate state",
+    ):
+        middleware.restore_state(None)
+
+
 def test_model_event_records_cache_reasoning_and_latency():
     events = []
     message = _Msg(
@@ -2327,17 +2337,17 @@ def test_validated_bulk_result_completes_after_token_budget_wrapup():
     assert termination_detail == {}
 
 
-def test_legacy_runtime_ignores_general_chat_outcome_gates():
+def test_legacy_runtime_marks_provider_output_limit_as_partial():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=None,
         evidence_requirement="none",
         truncated=True,
-        stop_reason="turn_limit",
+        stop_reason="model_length_capped",
         execution_gate_enabled=False,
     )
 
-    assert outcome == "completed"
-    assert termination_detail == {}
+    assert outcome == "partial"
+    assert termination_detail == {"reason": "model_length_capped"}
 
 
 def test_validation_without_expected_count_remains_partial_after_wrapup():

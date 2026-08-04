@@ -1,0 +1,6 @@
+type: fix
+audience: user
+en: >-
+  Improved large document generation by preventing truncated model responses
+  from being marked complete and writing output in resumable chunks.
+zh-CN: 改进大文档生成，避免将截断的模型响应标记为完成，并以可恢复的分块方式写入输出。

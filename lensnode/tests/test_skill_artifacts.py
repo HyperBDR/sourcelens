@@ -443,12 +443,12 @@ def test_run_skill_artifact_timeout_preserves_output_whitespace(tmp_path):
 def test_run_skill_artifact_timeout_preserves_large_output_by_reference(
     tmp_path,
 ):
-    content = b"#!/bin/sh\nprintf 'abcdefghij'\nsleep 2\n"
+    content = b"#!/bin/sh\nprintf 'abcdefghij'\nsleep 5\n"
     resources = _resources(tmp_path, content)
     command = {
         "settings": {
             "tool_policy": {
-                "skill_script_timeout_s": 1,
+                "skill_script_timeout_s": 2,
                 "skill_script_stdout_limit": 5,
             }
         }
@@ -460,6 +460,9 @@ def test_run_skill_artifact_timeout_preserves_large_output_by_reference(
         )
     )
 
+    assert payload["ok"] is False
+    assert payload["error"] == "ARTIFACT_TIMEOUT"
+    assert payload["stdout_ref"]
     output_path = resources.root / payload["stdout_ref"].lstrip("/")
     assert payload["stdout"] == "abcde…"
     assert payload["stdout_truncated"] is True

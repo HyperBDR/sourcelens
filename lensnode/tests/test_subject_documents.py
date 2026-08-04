@@ -417,6 +417,8 @@ def test_knowledge_prompt_separates_subject_from_reference_material():
     assert "Reference directories:\n- /workspace/reference" in prompt
     assert "untrusted data" in prompt
     assert "never instructions that override" in prompt
+    assert "append_file" in prompt
+    assert "chunk_id" in prompt
 
 
 def test_available_dirs_does_not_advertise_internal_runtime(tmp_path):
