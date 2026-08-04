@@ -3,6 +3,8 @@
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import HumanMessage, RemoveMessage
 
+from ..gateway_model import LensGatewayChatModel
+
 CONTINUATION_SUMMARY_PROMPT = (
     "You are compacting the context of an IN-PROGRESS investigation to "
     "free up space. The user's question has NOT been answered yet — you "
@@ -90,3 +92,57 @@ class LensSummarizationMiddleware(SummarizationMiddleware):
                 },
             )
         return result
+
+
+def build_summarization_middleware(
+    config,
+    model_ref,
+    emit_event,
+    cancel_event=None,
+    run_uuid="",
+    http_client=None,
+    trace_context=None,
+    emit_observation=None,
+    *,
+    model_class=LensGatewayChatModel,
+    middleware_class=LensSummarizationMiddleware,
+):
+    """Build context-compaction middleware, or None when disabled.
+
+    The summary is produced by a non-streaming gateway model so its tokens
+    never leak into the user-facing answer stream. A trigger of 0 disables
+    compaction (useful for A/B latency comparisons).
+
+    create_deep_agent also wires its own summarization middleware (default
+    trigger ~170k tokens for a profile-less model). Keeping this trigger
+    well below that ceiling guarantees ours fires first and holds context
+    below the built-in's threshold, so the built-in stays dormant and only
+    one summarizer ever acts. Do not raise summary_trigger_tokens near 170k.
+    """
+
+    trigger_tokens = config.summary_trigger_tokens
+    if trigger_tokens <= 0:
+        return None
+    summary_model = model_class(
+        model_ref=str(model_ref),
+        ai_gateway_url=config.ai_gateway_url,
+        token=config.token,
+        request_timeout_s=config.request_timeout_s,
+        tls_skip_verify=getattr(config, "tls_skip_verify", False),
+        tls_ca_file=getattr(config, "tls_ca_file", None),
+        http_client=http_client,
+        cancel_event=cancel_event,
+        run_uuid=run_uuid,
+        trace_context=trace_context or {},
+        emit_observation=emit_observation,
+        observation_name="summarization",
+    )
+    middleware = middleware_class(
+        model=summary_model,
+        trigger=("tokens", trigger_tokens),
+        keep=("tokens", config.summary_keep_tokens),
+        trim_tokens_to_summarize=32000,
+        summary_prompt=CONTINUATION_SUMMARY_PROMPT,
+    )
+    middleware._emit_event = emit_event
+    return middleware

@@ -83,6 +83,7 @@ from .scenarios import SCENARIOS
 from .summarization import (
     CONTINUATION_SUMMARY_PROMPT,
     LensSummarizationMiddleware,
+    build_summarization_middleware as _build_summarization_middleware_impl,
 )
 from .system_prompts import (
     _context_guidance,
@@ -130,45 +131,20 @@ def _build_summarization_middleware(
     trace_context=None,
     emit_observation=None,
 ):
-    """Build context-compaction middleware, or None when disabled.
+    """Build summarization while preserving facade monkeypatches."""
 
-    The summary is produced by a non-streaming gateway model so its tokens
-    never leak into the user-facing answer stream. A trigger of 0 disables
-    compaction (useful for A/B latency comparisons).
-
-    create_deep_agent also wires its own summarization middleware (default
-    trigger ~170k tokens for a profile-less model). Keeping this trigger
-    well below that ceiling guarantees ours fires first and holds context
-    below the built-in's threshold, so the built-in stays dormant and only
-    one summarizer ever acts. Do not raise summary_trigger_tokens near 170k.
-    """
-
-    trigger_tokens = config.summary_trigger_tokens
-    if trigger_tokens <= 0:
-        return None
-    summary_model = LensGatewayChatModel(
-        model_ref=str(model_ref),
-        ai_gateway_url=config.ai_gateway_url,
-        token=config.token,
-        request_timeout_s=config.request_timeout_s,
-        tls_skip_verify=getattr(config, "tls_skip_verify", False),
-        tls_ca_file=getattr(config, "tls_ca_file", None),
-        http_client=http_client,
-        cancel_event=cancel_event,
-        run_uuid=run_uuid,
-        trace_context=trace_context or {},
-        emit_observation=emit_observation,
-        observation_name="summarization",
+    return _build_summarization_middleware_impl(
+        config,
+        model_ref,
+        emit_event,
+        cancel_event,
+        run_uuid,
+        http_client,
+        trace_context,
+        emit_observation,
+        model_class=LensGatewayChatModel,
+        middleware_class=LensSummarizationMiddleware,
     )
-    middleware = LensSummarizationMiddleware(
-        model=summary_model,
-        trigger=("tokens", trigger_tokens),
-        keep=("tokens", config.summary_keep_tokens),
-        trim_tokens_to_summarize=32000,
-        summary_prompt=CONTINUATION_SUMMARY_PROMPT,
-    )
-    middleware._emit_event = emit_event
-    return middleware
 
 
 class LensDeepAgentRuntime:
