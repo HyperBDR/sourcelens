@@ -1,4 +1,4 @@
-"""Pure message and event helpers used by the LensNode agent runtime."""
+"""Pure message and event helpers for the LensNode agent runtime."""
 
 
 def extract_final_message(response):

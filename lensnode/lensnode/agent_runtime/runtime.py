@@ -27,12 +27,12 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from .agent_tools import (
+from ..agent_tools import (
     SELF_REPORTING_TOOLS,
     build_agent_tools,
     build_general_chat_tools,
 )
-from .checkpoint import (
+from ..checkpoint import (
     CheckpointResumeError,
     checkpoint_enabled,
     get_checkpoint_saver,
@@ -42,15 +42,15 @@ from .checkpoint import (
     save_runtime_state,
     thread_config,
 )
-from .gateway_model import (
+from ..gateway_model import (
     LensGatewayChatModel,
     RunCancelledError,
     _tool_result_metadata,
 )
-from .logging_utils import elapsed_since, task_log, utc_now
-from .mcp_tools import build_deferred_mcp_tools, load_mcp_tools
-from .runtime_modes import runtime_mode_for
-from .runtime_messages import (
+from ..logging_utils import elapsed_since, task_log, utc_now
+from ..mcp_tools import build_deferred_mcp_tools, load_mcp_tools
+from ..runtime_modes import runtime_mode_for
+from .messages import (
     activity_from_event as _activity_from_event,
     build_initial_messages as _build_initial_messages,
     detail_lines as _detail_lines,
@@ -58,14 +58,14 @@ from .runtime_messages import (
     normalize_plan_steps as _normalize_plan_steps,
     tool_call_summary as _tool_call_summary,
 )
-from .runtime_prompts import (
+from .prompts import (
     answer_language_requirement as _answer_language_requirement,
     command_answer_language as _command_answer_language,
     detect_answer_language as _detect_answer_language,
     history_artifact_guidance as _history_artifact_guidance,
     pick_text as _pick_text,
 )
-from .runtime_resources import (
+from ..runtime_resources import (
     cleanup_runtime_resources,
     prepare_runtime_resources,
 )

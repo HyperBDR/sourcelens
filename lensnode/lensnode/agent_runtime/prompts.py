@@ -1,4 +1,4 @@
-"""Language and reusable prompt fragments for LensNode runs."""
+"""Language selection and reusable prompt fragments for LensNode runs."""
 
 
 def detect_answer_language(question):
