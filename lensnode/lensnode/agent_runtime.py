@@ -2460,6 +2460,10 @@ def _finalize_runtime_outcome(
     """Resolve a run outcome after observing actual tool execution."""
 
     if not execution_gate_enabled:
+        if truncated:
+            return "partial", {
+                "reason": stop_reason or "execution_limit",
+            }
         return "completed", {}
     if capability_middleware is None:
         if truncated:
@@ -2844,6 +2848,14 @@ def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
         "and the user cannot see it; when you produce a file deliverable "
         "the user should keep, write it to scratch and then call "
         "save_deliverable(path) to deliver it for download.\n\n"
+        "Long-form file deliverables:\n"
+        "- Never place a long document in one write_file tool call. Use "
+        "append_file for every section instead, keeping each section at or "
+        "below 24 KiB. Use one stable output path and ordered chunk_id "
+        "values such as translation-001, translation-002.\n"
+        "- append_file retries with the same chunk_id and content are safe; "
+        "a changed replay is rejected. Finish all chunks before calling "
+        "save_deliverable(path).\n\n"
         "Work in parallel whenever steps are independent — this is the "
         "biggest lever on response speed. Batch independent tool calls "
         "into a single step instead of running them one by one: read "
