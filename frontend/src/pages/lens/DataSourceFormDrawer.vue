@@ -113,7 +113,7 @@
             <div class="flex gap-2">
               <BaseSelect
                 :model-value="form.credential_uuid"
-                @change="handleCredentialChange"
+                @update:model-value="handleCredentialChange"
               >
                 <option value="">
                   {{ t('lensAdmin.datasourceWizard.selectCredential') }}
@@ -201,7 +201,7 @@
             <div class="flex gap-2">
               <BaseSelect
                 :model-value="form.credential_uuid"
-                @change="handleCredentialChange"
+                @update:model-value="handleCredentialChange"
               >
                 <option value="">
                   {{ t('lensAdmin.datasourceWizard.selectFeishuCredential') }}
@@ -1890,8 +1890,7 @@ function testConnectionIfVisible() {
   }
 }
 
-async function handleCredentialChange(event) {
-  const nextUuid = event.target.value
+async function handleCredentialChange(nextUuid) {
   const previousUuid =
     acceptedCredentialUuid.value || props.form.credential_uuid
   if (nextUuid === props.form.credential_uuid) {
@@ -1903,7 +1902,6 @@ async function handleCredentialChange(event) {
     )
     if (!confirmed) {
       props.form.credential_uuid = previousUuid
-      event.target.value = previousUuid
       return
     }
   }
