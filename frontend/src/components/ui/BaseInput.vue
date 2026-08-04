@@ -3,7 +3,7 @@
     <label
       v-if="label"
       :for="inputId"
-      class="block text-sm font-medium text-ink-800"
+      class="block text-sm font-medium text-theme"
     >
       {{ label }}
       <span v-if="required" class="text-danger-600">*</span>
@@ -78,7 +78,7 @@
       {{ error }}
     </p>
 
-    <p v-else-if="help" class="text-sm text-ink-500">
+    <p v-else-if="help" class="text-sm text-theme-muted">
       {{ help }}
     </p>
   </div>
@@ -150,7 +150,7 @@ const inputId = ref(`input-${Math.random().toString(36).substr(2, 9)}`)
 
 const inputClasses = computed(() => {
   const baseClasses =
-    'block w-full rounded-lg border bg-surface px-3 py-2 text-sm text-ink-900 shadow-sm placeholder:text-ink-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:opacity-50'
+    'block w-full rounded-lg border bg-surface px-3 py-2 text-sm text-theme shadow-sm placeholder:text-theme-subtle focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 disabled:cursor-not-allowed disabled:opacity-50'
   const errorClass = props.error
     ? 'border-danger-300 focus:border-danger-500 focus:ring-danger-500/20'
     : 'border-line'

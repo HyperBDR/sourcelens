@@ -22,10 +22,13 @@
             class="flex flex-shrink-0 items-center justify-between border-b border-line px-6 py-4"
           >
             <div class="min-w-0 flex-1">
-              <h2 class="truncate text-base font-semibold text-ink-900">
+              <h2 class="truncate text-base font-semibold text-theme">
                 {{ title }}
               </h2>
-              <p v-if="subtitle" class="mt-0.5 truncate text-sm text-ink-500">
+              <p
+                v-if="subtitle"
+                class="mt-0.5 truncate text-sm text-theme-muted"
+              >
                 {{ subtitle }}
               </p>
             </div>
@@ -37,7 +40,7 @@
             </div>
             <button
               type="button"
-              class="ml-3 flex-shrink-0 rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-sunken hover:text-ink-600 focus:outline-none"
+              class="ml-3 flex-shrink-0 rounded-md p-1.5 text-theme-subtle transition-colors hover:bg-surface-sunken hover:text-theme-secondary focus:outline-none"
               :aria-label="t('common.close')"
               @click="requestClose"
             >

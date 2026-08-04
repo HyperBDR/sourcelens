@@ -5,8 +5,8 @@
       :class="[
         'flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors md:min-h-0 md:min-w-0',
         variant === 'dark'
-          ? 'text-white/80 hover:bg-white/10 hover:text-white'
-          : 'text-ink-500 hover:bg-line-soft hover:text-ink-800'
+          ? 'text-white/80 hover:bg-surface-hover/20 hover:text-white'
+          : 'text-theme-muted hover:bg-line-soft hover:text-theme'
       ]"
       :title="t('common.language')"
     >
@@ -42,8 +42,8 @@
           class="flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors md:min-h-0"
           :class="
             locale === lang.value
-              ? 'bg-line-soft font-medium text-ink-900'
-              : 'text-ink-600 hover:bg-line-soft hover:text-ink-900'
+              ? 'bg-line-soft font-medium text-theme'
+              : 'text-theme-secondary hover:bg-line-soft hover:text-theme'
           "
         >
           <span class="text-base leading-none">{{ lang.flag }}</span>

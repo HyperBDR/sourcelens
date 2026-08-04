@@ -25,7 +25,7 @@
     >
       <KeyRound :size="16" :stroke-width="2" aria-hidden="true" />
       <span v-if="!collapsed || isMobile" class="min-w-0 text-left">
-        <span class="block truncate text-xs font-medium text-ink-700">
+        <span class="block truncate text-xs font-medium text-theme-secondary">
           {{ passwordText.setup.promptStatus }}
         </span>
         <span class="block truncate text-xs text-primary-600">
@@ -47,16 +47,16 @@
         <span>{{ userInitials }}</span>
       </div>
       <div v-if="!collapsed || isMobile" class="min-w-0 flex-1 text-left">
-        <div class="truncate text-sm font-medium text-ink-900">
+        <div class="truncate text-sm font-medium text-theme">
           {{ displayName }}
         </div>
-        <div class="truncate text-xs text-ink-500">
+        <div class="truncate text-xs text-theme-muted">
           {{ t('platforms.workspace') }}
         </div>
       </div>
       <svg
         v-if="!collapsed || isMobile"
-        class="h-4 w-4 shrink-0 text-ink-500 transition-transform"
+        class="h-4 w-4 shrink-0 text-theme-muted transition-transform"
         :class="{ 'rotate-180': dockMenuOpen }"
         viewBox="0 0 24 24"
         fill="none"
@@ -269,14 +269,14 @@ async function handleLogout() {
 }
 
 .dock-link {
-  @apply flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-theme-secondary transition-colors;
 }
 
 .dock-link:hover {
-  @apply bg-line-soft text-ink-900;
+  @apply bg-line-soft text-theme;
 }
 
 .dock-build-info {
-  @apply px-3 pb-1 pt-2 text-left text-xs text-ink-400;
+  @apply px-3 pb-1 pt-2 text-left text-xs text-theme-subtle;
 }
 </style>

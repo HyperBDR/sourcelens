@@ -3,7 +3,7 @@
     <label
       v-if="label"
       :for="selectId"
-      class="block text-sm font-medium text-ink-800"
+      class="block text-sm font-medium text-theme"
     >
       {{ label }}
       <span v-if="required" class="text-danger-600">*</span>
@@ -42,7 +42,7 @@
             'pointer-events-none absolute right-3 top-1/2 h-4 w-4',
             '-translate-y-1/2 transition-transform duration-150',
             isOpen ? 'rotate-180' : '',
-            disabled ? 'text-ink-300' : 'text-ink-500'
+            disabled ? 'text-theme-subtle' : 'text-theme-muted'
           ]"
           fill="none"
           stroke="currentColor"
@@ -77,7 +77,7 @@
       {{ error }}
     </p>
 
-    <p v-else-if="help" :id="helpId" class="text-sm text-ink-500">
+    <p v-else-if="help" :id="helpId" class="text-sm text-theme-muted">
       {{ help }}
     </p>
 
@@ -283,16 +283,16 @@ const selectClasses = computed(() => {
   }
   const variantClasses = {
     default: [
-      'rounded-lg border bg-surface text-ink-900 shadow-sm',
-      'transition-colors hover:border-ink-300',
+      'rounded-lg border bg-surface text-theme shadow-sm',
+      'transition-colors hover:border-line-strong',
       'focus:border-primary-500 focus:outline-none focus:ring-2',
       'focus:ring-primary-500/20 disabled:bg-surface-sunken',
-      'disabled:text-ink-400 disabled:opacity-50'
+      'disabled:text-theme-subtle disabled:opacity-50'
     ].join(' '),
     unstyled: [
-      'border-0 bg-transparent text-ink-900 shadow-none',
+      'border-0 bg-transparent text-theme shadow-none',
       'focus:outline-none focus:ring-0',
-      'disabled:text-ink-400 disabled:opacity-50'
+      'disabled:text-theme-subtle disabled:opacity-50'
     ].join(' ')
   }
   const invalidClasses = isInvalid.value
@@ -338,10 +338,10 @@ function optionClasses(option, index) {
     optionSizeClasses.value,
     props.mobileTouch ? 'min-h-11 md:min-h-0' : '',
     option.disabled
-      ? 'cursor-not-allowed text-ink-400 opacity-60'
-      : 'cursor-pointer text-ink-800',
+      ? 'cursor-not-allowed text-theme-subtle opacity-60'
+      : 'cursor-pointer text-theme',
     !option.disabled && activeIndex.value === index
-      ? 'bg-primary-50 text-primary-700'
+      ? 'bg-surface-selected text-theme'
       : '',
     !option.disabled && activeIndex.value !== index
       ? 'hover:bg-surface-sunken'

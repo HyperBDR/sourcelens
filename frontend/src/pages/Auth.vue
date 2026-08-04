@@ -8,16 +8,16 @@
       </div>
 
       <!-- Login card -->
-      <div class="rounded-2xl border border-line bg-white p-8 shadow-xl">
+      <div class="rounded-2xl border border-line bg-surface p-8 shadow-xl">
         <div class="mb-7 text-center">
           <BrandLogo
             variant="mark"
             class="mx-auto mb-4 flex h-8 justify-center"
           />
-          <h1 class="text-xl font-semibold text-ink-900">
+          <h1 class="text-xl font-semibold text-theme">
             {{ t('auth.loginTitle') }}
           </h1>
-          <p class="mt-2 text-sm text-ink-500">
+          <p class="mt-2 text-sm text-theme-muted">
             {{ t('auth.codeLogin.modalSubtitle') }}
           </p>
         </div>

@@ -9,7 +9,7 @@
       <router-link
         v-if="showQaLink && assistantSlug"
         :to="`/lens/assistants/${assistantSlug}/qa`"
-        class="inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-sm font-medium text-ink-600 no-underline transition-colors hover:border-ink-300 hover:bg-surface-sunken hover:text-ink-900"
+        class="inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-sm font-medium text-theme-secondary no-underline transition-colors hover:border-line-strong hover:bg-surface-sunken hover:text-theme"
       >
         <MessagesSquare :size="15" :stroke-width="2" aria-hidden="true" />
         {{ t('lens.qa.publicListLink') }}
@@ -24,7 +24,7 @@
       <router-link
         v-if="!isAuthenticated"
         :to="loginTarget"
-        class="rounded-md px-3 py-1.5 text-sm font-medium text-ink-600 no-underline transition-colors hover:bg-surface-sunken"
+        class="rounded-md px-3 py-1.5 text-sm font-medium text-theme-secondary no-underline transition-colors hover:bg-surface-sunken"
       >
         {{ t('auth.signIn') }}
       </router-link>

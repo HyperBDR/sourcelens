@@ -40,7 +40,7 @@
       <button
         v-if="isMobile"
         @click="$emit('close')"
-        class="rounded-md p-2 text-ink-500 hover:bg-line-soft hover:text-ink-900"
+        class="rounded-md p-2 text-theme-muted hover:bg-line-soft hover:text-theme"
       >
         <svg
           class="w-5 h-5"
@@ -187,7 +187,7 @@ const preloadRoute = (path) => {
 
 <style scoped>
 .nav-item {
-  @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-700 transition-colors hover:bg-line-soft hover:text-ink-900;
+  @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-theme-secondary transition-colors hover:bg-line-soft hover:text-theme;
 }
 
 .nav-item-active {
@@ -195,7 +195,7 @@ const preloadRoute = (path) => {
 }
 
 .nav-item-parent {
-  @apply w-full cursor-pointer font-semibold text-ink-900;
+  @apply w-full cursor-pointer font-semibold text-theme;
 }
 
 .nav-item-parent:hover {
@@ -203,7 +203,7 @@ const preloadRoute = (path) => {
 }
 
 .nav-item-child {
-  @apply relative pl-10 py-2 text-sm font-normal text-ink-600;
+  @apply relative pl-10 py-2 text-sm font-normal text-theme-secondary;
   margin-left: 0.75rem;
   border-radius: 0.375rem;
 }

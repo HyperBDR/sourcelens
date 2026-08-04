@@ -36,15 +36,20 @@ export default {
           600: '#4b5563',
           700: '#374151',
           800: '#1f2937',
-          900: '#111827'
+          900: '#111827',
+          950: '#030712'
         },
         line: {
-          DEFAULT: '#e5e7eb',
-          soft: '#f3f4f6'
+          DEFAULT: 'rgb(var(--sl-border-default-rgb) / <alpha-value>)',
+          soft: 'rgb(var(--sl-border-soft-rgb) / <alpha-value>)',
+          strong: 'rgb(var(--sl-border-strong-rgb) / <alpha-value>)'
         },
         surface: {
-          DEFAULT: '#ffffff',
-          sunken: '#f9fafb'
+          DEFAULT: 'rgb(var(--sl-bg-surface-rgb) / <alpha-value>)',
+          sunken: 'rgb(var(--sl-bg-canvas-rgb) / <alpha-value>)',
+          raised: 'rgb(var(--sl-bg-raised-rgb) / <alpha-value>)',
+          hover: 'rgb(var(--sl-bg-hover-rgb) / <alpha-value>)',
+          selected: 'rgb(var(--sl-bg-selected-rgb) / <alpha-value>)'
         },
         success: {
           DEFAULT: '#1f9d6b',
@@ -78,6 +83,14 @@ export default {
           700: '#374151',
           800: '#1f2937',
           900: '#111827'
+        }
+      },
+      textColor: {
+        theme: {
+          DEFAULT: 'rgb(var(--sl-text-primary-rgb) / <alpha-value>)',
+          secondary: 'rgb(var(--sl-text-secondary-rgb) / <alpha-value>)',
+          muted: 'rgb(var(--sl-text-muted-rgb) / <alpha-value>)',
+          subtle: 'rgb(var(--sl-text-subtle-rgb) / <alpha-value>)'
         }
       },
       fontFamily: {
