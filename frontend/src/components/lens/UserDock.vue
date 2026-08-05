@@ -234,13 +234,11 @@ async function handleLogout() {
   @apply px-3 pb-1 pt-2 text-left text-xs text-theme-subtle;
 }
 
-:global(:root[data-theme='dark'] .password-setup-prompt),
 :global(:root[data-theme='dark'] .anon-login-btn) {
   border-color: var(--sl-border-default);
   background: var(--sl-bg-raised);
 }
 
-:global(:root[data-theme='dark'] .password-setup-prompt:hover),
 :global(:root[data-theme='dark'] .dock-trigger:hover),
 :global(:root[data-theme='dark'] .dock-trigger-open),
 :global(:root[data-theme='dark'] .anon-login-btn:hover) {
