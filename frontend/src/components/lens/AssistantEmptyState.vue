@@ -58,7 +58,11 @@
     <!-- Visitor / end-user: a simple no-assistant notice. -->
     <div v-else class="onboarding-card">
       <div class="onboarding-badge badge-visitor">
-        <img src="/brand/logo_transparent.png" alt="" class="badge-logo" />
+        <BrandLogo
+          variant="mark"
+          altText=""
+          wrapperClass="badge-logo gap-0 [&_img]:h-8 [&_img]:w-8"
+        />
       </div>
       <h1 class="onboarding-title">{{ t('lens.onboarding.visitorTitle') }}</h1>
       <p class="onboarding-subtitle">
@@ -73,6 +77,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowRight, Bot, Database, MessageSquare, Sparkles } from '@lucide/vue'
 
+import BrandLogo from '@/components/layout/BrandLogo.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 
 defineProps({
@@ -119,7 +124,11 @@ function goConsole() {
 }
 
 .badge-logo {
-  @apply h-8 w-8 object-contain opacity-80;
+  @apply opacity-80;
+}
+
+.badge-logo :deep(img) {
+  @apply h-8 w-8 object-contain;
 }
 
 .onboarding-title {

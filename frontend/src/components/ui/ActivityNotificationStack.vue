@@ -16,19 +16,19 @@
           v-for="notification in state.notifications"
           :key="notification.id"
           type="button"
-          class="pointer-events-auto flex w-full items-center gap-3 rounded-xl border bg-white p-3 text-left shadow-lg transition-colors hover:bg-gray-50"
+          class="pointer-events-auto flex w-full items-center gap-3 rounded-xl border bg-surface p-3 text-left shadow-lg transition-colors hover:bg-surface-hover"
           :class="notificationClass(notification.type)"
           @click="openNotification(notification)"
         >
-          <img
-            src="/brand/logo_transparent.png"
-            alt=""
-            class="h-9 w-9 shrink-0 object-contain"
+          <BrandLogo
+            variant="mark"
+            altText=""
+            wrapperClass="shrink-0 gap-0 [&_img]:h-9 [&_img]:w-9"
           />
           <span class="min-w-0 flex-1">
             <span
               v-if="notification.title"
-              class="block truncate text-sm font-semibold text-gray-900"
+              class="block truncate text-sm font-semibold text-theme"
             >
               {{ notification.title }}
             </span>
@@ -48,17 +48,18 @@
 <script setup>
 import { useRouter } from 'vue-router'
 
+import BrandLogo from '@/components/layout/BrandLogo.vue'
 import { useSessionActivity } from '@/composables/useSessionActivity'
 
 const router = useRouter()
 const { dismissNotification, state } = useSessionActivity()
 
 function notificationClass(type) {
-  return type === 'error' ? 'border-red-200' : 'border-gray-200'
+  return type === 'error' ? 'border-red-200' : 'border-line'
 }
 
 function messageClass(type) {
-  return type === 'error' ? 'text-red-700' : 'text-gray-600'
+  return type === 'error' ? 'text-red-700' : 'text-theme-secondary'
 }
 
 function openNotification(notification) {

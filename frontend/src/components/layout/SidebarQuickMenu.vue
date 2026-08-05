@@ -10,15 +10,15 @@
         <span>{{ userInitials }}</span>
       </div>
       <div class="min-w-0 flex-1">
-        <div class="truncate text-sm font-medium text-ink-900">
+        <div class="truncate text-sm font-medium text-theme">
           {{ displayName }}
         </div>
-        <div class="truncate text-xs text-ink-500">
+        <div class="truncate text-xs text-theme-muted">
           {{ currentPlatformLabel }}
         </div>
       </div>
       <svg
-        class="h-4 w-4 shrink-0 text-ink-500 transition-transform"
+        class="h-4 w-4 shrink-0 text-theme-muted transition-transform"
         :class="{ 'rotate-180': open }"
         fill="none"
         stroke="currentColor"
@@ -68,7 +68,7 @@
         <div class="quick-menu-section">
           <div
             v-if="userStore.userHasFeature('admin_console')"
-            class="mb-2 border-b border-line pb-2"
+            class="quick-menu-admin-separator mb-2 border-b border-line pb-2"
           >
             <router-link
               to="/management/users"
@@ -215,18 +215,33 @@ onUnmounted(() => {
 }
 
 .quick-menu-label {
-  @apply mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-500;
+  @apply mb-2 text-[11px] font-semibold uppercase tracking-wide text-theme-muted;
 }
 
 .quick-menu-link {
-  @apply flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-theme-secondary transition-colors;
 }
 
 .quick-menu-link:hover {
-  @apply bg-line-soft text-ink-900;
+  @apply bg-line-soft text-theme;
 }
 
 .quick-pill {
-  @apply rounded-full bg-line-soft px-2 py-0.5 text-xs font-medium text-ink-500;
+  @apply rounded-full bg-line-soft px-2 py-0.5 text-xs font-medium text-theme-muted;
+}
+
+:global(:root[data-theme='dark'] .quick-menu-trigger:hover),
+:global(:root[data-theme='dark'] .quick-menu-trigger-open) {
+  border-color: var(--sl-border-strong);
+  background: var(--sl-bg-hover);
+}
+
+:global(:root[data-theme='dark'] .quick-menu-admin-separator),
+:global(:root[data-theme='dark'] .quick-menu-section) {
+  border-bottom: 0;
+}
+
+:global(:root[data-theme='dark'] .quick-menu-link:hover) {
+  background: var(--sl-bg-hover);
 }
 </style>

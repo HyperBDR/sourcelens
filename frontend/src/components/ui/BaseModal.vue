@@ -18,7 +18,7 @@
     >
       <div class="flex min-h-full items-center justify-center p-4">
         <div
-          class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+          class="fixed inset-0 bg-ink-950/50 transition-opacity"
           aria-hidden="true"
         />
 
@@ -33,22 +33,22 @@
           <div
             v-if="show"
             tabindex="-1"
-            class="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all w-full max-w-2xl max-h-[90vh] sm:max-h-[90vh] flex flex-col my-4 sm:my-8"
+            class="relative transform overflow-hidden rounded-lg bg-surface text-left shadow-xl transition-all w-full max-w-2xl max-h-[90vh] sm:max-h-[90vh] flex flex-col my-4 sm:my-8"
             @click.stop
           >
             <!-- Header -->
             <div
-              class="flex-shrink-0 flex items-start justify-between gap-3 bg-white px-4 pt-5 pb-3 sm:px-6 sm:pt-6 sm:pb-4 border-b border-gray-200"
+              class="flex-shrink-0 flex items-start justify-between gap-3 bg-surface px-4 pt-5 pb-3 sm:px-6 sm:pt-6 sm:pb-4 border-b border-line"
             >
               <h3
                 v-if="title"
-                class="text-base font-semibold leading-6 text-gray-900 text-left flex-1 min-w-0"
+                class="text-base font-semibold leading-6 text-theme text-left flex-1 min-w-0"
               >
                 {{ title }}
               </h3>
               <button
                 type="button"
-                class="modal-close-btn inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1"
+                class="modal-close-btn inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1"
                 :aria-label="t('common.close')"
                 :title="t('common.close')"
                 @click="$emit('close')"
@@ -74,7 +74,7 @@
             <div
               class="flex-1 overflow-y-auto -webkit-overflow-scrolling-touch min-h-0"
             >
-              <div class="bg-white px-4 py-4 sm:px-6 sm:py-4">
+              <div class="bg-surface px-4 py-4 sm:px-6 sm:py-4">
                 <div v-if="icon" class="sm:flex sm:items-start">
                   <div
                     class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full sm:mx-0 sm:h-10 sm:w-10"
@@ -96,7 +96,7 @@
             <!-- Footer (fixed at bottom) -->
             <div
               v-if="$slots.footer"
-              class="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6 flex-shrink-0 border-t border-gray-200"
+              class="bg-surface-sunken px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6 flex-shrink-0 border-t border-line"
             >
               <slot name="footer" />
             </div>

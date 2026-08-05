@@ -346,11 +346,10 @@
                 <span v-if="message.role === 'user'" aria-hidden="true">
                   {{ userInitials }}
                 </span>
-                <img
+                <BrandLogo
                   v-else
-                  src="/brand/logo_transparent.png"
-                  alt="SourceLens"
-                  class="h-[20px] w-[20px] object-contain"
+                  variant="mark"
+                  wrapperClass="gap-0 [&_img]:h-[20px] [&_img]:w-[20px]"
                 />
               </div>
 
@@ -838,10 +837,9 @@
             <!-- Empty-answer hint: a finished turn returned no text -->
             <div v-if="showRetryHint" class="message-row message-row-assistant">
               <div class="message-avatar assistant">
-                <img
-                  src="/brand/logo_transparent.png"
-                  alt="SourceLens"
-                  class="h-[20px] w-[20px] object-contain"
+                <BrandLogo
+                  variant="mark"
+                  wrapperClass="gap-0 [&_img]:h-[20px] [&_img]:w-[20px]"
                 />
               </div>
               <div class="message-body">
@@ -867,10 +865,9 @@
               class="message-row message-row-assistant live-progress-row"
             >
               <div class="message-avatar assistant">
-                <img
-                  src="/brand/logo_transparent.png"
-                  alt="SourceLens"
-                  class="h-[20px] w-[20px] object-contain"
+                <BrandLogo
+                  variant="mark"
+                  wrapperClass="gap-0 [&_img]:h-[20px] [&_img]:w-[20px]"
                 />
               </div>
               <div class="message-body">
@@ -3558,14 +3555,14 @@ onBeforeUnmount(() => {
 <style scoped>
 .lens-chat-page {
   @apply flex h-screen w-full overflow-hidden;
-  background: #ffffff;
-  color: #111827;
+  background: var(--sl-bg-surface);
+  color: var(--sl-text-primary);
 }
 
 .sidebar {
   @apply flex h-full flex-shrink-0 flex-col border-r transition-all duration-300 ease-in-out;
-  background: #ffffff;
-  border-color: #e5e7eb;
+  background: var(--sl-bg-surface);
+  border-color: var(--sl-border-default);
 }
 
 .sidebar-expanded {
@@ -3606,11 +3603,11 @@ onBeforeUnmount(() => {
 
 .sidebar-collapse-btn {
   @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors;
-  color: #374151;
+  color: var(--sl-text-secondary);
 }
 
 .sidebar-collapse-btn:hover {
-  background: #f3f4f6;
+  background: var(--sl-bg-hover);
 }
 
 .sidebar-collapse-btn svg {
@@ -3619,11 +3616,11 @@ onBeforeUnmount(() => {
 
 .new-chat-btn {
   @apply flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors;
-  color: #374151;
+  color: var(--sl-text-secondary);
 }
 
 .new-chat-btn:hover {
-  background: #f3f4f6;
+  background: var(--sl-bg-hover);
 }
 
 .new-chat-btn svg {
@@ -3647,12 +3644,12 @@ onBeforeUnmount(() => {
 }
 
 .session-filters button {
-  @apply rounded-md px-2 py-1 text-[11px] font-semibold tracking-wide text-gray-500 transition-colors;
+  @apply rounded-md px-2 py-1 text-[11px] font-semibold tracking-wide text-theme-muted transition-colors;
 }
 
 .session-filters button:hover,
 .session-filter-active {
-  @apply bg-gray-100 text-gray-900;
+  @apply bg-surface-hover text-theme;
 }
 
 .sessions-list {
@@ -3664,11 +3661,11 @@ onBeforeUnmount(() => {
 }
 
 .session-item:hover {
-  background: #f3f4f6;
+  background: var(--sl-bg-hover);
 }
 
 .session-item-active {
-  background: #e5e7eb;
+  background: var(--sl-bg-selected);
 }
 
 .session-title-row {
@@ -3677,7 +3674,7 @@ onBeforeUnmount(() => {
 
 .session-title {
   @apply min-w-0 flex-1 truncate text-sm font-medium;
-  color: #111827;
+  color: var(--sl-text-primary);
 }
 
 .session-activity-indicator {
@@ -3693,7 +3690,7 @@ onBeforeUnmount(() => {
 }
 
 .session-list-empty {
-  @apply px-3 py-4 text-center text-xs text-gray-400;
+  @apply px-3 py-4 text-center text-xs text-theme-subtle;
 }
 
 .session-unread-indicator {
@@ -3715,17 +3712,17 @@ onBeforeUnmount(() => {
 .session-rename-input {
   @apply w-full rounded-md border px-2 py-1 text-sm font-medium outline-none;
   border-color: #c7d2fe;
-  color: #111827;
+  color: var(--sl-text-primary);
 }
 
 .main-shell {
   @apply relative flex min-w-0 flex-1 flex-col overflow-hidden;
-  background: #ffffff;
+  background: var(--sl-bg-surface);
 }
 
 .mobile-topbar {
   @apply flex flex-shrink-0 items-center gap-1 border-b px-2 py-1.5;
-  border-color: #e5e7eb;
+  border-color: var(--sl-border-default);
 }
 
 .mobile-topbar-title {
@@ -3738,7 +3735,7 @@ onBeforeUnmount(() => {
 
 .chat-header {
   @apply flex flex-shrink-0 items-center gap-3 border-b px-5 py-3;
-  border-color: #e5e7eb;
+  border-color: var(--sl-border-default);
 }
 
 .chat-header-title {
@@ -3758,20 +3755,20 @@ onBeforeUnmount(() => {
 }
 
 .chat-header-back:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--sl-bg-hover);
+  color: var(--sl-text-secondary);
 }
 
 .chat-header-link {
   @apply inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium no-underline transition-colors;
-  border-color: #e5e7eb;
-  color: #4b5563;
+  border-color: var(--sl-border-default);
+  color: var(--sl-text-secondary);
 }
 
 .chat-header-link:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
-  color: #111827;
+  background: var(--sl-bg-canvas);
+  border-color: var(--sl-border-strong);
+  color: var(--sl-text-primary);
 }
 
 .retry-hint {
@@ -3826,7 +3823,7 @@ onBeforeUnmount(() => {
 }
 
 .message-avatar.assistant {
-  background: #ffffff;
+  background: var(--sl-bg-surface);
   border: 1px solid #e5e7eb;
 }
 
@@ -3845,13 +3842,13 @@ onBeforeUnmount(() => {
 
 .message-card.user {
   @apply rounded-xl px-3.5 py-2.5 text-left;
-  background: #f3f4f6;
+  background: var(--sl-bg-hover);
   overflow-wrap: anywhere;
 }
 
 .message-time {
   @apply mt-1 text-xs;
-  color: #9ca3af;
+  color: var(--sl-text-subtle);
 }
 
 .message-time.user {
@@ -3860,19 +3857,19 @@ onBeforeUnmount(() => {
 
 .message-markdown :deep(.markdown-content) {
   @apply max-w-none break-words;
-  color: #374151;
+  color: var(--sl-text-secondary);
 }
 
 .message-markdown :deep(.markdown-content h1),
 .message-markdown :deep(.markdown-content h2),
 .message-markdown :deep(.markdown-content h3),
 .message-markdown :deep(.markdown-content h4) {
-  color: #111827;
+  color: var(--sl-text-primary);
 }
 
 .message-markdown :deep(.markdown-content p) {
   @apply mb-2.5 text-[15px] leading-6;
-  color: #374151;
+  color: var(--sl-text-secondary);
 }
 
 .message-markdown :deep(.markdown-content ul),
@@ -3882,7 +3879,7 @@ onBeforeUnmount(() => {
 
 .message-markdown :deep(.markdown-content li) {
   @apply mb-1.5 text-[15px] leading-6;
-  color: #374151;
+  color: var(--sl-text-secondary);
 }
 
 .message-markdown :deep(.markdown-content :not(pre) > code) {
@@ -3892,7 +3889,7 @@ onBeforeUnmount(() => {
 
 .message-text {
   @apply whitespace-pre-wrap break-words text-[15px] leading-6;
-  color: #111827;
+  color: var(--sl-text-primary);
 }
 
 .message-actions {
@@ -3901,12 +3898,12 @@ onBeforeUnmount(() => {
 
 .icon-btn {
   @apply flex h-[30px] w-[30px] items-center justify-center rounded-md transition-colors;
-  color: #9ca3af;
+  color: var(--sl-text-subtle);
 }
 
 .icon-btn:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--sl-bg-hover);
+  color: var(--sl-text-secondary);
 }
 
 .icon-btn:disabled {
@@ -3950,8 +3947,8 @@ onBeforeUnmount(() => {
 .live-card,
 .activity-card,
 .timeline-card {
-  @apply mb-9 max-w-[900px] rounded-lg border bg-white px-4 py-3;
-  border-color: #e5e7eb;
+  @apply mb-9 max-w-[900px] rounded-lg border bg-surface px-4 py-3;
+  border-color: var(--sl-border-default);
 }
 
 .card-head {
@@ -3961,13 +3958,13 @@ onBeforeUnmount(() => {
 .card-title,
 .card-heading {
   @apply text-xs font-semibold uppercase tracking-wide;
-  color: #6b7280;
+  color: var(--sl-text-muted);
 }
 
 .card-state,
 .card-caption {
   @apply text-xs;
-  color: #6b7280;
+  color: var(--sl-text-muted);
 }
 
 .live-progress-row {
@@ -3980,7 +3977,7 @@ onBeforeUnmount(() => {
 
 .thinking-elapsed {
   @apply shrink-0 text-xs tabular-nums;
-  color: #9ca3af;
+  color: var(--sl-text-subtle);
 }
 
 .runtime-progress-card,
@@ -3990,9 +3987,9 @@ onBeforeUnmount(() => {
   margin-top: 0.5rem;
   border: 1px solid #e2e8f0;
   border-radius: 0.625rem;
-  background: #f8fafc;
+  background: var(--sl-bg-raised);
   padding: 0.65rem 0.75rem;
-  color: #475569;
+  color: var(--sl-text-secondary);
   font-size: 0.78rem;
   line-height: 1.45;
 }
@@ -4003,8 +4000,8 @@ onBeforeUnmount(() => {
 }
 
 .runtime-progress-live {
-  border-color: #d8dce8;
-  background: #f8f9fc;
+  border-color: var(--sl-border-default);
+  background: var(--sl-bg-raised);
 }
 
 .runtime-progress-summary {
@@ -4027,7 +4024,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   flex: 1;
   overflow: hidden;
-  color: #64748b;
+  color: var(--sl-text-muted);
   font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4035,7 +4032,7 @@ onBeforeUnmount(() => {
 
 .runtime-progress-chevron {
   flex: 0 0 auto;
-  color: #94a3b8;
+  color: var(--sl-text-subtle);
   font-size: 0.9rem;
   transition: transform 0.15s ease;
 }
@@ -4050,7 +4047,7 @@ onBeforeUnmount(() => {
 
 .runtime-card-title {
   margin-bottom: 0.35rem;
-  color: #334155;
+  color: var(--sl-text-secondary);
   font-weight: 600;
 }
 
@@ -4066,7 +4063,7 @@ onBeforeUnmount(() => {
 }
 
 .runtime-task-row {
-  color: #334155;
+  color: var(--sl-text-secondary);
   font-weight: 600;
 }
 
@@ -4081,7 +4078,7 @@ onBeforeUnmount(() => {
 }
 
 .runtime-stage-row {
-  color: #475569;
+  color: var(--sl-text-secondary);
   font-weight: 500;
 }
 
@@ -4089,7 +4086,7 @@ onBeforeUnmount(() => {
   max-height: 6.5rem;
   margin-left: 1.35rem;
   overflow-y: auto;
-  color: #64748b;
+  color: var(--sl-text-muted);
   font-size: 0.72rem;
   scrollbar-width: thin;
 }
@@ -4104,7 +4101,7 @@ onBeforeUnmount(() => {
   padding: 0.15rem 0.35rem;
   overflow-y: auto;
   border-left: 1px solid #e2e8f0;
-  color: #64748b;
+  color: var(--sl-text-muted);
   font-size: 0.71rem;
   scrollbar-width: thin;
 }
@@ -4140,7 +4137,7 @@ onBeforeUnmount(() => {
 
 .runtime-activity-count {
   flex: 0 0 auto;
-  color: #9a9388;
+  color: var(--sl-text-muted);
 }
 
 .runtime-plan-status {
@@ -4151,7 +4148,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   flex: 0 0 auto;
   margin-top: 0.08rem;
-  color: #8b8378;
+  color: var(--sl-text-muted);
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1;
@@ -4188,7 +4185,7 @@ onBeforeUnmount(() => {
 }
 
 .runtime-plan-status.is-skipped {
-  color: #9ca3af;
+  color: var(--sl-text-subtle);
 }
 
 .runtime-step-content {
@@ -4200,7 +4197,7 @@ onBeforeUnmount(() => {
 
 .runtime-step-summary {
   margin-top: 0.08rem;
-  color: #7a746a;
+  color: var(--sl-text-muted);
   font-size: 0.72rem;
 }
 
@@ -4208,15 +4205,15 @@ onBeforeUnmount(() => {
   margin-top: 0.4rem;
   padding-top: 0.4rem;
   border-top: 1px dashed #e2e8f0;
-  color: #64748b;
+  color: var(--sl-text-muted);
   font-size: 0.72rem;
 }
 
 .live-status-card {
   @apply mb-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm;
   border: 1px solid #e5e7eb;
-  background: #f9fafb;
-  color: #374151;
+  background: var(--sl-bg-canvas);
+  color: var(--sl-text-secondary);
 }
 
 .runtime-block-card {
@@ -4238,12 +4235,12 @@ onBeforeUnmount(() => {
 
 .live-text {
   @apply whitespace-pre-wrap text-[15px] leading-6;
-  color: #111827;
+  color: var(--sl-text-primary);
 }
 
 .live-thinking {
   @apply flex items-center gap-2 text-sm;
-  color: #4b5563;
+  color: var(--sl-text-secondary);
 }
 
 .live-markdown.is-streaming :deep(.markdown-content > *:last-child)::after {
@@ -4259,23 +4256,23 @@ onBeforeUnmount(() => {
 
 .activity-item {
   @apply flex items-start justify-between gap-3 rounded-md px-3 py-2;
-  background: #f9fafb;
+  background: var(--sl-bg-canvas);
 }
 
 .activity-title {
   @apply text-sm font-medium;
-  color: #111827;
+  color: var(--sl-text-primary);
 }
 
 .activity-detail {
   @apply mt-1 truncate text-xs;
-  color: #6b7280;
+  color: var(--sl-text-muted);
 }
 
 .activity-time,
 .timeline-time {
   @apply shrink-0 text-xs;
-  color: #6b7280;
+  color: var(--sl-text-muted);
 }
 
 .timeline-toggle {
@@ -4306,21 +4303,21 @@ onBeforeUnmount(() => {
 
 .timeline-label {
   @apply text-xs;
-  color: #4b5563;
+  color: var(--sl-text-secondary);
 }
 
 .timeline-message {
   @apply mt-2 whitespace-pre-wrap text-xs leading-5;
-  color: #374151;
+  color: var(--sl-text-secondary);
 }
 
 .composer-wrap {
   @apply pointer-events-none absolute inset-x-0 bottom-0 z-20 px-6 pb-5;
   background: linear-gradient(
     to top,
-    rgba(255, 255, 255, 0.98) 36%,
-    rgba(255, 255, 255, 0.78) 72%,
-    rgba(255, 255, 255, 0) 100%
+    rgb(var(--sl-bg-surface-rgb) / 98%) 36%,
+    rgb(var(--sl-bg-surface-rgb) / 78%) 72%,
+    rgb(var(--sl-bg-surface-rgb) / 0%) 100%
   );
 }
 
@@ -4329,7 +4326,7 @@ onBeforeUnmount(() => {
 }
 
 .archived-session-notice button {
-  @apply rounded-md px-2 py-1 font-semibold text-primary-700 hover:bg-white;
+  @apply rounded-md px-2 py-1 font-semibold text-primary-700 hover:bg-surface;
 }
 
 .composer-inner {
@@ -4341,8 +4338,8 @@ onBeforeUnmount(() => {
 }
 
 .composer {
-  @apply flex items-center gap-3 rounded-xl border bg-white px-4 py-2.5;
-  border-color: #dbe1e8;
+  @apply flex items-center gap-3 rounded-xl border bg-surface px-4 py-2.5;
+  border-color: var(--sl-border-default);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
@@ -4353,7 +4350,7 @@ onBeforeUnmount(() => {
 
 .composer-input {
   @apply flex-1 border-0 bg-transparent py-2 px-0 text-[16px] leading-6 outline-none;
-  color: #111827;
+  color: var(--sl-text-primary);
   min-height: 2.5rem;
   max-height: 200px;
   resize: none;
@@ -4362,7 +4359,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-input::placeholder {
-  color: #9ca3af;
+  color: var(--sl-text-subtle);
 }
 
 .composer-action-btn {
@@ -4380,7 +4377,7 @@ onBeforeUnmount(() => {
 }
 
 .composer-action-btn:disabled {
-  background: #e5e7eb;
+  background: var(--sl-bg-selected);
   cursor: not-allowed;
 }
 
@@ -4394,7 +4391,7 @@ onBeforeUnmount(() => {
 
 .composer-attach-btn {
   @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-full
-    border border-line bg-white text-gray-500 transition-colors;
+    border border-line bg-surface text-theme-muted transition-colors;
 }
 
 .composer-attach-btn:hover:not(:disabled) {
@@ -4418,11 +4415,11 @@ onBeforeUnmount(() => {
 }
 
 .composer-thumb.is-document {
-  @apply w-48 bg-gray-50;
+  @apply w-48 bg-surface-sunken;
 }
 
 .composer-document {
-  @apply flex h-full min-w-0 items-center gap-2 px-3 pr-7 text-gray-600;
+  @apply flex h-full min-w-0 items-center gap-2 px-3 pr-7 text-theme-secondary;
 }
 
 .composer-document span {
@@ -4439,7 +4436,7 @@ onBeforeUnmount(() => {
 
 .composer-thumb-spinner {
   @apply absolute inset-0 m-auto h-5 w-5 rounded-full border-2
-    border-gray-300 border-t-primary-500;
+    border-line-strong border-t-primary-500;
   animation: spin 0.7s linear infinite;
 }
 
@@ -4507,7 +4504,7 @@ onBeforeUnmount(() => {
 
 .message-document-card {
   @apply flex max-w-sm items-center gap-2 rounded-lg border border-line
-    bg-white px-3 py-2 text-left text-gray-600 transition-colors;
+    bg-surface px-3 py-2 text-left text-theme-secondary transition-colors;
 }
 
 .message-document-card:hover {
@@ -4523,7 +4520,7 @@ onBeforeUnmount(() => {
 }
 
 .message-document-card small {
-  @apply text-xs text-gray-400;
+  @apply text-xs text-theme-subtle;
 }
 
 .message-deliverables {
@@ -4532,7 +4529,7 @@ onBeforeUnmount(() => {
 
 .deliverable-card {
   @apply flex w-full max-w-sm items-center gap-3 rounded-xl border
-    border-line bg-white px-3 py-2.5 text-left transition-all;
+    border-line bg-surface px-3 py-2.5 text-left transition-all;
 }
 
 .deliverable-card:hover {
@@ -4553,11 +4550,11 @@ onBeforeUnmount(() => {
 }
 
 .deliverable-name {
-  @apply truncate text-sm font-medium text-gray-800;
+  @apply truncate text-sm font-medium text-theme;
 }
 
 .deliverable-sub {
-  @apply mt-0.5 text-xs uppercase tracking-wide text-gray-400;
+  @apply mt-0.5 text-xs uppercase tracking-wide text-theme-subtle;
 }
 
 .deliverable-actions {
@@ -4566,7 +4563,7 @@ onBeforeUnmount(() => {
 
 .deliverable-action {
   @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg
-    text-gray-400 transition-colors;
+    text-theme-subtle transition-colors;
 }
 
 .deliverable-action:hover {
@@ -4575,7 +4572,7 @@ onBeforeUnmount(() => {
 
 .disclaimer {
   @apply mt-3 text-center text-xs;
-  color: #9ca3af;
+  color: var(--sl-text-subtle);
 }
 
 .sidebar-footer {
@@ -4672,6 +4669,23 @@ onBeforeUnmount(() => {
 @media (min-width: 1024px) {
   .main-shell {
     box-shadow: inset 1px 0 0 #e5e7eb;
+  }
+}
+
+:global(:root[data-theme='dark'] .sidebar) {
+  background: var(--sl-bg-canvas);
+  border-right: 0;
+}
+
+:global(:root[data-theme='dark'] .mobile-topbar),
+:global(:root[data-theme='dark'] .chat-header),
+:global(:root[data-theme='dark'] .sidebar-footer) {
+  border-color: transparent;
+}
+
+@media (min-width: 1024px) {
+  :global(:root[data-theme='dark'] .main-shell) {
+    box-shadow: none;
   }
 }
 </style>

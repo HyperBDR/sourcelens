@@ -36,15 +36,20 @@ export default {
           600: '#4b5563',
           700: '#374151',
           800: '#1f2937',
-          900: '#111827'
+          900: '#111827',
+          950: '#030712'
         },
         line: {
-          DEFAULT: '#e5e7eb',
-          soft: '#f3f4f6'
+          DEFAULT: 'rgb(var(--sl-border-default-rgb) / <alpha-value>)',
+          soft: 'rgb(var(--sl-border-soft-rgb) / <alpha-value>)',
+          strong: 'rgb(var(--sl-border-strong-rgb) / <alpha-value>)'
         },
         surface: {
-          DEFAULT: '#ffffff',
-          sunken: '#f9fafb'
+          DEFAULT: 'rgb(var(--sl-bg-surface-rgb) / <alpha-value>)',
+          sunken: 'rgb(var(--sl-bg-canvas-rgb) / <alpha-value>)',
+          raised: 'rgb(var(--sl-bg-raised-rgb) / <alpha-value>)',
+          hover: 'rgb(var(--sl-bg-hover-rgb) / <alpha-value>)',
+          selected: 'rgb(var(--sl-bg-selected-rgb) / <alpha-value>)'
         },
         success: {
           DEFAULT: '#1f9d6b',
@@ -78,6 +83,43 @@ export default {
           700: '#374151',
           800: '#1f2937',
           900: '#111827'
+        }
+      },
+      textColor: {
+        gray: {
+          400: 'rgb(var(--sl-neutral-text-400-rgb) / <alpha-value>)',
+          500: 'rgb(var(--sl-neutral-text-500-rgb) / <alpha-value>)',
+          600: 'rgb(var(--sl-neutral-text-600-rgb) / <alpha-value>)',
+          700: 'rgb(var(--sl-neutral-text-700-rgb) / <alpha-value>)',
+          800: 'rgb(var(--sl-neutral-text-800-rgb) / <alpha-value>)',
+          900: 'rgb(var(--sl-neutral-text-900-rgb) / <alpha-value>)'
+        },
+        ink: {
+          400: 'rgb(var(--sl-neutral-text-400-rgb) / <alpha-value>)',
+          500: 'rgb(var(--sl-neutral-text-500-rgb) / <alpha-value>)',
+          600: 'rgb(var(--sl-neutral-text-600-rgb) / <alpha-value>)',
+          700: 'rgb(var(--sl-neutral-text-700-rgb) / <alpha-value>)',
+          800: 'rgb(var(--sl-neutral-text-800-rgb) / <alpha-value>)',
+          900: 'rgb(var(--sl-neutral-text-900-rgb) / <alpha-value>)'
+        },
+        theme: {
+          DEFAULT: 'rgb(var(--sl-text-primary-rgb) / <alpha-value>)',
+          secondary: 'rgb(var(--sl-text-secondary-rgb) / <alpha-value>)',
+          muted: 'rgb(var(--sl-text-muted-rgb) / <alpha-value>)',
+          subtle: 'rgb(var(--sl-text-subtle-rgb) / <alpha-value>)'
+        }
+      },
+      backgroundColor: {
+        white: 'rgb(var(--sl-bg-surface-rgb) / <alpha-value>)',
+        gray: {
+          50: 'rgb(var(--sl-bg-canvas-rgb) / <alpha-value>)',
+          100: 'rgb(var(--sl-bg-hover-rgb) / <alpha-value>)',
+          200: 'rgb(var(--sl-bg-selected-rgb) / <alpha-value>)'
+        },
+        ink: {
+          50: 'rgb(var(--sl-bg-canvas-rgb) / <alpha-value>)',
+          100: 'rgb(var(--sl-bg-hover-rgb) / <alpha-value>)',
+          200: 'rgb(var(--sl-bg-selected-rgb) / <alpha-value>)'
         }
       },
       fontFamily: {
