@@ -184,7 +184,7 @@
                   <BaseSelect
                     id="ui-language"
                     :model-value="locale"
-                    @change="selectLanguage($event.target.value)"
+                    @update:model-value="selectLanguage"
                   >
                     <option
                       v-for="lang in languages"
