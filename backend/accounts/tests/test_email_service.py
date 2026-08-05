@@ -4,7 +4,6 @@ from django.test import SimpleTestCase, override_settings
 from accounts.services.email import (
     OtpLoginEmailService,
     PasswordResetEmailService,
-    PasswordSetupEmailService,
     get_email_delivery_options,
 )
 
@@ -59,7 +58,7 @@ class PasswordResetEmailServiceTests(SimpleTestCase):
         )
         assert reset_url in message.body
         assert reset_url in message.alternatives[0][0]
-        assert 'Reset password' in message.alternatives[0][0]
+        assert 'Set or reset password' in message.alternatives[0][0]
 
     def test_renders_and_sends_chinese_password_reset_email(self):
         sent = PasswordResetEmailService.send_password_reset_email(
@@ -72,7 +71,7 @@ class PasswordResetEmailServiceTests(SimpleTestCase):
         assert sent is True
         assert len(mail.outbox) == 1
         html = mail.outbox[0].alternatives[0][0]
-        assert '重置密码' in html
+        assert '设置或重置密码' in html
         assert '24 小时后失效' in html
 
     def test_unknown_language_uses_english_template(self):
@@ -84,7 +83,7 @@ class PasswordResetEmailServiceTests(SimpleTestCase):
         )
 
         assert sent is True
-        assert 'Reset password' in mail.outbox[0].alternatives[0][0]
+        assert 'Set or reset password' in mail.outbox[0].alternatives[0][0]
 
 
 @override_settings(
@@ -98,22 +97,15 @@ class VerificationCodeEmailStyleTests(SimpleTestCase):
     def setUp(self):
         mail.outbox.clear()
 
-    def test_password_setup_email_matches_login_code_visual_style(self):
+    def test_login_code_email_visual_style(self):
         login_sent = OtpLoginEmailService.send_login_code_email(
             email='person@example.com',
             code='123456',
             language='en-US',
         )
-        setup_sent = PasswordSetupEmailService.send_password_setup_code_email(
-            email='person@example.com',
-            code='654321',
-            language='en-US',
-        )
 
         assert login_sent is True
-        assert setup_sent is True
         login_html = mail.outbox[0].alternatives[0][0]
-        setup_html = mail.outbox[1].alternatives[0][0]
         shared_style = (
             'background-color:#f1f5f9',
             'max-width:520px',
@@ -121,19 +113,5 @@ class VerificationCodeEmailStyleTests(SimpleTestCase):
             'border:2px dashed #bfdbfe',
         )
         assert all(marker in login_html for marker in shared_style)
-        assert all(marker in setup_html for marker in shared_style)
-        assert 'Set up your SourceLens password' in setup_html
-        assert '654321' in setup_html
-
-    def test_password_setup_email_uses_chinese_purpose_copy(self):
-        sent = PasswordSetupEmailService.send_password_setup_code_email(
-            email='person@example.com',
-            code='654321',
-            language='zh-CN',
-        )
-
-        assert sent is True
-        html = mail.outbox[0].alternatives[0][0]
-        assert '设置你的 SourceLens 密码' in html
-        assert '验证身份并创建本地密码' in html
-        assert '654321' in html
+        assert 'Your verification code' in login_html
+        assert '123456' in login_html

@@ -51,16 +51,6 @@ export const authApi = {
     return api.post('/v1/auth/password/change', passwordData)
   },
 
-  // Send a step-up code for first-time local password setup
-  sendPasswordSetupCode() {
-    return api.post('/v1/auth/password/setup/send-code')
-  },
-
-  // Create the first local password after step-up verification
-  setupPassword(passwordData) {
-    return api.post('/v1/auth/password/setup', passwordData)
-  },
-
   // Complete OAuth setup (Google, WeChat, etc.)
   completeOAuthSetup(data) {
     return api.post('/v1/auth/oauth/complete-setup', data)
@@ -96,8 +86,6 @@ export const {
   resetPassword,
   confirmPasswordReset,
   changePassword,
-  sendPasswordSetupCode,
-  setupPassword,
   completeOAuthSetup,
   completeGoogleSetup,
   checkUsernameAvailability,

@@ -728,13 +728,13 @@
   },
   "password": {
     "reset": {
-      "title": "重置密码",
-      "subtitle": "在下方输入您的新密码",
+      "title": "设置或重置密码",
+      "subtitle": "在下方输入您要使用的密码",
       "newPassword": "新密码",
       "newPasswordPlaceholder": "输入新密码",
       "confirmPassword": "确认密码",
       "confirmPasswordPlaceholder": "确认新密码",
-      "submit": "重置密码",
+      "submit": "设置密码",
       "resetting": "正在重置...",
       "requirements": "密码要求：",
       "requirement1": "8-32 个字符",
@@ -746,11 +746,11 @@
       "passwordRequirements": "密码必须同时包含字母和数字",
       "newPasswordRequired": "请输入新密码",
       "confirmPasswordRequired": "请再次输入新密码",
-      "invalidLink": "无效或已过期的重置链接",
-      "error": "重置失败",
-      "unknownError": "重置密码失败，请重试。",
-      "successTitle": "密码重置成功",
-      "successMessage": "您的密码已重置。现在可以使用新密码登录了。",
+      "invalidLink": "无效或已过期的设置或重置链接",
+      "error": "密码更新失败",
+      "unknownError": "设置密码失败，请重试。",
+      "successTitle": "密码设置成功",
+      "successMessage": "您的密码已设置。现在可以使用该密码登录。",
       "backToLogin": "返回登录"
     }
   },

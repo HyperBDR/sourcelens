@@ -17,9 +17,8 @@ from django.core.cache import cache
 logger = logging.getLogger(__name__)
 
 LOGIN_PURPOSE = 'login'
-PASSWORD_SETUP_PURPOSE = 'password_setup'
 
-_ALLOWED_PURPOSES = frozenset({LOGIN_PURPOSE, PASSWORD_SETUP_PURPOSE})
+_ALLOWED_PURPOSES = frozenset({LOGIN_PURPOSE})
 _CODE_KEY = 'otp:{purpose}:code:{email}'
 _COOLDOWN_KEY = 'otp:login:cooldown:{email}'
 _DAILY_KEY = 'otp:login:daily:{email}'

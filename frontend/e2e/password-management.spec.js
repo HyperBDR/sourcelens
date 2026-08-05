@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('requests a password reset without exposing account eligibility', async ({
+test('requests password setup or reset without exposing eligibility', async ({
   page
 }) => {
   let resetRequests = 0
@@ -24,7 +24,7 @@ test('requests a password reset without exposing account eligibility', async ({
   const email = page.getByLabel('Email address')
   await expect(email).toHaveAttribute('autocomplete', 'email')
   await email.fill('invalid-email')
-  await page.getByRole('button', { name: 'Send reset link' }).click()
+  await page.getByRole('button', { name: 'Send setup or reset link' }).click()
   await expect(page.getByText('Enter a valid email address')).toBeVisible()
   expect(resetRequests).toBe(0)
 
@@ -32,7 +32,7 @@ test('requests a password reset without exposing account eligibility', async ({
   await email.press('Enter')
   await expect(
     page.getByText(
-      'If an eligible account exists for this email, a reset link has been sent.'
+      'If an eligible account exists for this email, a setup or reset link has been sent.'
     )
   ).toBeVisible()
   expect(resetRequests).toBe(1)
@@ -43,7 +43,6 @@ test('changes an authenticated local password from Security settings', async ({
   page
 }) => {
   const changePayloads = []
-  const resetPayloads = []
   await page.addInitScript(() => {
     localStorage.setItem('access_token', 'test-access-token')
     localStorage.setItem('userLanguage', 'en')
@@ -102,17 +101,6 @@ test('changes an authenticated local password from Security settings', async ({
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({ data: { detail: 'New password saved' } })
-      })
-      return
-    }
-    if (url.pathname.includes('/v1/auth/password/reset')) {
-      resetPayloads.push(route.request().postDataJSON())
-      await route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          message: 'Password reset email sent successfully'
-        })
       })
       return
     }
@@ -175,21 +163,7 @@ test('changes an authenticated local password from Security settings', async ({
     newPassword2: 'N4kW8mZ2qP7'
   })
 
-  await page
-    .getByRole('button', { name: 'Forgot your current password?' })
-    .click()
-  const resetEmail = page.getByLabel('Email address')
-  await expect(resetEmail).toHaveValue('person@example.com')
-  await page.getByRole('button', { name: 'Send reset link' }).click()
   await expect(
-    page.getByText(
-      'If an eligible account exists for this email, a reset link has been sent.'
-    )
-  ).toBeVisible()
-  expect(resetPayloads).toEqual([{ email: 'person@example.com' }])
-
-  await page.getByRole('button', { name: 'Back to security' }).click()
-  await expect(
-    page.getByRole('button', { name: 'Change password' })
-  ).toBeVisible()
+    page.getByRole('button', { name: 'Forgot your current password?' })
+  ).toHaveCount(0)
 })
