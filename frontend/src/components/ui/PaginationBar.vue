@@ -18,7 +18,7 @@
           :full-width="false"
           mobile-touch
           size="sm"
-          @change="updatePageSize"
+          @update:model-value="updatePageSize"
         >
           <option v-for="size in pageSizeOptions" :key="size" :value="size">
             {{ size }}
@@ -122,8 +122,8 @@ const showing = computed(() => ({
   total: props.total
 }))
 
-function updatePageSize(event) {
-  emit('update:pageSize', Number(event.target.value))
+function updatePageSize(value) {
+  emit('update:pageSize', Number(value))
   emit('page-size-change')
 }
 </script>
