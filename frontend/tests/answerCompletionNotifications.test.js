@@ -70,14 +70,14 @@ function createNotificationApi(permission = 'granted', requested = permission) {
   return NotificationApi
 }
 
-test('uses a bell instead of an unread count in the browser title', () => {
+test('uses a completion label without an unread count in the browser title', () => {
   assert.equal(
     answerCompletionTitle({
       baseTitle: 'SourceLens',
       completionLabel: 'Answer completed',
       hasUnread: true
     }),
-    '🔔 Answer completed · SourceLens'
+    'Answer completed · SourceLens'
   )
   assert.equal(
     answerCompletionTitle({

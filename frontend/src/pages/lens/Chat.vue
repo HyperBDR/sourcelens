@@ -2918,11 +2918,10 @@ async function selectSession(session, updateRoute = true) {
   }
   await nextTick(scrollToBottom)
   if (!isCurrentLoad()) return
-  await maybeResumeActiveRun(session.uuid, isCurrentLoad)
-  if (!isCurrentLoad()) return
   if (clearUnreadSession(window.localStorage, session.uuid)) {
     refreshUnreadSessions()
   }
+  await maybeResumeActiveRun(session.uuid, isCurrentLoad)
 }
 
 // If the session has a run still in progress (e.g. the user navigated away
