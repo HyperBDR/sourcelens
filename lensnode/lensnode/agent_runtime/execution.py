@@ -5,7 +5,7 @@ import logging
 from langchain_core.messages import HumanMessage
 
 from ..agent_tools import SELF_REPORTING_TOOLS
-from ..gateway_model import RunCancelledError
+from ..gateway_model import GatewayStreamError, RunCancelledError
 from .messages import (
     extract_final_message as _extract_final_message,
     normalize_plan_steps as _normalize_plan_steps,
@@ -38,6 +38,8 @@ def _run_agent_with_turn_limit(
     token_budget_wrapup_event=None,
     on_checkpoint_state=None,
     input_checkpoint_seeded=False,
+    stream_recovery_attempts=0,
+    on_stream_recovery=None,
 ):
     """Stream agent events and stop after max_turns NEW AI turns.
 
@@ -61,6 +63,11 @@ def _run_agent_with_turn_limit(
     Returns (answer, truncated, termination_reason). ``truncated`` is true
     when the agent was stopped before it finished naturally, and the reason
     preserves the gate that requested wrap-up.
+
+    A gateway stream failure may resume from the latest graph checkpoint
+    when a thread and a positive recovery budget are supplied. Seen events
+    and turn accounting remain in memory so checkpoint replay is not exposed
+    as duplicate progress.
     """
 
     last_state = {"messages": messages} if resume_from_checkpoint else None
@@ -87,13 +94,13 @@ def _run_agent_with_turn_limit(
         graph_input = {"messages": []}
     else:
         graph_input = {"messages": messages}
-    for state in agent.stream(
+    for state in _stream_agent_states_with_recovery(
+        agent,
         graph_input,
-        stream_mode="values",
-        config={
-            "recursion_limit": 500,
-            **(thread or {}),
-        },
+        thread,
+        stream_recovery_attempts,
+        emit_event,
+        on_stream_recovery,
     ):
         if cancel_event is not None and cancel_event.is_set():
             raise RunCancelledError(
@@ -223,6 +230,57 @@ def _run_agent_with_turn_limit(
         }:
             termination_reason = model_reason
     return answer, truncated, termination_reason
+
+
+def _stream_agent_states_with_recovery(
+    agent,
+    graph_input,
+    thread,
+    recovery_attempts,
+    emit_event,
+    on_recovery,
+):
+    """Resume a failed gateway stream from the latest graph checkpoint."""
+
+    remaining_attempts = max(0, recovery_attempts)
+    max_attempts = remaining_attempts
+    attempt = 0
+
+    while True:
+        try:
+            yield from agent.stream(
+                graph_input,
+                stream_mode="values",
+                config={
+                    "recursion_limit": 500,
+                    **(thread or {}),
+                },
+            )
+            return
+        except GatewayStreamError as exc:
+            if not thread or remaining_attempts <= 0:
+                raise
+            attempt += 1
+            remaining_attempts -= 1
+            LOGGER.warning(
+                "Agent gateway stream failed; resuming checkpoint "
+                "(attempt %s/%s, code=%s)",
+                attempt,
+                max_attempts,
+                exc.code,
+            )
+            if on_recovery is not None:
+                on_recovery()
+            if emit_event is not None:
+                emit_event(
+                    "deepagents.stream.recovering",
+                    {
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "code": exc.code,
+                    },
+                )
+            graph_input = None
 
 
 def _strip_dangling_tool_call(messages):
