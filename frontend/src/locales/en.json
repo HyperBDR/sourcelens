@@ -718,13 +718,13 @@
   },
   "password": {
     "reset": {
-      "title": "Reset Password",
-      "subtitle": "Enter your new password below",
+      "title": "Set or Reset Password",
+      "subtitle": "Enter the password you want to use below",
       "newPassword": "New Password",
       "newPasswordPlaceholder": "Enter new password",
       "confirmPassword": "Confirm Password",
       "confirmPasswordPlaceholder": "Confirm new password",
-      "submit": "Reset Password",
+      "submit": "Set Password",
       "resetting": "Resetting...",
       "requirements": "Password requirements:",
       "requirement1": "8-32 characters",
@@ -736,11 +736,11 @@
       "passwordRequirements": "Password must contain both letters and numbers",
       "newPasswordRequired": "Please enter a new password",
       "confirmPasswordRequired": "Please confirm the new password",
-      "invalidLink": "Invalid or expired reset link",
-      "error": "Reset Failed",
-      "unknownError": "Failed to reset password. Please try again.",
-      "successTitle": "Password Reset Successfully",
-      "successMessage": "Your password has been reset. You can now login with your new password.",
+      "invalidLink": "Invalid or expired setup or reset link",
+      "error": "Password Update Failed",
+      "unknownError": "Failed to set your password. Please try again.",
+      "successTitle": "Password Set Successfully",
+      "successMessage": "Your password has been set. You can now sign in with it.",
       "backToLogin": "Back to login"
     }
   },

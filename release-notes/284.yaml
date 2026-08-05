@@ -1,0 +1,7 @@
+type: improvement
+audience: user
+en: >-
+  Unified password setup and recovery so the Forgot password link can create
+  or reset a local sign-in password.
+zh-CN: >-
+  统一密码设置与找回流程，现在可通过“忘记密码”链接创建或重置本地登录密码。

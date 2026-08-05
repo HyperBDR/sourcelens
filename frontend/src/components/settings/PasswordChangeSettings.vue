@@ -1,28 +1,14 @@
 <template>
-  <ForgotPasswordForm
-    v-if="showPasswordReset"
-    :initial-email="userStore.userInfo?.email || ''"
-    :back-label="t('passwordManagement.security.backToSecurity')"
-    @back="showPasswordReset = false"
-  />
-
-  <FirstTimePasswordSetupSettings
-    v-else-if="!canChangePassword"
-    @completed="setupCompleted = true"
-  />
+  <div v-if="!canChangePassword" class="space-y-5">
+    <p class="text-sm text-gray-500">
+      {{ t('passwordManagement.security.unavailable') }}
+    </p>
+  </div>
 
   <div v-else class="space-y-5">
     <p class="text-sm text-gray-500">
       {{ t('passwordManagement.security.description') }}
     </p>
-
-    <div
-      v-if="setupCompleted"
-      class="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700"
-      role="status"
-    >
-      {{ t('passwordManagement.setup.success') }}
-    </div>
 
     <form class="space-y-4" novalidate @submit.prevent="handleSubmit">
       <BaseInput
@@ -66,7 +52,7 @@
         {{ statusMessage }}
       </div>
 
-      <div class="flex flex-wrap items-center gap-4">
+      <div>
         <BaseButton
           type="submit"
           variant="primary"
@@ -79,14 +65,6 @@
               : t('passwordManagement.security.submit')
           }}
         </BaseButton>
-
-        <button
-          type="button"
-          class="text-sm text-primary-600 hover:underline"
-          @click="showPasswordReset = true"
-        >
-          {{ t('passwordManagement.security.forgotPassword') }}
-        </button>
       </div>
     </form>
   </div>
@@ -96,8 +74,6 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { authApi } from '@/api/auth'
-import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm.vue'
-import FirstTimePasswordSetupSettings from '@/components/settings/FirstTimePasswordSetupSettings.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import { passwordManagementMessages } from '@/locales/passwordManagement'
@@ -129,8 +105,6 @@ const errors = reactive({
 const loading = ref(false)
 const success = ref(false)
 const statusMessage = ref('')
-const showPasswordReset = ref(false)
-const setupCompleted = ref(false)
 
 const validateForm = () => {
   errors.currentPassword = ''
