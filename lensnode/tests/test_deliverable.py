@@ -1,10 +1,14 @@
+import hashlib
 import json
 import ssl
 from pathlib import Path
 
 import httpx
 
-from lensnode.agent_tools import _build_save_deliverable_tool
+from lensnode.agent_tools import (
+    _build_append_file_tool,
+    _build_save_deliverable_tool,
+)
 from lensnode.config import LensNodeConfig
 from lensnode.runtime_resources import RuntimeResources
 
@@ -152,3 +156,115 @@ def test_save_deliverable_missing_file(monkeypatch, tmp_path):
 
     assert payload["ok"] is False
     assert payload["error"] == "FILE_NOT_FOUND"
+
+
+def test_append_file_writes_idempotent_limited_chunks(tmp_path):
+    tool = _build_append_file_tool(_resources(tmp_path), None)
+
+    assert tool.metadata == {"operation": "write", "idempotent": True}
+
+    first = json.loads(
+        tool.invoke(
+            {
+                "path": "translation.md",
+                "chunk_id": "translation-001",
+                "content": "first section\n",
+            }
+        )
+    )
+    duplicate = json.loads(
+        tool.invoke(
+            {
+                "path": "translation.md",
+                "chunk_id": "translation-001",
+                "content": "first section\n",
+            }
+        )
+    )
+    second = json.loads(
+        tool.invoke(
+            {
+                "path": "translation.md",
+                "chunk_id": "translation-002",
+                "content": "second section\n",
+            }
+        )
+    )
+
+    assert first == {"ok": True, "duplicate": False}
+    assert duplicate == {"ok": True, "duplicate": True}
+    assert second == {"ok": True, "duplicate": False}
+    assert (tmp_path / "translation.md").read_text(encoding="utf-8") == (
+        "first section\nsecond section\n"
+    )
+
+
+def test_append_file_rejects_conflicting_or_oversized_chunk(tmp_path):
+    tool = _build_append_file_tool(_resources(tmp_path), None)
+    tool.invoke(
+        {
+            "path": "translation.md",
+            "chunk_id": "translation-001",
+            "content": "first section\n",
+        }
+    )
+
+    conflict = json.loads(
+        tool.invoke(
+            {
+                "path": "translation.md",
+                "chunk_id": "translation-001",
+                "content": "changed section\n",
+            }
+        )
+    )
+    oversized = json.loads(
+        tool.invoke(
+            {
+                "path": "translation.md",
+                "chunk_id": "translation-002",
+                "content": "x" * (25 * 1024),
+            }
+        )
+    )
+
+    assert conflict["ok"] is False
+    assert conflict["error"] == "CHUNK_CONFLICT"
+    assert oversized["ok"] is False
+    assert oversized["error"] == "CHUNK_TOO_LARGE"
+
+
+def test_append_file_recovers_chunk_written_before_manifest_commit(tmp_path):
+    content = "first section\n"
+    (tmp_path / "translation.md").write_text(content, encoding="utf-8")
+    (tmp_path / ".sourcelens-append-chunks.json").write_text(
+        json.dumps(
+            {
+                "chunks": {
+                    "translation.md:translation-001": {
+                        "byte_size": len(content.encode("utf-8")),
+                        "offset": 0,
+                        "sha256": hashlib.sha256(
+                            content.encode("utf-8")
+                        ).hexdigest(),
+                        "state": "pending",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    tool = _build_append_file_tool(_resources(tmp_path), None)
+
+    recovered = json.loads(
+        tool.invoke(
+            {
+                "path": "translation.md",
+                "chunk_id": "translation-001",
+                "content": content,
+            }
+        )
+    )
+
+    assert recovered == {"ok": True, "duplicate": True}
+    assert (tmp_path / "translation.md").read_text(encoding="utf-8") == content

@@ -49,11 +49,17 @@ SELF_REPORTING_TOOLS = {
     "run_skill_script",
     "run_skill_artifact",
     "run_skill_transform",
+    "append_file",
 }
 
 _STRUCTURED_INPUT_MAX_BYTES = 50 * 1024 * 1024
 _STRUCTURED_GROUP_MAX_ITEMS = 1000
 _STRUCTURED_VALIDATION_MAX_ITEMS = 1_000_000
+_APPEND_FILE_CHUNK_MAX_BYTES = 24 * 1024
+_APPEND_FILE_CHUNK_ID_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+)
+_APPEND_FILE_MANIFEST = ".sourcelens-append-chunks.json"
 _SAVED_OUTPUT_LINE_MAX_CHARS = 500
 _STRUCTURED_OPERATIONS = {
     "count",
@@ -490,6 +496,7 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
         git_diff,
     ]
     if resources is not None and config is not None:
+        tools.append(_build_append_file_tool(resources, emit_event))
         tools.append(
             _build_save_deliverable_tool(
                 command, resources, config, emit_event
@@ -804,6 +811,175 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
         )
 
     return save_deliverable
+
+
+def _build_append_file_tool(resources, emit_event):
+    """Build an idempotent, bounded append tool for long deliverables."""
+
+    root = resources.root.resolve()
+    manifest_path = root / _APPEND_FILE_MANIFEST
+    state_lock = threading.Lock()
+
+    def emit(name, detail=None):
+        if emit_event is not None:
+            emit_event(name, detail or {})
+
+    def load_manifest():
+        if not manifest_path.exists():
+            return {}
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        chunks = data.get("chunks") if isinstance(data, dict) else None
+        return chunks if isinstance(chunks, dict) else None
+
+    def save_manifest(chunks):
+        temporary = manifest_path.with_name(
+            f"{manifest_path.name}.{uuid.uuid4().hex}.tmp"
+        )
+        temporary.write_text(
+            json.dumps({"chunks": chunks}, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(temporary, manifest_path)
+
+    @tool("append_file")
+    def append_file(path: str, chunk_id: str, content: str) -> str:
+        """Append one bounded, idempotent text chunk to a scratch file.
+
+        Use this for every chunk of a long new document. Keep content at or
+        below 24 KiB. Use the same path and a unique ordered chunk_id such as
+        translation-001, translation-002. Retrying a chunk with the same id
+        and content is safe; changing content for an existing id is rejected.
+        Call save_deliverable only after all chunks have been appended.
+        """
+
+        relative = str(path or "").lstrip("/")
+        resolved = (root / relative).resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return _json({"ok": False, "error": "PATH_NOT_ALLOWED"})
+        if (
+            not relative
+            or resolved == manifest_path
+            or not _APPEND_FILE_CHUNK_ID_PATTERN.fullmatch(str(chunk_id))
+        ):
+            return _json({"ok": False, "error": "INVALID_CHUNK"})
+
+        content_bytes = len(content.encode("utf-8"))
+        if content_bytes > _APPEND_FILE_CHUNK_MAX_BYTES:
+            return _json(
+                {
+                    "ok": False,
+                    "error": "CHUNK_TOO_LARGE",
+                    "max_bytes": _APPEND_FILE_CHUNK_MAX_BYTES,
+                }
+            )
+
+        relative_path = resolved.relative_to(root).as_posix()
+        manifest_key = f"{relative_path}:{chunk_id}"
+        content_data = content.encode("utf-8")
+        content_sha256 = hashlib.sha256(content_data).hexdigest()
+        emit(
+            "tool.append_file.start",
+            {
+                "path": relative_path,
+                "chunk_id": chunk_id,
+                "byte_size": content_bytes,
+            },
+        )
+        with state_lock:
+            chunks = load_manifest()
+            if chunks is None:
+                return _json({"ok": False, "error": "CHUNK_STATE_INVALID"})
+            existing = chunks.get(manifest_key)
+            if existing is not None:
+                if existing == content_sha256:
+                    emit(
+                        "tool.append_file.done",
+                        {
+                            "path": relative_path,
+                            "chunk_id": chunk_id,
+                            "duplicate": True,
+                        },
+                    )
+                    return _json({"ok": True, "duplicate": True})
+                if not isinstance(existing, dict):
+                    return _json({"ok": False, "error": "CHUNK_CONFLICT"})
+                if existing.get("sha256") != content_sha256:
+                    return _json({"ok": False, "error": "CHUNK_CONFLICT"})
+                if existing.get("state") == "completed":
+                    return _json({"ok": True, "duplicate": True})
+                if existing.get("state") != "pending":
+                    return _json(
+                        {"ok": False, "error": "CHUNK_STATE_INVALID"}
+                    )
+                offset = existing.get("offset")
+                byte_size = existing.get("byte_size")
+                if not isinstance(offset, int) or byte_size != content_bytes:
+                    return _json(
+                        {"ok": False, "error": "CHUNK_STATE_INVALID"}
+                    )
+                try:
+                    if resolved.exists():
+                        with resolved.open("rb") as output:
+                            output.seek(offset)
+                            written = output.read(content_bytes)
+                    else:
+                        written = b""
+                    if written == content_data:
+                        existing["state"] = "completed"
+                        save_manifest(chunks)
+                        return _json({"ok": True, "duplicate": True})
+                    current_size = (
+                        resolved.stat().st_size if resolved.exists() else 0
+                    )
+                    if current_size != offset:
+                        return _json(
+                            {
+                                "ok": False,
+                                "error": "CHUNK_RECOVERY_REQUIRED",
+                            }
+                        )
+                except OSError:
+                    return _json({"ok": False, "error": "APPEND_FAILED"})
+            try:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                if existing is None:
+                    chunks[manifest_key] = {
+                        "byte_size": content_bytes,
+                        "offset": (
+                            resolved.stat().st_size
+                            if resolved.exists()
+                            else 0
+                        ),
+                        "sha256": content_sha256,
+                        "state": "pending",
+                    }
+                    save_manifest(chunks)
+                with resolved.open("ab") as output:
+                    output.write(content_data)
+                chunks[manifest_key]["state"] = "completed"
+                save_manifest(chunks)
+            except OSError:
+                return _json({"ok": False, "error": "APPEND_FAILED"})
+        emit(
+            "tool.append_file.done",
+            {
+                "path": relative_path,
+                "chunk_id": chunk_id,
+                "duplicate": False,
+            },
+        )
+        return _json({"ok": True, "duplicate": False})
+
+    append_file.metadata = {
+        "operation": "write",
+        "idempotent": True,
+    }
+    return append_file
 
 
 def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):

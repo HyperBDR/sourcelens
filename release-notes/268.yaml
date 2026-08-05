@@ -1,0 +1,4 @@
+type: fix
+audience: user
+en: Fixed language selection in User Settings so interface changes persist.
+zh-CN: 修复用户设置中的语言选择，使界面语言切换能够正确保存。

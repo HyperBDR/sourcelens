@@ -24,6 +24,7 @@ from lensnode.agent_runtime import (
     _synthesize_wrapup_answer,
 )
 from lensnode.checkpoint import CheckpointResumeError, ResumeState
+from lensnode.gateway_model import GatewayStreamError
 
 
 class _Msg:
@@ -715,6 +716,16 @@ def test_capability_boundary_state_round_trips_for_resume():
     assert restored.successful_evidence == original.successful_evidence
     assert outcome == "completed"
     assert detail == {}
+
+
+def test_capability_boundary_rejects_invalid_resume_state():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+
+    with pytest.raises(
+        CheckpointResumeError,
+        match="invalid execution-gate state",
+    ):
+        middleware.restore_state(None)
 
 
 def test_model_event_records_cache_reasoning_and_latency():
@@ -1751,6 +1762,7 @@ def test_successful_skill_evidence_preserves_the_final_answer(
     )
 
     def run_agent(*_args, **_kwargs):
+        captured["run_options"] = _kwargs
         captured["boundary"].success_count = 2
         captured["boundary"].successful_capabilities = {
             "artifact_delivery",
@@ -1792,6 +1804,7 @@ def test_successful_skill_evidence_preserves_the_final_answer(
     assert result["answer"] == "已生成并交付订单流程图。"
     assert result["outcome"] == "completed"
     assert result["termination_detail"] == {}
+    assert captured["run_options"]["stream_recovery_attempts"] == 0
 
 
 def test_delivered_artifact_completes_after_token_budget_wrapup():
@@ -1938,6 +1951,8 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
         assert options["token_budget_wrapup_event"] is None
         assert "capability_stop_event" not in options
         assert options["input_checkpoint_seeded"] is True
+        assert options["stream_recovery_attempts"] == 1
+        assert options["on_stream_recovery"] is None
     assert checkpoint_actions == [
         "saver",
         "metadata",
@@ -2327,17 +2342,17 @@ def test_validated_bulk_result_completes_after_token_budget_wrapup():
     assert termination_detail == {}
 
 
-def test_legacy_runtime_ignores_general_chat_outcome_gates():
+def test_legacy_runtime_marks_provider_output_limit_as_partial():
     outcome, termination_detail = _finalize_runtime_outcome(
         capability_middleware=None,
         evidence_requirement="none",
         truncated=True,
-        stop_reason="turn_limit",
+        stop_reason="model_length_capped",
         execution_gate_enabled=False,
     )
 
-    assert outcome == "completed"
-    assert termination_detail == {}
+    assert outcome == "partial"
+    assert termination_detail == {"reason": "model_length_capped"}
 
 
 def test_validation_without_expected_count_remains_partial_after_wrapup():
@@ -3817,6 +3832,138 @@ def test_resume_does_not_reemit_checkpointed_tool_events():
     assert plan_events[0]["payload"]["steps"] == [
         {"id": "step-1", "title": "Inspect", "status": "completed"},
         {"id": "step-2", "title": "Finish", "status": "in_progress"},
+    ]
+
+
+def test_stream_error_recovers_from_checkpoint_without_duplicate_events():
+    checkpoint_message = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "lookup-1",
+                "name": "lookup",
+                "args": {"query": "evidence"},
+            }
+        ],
+    )
+    final_message = _Msg("ai", content="recovered answer")
+
+    class Agent:
+        def __init__(self):
+            self.inputs = []
+
+        def stream(self, inp, stream_mode=None, config=None):
+            del stream_mode, config
+            self.inputs.append(inp)
+            if len(self.inputs) == 1:
+                yield {"messages": [checkpoint_message]}
+                raise GatewayStreamError(
+                    "MODEL_STREAM_ERROR",
+                    "stream ended before completion",
+                )
+            assert inp is None
+            yield {"messages": [checkpoint_message, final_message]}
+
+    agent = Agent()
+    events = []
+    output_resets = []
+
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
+        agent,
+        [{"role": "user", "content": "question"}],
+        max_turns=5,
+        thread={"configurable": {"thread_id": "run-1"}},
+        emit_event=lambda name, detail: events.append((name, detail)),
+        stream_recovery_attempts=1,
+        on_stream_recovery=lambda: output_resets.append(True),
+    )
+
+    assert answer == "recovered answer"
+    assert truncated is False
+    assert termination_reason is None
+    assert agent.inputs == [
+        {"messages": [{"role": "user", "content": "question"}]},
+        None,
+    ]
+    assert output_resets == [True]
+    assert [name for name, _detail in events].count(
+        "deepagents.stream.recovering"
+    ) == 1
+    assert [name for name, _detail in events].count(
+        "tool.lookup.invoke"
+    ) == 1
+    assert [name for name, _detail in events].count("llm.response") == 2
+
+
+@pytest.mark.parametrize(
+    ("thread", "stream_recovery_attempts"),
+    [
+        (None, 1),
+        ({"configurable": {"thread_id": "run-1"}}, 0),
+    ],
+)
+def test_stream_error_is_not_recovered_without_checkpoint_or_budget(
+    thread,
+    stream_recovery_attempts,
+):
+    error = GatewayStreamError(
+        "MODEL_STREAM_ERROR",
+        "stream ended before completion",
+    )
+
+    class Agent:
+        call_count = 0
+
+        def stream(self, inp, stream_mode=None, config=None):
+            del inp, stream_mode, config
+            self.call_count += 1
+            raise error
+
+    agent = Agent()
+
+    with pytest.raises(GatewayStreamError) as raised:
+        _run_agent_with_turn_limit(
+            agent,
+            [{"role": "user", "content": "question"}],
+            max_turns=5,
+            thread=thread,
+            stream_recovery_attempts=stream_recovery_attempts,
+        )
+
+    assert raised.value is error
+    assert agent.call_count == 1
+
+
+def test_stream_error_stops_after_recovery_budget_is_exhausted():
+    errors = [
+        GatewayStreamError("MODEL_STREAM_ERROR", "first failure"),
+        GatewayStreamError("MODEL_STREAM_ERROR", "second failure"),
+    ]
+
+    class Agent:
+        def __init__(self):
+            self.inputs = []
+
+        def stream(self, inp, stream_mode=None, config=None):
+            del stream_mode, config
+            self.inputs.append(inp)
+            raise errors[len(self.inputs) - 1]
+
+    agent = Agent()
+
+    with pytest.raises(GatewayStreamError) as raised:
+        _run_agent_with_turn_limit(
+            agent,
+            [{"role": "user", "content": "question"}],
+            max_turns=5,
+            thread={"configurable": {"thread_id": "run-1"}},
+            stream_recovery_attempts=1,
+        )
+
+    assert raised.value is errors[1]
+    assert agent.inputs == [
+        {"messages": [{"role": "user", "content": "question"}]},
+        None,
     ]
 
 

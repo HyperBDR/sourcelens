@@ -1,0 +1,51 @@
+"""Deep Agents file-offload configuration for LensNode runs."""
+
+import threading
+
+from deepagents.middleware.filesystem import FilesystemMiddleware
+
+_OFFLOAD_PATCH_LOCK = threading.Lock()
+
+
+def apply_offload_thresholds(config):
+    """Tune deepagents' proactive file-offload thresholds (issue #60).
+
+    FilesystemMiddleware evicts oversized tool results (and human messages) to
+    re-readable workspace files, but create_deep_agent hard-wires it with the
+    library defaults (tool 20000 / human 50000 tokens) and exposes no way to
+    configure them. Lowering the tool threshold offloads large workspace reads
+    to files sooner, keeping the inline context lean so heavy-retrieval runs
+    stop thrashing the summarizer (issue #60 "Snape timeline" repro: offload
+    off = 4 compactions and no convergence; offload on = 0 compactions).
+
+    The thresholds are captured into the wrapper closure and the wrapper is
+    installed once per process, guarded by a lock so concurrent runs (lensnode
+    executes runs on worker threads) cannot double-install. There is no shared
+    mutable state to race across runs. Values are injected via setdefault, so
+    the class identity is unchanged (required-middleware and isinstance checks
+    are unaffected) and any explicit call-site argument still wins. The tool
+    threshold is always set (config default 5000; 0 disables eviction); a None
+    human threshold leaves the library default in place.
+    """
+
+    if getattr(FilesystemMiddleware.__init__, "_lens_offload_wrapped", False):
+        return
+    with _OFFLOAD_PATCH_LOCK:
+        if getattr(
+            FilesystemMiddleware.__init__, "_lens_offload_wrapped", False
+        ):
+            return
+        tool_tokens = config.offload_tool_tokens
+        human_tokens = config.offload_human_tokens
+        original_init = FilesystemMiddleware.__init__
+
+        def init_with_offload_defaults(self, *args, **kwargs):
+            kwargs.setdefault("tool_token_limit_before_evict", tool_tokens)
+            if human_tokens is not None:
+                kwargs.setdefault(
+                    "human_message_token_limit_before_evict", human_tokens
+                )
+            original_init(self, *args, **kwargs)
+
+        init_with_offload_defaults._lens_offload_wrapped = True
+        FilesystemMiddleware.__init__ = init_with_offload_defaults
