@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 import subprocess
 
+from .path_rules import SIDECAR_SUFFIX
+
 LOGGER = logging.getLogger("lensnode")
 
 DEFAULT_EXCLUDED_DIRS = {
@@ -123,7 +125,8 @@ def search_workspace(
             )
             if len(files) >= max_results:
                 break
-        return {"mode": "files", "files": list(dict.fromkeys(files))[:max_results]}
+        files = _visible_paths(files, dirs, policy)
+        return {"mode": "files", "files": files[:max_results]}
 
     if output_mode == "count":
         counts = []
@@ -136,6 +139,7 @@ def search_workspace(
             )
             if len(counts) >= max_results:
                 break
+        counts = _visible_counts(counts, dirs, policy)
         counts.sort(key=lambda item: (-item["count"], item["path"]))
         return {"mode": "count", "counts": counts[:max_results]}
 
@@ -157,8 +161,20 @@ def search_workspace(
             break
 
     if matches:
+        matches = [
+            match
+            for match in matches
+            if _path_allowed_in_dirs(match["path"], dirs, policy)
+        ]
+        for match in matches:
+            match["path"] = str(citation_path(match["path"]))
         matches = _rank_matches(matches, terms)
-        return {"mode": "content", "matches": matches[:max_results], "files": []}
+        if matches:
+            return {
+                "mode": "content",
+                "matches": matches[:max_results],
+                "files": [],
+            }
 
     files = []
     for root, scope in dirs:
@@ -181,7 +197,7 @@ def search_workspace(
     return {
         "mode": "content",
         "matches": [],
-        "files": [str(path) for path in files],
+        "files": _visible_paths(files, dirs, policy),
         "note": note,
     }
 
@@ -208,7 +224,15 @@ def glob_files(target_dirs, pattern, max_results=None, policy=None):
                 if len(found) >= GLOB_SCAN_LIMIT:
                     break
                 if is_path_allowed(root, path, scope, policy):
-                    found.append(path)
+                    visible = citation_path(path)
+                    if visible != path and not is_path_allowed(
+                        root,
+                        visible,
+                        scope,
+                        policy,
+                    ):
+                        continue
+                    found.append(visible)
         except (ValueError, NotImplementedError):
             continue
     found = sorted(set(found), key=_safe_mtime, reverse=True)
@@ -326,6 +350,8 @@ def is_path_allowed(root, path, scope, policy):
         return False
     if is_path_excluded(root, path, scope, policy):
         return False
+    if _is_sidecar_artifact(path) and converted_source_path(path) is None:
+        return False
     exclude_extensions = _option(
         scope,
         policy,
@@ -335,6 +361,93 @@ def is_path_allowed(root, path, scope, policy):
     if path.suffix in _normalize_extensions(exclude_extensions):
         return False
     return True
+
+
+def converted_source_path(path_value):
+    """Return the source document represented by a sidecar content file."""
+
+    path = Path(path_value)
+    parent = path.parent
+    if (
+        not path.is_file()
+        or path.name != "content.md"
+        or not parent.name.endswith(SIDECAR_SUFFIX)
+    ):
+        return None
+    source_name = parent.name[: -len(SIDECAR_SUFFIX)]
+    if not source_name:
+        return None
+    source = parent.parent / source_name
+    return source if source.is_file() else None
+
+
+def citation_path(path_value):
+    """Return the user-facing source path for a retrieval artifact."""
+
+    path = Path(path_value)
+    return converted_source_path(path) or path
+
+
+def retrieval_path(path_value):
+    """Return searchable sidecar text when a source document has one."""
+
+    path = Path(path_value)
+    content = Path(f"{path}{SIDECAR_SUFFIX}") / "content.md"
+    if path.is_file() and converted_source_path(content) == path:
+        return content
+    return path
+
+
+def _is_sidecar_artifact(path_value):
+    """Return whether a path is inside a conversion sidecar directory."""
+
+    path = Path(path_value)
+    return any(
+        part != SIDECAR_SUFFIX and part.endswith(SIDECAR_SUFFIX)
+        for part in path.parts
+    )
+
+
+def _path_allowed_in_dirs(path_value, dirs, policy):
+    """Return whether a tool result remains allowed by its selected root."""
+
+    path = Path(path_value)
+    for root, scope in dirs:
+        if not is_path_allowed(root, path, scope, policy):
+            continue
+        source = converted_source_path(path)
+        if source is None or is_path_allowed(root, source, scope, policy):
+            return True
+    return False
+
+
+def _visible_paths(paths, dirs, policy):
+    """Return unique allowed paths with conversion artifacts normalized."""
+
+    visible = []
+    for path in paths:
+        if not _path_allowed_in_dirs(path, dirs, policy):
+            continue
+        value = str(citation_path(path))
+        if value not in visible:
+            visible.append(value)
+    return visible
+
+
+def _visible_counts(counts, dirs, policy):
+    """Merge match counts under their user-facing source paths."""
+
+    visible = {}
+    for item in counts:
+        path = item["path"]
+        if not _path_allowed_in_dirs(path, dirs, policy):
+            continue
+        value = str(citation_path(path))
+        visible[value] = visible.get(value, 0) + int(item["count"])
+    return [
+        {"path": path, "count": count}
+        for path, count in visible.items()
+    ]
 
 
 def _query_terms(query):

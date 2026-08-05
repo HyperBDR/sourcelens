@@ -23,10 +23,12 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from .tls import create_config_ssl_context
 from .workspace import (
+    citation_path,
     glob_files,
     is_path_allowed,
     is_path_excluded,
     read_workspace_window,
+    retrieval_path,
     search_workspace as search_workspace_files,
     target_scope,
 )
@@ -145,6 +147,8 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
         language when needed). File size is not a constraint. In content
         mode, when nothing matches a 'files' listing of the scope is
         returned so you can read files directly with read_workspace_file.
+        Converted documents are identified by their original source paths,
+        never by internal .sourcelens sidecar paths.
         """
 
         emit(
@@ -195,17 +199,21 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
 
         Returns numbered lines plus has_more so you can page through any file
         by increasing offset; file size is not a constraint. Call
-        search_workspace first to get the line numbers worth reading.
+        search_workspace first to get the line numbers worth reading. An
+        original converted-document path transparently reads its searchable
+        text while retaining the original path for citation.
         """
 
+        requested_path = str(citation_path(Path(path).resolve()))
         emit(
             "tool.read_workspace_file.start",
             {
-                "path": path,
+                "path": requested_path,
                 "offset": offset,
                 "limit": limit,
                 "summary": (
-                    f"{_basename(path)} · lines {offset}-{offset + limit - 1}"
+                    f"{_basename(requested_path)} · lines "
+                    f"{offset}-{offset + limit - 1}"
                 ),
             },
         )
@@ -245,15 +253,17 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
             limit=limit,
             policy=retrieval_policy,
         )
+        visible_path = str(citation_path(resolved))
+        window["path"] = visible_path
         emit(
             "tool.read_workspace_file.done",
             {
-                "path": str(resolved),
+                "path": visible_path,
                 "start": window.get("start_line"),
                 "end": window.get("end_line"),
                 "has_more": window.get("has_more"),
                 "summary": (
-                    f"{_basename(resolved)} · lines "
+                    f"{_basename(visible_path)} · lines "
                     f"{window.get('start_line')}-{window.get('end_line')}"
                     f"{' (+more)' if window.get('has_more') else ''}"
                 ),
@@ -270,7 +280,8 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
         Use when you know a filename or want to enumerate files of a type,
         e.g. pattern="**/*.md", "**/*install*", "src/**/*.py". Returns file
         paths sorted by modification time; read them with
-        read_workspace_file.
+        read_workspace_file. Converted content is returned under its original
+        document path rather than an internal .sourcelens path.
         """
 
         emit(
@@ -3376,8 +3387,9 @@ def _resolve_allowed_path(path, target_dirs, policy=None):
         except ValueError:
             continue
         scope = target_scope(item)
-        if is_path_allowed(root, candidate, scope, policy or {}):
-            return candidate
+        resolved = retrieval_path(candidate)
+        if is_path_allowed(root, resolved, scope, policy or {}):
+            return resolved
     return None
 
 
@@ -3546,7 +3558,17 @@ def _list_directory_files(directory, target_dirs, policy=None, limit=50):
             path = current_path / name
             if not is_path_allowed(root, path, scope, policy):
                 continue
-            files.append(str(path))
+            visible_path = citation_path(path)
+            if visible_path != path and not is_path_allowed(
+                root,
+                visible_path,
+                scope,
+                policy,
+            ):
+                continue
+            visible = str(visible_path)
+            if visible not in files:
+                files.append(visible)
     return files
 
 
