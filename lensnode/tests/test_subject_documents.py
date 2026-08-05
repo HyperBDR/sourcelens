@@ -143,6 +143,7 @@ def test_prepare_materializes_converts_and_scopes_subject_document(
     assert calls[0][3]["conversion"]["document"] is True
     assert calls[0][3]["conversion"]["embedded_image"] is True
     assert calls[0][3]["conversion"]["vision_model_ref"] == "vision-model"
+    assert calls[0][3]["run_uuid"] == "run-123"
     assert str(sidecar / "content.md") in glob_files(
         [{"path": str(subject_dir), "material_role": "subject"}],
         "**/*",
@@ -150,6 +151,60 @@ def test_prepare_materializes_converts_and_scopes_subject_document(
 
     cleanup_runtime_resources(resources)
     assert not resources.root.exists()
+
+
+def test_prepare_emits_replayable_document_progress(monkeypatch, tmp_path):
+    content = b"%PDF-1.7\nsubject"
+    command = _command(content)
+    events = []
+
+    monkeypatch.setattr(
+        "lensnode.runtime_resources._download_run_attachment",
+        lambda config, run_uuid, document, **kwargs: content,
+    )
+
+    def convert_document(*args, **kwargs):
+        kwargs["on_progress"](
+            {
+                "stage": "recognizing_images",
+                "image_completed": 1,
+                "image_total": 2,
+            }
+        )
+        return {"chars": 35}
+
+    monkeypatch.setattr(
+        "lensnode.runtime_resources._run_document_conversion",
+        convert_document,
+    )
+
+    prepare_runtime_resources(
+        _config(tmp_path),
+        command,
+        emit_event=lambda name, detail: events.append((name, detail)),
+    )
+
+    document_events = [
+        detail
+        for name, detail in events
+        if name == "workflow.document.progress"
+    ]
+    assert [
+        event["payload"]["stage"] for event in document_events
+    ] == [
+        "downloading",
+        "extracting_text",
+        "recognizing_images",
+        "ready",
+    ]
+    assert [
+        event["payload"]["revision"] for event in document_events
+    ] == [1, 2, 3, 4]
+    assert document_events[2]["payload"]["image_completed"] == 1
+    assert document_events[2]["payload"]["image_total"] == 2
+    assert all(event["event_type"] == "document.progress" for event in document_events)
+    assert all(event["visibility"] == "user" for event in document_events)
+    assert "Tender 2026.pdf" not in str(document_events)
 
 
 def test_prepare_materializes_prior_deliverable_for_general_chat(
@@ -290,11 +345,72 @@ def test_prepare_cancels_conversion_and_removes_runtime_files(
     assert not runtime_root.exists()
 
 
-def _stall_conversion_worker(target, path, item, context, result_queue):
+def _stall_conversion_worker(
+    target,
+    path,
+    item,
+    context,
+    result_queue,
+    progress_queue,
+):
     """Record the child PID and stall until the parent terminates it."""
 
+    del target, item, context, result_queue, progress_queue
     Path(path).write_text(str(os.getpid()), encoding="utf-8")
     time.sleep(60)
+
+
+def _report_conversion_progress(target, path, item, context):
+    """Report one child-process progress update."""
+
+    del target, path, item
+    context["progress_queue"].put(
+        {
+            "stage": "recognizing_images",
+            "image_completed": 2,
+            "image_total": 5,
+        }
+    )
+    return {"chars": 1}
+
+
+def test_conversion_process_forwards_progress_to_parent(monkeypatch, tmp_path):
+    try:
+        fork_context = multiprocessing.get_context("fork")
+    except ValueError:
+        pytest.skip("fork context is required for this process test")
+
+    monkeypatch.setattr(
+        runtime_resources.multiprocessing,
+        "get_context",
+        lambda _method: fork_context,
+    )
+    monkeypatch.setattr(
+        runtime_resources,
+        "convert_one",
+        _report_conversion_progress,
+    )
+    progress = []
+
+    result = runtime_resources._run_document_conversion(
+        tmp_path,
+        tmp_path / "document.docx",
+        {},
+        {},
+        cancel_event=threading.Event(),
+        on_activity=None,
+        on_progress=progress.append,
+        deadline_at=time.monotonic() + 5,
+    )
+
+    assert result == {"chars": 1}
+    assert progress == [
+        {
+            "stage": "recognizing_images",
+            "image_completed": 2,
+            "image_total": 5,
+        }
+    ]
 
 
 def test_conversion_process_is_terminated_at_run_deadline(

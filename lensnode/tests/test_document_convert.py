@@ -246,6 +246,7 @@ def test_post_process_document_recognizes_embedded_office_image(
         describe_image_bytes,
     )
 
+    progress = []
     summary = post_process_documents(
         {
             "datasource_uuid": "ds1",
@@ -260,6 +261,7 @@ def test_post_process_document_recognizes_embedded_office_image(
             },
             "ai_gateway_url": "http://gateway",
             "lensnode_token": "token",
+            "progress_queue": types.SimpleNamespace(put=progress.append),
         },
         SyncResult(items=[sync_item(doc)]),
     )
@@ -272,6 +274,18 @@ def test_post_process_document_recognizes_embedded_office_image(
     assert summary["embedded_images_total"] == 1
     assert summary["embedded_images_recognized"] == 1
     assert meta["conversion"]["stats"]["embedded_images_recognized"] == 1
+    assert progress == [
+        {
+            "stage": "recognizing_images",
+            "image_completed": 0,
+            "image_total": 1,
+        },
+        {
+            "stage": "recognizing_images",
+            "image_completed": 1,
+            "image_total": 1,
+        },
+    ]
 
 
 def test_post_process_pdf_recognizes_embedded_image(tmp_path, monkeypatch):

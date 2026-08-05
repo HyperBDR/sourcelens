@@ -61,6 +61,18 @@ def _touch_runtime_activity(context):
         on_activity()
 
 
+def _emit_conversion_progress(context, detail):
+    """Send content-free conversion progress to the parent process."""
+
+    progress_queue = context.get("progress_queue")
+    if progress_queue is None:
+        return
+    try:
+        progress_queue.put(detail)
+    except (AttributeError, OSError, ValueError):
+        return
+
+
 class ConversionOutput:
     """One converter output."""
 
@@ -1121,6 +1133,17 @@ def convert_embedded_images(path, context):
     try:
         with zipfile.ZipFile(path) as archive:
             entries = embedded_image_entries(archive, prefix)
+            image_total = min(len(entries), max(max_images, 0))
+            if image_total:
+                _emit_conversion_progress(
+                    context,
+                    {
+                        "stage": "recognizing_images",
+                        "image_completed": 0,
+                        "image_total": image_total,
+                    },
+                )
+            image_completed = 0
             for index, name in enumerate(entries, start=1):
                 _check_runtime_cancelled(context)
                 _touch_runtime_activity(context)
@@ -1143,6 +1166,15 @@ def convert_embedded_images(path, context):
                     stats["images_duplicate"] = int(
                         stats.get("images_duplicate") or 0
                     ) + 1
+                    image_completed += 1
+                    _emit_conversion_progress(
+                        context,
+                        {
+                            "stage": "recognizing_images",
+                            "image_completed": image_completed,
+                            "image_total": image_total,
+                        },
+                    )
                     continue
                 seen.add(digest)
                 result = convert_one_embedded_image(
@@ -1156,6 +1188,15 @@ def convert_embedded_images(path, context):
                 merge_cost_stats(cost, result["cost"])
                 if result["description"]:
                     descriptions.append(result)
+                image_completed += 1
+                _emit_conversion_progress(
+                    context,
+                    {
+                        "stage": "recognizing_images",
+                        "image_completed": image_completed,
+                        "image_total": image_total,
+                    },
+                )
     except (OSError, zipfile.BadZipFile):
         return {"markdown": "", "stats": stats, "cost": cost}
 
@@ -1831,6 +1872,7 @@ def describe_image_bytes(image_bytes, mime_type, context):
         model_ref=model_ref,
         ai_gateway_url=gateway_url,
         token=token,
+        run_uuid=context.get("run_uuid"),
         tls_skip_verify=context.get("tls_skip_verify", False),
         tls_ca_file=context.get("tls_ca_file"),
         http_client=context.get("gateway_http_client"),

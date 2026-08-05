@@ -1130,8 +1130,10 @@ def test_legacy_tool_result_is_neutralized_without_recovery_metadata():
 
 def test_image_gateway_request_uses_configured_tls_context(monkeypatch):
     client_options = {}
+    captured = {}
 
     def handler(request):
+        captured["payload"] = json.loads(request.read())
         return httpx.Response(
             200,
             json={"message": {"content": "described"}},
@@ -1146,10 +1148,12 @@ def test_image_gateway_request_uses_configured_tls_context(monkeypatch):
         model_ref="vision-model",
         ai_gateway_url="https://gateway.example/ai/",
         token="token",
+        run_uuid="run-123",
         tls_skip_verify=True,
     )
 
     assert result["content"] == "described"
+    assert captured["payload"]["run_uuid"] == "run-123"
     assert client_options["verify"].verify_mode == ssl.CERT_NONE
 
 

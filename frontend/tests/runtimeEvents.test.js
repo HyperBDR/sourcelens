@@ -8,6 +8,7 @@ import {
   calculateRunElapsedSeconds,
   createConversationAutoScroller,
   createRuntimeState,
+  formatDocumentProgressText,
   formatActivityProgressText,
   getMessageTimestamp,
   isActiveProgressAncestor,
@@ -1334,6 +1335,56 @@ test('falls back through phase, activity and run status', () => {
   assert.equal(selectLiveProgressText({ fallbackText: 'Waiting' }), 'Waiting')
 })
 
+test('formats active document preparation without exposing document data', () => {
+  const translate = (key, values) => `${key}:${JSON.stringify(values)}`
+
+  assert.equal(
+    formatDocumentProgressText(
+      {
+        stage: 'downloading',
+        documentIndex: 1,
+        documentTotal: 2
+      },
+      translate
+    ),
+    'lens.chat.runtime.documentProgress.downloading:{"current":1,"total":2}'
+  )
+  assert.equal(
+    formatDocumentProgressText(
+      {
+        stage: 'recognizing_images',
+        imageCompleted: 3,
+        imageTotal: 5
+      },
+      translate
+    ),
+    'lens.chat.runtime.documentProgress.recognizingImages:{"completed":3,"total":5}'
+  )
+  assert.equal(
+    formatDocumentProgressText(
+      {
+        stage: 'extracting_text',
+        documentIndex: 2,
+        documentTotal: 2
+      },
+      translate
+    ),
+    'lens.chat.runtime.documentProgress.extractingText:{"current":2,"total":2}'
+  )
+  assert.equal(formatDocumentProgressText({ stage: 'ready' }, translate), '')
+})
+
+test('shows document preparation before generic run status', () => {
+  assert.equal(
+    selectLiveProgressText({
+      documentProgressText: 'Recognizing document images 3/5',
+      phaseText: 'Analyzing',
+      fallbackText: 'Generating'
+    }),
+    'Recognizing document images 3/5'
+  )
+})
+
 test('ignores stale plan revisions after reconnect', () => {
   let state = createRuntimeState()
   state = applyRuntimeEvent(state, {
@@ -1355,6 +1406,42 @@ test('ignores stale plan revisions after reconnect', () => {
 
   assert.equal(state.planRevision, 2)
   assert.equal(state.plan[0].title, 'New plan')
+})
+
+test('keeps the latest document progress after reconnect', () => {
+  let state = createRuntimeState()
+  state = applyRuntimeEvent(state, {
+    event_type: 'document.progress',
+    visibility: 'user',
+    payload: {
+      revision: 2,
+      stage: 'recognizing_images',
+      document_index: 1,
+      document_total: 1,
+      image_completed: 3,
+      image_total: 5
+    }
+  })
+  state = applyRuntimeEvent(state, {
+    event_type: 'document.progress',
+    visibility: 'user',
+    payload: {
+      revision: 1,
+      stage: 'extracting_text',
+      document_index: 1,
+      document_total: 1
+    }
+  })
+
+  assert.equal(state.documentProgressRevision, 2)
+  assert.deepEqual(state.documentProgress, {
+    revision: 2,
+    stage: 'recognizing_images',
+    documentIndex: 1,
+    documentTotal: 1,
+    imageCompleted: 3,
+    imageTotal: 5
+  })
 })
 
 test('reduces ordered direct-execution stages and ignores stale revisions', () => {

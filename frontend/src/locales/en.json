@@ -296,6 +296,11 @@
         "stageEnded": "Ended {completed}/{total}",
         "activityProgress": "Recorded {count} activities",
         "activityCompleted": "Completed {count} activities",
+        "documentProgress": {
+          "downloading": "Downloading document {current}/{total}",
+          "extractingText": "Extracting document text {current}/{total}",
+          "recognizingImages": "Recognizing document images {completed}/{total}"
+        },
         "blockedTitle": "Capability unavailable",
         "executionFailedTitle": "Capability execution failed",
         "verificationFailedTitle": "Result verification incomplete",

@@ -1384,6 +1384,7 @@ def describe_image_result(
     model_ref,
     ai_gateway_url,
     token,
+    run_uuid=None,
     tls_skip_verify=False,
     tls_ca_file=None,
     http_client=None,
@@ -1409,6 +1410,8 @@ def describe_image_result(
             }
         ],
     }
+    if run_uuid:
+        payload["run_uuid"] = str(run_uuid)
     with _http_client_context(
         http_client,
         timeout=120,
