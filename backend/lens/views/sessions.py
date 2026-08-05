@@ -41,6 +41,7 @@ from lens.models import (
     Message,
     MessageAttachment,
     Run,
+    RunDiagnostic,
     RunExecution,
     RunOutputFile,
     Session,
@@ -192,18 +193,19 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         return Response(serializer.data)
 
     def perform_destroy(self, instance):
-        """Delete runs first to avoid PROTECT conflict on Run.input_message.
+        """Delete protected dependents in dependency order.
 
-        Django 5.1's deletion collector checks PROTECT constraints during
-        the collection phase. It processes Message.session (CASCADE) before
-        Run.session (CASCADE), so Run.input_message (PROTECT) blocks Message
-        deletion before Run is added to the deletion set. Deleting Runs
-        explicitly first removes the PROTECT reference.
+        Django's deletion collector checks PROTECT constraints while it
+        collects related objects. Delete diagnostics before their evidence
+        cascades from Run, then delete Runs before Messages cascade from the
+        Session.
         """
         session_uuid = instance.uuid
         user_id = instance.user_id
-        instance.run_set.all().delete()
-        instance.delete()
+        with transaction.atomic():
+            RunDiagnostic.objects.filter(run__session=instance).delete()
+            instance.run_set.all().delete()
+            instance.delete()
         try:
             delete_session_document_attachments(
                 session_uuid,
