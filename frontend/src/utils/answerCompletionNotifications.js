@@ -41,7 +41,7 @@ export function answerCompletionTitle({
   completionLabel,
   hasUnread
 }) {
-  return hasUnread ? `🔔 ${completionLabel} · ${baseTitle}` : baseTitle
+  return hasUnread ? `${completionLabel} · ${baseTitle}` : baseTitle
 }
 
 export function shouldReviewUnreadSession({
