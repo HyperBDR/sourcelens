@@ -1477,6 +1477,7 @@ import {
   createConversationAutoScroller,
   createRuntimeState,
   formatActivityProgressText,
+  formatDocumentProgressText,
   formatDuration,
   getMessageTimestamp,
   isActiveProgressAncestor,
@@ -2010,6 +2011,10 @@ const liveFinalAnswerProgressText = computed(() => {
   return t('lens.chat.runtime.planCompletedAnswering', progress)
 })
 
+const liveDocumentProgressText = computed(() =>
+  formatDocumentProgressText(runtimeState.value.documentProgress, t)
+)
+
 const liveStageProgressText = computed(() =>
   stageProgressText(runtimeState.value.stages)
 )
@@ -2029,6 +2034,7 @@ const liveProgressText = computed(() => {
   }
   return selectLiveProgressText({
     finalAnswerProgressText: liveFinalAnswerProgressText.value,
+    documentProgressText: liveDocumentProgressText.value,
     structuredProgressText: liveStructuredProgressText.value,
     planProgressText: livePlanProgressText.value,
     stageProgressText: runtimeState.value.route

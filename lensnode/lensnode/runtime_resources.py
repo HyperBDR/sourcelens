@@ -149,6 +149,7 @@ def prepare_runtime_resources(
             config,
             command,
             runtime_root,
+            emit_event=emit_event,
             cancel_event=cancel_event,
             on_activity=on_activity,
         )
@@ -269,6 +270,7 @@ def _materialize_subject_documents(
     config,
     command,
     runtime_root,
+    emit_event=None,
     cancel_event=None,
     on_activity=None,
 ):
@@ -287,7 +289,35 @@ def _materialize_subject_documents(
         1,
         int(command.get("run_timeout_s") or config.request_timeout_s),
     )
-    for document in documents:
+    progress_revision = 0
+
+    def emit_document_progress(stage, document_index, detail=None):
+        """Emit one replayable, content-free document progress event."""
+
+        nonlocal progress_revision
+        if emit_event is None:
+            return
+        progress_revision += 1
+        detail = detail or {}
+        emit_event(
+            "workflow.document.progress",
+            {
+                "event_type": "document.progress",
+                "visibility": "user",
+                "payload": {
+                    "revision": progress_revision,
+                    "stage": stage,
+                    "document_index": document_index,
+                    "document_total": len(documents),
+                    "image_completed": int(
+                        detail.get("image_completed") or 0
+                    ),
+                    "image_total": int(detail.get("image_total") or 0),
+                },
+            },
+        )
+
+    for document_index, document in enumerate(documents, start=1):
         _check_cancelled(cancel_event)
         attachment_uuid = str(document.get("uuid") or "").strip()
         original_name = Path(
@@ -309,6 +339,7 @@ def _materialize_subject_documents(
         extension = Path(filename).suffix.lower()
         if not attachment_uuid or extension not in RUN_DOCUMENT_EXTENSIONS:
             raise ValueError("Unsupported Run attachment metadata")
+        emit_document_progress("downloading", document_index)
         data = _download_run_attachment(
             config,
             run_uuid,
@@ -325,8 +356,10 @@ def _materialize_subject_documents(
 
         source_path = subject_dir / f"{prefix}{filename}"
         source_path.write_bytes(data)
+        emit_document_progress("extracting_text", document_index)
         context = {
             "source_type": "run_attachment",
+            "run_uuid": run_uuid,
             "target_path": str(subject_dir),
             "conversion": {
                 "document": True,
@@ -346,16 +379,30 @@ def _materialize_subject_documents(
             context,
             cancel_event=cancel_event,
             on_activity=on_activity,
+            on_progress=lambda detail: emit_document_progress(
+                detail.get("stage") or "extracting_text",
+                document_index,
+                detail,
+            ),
             deadline_at=conversion_deadline,
         )
+        emit_document_progress("ready", document_index)
     return subject_dir
 
 
-def _conversion_worker(target, path, item, context, result_queue):
+def _conversion_worker(
+    target,
+    path,
+    item,
+    context,
+    result_queue,
+    progress_queue,
+):
     """Convert one document and report a serialization-safe result."""
 
     try:
-        result = convert_one(target, path, item, context)
+        worker_context = {**context, "progress_queue": progress_queue}
+        result = convert_one(target, path, item, worker_context)
     except Exception as exc:
         result_queue.put(
             {
@@ -375,6 +422,7 @@ def _run_document_conversion(
     *,
     cancel_event,
     on_activity,
+    on_progress=None,
     deadline_at,
 ):
     """Run conversion in a child process bounded by cancellation and time."""
@@ -386,9 +434,17 @@ def _run_document_conversion(
 
     process_context = multiprocessing.get_context("spawn")
     result_queue = process_context.Queue(maxsize=1)
+    progress_queue = process_context.Queue(maxsize=128)
     process = process_context.Process(
         target=_conversion_worker,
-        args=(target, path, item, context, result_queue),
+        args=(
+            target,
+            path,
+            item,
+            context,
+            result_queue,
+            progress_queue,
+        ),
         name="document-attachment-conversion",
     )
     started = False
@@ -406,11 +462,13 @@ def _run_document_conversion(
             process.join(
                 timeout=min(RUNTIME_CONVERSION_POLL_S, remaining_s)
             )
+            _forward_conversion_progress(progress_queue, on_progress)
             now = time.monotonic()
             if now >= next_activity_at:
                 _touch_activity(on_activity)
                 next_activity_at = now + RUNTIME_ACTIVITY_INTERVAL_S
 
+        _forward_conversion_progress(progress_queue, on_progress)
         try:
             payload = result_queue.get(timeout=1)
         except queue.Empty as exc:
@@ -429,6 +487,20 @@ def _run_document_conversion(
             process.join(timeout=1)
         result_queue.close()
         result_queue.join_thread()
+        progress_queue.close()
+        progress_queue.join_thread()
+
+
+def _forward_conversion_progress(progress_queue, on_progress):
+    """Forward all available child progress messages to the Run emitter."""
+
+    while True:
+        try:
+            detail = progress_queue.get_nowait()
+        except queue.Empty:
+            return
+        if on_progress is not None and isinstance(detail, dict):
+            on_progress(detail)
 
 
 def _download_run_attachment(

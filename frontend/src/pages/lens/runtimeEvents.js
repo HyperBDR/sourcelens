@@ -7,6 +7,12 @@ const STAGE_STATUSES = new Set([
   'skipped'
 ])
 const ACTIVITY_STATUSES = new Set(['in_progress', 'completed', 'failed'])
+const DOCUMENT_PROGRESS_STAGES = new Set([
+  'downloading',
+  'extracting_text',
+  'recognizing_images',
+  'ready'
+])
 const STRUCTURED_ACTIVITY_KINDS = new Set([
   'query_orders',
   'get_order_detail',
@@ -70,6 +76,26 @@ export function formatActivityProgressText(
     text += ` · ${formatDuration(durationSeconds)}`
   }
   return text
+}
+
+export function formatDocumentProgressText(progress, translate) {
+  if (!progress || progress.stage === 'ready') return ''
+  if (progress.stage === 'recognizing_images') {
+    return translate('lens.chat.runtime.documentProgress.recognizingImages', {
+      completed: progress.imageCompleted,
+      total: progress.imageTotal
+    })
+  }
+  const keys = {
+    downloading: 'downloading',
+    extracting_text: 'extractingText'
+  }
+  const key = keys[progress.stage]
+  if (!key) return ''
+  return translate(`lens.chat.runtime.documentProgress.${key}`, {
+    current: progress.documentIndex,
+    total: progress.documentTotal
+  })
 }
 
 export function getMessageTimestamp(message) {
@@ -150,6 +176,8 @@ export function createRuntimeState() {
     complexity: null,
     evidenceRequirement: null,
     phase: null,
+    documentProgress: null,
+    documentProgressRevision: 0,
     plan: [],
     planRevision: 0,
     stages: [],
@@ -556,6 +584,7 @@ export function summarizeStageProgress(stages, { terminal = false } = {}) {
 
 export function selectLiveProgressText({
   finalAnswerProgressText,
+  documentProgressText,
   structuredProgressText,
   planProgressText,
   stageProgressText,
@@ -566,6 +595,7 @@ export function selectLiveProgressText({
 }) {
   return (
     finalAnswerProgressText ||
+    documentProgressText ||
     structuredProgressText ||
     planProgressText ||
     stageProgressText ||
@@ -798,6 +828,27 @@ export function applyRuntimeEvent(state, event) {
   }
   if (event.event_type === 'phase.changed') {
     return { ...current, phase: payload.phase || null }
+  }
+  if (event.event_type === 'document.progress') {
+    const revision = Math.max(Number(payload.revision || 0), 0)
+    if (
+      revision < current.documentProgressRevision ||
+      !DOCUMENT_PROGRESS_STAGES.has(payload.stage)
+    ) {
+      return current
+    }
+    return {
+      ...current,
+      documentProgressRevision: revision,
+      documentProgress: {
+        revision,
+        stage: payload.stage,
+        documentIndex: Math.max(Number(payload.document_index || 0), 0),
+        documentTotal: Math.max(Number(payload.document_total || 0), 0),
+        imageCompleted: Math.max(Number(payload.image_completed || 0), 0),
+        imageTotal: Math.max(Number(payload.image_total || 0), 0)
+      }
+    }
   }
   if (event.event_type === 'plan.updated') {
     const revision = Math.max(Number(payload.revision || 0), 0)
