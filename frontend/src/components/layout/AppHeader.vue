@@ -1,6 +1,6 @@
 <template>
   <header
-    class="z-30 flex-shrink-0 border-b border-line bg-surface/95 shadow-sm backdrop-blur"
+    class="app-header z-30 flex-shrink-0 border-b border-line bg-surface/95 shadow-sm backdrop-blur"
   >
     <div class="px-4 sm:px-6 lg:px-8">
       <div class="flex justify-between items-center h-16">
@@ -58,3 +58,10 @@ const pageTitle = computed(() => {
   return routeNames[route.name] || t('common.appName')
 })
 </script>
+
+<style scoped>
+:global(:root[data-theme='dark'] .app-header) {
+  border-bottom: 0;
+  box-shadow: none;
+}
+</style>

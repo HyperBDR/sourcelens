@@ -4671,4 +4671,21 @@ onBeforeUnmount(() => {
     box-shadow: inset 1px 0 0 #e5e7eb;
   }
 }
+
+:global(:root[data-theme='dark'] .sidebar) {
+  background: var(--sl-bg-canvas);
+  border-right: 0;
+}
+
+:global(:root[data-theme='dark'] .mobile-topbar),
+:global(:root[data-theme='dark'] .chat-header),
+:global(:root[data-theme='dark'] .sidebar-footer) {
+  border-color: transparent;
+}
+
+@media (min-width: 1024px) {
+  :global(:root[data-theme='dark'] .main-shell) {
+    box-shadow: none;
+  }
+}
 </style>

@@ -18,14 +18,14 @@
   <!-- Sidebar -->
   <aside
     :class="[
-      'flex h-full w-64 flex-shrink-0 flex-col border-r border-line bg-surface-sunken transition-transform duration-300 ease-in-out',
+      'app-sidebar flex h-full w-64 flex-shrink-0 flex-col border-r border-line bg-surface-sunken transition-transform duration-300 ease-in-out',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
   >
     <!-- Logo and close button -->
     <div
-      class="flex h-16 items-center justify-between border-b border-line px-4"
+      class="app-sidebar-header flex h-16 items-center justify-between border-b border-line px-4"
     >
       <router-link
         :to="homePath"
@@ -258,5 +258,13 @@ const preloadRoute = (path) => {
 
 .nav-item-parent:hover svg:last-child {
   @apply opacity-100;
+}
+
+:global(:root[data-theme='dark'] .app-sidebar) {
+  border-right: 0;
+}
+
+:global(:root[data-theme='dark'] .app-sidebar-header) {
+  border-bottom: 0;
 }
 </style>

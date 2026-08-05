@@ -24,16 +24,14 @@
       >
         <section
           v-if="show"
-          class="relative flex h-[480px] max-h-[82vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-surface shadow-soft-lg"
+          class="settings-modal relative flex h-[526px] max-h-[82vh] w-full max-w-[700px] overflow-hidden rounded-2xl border border-line bg-surface shadow-soft-lg"
         >
           <!-- Left nav -->
           <nav
-            class="flex w-14 shrink-0 flex-col border-r border-line bg-surface-sunken py-3 sm:w-44"
+            class="settings-nav flex w-14 shrink-0 flex-col border-r border-line bg-surface-sunken py-4 sm:w-48"
           >
-            <div class="hidden px-3 pb-2 pt-1 sm:block">
-              <div
-                class="text-xs font-semibold uppercase tracking-wide text-theme-subtle"
-              >
+            <div class="hidden px-4 pb-3 sm:block">
+              <div class="settings-nav-title text-sm font-semibold text-theme-subtle">
                 {{ t('settings.modal.label') }}
               </div>
             </div>
@@ -47,7 +45,7 @@
                 :aria-label="section.label"
                 :class="
                   activeSection === section.key
-                    ? 'bg-surface font-medium text-theme shadow-sm'
+                    ? 'settings-nav-active bg-surface font-medium text-theme shadow-sm'
                     : 'text-theme-secondary hover:bg-surface-hover hover:text-theme'
                 "
                 @click="activeSection = section.key"
@@ -70,10 +68,10 @@
               </button>
             </div>
 
-            <div class="border-t border-line px-2 pt-2">
+            <div class="settings-logout-wrap border-t border-line px-2 pt-2">
               <button
                 type="button"
-                class="flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:justify-start sm:px-3"
+                class="settings-logout flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:justify-start sm:px-3"
                 :aria-label="t('common.logout')"
                 @click="handleLogout"
               >
@@ -105,14 +103,14 @@
           <!-- Right content -->
           <div class="flex min-w-0 flex-1 flex-col">
             <header
-              class="flex items-center justify-between border-b border-line px-4 py-4 sm:px-5"
+              class="settings-header flex items-center justify-between border-b border-line px-4 pb-2 pt-5 sm:px-6"
             >
               <h2 class="text-base font-semibold text-theme">
                 {{ sections.find((s) => s.key === activeSection)?.label }}
               </h2>
               <button
                 type="button"
-                class="flex h-8 w-8 items-center justify-center rounded-full text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary"
+                class="flex h-8 w-8 items-center justify-center rounded-lg text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary"
                 :aria-label="t('common.close')"
                 @click="emit('close')"
               >
@@ -133,7 +131,7 @@
               </button>
             </header>
 
-            <div class="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
+            <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3 sm:px-6">
               <!-- Profile section -->
               <div v-if="activeSection === 'profile'" class="space-y-5">
                 <div class="flex items-center gap-4">
@@ -219,21 +217,36 @@
                 <p class="text-sm text-theme-muted">
                   {{ t('settings.modal.appearanceDesc') }}
                 </p>
-                <div class="space-y-2" role="radiogroup">
+                <div class="grid gap-2 sm:grid-cols-2" role="radiogroup">
                   <label
                     v-for="option in themeOptions"
                     :key="option.value"
-                    class="flex cursor-pointer items-center gap-3 rounded-xl border border-line px-4 py-3 text-sm text-theme transition-colors hover:bg-surface-hover"
+                    class="flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 text-sm text-theme transition-colors"
+                    :class="
+                      preferencesStore.themeMode === option.value
+                        ? 'border-primary-500 bg-surface-selected'
+                        : 'border-line/80 bg-surface-raised hover:border-line-strong hover:bg-surface-hover'
+                    "
                   >
+                    <span
+                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-theme-secondary"
+                    >
+                      <component :is="option.icon" class="h-4 w-4" />
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block font-medium">{{ option.label }}</span>
+                      <span class="mt-0.5 block text-xs text-theme-muted">
+                        {{ option.description }}
+                      </span>
+                    </span>
                     <input
                       v-model="preferencesStore.themeMode"
                       type="radio"
                       name="appearance-mode"
                       :value="option.value"
-                      class="h-4 w-4 accent-primary-500"
+                      class="h-4 w-4 shrink-0 accent-primary-500"
                       @change="preferencesStore.setThemeMode(option.value)"
                     />
-                    <span class="font-medium">{{ option.label }}</span>
                   </label>
                 </div>
                 <p
@@ -241,6 +254,9 @@
                   class="text-sm text-theme-muted"
                 >
                   {{ t('settings.modal.themeScheduleDescription') }}
+                </p>
+                <p class="text-xs text-theme-subtle">
+                  {{ t('settings.modal.themeAdminNote') }}
                 </p>
               </div>
 
@@ -287,13 +303,6 @@ const preferencesStore = usePreferencesStore()
 const languages = computed(() => getUiLanguageOptions(t))
 const activeSection = ref('profile')
 
-const themeOptions = computed(() => [
-  { value: 'light', label: t('settings.modal.themeLight') },
-  { value: 'dark', label: t('settings.modal.themeDark') },
-  { value: 'system', label: t('settings.modal.themeSystem') },
-  { value: 'scheduled', label: t('settings.modal.themeScheduled') }
-])
-
 const UserIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke-linecap="round"/></svg>`
 }
@@ -312,6 +321,45 @@ const ReleaseNotesIcon = {
 const LockIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg>`
 }
+const SunIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" stroke-linecap="round"/></svg>`
+}
+const MoonIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+}
+const SystemIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" stroke-linecap="round"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" fill-opacity="0.25"/></svg>`
+}
+const ClockIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+}
+
+const themeOptions = computed(() => [
+  {
+    value: 'light',
+    label: t('settings.modal.themeLight'),
+    description: t('settings.modal.themeLightDesc'),
+    icon: SunIcon
+  },
+  {
+    value: 'dark',
+    label: t('settings.modal.themeDark'),
+    description: t('settings.modal.themeDarkDesc'),
+    icon: MoonIcon
+  },
+  {
+    value: 'system',
+    label: t('settings.modal.themeSystem'),
+    description: t('settings.modal.themeSystemDesc'),
+    icon: SystemIcon
+  },
+  {
+    value: 'scheduled',
+    label: t('settings.modal.themeScheduled'),
+    description: t('settings.modal.themeScheduledDesc'),
+    icon: ClockIcon
+  }
+])
 
 const sections = computed(() => [
   { key: 'profile', label: t('settings.modal.title'), icon: UserIcon },
@@ -407,3 +455,28 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', handleKeydown)
 })
 </script>
+
+<style scoped>
+:global(:root[data-theme='dark'] .settings-modal) {
+  border-color: rgb(var(--sl-border-default-rgb) / 60%);
+}
+
+:global(:root[data-theme='dark'] .settings-nav),
+:global(:root[data-theme='dark'] .settings-logout-wrap),
+:global(:root[data-theme='dark'] .settings-header) {
+  border-color: transparent;
+}
+
+:global(:root[data-theme='dark'] .settings-nav-title) {
+  color: var(--sl-text-primary);
+}
+
+:global(:root[data-theme='dark'] .settings-nav-active) {
+  background: var(--sl-bg-selected);
+  box-shadow: none;
+}
+
+:global(:root[data-theme='dark'] .settings-logout:hover) {
+  background: var(--sl-bg-hover);
+}
+</style>

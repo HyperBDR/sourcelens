@@ -563,7 +563,13 @@ test('defines light and exact Cursor dark semantic tokens', () => {
     'sl-text-primary': '#171512',
     'sl-text-secondary': '#4b5563',
     'sl-text-muted': '#6b7280',
-    'sl-text-subtle': '#9ca3af'
+    'sl-text-subtle': '#9ca3af',
+    'sl-neutral-text-400-rgb': '156 163 175',
+    'sl-neutral-text-500-rgb': '107 114 128',
+    'sl-neutral-text-600-rgb': '75 85 99',
+    'sl-neutral-text-700-rgb': '55 65 81',
+    'sl-neutral-text-800-rgb': '31 41 55',
+    'sl-neutral-text-900-rgb': '17 24 39'
   })
   assertTokenValues(getCssBlock(":root[data-theme='dark']"), {
     'sl-bg-canvas': '#1e1e1e',
@@ -576,7 +582,13 @@ test('defines light and exact Cursor dark semantic tokens', () => {
     'sl-text-primary': '#cccccc',
     'sl-text-secondary': '#b4b4b4',
     'sl-text-muted': '#858585',
-    'sl-text-subtle': '#6e6e6e'
+    'sl-text-subtle': '#6e6e6e',
+    'sl-neutral-text-400-rgb': '133 133 133',
+    'sl-neutral-text-500-rgb': '133 133 133',
+    'sl-neutral-text-600-rgb': '180 180 180',
+    'sl-neutral-text-700-rgb': '180 180 180',
+    'sl-neutral-text-800-rgb': '204 204 204',
+    'sl-neutral-text-900-rgb': '204 204 204'
   })
 })
 
@@ -615,6 +627,20 @@ test('Tailwind semantic roles use opacity-compatible variables', () => {
     tailwindSource,
     /textColor:\s*\{[\s\S]*?theme:\s*\{[\s\S]*?DEFAULT:\s*'rgb\(var\(--sl-text-primary-rgb\) \/ <alpha-value>\)'/
   )
+  for (const palette of ['gray', 'ink']) {
+    assert.match(
+      tailwindSource,
+      new RegExp(
+        `${palette}:\\s*\\{[\\s\\S]*?900:\\s*` +
+          `'rgb\\(var\\(--sl-neutral-text-900-rgb\\) \\/ ` +
+          `<alpha-value>\\)'`
+      )
+    )
+  }
+  assert.match(
+    tailwindSource,
+    /backgroundColor:\s*\{[\s\S]*?white:\s*'rgb\(var\(--sl-bg-surface-rgb\) \/ <alpha-value>\)'/
+  )
 })
 
 test('document root uses semantic canvas and theme text', () => {
@@ -638,7 +664,6 @@ const en = JSON.parse(
 const zh = JSON.parse(
   readFileSync(new URL('../src/locales/zh-CN.json', import.meta.url), 'utf8')
 )
-
 test('settings expose four mutually exclusive appearance modes', () => {
   for (const mode of ['light', 'dark', 'system', 'scheduled']) {
     assert.match(settingsSource, new RegExp(`value: '${mode}'`))
@@ -646,11 +671,38 @@ test('settings expose four mutually exclusive appearance modes', () => {
   assert.match(settingsSource, /setThemeMode/)
 })
 
+test('settings modal preserves light colors and softens dark dividers', () => {
+  assert.match(settingsSource, /bg-surface-sunken/)
+  assert.match(settingsSource, /border-r border-line/)
+  assert.match(settingsSource, /border-b border-line/)
+  assert.match(settingsSource, /border-t border-line/)
+  assert.match(settingsSource, /hover:bg-red-50/)
+  assert.match(
+    settingsSource,
+    /:global\(:root\[data-theme='dark'\] \.settings-header\)/
+  )
+  assert.match(settingsSource, /border-color: transparent/)
+  assert.match(settingsSource, /\.settings-logout:hover/)
+  assert.match(settingsSource, /background: var\(--sl-bg-hover\)/)
+})
+
+test('appearance choices use responsive cards and semantic hover colors', () => {
+  assert.match(settingsSource, /sm:grid-cols-2/)
+  assert.match(settingsSource, /bg-surface-selected/)
+  assert.match(settingsSource, /hover:border-line-strong/)
+  assert.match(settingsSource, /hover:bg-surface-hover/)
+})
+
 test('appearance labels exist in both locales', () => {
   for (const locale of [en, zh]) {
     assert.ok(locale.settings.modal.appearance)
     assert.ok(locale.settings.modal.themeScheduled)
     assert.ok(locale.settings.modal.themeScheduleDescription)
+    assert.ok(locale.settings.modal.themeLightDesc)
+    assert.ok(locale.settings.modal.themeDarkDesc)
+    assert.ok(locale.settings.modal.themeSystemDesc)
+    assert.ok(locale.settings.modal.themeScheduledDesc)
+    assert.ok(locale.settings.modal.themeAdminNote)
   }
 })
 
@@ -675,6 +727,20 @@ const activityStackSource = readFileSync(
 )
 const adminSidebarSource = readFileSync(
   new URL('../src/admin/layout/AdminSidebar.vue', import.meta.url),
+  'utf8'
+)
+const userMenuSources = [
+  '../src/components/layout/SidebarQuickMenu.vue',
+  '../src/components/lens/UserDock.vue'
+].map((relativePath) =>
+  readFileSync(new URL(relativePath, import.meta.url), 'utf8')
+)
+const appSidebarSource = readFileSync(
+  new URL('../src/components/layout/AppSidebar.vue', import.meta.url),
+  'utf8'
+)
+const appHeaderSource = readFileSync(
+  new URL('../src/components/layout/AppHeader.vue', import.meta.url),
   'utf8'
 )
 
@@ -757,6 +823,54 @@ test('administration keeps its existing explicit logo treatment', () => {
   assert.match(adminSidebarSource, /tone="dark"/)
   assert.match(adminSidebarSource, /\[&_img\]:!w-52/)
   assert.match(adminSidebarSource, /mix-blend-screen/)
+})
+
+test('user menus preserve light interactions and override only dark colors', () => {
+  for (const source of userMenuSources) {
+    assert.match(source, /bg-primary-(?:50|100)\b/)
+    assert.match(source, /border-[bt] border-line/)
+    assert.match(source, /:global\(:root\[data-theme='dark'\] \./)
+    assert.match(source, /background: var\(--sl-bg-hover\)/)
+  }
+})
+
+test('scoped dark selectors keep their component targets', () => {
+  const sources = [
+    settingsSource,
+    appSidebarSource,
+    appHeaderSource,
+    chatLogoSource,
+    ...userMenuSources
+  ]
+  const truncatedSelector = /:global\(:root\[data-theme='dark'\]\)\s+\./
+
+  for (const source of sources) {
+    assert.doesNotMatch(source, truncatedSelector)
+  }
+})
+
+test('user shells keep light dividers and remove them only in dark mode', () => {
+  assert.match(appSidebarSource, /border-r border-line/)
+  assert.match(appSidebarSource, /border-b border-line/)
+  assert.match(appHeaderSource, /border-b border-line/)
+  assert.match(appSidebarSource, /:root\[data-theme='dark'\]/)
+  assert.match(appHeaderSource, /:root\[data-theme='dark'\]/)
+
+  const chatSidebar = chatLogoSource.match(/\.sidebar\s*\{([^}]*)\}/)
+  const chatHeader = chatLogoSource.match(/\.chat-header\s*\{([^}]*)\}/)
+  const sidebarFooter = chatLogoSource.match(/\.sidebar-footer\s*\{([^}]*)\}/)
+
+  assert.ok(chatSidebar)
+  assert.ok(chatHeader)
+  assert.ok(sidebarFooter)
+  assert.match(chatSidebar[1], /border-r/)
+  assert.match(chatSidebar[1], /--sl-bg-surface/)
+  assert.match(chatHeader[1], /border-b/)
+  assert.match(sidebarFooter[1], /border-t/)
+  assert.match(chatLogoSource, /box-shadow: inset 1px 0 0 #e5e7eb/)
+  assert.match(chatLogoSource, /:root\[data-theme='dark'\]/)
+  assert.match(chatLogoSource, /background: var\(--sl-bg-canvas\)/)
+  assert.match(chatLogoSource, /box-shadow: none/)
 })
 
 const sharedThemeFiles = [

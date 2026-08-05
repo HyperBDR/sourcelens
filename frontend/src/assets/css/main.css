@@ -30,6 +30,12 @@
   --sl-text-muted-rgb: 107 114 128;
   --sl-text-subtle: #9ca3af;
   --sl-text-subtle-rgb: 156 163 175;
+  --sl-neutral-text-400-rgb: 156 163 175;
+  --sl-neutral-text-500-rgb: 107 114 128;
+  --sl-neutral-text-600-rgb: 75 85 99;
+  --sl-neutral-text-700-rgb: 55 65 81;
+  --sl-neutral-text-800-rgb: 31 41 55;
+  --sl-neutral-text-900-rgb: 17 24 39;
   --sl-form-bg: #ffffff;
   --sl-form-text: #171512;
   --sl-form-border: #ded7ca;
@@ -69,6 +75,12 @@
   --sl-text-muted-rgb: 133 133 133;
   --sl-text-subtle: #6e6e6e;
   --sl-text-subtle-rgb: 110 110 110;
+  --sl-neutral-text-400-rgb: 133 133 133;
+  --sl-neutral-text-500-rgb: 133 133 133;
+  --sl-neutral-text-600-rgb: 180 180 180;
+  --sl-neutral-text-700-rgb: 180 180 180;
+  --sl-neutral-text-800-rgb: 204 204 204;
+  --sl-neutral-text-900-rgb: 204 204 204;
   --sl-form-bg: #252526;
   --sl-form-text: #cccccc;
   --sl-form-border: #3c3c3c;

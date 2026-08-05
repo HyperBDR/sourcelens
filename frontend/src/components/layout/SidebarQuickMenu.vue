@@ -68,7 +68,7 @@
         <div class="quick-menu-section">
           <div
             v-if="userStore.userHasFeature('admin_console')"
-            class="mb-2 border-b border-line pb-2"
+            class="quick-menu-admin-separator mb-2 border-b border-line pb-2"
           >
             <router-link
               to="/management/users"
@@ -228,5 +228,20 @@ onUnmounted(() => {
 
 .quick-pill {
   @apply rounded-full bg-line-soft px-2 py-0.5 text-xs font-medium text-theme-muted;
+}
+
+:global(:root[data-theme='dark'] .quick-menu-trigger:hover),
+:global(:root[data-theme='dark'] .quick-menu-trigger-open) {
+  border-color: var(--sl-border-strong);
+  background: var(--sl-bg-hover);
+}
+
+:global(:root[data-theme='dark'] .quick-menu-admin-separator),
+:global(:root[data-theme='dark'] .quick-menu-section) {
+  border-bottom: 0;
+}
+
+:global(:root[data-theme='dark'] .quick-menu-link:hover) {
+  background: var(--sl-bg-hover);
 }
 </style>

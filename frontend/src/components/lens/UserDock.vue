@@ -279,4 +279,27 @@ async function handleLogout() {
 .dock-build-info {
   @apply px-3 pb-1 pt-2 text-left text-xs text-theme-subtle;
 }
+
+:global(:root[data-theme='dark'] .password-setup-prompt),
+:global(:root[data-theme='dark'] .anon-login-btn) {
+  border-color: var(--sl-border-default);
+  background: var(--sl-bg-raised);
+}
+
+:global(:root[data-theme='dark'] .password-setup-prompt:hover),
+:global(:root[data-theme='dark'] .dock-trigger:hover),
+:global(:root[data-theme='dark'] .dock-trigger-open),
+:global(:root[data-theme='dark'] .anon-login-btn:hover) {
+  border-color: var(--sl-border-strong);
+  background: var(--sl-bg-hover);
+}
+
+:global(:root[data-theme='dark'] .dock-section) {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+:global(:root[data-theme='dark'] .dock-link:hover) {
+  background: var(--sl-bg-hover);
+}
 </style>
