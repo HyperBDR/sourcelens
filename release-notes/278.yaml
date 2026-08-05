@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed a stale answer-completion browser title when reopening a conversation
+  that is still running.
+zh-CN: >-
+  修复重新打开仍在运行的会话后，浏览器标题仍显示“回答已完成”的问题。
