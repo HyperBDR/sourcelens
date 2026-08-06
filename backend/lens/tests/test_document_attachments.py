@@ -632,6 +632,42 @@ class DocumentAttachmentTests(TestCase):
         )
         self.assertEqual(payload["answer_language"], "zh-CN")
 
+    def test_dispatch_includes_features_from_assistant_settings(self):
+        self.assistant.settings = {"features": {"codegraph": False}}
+        self.assistant.save(update_fields=["settings"])
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze the codebase",
+            enqueue=False,
+        )
+
+        with (
+            patch("lens.services.get_channel_layer"),
+            patch("lens.services.async_to_sync") as async_to_sync,
+        ):
+            sender = async_to_sync.return_value
+            dispatch_run_to_lensnode(run, "Analyze the codebase")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(payload["features"], {"codegraph": False})
+
+    def test_dispatch_features_default_to_empty_when_unset(self):
+        run = create_execution_run(
+            session=self.session,
+            question="Analyze the codebase",
+            enqueue=False,
+        )
+
+        with (
+            patch("lens.services.get_channel_layer"),
+            patch("lens.services.async_to_sync") as async_to_sync,
+        ):
+            sender = async_to_sync.return_value
+            dispatch_run_to_lensnode(run, "Analyze the codebase")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(payload["features"], {})
+
     def test_document_only_run_dispatches_with_analysis_prompt(self):
         self.user.profile.language = "zh-CN"
         self.user.profile.save(update_fields=["language"])

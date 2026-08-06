@@ -33,6 +33,10 @@ class LensNodeConfig:
     mcp_discovery_timeout_s: int = 30
     mcp_tool_timeout_s: int = 60
     mcp_defer_threshold: int = 12
+    mcp_stdio_allowlist: tuple[str, ...] = ("codegraph",)
+    mcp_enable_codegraph: bool = True
+    codegraph_command: str = "codegraph"
+    codegraph_init_timeout_s: int = 300
 
 
 def _optional_int(value):
@@ -132,6 +136,22 @@ def load_config():
         ),
         mcp_defer_threshold=int(
             os.getenv("LENSNODE_MCP_DEFER_THRESHOLD", "12")
+        ),
+        mcp_stdio_allowlist=tuple(
+            item.strip()
+            for item in os.getenv(
+                "LENSNODE_MCP_STDIO_ALLOWLIST", "codegraph"
+            ).split(",")
+            if item.strip()
+        ),
+        mcp_enable_codegraph=_env_bool(
+            "LENSNODE_MCP_ENABLE_CODEGRAPH", default=True
+        ),
+        codegraph_command=os.getenv(
+            "LENSNODE_CODEGRAPH_COMMAND", "codegraph"
+        ),
+        codegraph_init_timeout_s=int(
+            os.getenv("LENSNODE_CODEGRAPH_INIT_TIMEOUT_S", "300")
         ),
         offload_tool_tokens=int(
             os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"

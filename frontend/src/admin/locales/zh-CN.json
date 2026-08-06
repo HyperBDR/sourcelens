@@ -1143,6 +1143,8 @@
       "retrievalPolicy": "检索策略",
       "excludeExtensions": "排除扩展名",
       "excludeDirs": "排除目录",
+      "enableCodegraph": "启用代码图",
+      "enableCodegraphHint": "构建并检索代码图，辅助代码分析",
       "workspaceGuideEnabled": "为该 Assistant 注入此指引",
       "workspaceGuideHelp": "描述仓库结构、检索优先级和停止规则。SourceLens 会将其保存为绑定 Skill，并在节点执行时注入。",
       "agentModel": "Agent 模型",
