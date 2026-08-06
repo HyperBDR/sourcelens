@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed page-size dropdown options wrapping digits onto two lines in narrow
+  select menus.
+zh-CN: >-
+  修复每页条数等窄下拉菜单中数字选项被拆成两行显示的问题。
