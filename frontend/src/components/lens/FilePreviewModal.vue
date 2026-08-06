@@ -228,7 +228,7 @@ onUnmounted(() => {
   height: 100%;
   max-height: 90vh;
   overflow: hidden;
-  background: #fff;
+  background: var(--sl-bg-surface);
   border-radius: 12px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
 }
@@ -238,14 +238,14 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
-  border-bottom: 1px solid #eceff3;
+  border-bottom: 1px solid var(--sl-border-default);
 }
 .preview-title {
   min-width: 0;
   overflow: hidden;
   font-size: 14px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--sl-text-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -260,24 +260,24 @@ onUnmounted(() => {
   justify-content: center;
   width: 32px;
   height: 32px;
-  color: #6b7280;
+  color: var(--sl-text-muted);
   border-radius: 8px;
   transition: all 0.15s;
 }
 .preview-tool:hover {
-  color: #2563eb;
-  background: #eff6ff;
+  color: var(--sl-accent);
+  background: var(--sl-bg-hover);
 }
 .preview-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  background: #f8fafc;
+  background: var(--sl-bg-canvas);
 }
 .preview-status {
   padding: 48px 16px;
   font-size: 14px;
-  color: #6b7280;
+  color: var(--sl-text-muted);
   text-align: center;
 }
 .preview-image {
@@ -289,7 +289,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   min-height: 70vh;
-  background: #fff;
+  background: var(--sl-bg-surface);
   border: 0;
 }
 .preview-markdown {
@@ -302,7 +302,7 @@ onUnmounted(() => {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
   line-height: 1.6;
-  color: #1f2937;
+  color: var(--sl-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
 }
