@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed admin date filter placeholders and layout so English and Chinese
+  labels stay on one line without overlapping the calendar icon.
+zh-CN: >-
+  修复管理台日期筛选占位符与布局，中英文均单行显示且不与日历图标重叠。
