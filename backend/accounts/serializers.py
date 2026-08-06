@@ -776,31 +776,6 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         return attrs
 
 
-class FirstTimePasswordSetupSerializer(serializers.Serializer):
-    """Validate a step-up code and first local password."""
-
-    code = serializers.RegexField(r"^\d{6}$", write_only=True)
-    new_password1 = serializers.CharField(write_only=True)
-    new_password2 = serializers.CharField(write_only=True)
-
-    def to_internal_value(self, data):
-        """Accept the documented camelCase API fields."""
-        return super().to_internal_value(normalize_password_fields(data))
-
-    def validate(self, attrs):
-        """Enforce confirmation and the shared password policy."""
-        if attrs["new_password1"] != attrs["new_password2"]:
-            raise serializers.ValidationError(
-                {"new_password2": _("Passwords do not match")}
-            )
-
-        validate_password_policy(
-            attrs["new_password1"],
-            user=self.context.get("user"),
-        )
-        return attrs
-
-
 class CustomPasswordChangeSerializer(PasswordChangeSerializer):
     """Require the current password and enforce the product password policy."""
 

@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed table page-size controls so selecting a new rows-per-page value
+  updates the list.
+zh-CN: >-
+  修复表格每页条数设置，选择新的每页数量后列表会正确更新。

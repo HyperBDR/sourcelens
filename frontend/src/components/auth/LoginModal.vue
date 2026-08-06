@@ -63,14 +63,14 @@ const { t } = useI18n()
 }
 
 .login-card {
-  @apply relative w-full max-w-sm rounded-2xl bg-white p-8;
+  @apply relative w-full max-w-sm rounded-2xl bg-surface p-8;
   box-shadow:
     0 20px 50px -12px rgba(0, 0, 0, 0.3),
     0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
 .login-close {
-  @apply absolute right-3.5 top-3.5 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600;
+  @apply absolute right-3.5 top-3.5 rounded-lg p-1.5 text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary;
 }
 
 .login-head {
@@ -82,11 +82,11 @@ const { t } = useI18n()
 }
 
 .login-title {
-  @apply text-xl font-semibold text-ink-900;
+  @apply text-xl font-semibold text-theme;
 }
 
 .login-sub {
-  @apply mx-auto mt-2 max-w-[16rem] text-sm leading-relaxed text-ink-500;
+  @apply mx-auto mt-2 max-w-[16rem] text-sm leading-relaxed text-theme-muted;
 }
 
 .login-enter-active,

@@ -5,6 +5,7 @@ import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
 import { usePreferencesStore } from './store/preferences'
+import { isManagementPath } from './utils/theme'
 import './assets/css/main.css'
 
 // Google Analytics (gtag.js) — loaded only when a measurement ID is set,
@@ -45,7 +46,14 @@ app.use(router)
 app.use(i18n)
 
 const preferencesStore = usePreferencesStore()
+preferencesStore.setThemeOverride(
+  isManagementPath(window.location.pathname) ? 'light' : null
+)
 preferencesStore.loadFromLocalStorage()
 document.documentElement.lang = i18n.global.locale.value
+
+router.afterEach((to) => {
+  preferencesStore.setThemeOverride(isManagementPath(to.path) ? 'light' : null)
+})
 
 app.mount('#app')

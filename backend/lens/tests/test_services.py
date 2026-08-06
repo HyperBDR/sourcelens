@@ -1298,6 +1298,53 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(event["payload"], {})
         self.assertNotIn("secret-token", str(event))
 
+    def test_document_progress_event_exposes_only_bounded_counts(self):
+        event = sanitize_runtime_event(
+            {
+                "event_type": "document.progress",
+                "visibility": "user",
+                "payload": {
+                    "revision": "7",
+                    "stage": "recognizing_images",
+                    "document_index": 1,
+                    "document_total": 2,
+                    "image_completed": 3,
+                    "image_total": 5,
+                    "filename": "private-report.docx",
+                    "secret": "hidden",
+                },
+            }
+        )
+
+        self.assertEqual(event["event_type"], "document.progress")
+        self.assertEqual(
+            event["payload"],
+            {
+                "revision": 7,
+                "stage": "recognizing_images",
+                "document_index": 1,
+                "document_total": 2,
+                "image_completed": 3,
+                "image_total": 5,
+            },
+        )
+        self.assertNotIn("private-report.docx", str(event))
+        self.assertNotIn("hidden", str(event))
+
+    def test_document_progress_event_rejects_unknown_stage(self):
+        event = sanitize_runtime_event(
+            {
+                "event_type": "document.progress",
+                "visibility": "user",
+                "payload": {
+                    "revision": 1,
+                    "stage": "reading_private_content",
+                },
+            }
+        )
+
+        self.assertEqual(event["payload"], {})
+
     def test_order_query_activity_exposes_safe_real_parameters(self):
         event = sanitize_runtime_event(
             {

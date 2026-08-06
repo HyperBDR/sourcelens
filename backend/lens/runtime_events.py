@@ -5,6 +5,7 @@ from datetime import datetime
 PUBLIC_EVENT_TYPES = {
     "artifact.created",
     "capability.blocked",
+    "document.progress",
     "execution.failed",
     "verification.failed",
     "phase.changed",
@@ -54,6 +55,13 @@ PUBLIC_STAGE_STATUSES = {
     "completed",
     "failed",
     "skipped",
+}
+
+PUBLIC_DOCUMENT_PROGRESS_STAGES = {
+    "downloading",
+    "extracting_text",
+    "recognizing_images",
+    "ready",
 }
 
 TOOL_ACTIVITY_STATUSES = {
@@ -412,6 +420,30 @@ def _sanitize_payload(event_type, payload):
     if event_type == "phase.changed":
         phase = payload.get("phase")
         return {"phase": phase} if phase in PUBLIC_PHASES else {}
+    if event_type == "document.progress":
+        stage = payload.get("stage")
+        if stage not in PUBLIC_DOCUMENT_PROGRESS_STAGES:
+            return {}
+        return {
+            "revision": _positive_int(payload.get("revision")),
+            "stage": stage,
+            "document_index": min(
+                _positive_int(payload.get("document_index")),
+                100,
+            ),
+            "document_total": min(
+                _positive_int(payload.get("document_total")),
+                100,
+            ),
+            "image_completed": min(
+                _positive_int(payload.get("image_completed")),
+                100,
+            ),
+            "image_total": min(
+                _positive_int(payload.get("image_total")),
+                100,
+            ),
+        }
     if event_type == "plan.updated":
         steps = []
         for item in (payload.get("steps") or [])[:12]:

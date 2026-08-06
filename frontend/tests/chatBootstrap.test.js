@@ -20,6 +20,24 @@ test('reveals loaded chat before waiting for active run recovery', async () => {
   assert.ok(chatRevealed < resumeActiveRun)
 })
 
+test('reviews a selected unread chat before active run recovery', async () => {
+  const source = await chatSource()
+  const selectSession = source.indexOf('async function selectSession(')
+  const resumeActiveRun = source.indexOf(
+    'await maybeResumeActiveRun(session.uuid, isCurrentLoad)',
+    selectSession
+  )
+  const clearUnread = source.indexOf(
+    'clearUnreadSession(window.localStorage, session.uuid)',
+    selectSession
+  )
+
+  assert.notEqual(selectSession, -1)
+  assert.notEqual(resumeActiveRun, -1)
+  assert.notEqual(clearUnread, -1)
+  assert.ok(clearUnread < resumeActiveRun)
+})
+
 test('guards restored run state with the current session load', async () => {
   const source = await chatSource()
 

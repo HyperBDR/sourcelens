@@ -1,0 +1,7 @@
+type: feature
+audience: user
+en: >-
+  Added Light, Dark, Follow system, and Scheduled appearance modes for
+  user-facing pages while keeping administration pages light.
+zh-CN: >-
+  为用户端页面新增浅色、深色、跟随系统和定时切换外观模式，同时保持管理页面使用浅色外观。

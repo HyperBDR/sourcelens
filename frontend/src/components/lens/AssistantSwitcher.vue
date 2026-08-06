@@ -245,7 +245,7 @@
         <div class="assistant-switcher-label">
           {{ t('settings.modal.switchAssistantTitle') }}
         </div>
-        <div class="truncate text-sm font-semibold text-ink-900">
+        <div class="truncate text-sm font-semibold text-theme">
           {{ currentAssistantLabel }}
         </div>
         <div class="assistant-switcher-hint">
@@ -257,7 +257,7 @@
       </div>
       <svg
         v-if="!compact"
-        class="assistant-switcher-chevron h-4 w-4 shrink-0 text-ink-500 transition-transform"
+        class="assistant-switcher-chevron h-4 w-4 shrink-0 text-theme-muted transition-transform"
         :class="{ 'rotate-180': open }"
         viewBox="0 0 24 24"
         fill="none"
@@ -565,11 +565,11 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-label {
-  @apply text-[11px] font-semibold uppercase tracking-wide text-ink-500;
+  @apply text-[11px] font-semibold uppercase tracking-wide text-theme-muted;
 }
 
 .assistant-switcher-hint {
-  @apply mt-0.5 text-[11px] text-ink-500;
+  @apply mt-0.5 text-[11px] text-theme-muted;
 }
 
 .assistant-switcher-count {
@@ -594,11 +594,11 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-header-name {
-  @apply min-w-0 truncate text-base font-semibold text-ink-900;
+  @apply min-w-0 truncate text-base font-semibold text-theme;
 }
 
 .assistant-switcher-header-chevron {
-  @apply h-4 w-4 shrink-0 text-ink-400 transition-transform;
+  @apply h-4 w-4 shrink-0 text-theme-subtle transition-transform;
 }
 
 .assistant-switcher-panel {
@@ -614,11 +614,11 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-title {
-  @apply text-sm font-semibold text-ink-900;
+  @apply text-sm font-semibold text-theme;
 }
 
 .assistant-switcher-desc {
-  @apply mt-1 text-xs text-ink-500;
+  @apply mt-1 text-xs text-theme-muted;
 }
 
 .assistant-switcher-search {
@@ -626,7 +626,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-input {
-  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-700 outline-none transition-colors;
+  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-theme-secondary outline-none transition-colors;
 }
 
 .assistant-switcher-input:focus {
@@ -638,15 +638,15 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-empty {
-  @apply px-3 py-4 text-sm text-ink-500;
+  @apply px-3 py-4 text-sm text-theme-muted;
 }
 
 .assistant-switcher-item {
-  @apply flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left text-sm text-theme-secondary transition-colors;
 }
 
 .assistant-switcher-item:hover {
-  @apply bg-line-soft text-ink-900;
+  @apply bg-line-soft text-theme;
 }
 
 .assistant-switcher-item-active {
@@ -658,7 +658,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-item-description {
-  @apply mt-0.5 overflow-hidden text-xs leading-5 text-ink-500;
+  @apply mt-0.5 overflow-hidden text-xs leading-5 text-theme-muted;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -697,11 +697,11 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-embedded-item {
-  @apply flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-theme-secondary transition-colors;
 }
 
 .assistant-switcher-embedded-item:hover {
-  @apply bg-line-soft text-ink-900;
+  @apply bg-line-soft text-theme;
 }
 
 .assistant-switcher-embedded-item-active {
@@ -717,7 +717,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-embedded-arrow {
-  @apply h-4 w-4 shrink-0 text-ink-400;
+  @apply h-4 w-4 shrink-0 text-theme-subtle;
 }
 
 .assistant-switcher-flyout {
@@ -725,12 +725,12 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-flyout-trigger {
-  @apply flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-ink-700 transition-colors;
+  @apply flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-theme-secondary transition-colors;
 }
 
 .assistant-switcher-flyout-trigger:hover,
 .assistant-switcher-flyout-trigger-open {
-  @apply bg-line-soft text-ink-900;
+  @apply bg-line-soft text-theme;
 }
 
 .assistant-switcher-flyout-trigger-label {
@@ -738,7 +738,7 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-flyout-trigger-chevron {
-  @apply h-4 w-4 shrink-0 text-ink-400;
+  @apply h-4 w-4 shrink-0 text-theme-subtle;
 }
 
 .assistant-switcher-flyout-panel {
@@ -752,11 +752,11 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-flyout-panel-title {
-  @apply text-sm font-semibold text-ink-900;
+  @apply text-sm font-semibold text-theme;
 }
 
 .assistant-switcher-flyout-panel-subtitle {
-  @apply text-xs text-ink-500;
+  @apply text-xs text-theme-muted;
 }
 
 .assistant-switcher-flyout-grid {
@@ -765,11 +765,11 @@ onUnmounted(() => {
 }
 
 .assistant-switcher-flyout-item {
-  @apply flex items-center gap-2 rounded-xl border border-transparent px-3 py-2 text-left text-ink-700 transition-colors;
+  @apply flex items-center gap-2 rounded-xl border border-transparent px-3 py-2 text-left text-theme-secondary transition-colors;
 }
 
 .assistant-switcher-flyout-item:hover {
-  @apply bg-line-soft text-ink-900;
+  @apply bg-line-soft text-theme;
 }
 
 .assistant-switcher-flyout-item-active {

@@ -1,0 +1,7 @@
+type: improvement
+audience: user
+en: >-
+  Added live document preparation progress for downloads, text extraction,
+  and embedded-image recognition before an answer starts.
+zh-CN: >-
+  新增文档下载、文本提取和内嵌图片识别的实时准备进度，在回答开始前也能看到处理状态。

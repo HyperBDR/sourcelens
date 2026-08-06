@@ -1,16 +1,16 @@
 <template>
   <div
     v-if="total > 0"
-    class="mt-4 flex flex-shrink-0 flex-col items-start justify-between gap-4 border-t border-gray-200 pt-4 md:flex-row md:items-center"
+    class="mt-4 flex flex-shrink-0 flex-col items-start justify-between gap-4 border-t border-line pt-4 md:flex-row md:items-center"
   >
-    <div class="text-sm font-medium text-gray-700">
+    <div class="text-sm font-medium text-theme-secondary">
       {{ t('common.pagination.showing', showing) }}
     </div>
     <div
       class="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center"
     >
       <div class="flex items-center gap-3">
-        <label class="text-sm text-gray-600">
+        <label class="text-sm text-theme-secondary">
           {{ t('common.pagination.itemsPerPage') }}:
         </label>
         <BaseSelect
@@ -18,7 +18,7 @@
           :full-width="false"
           mobile-touch
           size="sm"
-          @change="updatePageSize"
+          @update:model-value="updatePageSize"
         >
           <option v-for="size in pageSizeOptions" :key="size" :value="size">
             {{ size }}
@@ -51,7 +51,7 @@
           <span class="sr-only">{{ t('common.pagination.previous') }}</span>
         </BaseButton>
         <span
-          class="inline-flex min-h-11 items-center justify-center rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm font-semibold text-gray-700 md:min-h-0"
+          class="inline-flex min-h-11 items-center justify-center rounded-md border border-line bg-surface-sunken px-3 py-1.5 text-sm font-semibold text-theme-secondary md:min-h-0"
         >
           {{
             t('common.pagination.page', {
@@ -122,8 +122,8 @@ const showing = computed(() => ({
   total: props.total
 }))
 
-function updatePageSize(event) {
-  emit('update:pageSize', Number(event.target.value))
+function updatePageSize(value) {
+  emit('update:pageSize', Number(value))
   emit('page-size-change')
 }
 </script>

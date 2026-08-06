@@ -24,16 +24,14 @@
       >
         <section
           v-if="show"
-          class="relative flex h-[480px] max-h-[82vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-white shadow-soft-lg"
+          class="settings-modal relative flex h-[526px] max-h-[82vh] w-full max-w-[700px] overflow-hidden rounded-2xl border border-line bg-surface shadow-soft-lg"
         >
           <!-- Left nav -->
           <nav
-            class="flex w-14 shrink-0 flex-col border-r border-line bg-gray-50 py-3 sm:w-44"
+            class="settings-nav flex w-14 shrink-0 flex-col border-r border-line bg-surface-sunken py-4 sm:w-48"
           >
-            <div class="hidden px-3 pb-2 pt-1 sm:block">
-              <div
-                class="text-xs font-semibold uppercase tracking-wide text-gray-400"
-              >
+            <div class="hidden px-4 pb-3 sm:block">
+              <div class="settings-nav-title text-sm font-semibold text-theme-subtle">
                 {{ t('settings.modal.label') }}
               </div>
             </div>
@@ -47,8 +45,8 @@
                 :aria-label="section.label"
                 :class="
                   activeSection === section.key
-                    ? 'bg-white font-medium text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    ? 'settings-nav-active bg-surface font-medium text-theme shadow-sm'
+                    : 'text-theme-secondary hover:bg-surface-hover hover:text-theme'
                 "
                 @click="activeSection = section.key"
               >
@@ -70,10 +68,10 @@
               </button>
             </div>
 
-            <div class="border-t border-line px-2 pt-2">
+            <div class="settings-logout-wrap border-t border-line px-2 pt-2">
               <button
                 type="button"
-                class="flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:justify-start sm:px-3"
+                class="settings-logout flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:justify-start sm:px-3"
                 :aria-label="t('common.logout')"
                 @click="handleLogout"
               >
@@ -105,14 +103,14 @@
           <!-- Right content -->
           <div class="flex min-w-0 flex-1 flex-col">
             <header
-              class="flex items-center justify-between border-b border-line px-4 py-4 sm:px-5"
+              class="settings-header flex items-center justify-between border-b border-line px-4 pb-2 pt-5 sm:px-6"
             >
-              <h2 class="text-base font-semibold text-gray-900">
+              <h2 class="text-base font-semibold text-theme">
                 {{ sections.find((s) => s.key === activeSection)?.label }}
               </h2>
               <button
                 type="button"
-                class="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                class="flex h-8 w-8 items-center justify-center rounded-lg text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary"
                 :aria-label="t('common.close')"
                 @click="emit('close')"
               >
@@ -133,7 +131,7 @@
               </button>
             </header>
 
-            <div class="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-5">
+            <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3 sm:px-6">
               <!-- Profile section -->
               <div v-if="activeSection === 'profile'" class="space-y-5">
                 <div class="flex items-center gap-4">
@@ -144,10 +142,10 @@
                     {{ userInitials }}
                   </div>
                   <div class="min-w-0">
-                    <div class="truncate text-base font-semibold text-gray-900">
+                    <div class="truncate text-base font-semibold text-theme">
                       {{ displayName }}
                     </div>
-                    <div class="mt-0.5 truncate text-sm text-gray-500">
+                    <div class="mt-0.5 truncate text-sm text-theme-muted">
                       {{
                         userStore.userInfo?.email || t('settings.modal.noEmail')
                       }}
@@ -157,18 +155,18 @@
 
                 <div class="divide-y divide-line rounded-xl border border-line">
                   <div class="flex items-center justify-between px-4 py-3">
-                    <span class="text-sm text-gray-500">{{
+                    <span class="text-sm text-theme-muted">{{
                       t('settings.modal.username')
                     }}</span>
-                    <span class="text-sm font-medium text-gray-900">
+                    <span class="text-sm font-medium text-theme">
                       {{ userStore.userInfo?.username || '—' }}
                     </span>
                   </div>
                   <div class="flex items-center justify-between px-4 py-3">
-                    <span class="text-sm text-gray-500">{{
+                    <span class="text-sm text-theme-muted">{{
                       t('settings.modal.email')
                     }}</span>
-                    <span class="text-sm font-medium text-gray-900">
+                    <span class="text-sm font-medium text-theme">
                       {{ userStore.userInfo?.email || '—' }}
                     </span>
                   </div>
@@ -177,7 +175,7 @@
 
               <!-- Language section -->
               <div v-if="activeSection === 'language'" class="space-y-3">
-                <p class="text-sm text-gray-500">
+                <p class="text-sm text-theme-muted">
                   {{ t('settings.modal.languageDesc') }}
                 </p>
                 <div class="relative">
@@ -198,7 +196,7 @@
                     class="pointer-events-none absolute inset-y-0 right-3 flex items-center"
                   >
                     <svg
-                      class="h-4 w-4 text-gray-400"
+                      class="h-4 w-4 text-theme-subtle"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -212,6 +210,54 @@
                     </svg>
                   </div>
                 </div>
+              </div>
+
+              <!-- Appearance section -->
+              <div v-if="activeSection === 'appearance'" class="space-y-3">
+                <p class="text-sm text-theme-muted">
+                  {{ t('settings.modal.appearanceDesc') }}
+                </p>
+                <div class="grid gap-2 sm:grid-cols-2" role="radiogroup">
+                  <label
+                    v-for="option in themeOptions"
+                    :key="option.value"
+                    class="flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 text-sm text-theme transition-colors"
+                    :class="
+                      preferencesStore.themeMode === option.value
+                        ? 'border-primary-500 bg-surface-selected'
+                        : 'border-line/80 bg-surface-raised hover:border-line-strong hover:bg-surface-hover'
+                    "
+                  >
+                    <span
+                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-theme-secondary"
+                    >
+                      <component :is="option.icon" class="h-4 w-4" />
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block font-medium">{{ option.label }}</span>
+                      <span class="mt-0.5 block text-xs text-theme-muted">
+                        {{ option.description }}
+                      </span>
+                    </span>
+                    <input
+                      v-model="preferencesStore.themeMode"
+                      type="radio"
+                      name="appearance-mode"
+                      :value="option.value"
+                      class="h-4 w-4 shrink-0 accent-primary-500"
+                      @change="preferencesStore.setThemeMode(option.value)"
+                    />
+                  </label>
+                </div>
+                <p
+                  v-if="preferencesStore.themeMode === 'scheduled'"
+                  class="text-sm text-theme-muted"
+                >
+                  {{ t('settings.modal.themeScheduleDescription') }}
+                </p>
+                <p class="text-xs text-theme-subtle">
+                  {{ t('settings.modal.themeAdminNote') }}
+                </p>
               </div>
 
               <AnswerNotificationSettings
@@ -239,6 +285,7 @@ import ReleaseNotesSettings from '@/components/settings/ReleaseNotesSettings.vue
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import { getPasswordManagementText } from '@/locales/passwordManagement'
 import { getUiLanguageOptions } from '@/utils/languages'
+import { usePreferencesStore } from '@/store/preferences'
 import { useUiStore } from '@/store/ui'
 import { useUserStore } from '@/store/user'
 
@@ -252,6 +299,7 @@ const { t, locale } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 const uiStore = useUiStore()
+const preferencesStore = usePreferencesStore()
 const languages = computed(() => getUiLanguageOptions(t))
 const activeSection = ref('profile')
 
@@ -260,6 +308,9 @@ const UserIcon = {
 }
 const GlobeIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" stroke-linecap="round"/></svg>`
+}
+const AppearanceIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" stroke-linecap="round"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" fill-opacity="0.25"/></svg>`
 }
 const BellIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 21h4" stroke-linecap="round"/></svg>`
@@ -270,6 +321,45 @@ const ReleaseNotesIcon = {
 const LockIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg>`
 }
+const SunIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" stroke-linecap="round"/></svg>`
+}
+const MoonIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+}
+const SystemIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" stroke-linecap="round"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" fill-opacity="0.25"/></svg>`
+}
+const ClockIcon = {
+  template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+}
+
+const themeOptions = computed(() => [
+  {
+    value: 'light',
+    label: t('settings.modal.themeLight'),
+    description: t('settings.modal.themeLightDesc'),
+    icon: SunIcon
+  },
+  {
+    value: 'dark',
+    label: t('settings.modal.themeDark'),
+    description: t('settings.modal.themeDarkDesc'),
+    icon: MoonIcon
+  },
+  {
+    value: 'system',
+    label: t('settings.modal.themeSystem'),
+    description: t('settings.modal.themeSystemDesc'),
+    icon: SystemIcon
+  },
+  {
+    value: 'scheduled',
+    label: t('settings.modal.themeScheduled'),
+    description: t('settings.modal.themeScheduledDesc'),
+    icon: ClockIcon
+  }
+])
 
 const sections = computed(() => [
   { key: 'profile', label: t('settings.modal.title'), icon: UserIcon },
@@ -279,6 +369,11 @@ const sections = computed(() => [
     icon: ReleaseNotesIcon
   },
   { key: 'language', label: t('settings.modal.language'), icon: GlobeIcon },
+  {
+    key: 'appearance',
+    label: t('settings.modal.appearance'),
+    icon: AppearanceIcon
+  },
   {
     key: 'notifications',
     label: t('settings.modal.notifications'),
@@ -360,3 +455,28 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', handleKeydown)
 })
 </script>
+
+<style scoped>
+:global(:root[data-theme='dark'] .settings-modal) {
+  border-color: rgb(var(--sl-border-default-rgb) / 60%);
+}
+
+:global(:root[data-theme='dark'] .settings-nav),
+:global(:root[data-theme='dark'] .settings-logout-wrap),
+:global(:root[data-theme='dark'] .settings-header) {
+  border-color: transparent;
+}
+
+:global(:root[data-theme='dark'] .settings-nav-title) {
+  color: var(--sl-text-primary);
+}
+
+:global(:root[data-theme='dark'] .settings-nav-active) {
+  background: var(--sl-bg-selected);
+  box-shadow: none;
+}
+
+:global(:root[data-theme='dark'] .settings-logout:hover) {
+  background: var(--sl-bg-hover);
+}
+</style>

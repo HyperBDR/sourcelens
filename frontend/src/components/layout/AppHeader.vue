@@ -1,6 +1,6 @@
 <template>
   <header
-    class="z-30 flex-shrink-0 border-b border-line bg-surface/95 shadow-sm backdrop-blur"
+    class="app-header z-30 flex-shrink-0 border-b border-line bg-surface/95 shadow-sm backdrop-blur"
   >
     <div class="px-4 sm:px-6 lg:px-8">
       <div class="flex justify-between items-center h-16">
@@ -8,7 +8,7 @@
           <button
             v-if="showMenuButton"
             @click="$emit('toggle-menu')"
-            class="lg:hidden rounded-md p-2 text-ink-600 hover:bg-line-soft hover:text-ink-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="lg:hidden rounded-md p-2 text-theme-secondary hover:bg-line-soft hover:text-theme focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <svg
               class="w-6 h-6"
@@ -24,7 +24,7 @@
               />
             </svg>
           </button>
-          <h1 class="text-lg font-semibold text-ink-900 lg:hidden">
+          <h1 class="text-lg font-semibold text-theme lg:hidden">
             {{ pageTitle }}
           </h1>
         </div>
@@ -58,3 +58,10 @@ const pageTitle = computed(() => {
   return routeNames[route.name] || t('common.appName')
 })
 </script>
+
+<style scoped>
+:global(:root[data-theme='dark'] .app-header) {
+  border-bottom: 0;
+  box-shadow: none;
+}
+</style>

@@ -18,9 +18,7 @@ from .registration import (
 )
 from .password import (
     ConfirmPasswordResetView,
-    FirstTimePasswordSetupView,
     SendPasswordResetEmailView,
-    SendPasswordSetupCodeView,
 )
 from .user import CustomUserDetailsView
 from .scenes import GetAvailableScenesView
@@ -36,8 +34,6 @@ __all__ = [
     'CheckVirtualEmailUsernameView',
     'SendPasswordResetEmailView',
     'ConfirmPasswordResetView',
-    'SendPasswordSetupCodeView',
-    'FirstTimePasswordSetupView',
     'CustomUserDetailsView',
     'GetAvailableScenesView',
 ]

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% if purpose == 'password_setup' %}设置 SourceLens 密码验证码{% else %}你的登录验证码{% endif %}</title>
+  <title>你的登录验证码</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f1f5f9;padding:40px 16px;">
@@ -41,10 +41,10 @@
                   <td style="padding:40px 40px 32px;">
 
                     <p style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;line-height:1.3;">
-                      {% if purpose == 'password_setup' %}设置你的 SourceLens 密码{% else %}你的登录验证码{% endif %}
+                      你的登录验证码
                     </p>
                     <p style="margin:0 0 32px;font-size:15px;color:#6b7280;line-height:1.6;">
-                      {% if purpose == 'password_setup' %}请使用以下验证码验证身份并创建本地密码。验证码将在 <strong style="color:#374151;">{{ expiry_minutes }} 分钟</strong>后失效。{% else %}请使用以下验证码登录 SourceLens。验证码将在 <strong style="color:#374151;">{{ expiry_minutes }} 分钟</strong>后失效。{% endif %}
+                      请使用以下验证码登录 SourceLens。验证码将在 <strong style="color:#374151;">{{ expiry_minutes }} 分钟</strong>后失效。
                     </p>
 
                     <!-- Code box -->
@@ -61,7 +61,7 @@
                       <tr>
                         <td style="background-color:#fefce8;border-left:3px solid #facc15;border-radius:0 8px 8px 0;padding:14px 16px;">
                           <p style="margin:0;font-size:13px;color:#854d0e;line-height:1.5;">
-                            {% if purpose == 'password_setup' %}<strong>安全提示：</strong>我们不会主动向你索要此验证码。如果你并未申请设置密码，请忽略此邮件，你的账号目前仍然安全。{% else %}<strong>安全提示：</strong>我们不会主动向你索要此验证码。如果你并未发起登录，请忽略此邮件，你的账号目前仍然安全。{% endif %}
+                            <strong>安全提示：</strong>我们不会主动向你索要此验证码。如果你并未发起登录，请忽略此邮件，你的账号目前仍然安全。
                           </p>
                         </td>
                       </tr>
@@ -78,7 +78,7 @@
           <tr>
             <td style="padding:24px 8px 0;text-align:center;">
               <p style="margin:0 0 6px;font-size:12px;color:#9ca3af;">
-                &copy; SourceLens · {% if purpose == 'password_setup' %}此邮件因你的账号发起密码设置请求而发送。{% else %}此邮件因你的账号发起登录请求而发送。{% endif %}
+                &copy; SourceLens · 此邮件因你的账号发起登录请求而发送。
               </p>
               <p style="margin:0;font-size:12px;color:#9ca3af;">
                 <a href="{{ frontend_url }}" style="color:#6b7280;text-decoration:none;">{{ frontend_url }}</a>

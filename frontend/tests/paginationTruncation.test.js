@@ -46,6 +46,17 @@ test('shared Q&A review uses backend pagination metadata', async () => {
   assert.match(source, /goNextPage[\s\S]*load\(\)/)
 })
 
+test('shared pagination applies the selected page size before reloading', async () => {
+  const source = await readSource('components/ui/PaginationBar.vue')
+
+  assert.match(source, /@update:model-value="updatePageSize"/)
+  assert.doesNotMatch(source, /@change="updatePageSize"/)
+  assert.match(
+    source,
+    /function updatePageSize\(value\)[\s\S]*update:pageSize[\s\S]*page-size-change/
+  )
+})
+
 test('management selectors collect all user and group pages', async () => {
   const [api, groups, users, tasks] = await Promise.all([
     readSource('admin/api/management.js'),

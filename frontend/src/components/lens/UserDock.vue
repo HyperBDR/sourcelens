@@ -13,28 +13,6 @@
 
   <div v-else ref="dockMenuRef" class="dock-menu-wrap">
     <button
-      v-if="needsPasswordSetup"
-      type="button"
-      class="password-setup-prompt"
-      :class="{
-        'password-setup-prompt-collapsed': collapsed && !isMobile
-      }"
-      :aria-label="passwordText.setup.promptAction"
-      :title="passwordText.setup.promptAction"
-      @click="openPasswordSetup"
-    >
-      <KeyRound :size="16" :stroke-width="2" aria-hidden="true" />
-      <span v-if="!collapsed || isMobile" class="min-w-0 text-left">
-        <span class="block truncate text-xs font-medium text-ink-700">
-          {{ passwordText.setup.promptStatus }}
-        </span>
-        <span class="block truncate text-xs text-primary-600">
-          {{ passwordText.setup.promptAction }}
-        </span>
-      </span>
-    </button>
-
-    <button
       class="dock-trigger"
       :class="[
         dockMenuOpen ? 'dock-trigger-open' : '',
@@ -47,16 +25,16 @@
         <span>{{ userInitials }}</span>
       </div>
       <div v-if="!collapsed || isMobile" class="min-w-0 flex-1 text-left">
-        <div class="truncate text-sm font-medium text-ink-900">
+        <div class="truncate text-sm font-medium text-theme">
           {{ displayName }}
         </div>
-        <div class="truncate text-xs text-ink-500">
+        <div class="truncate text-xs text-theme-muted">
           {{ t('platforms.workspace') }}
         </div>
       </div>
       <svg
         v-if="!collapsed || isMobile"
-        class="h-4 w-4 shrink-0 text-ink-500 transition-transform"
+        class="h-4 w-4 shrink-0 text-theme-muted transition-transform"
         :class="{ 'rotate-180': dockMenuOpen }"
         viewBox="0 0 24 24"
         fill="none"
@@ -121,9 +99,8 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { onClickOutside } from '@vueuse/core'
-import { KeyRound, LogIn, LogOut, Settings, Share2, Shield } from '@lucide/vue'
+import { LogIn, LogOut, Settings, Share2, Shield } from '@lucide/vue'
 
-import { getPasswordManagementText } from '@/locales/passwordManagement'
 import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
 
@@ -133,7 +110,7 @@ defineProps({
 })
 const emit = defineEmits(['require-login', 'open-my-shares'])
 
-const { locale, t } = useI18n()
+const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 const uiStore = useUiStore()
@@ -152,12 +129,6 @@ onClickOutside(dockMenuRef, () => {
 
 const isAnonymous = computed(() => !userStore.isAuthenticated)
 const isAdmin = computed(() => userStore.userHasFeature('admin_console'))
-const needsPasswordSetup = computed(
-  () =>
-    userStore.isAuthenticated &&
-    userStore.userInfo?.auth_info?.can_change_password === false
-)
-const passwordText = computed(() => getPasswordManagementText(locale.value))
 
 const displayName = computed(() => {
   const userInfo = userStore.userInfo
@@ -197,11 +168,6 @@ function openSettings() {
   dockMenuOpen.value = false
 }
 
-function openPasswordSetup() {
-  uiStore.openSettings('security')
-  dockMenuOpen.value = false
-}
-
 async function handleLogout() {
   try {
     await userStore.logout()
@@ -217,18 +183,6 @@ async function handleLogout() {
 <style scoped>
 .dock-menu-wrap {
   @apply relative space-y-2;
-}
-
-.password-setup-prompt {
-  @apply flex w-full items-center gap-2 rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-left transition-colors;
-}
-
-.password-setup-prompt:hover {
-  @apply border-primary-200 bg-primary-100;
-}
-
-.password-setup-prompt-collapsed {
-  @apply justify-center px-0;
 }
 
 .dock-trigger {
@@ -269,14 +223,35 @@ async function handleLogout() {
 }
 
 .dock-link {
-  @apply flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-ink-700 transition-colors;
+  @apply flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-theme-secondary transition-colors;
 }
 
 .dock-link:hover {
-  @apply bg-line-soft text-ink-900;
+  @apply bg-line-soft text-theme;
 }
 
 .dock-build-info {
-  @apply px-3 pb-1 pt-2 text-left text-xs text-ink-400;
+  @apply px-3 pb-1 pt-2 text-left text-xs text-theme-subtle;
+}
+
+:global(:root[data-theme='dark'] .anon-login-btn) {
+  border-color: var(--sl-border-default);
+  background: var(--sl-bg-raised);
+}
+
+:global(:root[data-theme='dark'] .dock-trigger:hover),
+:global(:root[data-theme='dark'] .dock-trigger-open),
+:global(:root[data-theme='dark'] .anon-login-btn:hover) {
+  border-color: var(--sl-border-strong);
+  background: var(--sl-bg-hover);
+}
+
+:global(:root[data-theme='dark'] .dock-section) {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+:global(:root[data-theme='dark'] .dock-link:hover) {
+  background: var(--sl-bg-hover);
 }
 </style>

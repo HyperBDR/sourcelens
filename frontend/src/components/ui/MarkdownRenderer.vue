@@ -231,31 +231,31 @@ const renderedContent = computed(() => {
     // a throw here means the answer renders unformatted, so it must be
     // visible in the console for diagnosis rather than swallowed.
     console.error('MarkdownRenderer failed to render content:', error)
-    return `<pre class="text-gray-600">${escapeHtml(props.content || '')}</pre>`
+    return `<pre class="text-theme-secondary">${escapeHtml(props.content || '')}</pre>`
   }
 })
 </script>
 
 <style scoped>
 .markdown-content {
-  @apply text-gray-700;
+  @apply text-theme-secondary;
 }
 
 /* Override prose styles for better readability */
 .markdown-content :deep(h1) {
-  @apply text-xl font-bold text-gray-900 mt-6 mb-4 first:mt-0;
+  @apply mb-4 mt-6 text-xl font-bold text-theme first:mt-0;
 }
 
 .markdown-content :deep(h2) {
-  @apply text-lg font-semibold text-gray-900 mt-5 mb-3 first:mt-0;
+  @apply mb-3 mt-5 text-lg font-semibold text-theme first:mt-0;
 }
 
 .markdown-content :deep(h3) {
-  @apply text-base font-medium text-gray-900 mt-4 mb-2 first:mt-0;
+  @apply mb-2 mt-4 text-base font-medium text-theme first:mt-0;
 }
 
 .markdown-content :deep(h4) {
-  @apply text-sm font-medium text-gray-900 mt-3 mb-2 first:mt-0;
+  @apply mb-2 mt-3 text-sm font-medium text-theme first:mt-0;
 }
 
 .markdown-content :deep(p) {
@@ -278,19 +278,19 @@ const renderedContent = computed(() => {
 }
 
 .markdown-content :deep(li) {
-  @apply text-gray-700;
+  @apply text-theme-secondary;
 }
 
 .markdown-content :deep(blockquote) {
-  @apply border-l-4 border-gray-300 pl-4 italic text-gray-600 my-4;
+  @apply my-4 border-l-4 border-line-strong pl-4 italic text-theme-secondary;
 }
 
 .markdown-content :deep(code) {
-  @apply bg-gray-100 text-gray-800 px-1 py-0.5 rounded text-sm font-mono;
+  @apply rounded bg-surface-hover px-1 py-0.5 font-mono text-sm text-theme;
 }
 
 .markdown-content :deep(pre) {
-  @apply bg-gray-900 border border-gray-700 p-4 rounded-lg my-4 text-sm overflow-x-auto;
+  @apply my-4 overflow-x-auto rounded-lg border border-ink-700 bg-ink-900 p-4 text-sm;
   white-space: pre-wrap;
   word-wrap: break-word;
   word-break: break-all;
@@ -313,15 +313,15 @@ const renderedContent = computed(() => {
 }
 
 .markdown-content :deep(table) {
-  @apply w-full border-collapse border border-gray-300;
+  @apply w-full border-collapse border border-line-strong;
 }
 
 .markdown-content :deep(th) {
-  @apply bg-gray-50 border border-gray-300 px-3 py-2 text-left font-medium text-gray-900;
+  @apply border border-line-strong bg-surface-sunken px-3 py-2 text-left font-medium text-theme;
 }
 
 .markdown-content :deep(td) {
-  @apply border border-gray-300 px-3 py-2 text-gray-700;
+  @apply border border-line-strong px-3 py-2 text-theme-secondary;
 }
 
 .markdown-content :deep(a) {
@@ -333,7 +333,7 @@ const renderedContent = computed(() => {
 }
 
 .markdown-content :deep(strong) {
-  @apply font-semibold text-gray-900;
+  @apply font-semibold text-theme;
 }
 
 .markdown-content :deep(em) {
@@ -341,6 +341,6 @@ const renderedContent = computed(() => {
 }
 
 .markdown-content :deep(hr) {
-  @apply border-t border-gray-300 my-6;
+  @apply my-6 border-t border-line-strong;
 }
 </style>
