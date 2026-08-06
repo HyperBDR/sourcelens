@@ -454,6 +454,7 @@ function handleTriggerKeydown(event) {
 
   if (event.key === 'Escape' && isOpen.value) {
     event.preventDefault()
+    event.stopPropagation()
     closeMenu()
     return
   }

@@ -1,0 +1,9 @@
+type: fix
+audience: user
+en: >-
+  Improved User Settings so Escape closes nested menus first, mobile
+  navigation shows section names and is easier to tap, backdrop dismiss
+  works, and the dialog is announced correctly to assistive technologies.
+zh-CN: >-
+  改进用户设置：Esc 先关闭嵌套菜单、手机端显示设置项名称且更易点击、
+  点击遮罩可关闭，并为辅助技术正确声明对话框。
