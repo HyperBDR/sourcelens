@@ -64,21 +64,19 @@
               <span class="text-sm text-gray-600 whitespace-nowrap">{{
                 t('taskManagement.list.dateRange')
               }}</span>
-              <input
+              <BaseDateInput
                 v-model="filterStartDate"
-                type="date"
-                :lang="locale"
+                compact
                 :max="filterEndDate || undefined"
-                class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                :mobile-touch="false"
                 @change="onFilterChange"
               />
               <span class="text-gray-400">–</span>
-              <input
+              <BaseDateInput
                 v-model="filterEndDate"
-                type="date"
-                :lang="locale"
+                compact
                 :min="filterStartDate || undefined"
-                class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                :mobile-touch="false"
                 @change="onFilterChange"
               />
             </div>
@@ -267,6 +265,7 @@ import { formatDuration } from '@/utils/formatting'
 import { taskManagementApi, managementApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDateInput from '@/components/ui/BaseDateInput.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'

@@ -56,21 +56,19 @@
                   {{ t('notificationManagement.records.statusPending') }}
                 </option>
               </BaseSelect>
-              <input
+              <BaseDateInput
                 v-model="filters.start_date"
-                type="date"
-                :lang="locale"
+                compact
                 :max="filters.end_date || undefined"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                :mobile-touch="false"
                 @change="onFiltersChanged"
               />
               <span class="text-gray-400">–</span>
-              <input
+              <BaseDateInput
                 v-model="filters.end_date"
-                type="date"
-                :lang="locale"
+                compact
                 :min="filters.start_date || undefined"
-                class="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                :mobile-touch="false"
                 @change="onFiltersChanged"
               />
             </div>
@@ -479,6 +477,7 @@ import { extractErrorMessage } from '@/utils/api'
 import { notificationsAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDateInput from '@/components/ui/BaseDateInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'

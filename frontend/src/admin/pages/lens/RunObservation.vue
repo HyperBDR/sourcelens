@@ -17,28 +17,28 @@
       >
         <div class="flex min-h-0 flex-col p-0 md:p-6">
           <div
-            class="mb-4 flex flex-shrink-0 flex-col items-stretch gap-3 rounded-lg border border-gray-200 bg-white p-3 md:mb-6 md:flex-row md:flex-wrap md:items-center md:justify-between md:border-0 md:p-0"
+            class="mb-4 flex flex-shrink-0 flex-col items-stretch gap-3 rounded-lg border border-gray-200 bg-white p-3 md:mb-6 md:flex-row md:flex-nowrap md:items-center md:justify-between md:border-0 md:p-0"
           >
             <div
-              class="flex w-full flex-col items-stretch gap-3 md:w-auto md:flex-1 md:flex-row md:flex-wrap md:items-center"
+              class="flex w-full min-w-0 flex-col items-stretch gap-3 md:flex-1 md:flex-row md:flex-nowrap md:items-center"
             >
               <input
                 v-model="filters.q"
                 type="text"
                 :placeholder="t('lensRuns.filterKeyword')"
-                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-52"
+                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-40"
                 @input="onFiltersChanged"
               />
               <input
                 v-model="filters.username"
                 type="text"
                 :placeholder="t('lensRuns.filterUsername')"
-                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-36"
+                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-28"
                 @input="onUsernameChanged"
               />
               <BaseSelect
                 v-model="filters.assistant"
-                class="md:w-40"
+                class="md:w-32"
                 mobile-touch
                 @change="onFiltersChanged"
               >
@@ -49,7 +49,7 @@
               </BaseSelect>
               <BaseSelect
                 v-model="filters.status"
-                class="md:w-32"
+                class="md:w-28"
                 mobile-touch
                 @change="onFiltersChanged"
               >
@@ -64,25 +64,25 @@
                   {{ t('lensRuns.statusCancelled') }}
                 </option>
               </BaseSelect>
-              <input
-                v-model="filters.start_date"
-                type="date"
-                :lang="locale"
-                :max="filters.end_date || undefined"
-                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
-                @change="onFiltersChanged"
-              />
-              <span class="hidden text-gray-400 md:inline">–</span>
-              <input
-                v-model="filters.end_date"
-                type="date"
-                :lang="locale"
-                :min="filters.start_date || undefined"
-                class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
-                @change="onFiltersChanged"
-              />
+              <div
+                class="flex w-full shrink-0 items-center gap-2 md:w-auto"
+              >
+                <BaseDateInput
+                  v-model="filters.start_date"
+                  compact
+                  :max="filters.end_date || undefined"
+                  @change="onFiltersChanged"
+                />
+                <span class="text-gray-400">–</span>
+                <BaseDateInput
+                  v-model="filters.end_date"
+                  compact
+                  :min="filters.start_date || undefined"
+                  @change="onFiltersChanged"
+                />
+              </div>
             </div>
-            <div class="flex w-full items-center gap-2 md:w-auto">
+            <div class="flex w-full shrink-0 items-center gap-2 md:w-auto">
               <BaseButton
                 variant="outline"
                 size="sm"
@@ -1160,13 +1160,14 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import RunDiagnosisPanel from '@/admin/pages/lens/RunDiagnosisPanel.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDateInput from '@/components/ui/BaseDateInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const { showError } = useToast()
 const route = useRoute()
 const router = useRouter()

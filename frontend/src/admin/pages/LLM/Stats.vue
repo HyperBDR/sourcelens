@@ -72,11 +72,10 @@
               }}
             </label>
             <template v-if="granularity === 'day'">
-              <input
+              <BaseDateInput
                 v-model="selectedDate"
-                type="date"
-                :lang="locale"
-                class="stats-filter-control rounded-lg border border-gray-200 px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
+                :mobile-touch="false"
+                input-class="stats-filter-control w-40 rounded-lg border-gray-200 focus:ring-2 focus:ring-primary-600 focus:border-primary-600"
                 @change="fetchStats"
               />
             </template>
@@ -84,7 +83,7 @@
               <input
                 v-model="selectedMonth"
                 type="month"
-                :lang="locale"
+                :lang="toDocumentLang(locale)"
                 class="stats-filter-control rounded-lg border border-gray-200 px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 hover:border-gray-300 transition-colors"
                 @change="fetchStats"
               />
@@ -495,6 +494,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { toDocumentLang } from '@/utils/documentLang'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -511,6 +511,7 @@ import { formatNumLocale, formatCostLocale } from '@/utils/formatting'
 import { llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDateInput from '@/components/ui/BaseDateInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 
