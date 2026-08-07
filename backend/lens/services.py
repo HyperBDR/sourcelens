@@ -718,16 +718,20 @@ def create_execution_run(
 
     validate_retry_run(session, retry_of_run)
 
-    if (
-        not session.title_manually_edited
-        and session.title_generation_status
-        == Session.TitleGenerationStatus.PENDING
-        and not session.message_set.exists()
-    ):
+    if not session.title_manually_edited and not session.message_set.exists():
         fallback_title = fallback_session_title(question)
         if fallback_title:
             session.title = fallback_title
-            session.save(update_fields=["title", "updated_at"])
+            session.title_generation_status = (
+                Session.TitleGenerationStatus.PENDING
+            )
+            session.save(
+                update_fields=[
+                    "title",
+                    "title_generation_status",
+                    "updated_at",
+                ]
+            )
 
     input_message = Message.objects.create(
         session=session,
