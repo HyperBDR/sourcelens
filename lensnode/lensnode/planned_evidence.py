@@ -488,7 +488,12 @@ def validate_citations(citations, bundle, workspace_root):
             path.relative_to(root)
             start = int(citation.get("start_line"))
             end = int(citation.get("end_line"))
-            line_count = len(path.read_text(encoding="utf-8").splitlines())
+            line_count = _citation_line_count(
+                root,
+                path,
+                path_text,
+                str(citation["revision"]),
+            )
             matches = any(
                 item.evidence_type == "source"
                 and item.path == path_text
@@ -714,3 +719,21 @@ def _optional_int(value):
 
 def _estimate_tokens(text):
     return max(1, math.ceil(len(text) / 4))
+
+
+def _citation_line_count(root, path, path_text, revision):
+    """Read line count from the cited revision or current source snapshot."""
+
+    if revision in {"workspace", "working-tree", "snapshot"}:
+        return len(path.read_text(encoding="utf-8").splitlines())
+    result = subprocess.run(
+        ["git", "show", f"{revision}:{path_text}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError("cited revision or path is unavailable")
+    return len(result.stdout.splitlines())
