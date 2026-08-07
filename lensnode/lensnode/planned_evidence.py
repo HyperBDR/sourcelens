@@ -50,7 +50,7 @@ class CodeGraphQuery:
     def as_args(self):
         """Return safe arguments for a CodeGraph adapter."""
 
-        args = {"operation": self.operation}
+        args = {}
         if self.query:
             args["query"] = self.query
         if self.symbol:
@@ -319,7 +319,11 @@ class EvidenceExecutor:
 
         reader = self.workspace_tools.get("read_workspace_file")
         if reader is not None:
-            windows = plan.source_windows[: plan.max_files]
+            windows = _coalesce_source_windows(
+                plan.source_windows[: plan.max_files],
+                plan.budgets.max_source_window_lines,
+            )
+            read_requests = []
             for window in windows:
                 limit = window.end_line or (
                     window.start_line
@@ -330,33 +334,41 @@ class EvidenceExecutor:
                     limit - window.start_line + 1,
                     plan.budgets.max_source_window_lines,
                 )
-                try:
-                    result = _invoke_adapter(
-                        reader,
-                        {
-                            "path": window.path,
-                            "offset": window.start_line,
-                            "limit": limit,
-                        },
-                    )
-                except Exception as exc:
-                    raw_items.append(
-                        {
-                            "evidence_type": "retrieval_error",
-                            "path": window.path,
-                            "content": type(exc).__name__,
-                            "provenance": "read_workspace_file",
-                        }
-                    )
-                else:
-                    call_counts["file_read"] += 1
-                    raw_items.extend(
-                        _items_from_result(
-                            result,
-                            "source",
-                            "read_workspace_file",
+                read_requests.append(
+                    {
+                        "path": window.path,
+                        "offset": window.start_line,
+                        "limit": limit,
+                    }
+                )
+            with ThreadPoolExecutor(
+                max_workers=max(min(len(read_requests), 8), 1)
+            ) as pool:
+                futures = [
+                    pool.submit(_invoke_adapter, reader, args)
+                    for args in read_requests
+                ]
+                for args, future in zip(read_requests, futures):
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        raw_items.append(
+                            {
+                                "evidence_type": "retrieval_error",
+                                "path": args["path"],
+                                "content": type(exc).__name__,
+                                "provenance": "read_workspace_file",
+                            }
                         )
-                    )
+                    else:
+                        call_counts["file_read"] += 1
+                        raw_items.extend(
+                            _items_from_result(
+                                result,
+                                "source",
+                                "read_workspace_file",
+                            )
+                        )
 
         bundle = build_evidence_bundle(
             raw_items,
@@ -458,8 +470,20 @@ def validate_citations(citations, bundle, workspace_root):
     valid = []
     invalid = []
     for citation in citations or ():
-        path_text = str((citation or {}).get("path") or "")
+        citation = citation if isinstance(citation, dict) else {}
+        path_text = str(citation.get("path") or "")
         try:
+            for field in (
+                "project",
+                "repository",
+                "revision",
+                "symbol",
+                "evidence_type",
+            ):
+                if not str((citation or {}).get(field) or "").strip():
+                    raise ValueError
+            if citation.get("evidence_type") != "source":
+                raise ValueError
             path = (root / path_text).resolve()
             path.relative_to(root)
             start = int(citation.get("start_line"))
@@ -541,6 +565,35 @@ def _items_from_result(result, evidence_type, provenance):
             "provenance": provenance,
         }
     ]
+
+
+def _coalesce_source_windows(windows, max_lines):
+    """Merge overlapping windows for one path within the line budget."""
+
+    grouped = {}
+    for window in windows:
+        end = window.end_line or window.start_line + max_lines - 1
+        grouped.setdefault(window.path, []).append(
+            (window.start_line, min(end, window.start_line + max_lines - 1))
+        )
+    merged = []
+    for path, ranges in grouped.items():
+        current_start = None
+        current_end = None
+        for start, end in sorted(ranges):
+            if current_start is None:
+                current_start, current_end = start, end
+            elif start <= current_end + 1:
+                current_end = min(
+                    max(current_end, end),
+                    current_start + max_lines - 1,
+                )
+            else:
+                merged.append(SourceWindow(path, current_start, current_end))
+                current_start, current_end = start, end
+        if current_start is not None:
+            merged.append(SourceWindow(path, current_start, current_end))
+    return tuple(merged)
 
 
 def _evidence_item(item):

@@ -137,6 +137,38 @@ def test_evidence_bundle_deduplicates_and_applies_token_budget():
     assert bundle.metrics["evidence_tokens"] <= 30
 
 
+def test_executor_merges_overlapping_source_windows():
+    reads = []
+
+    def read_workspace_file(**kwargs):
+        reads.append(kwargs)
+        return json.dumps(
+            {
+                "path": kwargs["path"],
+                "start_line": kwargs["offset"],
+                "end_line": kwargs["offset"] + kwargs["limit"] - 1,
+                "content": "source",
+            }
+        )
+
+    plan = parse_retrieval_plan(
+        {
+            "objective": "inspect source",
+            "source_windows": [
+                {"path": "app.py", "start_line": 10, "end_line": 20},
+                {"path": "app.py", "start_line": 18, "end_line": 30},
+            ],
+        }
+    )
+
+    bundle = EvidenceExecutor(
+        workspace_tools={"read_workspace_file": read_workspace_file}
+    ).execute(plan)
+
+    assert reads == [{"path": "app.py", "offset": 10, "limit": 21}]
+    assert bundle.metrics["file_read_call_count"] == 1
+
+
 def test_sufficiency_reports_missing_categories_without_fabrication():
     bundle = build_evidence_bundle(
         [
