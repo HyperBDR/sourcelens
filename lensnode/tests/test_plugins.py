@@ -49,6 +49,30 @@ def test_codegraph_plugin_contributes_stdio_server(monkeypatch, tmp_path):
     ]
 
 
+def test_codegraph_plugin_contributes_generic_agent_runtime_behavior():
+    plugin = CodeGraphPlugin()
+    tools = [
+        SimpleNamespace(name="mcp__codegraph__codegraph_explore"),
+    ]
+
+    contribution = plugin.contribute_agent_runtime(
+        _config(),
+        {"task": "code_analysis"},
+        tools,
+    )
+
+    assert contribution.prompt_guidance.startswith("CodeGraph is available")
+    assert contribution.middleware == contribution.subagent_middleware
+    assert contribution.always_visible_tool_prefixes == (
+        "mcp__codegraph__",
+    )
+    assert plugin.contribute_agent_runtime(
+        _config(),
+        {"task": "knowledge_qa"},
+        tools,
+    ) is None
+
+
 def test_codegraph_plugin_disabled_when_toggle_off():
     config = _config(mcp_enable_codegraph=False)
     assert not CodeGraphPlugin().enabled(config)

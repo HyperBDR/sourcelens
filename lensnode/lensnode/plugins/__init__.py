@@ -6,6 +6,18 @@ inside this package; external plugins remain a deferred decision (see
 docs/decisions/001-platform-connections-and-credentials.md).
 """
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class AgentRuntimeContribution:
+    """Optional agent-runtime capabilities contributed by one plugin."""
+
+    prompt_guidance: str = ""
+    middleware: tuple = ()
+    subagent_middleware: tuple = ()
+    always_visible_tool_prefixes: tuple = ()
+
 
 class LensNodePlugin:
     """Base class for an in-process capability plugin.
@@ -27,6 +39,19 @@ class LensNodePlugin:
 
         return []
 
+    def contribute_agent_runtime(self, config, command, mcp_tools):
+        """Return optional runtime behavior after MCP discovery."""
+
+        return None
+
+
+def _plugins():
+    """Return the built-in plugin registry."""
+
+    from .codegraph import CodeGraphPlugin
+
+    return (CodeGraphPlugin(),)
+
 
 def collect_mcp_servers(config, mcp_configs, emit_event=None):
     """Merge plugin-contributed MCP servers, deduplicating by name.
@@ -35,9 +60,7 @@ def collect_mcp_servers(config, mcp_configs, emit_event=None):
     same name.
     """
 
-    from .codegraph import CodeGraphPlugin
-
-    plugins = (CodeGraphPlugin(),)
+    plugins = _plugins()
     servers = list(mcp_configs)
     for plugin in plugins:
         if not plugin.enabled(config):
@@ -54,3 +77,20 @@ def collect_mcp_servers(config, mcp_configs, emit_event=None):
                 continue
             servers.append(server)
     return servers
+
+
+def collect_agent_runtime_contributions(config, command, mcp_tools):
+    """Collect runtime behavior without exposing plugin identities upstream."""
+
+    contributions = []
+    for plugin in _plugins():
+        if not plugin.enabled(config):
+            continue
+        contribution = plugin.contribute_agent_runtime(
+            config,
+            command,
+            mcp_tools,
+        )
+        if contribution is not None:
+            contributions.append(contribution)
+    return contributions

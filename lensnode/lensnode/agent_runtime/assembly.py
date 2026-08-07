@@ -4,6 +4,8 @@ from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 
 from .restrictions import NoTaskMiddleware as _NoTaskMiddleware
 from .system_prompts import _is_general_chat
+
+
 def _agent_middleware(
     command,
     summarizer,
@@ -12,12 +14,14 @@ def _agent_middleware(
     capability_middleware=None,
     mcp_middleware=None,
     trace_middleware=None,
+    runtime_middleware=(),
 ):
     """Return task-specific middleware for one Deep Agent run."""
 
     middleware = []
     if summarizer is not None:
         middleware.append(summarizer)
+    middleware.extend(runtime_middleware)
     if _is_general_chat(command):
         middleware.append(_NoTaskMiddleware(emit_event))
         if capability_middleware is not None:
@@ -29,7 +33,11 @@ def _agent_middleware(
     return middleware
 
 
-def _fast_subagent(mcp_middleware=None, trace_middleware=None):
+def _fast_subagent(
+    mcp_middleware=None,
+    trace_middleware=None,
+    runtime_middleware=(),
+):
     """General-purpose subagent that parallelizes its own tool calls.
 
     By default a delegated subagent runs deepagents' stock prompt and
@@ -53,9 +61,13 @@ def _fast_subagent(mcp_middleware=None, trace_middleware=None):
     }
     middleware = [
         item
-        for item in (trace_middleware, mcp_middleware)
+        for item in (
+            trace_middleware,
+            mcp_middleware,
+        )
         if item is not None
     ]
+    middleware.extend(runtime_middleware)
     if middleware:
         subagent["middleware"] = middleware
     return subagent
