@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from lensnode import workspace as workspace_module
 from lensnode.agent_tools import build_agent_tools
@@ -23,6 +24,31 @@ def _make_big_file(path, keyword_line_no, keyword="Horcrux", total=10000):
             lines.append(f"line {index}: ordinary narrative filler text here")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+def _make_converted_document(root, name="Contract-2026.pdf"):
+    """Create a source document and its searchable conversion sidecar."""
+
+    source = root / name
+    source.write_bytes(b"document bytes")
+    sidecar = Path(f"{source}.sourcelens")
+    sidecar.mkdir(parents=True)
+    content = sidecar / "content.md"
+    content.write_text(
+        "# Contract-2026\n\nWarranty period: five years.\n",
+        encoding="utf-8",
+    )
+    (sidecar / "meta.json").write_text(
+        '{"retrieval": {"source_path": "Contract-2026.pdf"}}',
+        encoding="utf-8",
+    )
+    assets = sidecar / "assets"
+    assets.mkdir()
+    (assets / "description.txt").write_text(
+        "internal image description",
+        encoding="utf-8",
+    )
+    return source, content
 
 
 def test_search_returns_line_matches_for_large_file(tmp_path):
@@ -87,6 +113,90 @@ def test_image_and_vector_assets_excluded_from_search(tmp_path):
     paths = [match["path"] for match in result["matches"]]
     assert any(path.endswith("guide.md") for path in paths)
     assert not any(path.endswith(".svg") for path in paths)
+
+
+def test_converted_documents_use_source_paths_in_all_search_modes(tmp_path):
+    root = tmp_path / "ws"
+    root.mkdir()
+    source, content = _make_converted_document(root)
+    target_dirs = [{"path": str(root)}]
+
+    matches = search_workspace(target_dirs, "Warranty period")
+    files = search_workspace(
+        target_dirs,
+        "Warranty period",
+        output_mode="files",
+    )
+    counts = search_workspace(
+        target_dirs,
+        "Warranty period",
+        output_mode="count",
+    )
+    found = glob_files(target_dirs, "**/*")
+
+    assert matches["matches"][0]["path"] == str(source)
+    assert files["files"] == [str(source)]
+    assert counts["counts"] == [{"path": str(source), "count": 1}]
+    assert found.count(str(source)) == 1
+    assert str(content) not in found
+    assert not any(".sourcelens" in path for path in found)
+
+
+def test_original_document_path_reads_searchable_sidecar_text(tmp_path):
+    root = tmp_path / "ws"
+    root.mkdir()
+    source, _content = _make_converted_document(root)
+    tools = {
+        item.name: item
+        for item in build_agent_tools(
+            {"target_dirs": [{"path": str(root)}], "settings": {}}
+        )
+    }
+
+    result = json.loads(
+        tools["read_workspace_file"].invoke({"path": str(source)})
+    )
+
+    assert result["path"] == str(source)
+    assert "Warranty period: five years." in result["content"]
+    assert ".sourcelens" not in result["path"]
+
+
+def test_orphaned_sidecar_artifacts_are_not_retrieval_evidence(tmp_path):
+    root = tmp_path / "ws"
+    sidecar = root / "missing.pdf.sourcelens"
+    sidecar.mkdir(parents=True)
+    content = sidecar / "content.md"
+    content.write_text("orphaned secret marker\n", encoding="utf-8")
+    target_dirs = [{"path": str(root)}]
+
+    result = search_workspace(target_dirs, "orphaned secret marker")
+    found = glob_files(target_dirs, "**/*")
+
+    assert result["matches"] == []
+    assert str(content) not in result["files"]
+    assert str(content) not in found
+
+
+def test_converted_document_alias_cannot_escape_workspace(tmp_path):
+    root = tmp_path / "ws"
+    root.mkdir()
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"outside")
+    source = root / "linked.pdf"
+    source.symlink_to(outside)
+    sidecar = root / "linked.pdf.sourcelens"
+    sidecar.mkdir()
+    content = sidecar / "content.md"
+    content.write_text("outside alias marker\n", encoding="utf-8")
+    target_dirs = [{"path": str(root)}]
+
+    result = search_workspace(target_dirs, "outside alias marker")
+    found = glob_files(target_dirs, "**/*")
+
+    assert result["matches"] == []
+    assert str(source) not in result["files"]
+    assert str(source) not in found
 
 
 def test_regex_search_matches_pattern(tmp_path):

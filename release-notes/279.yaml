@@ -1,0 +1,8 @@
+type: fix
+audience: user
+en: >-
+  Chat citations for converted documents now reference the original file
+  instead of internal conversion paths.
+zh-CN: >-
+  转换文档的聊天引用现指向原始文件，
+  不再显示内部转换路径。
