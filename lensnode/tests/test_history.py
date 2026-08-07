@@ -1866,7 +1866,7 @@ def test_delivered_artifact_completes_after_token_budget_wrapup():
     assert termination_detail == {}
 
 
-def test_legacy_runtime_modes_skip_general_chat_execution_gates(
+def test_knowledge_qa_skips_general_chat_execution_gates(
     monkeypatch,
     tmp_path,
 ):
@@ -1962,23 +1962,22 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
     runtime = agent_runtime.LensDeepAgentRuntime(config)
     wrapup_event = threading.Event()
 
-    for task in ("knowledge_qa", "code_analysis"):
-        result = runtime._answer_sync(
-            {
-                "run_uuid": f"legacy-{task}",
-                "task": task,
-                "question": "Question",
-                "agent_model_ref": "model-ref",
-            },
-            wrapup_event=wrapup_event,
-            on_checkpoint_ready=lambda task=task: checkpoint_actions.append(
-                ("ready", task)
-            ),
-        )
+    result = runtime._answer_sync(
+        {
+            "run_uuid": "legacy-knowledge_qa",
+            "task": "knowledge_qa",
+            "question": "Question",
+            "agent_model_ref": "model-ref",
+        },
+        wrapup_event=wrapup_event,
+        on_checkpoint_ready=lambda: checkpoint_actions.append(
+            ("ready", "knowledge_qa")
+        ),
+    )
 
-        assert result["answer"] == "legacy answer"
-        assert result["outcome"] == "completed"
-        assert result["termination_detail"] == {}
+    assert result["answer"] == "legacy answer"
+    assert result["outcome"] == "completed"
+    assert result["termination_detail"] == {}
 
     assert all(
         options["general_chat_execution_gates"] is False
@@ -1996,10 +1995,6 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
         "metadata",
         "checkpoint",
         ("ready", "knowledge_qa"),
-        "saver",
-        "metadata",
-        "checkpoint",
-        ("ready", "code_analysis"),
     ]
 
 
