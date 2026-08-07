@@ -1,0 +1,4 @@
+type: improvement
+audience: user
+en: "Code analysis now uses bounded planned evidence retrieval to reduce repeated model calls and provide more reliable source citations."
+zh-CN: "代码分析现在使用有界的计划证据检索，减少重复模型调用并提供更可靠的源代码引用。"
