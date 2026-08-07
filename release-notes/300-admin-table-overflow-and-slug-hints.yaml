@@ -1,0 +1,4 @@
+type: fix
+audience: admin
+en: "Fixed Admin table overflow on narrow screens and added clearer Assistant slug guidance and validation."
+zh-CN: "修复管理台表格在窄屏下的溢出问题，并补充 Assistant Slug 的提示与校验。"
