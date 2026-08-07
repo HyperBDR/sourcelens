@@ -27,6 +27,44 @@ from lensnode.checkpoint import CheckpointResumeError, ResumeState
 from lensnode.gateway_model import GatewayStreamError
 
 
+def test_runtime_answer_composes_execution_phases(monkeypatch):
+    calls = []
+    resources = SimpleNamespace()
+    state = SimpleNamespace(resources=resources)
+    runtime = agent_runtime.LensDeepAgentRuntime(SimpleNamespace())
+
+    monkeypatch.setattr(
+        runtime,
+        "_prepare_runtime",
+        lambda *_args, **_kwargs: calls.append("prepare") or state,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_route_runtime",
+        lambda _state: calls.append("route"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_build_agent",
+        lambda _state: calls.append("build"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_execute_agent",
+        lambda _state: calls.append("execute") or {"answer": "done"},
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: calls.append("cleanup"),
+    )
+
+    result = runtime._answer_sync({"question": "hello"})
+
+    assert result == {"answer": "done"}
+    assert calls == ["prepare", "route", "build", "execute", "cleanup"]
+
+
 class _Msg:
     """Minimal stand-in for a LangChain message with a type/content."""
 
