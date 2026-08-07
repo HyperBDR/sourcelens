@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed Dark-mode Markdown file preview so document text stays readable
+  against the preview background.
+zh-CN: >-
+  修复深色模式下 Markdown 文件预览文字对比度不足、几乎不可读的问题。
