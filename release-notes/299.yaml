@@ -1,0 +1,4 @@
+type: improvement
+audience: user
+en: "Code-analysis assistants now keep their code graph up to date as the workspace changes, and prefer the code graph for structural questions such as where a symbol is defined and what calls what."
+zh-CN: "代码分析助手现在会在工作区代码变化时自动更新代码图，并在询问符号定义位置、调用关系等结构性问题时优先使用代码图。"
