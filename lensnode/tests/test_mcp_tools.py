@@ -7,6 +7,7 @@ from langchain_core.tools import StructuredTool
 
 from lensnode.mcp_tools import (
     DeferredMCPToolMiddleware,
+    MCPToolFirstMiddleware,
     build_deferred_mcp_tools,
     load_mcp_tools,
 )
@@ -21,6 +22,10 @@ def _remote_tool(name="lookup"):
         name=name,
         description="Look up a remote record.",
     )
+
+
+def _named_tool(name):
+    return SimpleNamespace(name=name)
 
 
 def _install_fake_adapter(monkeypatch, clients):
@@ -389,6 +394,120 @@ def test_deferred_mcp_tools_promote_only_matching_schemas():
     }
 
 
+def test_deferred_mcp_tools_keep_codegraph_visible():
+    tools = [
+        _named_tool("mcp__codegraph__codegraph_explore"),
+        *(_named_tool(f"mcp__catalog__lookup_{index}") for index in range(3)),
+    ]
+
+    visible_tools, middleware = build_deferred_mcp_tools(
+        tools,
+        threshold=2,
+        always_visible_prefixes=("mcp__codegraph__",),
+    )
+
+    assert middleware is not None
+    assert {
+        tool.name for tool in middleware._filter_tools(visible_tools)
+    } == {
+        "mcp__codegraph__codegraph_explore",
+        "tool_search",
+    }
+
+
+def test_codegraph_first_middleware_restores_tools_after_codegraph_call():
+    middleware = MCPToolFirstMiddleware("mcp__codegraph__")
+    all_tools = [
+        _named_tool("search_workspace"),
+        _named_tool("find_files"),
+        _named_tool("read_workspace_file"),
+        _named_tool("mcp__codegraph__codegraph_explore"),
+    ]
+    request = SimpleNamespace(
+        tools=all_tools,
+        override=lambda **updates: SimpleNamespace(**updates),
+    )
+    captured = []
+
+    middleware.wrap_model_call(
+        request,
+        lambda filtered: captured.append(
+            [tool.name for tool in filtered.tools]
+        ),
+    )
+
+    assert captured == [["mcp__codegraph__codegraph_explore"]]
+
+    middleware.wrap_tool_call(
+        SimpleNamespace(
+            tool_call={
+                "name": "mcp__codegraph__codegraph_explore",
+            }
+        ),
+        lambda _request: "done",
+    )
+
+    middleware.wrap_model_call(
+        request,
+        lambda filtered: captured.append(
+            [tool.name for tool in filtered.tools]
+        ),
+    )
+
+    assert captured == [
+        ["mcp__codegraph__codegraph_explore"],
+        [tool.name for tool in all_tools],
+    ]
+
+
+def test_codegraph_first_middleware_restores_tools_after_async_failure():
+    middleware = MCPToolFirstMiddleware("mcp__codegraph__")
+    all_tools = [
+        _named_tool("search_workspace"),
+        _named_tool("mcp__codegraph__codegraph_explore"),
+    ]
+    request = SimpleNamespace(
+        tools=all_tools,
+        override=lambda **updates: SimpleNamespace(**updates),
+    )
+
+    async def exercise():
+        async def capture(filtered):
+            return filtered
+
+        await middleware.awrap_model_call(
+            request,
+            capture,
+        )
+
+        async def fail(_request):
+            raise RuntimeError("CodeGraph unavailable")
+
+        try:
+            await middleware.awrap_tool_call(
+                SimpleNamespace(
+                    tool_call={
+                        "name": "mcp__codegraph__codegraph_explore",
+                    }
+                ),
+                fail,
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("the fake CodeGraph call must fail")
+
+        response = await middleware.awrap_model_call(
+            request,
+            capture,
+        )
+        assert [tool.name for tool in response.tools] == [
+            tool.name for tool in all_tools
+        ]
+
+    asyncio.run(exercise())
+
+
 def test_stdio_mcp_requires_explicit_allowlist(monkeypatch):
     clients = []
     events = []
@@ -434,6 +553,38 @@ def test_stdio_mcp_requires_explicit_allowlist(monkeypatch):
     assert not any(
         event == "mcp.server.skipped" for event, detail in events
     )
+
+
+def test_mcp_ready_event_reports_loaded_tool_names(monkeypatch):
+    clients = []
+    events = []
+    _install_fake_adapter(monkeypatch, clients)
+
+    load_mcp_tools(
+        [
+            {
+                "name": "codegraph",
+                "transport": "stdio",
+                "endpoint": "",
+                "config": {"command": "codegraph"},
+                "load_config": {},
+            }
+        ],
+        stdio_allowlist=("codegraph",),
+        emit_event=lambda event, detail: events.append((event, detail)),
+    )
+
+    ready_events = [
+        detail for event, detail in events if event == "mcp.server.ready"
+    ]
+
+    assert ready_events == [
+        {
+            "server": "codegraph",
+            "tool_count": 1,
+            "tool_names": ["mcp__codegraph__lookup"],
+        }
+    ]
 
 
 def test_stdio_mcp_allowlist_gate_and_params(monkeypatch):

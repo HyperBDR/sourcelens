@@ -3644,6 +3644,18 @@ def test_knowledge_qa_keeps_task_tool_available():
     )
 
 
+def test_agent_middleware_includes_runtime_extensions():
+    runtime_extension = object()
+
+    middleware = agent_runtime._agent_middleware(
+        {"task": "code_analysis"},
+        summarizer=None,
+        runtime_middleware=(runtime_extension,),
+    )
+
+    assert middleware == [runtime_extension]
+
+
 def test_agent_middleware_includes_deferred_mcp_filter():
     deferred = object()
 
@@ -3662,6 +3674,16 @@ def test_fast_subagent_inherits_deferred_mcp_filter():
     subagent = agent_runtime._fast_subagent(deferred)
 
     assert subagent["middleware"] == [deferred]
+
+
+def test_fast_subagent_inherits_runtime_extensions():
+    runtime_extension = object()
+
+    subagent = agent_runtime._fast_subagent(
+        runtime_middleware=(runtime_extension,),
+    )
+
+    assert subagent["middleware"] == [runtime_extension]
 
 
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):

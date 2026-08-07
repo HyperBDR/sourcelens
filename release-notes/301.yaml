@@ -1,0 +1,4 @@
+type: improvement
+audience: user
+en: "Code analysis assistants now keep CodeGraph-specific runtime behavior inside the plugin boundary while still prioritizing CodeGraph before workspace searches."
+zh-CN: "代码分析助手现在将 CodeGraph 专属运行逻辑保持在插件边界内，同时仍会在工作区搜索前优先使用 CodeGraph。"

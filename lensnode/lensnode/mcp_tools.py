@@ -26,11 +26,81 @@ MCP_STDIO_MAX_ARGS = 32
 MCP_STDIO_MAX_ENV = 32
 
 
+class MCPToolFirstMiddleware(AgentMiddleware):
+    """Expose one MCP tool family on the first model turn."""
+
+    def __init__(self, tool_prefix):
+        self._tool_prefix = str(tool_prefix or "")
+        self._completed = False
+        self._lock = threading.Lock()
+
+    def _filter_tools(self, tools):
+        """Keep only the configured tool family until its first call."""
+
+        with self._lock:
+            if self._completed:
+                return list(tools)
+        return [
+            tool
+            for tool in tools
+            if str(getattr(tool, "name", "") or "").startswith(
+                self._tool_prefix
+            )
+        ]
+
+    def _tool_name(self, request):
+        """Return the invoked tool name from a middleware request."""
+
+        tool_call = getattr(request, "tool_call", None) or {}
+        return str(
+            tool_call.get("name")
+            or getattr(getattr(request, "tool", None), "name", None)
+            or ""
+        )
+
+    def _mark_completed(self):
+        """Restore the normal tool set after the first tool call."""
+
+        with self._lock:
+            self._completed = True
+
+    def wrap_model_call(self, request, handler):
+        """Filter synchronous model requests."""
+
+        request = request.override(tools=self._filter_tools(request.tools))
+        return handler(request)
+
+    async def awrap_model_call(self, request, handler):
+        """Filter asynchronous model requests."""
+
+        request = request.override(tools=self._filter_tools(request.tools))
+        return await handler(request)
+
+    def wrap_tool_call(self, request, handler):
+        """Restore tools after a synchronous first-family call."""
+
+        try:
+            return handler(request)
+        finally:
+            if self._tool_name(request).startswith(self._tool_prefix):
+                self._mark_completed()
+
+    async def awrap_tool_call(self, request, handler):
+        """Restore tools after an asynchronous first-family call."""
+
+        try:
+            return await handler(request)
+        finally:
+            if self._tool_name(request).startswith(self._tool_prefix):
+                self._mark_completed()
+
+
 class DeferredMCPToolMiddleware(AgentMiddleware):
     """Hide MCP schemas until tool_search promotes matching tools."""
 
-    def __init__(self, mcp_tools):
+    def __init__(self, mcp_tools, always_visible_prefixes=()):
         self._mcp_tools = {tool.name: tool for tool in mcp_tools}
+        self._always_visible_prefixes = tuple(always_visible_prefixes)
         self._promoted = set()
         self._lock = threading.Lock()
         self.search_tool = StructuredTool.from_function(
@@ -78,7 +148,8 @@ class DeferredMCPToolMiddleware(AgentMiddleware):
         return [
             tool
             for tool in tools
-            if not _is_mcp_tool(tool)
+            if _has_prefix(tool, self._always_visible_prefixes)
+            or not _is_mcp_tool(tool)
             or tool.name in promoted
         ]
 
@@ -264,6 +335,7 @@ def load_mcp_tools(
                         params
                     )
                 )
+            loaded_tool_names = []
             for raw_tool in discovered:
                 if len(tools) >= MCP_MAX_TOOLS:
                     _emit(
@@ -284,12 +356,14 @@ def load_mcp_tools(
                     terminate_fn=terminate_fn,
                 )
                 tools.append(tool)
+                loaded_tool_names.append(tool.name)
             _emit(
                 emit_event,
                 "mcp.server.ready",
                 {
                     "server": display_name,
                     "tool_count": len(discovered),
+                    "tool_names": loaded_tool_names,
                 },
             )
         finally:
@@ -323,12 +397,20 @@ async def _discover_mcp_servers(prepared, timeout_s):
     )
 
 
-def build_deferred_mcp_tools(mcp_tools, *, threshold=12):
+def build_deferred_mcp_tools(
+    mcp_tools,
+    *,
+    threshold=12,
+    always_visible_prefixes=(),
+):
     """Return registered MCP tools and optional schema-filter middleware."""
 
     if len(mcp_tools) <= max(int(threshold), 0):
         return list(mcp_tools), None
-    middleware = DeferredMCPToolMiddleware(mcp_tools)
+    middleware = DeferredMCPToolMiddleware(
+        mcp_tools,
+        always_visible_prefixes=always_visible_prefixes,
+    )
     return [*mcp_tools, middleware.search_tool], middleware
 
 
@@ -619,6 +701,13 @@ def _is_mcp_tool(tool):
     """Return whether a tool came from the MCP loader."""
 
     return str(getattr(tool, "name", "")).startswith(MCP_TOOL_PREFIX)
+
+
+def _has_prefix(tool, prefixes):
+    """Return whether a tool name starts with one of the prefixes."""
+
+    name = str(getattr(tool, "name", "") or "")
+    return any(name.startswith(prefix) for prefix in prefixes)
 
 
 def _emit(emit_event, event, detail):

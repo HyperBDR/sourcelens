@@ -105,5 +105,9 @@ def test_streamable_http_discovers_calls_and_closes_sessions():
     assert recorder.methods.count("DELETE") == 2
     assert (
         "mcp.server.ready",
-        {"server": "Local deterministic MCP", "tool_count": 1},
+        {
+            "server": "Local deterministic MCP",
+            "tool_count": 1,
+            "tool_names": ["mcp__local_deterministic_mcp__add"],
+        },
     ) in events

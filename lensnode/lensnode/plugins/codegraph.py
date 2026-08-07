@@ -11,7 +11,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import LensNodePlugin
+from ..mcp_tools import MCPToolFirstMiddleware
+from . import AgentRuntimeContribution, LensNodePlugin
 
 CODEGRAPH_SERVER_NAME = "codegraph"
 CODEGRAPH_INDEX_DIR = ".codegraph"
@@ -78,6 +79,35 @@ class CodeGraphPlugin(LensNodePlugin):
                 "load_config": {},
             }
         ]
+
+    def contribute_agent_runtime(self, config, command, mcp_tools):
+        """Prioritize CodeGraph when its MCP tools are available."""
+
+        del config
+        if (command or {}).get("task") != "code_analysis":
+            return None
+        if not any(
+            str(getattr(tool, "name", "")).startswith("mcp__codegraph__")
+            for tool in mcp_tools
+        ):
+            return None
+        middleware = MCPToolFirstMiddleware("mcp__codegraph__")
+        return AgentRuntimeContribution(
+            prompt_guidance=(
+                "CodeGraph is available through the MCP tool family "
+                "mcp__codegraph__. For structural code questions — where "
+                "a symbol or function is defined, what calls what, how a "
+                "module reaches another, or what would break if something "
+                "changed — MUST call the CodeGraph MCP tool before any "
+                "workspace search or file-reading tool. Use workspace "
+                "search only for literal text such as exact traceback "
+                "lines, comments, log messages, or regex patterns, and "
+                "after CodeGraph has identified the relevant files."
+            ),
+            middleware=(middleware,),
+            subagent_middleware=(middleware,),
+            always_visible_tool_prefixes=("mcp__codegraph__",),
+        )
 
 
 def _ensure_codegraph_index(config, workspace, emit_event=None):

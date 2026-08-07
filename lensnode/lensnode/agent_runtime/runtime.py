@@ -30,6 +30,7 @@ from ..gateway_model import (
 )
 from ..logging_utils import elapsed_since, task_log, utc_now
 from ..mcp_tools import build_deferred_mcp_tools, load_mcp_tools
+from ..plugins import collect_agent_runtime_contributions
 from ..runtime_modes import runtime_mode_for
 from .assembly import _agent_middleware, _fast_subagent
 from .capabilities import CapabilityBoundaryMiddleware
@@ -404,6 +405,31 @@ class LensDeepAgentRuntime:
                     (),
                 ),
             )
+            runtime_contributions = collect_agent_runtime_contributions(
+                self.config,
+                command,
+                mcp_tools,
+            )
+            runtime_middleware = tuple(
+                item
+                for contribution in runtime_contributions
+                for item in contribution.middleware
+            )
+            subagent_middleware = tuple(
+                item
+                for contribution in runtime_contributions
+                for item in contribution.subagent_middleware
+            )
+            runtime_guidance = tuple(
+                contribution.prompt_guidance
+                for contribution in runtime_contributions
+                if contribution.prompt_guidance
+            )
+            always_visible_tool_prefixes = tuple(
+                prefix
+                for contribution in runtime_contributions
+                for prefix in contribution.always_visible_tool_prefixes
+            )
             registered_mcp_tools, mcp_middleware = (
                 build_deferred_mcp_tools(
                     mcp_tools,
@@ -412,13 +438,10 @@ class LensDeepAgentRuntime:
                         "mcp_defer_threshold",
                         12,
                     ),
+                    always_visible_prefixes=always_visible_tool_prefixes,
                 )
             )
             tools.extend(registered_mcp_tools)
-            codegraph_available = any(
-                tool.name.startswith("mcp__codegraph__")
-                for tool in mcp_tools
-            )
             if resume_state is not None:
                 _reject_unsafe_resume_tool_replay(
                     resume_state.messages,
@@ -626,7 +649,7 @@ class LensDeepAgentRuntime:
                     command,
                     resources.context_skill_contents,
                     mcp_deferred=mcp_middleware is not None,
-                    codegraph_available=codegraph_available,
+                    runtime_guidance=runtime_guidance,
                 ),
                 "backend": FilesystemBackend(
                     root_dir=str(resources.root),
@@ -639,6 +662,7 @@ class LensDeepAgentRuntime:
                         _fast_subagent(
                             mcp_middleware,
                             trace_middleware,
+                            subagent_middleware,
                         )
                     ]
                 ),
@@ -664,6 +688,7 @@ class LensDeepAgentRuntime:
                 capability_middleware=capability_middleware,
                 mcp_middleware=mcp_middleware,
                 trace_middleware=trace_middleware,
+                runtime_middleware=runtime_middleware,
             )
             if middleware:
                 kwargs["middleware"] = middleware
