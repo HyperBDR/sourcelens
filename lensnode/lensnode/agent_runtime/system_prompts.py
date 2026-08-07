@@ -12,6 +12,7 @@ def _system_prompt(
     context_skill_contents=None,
     *,
     mcp_deferred=False,
+    codegraph_available=False,
 ):
     """Build the per-task Deep Agents system prompt."""
 
@@ -22,6 +23,7 @@ def _system_prompt(
             scenario,
             command,
             context_skill_contents,
+            codegraph_available=codegraph_available,
         )
     if mcp_deferred:
         prompt += (
@@ -38,7 +40,13 @@ def _is_general_chat(command):
 
     return command.get("task") == "general_chat"
 
-def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
+def _knowledge_system_prompt(
+    scenario,
+    command,
+    context_skill_contents=None,
+    *,
+    codegraph_available=False,
+):
     """Build the workspace-grounded system prompt."""
 
     target_dirs = command.get("target_dirs") or []
@@ -78,9 +86,10 @@ def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
         "find_files / read_workspace_file.\n"
         "- Your FIRST action for any project or code question MUST be a "
         "search_workspace call, or a find_files call with a RECURSIVE "
-        "pattern (\"**/*\", never a bare \"*\", which only lists the top "
+        'pattern ("**/*", never a bare "*", which only lists the top '
         "level). If find_files returns nothing, retry with \"**/*\" or a "
         "broader search_workspace before drawing any conclusion.\n"
+        f"{_codegraph_guidance(codegraph_available)}\n"
         "- Use the scratch directory (write_file / read_file / ls) only "
         "for artifacts you generate. For example, if you convert a PDF to "
         "markdown, write the result there, not into the source "
@@ -289,6 +298,27 @@ def _subagent_guidance(agent_rounds):
         "tool calls (parallel reads/searches). Do NOT delegate to `task` "
         "subagents for this — at this depth, direct batched work is "
         "faster than spinning up subagents.\n\n"
+    )
+
+
+def _codegraph_guidance(available):
+    """Return the CodeGraph-first guidance block when the tools are loaded."""
+
+    if not available:
+        return ""
+    return (
+        "- CodeGraph is available: a prebuilt knowledge graph of the "
+        "workspace source. For STRUCTURAL questions — where a symbol or "
+        "function is defined, what calls what, how a module reaches another, "
+        "what would break if something changed — PREFER the codegraph tools "
+        "(mcp__codegraph__codegraph_search, mcp__codegraph__codegraph_callers, "
+        "mcp__codegraph__codegraph_callees, mcp__codegraph__codegraph_trace, "
+        "mcp__codegraph__codegraph_impact, "
+        "mcp__codegraph__codegraph_explore) over a ripgrep search_workspace. "
+        "They answer from the graph directly and are far faster than "
+        "scanning matching lines. Use search_workspace for literal-text "
+        "questions (exact strings, comments, log messages) and after you "
+        "already have a specific file open."
     )
 
 
