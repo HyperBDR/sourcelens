@@ -12,6 +12,9 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends.filesystem import FilesystemBackend
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from ..agent_tools import (
     build_agent_tools,
     build_general_chat_tools,
@@ -32,6 +35,13 @@ from ..gateway_model import (
 from ..logging_utils import elapsed_since, task_log, utc_now
 from ..mcp_tools import build_deferred_mcp_tools, load_mcp_tools
 from ..plugins import collect_agent_runtime_contributions
+from ..planned_evidence import (
+    EvidenceExecutor,
+    build_evidence_bundle,
+    parse_retrieval_plan,
+    validate_citations,
+    validate_evidence_sufficiency,
+)
 from ..runtime_modes import runtime_mode_for
 from .assembly import _agent_middleware, _fast_subagent
 from .capabilities import CapabilityBoundaryMiddleware
@@ -201,6 +211,18 @@ class LensDeepAgentRuntime:
             on_checkpoint_ready,
         )
         try:
+            if (
+                state.runtime_mode.name == "code_analysis"
+                and state.resume_state is None
+            ):
+                return _run_planned_code_analysis(
+                    model=state.model,
+                    command=state.command,
+                    tools=state.tools,
+                    mcp_tools=state.mcp_tools,
+                    emit_agent_event=state.emit_agent_event,
+                    workspace_root=self.config.workspace_path,
+                )
             route_result = self._route_runtime(state)
             if route_result is not None:
                 return route_result
@@ -994,3 +1016,314 @@ def _scenario_for_task(task):
     """Return scenario metadata for a LensNode task name."""
 
     return SCENARIOS.get(task or "", SCENARIOS["knowledge_qa"])
+
+
+def _run_planned_code_analysis(
+    *,
+    model,
+    command,
+    tools,
+    mcp_tools,
+    emit_agent_event,
+    workspace_root,
+):
+    """Run Code Analysis through one plan and one compact evidence bundle."""
+
+    question = str(command.get("question") or "")
+    planner_prompt = _planned_planner_prompt(command)
+    planner_response = model.invoke(
+        [
+            SystemMessage(content=planner_prompt),
+            HumanMessage(content=question),
+        ],
+        runtime_control_call=True,
+    )
+    plan = _parse_planner_response(planner_response, question, command)
+    emit_agent_event(
+        "planned_evidence.plan.ready",
+        {
+            "question_type": plan.question_type,
+            "codegraph_queries": len(plan.codegraph_queries),
+            "literal_queries": len(plan.literal_queries),
+            "source_windows": len(plan.source_windows),
+            "max_files": plan.max_files,
+        },
+    )
+
+    executor = EvidenceExecutor(
+        workspace_tools=_planned_workspace_adapters(tools),
+        codegraph_tools=_planned_codegraph_adapters(mcp_tools),
+    )
+    bundle = executor.execute(plan)
+    sufficiency = validate_evidence_sufficiency(
+        bundle,
+        plan.evidence_requirements,
+    )
+    fallback_used = False
+    if not sufficiency.sufficient and plan.max_fallback_rounds:
+        fallback_response = model.invoke(
+            [
+                SystemMessage(content=_planned_fallback_prompt()),
+                HumanMessage(
+                    content=json.dumps(
+                        {
+                            "objective": plan.objective,
+                            "gaps": list(sufficiency.gaps),
+                        },
+                        ensure_ascii=False,
+                    )
+                ),
+            ],
+            runtime_control_call=True,
+        )
+        fallback_plan = _parse_planner_response(
+            fallback_response,
+            question,
+            command,
+            fallback=True,
+        )
+        fallback_bundle = executor.execute(fallback_plan)
+        bundle = build_evidence_bundle(
+            [
+                item.as_dict()
+                for item in (*bundle.items, *fallback_bundle.items)
+            ],
+            max_tokens=plan.budgets.max_evidence_tokens,
+        )
+        fallback_used = True
+        sufficiency = validate_evidence_sufficiency(
+            bundle,
+            plan.evidence_requirements,
+        )
+    bundle.metrics["fallback_rounds"] = int(fallback_used)
+    bundle.metrics["model_call_count"] = 2 + int(fallback_used)
+    bundle.metrics["evidence_gap_count"] = len(sufficiency.gaps)
+    bundle.metrics["plan_version"] = "planned-evidence-v1"
+    bundle.metrics["planned_operation_count"] = (
+        len(plan.codegraph_queries) + len(plan.literal_queries)
+    )
+    bundle.metrics["planned_codegraph_operations"] = sorted(
+        {query.operation for query in plan.codegraph_queries}
+    )
+    final_response = model.invoke(
+        [
+            SystemMessage(content=_planned_final_prompt()),
+            HumanMessage(
+                content=json.dumps(
+                    {
+                        "question": question,
+                        "project": plan.project,
+                        "repository": plan.repository,
+                        "revision": plan.revision,
+                        "evidence": bundle.as_dict(),
+                        "evidence_gaps": list(sufficiency.gaps),
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+        ],
+        runtime_final_synthesis=True,
+    )
+    answer, citations, unsupported_claim_count = _validated_planned_answer(
+        final_response,
+        bundle,
+        workspace_root,
+    )
+    bundle.metrics["citation_count"] = len(citations)
+    bundle.metrics["unsupported_claim_count"] = unsupported_claim_count
+    claim_count = len(citations) + unsupported_claim_count
+    bundle.metrics["citation_coverage_ratio"] = (
+        round(len(citations) / claim_count, 4) if claim_count else 0.0
+    )
+    emit_agent_event(
+        "planned_evidence.metrics",
+        {
+            **bundle.metrics,
+            "sufficient": sufficiency.sufficient,
+            "gap_categories": list(sufficiency.gaps),
+        },
+    )
+    if not sufficiency.sufficient:
+        answer += (
+            "\n\nEvidence gap: "
+            + ", ".join(sufficiency.gaps)
+            + ". The affected conclusion is unverified."
+        )
+    return {
+        "answer": answer,
+        "samples": [],
+        "stop_reason": model.stop_reason,
+        "token_usage": model.token_usage,
+        "outcome": "completed",
+        "termination_detail": {},
+        "planned_evidence": bundle.metrics,
+        "citations": list(citations),
+    }
+
+
+def _planned_workspace_adapters(tools):
+    """Expose only deterministic workspace tools to the evidence executor."""
+
+    return {
+        tool.name: tool
+        for tool in tools
+        if getattr(tool, "name", "")
+        in {"search_workspace", "read_workspace_file"}
+    }
+
+
+def _planned_codegraph_adapters(tools):
+    """Map CodeGraph MCP tool names to bounded plan operations."""
+
+    adapters = {}
+    for tool in tools:
+        name = str(getattr(tool, "name", ""))
+        if not name.startswith("mcp__codegraph__codegraph_"):
+            continue
+        operation = name.rsplit("_", 1)[-1]
+        if operation not in {
+            "callers",
+            "callees",
+            "context",
+            "explore",
+            "impact",
+            "node",
+            "search",
+            "trace",
+        }:
+            continue
+        adapters[operation] = tool
+    return adapters
+
+
+def _parse_planner_response(response, question, command, fallback=False):
+    """Parse a planner response or fail closed to one bounded safe plan."""
+
+    content = _message_content(response)
+    try:
+        return parse_retrieval_plan(content)
+    except Exception:
+        return parse_retrieval_plan(
+            {
+                "objective": question[:500] or "analyze the workspace",
+                "project": command.get("project") or "workspace",
+                "repository": command.get("repository") or "workspace",
+                "revision": command.get("revision") or "workspace",
+                "question_type": "mixed",
+                "evidence_requirements": [
+                    "source lines",
+                    "caller context" if fallback else "structural flow",
+                ],
+                "codegraph_queries": [
+                    {"operation": "explore", "query": question[:500]}
+                ],
+                "literal_queries": [question[:500]],
+                "max_files": 8,
+                "max_fallback_rounds": 0,
+            }
+        )
+
+
+def _validated_planned_answer(response, bundle, workspace_root):
+    """Return final text and only verified source citations."""
+
+    content = _message_content(response)
+    payload = _json_object(content)
+    if payload is None:
+        return (
+            content + "\n\nNo verified citations were returned.",
+            (),
+            1,
+        )
+    answer = str(payload.get("answer") or "").strip()
+    valid, invalid = validate_citations(
+        payload.get("citations"),
+        bundle,
+        workspace_root,
+    )
+    if invalid:
+        answer += "\n\nUnverified citations: " + ", ".join(invalid)
+    unsupported = payload.get("unsupported_claims") or []
+    if unsupported:
+        answer += "\n\nUnverified claims remain in the response."
+    if valid:
+        answer += "\n\nEvidence citations:\n"
+        answer += "\n".join(
+            "- {project} / {repository} @ {revision}: `{path}` "
+            "({symbol}, lines {start_line}-{end_line})".format(**citation)
+            for citation in valid
+        )
+    else:
+        answer += "\n\nNo verified citations were returned."
+    return answer or content, valid, len(unsupported)
+
+
+def _message_content(message):
+    """Return model content as bounded plain text."""
+
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            item.get("text", "")
+            if isinstance(item, dict)
+            else str(item)
+            for item in content
+        )
+    return str(content or "")
+
+
+def _json_object(content):
+    """Parse strict JSON or a single fenced JSON object."""
+
+    text = str(content or "").strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text.split("\n", 1)[-1][:-3].strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _planned_planner_prompt(command):
+    """Build the compact initial planner contract."""
+
+    return (
+        "Return only one JSON retrieval plan. Do not inspect files or call "
+        "tools. The backend will execute every bounded operation. Include "
+        "objective, project, repository, revision, question_type, "
+        "evidence_requirements, codegraph_queries, literal_queries, "
+        "source_windows, max_files, max_fallback_rounds, and budgets. "
+        "Use CodeGraph for structural questions and exact search for logs "
+        "or traceback text. Keep max_fallback_rounds at 1 or less. The "
+        "workspace is "
+        f"{command.get('workspace_path') or 'the selected workspace'}."
+    )
+
+
+def _planned_fallback_prompt():
+    """Build the one compact adaptive fallback planner contract."""
+
+    return (
+        "Return only one bounded JSON retrieval plan for the listed evidence "
+        "gaps. Do not include tools or unbounded loops. Use at most one "
+        "CodeGraph query and two literal queries. Include source_windows "
+        "when source lines are missing and set max_fallback_rounds to 0."
+    )
+
+
+def _planned_final_prompt():
+    """Build the final answer contract for compact evidence only."""
+
+    return (
+        "Answer the user's code-analysis question only from the supplied "
+        "evidence bundle. Return JSON with answer, citations, and "
+        "unsupported_claims. Every material code claim needs a citation "
+        "containing project, repository, revision, path, symbol, "
+        "start_line, end_line, evidence_type, and supports. Never invent "
+        "paths, symbols, revisions, or line ranges. If evidence is missing, "
+        "put the claim in unsupported_claims and say it is unverified. "
+        "Keep runtime evidence separate from source evidence."
+    )
