@@ -15,6 +15,9 @@ MAX_FILES = 15
 MAX_SOURCE_WINDOW_LINES = 250
 MAX_EVIDENCE_TOKENS = 20000
 MAX_QUERY_CHARS = 500
+MAX_CODEGRAPH_QUERIES = 16
+MAX_LITERAL_QUERIES = 32
+MAX_SOURCE_WINDOWS = 32
 ALLOWED_CODEGRAPH_OPERATIONS = {
     "callers",
     "callees",
@@ -178,7 +181,10 @@ def parse_retrieval_plan(raw):
 
     objective = _required_text(raw.get("objective"), "objective")
     codegraph_queries = []
-    for item in _list_value(raw.get("codegraph_queries")):
+    codegraph_items = _list_value(raw.get("codegraph_queries"))[
+        :MAX_CODEGRAPH_QUERIES
+    ]
+    for item in codegraph_items:
         if not isinstance(item, dict):
             raise PlanValidationError("codegraph query must be an object")
         operation = _required_text(item.get("operation"), "operation")
@@ -195,7 +201,7 @@ def parse_retrieval_plan(raw):
         )
 
     windows = []
-    for item in _list_value(raw.get("source_windows")):
+    for item in _list_value(raw.get("source_windows"))[:MAX_SOURCE_WINDOWS]:
         if not isinstance(item, dict):
             raise PlanValidationError("source window must be an object")
         path = _required_text(item.get("path"), "source window path")
@@ -216,16 +222,22 @@ def parse_retrieval_plan(raw):
         raise PlanValidationError("budgets must be an object")
     budgets = RetrievalBudgets(
         max_source_window_lines=min(
-            _positive_int(
-                raw_budgets.get("max_source_window_lines"),
-                MAX_SOURCE_WINDOW_LINES,
+            max(
+                _positive_int(
+                    raw_budgets.get("max_source_window_lines"),
+                    MAX_SOURCE_WINDOW_LINES,
+                ),
+                1,
             ),
             MAX_SOURCE_WINDOW_LINES,
         ),
         max_evidence_tokens=min(
-            _positive_int(
-                raw_budgets.get("max_evidence_tokens"),
-                MAX_EVIDENCE_TOKENS,
+            max(
+                _positive_int(
+                    raw_budgets.get("max_evidence_tokens"),
+                    MAX_EVIDENCE_TOKENS,
+                ),
+                1,
             ),
             MAX_EVIDENCE_TOKENS,
         ),
@@ -238,10 +250,14 @@ def parse_retrieval_plan(raw):
         question_type=_bounded_query(raw.get("question_type")) or "mixed",
         evidence_requirements=_unique_texts(
             raw.get("evidence_requirements")
-        ),
+        )[:MAX_LITERAL_QUERIES],
         codegraph_queries=tuple(codegraph_queries),
-        literal_queries=_unique_queries(raw.get("literal_queries")),
-        file_scopes=_unique_queries(raw.get("file_scopes")),
+        literal_queries=_unique_queries(raw.get("literal_queries"))[
+            :MAX_LITERAL_QUERIES
+        ],
+        file_scopes=_unique_queries(raw.get("file_scopes"))[
+            :MAX_LITERAL_QUERIES
+        ],
         source_windows=tuple(windows),
         max_files=min(
             max(_positive_int(raw.get("max_files"), MAX_FILES), 1),
@@ -511,7 +527,13 @@ def validate_citations(citations, bundle, workspace_root):
                 or not matches
             ):
                 raise ValueError
-        except (OSError, TypeError, ValueError, AttributeError):
+        except (
+            OSError,
+            TypeError,
+            ValueError,
+            AttributeError,
+            subprocess.SubprocessError,
+        ):
             invalid.append(path_text or "<missing-path>")
             continue
         valid.append(dict(citation))

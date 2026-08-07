@@ -812,6 +812,50 @@
                   </dl>
                 </section>
 
+                <section
+                  v-if="hasPlannedEvidence"
+                  data-testid="run-planned-evidence"
+                  class="overview-section"
+                >
+                  <h3 class="overview-title">
+                    {{ t('lensRuns.plannedEvidence') }}
+                  </h3>
+                  <dl class="overview-grid">
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceModelCalls') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.model_call_count ?? '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceRetrievalCalls') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.retrieval_call_count ?? '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceTokens') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.evidence_tokens ?? '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceCitations') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.citation_count ?? '-' }}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+
                 <section>
                   <h3 class="text-sm font-semibold text-gray-700 mb-2">
                     {{ t('lensRuns.question') }}
@@ -1207,6 +1251,13 @@ const visionQuery = computed(() => {
   )
   return step?.multimodal?.query || ''
 })
+
+const plannedEvidence = computed(
+  () => detail.value?.planned_evidence || {}
+)
+const hasPlannedEvidence = computed(
+  () => Object.keys(plannedEvidence.value).length > 0
+)
 
 const AGENT_ROUNDS_KEYS = {
   flash: 'flash',

@@ -414,6 +414,11 @@ class LensDeepAgentRuntime:
                     (),
                 ),
             )
+            runtime_contributions = collect_agent_runtime_contributions(
+                self.config,
+                command,
+                mcp_tools,
+            )
             if runtime_mode.name == "code_analysis" and resume_state is None:
                 return _run_planned_code_analysis(
                     model=model,
@@ -425,11 +430,6 @@ class LensDeepAgentRuntime:
                     emit_output=emit_output,
                     workspace_root=self.config.workspace_path,
                 )
-            runtime_contributions = collect_agent_runtime_contributions(
-                self.config,
-                command,
-                mcp_tools,
-            )
             runtime_middleware = tuple(
                 item
                 for contribution in runtime_contributions
@@ -1012,15 +1012,13 @@ def _run_planned_code_analysis(
     bundle.metrics["fallback_rounds"] = int(fallback_used)
     bundle.metrics["model_call_count"] = 2 + int(fallback_used)
     bundle.metrics["evidence_gap_count"] = len(sufficiency.gaps)
-    emit_agent_event(
-        "planned_evidence.metrics",
-        {
-            **bundle.metrics,
-            "sufficient": sufficiency.sufficient,
-            "gap_categories": list(sufficiency.gaps),
-        },
+    bundle.metrics["plan_version"] = "planned-evidence-v1"
+    bundle.metrics["planned_operation_count"] = (
+        len(plan.codegraph_queries) + len(plan.literal_queries)
     )
-
+    bundle.metrics["planned_codegraph_operations"] = sorted(
+        {query.operation for query in plan.codegraph_queries}
+    )
     final_response = model.invoke(
         [
             SystemMessage(content=_planned_final_prompt()),
@@ -1040,10 +1038,24 @@ def _run_planned_code_analysis(
         ],
         runtime_final_synthesis=True,
     )
-    answer, citations = _validated_planned_answer(
+    answer, citations, unsupported_claim_count = _validated_planned_answer(
         final_response,
         bundle,
         workspace_root,
+    )
+    bundle.metrics["citation_count"] = len(citations)
+    bundle.metrics["unsupported_claim_count"] = unsupported_claim_count
+    claim_count = len(citations) + unsupported_claim_count
+    bundle.metrics["citation_coverage_ratio"] = (
+        round(len(citations) / claim_count, 4) if claim_count else 0.0
+    )
+    emit_agent_event(
+        "planned_evidence.metrics",
+        {
+            **bundle.metrics,
+            "sufficient": sufficiency.sufficient,
+            "gap_categories": list(sufficiency.gaps),
+        },
     )
     if not sufficiency.sufficient:
         answer += (
@@ -1132,7 +1144,11 @@ def _validated_planned_answer(response, bundle, workspace_root):
     content = _message_content(response)
     payload = _json_object(content)
     if payload is None:
-        return content + "\n\nNo verified citations were returned.", ()
+        return (
+            content + "\n\nNo verified citations were returned.",
+            (),
+            1,
+        )
     answer = str(payload.get("answer") or "").strip()
     valid, invalid = validate_citations(
         payload.get("citations"),
@@ -1153,7 +1169,7 @@ def _validated_planned_answer(response, bundle, workspace_root):
         )
     else:
         answer += "\n\nNo verified citations were returned."
-    return answer or content, valid
+    return answer or content, valid, len(unsupported)
 
 
 def _message_content(message):
