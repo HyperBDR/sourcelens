@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { detectTimezone, detectLanguage } from '@/utils/timezone'
 import i18n, { normalizeUiLanguage } from '@/i18n'
+import { toDocumentLang } from '@/utils/documentLang'
 import {
   getNextThemeBoundary,
   normalizeThemeMode,
@@ -174,7 +175,7 @@ export const usePreferencesStore = defineStore('preferences', {
       const normalizedLanguage = normalizeUiLanguage(language)
       this.language = normalizedLanguage
       i18n.global.locale.value = normalizedLanguage
-      document.documentElement.lang = normalizedLanguage
+      document.documentElement.lang = toDocumentLang(normalizedLanguage)
       localStorage.setItem('userLanguage', normalizedLanguage)
     },
 
@@ -242,7 +243,7 @@ export const usePreferencesStore = defineStore('preferences', {
         const normalizedLanguage = normalizeUiLanguage(savedLanguage)
         this.language = normalizedLanguage
         i18n.global.locale.value = normalizedLanguage
-        document.documentElement.lang = normalizedLanguage
+        document.documentElement.lang = toDocumentLang(normalizedLanguage)
         if (savedLanguage !== normalizedLanguage) {
           localStorage.setItem('userLanguage', normalizedLanguage)
         }
@@ -288,7 +289,7 @@ export const usePreferencesStore = defineStore('preferences', {
       this.nativeBrowserNotifications = false
       this.themeMode = 'system'
       i18n.global.locale.value = normalizedLanguage
-      document.documentElement.lang = normalizedLanguage
+      document.documentElement.lang = toDocumentLang(normalizedLanguage)
       localStorage.removeItem('userLanguage')
       localStorage.removeItem('userTimezone')
       localStorage.removeItem(COMPLETION_INDICATOR_KEY)

@@ -10,9 +10,11 @@
     <div
       v-if="show"
       class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
-      @click.self="emit('close')"
     >
-      <div class="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
+      <div
+        class="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
+        @click="emit('close')"
+      />
 
       <Transition
         enter-active-class="transition duration-200 ease-out"
@@ -24,14 +26,19 @@
       >
         <section
           v-if="show"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-modal-title"
           class="settings-modal relative flex h-[526px] max-h-[82vh] w-full max-w-[700px] overflow-hidden rounded-2xl border border-line bg-surface shadow-soft-lg"
         >
           <!-- Left nav -->
           <nav
-            class="settings-nav flex w-14 shrink-0 flex-col border-r border-line bg-surface-sunken py-4 sm:w-48"
+            class="settings-nav flex w-36 shrink-0 flex-col border-r border-line bg-surface-sunken py-4 sm:w-48"
           >
-            <div class="hidden px-4 pb-3 sm:block">
-              <div class="settings-nav-title text-sm font-semibold text-theme-subtle">
+            <div class="px-3 pb-3 sm:px-4">
+              <div
+                class="settings-nav-title text-sm font-semibold text-theme-subtle"
+              >
                 {{ t('settings.modal.label') }}
               </div>
             </div>
@@ -41,7 +48,7 @@
                 v-for="section in sections"
                 :key="section.key"
                 type="button"
-                class="flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm transition-colors sm:justify-start sm:px-3"
+                class="flex min-h-11 w-full items-center justify-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors sm:min-h-0 sm:px-3"
                 :aria-label="section.label"
                 :class="
                   activeSection === section.key
@@ -51,7 +58,7 @@
                 @click="activeSection = section.key"
               >
                 <component :is="section.icon" class="h-4 w-4 shrink-0" />
-                <span class="hidden min-w-0 flex-1 truncate sm:block">
+                <span class="min-w-0 flex-1 truncate text-xs sm:text-sm">
                   {{ section.label }}
                 </span>
                 <span
@@ -71,7 +78,7 @@
             <div class="settings-logout-wrap border-t border-line px-2 pt-2">
               <button
                 type="button"
-                class="settings-logout flex w-full items-center justify-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:justify-start sm:px-3"
+                class="settings-logout flex min-h-11 w-full items-center justify-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:min-h-0 sm:px-3"
                 :aria-label="t('common.logout')"
                 @click="handleLogout"
               >
@@ -95,7 +102,9 @@
                   />
                   <line x1="21" y1="12" x2="9" y2="12" stroke-linecap="round" />
                 </svg>
-                <span class="hidden sm:block">{{ t('common.logout') }}</span>
+                <span class="truncate text-xs sm:text-sm">{{
+                  t('common.logout')
+                }}</span>
               </button>
             </div>
           </nav>
@@ -105,10 +114,14 @@
             <header
               class="settings-header flex items-center justify-between border-b border-line px-4 pb-2 pt-5 sm:px-6"
             >
-              <h2 class="text-base font-semibold text-theme">
+              <h2
+                id="settings-modal-title"
+                class="text-base font-semibold text-theme"
+              >
                 {{ sections.find((s) => s.key === activeSection)?.label }}
               </h2>
               <button
+                ref="closeButtonRef"
                 type="button"
                 class="flex h-8 w-8 items-center justify-center rounded-lg text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary"
                 :aria-label="t('common.close')"
@@ -154,21 +167,25 @@
                 </div>
 
                 <div class="divide-y divide-line rounded-xl border border-line">
-                  <div class="flex items-center justify-between px-4 py-3">
-                    <span class="text-sm text-theme-muted">{{
-                      t('settings.modal.username')
-                    }}</span>
-                    <span class="text-sm font-medium text-theme">
+                  <div class="space-y-1 px-3 py-3 sm:px-4">
+                    <div class="text-xs font-medium text-theme-muted">
+                      {{ t('settings.modal.username') }}
+                    </div>
+                    <div
+                      class="break-all text-sm font-medium leading-snug text-theme"
+                    >
                       {{ userStore.userInfo?.username || '—' }}
-                    </span>
+                    </div>
                   </div>
-                  <div class="flex items-center justify-between px-4 py-3">
-                    <span class="text-sm text-theme-muted">{{
-                      t('settings.modal.email')
-                    }}</span>
-                    <span class="text-sm font-medium text-theme">
+                  <div class="space-y-1 px-3 py-3 sm:px-4">
+                    <div class="text-xs font-medium text-theme-muted">
+                      {{ t('settings.modal.email') }}
+                    </div>
+                    <div
+                      class="break-all text-sm font-medium leading-snug text-theme"
+                    >
                       {{ userStore.userInfo?.email || '—' }}
-                    </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -178,38 +195,19 @@
                 <p class="text-sm text-theme-muted">
                   {{ t('settings.modal.languageDesc') }}
                 </p>
-                <div class="relative">
-                  <BaseSelect
-                    id="ui-language"
-                    :model-value="locale"
-                    @update:model-value="selectLanguage"
+                <BaseSelect
+                  id="ui-language"
+                  :model-value="locale"
+                  @update:model-value="selectLanguage"
+                >
+                  <option
+                    v-for="lang in languages"
+                    :key="lang.value"
+                    :value="lang.value"
                   >
-                    <option
-                      v-for="lang in languages"
-                      :key="lang.value"
-                      :value="lang.value"
-                    >
-                      {{ lang.flag }} {{ lang.label }}
-                    </option>
-                  </BaseSelect>
-                  <div
-                    class="pointer-events-none absolute inset-y-0 right-3 flex items-center"
-                  >
-                    <svg
-                      class="h-4 w-4 text-theme-subtle"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.5"
-                    >
-                      <path
-                        d="m6 9 6 6 6-6"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </div>
-                </div>
+                    {{ lang.flag }} {{ lang.label }}
+                  </option>
+                </BaseSelect>
               </div>
 
               <!-- Appearance section -->
@@ -276,7 +274,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import AnswerNotificationSettings from '@/components/settings/AnswerNotificationSettings.vue'
@@ -302,6 +300,7 @@ const uiStore = useUiStore()
 const preferencesStore = usePreferencesStore()
 const languages = computed(() => getUiLanguageOptions(t))
 const activeSection = ref('profile')
+const closeButtonRef = ref(null)
 
 const UserIcon = {
   template: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke-linecap="round"/></svg>`
@@ -423,13 +422,19 @@ const handleLogout = async () => {
 }
 
 const handleKeydown = (event) => {
-  if (event.key === 'Escape' && props.show) uiStore.closeSettings()
+  if (event.key === 'Escape' && props.show && !event.defaultPrevented) {
+    uiStore.closeSettings()
+  }
 }
 
 watch(
   () => props.show,
-  (show) => {
-    if (show) activeSection.value = uiStore.settingsTab || 'profile'
+  async (show) => {
+    if (show) {
+      activeSection.value = uiStore.settingsTab || 'profile'
+      await nextTick()
+      closeButtonRef.value?.focus()
+    }
     if (typeof document !== 'undefined')
       document.body.style.overflow = show ? 'hidden' : ''
   },

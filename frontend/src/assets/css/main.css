@@ -117,6 +117,65 @@
     color: var(--sl-form-text) !important;
   }
 
+  input[type='date'],
+  input[type='datetime-local'],
+  input[type='time'] {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  input[type='date']:not(.is-empty)::-webkit-datetime-edit,
+  input[type='datetime-local']:not(.is-empty)::-webkit-datetime-edit,
+  input[type='time']:not(.is-empty)::-webkit-datetime-edit {
+    display: inline-flex;
+    align-items: center;
+    height: 100%;
+    padding: 0;
+    line-height: 1.25rem;
+  }
+
+  input[type='date']:not(.is-empty)::-webkit-datetime-edit-fields-wrapper,
+  input[type='datetime-local']:not(.is-empty)::-webkit-datetime-edit-fields-wrapper,
+  input[type='time']:not(.is-empty)::-webkit-datetime-edit-fields-wrapper {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  input[type='date']:not(.base-date-input)::-webkit-calendar-picker-indicator,
+  input[type='datetime-local']:not(.base-date-input)::-webkit-calendar-picker-indicator {
+    align-self: center;
+  }
+
+  input.base-date-input.is-empty::-webkit-datetime-edit,
+  input.base-date-input.is-empty::-webkit-datetime-edit-fields-wrapper,
+  input.base-date-input.is-empty::-webkit-datetime-edit-text,
+  input.base-date-input.is-empty::-webkit-datetime-edit-month-field,
+  input.base-date-input.is-empty::-webkit-datetime-edit-day-field,
+  input.base-date-input.is-empty::-webkit-datetime-edit-year-field {
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    opacity: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+  }
+
+  input.base-date-input::-webkit-calendar-picker-indicator {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 2.5rem;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  input.base-date-input {
+    position: relative;
+  }
+
   input[type='checkbox'],
   input[type='radio'] {
     -webkit-appearance: none !important;
@@ -224,6 +283,44 @@
   .break-words {
     word-break: break-word;
     overflow-wrap: break-word;
+  }
+
+  .sl-scrollbar,
+  .layout-admin main,
+  .layout-admin .overflow-x-auto,
+  .layout-admin .overflow-y-auto {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--sl-text-subtle-rgb) / 0.35) transparent;
+  }
+
+  .sl-scrollbar::-webkit-scrollbar,
+  .layout-admin main::-webkit-scrollbar,
+  .layout-admin .overflow-x-auto::-webkit-scrollbar,
+  .layout-admin .overflow-y-auto::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .sl-scrollbar::-webkit-scrollbar-track,
+  .layout-admin main::-webkit-scrollbar-track,
+  .layout-admin .overflow-x-auto::-webkit-scrollbar-track,
+  .layout-admin .overflow-y-auto::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sl-scrollbar::-webkit-scrollbar-thumb,
+  .layout-admin main::-webkit-scrollbar-thumb,
+  .layout-admin .overflow-x-auto::-webkit-scrollbar-thumb,
+  .layout-admin .overflow-y-auto::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--sl-text-subtle-rgb) / 0.28);
+    border-radius: 9999px;
+  }
+
+  .sl-scrollbar:hover::-webkit-scrollbar-thumb,
+  .layout-admin main:hover::-webkit-scrollbar-thumb,
+  .layout-admin .overflow-x-auto:hover::-webkit-scrollbar-thumb,
+  .layout-admin .overflow-y-auto:hover::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--sl-text-subtle-rgb) / 0.5);
   }
 }
 

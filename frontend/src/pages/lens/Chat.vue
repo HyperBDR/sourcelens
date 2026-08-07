@@ -4479,7 +4479,12 @@ onBeforeUnmount(() => {
   }
 
   .message-actions {
-    flex-wrap: wrap;
+    gap: 0.125rem;
+    flex-wrap: nowrap;
+  }
+
+  .message-actions .icon-btn {
+    @apply h-9 w-9;
   }
 }
 

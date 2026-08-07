@@ -104,7 +104,7 @@
           @click="selectOption(option, index)"
           @mouseenter="activateOption(option, index)"
         >
-          <span class="min-w-0 flex-1 break-words">
+          <span class="min-w-0 flex-1 whitespace-nowrap">
             {{ option.label }}
           </span>
 
@@ -454,6 +454,7 @@ function handleTriggerKeydown(event) {
 
   if (event.key === 'Escape' && isOpen.value) {
     event.preventDefault()
+    event.stopPropagation()
     closeMenu()
     return
   }
@@ -518,7 +519,11 @@ function updateMenuPosition() {
   const availableAbove = rect.top - menuGap
   const opensAbove = availableBelow < 160 && availableAbove > availableBelow
   const availableHeight = opensAbove ? availableAbove : availableBelow
-  const width = Math.min(rect.width, window.innerWidth - viewportMargin * 2)
+  const minMenuWidth = 96
+  const width = Math.max(
+    minMenuWidth,
+    Math.min(rect.width, window.innerWidth - viewportMargin * 2)
+  )
   const left = Math.max(
     viewportMargin,
     Math.min(rect.left, window.innerWidth - width - viewportMargin)

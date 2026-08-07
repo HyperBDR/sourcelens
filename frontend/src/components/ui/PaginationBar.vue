@@ -15,6 +15,7 @@
         </label>
         <BaseSelect
           :model-value="pageSize"
+          class="min-w-[4.5rem]"
           :full-width="false"
           mobile-touch
           size="sm"

@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/vue'
 import App from './App.vue'
 import router from './router'
 import i18n from './i18n'
+import { toDocumentLang } from './utils/documentLang'
 import { usePreferencesStore } from './store/preferences'
 import { isManagementPath } from './utils/theme'
 import './assets/css/main.css'
@@ -50,7 +51,7 @@ preferencesStore.setThemeOverride(
   isManagementPath(window.location.pathname) ? 'light' : null
 )
 preferencesStore.loadFromLocalStorage()
-document.documentElement.lang = i18n.global.locale.value
+document.documentElement.lang = toDocumentLang(i18n.global.locale.value)
 
 router.afterEach((to) => {
   preferencesStore.setThemeOverride(isManagementPath(to.path) ? 'light' : null)

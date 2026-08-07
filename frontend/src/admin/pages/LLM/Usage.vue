@@ -63,19 +63,15 @@
                   class="flex flex-col gap-2 md:flex-row md:items-center"
                   data-testid="usage-date-range"
                 >
-                  <input
+                  <BaseDateInput
                     v-model="filters.startDate"
-                    type="date"
-                    :lang="locale"
-                    class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
+                    compact
                     @change="onFiltersChanged"
                   />
                   <span class="hidden text-gray-400 md:inline">–</span>
-                  <input
+                  <BaseDateInput
                     v-model="filters.endDate"
-                    type="date"
-                    :lang="locale"
-                    class="min-h-11 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-auto"
+                    compact
                     @change="onFiltersChanged"
                   />
                 </div>
@@ -669,6 +665,7 @@ import {
 import { llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseDateInput from '@/components/ui/BaseDateInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
