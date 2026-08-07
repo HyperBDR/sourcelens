@@ -1637,6 +1637,13 @@ def dispatch_run_to_lensnode(
     runtime_settings = runtime_snapshot.get("settings")
     if not isinstance(runtime_settings, dict):
         runtime_settings = run.session.assistant.settings
+    features_payload = (
+        runtime_settings.get("features")
+        if isinstance(runtime_settings, dict)
+        else None
+    )
+    if not isinstance(features_payload, dict):
+        features_payload = {}
     if subject_documents is None:
         subject_documents = get_run_document_attachments(run.uuid)
     subject_documents = [
@@ -1690,6 +1697,7 @@ def dispatch_run_to_lensnode(
                 "run_uuid": str(run.uuid),
                 "dispatch_id": str(dispatch_id) if dispatch_id else None,
                 "task": execution.task,
+                "features": features_payload,
                 "question": rewritten_question,
                 "answer_language": answer_language,
                 "subject_documents": subject_documents,

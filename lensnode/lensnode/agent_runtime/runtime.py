@@ -398,6 +398,11 @@ class LensDeepAgentRuntime:
                     60,
                 ),
                 emit_event=emit_agent_event,
+                stdio_allowlist=getattr(
+                    self.config,
+                    "mcp_stdio_allowlist",
+                    (),
+                ),
             )
             registered_mcp_tools, mcp_middleware = (
                 build_deferred_mcp_tools(

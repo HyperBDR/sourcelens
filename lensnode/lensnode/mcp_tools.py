@@ -1,8 +1,13 @@
 import asyncio
 import json
 import logging
+import os
 import re
+import signal
+import subprocess
+import sys
 import threading
+from pathlib import Path
 from urllib.parse import urlparse
 
 from langchain.agents.middleware import AgentMiddleware
@@ -17,6 +22,8 @@ MCP_TOOL_NAME_MAX_CHARS = 64
 MCP_SEARCH_LIMIT = 5
 MCP_MAX_SERVERS = 20
 MCP_MAX_TOOLS = 100
+MCP_STDIO_MAX_ARGS = 32
+MCP_STDIO_MAX_ENV = 32
 
 
 class DeferredMCPToolMiddleware(AgentMiddleware):
@@ -94,8 +101,14 @@ def load_mcp_tools(
     discovery_timeout_s=30,
     tool_timeout_s=60,
     emit_event=None,
+    stdio_allowlist=None,
 ):
-    """Discover safe URL MCP tools with per-server failure isolation."""
+    """Discover safe URL and allowlisted stdio MCP tools.
+
+    stdio servers only run a plain executable name found on PATH whose
+    basename is in stdio_allowlist; a None/empty allowlist blocks all
+    stdio servers (fail closed).
+    """
 
     if not server_configs:
         return []
@@ -109,6 +122,7 @@ def load_mcp_tools(
         )
         return []
 
+    stdio_allowlist = set(tuple(stdio_allowlist or ()))
     server_configs = list(server_configs)
     if len(server_configs) > MCP_MAX_SERVERS:
         _emit(
@@ -126,17 +140,46 @@ def load_mcp_tools(
     for config in server_configs[:MCP_MAX_SERVERS]:
         display_name = str(config.get("name") or "MCP server")
         transport = str(config.get("transport") or "").lower()
+        stdio_params = None
         if transport == "stdio":
-            _emit(
-                emit_event,
-                "mcp.server.skipped",
-                {
-                    "server": display_name,
-                    "reason": "stdio_disabled",
-                },
-            )
-            continue
-        if transport != "url":
+            if not stdio_allowlist:
+                _emit(
+                    emit_event,
+                    "mcp.server.skipped",
+                    {
+                        "server": display_name,
+                        "reason": "stdio_disabled",
+                    },
+                )
+                continue
+            try:
+                stdio_params = _stdio_server_params(config)
+            except ValueError as exc:
+                LOGGER.warning(
+                    "Skipping MCP server %s with invalid config (%s)",
+                    display_name,
+                    exc,
+                )
+                _emit(
+                    emit_event,
+                    "mcp.server.skipped",
+                    {
+                        "server": display_name,
+                        "reason": "invalid_config",
+                    },
+                )
+                continue
+            if Path(stdio_params["command"]).name not in stdio_allowlist:
+                _emit(
+                    emit_event,
+                    "mcp.server.skipped",
+                    {
+                        "server": display_name,
+                        "reason": "stdio_not_allowed",
+                    },
+                )
+                continue
+        elif transport != "url":
             _emit(
                 emit_event,
                 "mcp.server.skipped",
@@ -149,7 +192,11 @@ def load_mcp_tools(
 
         server_name = _unique_identifier(display_name, used_server_names)
         try:
-            params = _url_server_params(config)
+            params = (
+                stdio_params
+                if stdio_params is not None
+                else _url_server_params(config)
+            )
             client = MultiServerMCPClient(
                 {server_name: params},
                 tool_name_prefix=True,
@@ -169,7 +216,9 @@ def load_mcp_tools(
                 },
             )
             continue
-        prepared.append((config, display_name, server_name, client))
+        prepared.append(
+            (config, display_name, server_name, client, stdio_params)
+        )
 
     if not prepared:
         return []
@@ -183,55 +232,69 @@ def load_mcp_tools(
         discovered_servers,
         strict=True,
     ):
-        config, display_name, server_name, _client = prepared_server
-        discovered, error = discovery
-        if error is not None:
-            LOGGER.warning(
-                "Skipping MCP server %s after discovery failed (%s)",
-                display_name,
-                type(error).__name__,
-            )
-            _emit(
-                emit_event,
-                "mcp.server.failed",
-                {
-                    "server": display_name,
-                    "reason": "discovery_failed",
-                },
-            )
-            continue
-
-        server_tool_timeout = _positive_float(
-            (config.get("load_config") or {}).get("tool_timeout_s"),
-            tool_timeout_s,
+        config, display_name, server_name, _client, stdio_params = (
+            prepared_server
         )
-        for raw_tool in discovered:
-            if len(tools) >= MCP_MAX_TOOLS:
+        try:
+            discovered, error = discovery
+            if error is not None:
+                LOGGER.warning(
+                    "Skipping MCP server %s after discovery failed (%s)",
+                    display_name,
+                    type(error).__name__,
+                )
                 _emit(
                     emit_event,
-                    "mcp.runtime.limited",
+                    "mcp.server.failed",
                     {
-                        "reason": "tool_limit",
-                        "loaded": MCP_MAX_TOOLS,
+                        "server": display_name,
+                        "reason": "discovery_failed",
                     },
                 )
-                return tools
-            tool = _wrap_mcp_tool(
-                raw_tool,
-                server_name,
-                display_name,
-                server_tool_timeout,
-                used_tool_names,
+                continue
+
+            server_tool_timeout = _positive_float(
+                (config.get("load_config") or {}).get("tool_timeout_s"),
+                tool_timeout_s,
             )
-            tools.append(tool)
-        _emit(
-            emit_event,
-            "mcp.server.ready",
-            {
-                "server": display_name,
-                "tool_count": len(discovered),
-            },
-        )
+            terminate_fn = None
+            if stdio_params is not None:
+                terminate_fn = (
+                    lambda params=stdio_params: _terminate_stdio_servers(
+                        params
+                    )
+                )
+            for raw_tool in discovered:
+                if len(tools) >= MCP_MAX_TOOLS:
+                    _emit(
+                        emit_event,
+                        "mcp.runtime.limited",
+                        {
+                            "reason": "tool_limit",
+                            "loaded": MCP_MAX_TOOLS,
+                        },
+                    )
+                    return tools
+                tool = _wrap_mcp_tool(
+                    raw_tool,
+                    server_name,
+                    display_name,
+                    server_tool_timeout,
+                    used_tool_names,
+                    terminate_fn=terminate_fn,
+                )
+                tools.append(tool)
+            _emit(
+                emit_event,
+                "mcp.server.ready",
+                {
+                    "server": display_name,
+                    "tool_count": len(discovered),
+                },
+            )
+        finally:
+            if stdio_params is not None:
+                _terminate_stdio_servers(stdio_params)
     return tools
 
 
@@ -253,7 +316,9 @@ async def _discover_mcp_servers(prepared, timeout_s):
     return await asyncio.gather(
         *(
             discover(server_name, client)
-            for _config, _display_name, server_name, client in prepared
+            for _config, _display_name, server_name, client, _params in (
+                prepared
+            )
         )
     )
 
@@ -304,12 +369,134 @@ def _url_server_params(config):
     return params
 
 
+def _stdio_server_params(config):
+    """Build validated adapter parameters for one stdio MCP server.
+
+    The command must be a plain executable name (no path separators) so
+    resolution always goes through PATH inside the sandbox, never an
+    arbitrary filesystem location.
+    """
+
+    raw_config = config.get("config") or {}
+    if not isinstance(raw_config, dict):
+        raise ValueError("stdio MCP config must be an object")
+    command = str(raw_config.get("command") or "").strip()
+    if not command or "/" in command or "\\" in command:
+        raise ValueError(
+            "stdio MCP command must be a plain executable name"
+        )
+    args = raw_config.get("args")
+    args = [str(arg) for arg in args] if isinstance(args, list) else []
+    if len(args) > MCP_STDIO_MAX_ARGS:
+        raise ValueError("stdio MCP args exceed the configured limit")
+    params = {
+        "transport": "stdio",
+        "command": command,
+        "args": args,
+    }
+    cwd = raw_config.get("cwd")
+    if isinstance(cwd, str) and cwd.strip():
+        params["cwd"] = cwd.strip()
+    env = raw_config.get("env")
+    if isinstance(env, dict):
+        if len(env) > MCP_STDIO_MAX_ENV:
+            raise ValueError("stdio MCP env exceeds the configured limit")
+        params["env"] = {
+            str(key): str(value)
+            for key, value in env.items()
+        }
+    return params
+
+
+def _terminate_stdio_servers(params):
+    """Reap orphaned subprocesses of one stdio MCP server.
+
+    Servers such as CodeGraph detach a background process when their
+    stdin closes, so the MCP client reports a clean session while an
+    orphaned server keeps running. Match the exact command and args and
+    terminate the process group.
+    """
+
+    needle = [
+        str(item)
+        for item in (
+            params.get("command"),
+            *(params.get("args") or ()),
+        )
+        if str(item).strip()
+    ]
+    if not needle:
+        return
+    for pid, argv in _process_table():
+        if all(item in argv for item in needle):
+            _terminate_process_group(pid)
+
+
+def _process_table():
+    """Yield (pid, argv) pairs for live processes on this host."""
+
+    if sys.platform == "darwin":
+        cmd = ["ps", "-ww", "-axo", "pid=,command="]
+    else:
+        cmd = ["ps", "-eo", "pid=,args="]
+    try:
+        output = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.SubprocessError, OSError):
+        return
+    for line in output.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            yield parts[0], parts[1]
+
+
+def _terminate_process_group(pid_str):
+    """Terminate a matched server process, never LensNode's own group.
+
+    The process group is only terminated when the matched process leads
+    it; otherwise the single process is signalled. Groups shared with
+    the running LensNode process are always skipped to avoid killing the
+    host agent itself.
+    """
+
+    pid = int(pid_str)
+    if pid == os.getpid():
+        return
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError, ValueError):
+        return
+    if pgid == os.getpgrp():
+        return
+    if pgid == pid:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(pgid, sig)
+            except ProcessLookupError:
+                return
+            except OSError:
+                break
+    else:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                return
+            except OSError:
+                break
+
+
 def _wrap_mcp_tool(
     raw_tool,
     server_name,
     display_name,
     timeout_s,
     used_names,
+    terminate_fn=None,
 ):
     """Wrap an async adapter tool for the synchronous Deep Agent runtime."""
 
@@ -345,6 +532,9 @@ def _wrap_mcp_tool(
                 error="MCP_TOOL_FAILED",
                 detail="The remote MCP tool failed.",
             )
+        finally:
+            if terminate_fn is not None:
+                terminate_fn()
 
     def call_sync(**kwargs):
         return asyncio.run(call_async(**kwargs))

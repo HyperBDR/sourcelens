@@ -11,13 +11,14 @@ import stat
 import tempfile
 import time
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 
 import httpx
 
 from .document_convert import convert_one
 from .path_rules import SIDECAR_SUFFIX, safe_filename
+from .plugins import collect_mcp_servers
 from .tls import create_config_ssl_context
 
 MAX_SKILL_PACKAGE_BYTES = 25 * 1024 * 1024
@@ -34,6 +35,35 @@ RUN_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 MCP_ENVIRONMENT_REFERENCE_PATTERN = re.compile(
     r"\$\{([A-Z_][A-Z0-9_]*)\}"
 )
+
+FEATURE_FLAG_MAPPING = {
+    "codegraph": "mcp_enable_codegraph",
+}
+
+
+def _apply_feature_flags(config, features):
+    """Return a config with per-run feature flags applied.
+
+    Only allowlisted config fields may be overridden by the run's
+    feature flags; unlisted fields are never touched, so a command
+    cannot inject arbitrary runtime settings. A missing or unrecognised
+    feature leaves the config unchanged (falls back to process config).
+    """
+
+    if not isinstance(features, dict):
+        return config
+    overrides = {}
+    for feature, field_name in FEATURE_FLAG_MAPPING.items():
+        value = features.get(feature)
+        if value is not None:
+            overrides[field_name] = bool(value)
+    if not overrides:
+        return config
+    if hasattr(config, "__dataclass_fields__"):
+        return replace(config, **overrides)
+    for field_name, value in overrides.items():
+        setattr(config, field_name, value)
+    return config
 
 
 @dataclass(frozen=True)
@@ -60,6 +90,7 @@ def prepare_runtime_resources(
 ):
     """Materialize Skill/MCP snapshots into cache and run directories."""
 
+    config = _apply_feature_flags(config, command.get("features"))
     workspace = Path(config.workspace_path)
     base = workspace / ".sourcelens"
     cache_root = base / "cache"
@@ -125,6 +156,11 @@ def prepare_runtime_resources(
         mcp_config = _materialize_mcp(mcp_root, mcp)
         if mcp_config is not None:
             mcp_configs.append(mcp_config)
+    mcp_configs = collect_mcp_servers(
+        config,
+        mcp_configs,
+        emit_event=emit_event,
+    )
 
     mcp_config_path = mcp_root / "mcp.json"
     _write_private_json(

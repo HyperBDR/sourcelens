@@ -387,3 +387,281 @@ def test_deferred_mcp_tools_promote_only_matching_schemas():
         "tool_search",
         "mcp__catalog__lookup_1",
     }
+
+
+def test_stdio_mcp_requires_explicit_allowlist(monkeypatch):
+    clients = []
+    events = []
+    _install_fake_adapter(monkeypatch, clients)
+    server = {
+        "name": "codegraph",
+        "transport": "stdio",
+        "endpoint": "",
+        "config": {
+            "command": "codegraph",
+            "args": ["serve", "--mcp"],
+        },
+        "load_config": {},
+    }
+
+    load_mcp_tools(
+        [server],
+        emit_event=lambda event, detail: events.append((event, detail)),
+    )
+    assert clients == []
+    assert any(
+        event == "mcp.server.skipped"
+        and detail["reason"] == "stdio_disabled"
+        for event, detail in events
+    )
+
+    clients.clear()
+    events.clear()
+    tools = load_mcp_tools(
+        [server],
+        stdio_allowlist=("codegraph",),
+        emit_event=lambda event, detail: events.append((event, detail)),
+    )
+
+    assert len(tools) == 1
+    assert clients[0].servers == {
+        "codegraph": {
+            "transport": "stdio",
+            "command": "codegraph",
+            "args": ["serve", "--mcp"],
+        }
+    }
+    assert not any(
+        event == "mcp.server.skipped" for event, detail in events
+    )
+
+
+def test_stdio_mcp_allowlist_gate_and_params(monkeypatch):
+    clients = []
+    events = []
+    _install_fake_adapter(monkeypatch, clients)
+    server = {
+        "name": "codegraph",
+        "transport": "stdio",
+        "endpoint": "",
+        "config": {
+            "command": "codegraph",
+            "args": ["serve", "--mcp", "--path", "/workspace"],
+            "cwd": "/workspace",
+            "env": {"CODEGRAPH_PROJECT": "default"},
+        },
+        "load_config": {},
+    }
+
+    tools = load_mcp_tools(
+        [server],
+        stdio_allowlist=("other",),
+        emit_event=lambda event, detail: events.append((event, detail)),
+    )
+    assert tools == []
+    assert any(
+        event == "mcp.server.skipped"
+        and detail["reason"] == "stdio_not_allowed"
+        for event, detail in events
+    )
+
+    tools = load_mcp_tools(
+        [server],
+        stdio_allowlist=("codegraph",),
+    )
+
+    assert len(tools) == 1
+    assert clients[0].servers == {
+        "codegraph": {
+            "transport": "stdio",
+            "command": "codegraph",
+            "args": ["serve", "--mcp", "--path", "/workspace"],
+            "cwd": "/workspace",
+            "env": {"CODEGRAPH_PROJECT": "default"},
+        }
+    }
+
+
+def test_stdio_mcp_rejects_path_command_and_excess_args(monkeypatch):
+    clients = []
+    events = []
+    _install_fake_adapter(monkeypatch, clients)
+    path_command = {
+        "name": "evil",
+        "transport": "stdio",
+        "endpoint": "",
+        "config": {"command": "/usr/bin/rm"},
+        "load_config": {},
+    }
+
+    load_mcp_tools(
+        [path_command],
+        stdio_allowlist=("rm",),
+        emit_event=lambda event, detail: events.append((event, detail)),
+    )
+    assert clients == []
+    assert any(
+        event == "mcp.server.skipped"
+        and detail["reason"] == "invalid_config"
+        for event, detail in events
+    )
+
+    events.clear()
+    excess_args = {
+        "name": "huge",
+        "transport": "stdio",
+        "endpoint": "",
+        "config": {
+            "command": "codegraph",
+            "args": [str(index) for index in range(40)],
+        },
+        "load_config": {},
+    }
+    load_mcp_tools(
+        [excess_args],
+        stdio_allowlist=("codegraph",),
+        emit_event=lambda event, detail: events.append((event, detail)),
+    )
+    assert clients == []
+    assert any(
+        event == "mcp.server.skipped"
+        and detail["reason"] == "invalid_config"
+        for event, detail in events
+    )
+
+    events.clear()
+    excess_env = {
+        "name": "huge-env",
+        "transport": "stdio",
+        "endpoint": "",
+        "config": {
+            "command": "codegraph",
+            "env": {
+                f"VAR_{index}": "value" for index in range(40)
+            },
+        },
+        "load_config": {},
+    }
+    load_mcp_tools(
+        [excess_env],
+        stdio_allowlist=("codegraph",),
+        emit_event=lambda event, detail: events.append((event, detail)),
+    )
+    assert clients == []
+    assert any(
+        event == "mcp.server.skipped"
+        and detail["reason"] == "invalid_config"
+        for event, detail in events
+    )
+
+
+def test_terminate_stdio_servers_matches_exact_commandline(monkeypatch):
+    killed = []
+    monkeypatch.setattr(
+        "lensnode.mcp_tools._process_table",
+        lambda: [
+            ("101", "/node/lib/dist/bin/codegraph.js serve --mcp --path /ws"),
+            ("102", "/usr/bin/ssh -p 22 other"),
+            ("103", "codegraph.js serve --path /ws replay"),
+        ],
+    )
+    monkeypatch.setattr(
+        "lensnode.mcp_tools._terminate_process_group",
+        lambda pid: killed.append(pid),
+    )
+
+    from lensnode.mcp_tools import _terminate_stdio_servers
+
+    _terminate_stdio_servers(
+        {
+            "command": "codegraph",
+            "args": ["serve", "--mcp", "--path", "/ws"],
+        }
+    )
+
+    assert killed == ["101"]
+
+
+def test_terminate_stdio_servers_empty_params_is_noop(monkeypatch):
+    killed = []
+    monkeypatch.setattr(
+        "lensnode.mcp_tools._process_table",
+        lambda: [("101", "whatever")],
+    )
+    monkeypatch.setattr(
+        "lensnode.mcp_tools._terminate_process_group",
+        lambda pid: killed.append(pid),
+    )
+
+    from lensnode.mcp_tools import _terminate_stdio_servers
+
+    _terminate_stdio_servers({"command": "", "args": []})
+    assert killed == []
+
+
+def test_terminate_process_group_skips_own_process_group(monkeypatch):
+    import os
+
+    import lensnode.mcp_tools as module
+
+    self_pgid = os.getpgrp()
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.getpgid", lambda _pid: self_pgid
+    )
+    signals = []
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.killpg",
+        lambda pgid, sig: signals.append(("pg", pgid, sig)),
+    )
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.kill",
+        lambda pid, sig: signals.append(("pid", pid, sig)),
+    )
+
+    module._terminate_process_group(str(os.getpid() + 1))
+    assert signals == []
+
+
+def test_terminate_process_group_kills_group_leader(monkeypatch):
+    import os
+    import signal
+
+    import lensnode.mcp_tools as tools
+
+    signals = []
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.getpgid", lambda pid: 777
+    )
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.killpg",
+        lambda pgid, sig: signals.append(sig),
+    )
+
+    tools._terminate_process_group("777")
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_terminate_process_group_kills_single_non_leader(monkeypatch):
+    import os
+    import signal
+
+    import lensnode.mcp_tools as tools
+
+    signals = []
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.getpgid", lambda pid: 999
+    )
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.killpg",
+        lambda pgid, sig: signals.append(("killpg", sig)),
+    )
+    monkeypatch.setattr(
+        "lensnode.mcp_tools.os.kill",
+        lambda pid, sig: signals.append(("kill", pid, sig)),
+    )
+
+    tools._terminate_process_group("555")
+    assert signals == [
+        ("kill", 555, signal.SIGTERM),
+        ("kill", 555, signal.SIGKILL),
+    ]

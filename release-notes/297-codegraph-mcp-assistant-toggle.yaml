@@ -1,0 +1,4 @@
+type: feature
+audience: admin
+en: "Code-analysis assistants now have a per-assistant \"Enable code graph\" toggle backed by a built-in CodeGraph stdio MCP server."
+zh-CN: "代码分析类助手新增按助手启用的\"启用代码图\"开关，由内置 CodeGraph stdio MCP 服务器支撑。"

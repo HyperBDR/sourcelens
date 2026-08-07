@@ -283,6 +283,23 @@
           </label>
         </div>
       </FormRow>
+      <FormRow
+        v-if="isCodeAnalysisTask"
+        :label="t('lensAdmin.fields.enableCodegraph')"
+      >
+        <label
+          class="flex cursor-pointer items-center gap-3 rounded-md border border-line bg-surface-sunken p-3"
+        >
+          <input
+            type="checkbox"
+            v-model="form.enable_codegraph"
+            class="h-4 w-4 flex-shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+          />
+          <span class="text-sm text-ink-700">{{
+            t('lensAdmin.fields.enableCodegraphHint')
+          }}</span>
+        </label>
+      </FormRow>
     </div>
 
     <!-- Wizard Step 3 — Workspace, Skills, Environment & MCP -->
@@ -1210,6 +1227,10 @@ const canProceedWizard = computed(() => {
 
 const isGeneralChatTask = computed(
   () => props.form.selected_task === 'general_chat'
+)
+
+const isCodeAnalysisTask = computed(
+  () => props.form.selected_task === 'code_analysis'
 )
 
 const selectedLensNodeTasks = computed(() => {

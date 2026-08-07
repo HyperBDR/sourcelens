@@ -582,6 +582,7 @@ function defaultForm() {
     access_user_ids: [],
     access_grant_options: [],
     settings: {},
+    enable_codegraph: true,
     status: 'active'
   }
 }
@@ -664,6 +665,7 @@ function formFromRow(row) {
       .map((g) => g.id),
     access_grant_options: row.access_grants || [],
     settings: { ...(row.settings || {}) },
+    enable_codegraph: row.settings?.features?.codegraph !== false,
     status: row.status || 'active'
   }
 }
@@ -783,6 +785,9 @@ function buildAssistantSettings() {
   } else {
     delete settings.post_prompt
   }
+  const features = { ...(settings.features || {}) }
+  features.codegraph = !!form.value.enable_codegraph
+  settings.features = features
   return settings
 }
 
