@@ -860,9 +860,15 @@ def supports_run_admission_checkpoint(lensnode):
 def _enqueue_session_title_generation(session_uuid, run_uuid):
     """Enqueue semantic title generation after the answer is committed."""
 
-    from .tasks import generate_session_title
+    from .tasks import (
+        SESSION_TITLE_TASK_EXPIRY_SECONDS,
+        generate_session_title,
+    )
 
-    generate_session_title.delay(str(session_uuid), str(run_uuid))
+    generate_session_title.apply_async(
+        args=[str(session_uuid), str(run_uuid)],
+        expires=SESSION_TITLE_TASK_EXPIRY_SECONDS,
+    )
 
 
 def analyze_multimodal_intent(run):

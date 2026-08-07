@@ -2,7 +2,10 @@ from django.core.management.base import BaseCommand
 
 from lens.models import Message, Run, Session
 from lens.session_titles import fallback_session_title
-from lens.tasks import generate_session_title
+from lens.tasks import (
+    SESSION_TITLE_TASK_EXPIRY_SECONDS,
+    generate_session_title,
+)
 
 
 class Command(BaseCommand):
@@ -93,7 +96,10 @@ class Command(BaseCommand):
                 continue
 
             try:
-                generate_session_title.delay(str(session.uuid), str(run.uuid))
+                generate_session_title.apply_async(
+                    args=[str(session.uuid), str(run.uuid)],
+                    expires=SESSION_TITLE_TASK_EXPIRY_SECONDS,
+                )
                 counts["queued"] += 1
             except Exception:
                 Session.objects.filter(

@@ -300,6 +300,14 @@ def register_periodic_tasks():
         enabled=True,
     )
 
+    TASK_REGISTRY.add(
+        name="lens-session-title-timeout",
+        task="lens.expire_stale_session_titles",
+        schedule=60,
+        queue="lens",
+        enabled=True,
+    )
+
     datasources = DataSource.objects.filter(
         status=DataSource.Status.ACTIVE,
     ).exclude(source_type=DataSource.SourceType.MANAGED_WORKSPACE)
