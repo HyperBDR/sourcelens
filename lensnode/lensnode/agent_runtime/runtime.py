@@ -415,6 +415,10 @@ class LensDeepAgentRuntime:
                 )
             )
             tools.extend(registered_mcp_tools)
+            codegraph_available = any(
+                tool.name.startswith("mcp__codegraph__")
+                for tool in mcp_tools
+            )
             if resume_state is not None:
                 _reject_unsafe_resume_tool_replay(
                     resume_state.messages,
@@ -622,6 +626,7 @@ class LensDeepAgentRuntime:
                     command,
                     resources.context_skill_contents,
                     mcp_deferred=mcp_middleware is not None,
+                    codegraph_available=codegraph_available,
                 ),
                 "backend": FilesystemBackend(
                     root_dir=str(resources.root),

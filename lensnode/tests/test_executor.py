@@ -1022,6 +1022,27 @@ def test_system_prompt_includes_context_skill_guidance():
     assert "/workspace/product" in prompt
 
 
+def test_system_prompt_omits_codegraph_guidance_by_default():
+    prompt = _system_prompt(
+        {"prompt": "Analyze code."},
+        {"target_dirs": [{"path": "/workspace/product"}]},
+    )
+
+    assert "CodeGraph is available" not in prompt
+
+
+def test_system_prompt_injects_codegraph_guidance_when_available():
+    prompt = _system_prompt(
+        {"prompt": "Analyze code."},
+        {"target_dirs": [{"path": "/workspace/product"}]},
+        codegraph_available=True,
+    )
+
+    assert "CodeGraph is available" in prompt
+    assert "mcp__codegraph__codegraph_trace" in prompt
+    assert "PREFER the codegraph" in prompt
+
+
 def test_git_log_accepts_non_integer_max_count(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
