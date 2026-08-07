@@ -54,6 +54,7 @@ def lock_assistant_for_new_work(assistant, user=None):
 
 
 @transaction.atomic
+@transaction.atomic
 def create_assistant_session(assistant_uuid, user, title=""):
     """Create a session while serializing against assistant archival."""
 
