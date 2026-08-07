@@ -118,22 +118,20 @@
 
           <div
             v-else
-            class="relative min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-surface"
+            class="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-surface"
             data-testid="user-table-scroll"
           >
-            <table
-              class="w-full min-w-[73rem] table-fixed divide-y divide-line"
-            >
+            <table class="w-full table-fixed divide-y divide-line">
               <colgroup>
                 <col class="w-12" />
                 <col class="w-16" />
-                <col class="w-48" />
-                <col class="w-56" />
-                <col class="w-48" />
-                <col class="w-24" />
-                <col class="w-28" />
-                <col class="w-44" />
-                <col class="w-16" />
+                <col class="w-40" />
+                <col class="hidden w-48 md:table-column" />
+                <col class="hidden w-40 md:table-column" />
+                <col class="hidden w-20 md:table-column" />
+                <col class="hidden w-24 md:table-column" />
+                <col class="hidden w-36 md:table-column" />
+                <col class="w-14" />
               </colgroup>
               <thead class="sticky top-0 z-10 bg-surface-sunken">
                 <tr>
@@ -149,13 +147,23 @@
                   </th>
                   <th class="table-head">ID</th>
                   <th class="table-head">{{ t('dashboard.username') }}</th>
-                  <th class="table-head">{{ t('dashboard.email') }}</th>
-                  <th class="table-head">{{ t('management.groups') }}</th>
-                  <th class="table-head">{{ t('dashboard.isStaff') }}</th>
-                  <th class="table-head">{{ t('management.isActive') }}</th>
-                  <th class="table-head">{{ t('management.dateJoined') }}</th>
+                  <th class="table-head hidden md:table-cell">
+                    {{ t('dashboard.email') }}
+                  </th>
+                  <th class="table-head hidden md:table-cell">
+                    {{ t('management.groups') }}
+                  </th>
+                  <th class="table-head hidden md:table-cell">
+                    {{ t('dashboard.isStaff') }}
+                  </th>
+                  <th class="table-head hidden md:table-cell">
+                    {{ t('management.isActive') }}
+                  </th>
+                  <th class="table-head hidden md:table-cell">
+                    {{ t('management.dateJoined') }}
+                  </th>
                   <th
-                    class="table-head sticky right-0 z-20 bg-surface-sunken text-right"
+                    class="table-head text-right md:sticky md:right-0 md:z-20 md:bg-surface-sunken"
                   >
                     {{ t('common.actions') }}
                   </th>
@@ -204,7 +212,9 @@
                       {{ secondaryDisplayName(user) }}
                     </div>
                   </td>
-                  <td class="table-cell min-w-0 text-ink-600">
+                  <td
+                    class="table-cell hidden min-w-0 text-ink-600 md:table-cell"
+                  >
                     <div
                       class="truncate"
                       data-testid="user-email"
@@ -213,12 +223,14 @@
                       {{ secondaryIdentity(user.email, user.username) || '—' }}
                     </div>
                   </td>
-                  <td class="table-cell min-w-0 text-ink-600">
+                  <td
+                    class="table-cell hidden min-w-0 text-ink-600 md:table-cell"
+                  >
                     <div class="truncate" :title="joinNames(user.groups)">
                       {{ joinNames(user.groups) }}
                     </div>
                   </td>
-                  <td class="table-cell">
+                  <td class="table-cell hidden md:table-cell">
                     <span
                       v-if="user.is_staff"
                       class="inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
@@ -227,18 +239,18 @@
                     </span>
                     <span v-else class="text-ink-400">—</span>
                   </td>
-                  <td class="table-cell">
+                  <td class="table-cell hidden md:table-cell">
                     <StatusBadge
                       :status="
                         user.is_active !== false ? 'enabled' : 'disabled'
                       "
                     />
                   </td>
-                  <td class="table-cell text-ink-500">
+                  <td class="table-cell hidden text-ink-500 md:table-cell">
                     {{ formatDate(user.date_joined) }}
                   </td>
                   <td
-                    class="table-cell sticky right-0 z-10 bg-surface text-right group-hover:bg-line-soft group-focus-visible:bg-line-soft"
+                    class="table-cell text-right md:sticky md:right-0 md:z-10 md:bg-surface md:group-hover:bg-line-soft md:group-focus-visible:bg-line-soft"
                     data-testid="user-actions"
                     @click.stop
                   >

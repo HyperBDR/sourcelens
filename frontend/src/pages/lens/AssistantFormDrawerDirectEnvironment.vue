@@ -54,7 +54,7 @@
     </div>
 
     <!-- Wizard Step 1 — Basics & Models -->
-    <div v-if="wizardStep === 1" class="space-y-5">
+    <div v-if="wizardStep === 1" class="min-w-0 space-y-5 overflow-x-hidden">
       <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step1Desc') }}</p>
       <FormRow :label="t('lensAdmin.fields.name')">
         <input v-model="form.name" class="form-input" required />
@@ -70,7 +70,19 @@
         </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.slug')">
-        <input v-model="form.slug" class="form-input" required />
+        <input
+          v-model="form.slug"
+          class="form-input form-input-mono"
+          :maxlength="slugMaxLength"
+          pattern="[a-z0-9][a-z0-9_-]*"
+          required
+        />
+        <p class="mt-1 flex items-start justify-between gap-3 text-xs">
+          <span class="text-ink-500">{{ t('lensAdmin.wizard.slugHint') }}</span>
+          <span class="shrink-0 tabular-nums" :class="slugLengthClass">
+            {{ slugLength }}/{{ slugMaxLength }}
+          </span>
+        </p>
       </FormRow>
       <FormRow :label="t('lensAdmin.fields.agentModel') + ' *'">
         <BaseSelect v-model="form.agent_model_ref" required>
@@ -1142,6 +1154,21 @@ const drawerSubtitle = computed(() =>
   props.mode === 'edit' ? props.form.name || '' : ''
 )
 
+const slugMaxLength = 180
+const slugPattern = /^[a-z0-9][a-z0-9_-]*$/
+
+const slugLength = computed(() => props.form.slug?.length ?? 0)
+
+const slugLengthClass = computed(() => {
+  if (slugLength.value >= slugMaxLength) {
+    return 'text-danger-600'
+  }
+  if (slugLength.value >= slugMaxLength * 0.9) {
+    return 'text-amber-600'
+  }
+  return 'text-ink-400'
+})
+
 const agentRoundsTiers = computed(() => [
   {
     value: 'flash',
@@ -1199,7 +1226,8 @@ const canProceedWizard = computed(() => {
   if (wizardStep.value === 1) {
     return (
       !!props.form.name?.trim() &&
-      !!props.form.slug?.trim() &&
+      slugPattern.test(props.form.slug?.trim() || '') &&
+      props.form.slug.length <= slugMaxLength &&
       !!props.form.agent_model_ref
     )
   }
@@ -1658,7 +1686,11 @@ function ensureSelectedTask() {
 
 <style scoped>
 .form-input {
-  @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+  @apply w-full min-w-0 max-w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20;
+}
+
+.form-input-mono {
+  @apply overflow-x-auto font-mono;
 }
 
 .skill-search-input {
