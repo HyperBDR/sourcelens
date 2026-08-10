@@ -285,6 +285,42 @@ def test_final_synthesis_streams_content_chunks_as_they_arrive(monkeypatch):
     assert "tool_choice" not in captured["payload"]
 
 
+def test_structured_final_synthesis_does_not_publish_protocol_chunks(
+    monkeypatch,
+):
+    body = (
+        'data: {"type": "token", "kind": "content", '
+        '"content": "{\\"answer\\":"}\n\n'
+        'data: {"type": "token", "kind": "content", '
+        '"content": "\\"Complete\\"}"}\n\n'
+        'data: {"type": "done", "usage": {"total_tokens": 8}, '
+        '"finish_reason": "stop", "tool_calls": []}\n\n'
+    )
+
+    def handler(_request):
+        return httpx.Response(200, content=body.encode("utf-8"))
+
+    _install_transport(monkeypatch, handler)
+    outputs = []
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=outputs.append,
+    )
+
+    result = model._generate(
+        [HumanMessage(content="summarize")],
+        runtime_final_synthesis=True,
+        runtime_structured_output=True,
+    )
+
+    assert result.generations[0].message.content == (
+        '{"answer":"Complete"}'
+    )
+    assert outputs == []
+
+
 def test_completed_plan_followup_repeats_hidden_draft_and_streams(
     monkeypatch,
 ):

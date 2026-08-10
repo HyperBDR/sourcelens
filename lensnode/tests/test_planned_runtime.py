@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from lensnode import agent_runtime
@@ -149,7 +150,10 @@ def test_planned_answer_extracts_json_after_explanatory_prefix(tmp_path):
         tmp_path,
     )
 
-    assert answer == ("Readable answer\n\nNo verified citations were returned.")
+    assert answer == (
+        "## Conclusion\n\nReadable answer\n\n"
+        "No verified citations were returned."
+    )
     assert citations == ()
     assert unsupported == 0
     assert "structured result" not in answer
@@ -177,3 +181,121 @@ def test_invalid_planned_envelope_is_not_exposed(tmp_path):
     assert "could not be validated" in answer
     assert citations == ()
     assert unsupported == 1
+
+
+def test_planned_answer_leads_with_conclusion_and_limits_evidence(tmp_path):
+    source = tmp_path / "app.py"
+    source.write_text("\n".join(f"line {index}" for index in range(1, 8)))
+    bundle = build_evidence_bundle(
+        [
+            {
+                "evidence_type": "source",
+                "path": "app.py",
+                "symbol": "analyze",
+                "start_line": 1,
+                "end_line": 7,
+                "content": source.read_text(),
+            }
+        ],
+        max_tokens=100,
+    )
+    citations = [
+        {
+            "project": "SourceLens",
+            "repository": "SourceLens",
+            "revision": "workspace",
+            "path": "app.py",
+            "symbol": f"analyze_{index}",
+            "start_line": index,
+            "end_line": index,
+            "evidence_type": "source",
+            "supports": f"finding {index}",
+        }
+        for index in range(1, 8)
+    ]
+    response = SimpleNamespace(
+        content=json.dumps(
+            {
+                "answer": "The implementation has one root cause.",
+                "citations": citations,
+                "unsupported_claims": [],
+            }
+        )
+    )
+
+    answer, valid, unsupported = agent_runtime._validated_planned_answer(
+        response,
+        bundle,
+        tmp_path,
+    )
+
+    assert answer.startswith(
+        "## Conclusion\n\nThe implementation has one root cause."
+    )
+    assert answer.count("- SourceLens / SourceLens") == 5
+    assert len(valid) == 5
+    assert unsupported == 0
+
+
+def test_planned_code_analysis_retries_truncated_final_concisely(tmp_path):
+    plan = {
+        "objective": "Find the root cause",
+        "project": "SourceLens",
+        "repository": "SourceLens",
+        "revision": "workspace",
+        "question_type": "implementation",
+        "evidence_requirements": [],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [],
+        "max_files": 3,
+        "max_fallback_rounds": 0,
+        "budgets": {"max_evidence_tokens": 100},
+    }
+    responses = [
+        SimpleNamespace(content=json.dumps(plan)),
+        SimpleNamespace(
+            content='{"answer":"An incomplete result",',
+            response_metadata={"model_length_capped": True},
+        ),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "The retry produced a complete conclusion.",
+                    "citations": [],
+                    "unsupported_claims": [],
+                }
+            ),
+            response_metadata={},
+        ),
+    ]
+
+    class Model:
+        stop_reason = "model_length_capped"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return responses[len(self.calls) - 1]
+
+    model = Model()
+    result = agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": "Why is the output incomplete?"},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["answer"].startswith(
+        "## Conclusion\n\nThe retry produced a complete conclusion."
+    )
+    assert result["planned_evidence"]["final_retry_count"] == 1
+    assert result["planned_evidence"]["model_call_count"] == 3
+    assert len(model.calls) == 3
+    assert model.calls[1][1]["runtime_structured_output"] is True
+    assert model.calls[2][1]["runtime_structured_output"] is True

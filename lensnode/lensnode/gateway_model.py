@@ -468,13 +468,20 @@ class LensGatewayChatModel(BaseChatModel):
             payload["max_tokens"] = kwargs["max_tokens"]
 
         if self.emit_output is not None and not control_call:
+            structured_output = bool(
+                kwargs.get("runtime_structured_output")
+            )
             try:
                 result = self._generate_streaming(
                     payload,
                     publish_tokens=(
-                        bool(kwargs.get("runtime_final_synthesis"))
-                        or completed_plan_followup
+                        not structured_output
+                        and (
+                            bool(kwargs.get("runtime_final_synthesis"))
+                            or completed_plan_followup
+                        )
                     ),
+                    suppress_output=structured_output,
                 )
             except Exception as exc:
                 self._finish_model_observation(
@@ -574,7 +581,13 @@ class LensGatewayChatModel(BaseChatModel):
             event["error_type"] = type(error).__name__
         self.emit_observation(event)
 
-    def _generate_streaming(self, payload, *, publish_tokens=False):
+    def _generate_streaming(
+        self,
+        payload,
+        *,
+        publish_tokens=False,
+        suppress_output=False,
+    ):
         """Consume a gateway stream and publish only a final answer turn."""
 
         content_parts = []
@@ -663,6 +676,7 @@ class LensGatewayChatModel(BaseChatModel):
             and content
             and not tool_calls
             and not publish_tokens
+            and not suppress_output
         ):
             self.emit_output(content)
 

@@ -118,6 +118,8 @@ from ..runtime_resources import (
 LOGGER = logging.getLogger("lensnode")
 
 _PLANNED_CODE_ANALYSIS_ROUTE = {"route": "planned_code_analysis"}
+_MAX_PRESENTED_CITATIONS = 5
+_MAX_INVALID_CITATION_LABELS = 3
 
 register_harness_profile(
     "lensgatewaychatmodel",
@@ -1143,25 +1145,31 @@ def _run_planned_code_analysis(
     bundle.metrics["planned_codegraph_operations"] = sorted(
         {query.operation for query in plan.codegraph_queries}
     )
-    final_response = model.invoke(
-        [
-            SystemMessage(content=_planned_final_prompt()),
-            HumanMessage(
-                content=json.dumps(
-                    {
-                        "question": question,
-                        "project": plan.project,
-                        "repository": plan.repository,
-                        "revision": plan.revision,
-                        "evidence": bundle.as_dict(),
-                        "evidence_gaps": list(sufficiency.gaps),
-                    },
-                    ensure_ascii=False,
-                )
-            ),
-        ],
-        runtime_final_synthesis=True,
+    final_input = json.dumps(
+        {
+            "question": question,
+            "project": plan.project,
+            "repository": plan.repository,
+            "revision": plan.revision,
+            "evidence": bundle.as_dict(),
+            "evidence_gaps": list(sufficiency.gaps),
+        },
+        ensure_ascii=False,
     )
+    final_response = _invoke_planned_synthesis(
+        model,
+        final_input,
+    )
+    final_retry_count = 0
+    if _planned_response_needs_retry(final_response):
+        final_response = _invoke_planned_synthesis(
+            model,
+            final_input,
+            compact=True,
+        )
+        final_retry_count = 1
+    bundle.metrics["final_retry_count"] = final_retry_count
+    bundle.metrics["model_call_count"] += final_retry_count
     answer, citations, unsupported_claim_count = _validated_planned_answer(
         final_response,
         bundle,
@@ -1270,31 +1278,42 @@ def _validated_planned_answer(response, bundle, workspace_root):
     if payload is None:
         if _looks_like_planned_answer_envelope(content):
             return (
+                "## Conclusion\n\n"
                 "The code analysis result could not be validated.\n\n"
                 "No verified citations were returned.",
                 (),
                 1,
             )
         return (
-            content + "\n\nNo verified citations were returned.",
+            "## Conclusion\n\n"
+            + content
+            + "\n\nNo verified citations were returned.",
             (),
             1,
         )
     answer = str(payload.get("answer") or "").strip()
     if not answer:
         answer = "The code analysis result could not be validated."
-    valid, invalid = validate_citations(
+    validated, invalid = validate_citations(
         payload.get("citations"),
         bundle,
         workspace_root,
     )
+    valid = _select_presented_citations(validated)
+    answer = "## Conclusion\n\n" + answer
     if invalid:
-        answer += "\n\nUnverified citations: " + ", ".join(invalid)
+        shown = ", ".join(invalid[:_MAX_INVALID_CITATION_LABELS])
+        remaining = len(invalid) - _MAX_INVALID_CITATION_LABELS
+        suffix = f" and {remaining} more" if remaining > 0 else ""
+        answer += f"\n\nUnverified citations: {shown}{suffix}."
     unsupported = payload.get("unsupported_claims") or []
     if unsupported:
-        answer += "\n\nUnverified claims remain in the response."
+        answer += (
+            f"\n\n{len(unsupported)} unverified claim(s) remain in "
+            "the response."
+        )
     if valid:
-        answer += "\n\nEvidence citations:\n"
+        answer += "\n\n## Key evidence\n\n"
         answer += "\n".join(
             "- {project} / {repository} @ {revision}: `{path}` "
             "({symbol}, lines {start_line}-{end_line})".format(**citation)
@@ -1303,6 +1322,56 @@ def _validated_planned_answer(response, bundle, workspace_root):
     else:
         answer += "\n\nNo verified citations were returned."
     return answer, valid, len(unsupported)
+
+
+def _select_presented_citations(citations):
+    """Keep a small, non-duplicated set of user-facing citations."""
+
+    selected = []
+    seen = set()
+    for citation in citations:
+        key = (
+            citation.get("project"),
+            citation.get("repository"),
+            citation.get("revision"),
+            citation.get("path"),
+            citation.get("symbol"),
+            citation.get("start_line"),
+            citation.get("end_line"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(citation)
+        if len(selected) >= _MAX_PRESENTED_CITATIONS:
+            break
+    return tuple(selected)
+
+
+def _invoke_planned_synthesis(model, final_input, compact=False):
+    """Generate one hidden structured response for final validation."""
+
+    return model.invoke(
+        [
+            SystemMessage(content=_planned_final_prompt(compact=compact)),
+            HumanMessage(content=final_input),
+        ],
+        runtime_final_synthesis=True,
+        runtime_structured_output=True,
+    )
+
+
+def _planned_response_needs_retry(response):
+    """Return whether one compact retry can recover a broken envelope."""
+
+    metadata = getattr(response, "response_metadata", None) or {}
+    if metadata.get("model_length_capped"):
+        return True
+    content = _message_content(response)
+    return (
+        _json_object(content) is None
+        and _looks_like_planned_answer_envelope(content)
+    )
 
 
 def _message_content(message):
@@ -1382,16 +1451,30 @@ def _planned_fallback_prompt():
     )
 
 
-def _planned_final_prompt():
+def _planned_final_prompt(compact=False):
     """Build the final answer contract for compact evidence only."""
 
-    return (
+    prompt = (
         "Answer the user's code-analysis question only from the supplied "
         "evidence bundle. Return JSON with answer, citations, and "
-        "unsupported_claims. Every material code claim needs a citation "
+        "unsupported_claims. In answer, state the direct conclusion in the "
+        "first two sentences, explain at most three decisive findings, and "
+        "end with a recommended next step or an explicit limitation. Keep "
+        "answer under 800 words. Do not include an evidence inventory or "
+        "citation appendix inside answer. Return at most five citations, "
+        "using only the strongest non-duplicated source evidence. Every "
+        "material code claim needs a citation "
         "containing project, repository, revision, path, symbol, "
         "start_line, end_line, evidence_type, and supports. Never invent "
         "paths, symbols, revisions, or line ranges. If evidence is missing, "
         "put the claim in unsupported_claims and say it is unverified. "
-        "Keep runtime evidence separate from source evidence."
+        "Keep runtime evidence separate from source evidence. Return the "
+        "JSON object only, with answer as the first field."
     )
+    if compact:
+        prompt += (
+            " The previous structured response was incomplete. Retry once "
+            "with answer under 350 words, at most two findings, and at most "
+            "three citations. Finish and close the JSON object."
+        )
+    return prompt
