@@ -191,7 +191,7 @@ def expire_stale_session_titles():
         title_generation_status__in=stale_statuses,
         updated_at__lt=cutoff,
     ).exclude(
-        run_set__status__in=active_run_statuses,
+        run__status__in=active_run_statuses,
     ).update(
         title_generation_status=Session.TitleGenerationStatus.FAILED,
         updated_at=timezone.now(),

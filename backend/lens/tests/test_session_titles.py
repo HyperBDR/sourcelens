@@ -167,6 +167,9 @@ class SessionTitleTests(TestCase):
         run.status = Run.Status.DONE
         run.outcome = Run.Outcome.COMPLETED
         run.save(update_fields=["status", "outcome"])
+        legacy.title = ""
+        legacy.title_generation_status = Session.TitleGenerationStatus.SKIPPED
+        legacy.save(update_fields=["title", "title_generation_status"])
 
         call_command("backfill_session_titles")
 
