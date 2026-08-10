@@ -1,0 +1,4 @@
+type: fix
+audience: user
+en: "Fixed long document filenames overflowing mobile chat attachment cards. Long names are now compacted while preserving their file extensions."
+zh-CN: "修复长文档文件名在移动端聊天附件卡片中溢出的问题。过长文件名现在会进行缩略，同时保留文件扩展名。"
