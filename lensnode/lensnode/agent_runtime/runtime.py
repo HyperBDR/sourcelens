@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import threading
+from types import SimpleNamespace
 
 from deepagents import (
     GeneralPurposeSubagentProfile,
@@ -11,6 +12,9 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends.filesystem import FilesystemBackend
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from ..agent_tools import (
     build_agent_tools,
     build_general_chat_tools,
@@ -30,6 +34,14 @@ from ..gateway_model import (
 )
 from ..logging_utils import elapsed_since, task_log, utc_now
 from ..mcp_tools import build_deferred_mcp_tools, load_mcp_tools
+from ..plugins import collect_agent_runtime_contributions
+from ..planned_evidence import (
+    EvidenceExecutor,
+    build_evidence_bundle,
+    parse_retrieval_plan,
+    validate_citations,
+    validate_evidence_sufficiency,
+)
 from ..runtime_modes import runtime_mode_for
 from .assembly import _agent_middleware, _fast_subagent
 from .capabilities import CapabilityBoundaryMiddleware
@@ -104,6 +116,8 @@ from ..runtime_resources import (
 )
 
 LOGGER = logging.getLogger("lensnode")
+
+_PLANNED_CODE_ANALYSIS_ROUTE = {"route": "planned_code_analysis"}
 
 register_harness_profile(
     "lensgatewaychatmodel",
@@ -189,6 +203,85 @@ class LensDeepAgentRuntime:
     ):
         """Synchronous Deep Agents invocation run in a worker thread."""
 
+        state = self._prepare_runtime(
+            command,
+            emit_progress,
+            emit_output,
+            on_activity,
+            cancel_event,
+            wrapup_event,
+            on_checkpoint_ready,
+        )
+        try:
+            if self._uses_planned_code_analysis(state):
+                self._prepare_planned_checkpoint(state)
+                return _run_planned_code_analysis(
+                    model=state.model,
+                    command=state.command,
+                    tools=state.tools,
+                    mcp_tools=state.mcp_tools,
+                    emit_agent_event=state.emit_agent_event,
+                    workspace_root=self.config.workspace_path,
+                )
+            route_result = self._route_runtime(state)
+            if route_result is not None:
+                return route_result
+            self._build_agent(state)
+            return self._execute_agent(state)
+        finally:
+            if cancel_event is None or not cancel_event.is_set():
+                cleanup_runtime_resources(state.resources)
+
+    def _uses_planned_code_analysis(self, state):
+        """Return whether this run belongs to the planned evidence path."""
+
+        runtime_mode = getattr(state, "runtime_mode", None)
+        if getattr(runtime_mode, "name", None) != "code_analysis":
+            return False
+        if state.resume_state is None:
+            return True
+        return (
+            state.resume_state.route_decision == _PLANNED_CODE_ANALYSIS_ROUTE
+        )
+
+    def _prepare_planned_checkpoint(self, state):
+        """Seed durable state before the planned pipeline invokes a model."""
+
+        if state.resume_state is not None or not checkpoint_enabled():
+            return
+        try:
+            get_checkpoint_saver(self.config.workspace_path)
+            save_resume_metadata(
+                state.run_uuid,
+                self.config.workspace_path,
+                route_decision=_PLANNED_CODE_ANALYSIS_ROUTE,
+                history_assistant_turns=state.history_assistant_turns,
+            )
+            save_initial_checkpoint(
+                state.run_uuid,
+                self.config.workspace_path,
+                state.initial_messages,
+            )
+            state.checkpoint_ready = True
+            state.initial_checkpoint_seeded = True
+            state.notify_checkpoint_ready()
+        except Exception:
+            LOGGER.exception(
+                "Failed to enable planned code analysis checkpoint"
+            )
+
+    def _prepare_runtime(
+        self,
+        command,
+        emit_progress=None,
+        emit_output=None,
+        on_activity=None,
+        cancel_event=None,
+        wrapup_event=None,
+        on_checkpoint_ready=None,
+    ):
+        """Prepare callbacks, resources, model, and tools for one run."""
+
         started_at = utc_now()
         question = command.get("question", "")
         run_uuid = str(command.get("run_uuid") or "")
@@ -213,6 +306,27 @@ class LensDeepAgentRuntime:
         ):
             trace_context = {}
             root_observation_id = None
+
+        state = SimpleNamespace(
+            started_at=started_at,
+            question=question,
+            run_uuid=run_uuid,
+            resume_state=resume_state,
+            scenario=scenario,
+            runtime_mode=runtime_mode,
+            model_ref=model_ref,
+            trace_context=trace_context,
+            root_observation_id=root_observation_id,
+            command=command,
+            emit_progress=emit_progress,
+            emit_output=emit_output,
+            on_activity=on_activity,
+            cancel_event=cancel_event,
+            wrapup_event=wrapup_event,
+            on_checkpoint_ready=on_checkpoint_ready,
+            config=self.config,
+            http_client=self.http_client,
+        )
 
         def emit_agent_event(event, detail=None):
             detail = runtime_mode.decorate_event(detail)
@@ -245,6 +359,9 @@ class LensDeepAgentRuntime:
                     {"observation": observation},
                 )
 
+        state.emit_agent_event = emit_agent_event
+        state.emit_user_event = emit_user_event
+        state.emit_trace_observation = emit_trace_observation
         emit_agent_event(
             "deepagents.runtime.start",
             {
@@ -264,7 +381,7 @@ class LensDeepAgentRuntime:
         )
         if runtime_mode.general_chat:
             emit_user_event("phase.changed", {"phase": "analyzing"})
-        resources = prepare_runtime_resources(
+        state.resources = prepare_runtime_resources(
             self.config,
             command,
             emit_event=emit_agent_event,
@@ -272,609 +389,1009 @@ class LensDeepAgentRuntime:
             on_activity=on_activity,
         )
         try:
-            initial_messages = _build_initial_messages(
-                command.get("history"),
-                question,
-            )
-            history_assistant_turns = sum(
-                1
-                for item in command.get("history") or []
-                if item.get("role") == "assistant"
-            )
-            runtime_evidence = dict(
-                resume_state.runtime_evidence if resume_state else {}
-            )
-            capability_middleware = None
-            checkpoint_ready = resume_state is not None
-            initial_checkpoint_seeded = False
-            resume_from_graph_checkpoint = resume_state is not None
-            checkpoint_ready_notified = False
+            self._prepare_model_and_tools(state)
+        except BaseException:
+            if cancel_event is None or not cancel_event.is_set():
+                cleanup_runtime_resources(state.resources)
+            raise
+        return state
 
-            def notify_checkpoint_ready():
-                nonlocal checkpoint_ready_notified
-                if checkpoint_ready_notified or on_checkpoint_ready is None:
-                    return
-                on_checkpoint_ready()
-                checkpoint_ready_notified = True
+    def _prepare_model_and_tools(self, state):
+        """Build the model, tools, middleware contributions, and MCP tools."""
 
-            if checkpoint_ready:
-                notify_checkpoint_ready()
+        state.initial_messages = _build_initial_messages(
+            state.command.get("history"),
+            state.question,
+        )
+        state.history_assistant_turns = sum(
+            1
+            for item in state.command.get("history") or []
+            if item.get("role") == "assistant"
+        )
+        state.runtime_evidence = dict(
+            state.resume_state.runtime_evidence if state.resume_state else {}
+        )
+        state.capability_middleware = None
+        state.checkpoint_ready = state.resume_state is not None
+        state.initial_checkpoint_seeded = False
+        state.resume_from_graph_checkpoint = state.resume_state is not None
+        state.checkpoint_ready_notified = False
+
+        def notify_checkpoint_ready():
             if (
-                runtime_mode.execution_gates
-                and resume_state is not None
-                and resume_state.checkpoint_step < 0
+                state.checkpoint_ready_notified
+                or state.on_checkpoint_ready is None
             ):
-                initial_checkpoint_seeded = True
-                resume_from_graph_checkpoint = False
+                return
+            state.on_checkpoint_ready()
+            state.checkpoint_ready_notified = True
 
-            def persist_execution_state(
-                capability_state=None,
-                guardrail_state=None,
-            ):
-                if not checkpoint_ready:
-                    return
-                if capability_state is None and capability_middleware:
-                    capability_state = capability_middleware.export_state()
-                save_runtime_state(
-                    run_uuid,
-                    self.config.workspace_path,
-                    capability_state=capability_state or {},
-                    runtime_evidence=runtime_evidence,
-                    guardrail_state=(
-                        guardrail_state
-                        if guardrail_state is not None
-                        else model.export_runtime_state()
-                    ),
-                )
-            token_budget = _resolve_token_budget(self.config, command)
-            token_budget_wrapup_event = (
-                threading.Event() if runtime_mode.execution_gates else None
-            )
-            model = LensGatewayChatModel(
-                model_ref=str(model_ref),
-                ai_gateway_url=self.config.ai_gateway_url,
-                token=self.config.token,
-                request_timeout_s=self.config.request_timeout_s,
-                tls_skip_verify=getattr(
-                    self.config, "tls_skip_verify", False
-                ),
-                tls_ca_file=getattr(self.config, "tls_ca_file", None),
-                http_client=self.http_client,
-                emit_output=emit_output,
-                on_activity=on_activity,
-                cancel_event=cancel_event,
-                run_uuid=run_uuid,
-                trace_context=trace_context,
-                emit_observation=emit_trace_observation,
-                observation_name="agent",
-                general_chat_execution_gates=runtime_mode.execution_gates,
-                token_budget_max_tokens=token_budget["max_tokens"],
-                token_budget_final_reserve_tokens=token_budget[
-                    "final_reserve_tokens"
-                ],
-                token_budget_warn_ratio=getattr(
-                    self.config,
-                    "token_budget_warn_ratio",
-                    0.8,
-                ),
-                token_budget_wrapup_event=token_budget_wrapup_event,
-                on_runtime_state_change=lambda state: (
-                    persist_execution_state(guardrail_state=state)
-                ),
-            )
-            if resume_state is not None:
-                model.restore_runtime_state(
-                    resume_state.messages,
-                    resume_state.guardrail_state,
-                )
-            if runtime_mode.general_chat:
-                tools = build_general_chat_tools(
-                    command,
-                    resources,
-                    self.config,
-                    emit_event=emit_agent_event,
-                    runtime_evidence=runtime_evidence,
-                    on_runtime_evidence=lambda _state: (
-                        persist_execution_state()
-                    ),
-                )
-            else:
-                tools = build_agent_tools(
-                    command,
-                    resources,
-                    self.config,
-                    emit_event=emit_agent_event,
-                )
-            mcp_tools = load_mcp_tools(
-                resources.mcp_configs,
-                discovery_timeout_s=getattr(
-                    self.config,
-                    "mcp_discovery_timeout_s",
-                    30,
-                ),
-                tool_timeout_s=getattr(
-                    self.config,
-                    "mcp_tool_timeout_s",
-                    60,
-                ),
-                emit_event=emit_agent_event,
-                stdio_allowlist=getattr(
-                    self.config,
-                    "mcp_stdio_allowlist",
-                    (),
-                ),
-            )
-            registered_mcp_tools, mcp_middleware = (
-                build_deferred_mcp_tools(
-                    mcp_tools,
-                    threshold=getattr(
-                        self.config,
-                        "mcp_defer_threshold",
-                        12,
-                    ),
-                )
-            )
-            tools.extend(registered_mcp_tools)
-            if resume_state is not None:
-                _reject_unsafe_resume_tool_replay(
-                    resume_state.messages,
-                    [*tools, *mcp_tools],
-                    resume_state.pending_write_tool_call_ids,
-                )
-            evidence_requirement = "none"
-            required_capabilities = []
-            if runtime_mode.execution_gates:
-                route_was_resumed = bool(
-                    resume_state is not None
-                    and resume_state.route_decision.get("route")
-                )
-                if route_was_resumed:
-                    route_decision = resume_state.route_decision
-                else:
-                    if resume_state is None and checkpoint_enabled():
-                        try:
-                            get_checkpoint_saver(
-                                self.config.workspace_path
-                            )
-                            save_resume_metadata(
-                                run_uuid,
-                                self.config.workspace_path,
-                                history_assistant_turns=(
-                                    history_assistant_turns
-                                ),
-                            )
-                            save_initial_checkpoint(
-                                run_uuid,
-                                self.config.workspace_path,
-                                initial_messages,
-                            )
-                            checkpoint_ready = True
-                            initial_checkpoint_seeded = True
-                            notify_checkpoint_ready()
-                        except Exception:
-                            LOGGER.exception(
-                                "Failed to enable route checkpoint"
-                            )
-                    route_decision = _select_general_chat_route(
-                        model,
-                        question,
-                        history=command.get("history"),
-                        history_artifacts=command.get(
-                            "history_artifact_paths"
-                        ),
-                        context_skill_contents=(
-                            resources.context_skill_contents
-                        ),
-                        available_tools=[*tools, *mcp_tools],
-                        has_bound_skills=bool(resources.skill_paths),
-                    )
-                    if checkpoint_ready:
-                        save_resume_metadata(
-                            run_uuid,
-                            self.config.workspace_path,
-                            route_decision=route_decision,
-                            history_assistant_turns=history_assistant_turns,
-                        )
-                        persist_execution_state()
-                command = {
-                    **command,
-                    "runtime_route": route_decision["route"],
-                }
-                emit_user_event(
-                    (
-                        "route.resumed"
-                        if route_was_resumed
-                        else "route.selected"
-                    ),
-                    route_decision,
-                )
-                evidence_requirement = route_decision[
-                    "evidence_requirement"
-                ]
-                required_capabilities = route_decision[
-                    "required_capabilities"
-                ]
-                if route_decision["route"] == "capability_unavailable":
-                    required = route_decision["required_capabilities"]
-                    capability = next(
-                        (
-                            item
-                            for item in required
-                            if item
-                            in {
-                                "artifact_delivery",
-                                "mcp",
-                                "skill",
-                                "tool",
-                                "workspace",
-                            }
-                        ),
-                        "tool",
-                    )
-                    termination_detail = _capability_termination_detail(
-                        capability
-                    )
-                    emit_user_event(
-                        "capability.blocked",
-                        termination_detail,
-                    )
-                    emit_user_event(
-                        "phase.changed",
-                        {"phase": "completed"},
-                    )
-                    return {
-                        "answer": _unverified_execution_answer(
-                            question,
-                            termination_detail,
-                            answer_language=_command_answer_language(command),
-                        ),
-                        "samples": [],
-                        "stop_reason": model.stop_reason,
-                        "token_usage": model.token_usage,
-                        "outcome": "blocked",
-                        "termination_detail": termination_detail,
-                    }
-                if route_decision["route"] == "direct_answer":
-                    emit_user_event("phase.changed", {"phase": "answering"})
-                    if resume_state is not None and emit_output is not None:
-                        emit_output("", reset=True)
-                    runtime_mode.emit_model_round(
-                        emit_agent_event,
-                        "start",
-                        1,
-                    )
-                    try:
-                        answer = _answer_general_chat_directly(
-                            model,
-                            command,
-                            _system_prompt(
-                                scenario,
-                                command,
-                                resources.context_skill_contents,
-                            ),
-                            messages=(
-                                resume_state.messages
-                                if resume_state is not None
-                                else None
-                            ),
-                            emit_event=emit_agent_event,
-                            emit_output=emit_output,
-                        )
-                    except Exception:
-                        runtime_mode.emit_model_round(
-                            emit_agent_event,
-                            "failed",
-                            1,
-                        )
-                        raise
-                    runtime_mode.emit_model_round(
-                        emit_agent_event,
-                        "done",
-                        1,
-                    )
-                    if not answer.strip():
-                        raise EmptyAgentResponseError(
-                            "Direct route returned no answer."
-                        )
-                    emit_user_event(
-                        "phase.changed",
-                        {"phase": "completed"},
-                    )
-                    return {
-                        "answer": answer,
-                        "samples": [],
-                        "stop_reason": model.stop_reason,
-                        "token_usage": model.token_usage,
-                        "outcome": "completed",
-                        "termination_detail": {},
-                    }
-                capability_middleware = CapabilityBoundaryMiddleware(
-                    emit_event=emit_agent_event,
-                    required_capabilities=required_capabilities,
-                    require_initial_plan=(
-                        route_decision["route"] == "plan_execute"
-                    ),
-                    on_state_change=persist_execution_state,
-                )
-                if resume_state is not None:
-                    capability_middleware.restore_state(
-                        resume_state.capability_state
-                    )
-                phase = (
-                    "planning"
-                    if route_decision["route"] == "plan_execute"
-                    else "executing"
-                )
-                emit_user_event("phase.changed", {"phase": phase})
-            trace_middleware = (
-                TraceObservationMiddleware(
-                    emit_trace_observation,
-                    root_observation_id,
-                )
-                if root_observation_id
-                else None
-            )
-            kwargs = {
-                "model": model,
-                "tools": tools,
-                "system_prompt": _system_prompt(
-                    scenario,
-                    command,
-                    resources.context_skill_contents,
-                    mcp_deferred=mcp_middleware is not None,
-                ),
-                "backend": FilesystemBackend(
-                    root_dir=str(resources.root),
-                    virtual_mode=True,
-                ),
-                "subagents": (
-                    []
-                    if runtime_mode.general_chat
-                    else [
-                        _fast_subagent(
-                            mcp_middleware,
-                            trace_middleware,
-                        )
-                    ]
-                ),
-                "name": f"lensnode-{command.get('task') or 'agent'}",
-            }
-            if resources.skill_paths and not runtime_mode.general_chat:
-                kwargs["skills"] = resources.skill_paths
+        state.notify_checkpoint_ready = notify_checkpoint_ready
+        if state.checkpoint_ready:
+            notify_checkpoint_ready()
+        if (
+            state.runtime_mode.execution_gates
+            and state.resume_state is not None
+            and state.resume_state.checkpoint_step < 0
+        ):
+            state.initial_checkpoint_seeded = True
+            state.resume_from_graph_checkpoint = False
 
-            summarizer = _build_summarization_middleware(
+        def persist_execution_state(
+            capability_state=None,
+            guardrail_state=None,
+        ):
+            if not state.checkpoint_ready:
+                return
+            if capability_state is None and state.capability_middleware:
+                capability_state = state.capability_middleware.export_state()
+            save_runtime_state(
+                state.run_uuid,
+                self.config.workspace_path,
+                capability_state=capability_state or {},
+                runtime_evidence=state.runtime_evidence,
+                guardrail_state=(
+                    guardrail_state
+                    if guardrail_state is not None
+                    else state.model.export_runtime_state()
+                ),
+            )
+
+        state.persist_execution_state = persist_execution_state
+        state.token_budget = _resolve_token_budget(
+            self.config,
+            state.command,
+        )
+        state.token_budget_wrapup_event = (
+            threading.Event()
+            if state.runtime_mode.execution_gates
+            else None
+        )
+        state.model = LensGatewayChatModel(
+            model_ref=str(state.model_ref),
+            ai_gateway_url=self.config.ai_gateway_url,
+            token=self.config.token,
+            request_timeout_s=self.config.request_timeout_s,
+            tls_skip_verify=getattr(
                 self.config,
-                model_ref,
-                emit_agent_event,
-                cancel_event,
-                run_uuid=run_uuid,
-                http_client=self.http_client,
-                trace_context=trace_context,
-                emit_observation=emit_trace_observation,
-            )
-            middleware = _agent_middleware(
-                command,
-                summarizer,
-                emit_agent_event,
-                capability_middleware=capability_middleware,
-                mcp_middleware=mcp_middleware,
-                trace_middleware=trace_middleware,
-            )
-            if middleware:
-                kwargs["middleware"] = middleware
-            if summarizer is not None:
-                emit_agent_event(
-                    "deepagents.summarization.enabled",
-                    {
-                        "trigger_tokens": self.config.summary_trigger_tokens,
-                        "keep_tokens": self.config.summary_keep_tokens,
-                    },
+                "tls_skip_verify",
+                False,
+            ),
+            tls_ca_file=getattr(self.config, "tls_ca_file", None),
+            http_client=self.http_client,
+            emit_output=state.emit_output,
+            on_activity=state.on_activity,
+            cancel_event=state.cancel_event,
+            run_uuid=state.run_uuid,
+            trace_context=state.trace_context,
+            emit_observation=state.emit_trace_observation,
+            observation_name="agent",
+            general_chat_execution_gates=state.runtime_mode.execution_gates,
+            token_budget_max_tokens=state.token_budget["max_tokens"],
+            token_budget_final_reserve_tokens=state.token_budget[
+                "final_reserve_tokens"
+            ],
+            token_budget_warn_ratio=getattr(
+                self.config,
+                "token_budget_warn_ratio",
+                0.8,
+            ),
+            token_budget_wrapup_event=state.token_budget_wrapup_event,
+            on_runtime_state_change=lambda runtime_state: (
+                state.persist_execution_state(
+                    guardrail_state=runtime_state
                 )
+            ),
+        )
+        if state.resume_state is not None:
+            state.model.restore_runtime_state(
+                state.resume_state.messages,
+                state.resume_state.guardrail_state,
+            )
+        if state.runtime_mode.general_chat:
+            state.tools = build_general_chat_tools(
+                state.command,
+                state.resources,
+                self.config,
+                emit_event=state.emit_agent_event,
+                runtime_evidence=state.runtime_evidence,
+                on_runtime_evidence=lambda _state: (
+                    state.persist_execution_state()
+                ),
+            )
+        else:
+            state.tools = build_agent_tools(
+                state.command,
+                state.resources,
+                self.config,
+                emit_event=state.emit_agent_event,
+            )
+        state.mcp_tools = load_mcp_tools(
+            state.resources.mcp_configs,
+            discovery_timeout_s=getattr(
+                self.config,
+                "mcp_discovery_timeout_s",
+                30,
+            ),
+            tool_timeout_s=getattr(
+                self.config,
+                "mcp_tool_timeout_s",
+                60,
+            ),
+            emit_event=state.emit_agent_event,
+            stdio_allowlist=getattr(
+                self.config,
+                "mcp_stdio_allowlist",
+                (),
+            ),
+        )
+        runtime_contributions = collect_agent_runtime_contributions(
+            self.config,
+            state.command,
+            state.mcp_tools,
+        )
+        state.runtime_middleware = tuple(
+            item
+            for contribution in runtime_contributions
+            for item in contribution.middleware
+        )
+        state.subagent_middleware = tuple(
+            item
+            for contribution in runtime_contributions
+            for item in contribution.subagent_middleware
+        )
+        state.runtime_guidance = tuple(
+            contribution.prompt_guidance
+            for contribution in runtime_contributions
+            if contribution.prompt_guidance
+        )
+        always_visible_tool_prefixes = tuple(
+            prefix
+            for contribution in runtime_contributions
+            for prefix in contribution.always_visible_tool_prefixes
+        )
+        state.registered_mcp_tools, state.mcp_middleware = (
+            build_deferred_mcp_tools(
+                state.mcp_tools,
+                threshold=getattr(
+                    self.config,
+                    "mcp_defer_threshold",
+                    12,
+                ),
+                always_visible_prefixes=always_visible_tool_prefixes,
+            )
+        )
+        state.tools.extend(state.registered_mcp_tools)
+        if state.resume_state is not None:
+            _reject_unsafe_resume_tool_replay(
+                state.resume_state.messages,
+                [*state.tools, *state.mcp_tools],
+                state.resume_state.pending_write_tool_call_ids,
+            )
+        state.evidence_requirement = "none"
+        state.required_capabilities = []
+        state.route_decision = None
 
-            emit_agent_event(
-                "deepagents.agent.create",
-                {
-                    "tool_count": len(tools),
-                    "skill_count": len(resources.skill_paths),
-                    "mcp_tool_count": len(mcp_tools),
-                    "mcp_deferred": mcp_middleware is not None,
-                    "task_tool_enabled": not runtime_mode.general_chat,
-                    "mcp_config_path": str(resources.mcp_config_path),
-                },
-            )
-            checkpoint_thread = thread_config(run_uuid)
-            if checkpoint_enabled():
-                if resume_state is not None:
-                    kwargs["checkpointer"] = get_checkpoint_saver(
-                        self.config.workspace_path
-                    )
-                    checkpoint_ready = True
-                elif checkpoint_ready:
-                    kwargs["checkpointer"] = get_checkpoint_saver(
-                        self.config.workspace_path
-                    )
-                else:
-                    try:
-                        kwargs["checkpointer"] = get_checkpoint_saver(
-                            self.config.workspace_path
-                        )
-                        save_resume_metadata(
-                            run_uuid,
-                            self.config.workspace_path,
-                            route_decision=(
-                                route_decision
-                                if runtime_mode.execution_gates
-                                else {}
-                            ),
-                            history_assistant_turns=(
-                                history_assistant_turns
-                            ),
-                        )
-                        save_initial_checkpoint(
-                            run_uuid,
-                            self.config.workspace_path,
-                            initial_messages,
-                        )
-                        checkpoint_ready = True
-                        initial_checkpoint_seeded = True
-                        notify_checkpoint_ready()
-                    except Exception:
-                        kwargs.pop("checkpointer", None)
-                        LOGGER.exception(
-                            "Failed to enable agent run checkpoints"
-                        )
-            agent = create_deep_agent(**kwargs)
-            max_turns = command.get("max_agent_turns", 26)
-            invoke_detail = {"max_agent_turns": max_turns}
-            if runtime_mode.execution_gates:
-                invoke_detail.update(
-                    {
-                        "token_budget_profile": token_budget["profile"],
-                        "token_budget_max_tokens": token_budget[
-                            "max_tokens"
-                        ],
-                        "token_budget_final_reserve_tokens": token_budget[
-                            "final_reserve_tokens"
-                        ],
-                    }
-                )
-            emit_agent_event(
-                "deepagents.agent.invoke",
-                invoke_detail,
-            )
-            messages = initial_messages
-            turn_baseline_ai = None
-            event_baseline_ai = None
-            if resume_state is not None:
-                if emit_output is not None:
-                    emit_output("", reset=True)
-                messages = list(resume_state.messages)
-                turn_baseline_ai = resume_state.history_assistant_turns
-                event_baseline_ai = sum(
-                    1
-                    for message in resume_state.messages
-                    if getattr(message, "type", "") == "ai"
-                )
-                emit_agent_event(
-                    "deepagents.runtime.resume",
-                    {
-                        "checkpoint_ai_turns": event_baseline_ai,
-                        "history_ai_turns": turn_baseline_ai,
-                    },
-                )
-            (
-                answer,
-                truncated,
-                termination_reason,
-            ) = _run_agent_with_turn_limit(
-                agent,
-                messages,
-                max_turns,
-                model=model,
-                thread=checkpoint_thread,
-                turn_baseline_ai=turn_baseline_ai,
-                event_baseline_ai=event_baseline_ai,
-                resume_from_checkpoint=resume_from_graph_checkpoint,
-                emit_event=emit_agent_event,
-                answer_language=_command_answer_language(command),
-                cancel_event=cancel_event,
-                wrapup_event=(
-                    wrapup_event if runtime_mode.execution_gates else None
-                ),
-                token_budget_wrapup_event=token_budget_wrapup_event,
-                on_checkpoint_state=(
-                    persist_execution_state if checkpoint_ready else None
-                ),
-                input_checkpoint_seeded=initial_checkpoint_seeded,
-                stream_recovery_attempts=1 if checkpoint_ready else 0,
-                on_stream_recovery=(
-                    (lambda: emit_output("", reset=True))
-                    if emit_output is not None
-                    else None
-                ),
-            )
-            if truncated:
-                emit_agent_event(
-                    "deepagents.agent.truncated",
-                    {"max_agent_turns": max_turns},
-                )
-            emit_agent_event(
-                "deepagents.runtime.done",
-                {
-                    "actual_duration": elapsed_since(started_at),
-                    "answer_chars": len(answer),
-                    "stop_reason": model.stop_reason,
-                    "termination_reason": termination_reason,
-                    "token_usage": model.token_usage,
-                },
-            )
-            outcome, termination_detail = _finalize_runtime_outcome(
-                capability_middleware=capability_middleware,
-                evidence_requirement=evidence_requirement,
-                required_capabilities=required_capabilities,
-                truncated=truncated or bool(termination_reason),
-                stop_reason=termination_reason or model.stop_reason,
-                execution_gate_enabled=runtime_mode.execution_gates,
-                runtime_evidence=runtime_evidence,
-            )
-            if capability_middleware is not None:
-                emit_agent_event(
-                    "deepagents.runtime.outcome",
-                    {
-                        "outcome": outcome,
-                        **capability_middleware.failure_diagnostics(
-                            required_capabilities,
-                            outcome,
+    def _route_runtime(self, state):
+        """Select and handle the general-chat execution route."""
+
+        if not state.runtime_mode.execution_gates:
+            return None
+        route_was_resumed = bool(
+            state.resume_state is not None
+            and state.resume_state.route_decision.get("route")
+        )
+        if route_was_resumed:
+            state.route_decision = state.resume_state.route_decision
+        else:
+            if state.resume_state is None and checkpoint_enabled():
+                try:
+                    get_checkpoint_saver(self.config.workspace_path)
+                    save_resume_metadata(
+                        state.run_uuid,
+                        self.config.workspace_path,
+                        history_assistant_turns=(
+                            state.history_assistant_turns
                         ),
-                    },
+                    )
+                    save_initial_checkpoint(
+                        state.run_uuid,
+                        self.config.workspace_path,
+                        state.initial_messages,
+                    )
+                    state.checkpoint_ready = True
+                    state.initial_checkpoint_seeded = True
+                    state.notify_checkpoint_ready()
+                except Exception:
+                    LOGGER.exception("Failed to enable route checkpoint")
+            state.route_decision = _select_general_chat_route(
+                state.model,
+                state.question,
+                history=state.command.get("history"),
+                history_artifacts=state.command.get(
+                    "history_artifact_paths"
+                ),
+                context_skill_contents=(
+                    state.resources.context_skill_contents
+                ),
+                available_tools=[*state.tools, *state.mcp_tools],
+                has_bound_skills=bool(state.resources.skill_paths),
+            )
+            if state.checkpoint_ready:
+                save_resume_metadata(
+                    state.run_uuid,
+                    self.config.workspace_path,
+                    route_decision=state.route_decision,
+                    history_assistant_turns=state.history_assistant_turns,
                 )
-            if outcome == "blocked" and capability_middleware is not None:
-                reason = termination_detail.get("reason")
-                if reason == "execution_failed":
-                    emit_user_event(
-                        "execution.failed",
-                        termination_detail,
-                    )
-                elif reason == "evidence_unavailable":
-                    emit_user_event(
-                        "verification.failed",
-                        termination_detail,
-                    )
-                answer = _unverified_execution_answer(
-                    question,
+                state.persist_execution_state()
+        state.command = {
+            **state.command,
+            "runtime_route": state.route_decision["route"],
+        }
+        state.emit_user_event(
+            "route.resumed" if route_was_resumed else "route.selected",
+            state.route_decision,
+        )
+        state.evidence_requirement = state.route_decision[
+            "evidence_requirement"
+        ]
+        state.required_capabilities = state.route_decision[
+            "required_capabilities"
+        ]
+        if state.route_decision["route"] == "capability_unavailable":
+            required = state.route_decision["required_capabilities"]
+            capability = next(
+                (
+                    item
+                    for item in required
+                    if item
+                    in {
+                        "artifact_delivery",
+                        "mcp",
+                        "skill",
+                        "tool",
+                        "workspace",
+                    }
+                ),
+                "tool",
+            )
+            termination_detail = _capability_termination_detail(capability)
+            state.emit_user_event(
+                "capability.blocked",
+                termination_detail,
+            )
+            state.emit_user_event(
+                "phase.changed",
+                {"phase": "completed"},
+            )
+            return {
+                "answer": _unverified_execution_answer(
+                    state.question,
                     termination_detail,
-                    answer_language=_command_answer_language(command),
+                    answer_language=_command_answer_language(
+                        state.command
+                    ),
+                ),
+                "samples": [],
+                "stop_reason": state.model.stop_reason,
+                "token_usage": state.model.token_usage,
+                "outcome": "blocked",
+                "termination_detail": termination_detail,
+            }
+        if state.route_decision["route"] == "direct_answer":
+            state.emit_user_event(
+                "phase.changed",
+                {"phase": "answering"},
+            )
+            if (
+                state.resume_state is not None
+                and state.emit_output is not None
+            ):
+                state.emit_output("", reset=True)
+            state.runtime_mode.emit_model_round(
+                state.emit_agent_event,
+                "start",
+                1,
+            )
+            try:
+                answer = _answer_general_chat_directly(
+                    state.model,
+                    state.command,
+                    _system_prompt(
+                        state.scenario,
+                        state.command,
+                        state.resources.context_skill_contents,
+                    ),
+                    messages=(
+                        state.resume_state.messages
+                        if state.resume_state is not None
+                        else None
+                    ),
+                    emit_event=state.emit_agent_event,
+                    emit_output=state.emit_output,
                 )
-            if runtime_mode.general_chat:
-                emit_user_event("phase.changed", {"phase": "completed"})
+            except Exception:
+                state.runtime_mode.emit_model_round(
+                    state.emit_agent_event,
+                    "failed",
+                    1,
+                )
+                raise
+            state.runtime_mode.emit_model_round(
+                state.emit_agent_event,
+                "done",
+                1,
+            )
+            if not answer.strip():
+                raise EmptyAgentResponseError(
+                    "Direct route returned no answer."
+                )
+            state.emit_user_event(
+                "phase.changed",
+                {"phase": "completed"},
+            )
             return {
                 "answer": answer,
                 "samples": [],
-                "stop_reason": model.stop_reason,
-                "token_usage": model.token_usage,
-                "outcome": outcome,
-                "termination_detail": termination_detail,
+                "stop_reason": state.model.stop_reason,
+                "token_usage": state.model.token_usage,
+                "outcome": "completed",
+                "termination_detail": {},
             }
-        finally:
-            if cancel_event is None or not cancel_event.is_set():
-                cleanup_runtime_resources(resources)
+        state.capability_middleware = CapabilityBoundaryMiddleware(
+            emit_event=state.emit_agent_event,
+            required_capabilities=state.required_capabilities,
+            require_initial_plan=(
+                state.route_decision["route"] == "plan_execute"
+            ),
+            on_state_change=state.persist_execution_state,
+        )
+        if state.resume_state is not None:
+            state.capability_middleware.restore_state(
+                state.resume_state.capability_state
+            )
+        phase = (
+            "planning"
+            if state.route_decision["route"] == "plan_execute"
+            else "executing"
+        )
+        state.emit_user_event("phase.changed", {"phase": phase})
+        return None
 
+    def _build_agent(self, state):
+        """Build the Deep Agents graph and configure its checkpoint."""
 
+        state.trace_middleware = (
+            TraceObservationMiddleware(
+                state.emit_trace_observation,
+                state.root_observation_id,
+            )
+            if state.root_observation_id
+            else None
+        )
+        state.kwargs = {
+            "model": state.model,
+            "tools": state.tools,
+            "system_prompt": _system_prompt(
+                state.scenario,
+                state.command,
+                state.resources.context_skill_contents,
+                mcp_deferred=state.mcp_middleware is not None,
+                runtime_guidance=state.runtime_guidance,
+            ),
+            "backend": FilesystemBackend(
+                root_dir=str(state.resources.root),
+                virtual_mode=True,
+            ),
+            "subagents": (
+                []
+                if state.runtime_mode.general_chat
+                else [
+                    _fast_subagent(
+                        state.mcp_middleware,
+                        state.trace_middleware,
+                        state.subagent_middleware,
+                    )
+                ]
+            ),
+            "name": f"lensnode-{state.command.get('task') or 'agent'}",
+        }
+        if state.resources.skill_paths and not state.runtime_mode.general_chat:
+            state.kwargs["skills"] = state.resources.skill_paths
 
+        state.summarizer = _build_summarization_middleware(
+            self.config,
+            state.model_ref,
+            state.emit_agent_event,
+            state.cancel_event,
+            run_uuid=state.run_uuid,
+            http_client=self.http_client,
+            trace_context=state.trace_context,
+            emit_observation=state.emit_trace_observation,
+        )
+        middleware = _agent_middleware(
+            state.command,
+            state.summarizer,
+            state.emit_agent_event,
+            capability_middleware=state.capability_middleware,
+            mcp_middleware=state.mcp_middleware,
+            trace_middleware=state.trace_middleware,
+            runtime_middleware=state.runtime_middleware,
+        )
+        if middleware:
+            state.kwargs["middleware"] = middleware
+        if state.summarizer is not None:
+            state.emit_agent_event(
+                "deepagents.summarization.enabled",
+                {
+                    "trigger_tokens": self.config.summary_trigger_tokens,
+                    "keep_tokens": self.config.summary_keep_tokens,
+                },
+            )
 
+        state.emit_agent_event(
+            "deepagents.agent.create",
+            {
+                "tool_count": len(state.tools),
+                "skill_count": len(state.resources.skill_paths),
+                "mcp_tool_count": len(state.mcp_tools),
+                "mcp_deferred": state.mcp_middleware is not None,
+                "task_tool_enabled": not state.runtime_mode.general_chat,
+                "mcp_config_path": str(state.resources.mcp_config_path),
+            },
+        )
+        state.checkpoint_thread = thread_config(state.run_uuid)
+        if checkpoint_enabled():
+            if state.resume_state is not None:
+                state.kwargs["checkpointer"] = get_checkpoint_saver(
+                    self.config.workspace_path
+                )
+                state.checkpoint_ready = True
+            elif state.checkpoint_ready:
+                state.kwargs["checkpointer"] = get_checkpoint_saver(
+                    self.config.workspace_path
+                )
+            else:
+                try:
+                    state.kwargs["checkpointer"] = get_checkpoint_saver(
+                        self.config.workspace_path
+                    )
+                    save_resume_metadata(
+                        state.run_uuid,
+                        self.config.workspace_path,
+                        route_decision=(
+                            state.route_decision
+                            if state.runtime_mode.execution_gates
+                            else {}
+                        ),
+                        history_assistant_turns=state.history_assistant_turns,
+                    )
+                    save_initial_checkpoint(
+                        state.run_uuid,
+                        self.config.workspace_path,
+                        state.initial_messages,
+                    )
+                    state.checkpoint_ready = True
+                    state.initial_checkpoint_seeded = True
+                    state.notify_checkpoint_ready()
+                except Exception:
+                    state.kwargs.pop("checkpointer", None)
+                    LOGGER.exception(
+                        "Failed to enable agent run checkpoints"
+                    )
+        state.agent = create_deep_agent(**state.kwargs)
+        state.max_turns = state.command.get("max_agent_turns", 26)
 
+    def _execute_agent(self, state):
+        """Run the prepared Deep Agents graph and finalize its outcome."""
 
-
-
-
-
-
-
-
-
+        invoke_detail = {"max_agent_turns": state.max_turns}
+        if state.runtime_mode.execution_gates:
+            invoke_detail.update(
+                {
+                    "token_budget_profile": state.token_budget["profile"],
+                    "token_budget_max_tokens": state.token_budget[
+                        "max_tokens"
+                    ],
+                    "token_budget_final_reserve_tokens": state.token_budget[
+                        "final_reserve_tokens"
+                    ],
+                }
+            )
+        state.emit_agent_event(
+            "deepagents.agent.invoke",
+            invoke_detail,
+        )
+        messages = state.initial_messages
+        turn_baseline_ai = None
+        event_baseline_ai = None
+        if state.resume_state is not None:
+            if state.emit_output is not None:
+                state.emit_output("", reset=True)
+            messages = list(state.resume_state.messages)
+            turn_baseline_ai = state.resume_state.history_assistant_turns
+            event_baseline_ai = sum(
+                1
+                for message in state.resume_state.messages
+                if getattr(message, "type", "") == "ai"
+            )
+            state.emit_agent_event(
+                "deepagents.runtime.resume",
+                {
+                    "checkpoint_ai_turns": event_baseline_ai,
+                    "history_ai_turns": turn_baseline_ai,
+                },
+            )
+        (
+            answer,
+            truncated,
+            termination_reason,
+        ) = _run_agent_with_turn_limit(
+            state.agent,
+            messages,
+            state.max_turns,
+            model=state.model,
+            thread=state.checkpoint_thread,
+            turn_baseline_ai=turn_baseline_ai,
+            event_baseline_ai=event_baseline_ai,
+            resume_from_checkpoint=state.resume_from_graph_checkpoint,
+            emit_event=state.emit_agent_event,
+            answer_language=_command_answer_language(state.command),
+            cancel_event=state.cancel_event,
+            wrapup_event=(
+                state.wrapup_event
+                if state.runtime_mode.execution_gates
+                else None
+            ),
+            token_budget_wrapup_event=state.token_budget_wrapup_event,
+            on_checkpoint_state=(
+                state.persist_execution_state
+                if state.checkpoint_ready
+                else None
+            ),
+            input_checkpoint_seeded=state.initial_checkpoint_seeded,
+            stream_recovery_attempts=1 if state.checkpoint_ready else 0,
+            on_stream_recovery=(
+                (lambda: state.emit_output("", reset=True))
+                if state.emit_output is not None
+                else None
+            ),
+        )
+        if truncated:
+            state.emit_agent_event(
+                "deepagents.agent.truncated",
+                {"max_agent_turns": state.max_turns},
+            )
+        state.emit_agent_event(
+            "deepagents.runtime.done",
+            {
+                "actual_duration": elapsed_since(state.started_at),
+                "answer_chars": len(answer),
+                "stop_reason": state.model.stop_reason,
+                "termination_reason": termination_reason,
+                "token_usage": state.model.token_usage,
+            },
+        )
+        outcome, termination_detail = _finalize_runtime_outcome(
+            capability_middleware=state.capability_middleware,
+            evidence_requirement=state.evidence_requirement,
+            required_capabilities=state.required_capabilities,
+            truncated=truncated or bool(termination_reason),
+            stop_reason=termination_reason or state.model.stop_reason,
+            execution_gate_enabled=state.runtime_mode.execution_gates,
+            runtime_evidence=state.runtime_evidence,
+        )
+        if state.capability_middleware is not None:
+            state.emit_agent_event(
+                "deepagents.runtime.outcome",
+                {
+                    "outcome": outcome,
+                    **state.capability_middleware.failure_diagnostics(
+                        state.required_capabilities,
+                        outcome,
+                    ),
+                },
+            )
+        if (
+            outcome == "blocked"
+            and state.capability_middleware is not None
+        ):
+            reason = termination_detail.get("reason")
+            if reason == "execution_failed":
+                state.emit_user_event(
+                    "execution.failed",
+                    termination_detail,
+                )
+            elif reason == "evidence_unavailable":
+                state.emit_user_event(
+                    "verification.failed",
+                    termination_detail,
+                )
+            answer = _unverified_execution_answer(
+                state.question,
+                termination_detail,
+                answer_language=_command_answer_language(
+                    state.command
+                ),
+            )
+        if state.runtime_mode.general_chat:
+            state.emit_user_event(
+                "phase.changed",
+                {"phase": "completed"},
+            )
+        return {
+            "answer": answer,
+            "samples": [],
+            "stop_reason": state.model.stop_reason,
+            "token_usage": state.model.token_usage,
+            "outcome": outcome,
+            "termination_detail": termination_detail,
+        }
 
 
 def _scenario_for_task(task):
     """Return scenario metadata for a LensNode task name."""
 
     return SCENARIOS.get(task or "", SCENARIOS["knowledge_qa"])
+
+
+def _run_planned_code_analysis(
+    *,
+    model,
+    command,
+    tools,
+    mcp_tools,
+    emit_agent_event,
+    workspace_root,
+):
+    """Run Code Analysis through one plan and one compact evidence bundle."""
+
+    question = str(command.get("question") or "")
+    planner_prompt = _planned_planner_prompt(command)
+    planner_response = model.invoke(
+        [
+            SystemMessage(content=planner_prompt),
+            HumanMessage(content=question),
+        ],
+        runtime_control_call=True,
+    )
+    plan = _parse_planner_response(planner_response, question, command)
+    emit_agent_event(
+        "planned_evidence.plan.ready",
+        {
+            "question_type": plan.question_type,
+            "codegraph_queries": len(plan.codegraph_queries),
+            "literal_queries": len(plan.literal_queries),
+            "source_windows": len(plan.source_windows),
+            "max_files": plan.max_files,
+        },
+    )
+
+    executor = EvidenceExecutor(
+        workspace_tools=_planned_workspace_adapters(tools),
+        codegraph_tools=_planned_codegraph_adapters(mcp_tools),
+    )
+    bundle = executor.execute(plan)
+    sufficiency = validate_evidence_sufficiency(
+        bundle,
+        plan.evidence_requirements,
+    )
+    fallback_used = False
+    if not sufficiency.sufficient and plan.max_fallback_rounds:
+        fallback_response = model.invoke(
+            [
+                SystemMessage(content=_planned_fallback_prompt()),
+                HumanMessage(
+                    content=json.dumps(
+                        {
+                            "objective": plan.objective,
+                            "gaps": list(sufficiency.gaps),
+                        },
+                        ensure_ascii=False,
+                    )
+                ),
+            ],
+            runtime_control_call=True,
+        )
+        fallback_plan = _parse_planner_response(
+            fallback_response,
+            question,
+            command,
+            fallback=True,
+        )
+        fallback_bundle = executor.execute(fallback_plan)
+        bundle = build_evidence_bundle(
+            [
+                item.as_dict()
+                for item in (*bundle.items, *fallback_bundle.items)
+            ],
+            max_tokens=plan.budgets.max_evidence_tokens,
+        )
+        fallback_used = True
+        sufficiency = validate_evidence_sufficiency(
+            bundle,
+            plan.evidence_requirements,
+        )
+    bundle.metrics["fallback_rounds"] = int(fallback_used)
+    bundle.metrics["model_call_count"] = 2 + int(fallback_used)
+    bundle.metrics["evidence_gap_count"] = len(sufficiency.gaps)
+    bundle.metrics["plan_version"] = "planned-evidence-v1"
+    bundle.metrics["planned_operation_count"] = (
+        len(plan.codegraph_queries) + len(plan.literal_queries)
+    )
+    bundle.metrics["planned_codegraph_operations"] = sorted(
+        {query.operation for query in plan.codegraph_queries}
+    )
+    final_response = model.invoke(
+        [
+            SystemMessage(content=_planned_final_prompt()),
+            HumanMessage(
+                content=json.dumps(
+                    {
+                        "question": question,
+                        "project": plan.project,
+                        "repository": plan.repository,
+                        "revision": plan.revision,
+                        "evidence": bundle.as_dict(),
+                        "evidence_gaps": list(sufficiency.gaps),
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+        ],
+        runtime_final_synthesis=True,
+    )
+    answer, citations, unsupported_claim_count = _validated_planned_answer(
+        final_response,
+        bundle,
+        workspace_root,
+    )
+    bundle.metrics["citation_count"] = len(citations)
+    bundle.metrics["unsupported_claim_count"] = unsupported_claim_count
+    claim_count = len(citations) + unsupported_claim_count
+    bundle.metrics["citation_coverage_ratio"] = (
+        round(len(citations) / claim_count, 4) if claim_count else 0.0
+    )
+    emit_agent_event(
+        "planned_evidence.metrics",
+        {
+            **bundle.metrics,
+            "sufficient": sufficiency.sufficient,
+            "gap_categories": list(sufficiency.gaps),
+        },
+    )
+    if not sufficiency.sufficient:
+        answer += (
+            "\n\nEvidence gap: "
+            + ", ".join(sufficiency.gaps)
+            + ". The affected conclusion is unverified."
+        )
+    return {
+        "answer": answer,
+        "samples": [],
+        "stop_reason": model.stop_reason,
+        "token_usage": model.token_usage,
+        "outcome": "completed",
+        "termination_detail": {},
+        "planned_evidence": bundle.metrics,
+        "citations": list(citations),
+    }
+
+
+def _planned_workspace_adapters(tools):
+    """Expose only deterministic workspace tools to the evidence executor."""
+
+    return {
+        tool.name: tool
+        for tool in tools
+        if getattr(tool, "name", "")
+        in {"search_workspace", "read_workspace_file"}
+    }
+
+
+def _planned_codegraph_adapters(tools):
+    """Map CodeGraph MCP tool names to bounded plan operations."""
+
+    adapters = {}
+    for tool in tools:
+        name = str(getattr(tool, "name", ""))
+        if not name.startswith("mcp__codegraph__codegraph_"):
+            continue
+        operation = name.rsplit("_", 1)[-1]
+        if operation not in {
+            "callers",
+            "callees",
+            "context",
+            "explore",
+            "impact",
+            "node",
+            "search",
+            "trace",
+        }:
+            continue
+        adapters[operation] = tool
+    return adapters
+
+
+def _parse_planner_response(response, question, command, fallback=False):
+    """Parse a planner response or fail closed to one bounded safe plan."""
+
+    content = _message_content(response)
+    try:
+        return parse_retrieval_plan(content)
+    except Exception:
+        return parse_retrieval_plan(
+            {
+                "objective": question[:500] or "analyze the workspace",
+                "project": command.get("project") or "workspace",
+                "repository": command.get("repository") or "workspace",
+                "revision": command.get("revision") or "workspace",
+                "question_type": "mixed",
+                "evidence_requirements": [
+                    "source lines",
+                    "caller context" if fallback else "structural flow",
+                ],
+                "codegraph_queries": [
+                    {"operation": "explore", "query": question[:500]}
+                ],
+                "literal_queries": [question[:500]],
+                "max_files": 8,
+                "max_fallback_rounds": 0,
+            }
+        )
+
+
+def _validated_planned_answer(response, bundle, workspace_root):
+    """Return final text and only verified source citations."""
+
+    content = _message_content(response)
+    payload = _json_object(content)
+    if payload is None:
+        if _looks_like_planned_answer_envelope(content):
+            return (
+                "The code analysis result could not be validated.\n\n"
+                "No verified citations were returned.",
+                (),
+                1,
+            )
+        return (
+            content + "\n\nNo verified citations were returned.",
+            (),
+            1,
+        )
+    answer = str(payload.get("answer") or "").strip()
+    if not answer:
+        answer = "The code analysis result could not be validated."
+    valid, invalid = validate_citations(
+        payload.get("citations"),
+        bundle,
+        workspace_root,
+    )
+    if invalid:
+        answer += "\n\nUnverified citations: " + ", ".join(invalid)
+    unsupported = payload.get("unsupported_claims") or []
+    if unsupported:
+        answer += "\n\nUnverified claims remain in the response."
+    if valid:
+        answer += "\n\nEvidence citations:\n"
+        answer += "\n".join(
+            "- {project} / {repository} @ {revision}: `{path}` "
+            "({symbol}, lines {start_line}-{end_line})".format(**citation)
+            for citation in valid
+        )
+    else:
+        answer += "\n\nNo verified citations were returned."
+    return answer, valid, len(unsupported)
+
+
+def _message_content(message):
+    """Return model content as bounded plain text."""
+
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            item.get("text", "")
+            if isinstance(item, dict)
+            else str(item)
+            for item in content
+        )
+    return str(content or "")
+
+
+def _json_object(content):
+    """Extract one planned-answer JSON object from model text."""
+
+    text = str(content or "").strip()
+    decoder = json.JSONDecoder()
+    starts = [0, *(match.start() for match in re.finditer(r"\{", text))]
+    for start in dict.fromkeys(starts):
+        try:
+            value, _end = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        if {
+            "answer",
+            "citations",
+            "unsupported_claims",
+        }.intersection(value):
+            return value
+    return None
+
+
+def _looks_like_planned_answer_envelope(content):
+    """Detect a malformed internal final-answer protocol envelope."""
+
+    text = str(content or "")
+    keys = {
+        key
+        for key in ("answer", "citations", "unsupported_claims")
+        if f'"{key}"' in text
+    }
+    return len(keys) >= 2
+
+
+def _planned_planner_prompt(command):
+    """Build the compact initial planner contract."""
+
+    return (
+        "Return only one JSON retrieval plan. Do not inspect files or call "
+        "tools. The backend will execute every bounded operation. Include "
+        "objective, project, repository, revision, question_type, "
+        "evidence_requirements, codegraph_queries, literal_queries, "
+        "source_windows, max_files, max_fallback_rounds, and budgets. "
+        "Use CodeGraph for structural questions and exact search for logs "
+        "or traceback text. Keep max_fallback_rounds at 1 or less. The "
+        "workspace is "
+        f"{command.get('workspace_path') or 'the selected workspace'}."
+    )
+
+
+def _planned_fallback_prompt():
+    """Build the one compact adaptive fallback planner contract."""
+
+    return (
+        "Return only one bounded JSON retrieval plan for the listed evidence "
+        "gaps. Do not include tools or unbounded loops. Use at most one "
+        "CodeGraph query and two literal queries. Include source_windows "
+        "when source lines are missing and set max_fallback_rounds to 0."
+    )
+
+
+def _planned_final_prompt():
+    """Build the final answer contract for compact evidence only."""
+
+    return (
+        "Answer the user's code-analysis question only from the supplied "
+        "evidence bundle. Return JSON with answer, citations, and "
+        "unsupported_claims. Every material code claim needs a citation "
+        "containing project, repository, revision, path, symbol, "
+        "start_line, end_line, evidence_type, and supports. Never invent "
+        "paths, symbols, revisions, or line ranges. If evidence is missing, "
+        "put the claim in unsupported_claims and say it is unverified. "
+        "Keep runtime evidence separate from source evidence."
+    )

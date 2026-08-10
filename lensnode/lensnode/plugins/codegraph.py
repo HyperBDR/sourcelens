@@ -6,11 +6,13 @@ first use.
 """
 
 import fcntl
+import json
 import shutil
 import subprocess
 from pathlib import Path
 
-from . import LensNodePlugin
+from ..mcp_tools import MCPToolFirstMiddleware
+from . import AgentRuntimeContribution, LensNodePlugin
 
 CODEGRAPH_SERVER_NAME = "codegraph"
 CODEGRAPH_INDEX_DIR = ".codegraph"
@@ -78,14 +80,45 @@ class CodeGraphPlugin(LensNodePlugin):
             }
         ]
 
+    def contribute_agent_runtime(self, config, command, mcp_tools):
+        """Prioritize CodeGraph when its MCP tools are available."""
+
+        del config
+        if (command or {}).get("task") != "code_analysis":
+            return None
+        if not any(
+            str(getattr(tool, "name", "")).startswith("mcp__codegraph__")
+            for tool in mcp_tools
+        ):
+            return None
+        middleware = MCPToolFirstMiddleware("mcp__codegraph__")
+        return AgentRuntimeContribution(
+            prompt_guidance=(
+                "CodeGraph is available through the MCP tool family "
+                "mcp__codegraph__. For structural code questions — where "
+                "a symbol or function is defined, what calls what, how a "
+                "module reaches another, or what would break if something "
+                "changed — MUST call the CodeGraph MCP tool before any "
+                "workspace search or file-reading tool. Use workspace "
+                "search only for literal text such as exact traceback "
+                "lines, comments, log messages, or regex patterns, and "
+                "after CodeGraph has identified the relevant files."
+            ),
+            middleware=(middleware,),
+            subagent_middleware=(middleware,),
+            always_visible_tool_prefixes=("mcp__codegraph__",),
+        )
+
 
 def _ensure_codegraph_index(config, workspace, emit_event=None):
-    """Build the workspace CodeGraph index once, guarded by a lock."""
+    """Build the workspace CodeGraph index once, guarded by a lock.
+
+    Creates the index on first use; afterwards refreshes it only when the
+    source worktree has pending changes or the tooling version changed.
+    """
 
     index_dir = workspace / CODEGRAPH_INDEX_DIR
-    if index_dir.is_dir():
-        return True
-    if not _has_indexable_code(workspace):
+    if not index_dir.is_dir() and not _has_indexable_code(workspace):
         return False
     lock_dir = workspace / ".sourcelens"
     lock_path = lock_dir / CODEGRAPH_INIT_LOCK
@@ -96,7 +129,9 @@ def _ensure_codegraph_index(config, workspace, emit_event=None):
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
                 if index_dir.is_dir():
-                    return True
+                    return _refresh_codegraph_index(
+                        config, workspace, emit_event=emit_event
+                    )
                 subprocess.run(
                     [
                         str(config.codegraph_command),
@@ -118,6 +153,115 @@ def _ensure_codegraph_index(config, workspace, emit_event=None):
             )
         return False
     return index_dir.is_dir()
+
+
+def _refresh_codegraph_index(config, workspace, emit_event=None):
+    """Refresh an existing index only when the worktree or tooling changed.
+
+    Must be called under the same lock that guards init, so a refresh never
+    races an in-progress build or another run's sync.
+    """
+
+    status = _codegraph_status(config, workspace)
+    if status is None:
+        return True
+    if status.get("reindex") or status.get("state") != "complete":
+        return _codegraph_rebuild(config, workspace, emit_event=emit_event)
+    if status.get("pending"):
+        return _codegraph_sync(config, workspace, emit_event=emit_event)
+    return True
+
+
+def _codegraph_status(config, workspace):
+    """Return (pending, reindex, state) from `codegraph status --json`.
+
+    Returns None when the index is not initialized or status cannot be
+    parsed, in which case the caller keeps the existing index untouched.
+    """
+
+    try:
+        result = subprocess.run(
+            [
+                str(config.codegraph_command),
+                "status",
+                str(workspace),
+                "--json",
+            ],
+            timeout=int(getattr(config, "codegraph_init_timeout_s", 300)),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        payload = json.loads(result.stdout.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not payload.get("initialized"):
+        return None
+    pending = payload.get("pendingChanges") or {}
+    has_pending = bool(
+        pending.get("added") or pending.get("modified") or pending.get("removed")
+    )
+    index_info = payload.get("index") or {}
+    return {
+        "pending": has_pending,
+        "reindex": bool(index_info.get("reindexRecommended")),
+        "state": index_info.get("state"),
+    }
+
+
+def _codegraph_sync(config, workspace, emit_event=None):
+    """Incrementally update the index for changed source files."""
+
+    try:
+        subprocess.run(
+            [
+                str(config.codegraph_command),
+                "sync",
+                str(workspace),
+                "--quiet",
+            ],
+            timeout=int(getattr(config, "codegraph_init_timeout_s", 300)),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        if emit_event is not None:
+            emit_event(
+                "codegraph.sync.failed",
+                {"reason": type(exc).__name__},
+            )
+        return False
+    return True
+
+
+def _codegraph_rebuild(config, workspace, emit_event=None):
+    """Rebuild the index when the tooling or extraction format changed."""
+
+    try:
+        subprocess.run(
+            [
+                str(config.codegraph_command),
+                "index",
+                str(workspace),
+                "--quiet",
+            ],
+            timeout=int(getattr(config, "codegraph_init_timeout_s", 300)),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        if emit_event is not None:
+            emit_event(
+                "codegraph.rebuild.failed",
+                {"reason": type(exc).__name__},
+            )
+        return False
+    return True
 
 
 def _has_indexable_code(workspace):

@@ -12,6 +12,7 @@ def _system_prompt(
     context_skill_contents=None,
     *,
     mcp_deferred=False,
+    runtime_guidance=None,
 ):
     """Build the per-task Deep Agents system prompt."""
 
@@ -22,6 +23,7 @@ def _system_prompt(
             scenario,
             command,
             context_skill_contents,
+            runtime_guidance=runtime_guidance,
         )
     if mcp_deferred:
         prompt += (
@@ -38,7 +40,13 @@ def _is_general_chat(command):
 
     return command.get("task") == "general_chat"
 
-def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
+def _knowledge_system_prompt(
+    scenario,
+    command,
+    context_skill_contents=None,
+    *,
+    runtime_guidance=None,
+):
     """Build the workspace-grounded system prompt."""
 
     target_dirs = command.get("target_dirs") or []
@@ -57,6 +65,7 @@ def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
     answer_language = _command_answer_language(command)
     language_requirement = _answer_language_requirement(answer_language)
     context_guidance = _context_guidance(context_skill_contents or [])
+    runtime_guidance_text = "\n".join(runtime_guidance or ())
     return (
         f"{language_requirement}\n\n"
         f"{scenario['prompt']}\n\n"
@@ -76,9 +85,11 @@ def _knowledge_system_prompt(scenario, command, context_skill_contents=None):
         "from them — that conclusion is always wrong. The workspace is "
         "always present and reachable ONLY through search_workspace / "
         "find_files / read_workspace_file.\n"
-        "- Your FIRST action for any project or code question MUST be a "
-        "search_workspace call, or a find_files call with a RECURSIVE "
-        "pattern (\"**/*\", never a bare \"*\", which only lists the top "
+        f"{runtime_guidance_text}\n"
+        "- For exact-text questions, or when CodeGraph is unavailable, your "
+        "FIRST workspace action MUST be a search_workspace call, or a "
+        "find_files call with a RECURSIVE "
+        'pattern ("**/*", never a bare "*", which only lists the top '
         "level). If find_files returns nothing, retry with \"**/*\" or a "
         "broader search_workspace before drawing any conclusion.\n"
         "- Use the scratch directory (write_file / read_file / ls) only "

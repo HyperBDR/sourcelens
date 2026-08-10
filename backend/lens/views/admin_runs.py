@@ -76,6 +76,7 @@ def _admin_run_step_counts(run):
         "total_tokens": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
+        "planned_evidence": {},
     }
     total_cost = 0.0
     has_cost = False
@@ -137,6 +138,32 @@ def _admin_run_step_counts(run):
                 if cost:
                     total_cost += cost
                     has_cost = True
+            elif agent_event == "planned_evidence.metrics":
+                counts["planned_evidence"] = {
+                    key: event.get(key)
+                    for key in (
+                        "plan_version",
+                        "planned_operation_count",
+                        "planned_codegraph_operations",
+                        "model_call_count",
+                        "retrieval_call_count",
+                        "codegraph_call_count",
+                        "literal_search_call_count",
+                        "file_read_call_count",
+                        "evidence_tokens",
+                        "evidence_item_count",
+                        "evidence_files",
+                        "deduplicated_item_count",
+                        "fallback_rounds",
+                        "evidence_gap_count",
+                        "citation_count",
+                        "unsupported_claim_count",
+                        "citation_coverage_ratio",
+                        "sufficient",
+                        "gap_categories",
+                    )
+                    if key in event
+                }
         # Control-plane preprocess calls (query rewrite, vision intent)
         # record their usage on the step itself, not as node events.
         usage = detail.get("usage")
@@ -371,6 +398,7 @@ def _admin_run_row(run):
         "prompt_tokens": counts["prompt_tokens"],
         "completion_tokens": counts["completion_tokens"],
         "total_cost": counts["total_cost"],
+        "planned_evidence": counts["planned_evidence"],
         "created_at": run.created_at.isoformat() if run.created_at else None,
     }
 

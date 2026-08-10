@@ -27,6 +27,44 @@ from lensnode.checkpoint import CheckpointResumeError, ResumeState
 from lensnode.gateway_model import GatewayStreamError
 
 
+def test_runtime_answer_composes_execution_phases(monkeypatch):
+    calls = []
+    resources = SimpleNamespace()
+    state = SimpleNamespace(resources=resources)
+    runtime = agent_runtime.LensDeepAgentRuntime(SimpleNamespace())
+
+    monkeypatch.setattr(
+        runtime,
+        "_prepare_runtime",
+        lambda *_args, **_kwargs: calls.append("prepare") or state,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_route_runtime",
+        lambda _state: calls.append("route"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_build_agent",
+        lambda _state: calls.append("build"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_execute_agent",
+        lambda _state: calls.append("execute") or {"answer": "done"},
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: calls.append("cleanup"),
+    )
+
+    result = runtime._answer_sync({"question": "hello"})
+
+    assert result == {"answer": "done"}
+    assert calls == ["prepare", "route", "build", "execute", "cleanup"]
+
+
 class _Msg:
     """Minimal stand-in for a LangChain message with a type/content."""
 
@@ -1828,7 +1866,7 @@ def test_delivered_artifact_completes_after_token_budget_wrapup():
     assert termination_detail == {}
 
 
-def test_legacy_runtime_modes_skip_general_chat_execution_gates(
+def test_knowledge_qa_skips_general_chat_execution_gates(
     monkeypatch,
     tmp_path,
 ):
@@ -1924,23 +1962,22 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
     runtime = agent_runtime.LensDeepAgentRuntime(config)
     wrapup_event = threading.Event()
 
-    for task in ("knowledge_qa", "code_analysis"):
-        result = runtime._answer_sync(
-            {
-                "run_uuid": f"legacy-{task}",
-                "task": task,
-                "question": "Question",
-                "agent_model_ref": "model-ref",
-            },
-            wrapup_event=wrapup_event,
-            on_checkpoint_ready=lambda task=task: checkpoint_actions.append(
-                ("ready", task)
-            ),
-        )
+    result = runtime._answer_sync(
+        {
+            "run_uuid": "legacy-knowledge_qa",
+            "task": "knowledge_qa",
+            "question": "Question",
+            "agent_model_ref": "model-ref",
+        },
+        wrapup_event=wrapup_event,
+        on_checkpoint_ready=lambda: checkpoint_actions.append(
+            ("ready", "knowledge_qa")
+        ),
+    )
 
-        assert result["answer"] == "legacy answer"
-        assert result["outcome"] == "completed"
-        assert result["termination_detail"] == {}
+    assert result["answer"] == "legacy answer"
+    assert result["outcome"] == "completed"
+    assert result["termination_detail"] == {}
 
     assert all(
         options["general_chat_execution_gates"] is False
@@ -1958,10 +1995,6 @@ def test_legacy_runtime_modes_skip_general_chat_execution_gates(
         "metadata",
         "checkpoint",
         ("ready", "knowledge_qa"),
-        "saver",
-        "metadata",
-        "checkpoint",
-        ("ready", "code_analysis"),
     ]
 
 
@@ -3644,6 +3677,18 @@ def test_knowledge_qa_keeps_task_tool_available():
     )
 
 
+def test_agent_middleware_includes_runtime_extensions():
+    runtime_extension = object()
+
+    middleware = agent_runtime._agent_middleware(
+        {"task": "code_analysis"},
+        summarizer=None,
+        runtime_middleware=(runtime_extension,),
+    )
+
+    assert middleware == [runtime_extension]
+
+
 def test_agent_middleware_includes_deferred_mcp_filter():
     deferred = object()
 
@@ -3662,6 +3707,16 @@ def test_fast_subagent_inherits_deferred_mcp_filter():
     subagent = agent_runtime._fast_subagent(deferred)
 
     assert subagent["middleware"] == [deferred]
+
+
+def test_fast_subagent_inherits_runtime_extensions():
+    runtime_extension = object()
+
+    subagent = agent_runtime._fast_subagent(
+        runtime_middleware=(runtime_extension,),
+    )
+
+    assert subagent["middleware"] == [runtime_extension]
 
 
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):

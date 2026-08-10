@@ -4,6 +4,10 @@ from lensnode.plugins import collect_mcp_servers
 from lensnode.plugins.codegraph import (
     CODEGRAPH_SERVER_NAME,
     CodeGraphPlugin,
+    _codegraph_rebuild,
+    _codegraph_sync,
+    _ensure_codegraph_index,
+    _refresh_codegraph_index,
 )
 from lensnode.runtime_resources import _apply_feature_flags
 
@@ -43,6 +47,30 @@ def test_codegraph_plugin_contributes_stdio_server(monkeypatch, tmp_path):
         "--path",
         str(tmp_path),
     ]
+
+
+def test_codegraph_plugin_contributes_generic_agent_runtime_behavior():
+    plugin = CodeGraphPlugin()
+    tools = [
+        SimpleNamespace(name="mcp__codegraph__codegraph_explore"),
+    ]
+
+    contribution = plugin.contribute_agent_runtime(
+        _config(),
+        {"task": "code_analysis"},
+        tools,
+    )
+
+    assert contribution.prompt_guidance.startswith("CodeGraph is available")
+    assert contribution.middleware == contribution.subagent_middleware
+    assert contribution.always_visible_tool_prefixes == (
+        "mcp__codegraph__",
+    )
+    assert plugin.contribute_agent_runtime(
+        _config(),
+        {"task": "knowledge_qa"},
+        tools,
+    ) is None
 
 
 def test_codegraph_plugin_disabled_when_toggle_off():
@@ -91,6 +119,326 @@ def test_codegraph_index_skipped_without_indexable_code(tmp_path):
 
     assert result == []
     assert not (tmp_path / ".codegraph").exists()
+
+
+def test_codegraph_refresh_skips_sync_when_index_fresh(monkeypatch, tmp_path):
+    (tmp_path / ".codegraph").mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_status",
+        lambda _config, _workspace: {
+            "pending": False,
+            "reindex": False,
+            "state": "complete",
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_sync",
+        lambda *_args, **_kwargs: calls.append("sync"),
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_rebuild",
+        lambda *_args, **_kwargs: calls.append("rebuild"),
+    )
+
+    result = _refresh_codegraph_index(_config(), tmp_path)
+
+    assert result is True
+    assert calls == []
+
+
+def test_codegraph_refresh_syncs_when_pending(monkeypatch, tmp_path):
+    (tmp_path / ".codegraph").mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_status",
+        lambda _config, _workspace: {
+            "pending": True,
+            "reindex": False,
+            "state": "complete",
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_sync",
+        lambda *_args, **_kwargs: calls.append("sync") or True,
+    )
+
+    result = _refresh_codegraph_index(_config(), tmp_path)
+
+    assert result is True
+    assert calls == ["sync"]
+
+
+def test_codegraph_refresh_rebuilds_when_recommended(monkeypatch, tmp_path):
+    (tmp_path / ".codegraph").mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_status",
+        lambda _config, _workspace: {
+            "pending": False,
+            "reindex": True,
+            "state": "complete",
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_rebuild",
+        lambda *_args, **_kwargs: calls.append("rebuild") or True,
+    )
+
+    result = _refresh_codegraph_index(_config(), tmp_path)
+
+    assert result is True
+    assert calls == ["rebuild"]
+
+
+def test_codegraph_refresh_rebuilds_when_incomplete(monkeypatch, tmp_path):
+    (tmp_path / ".codegraph").mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_status",
+        lambda _config, _workspace: {
+            "pending": False,
+            "reindex": False,
+            "state": "incomplete",
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_rebuild",
+        lambda *_args, **_kwargs: calls.append("rebuild") or True,
+    )
+
+    result = _refresh_codegraph_index(_config(), tmp_path)
+
+    assert result is True
+    assert calls == ["rebuild"]
+
+
+def test_codegraph_refresh_keeps_index_when_status_unreadable(
+    monkeypatch, tmp_path
+):
+    (tmp_path / ".codegraph").mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_status",
+        lambda _config, _workspace: None,
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_sync",
+        lambda *_args, **_kwargs: calls.append("sync"),
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_rebuild",
+        lambda *_args, **_kwargs: calls.append("rebuild"),
+    )
+
+    result = _refresh_codegraph_index(_config(), tmp_path)
+
+    assert result is True
+    assert calls == []
+
+
+def test_codegraph_sync_propagates_success(monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run",
+        lambda *_args, **_kwargs: ran.append(_args),
+    )
+
+    assert _codegraph_sync(_config(), tmp_path) is True
+    assert ran
+
+
+def test_codegraph_status_parses_nested_reindex_flag(monkeypatch, tmp_path):
+    import subprocess as real_subprocess
+
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run",
+        lambda *_args, **_kwargs: real_subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                '{"initialized": true, "pendingChanges": {"added": 0, '
+                '"modified": 0, "removed": 0}, "index": {'
+                '"reindexRecommended": true, "state": "complete"}}'
+            ).encode(),
+        ),
+    )
+
+    from lensnode.plugins.codegraph import _codegraph_status
+
+    status = _codegraph_status(_config(), tmp_path)
+
+    assert status == {
+        "pending": False,
+        "reindex": True,
+        "state": "complete",
+    }
+
+
+def test_codegraph_status_reports_pending_changes(monkeypatch, tmp_path):
+    import subprocess as real_subprocess
+
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run",
+        lambda *_args, **_kwargs: real_subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                '{"initialized": true, "pendingChanges": {"added": 2, '
+                '"modified": 0, "removed": 0}, "index": {'
+                '"reindexRecommended": false, "state": "complete"}}'
+            ).encode(),
+        ),
+    )
+
+    from lensnode.plugins.codegraph import _codegraph_status
+
+    status = _codegraph_status(_config(), tmp_path)
+
+    assert status["pending"] is True
+
+
+def test_codegraph_status_returns_none_on_uninitialized(monkeypatch, tmp_path):
+    import subprocess as real_subprocess
+
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run",
+        lambda *_args, **_kwargs: real_subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=('{"initialized": false}').encode(),
+        ),
+    )
+
+    from lensnode.plugins.codegraph import _codegraph_status
+
+    assert _codegraph_status(_config(), tmp_path) is None
+
+
+def test_codegraph_sync_failure_returns_false(monkeypatch, tmp_path):
+    import subprocess as real_subprocess
+
+    def fail(*_args, **_kwargs):
+        raise real_subprocess.CalledProcessError(1, "codegraph")
+
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run", fail
+    )
+
+    assert _codegraph_sync(_config(), tmp_path) is False
+
+
+def test_codegraph_rebuild_failure_returns_false(monkeypatch, tmp_path):
+    import subprocess as real_subprocess
+
+    def fail(*_args, **_kwargs):
+        raise real_subprocess.CalledProcessError(1, "codegraph")
+
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run", fail
+    )
+
+    assert _codegraph_rebuild(_config(), tmp_path) is False
+
+
+def test_ensure_refreshes_existing_index_under_lock(monkeypatch, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')")
+    (tmp_path / ".codegraph").mkdir()
+    calls = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_status",
+        lambda _config, _workspace: {
+            "pending": True,
+            "reindex": False,
+            "state": "complete",
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_sync",
+        lambda *_args, **_kwargs: calls.append("sync") or True,
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("init must not run for an existing index")
+        ),
+    )
+
+    result = _ensure_codegraph_index(_config(), tmp_path)
+
+    assert result is True
+    assert calls == ["sync"]
+
+
+def test_ensure_inits_missing_index(monkeypatch, tmp_path):
+    (tmp_path / "app.py").write_text("print('hi')")
+    ran = []
+
+    def fake_run(args, *_args, **_kwargs):
+        ran.append(args)
+        (tmp_path / ".codegraph").mkdir()
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph.subprocess.run", fake_run
+    )
+
+    result = _ensure_codegraph_index(_config(), tmp_path)
+
+    assert result is True
+    assert ran and ran[0][1] == "init"
+
+
+def test_ensure_concurrent_runs_serialize_on_lock(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    (tmp_path / "app.py").write_text("print('hi')")
+    (tmp_path / ".codegraph").mkdir()
+    active = 0
+    max_active = 0
+    counter_lock = threading.Lock()
+    calls = []
+
+    def fake_sync(*_args, **_kwargs):
+        nonlocal active, max_active
+        with counter_lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with counter_lock:
+            active -= 1
+        calls.append("sync")
+        return True
+
+    def fake_status(_config, _workspace):
+        return {
+            "pending": True,
+            "reindex": False,
+            "state": "complete",
+        }
+
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_sync", fake_sync
+    )
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._codegraph_status", fake_status
+    )
+
+    threads = [
+        threading.Thread(
+            target=_ensure_codegraph_index,
+            args=(_config(), tmp_path),
+        )
+        for _ in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert max_active == 1
+    assert len(calls) == 4
 
 
 def test_feature_flags_override_codegraph_off():

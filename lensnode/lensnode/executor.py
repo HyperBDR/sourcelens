@@ -538,6 +538,10 @@ class LensNodeExecutor:
                         "sample_paths": sample_paths,
                         "stop_reason": result.get("stop_reason"),
                         "token_usage": result.get("token_usage") or {},
+                        "planned_evidence": (
+                            result.get("planned_evidence") or {}
+                        ),
+                        "citations": result.get("citations") or [],
                     },
                 }
             )
