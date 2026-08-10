@@ -74,7 +74,7 @@
           v-model="form.slug"
           class="form-input form-input-mono"
           :maxlength="slugMaxLength"
-          pattern="[a-z0-9][a-z0-9_-]*"
+          pattern="[-a-zA-Z0-9_]+"
           required
         />
         <p class="mt-1 flex items-start justify-between gap-3 text-xs">
@@ -1155,9 +1155,11 @@ const drawerSubtitle = computed(() =>
 )
 
 const slugMaxLength = 180
-const slugPattern = /^[a-z0-9][a-z0-9_-]*$/
+const slugPattern = /^[-a-zA-Z0-9_]+$/
 
-const slugLength = computed(() => props.form.slug?.length ?? 0)
+const canonicalSlug = computed(() => String(props.form.slug ?? '').trim())
+
+const slugLength = computed(() => canonicalSlug.value.length)
 
 const slugLengthClass = computed(() => {
   if (slugLength.value >= slugMaxLength) {
@@ -1226,8 +1228,8 @@ const canProceedWizard = computed(() => {
   if (wizardStep.value === 1) {
     return (
       !!props.form.name?.trim() &&
-      slugPattern.test(props.form.slug?.trim() || '') &&
-      props.form.slug.length <= slugMaxLength &&
+      slugPattern.test(canonicalSlug.value) &&
+      canonicalSlug.value.length <= slugMaxLength &&
       !!props.form.agent_model_ref
     )
   }

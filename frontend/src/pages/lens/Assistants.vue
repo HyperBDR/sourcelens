@@ -719,7 +719,7 @@ function buildPayload() {
   return {
     name: form.value.name,
     description: form.value.description?.trim() || '',
-    slug: form.value.slug,
+    slug: form.value.slug?.trim() || '',
     lensnode_uuid: form.value.lensnode_uuid,
     selected_task: form.value.selected_task,
     selected_dirs:

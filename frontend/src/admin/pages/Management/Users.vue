@@ -118,10 +118,12 @@
 
           <div
             v-else
-            class="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-surface"
+            class="relative min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-surface"
             data-testid="user-table-scroll"
           >
-            <table class="w-full table-fixed divide-y divide-line">
+            <table
+              class="w-full min-w-[20.5rem] table-fixed divide-y divide-line md:min-w-[62.5rem]"
+            >
               <colgroup>
                 <col class="w-12" />
                 <col class="w-16" />
