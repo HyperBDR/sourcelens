@@ -1,0 +1,7 @@
+type: improvement
+audience: user
+en: >-
+  Code analysis now leads with a complete conclusion and shows only the
+  strongest supporting source citations.
+zh-CN: >-
+  代码分析现在优先给出完整结论，并仅展示最有力的源代码依据。
