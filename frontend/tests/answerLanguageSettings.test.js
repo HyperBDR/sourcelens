@@ -30,7 +30,7 @@ test('one language setting controls both UI and AI output', async () => {
   )
   assert.match(
     preferencesStore,
-    /document\.documentElement\.lang = normalizedLanguage/
+    /document\.documentElement\.lang = toDocumentLang\(normalizedLanguage\)/
   )
   assert.match(
     preferencesStore,

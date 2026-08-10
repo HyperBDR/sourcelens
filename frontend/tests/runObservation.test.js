@@ -75,7 +75,7 @@ test('run detail places diagnosis action before close and orders tabs', async ()
   const actionIndex = contents.indexOf('data-testid="generate-run-diagnosis"')
   const closeIndex = contents.indexOf('data-testid="close-run-detail"')
   const overviewIndex = contents.indexOf("activeDetailTab = 'overview'")
-  const diagnosisIndex = contents.indexOf("activeDetailTab = 'diagnosis'")
+  const diagnosisIndex = contents.indexOf('data-testid="run-diagnosis-tab"')
   const traceIndex = contents.indexOf("activeDetailTab = 'trace'")
   const filesIndex = contents.indexOf("activeDetailTab = 'files'")
 

@@ -1504,6 +1504,7 @@
     },
     "wizard": {
       "assistantDescriptionHint": "建议用一句话说明助手用途，尽量控制在 80 字以内。",
+      "slugHint": "仅允许字母、数字、连字符和下划线，最长 180 个字符。",
       "step1Title": "基础与模型",
       "step1Desc": "设置名称、Slug 与 Agent 模型（必填），以及可选的多模态模型",
       "agentModelHint": "必填 — LensNode 使用该模型运行深度分析 Agent。",

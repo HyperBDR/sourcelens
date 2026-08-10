@@ -426,7 +426,7 @@ ChartJS.register(
   Legend
 )
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const router = useRouter()
 
 function formatNum(value) {
