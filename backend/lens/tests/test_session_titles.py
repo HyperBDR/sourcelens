@@ -1,20 +1,27 @@
+from datetime import timedelta
 import uuid
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 
 from lens.assistant_lifecycle import create_assistant_session
 from lens.llm import LensLLMResult
-from lens.models import Assistant, LensNode, Run, Session
+from lens.models import Assistant, LensNode, Message, Run, Session
 from lens.serializers import SessionSerializer
 from lens.services import create_execution_run, finish_lensnode_run
 from lens.session_titles import (
     fallback_session_title,
     generate_semantic_session_title,
     normalize_generated_title,
+)
+from lens.tasks import (
+    expire_stale_session_titles,
+    generate_session_title,
+    generate_session_title_legacy,
 )
 
 
@@ -48,9 +55,10 @@ class SessionTitleTests(TestCase):
             title_generation_status=Session.TitleGenerationStatus.PENDING,
         )
 
-    def _completed_run(self, question="What caused this error?"):
+    def _completed_run(self, question="What caused this error?", session=None):
+        session = session or self.session
         run = create_execution_run(
-            session=self.session,
+            session=session,
             question=question,
             enqueue=False,
         )
@@ -97,6 +105,182 @@ class SessionTitleTests(TestCase):
             Session.TitleGenerationStatus.SKIPPED,
         )
         self.assertTrue(manual.title_manually_edited)
+
+    def test_empty_session_creation_reuses_existing_session(self):
+        first = create_assistant_session(self.assistant.uuid, self.user)
+        second = create_assistant_session(self.assistant.uuid, self.user)
+
+        self.assertEqual(first.uuid, second.uuid)
+        self.assertEqual(
+            Session.objects.filter(
+                assistant=self.assistant,
+                user=self.user,
+                title="",
+            ).count(),
+            1,
+        )
+
+    def test_session_with_messages_is_not_reused(self):
+        first = create_assistant_session(self.assistant.uuid, self.user)
+        Message.objects.create(
+            session=first,
+            role=Message.Role.USER,
+            content="Existing conversation",
+            sequence=1,
+        )
+
+        second = create_assistant_session(self.assistant.uuid, self.user)
+
+        self.assertNotEqual(first.uuid, second.uuid)
+
+    def test_legacy_session_gets_fallback_on_first_run(self):
+        legacy = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title_generation_status=Session.TitleGenerationStatus.SKIPPED,
+        )
+
+        run = create_execution_run(
+            session=legacy,
+            question="Explain the legacy session title behavior",
+            enqueue=False,
+        )
+
+        legacy.refresh_from_db()
+        self.assertEqual(
+            legacy.title,
+            fallback_session_title(run.input_message.content),
+        )
+        self.assertEqual(
+            legacy.title_generation_status,
+            Session.TitleGenerationStatus.PENDING,
+        )
+
+    @patch("lens.tasks.generate_session_title.apply_async")
+    def test_backfill_command_queues_completed_legacy_session(self, delay):
+        legacy = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title_generation_status=Session.TitleGenerationStatus.SKIPPED,
+        )
+        run = self._completed_run(session=legacy)
+        run.status = Run.Status.DONE
+        run.outcome = Run.Outcome.COMPLETED
+        run.save(update_fields=["status", "outcome"])
+        legacy.title = ""
+        legacy.title_generation_status = Session.TitleGenerationStatus.SKIPPED
+        legacy.save(update_fields=["title", "title_generation_status"])
+
+        call_command("backfill_session_titles")
+
+        legacy.refresh_from_db()
+        self.assertEqual(
+            legacy.title,
+            fallback_session_title(run.input_message.content),
+        )
+        self.assertEqual(
+            legacy.title_generation_status,
+            Session.TitleGenerationStatus.PENDING,
+        )
+        delay.assert_called_once()
+        self.assertEqual(
+            delay.call_args.kwargs["args"],
+            [str(legacy.uuid), str(run.uuid)],
+        )
+        self.assertEqual(
+            delay.call_args.kwargs["expires"],
+            900,
+        )
+
+    @patch("lens.tasks.generate_session_title.apply_async")
+    def test_backfill_queues_attachment_only_completed_session(self, delay):
+        legacy = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title_generation_status=Session.TitleGenerationStatus.SKIPPED,
+        )
+        run = self._completed_run(question="", session=legacy)
+        run.status = Run.Status.DONE
+        run.outcome = Run.Outcome.COMPLETED
+        run.save(update_fields=["status", "outcome"])
+
+        call_command("backfill_session_titles")
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.title, "")
+        self.assertEqual(
+            legacy.title_generation_status,
+            Session.TitleGenerationStatus.PENDING,
+        )
+        delay.assert_called_once_with(
+            args=[str(legacy.uuid), str(run.uuid)],
+            expires=900,
+        )
+
+    def test_title_task_is_versioned_and_stale_titles_expire(self):
+        stale_pending = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title="Stale fallback",
+            title_generation_status=Session.TitleGenerationStatus.PENDING,
+        )
+        stale_generating = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title="Stale generating fallback",
+            title_generation_status=Session.TitleGenerationStatus.GENERATING,
+        )
+        active = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title="Active run fallback",
+            title_generation_status=Session.TitleGenerationStatus.PENDING,
+        )
+        active_run = self._completed_run(session=active)
+        active_run.status = Run.Status.RUNNING
+        active_run.save(update_fields=["status"])
+        fresh = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title="Fresh fallback",
+            title_generation_status=Session.TitleGenerationStatus.PENDING,
+        )
+        stale_time = timezone.now() - timedelta(minutes=16)
+        Session.objects.filter(
+            pk__in=[stale_pending.pk, stale_generating.pk, active.pk],
+        ).update(updated_at=stale_time)
+
+        expired = expire_stale_session_titles()
+
+        self.assertEqual(expired, 2)
+        stale_pending.refresh_from_db()
+        stale_generating.refresh_from_db()
+        active.refresh_from_db()
+        fresh.refresh_from_db()
+        self.assertEqual(
+            stale_pending.title_generation_status,
+            Session.TitleGenerationStatus.FAILED,
+        )
+        self.assertEqual(
+            stale_generating.title_generation_status,
+            Session.TitleGenerationStatus.FAILED,
+        )
+        self.assertEqual(
+            active.title_generation_status,
+            Session.TitleGenerationStatus.PENDING,
+        )
+        self.assertEqual(
+            fresh.title_generation_status,
+            Session.TitleGenerationStatus.PENDING,
+        )
+        self.assertEqual(
+            generate_session_title.name,
+            "lens.generate_session_title.v2",
+        )
+        self.assertEqual(
+            generate_session_title_legacy.name,
+            "lens.generate_session_title",
+        )
 
     def test_database_defaults_support_old_session_inserts(self):
         session_uuid = uuid.uuid4()

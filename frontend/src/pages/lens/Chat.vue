@@ -27,28 +27,31 @@
           class="sidebar-brand"
           :class="sidebarCollapsedActive ? 'sidebar-brand-collapsed' : ''"
         >
-          <router-link
-            v-if="!sidebarCollapsedActive"
-            to="/dashboard"
-            class="sidebar-brand-link"
-            @click="isMobile && (sidebarOpen = false)"
-          >
-            <BrandLogo
-              :variant="sidebarLogoVariant"
-              :wrapperClass="sidebarLogoWrapperClass"
-            />
-          </router-link>
           <button
-            v-else
             type="button"
             class="sidebar-brand-link"
-            :aria-label="t('common.expand')"
-            @click="sidebarCollapsed = false"
+            :aria-label="
+              sidebarCollapsedActive
+                ? t('common.expand')
+                : t('management.logoTitle')
+            "
+            @click="handleSidebarLogoClick"
           >
-            <BrandLogo
-              :variant="sidebarLogoVariant"
-              :wrapperClass="sidebarLogoWrapperClass"
-            />
+            <span
+              class="sidebar-logo-stage"
+              :class="
+                sidebarCollapsedActive ? 'sidebar-logo-stage-collapsed' : ''
+              "
+            >
+              <BrandLogo
+                variant="wordmark"
+                wrapperClass="sidebar-logo-layer sidebar-wordmark-layer"
+              />
+              <BrandLogo
+                variant="mark"
+                wrapperClass="sidebar-logo-layer sidebar-mark-layer"
+              />
+            </span>
           </button>
           <button
             v-if="!isMobile"
@@ -1712,19 +1715,20 @@ const avatarBgColor = computed(() => {
   return colors[charCode % colors.length]
 })
 
-const sidebarLogoVariant = computed(() =>
-  sidebarCollapsed.value && !isMobile.value ? 'mark' : 'wordmark'
-)
-
-const sidebarLogoWrapperClass = computed(() =>
-  sidebarCollapsed.value && !isMobile.value
-    ? 'sidebar-brand-logo origin-center scale-[0.72]'
-    : 'sidebar-brand-logo origin-left'
-)
-
 const sidebarCollapsedActive = computed(
   () => sidebarCollapsed.value && !isMobile.value
 )
+
+function handleSidebarLogoClick() {
+  if (sidebarCollapsedActive.value) {
+    sidebarCollapsed.value = false
+    return
+  }
+  if (isMobile.value) {
+    sidebarOpen.value = false
+  }
+  router.push('/dashboard')
+}
 
 const isRunActive = computed(() =>
   ['queued', 'running', 'streaming'].includes(currentRun.value?.status)
@@ -2487,7 +2491,16 @@ async function createNewSession(notify = true) {
     return null
   }
 
-  sessions.value = [session, ...sessions.value]
+  const existingIndex = sessions.value.findIndex(
+    (item) => item.uuid === session.uuid
+  )
+  if (existingIndex >= 0) {
+    sessions.value = sessions.value.map((item) =>
+      item.uuid === session.uuid ? session : item
+    )
+  } else {
+    sessions.value = [session, ...sessions.value]
+  }
   sortManagedSessions()
   selectedSessionUuid.value = session.uuid
   question.value = ''
@@ -2502,7 +2515,7 @@ async function createNewSession(notify = true) {
     query: { session: session.uuid }
   })
 
-  if (notify) {
+  if (notify && existingIndex < 0) {
     showSuccess(t('lens.chat.sessionCreated'))
   }
 
@@ -3565,7 +3578,8 @@ onBeforeUnmount(() => {
 }
 
 .sidebar {
-  @apply flex h-full flex-shrink-0 flex-col border-r transition-all duration-300 ease-in-out;
+  @apply flex h-full flex-shrink-0 flex-col border-r transition-[width] duration-300 ease-in-out;
+  will-change: width;
   background: var(--sl-bg-surface);
   border-color: var(--sl-border-default);
 }
@@ -3583,32 +3597,73 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-brand {
-  @apply flex items-center justify-between gap-2 px-1 pb-4;
+  @apply relative block px-1 pb-4;
+  height: 48px;
+  transition: height 300ms ease-in-out;
 }
 
 .sidebar-brand-collapsed {
-  @apply flex-col items-center justify-start gap-2;
-}
-
-.sidebar-brand-collapsed .sidebar-brand-link {
-  @apply flex-none flex w-full items-center justify-center;
-}
-
-.sidebar-brand-collapsed .sidebar-collapse-btn {
-  @apply self-center;
+  height: 96px;
 }
 
 .sidebar-brand-link {
-  @apply min-w-0 flex-1 overflow-hidden border-0 bg-transparent p-0 text-left;
+  @apply absolute left-0 top-0 flex h-12 items-center;
+  width: calc(100% - 48px);
+  transition:
+    width 300ms ease-in-out,
+    transform 300ms ease-in-out;
 }
 
-.sidebar-brand-logo {
-  @apply max-w-full;
+.sidebar-brand-collapsed .sidebar-brand-link {
+  @apply left-1/2;
+  width: 100%;
+  transform: translateX(-50%);
+}
+
+.sidebar-logo-stage {
+  @apply relative block h-12 w-[190px] overflow-hidden;
+  contain: layout paint;
+  will-change: width;
+  transition: width 300ms ease-in-out;
+}
+
+.sidebar-logo-stage-collapsed {
+  @apply w-10;
+}
+
+.sidebar-logo-layer {
+  @apply absolute inset-0 flex h-12 items-center;
+  will-change: opacity, transform;
+  transition:
+    opacity 200ms ease-in-out,
+    transform 300ms ease-in-out;
+}
+
+.sidebar-wordmark-layer {
+  @apply origin-left opacity-100;
+}
+
+.sidebar-mark-layer {
+  @apply justify-center origin-center opacity-0 scale-[0.72];
+}
+
+.sidebar-logo-stage-collapsed .sidebar-wordmark-layer {
+  @apply pointer-events-none opacity-0 -translate-x-2;
+}
+
+.sidebar-logo-stage-collapsed .sidebar-mark-layer {
+  @apply opacity-100 translate-x-0;
 }
 
 .sidebar-collapse-btn {
-  @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors;
+  @apply absolute right-0 top-1 flex h-10 w-10 shrink-0 items-center
+    justify-center rounded-md transition-all duration-300 ease-in-out;
   color: var(--sl-text-secondary);
+}
+
+.sidebar-brand-collapsed .sidebar-collapse-btn {
+  @apply left-1/2 right-auto top-14;
+  transform: translateX(-50%);
 }
 
 .sidebar-collapse-btn:hover {

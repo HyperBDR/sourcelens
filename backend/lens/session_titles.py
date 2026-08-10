@@ -86,24 +86,27 @@ def generate_semantic_session_title(session_uuid, run_uuid):
     if not claimed:
         return ""
 
-    session = Session.objects.select_related("assistant", "user").get(
-        uuid=session_uuid
-    )
-    run = session.run_set.select_related(
-        "input_message",
-        "output_message",
-    ).get(uuid=run_uuid)
-    model_ref = (
-        session.assistant.postprocess_model_ref
-        or session.assistant.agent_model_ref
-    )
-
-    question = (run.input_message.content or "")[
-        :TITLE_INPUT_QUESTION_MAX_CHARS
-    ]
-    answer = (run.output_message.content or "")[:TITLE_INPUT_ANSWER_MAX_CHARS]
-    user_prompt = f"First question:\n{question}\n\nCompleted answer:\n{answer}"
     try:
+        session = Session.objects.select_related("assistant", "user").get(
+            uuid=session_uuid
+        )
+        run = session.run_set.select_related(
+            "input_message",
+            "output_message",
+        ).get(uuid=run_uuid)
+        model_ref = (
+            session.assistant.postprocess_model_ref
+            or session.assistant.agent_model_ref
+        )
+        question = (run.input_message.content or "")[
+            :TITLE_INPUT_QUESTION_MAX_CHARS
+        ]
+        answer = (run.output_message.content or "")[
+            :TITLE_INPUT_ANSWER_MAX_CHARS
+        ]
+        user_prompt = (
+            f"First question:\n{question}\n\nCompleted answer:\n{answer}"
+        )
         result = run_completion(
             model_ref=model_ref,
             system=_title_system_prompt(_run_answer_language(run)),

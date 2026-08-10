@@ -490,6 +490,12 @@ class DocumentAttachmentTests(TestCase):
 
         self.assertTrue(deleted)
         self.assertIsNone(get_document_attachment(metadata["uuid"]))
+        self.assertEqual(
+            cache.get(
+                f"lens:session_document_attachments:{self.session.uuid}"
+            ),
+            None,
+        )
         self.assertFalse(
             storages["document_attachments"].exists(metadata["storage_name"])
         )
