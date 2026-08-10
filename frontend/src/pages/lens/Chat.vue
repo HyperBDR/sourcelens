@@ -637,11 +637,14 @@
                         :key="file.uuid"
                         type="button"
                         class="message-document-card"
+                        :title="file.original_name"
                         @click="downloadAttachmentFile(file)"
                       >
                         <FileText :size="20" aria-hidden="true" />
                         <span>
-                          <strong>{{ file.original_name }}</strong>
+                          <strong>{{
+                            compactFilename(file.original_name)
+                          }}</strong>
                           <small>{{ formatBytes(file.byte_size) }}</small>
                         </span>
                         <Download :size="16" aria-hidden="true" />
@@ -1460,6 +1463,7 @@ import {
   retryableUserMessage
 } from '@/pages/lens/chatMessageContext'
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
+import { compactFilename } from '@/pages/lens/filenameDisplay'
 import {
   ATTACHMENT_ACCEPT,
   attachmentUploadError,
@@ -4558,7 +4562,7 @@ onBeforeUnmount(() => {
 }
 
 .message-attachments {
-  @apply mb-2 flex flex-wrap justify-end gap-2;
+  @apply mb-2 flex min-w-0 max-w-full flex-wrap justify-end gap-2;
 }
 
 .message-attachments :deep(.auth-image) {
@@ -4568,8 +4572,9 @@ onBeforeUnmount(() => {
 }
 
 .message-document-card {
-  @apply flex max-w-sm items-center gap-2 rounded-lg border border-line
-    bg-surface px-3 py-2 text-left text-theme-secondary transition-colors;
+  @apply flex w-full min-w-0 max-w-sm items-center gap-2 rounded-lg border
+    border-line bg-surface px-3 py-2 text-left text-theme-secondary
+    transition-colors;
 }
 
 .message-document-card:hover {
