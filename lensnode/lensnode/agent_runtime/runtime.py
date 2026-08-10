@@ -117,6 +117,8 @@ from ..runtime_resources import (
 
 LOGGER = logging.getLogger("lensnode")
 
+_PLANNED_CODE_ANALYSIS_ROUTE = {"route": "planned_code_analysis"}
+
 register_harness_profile(
     "lensgatewaychatmodel",
     HarnessProfile(
@@ -211,10 +213,8 @@ class LensDeepAgentRuntime:
             on_checkpoint_ready,
         )
         try:
-            if (
-                state.runtime_mode.name == "code_analysis"
-                and state.resume_state is None
-            ):
+            if self._uses_planned_code_analysis(state):
+                self._prepare_planned_checkpoint(state)
                 return _run_planned_code_analysis(
                     model=state.model,
                     command=state.command,
@@ -231,6 +231,44 @@ class LensDeepAgentRuntime:
         finally:
             if cancel_event is None or not cancel_event.is_set():
                 cleanup_runtime_resources(state.resources)
+
+    def _uses_planned_code_analysis(self, state):
+        """Return whether this run belongs to the planned evidence path."""
+
+        runtime_mode = getattr(state, "runtime_mode", None)
+        if getattr(runtime_mode, "name", None) != "code_analysis":
+            return False
+        if state.resume_state is None:
+            return True
+        return (
+            state.resume_state.route_decision == _PLANNED_CODE_ANALYSIS_ROUTE
+        )
+
+    def _prepare_planned_checkpoint(self, state):
+        """Seed durable state before the planned pipeline invokes a model."""
+
+        if state.resume_state is not None or not checkpoint_enabled():
+            return
+        try:
+            get_checkpoint_saver(self.config.workspace_path)
+            save_resume_metadata(
+                state.run_uuid,
+                self.config.workspace_path,
+                route_decision=_PLANNED_CODE_ANALYSIS_ROUTE,
+                history_assistant_turns=state.history_assistant_turns,
+            )
+            save_initial_checkpoint(
+                state.run_uuid,
+                self.config.workspace_path,
+                state.initial_messages,
+            )
+            state.checkpoint_ready = True
+            state.initial_checkpoint_seeded = True
+            state.notify_checkpoint_ready()
+        except Exception:
+            LOGGER.exception(
+                "Failed to enable planned code analysis checkpoint"
+            )
 
     def _prepare_runtime(
         self,
@@ -1230,12 +1268,21 @@ def _validated_planned_answer(response, bundle, workspace_root):
     content = _message_content(response)
     payload = _json_object(content)
     if payload is None:
+        if _looks_like_planned_answer_envelope(content):
+            return (
+                "The code analysis result could not be validated.\n\n"
+                "No verified citations were returned.",
+                (),
+                1,
+            )
         return (
             content + "\n\nNo verified citations were returned.",
             (),
             1,
         )
     answer = str(payload.get("answer") or "").strip()
+    if not answer:
+        answer = "The code analysis result could not be validated."
     valid, invalid = validate_citations(
         payload.get("citations"),
         bundle,
@@ -1255,7 +1302,7 @@ def _validated_planned_answer(response, bundle, workspace_root):
         )
     else:
         answer += "\n\nNo verified citations were returned."
-    return answer or content, valid, len(unsupported)
+    return answer, valid, len(unsupported)
 
 
 def _message_content(message):
@@ -1275,16 +1322,37 @@ def _message_content(message):
 
 
 def _json_object(content):
-    """Parse strict JSON or a single fenced JSON object."""
+    """Extract one planned-answer JSON object from model text."""
 
     text = str(content or "").strip()
-    if text.startswith("```") and text.endswith("```"):
-        text = text.split("\n", 1)[-1][:-3].strip()
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return value if isinstance(value, dict) else None
+    decoder = json.JSONDecoder()
+    starts = [0, *(match.start() for match in re.finditer(r"\{", text))]
+    for start in dict.fromkeys(starts):
+        try:
+            value, _end = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        if {
+            "answer",
+            "citations",
+            "unsupported_claims",
+        }.intersection(value):
+            return value
+    return None
+
+
+def _looks_like_planned_answer_envelope(content):
+    """Detect a malformed internal final-answer protocol envelope."""
+
+    text = str(content or "")
+    keys = {
+        key
+        for key in ("answer", "citations", "unsupported_claims")
+        if f'"{key}"' in text
+    }
+    return len(keys) >= 2
 
 
 def _planned_planner_prompt(command):

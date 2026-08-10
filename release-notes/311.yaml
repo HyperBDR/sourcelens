@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Code analysis now preserves planned evidence recovery after interruptions
+  and safely handles malformed structured answers.
+zh-CN: >-
+  代码分析现在可在中断后恢复计划证据流程，并安全处理格式异常的结构化回答。
