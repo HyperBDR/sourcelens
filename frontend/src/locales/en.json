@@ -529,11 +529,11 @@
       "label": "AI Email Username",
       "placeholder": "Enter username",
       "preview": "Full email address",
-      "info": "This AI email address is used to intelligently process your information.",
       "tooShort": "Username must be at least 3 characters",
-      "notAvailable": "This username is already in use",
+      "notAvailable": "This username is already taken",
       "checkFailed": "Unable to check username availability. Please try again later.",
-      "checking": "Checking availability..."
+      "checking": "Checking availability...",
+      "info": "This AI email address is used to intelligently process your information."
     },
     "scene": {
       "label": "Usage Scenario",
@@ -550,7 +550,7 @@
       "processing": "Processing Google sign-in",
       "pleaseWait": "Please wait...",
       "error": "Google sign-in failed",
-      "callbackError": "Google callback processing failed. Please try again.",
+      "callbackError": "An error occurred while processing the Google callback. Please try again.",
       "completeTitle": "Complete Account Setup",
       "completeSubtitle": "Please fill in the information below to complete your account setup",
       "loggedInAs": "Logged in as"

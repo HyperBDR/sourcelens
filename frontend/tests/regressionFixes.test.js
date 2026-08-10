@@ -17,6 +17,24 @@ test('active chat run exposes a localized stop action', async () => {
   assert.equal(chinese.common.stop, '停止')
 })
 
+test('admin tables and assistant slugs preserve backend-compatible values', async () => {
+  const [users, drawer, assistants, english, chinese] = await Promise.all([
+    source('admin/pages/Management/Users.vue'),
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('pages/lens/Assistants.vue'),
+    source('admin/locales/en.json').then(JSON.parse),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(users, /overflow-auto rounded-lg border/)
+  assert.match(users, /min-w-\[20\.5rem\].*md:min-w-\[62\.5rem\]/)
+  assert.match(drawer, /pattern="\[-a-zA-Z0-9_\]\+"/)
+  assert.match(drawer, /const canonicalSlug = computed\(\(\) => String\(/)
+  assert.match(assistants, /slug: form\.value\.slug\?\.trim\(\) \|\| ''/)
+  assert.match(english.lensAdmin.wizard.slugHint, /Letters/)
+  assert.match(chinese.lensAdmin.wizard.slugHint, /字母/)
+})
+
 test('final synthesis progress reacts to locale changes', async () => {
   const [chat, english, chinese, { computed }, { createI18n }] =
     await Promise.all([

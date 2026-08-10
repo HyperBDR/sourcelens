@@ -216,10 +216,12 @@
                 </button>
                 <div class="text-xs text-ink-400">{{ assistant.slug }}</div>
               </td>
-              <td class="px-4 py-3 text-ink-600">
+              <td class="px-4 py-3 tabular-nums text-ink-600">
                 {{ assistant.conversations }}
               </td>
-              <td class="px-4 py-3 text-ink-600">{{ assistant.qa_records }}</td>
+              <td class="px-4 py-3 tabular-nums text-ink-600">
+                {{ assistant.qa_records }}
+              </td>
               <td class="px-4 py-3 text-ink-500">
                 {{ formatDate(assistant.last_used_at) }}
               </td>

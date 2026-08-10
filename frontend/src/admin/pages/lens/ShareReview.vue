@@ -52,9 +52,19 @@
 
           <div
             v-else
-            class="relative overflow-x-auto rounded-lg border border-gray-200 bg-white"
+            class="share-review-table-wrap overflow-x-auto rounded-lg border border-gray-200 bg-white"
           >
-            <table class="min-w-full divide-y divide-gray-200">
+            <table
+              class="min-w-[56rem] w-full table-fixed divide-y divide-gray-200 md:min-w-0"
+            >
+              <colgroup>
+                <col style="width: 21%" />
+                <col style="width: 18%" />
+                <col style="width: 17%" />
+                <col style="width: 10.5rem" />
+                <col style="width: 4rem" />
+                <col style="width: 20rem" />
+              </colgroup>
               <thead class="bg-gradient-to-r from-gray-50 to-gray-100">
                 <tr>
                   <th class="table-head">
@@ -76,24 +86,26 @@
                   class="cursor-pointer transition-colors hover:bg-gray-50"
                   @click="openDetail(row)"
                 >
-                  <td class="table-cell">
+                  <td class="table-cell share-review-title-cell">
                     <div
-                      class="max-w-[320px] truncate font-medium text-gray-800"
+                      class="share-review-truncate font-medium text-gray-800"
                       :title="row.title"
                     >
                       {{ row.title }}
                     </div>
                     <div
-                      class="max-w-[320px] truncate text-xs text-gray-400"
+                      class="share-review-truncate text-xs text-gray-400"
                       :title="row.answer_snippet"
                     >
                       {{ row.answer_snippet }}
                     </div>
                   </td>
-                  <td class="table-cell text-gray-600">
+                  <td
+                    class="table-cell share-review-assistant-cell text-gray-600"
+                  >
                     <div class="flex min-w-0 items-center gap-2">
                       <span
-                        class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold"
+                        class="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold"
                         :class="
                           row.assistant_visibility === 'private'
                             ? 'border-amber-300 bg-amber-100 text-amber-800'
@@ -119,20 +131,32 @@
                           )
                         }}
                       </span>
-                      <span class="min-w-0 truncate">
+                      <span
+                        class="share-review-truncate min-w-0"
+                        :title="row.assistant_name"
+                      >
                         {{ row.assistant_name }}
                       </span>
                     </div>
                   </td>
-                  <td class="table-cell text-gray-600">
-                    {{ row.published_by }}
+                  <td
+                    class="table-cell share-review-publisher-cell text-gray-600"
+                  >
+                    <span
+                      class="share-review-truncate"
+                      :title="row.published_by"
+                    >
+                      {{ row.published_by }}
+                    </span>
                   </td>
                   <td class="table-cell whitespace-nowrap text-gray-500">
                     {{ formatDate(row.published_at, 'yyyy-MM-dd HH:mm') }}
                   </td>
                   <td class="table-cell text-gray-500">{{ row.view_count }}</td>
-                  <td class="table-cell" @click.stop>
-                    <div class="flex items-center justify-end gap-2">
+                  <td class="table-cell share-review-actions-cell" @click.stop>
+                    <div
+                      class="flex flex-nowrap items-center justify-end gap-2"
+                    >
                       <button
                         type="button"
                         class="text-xs text-gray-500 hover:text-primary-600"
@@ -460,5 +484,25 @@ onMounted(load)
 
 .qa-tab-active {
   @apply border-primary-500 text-primary-600;
+}
+
+.share-review-title-cell,
+.share-review-assistant-cell,
+.share-review-publisher-cell {
+  max-width: 0;
+  overflow: hidden;
+}
+
+.share-review-truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-review-actions-cell {
+  overflow: visible;
+  white-space: nowrap;
 }
 </style>

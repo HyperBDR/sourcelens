@@ -128,3 +128,31 @@ test('user identities stay distinct and row actions remain reachable', async ({
   expect(actionsBox).not.toBeNull()
   expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(1512)
 })
+
+for (const width of [320, 768, 1280]) {
+  test(`user table keeps columns reachable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await mockManagement(page)
+    await page.goto('/management/users')
+
+    const table = page.getByTestId('user-table-scroll')
+    const actions = page.getByTestId('user-actions').first()
+    await expect(actions).toBeVisible()
+
+    const overflow = await table.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      overflowX: getComputedStyle(element).overflowX,
+      scrollWidth: element.scrollWidth
+    }))
+
+    expect(overflow.overflowX).toBe('auto')
+    expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth)
+
+    await table.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth
+    })
+    const actionsBox = await actions.boundingBox()
+    expect(actionsBox).not.toBeNull()
+    expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(width)
+  })
+}

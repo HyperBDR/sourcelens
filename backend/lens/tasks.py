@@ -23,10 +23,13 @@ from .models import (
     RunExecution,
     RunTraceExport,
     ScheduledTask,
+    Session,
 )
 
 logger = logging.getLogger(__name__)
 ANSWER_RUN_DOCUMENT_COUNT_HEADER = "sourcelens_expected_document_count"
+SESSION_TITLE_TASK_EXPIRY_SECONDS = 900
+SESSION_TITLE_TASK_NAME = "lens.generate_session_title.v2"
 
 
 @shared_task(name="lens.execute_run_diagnostic", queue="lens")
@@ -149,13 +152,50 @@ def execute_answer_run(task, run_uuid, expected_document_count=None):
     return str(run.uuid)
 
 
-@shared_task(name="lens.generate_session_title", queue="lens")
+@shared_task(name=SESSION_TITLE_TASK_NAME, queue="lens")
 def generate_session_title(session_uuid, run_uuid):
     """Generate one semantic title without delaying its completed answer."""
 
     from .session_titles import generate_semantic_session_title
 
     return generate_semantic_session_title(session_uuid, run_uuid)
+
+
+@shared_task(name="lens.generate_session_title", queue="lens")
+def generate_session_title_legacy(session_uuid, run_uuid):
+    """Support title tasks published by the previous application revision."""
+
+    return generate_session_title(session_uuid, run_uuid)
+
+
+@shared_task(name="lens.expire_stale_session_titles", queue="lens")
+def expire_stale_session_titles():
+    """Fail title tasks that were not completed within their lease."""
+
+    from django.utils import timezone
+
+    cutoff = timezone.now() - timedelta(
+        seconds=SESSION_TITLE_TASK_EXPIRY_SECONDS
+    )
+    stale_statuses = [
+        Session.TitleGenerationStatus.PENDING,
+        Session.TitleGenerationStatus.GENERATING,
+    ]
+    active_run_statuses = [
+        Run.Status.QUEUED,
+        Run.Status.RUNNING,
+        Run.Status.STREAMING,
+    ]
+    return Session.objects.filter(
+        title_manually_edited=False,
+        title_generation_status__in=stale_statuses,
+        updated_at__lt=cutoff,
+    ).exclude(
+        run__status__in=active_run_statuses,
+    ).update(
+        title_generation_status=Session.TitleGenerationStatus.FAILED,
+        updated_at=timezone.now(),
+    )
 
 
 def enqueue_answer_run_task(

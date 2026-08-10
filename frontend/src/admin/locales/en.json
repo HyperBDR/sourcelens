@@ -1504,6 +1504,7 @@
     },
     "wizard": {
       "assistantDescriptionHint": "Use one sentence to explain the assistant's purpose; 80 characters or fewer is recommended.",
+      "slugHint": "Letters, numbers, hyphens, and underscores only. Up to 180 characters.",
       "step1Title": "Basics & Models",
       "step1Desc": "Set name, slug, agent model (required), and optional multimodal model",
       "agentModelHint": "Required — the LensNode uses this model to run deep analysis agents.",

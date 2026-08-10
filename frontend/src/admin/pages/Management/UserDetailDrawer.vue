@@ -2,7 +2,7 @@
   <BaseDrawer
     :show="show"
     :title="t('management.details.userTitle')"
-    :subtitle="user?.username || ''"
+    :subtitle="drawerSubtitle"
     width="2xl"
     @close="$emit('close')"
   >
@@ -44,7 +44,11 @@
         {{ t('common.retry') }}
       </BaseButton>
     </div>
-    <div v-else-if="detail" class="space-y-6" data-testid="user-detail-content">
+    <div
+      v-else-if="detail"
+      class="min-w-0 space-y-6 overflow-x-hidden"
+      data-testid="user-detail-content"
+    >
       <section class="flex flex-wrap items-center gap-4 pb-5">
         <div
           class="flex h-14 w-14 items-center justify-center rounded-full bg-brand-100 text-lg font-semibold text-brand-700"
@@ -52,10 +56,15 @@
           {{ initials(detail.subject.username) }}
         </div>
         <div class="min-w-0 flex-1">
-          <h3 class="text-lg font-semibold text-ink-900">
+          <h3 class="select-text truncate text-lg font-semibold text-ink-900">
             {{ detail.subject.username }}
           </h3>
-          <p class="text-sm text-ink-500">{{ detail.subject.email || '—' }}</p>
+          <p
+            class="select-text truncate text-sm text-ink-500"
+            :title="detail.subject.email || ''"
+          >
+            {{ detail.subject.email || '—' }}
+          </p>
           <div class="mt-2 flex flex-wrap gap-2 text-xs">
             <StatusBadge
               :status="detail.subject.is_active ? 'enabled' : 'disabled'"
@@ -81,7 +90,7 @@
       </section>
 
       <div
-        class="grid grid-cols-2 border-y border-line sm:grid-cols-4 sm:divide-x sm:divide-line"
+        class="grid grid-cols-2 divide-x divide-line border-y border-line sm:grid-cols-4"
       >
         <StatCard
           :label="t('management.details.assignedAssistants')"
@@ -110,19 +119,31 @@
           {{ t('management.details.accountOverview') }}
         </h3>
         <dl class="mt-4 grid gap-4 text-sm sm:grid-cols-2">
-          <div>
+          <div class="min-w-0">
             <dt class="text-ink-400">{{ t('dashboard.username') }}</dt>
-            <dd class="mt-1 text-ink-800">{{ detail.subject.username }}</dd>
+            <dd
+              class="select-text mt-1 truncate text-ink-800"
+              :title="detail.subject.username"
+            >
+              {{ detail.subject.username }}
+            </dd>
           </div>
-          <div>
+          <div class="min-w-0">
             <dt class="text-ink-400">{{ t('dashboard.email') }}</dt>
-            <dd class="mt-1 text-ink-800">{{ detail.subject.email || '—' }}</dd>
+            <dd
+              class="select-text mt-1 truncate text-ink-800"
+              :title="detail.subject.email || ''"
+            >
+              {{ detail.subject.email || '—' }}
+            </dd>
           </div>
-          <div>
+          <div class="min-w-0">
             <dt class="text-ink-400">{{ t('management.groups') }}</dt>
-            <dd class="mt-1 text-ink-800">{{ groupNames }}</dd>
+            <dd class="mt-1 truncate text-ink-800" :title="groupNames">
+              {{ groupNames }}
+            </dd>
           </div>
-          <div>
+          <div class="min-w-0">
             <dt class="text-ink-400">
               {{ t('management.details.accountType') }}
             </dt>
@@ -251,6 +272,13 @@ const tabs = computed(() => [
   { key: 'assistants', label: t('management.details.assistantsActivity') },
   { key: 'groups', label: t('management.groups') }
 ])
+const drawerSubtitle = computed(() => {
+  const value = props.user?.username || ''
+  if (value.length <= 72) {
+    return value
+  }
+  return `${value.slice(0, 72)}...`
+})
 const groupNames = computed(
   () =>
     detail.value?.subject.groups.map((group) => group.name).join(', ') || '—'

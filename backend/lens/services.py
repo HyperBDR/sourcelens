@@ -718,16 +718,20 @@ def create_execution_run(
 
     validate_retry_run(session, retry_of_run)
 
-    if (
-        not session.title_manually_edited
-        and session.title_generation_status
-        == Session.TitleGenerationStatus.PENDING
-        and not session.message_set.exists()
-    ):
+    if not session.title_manually_edited and not session.message_set.exists():
         fallback_title = fallback_session_title(question)
         if fallback_title:
             session.title = fallback_title
-            session.save(update_fields=["title", "updated_at"])
+            session.title_generation_status = (
+                Session.TitleGenerationStatus.PENDING
+            )
+            session.save(
+                update_fields=[
+                    "title",
+                    "title_generation_status",
+                    "updated_at",
+                ]
+            )
 
     input_message = Message.objects.create(
         session=session,
@@ -856,9 +860,15 @@ def supports_run_admission_checkpoint(lensnode):
 def _enqueue_session_title_generation(session_uuid, run_uuid):
     """Enqueue semantic title generation after the answer is committed."""
 
-    from .tasks import generate_session_title
+    from .tasks import (
+        SESSION_TITLE_TASK_EXPIRY_SECONDS,
+        generate_session_title,
+    )
 
-    generate_session_title.delay(str(session_uuid), str(run_uuid))
+    generate_session_title.apply_async(
+        args=[str(session_uuid), str(run_uuid)],
+        expires=SESSION_TITLE_TASK_EXPIRY_SECONDS,
+    )
 
 
 def analyze_multimodal_intent(run):

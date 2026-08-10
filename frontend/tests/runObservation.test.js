@@ -70,7 +70,7 @@ test('run overview separates executor status from business outcome', async () =>
   assert.match(contents, /lensRuns\.businessOutcome/)
 })
 
-test('run detail exposes diagnosis tab after files and before the panel', async () => {
+test('run detail exposes diagnosis tab before trace and files', async () => {
   const contents = await source()
   const overviewIndex = contents.indexOf("activeDetailTab = 'overview'")
   const diagnosisIndex = contents.indexOf("activeDetailTab = 'diagnosis'")
@@ -80,9 +80,9 @@ test('run detail exposes diagnosis tab after files and before the panel', async 
   assert.match(contents, /data-testid="close-run-detail"/)
   assert.match(contents, /data-testid="run-diagnosis-tab"/)
   assert.ok(overviewIndex >= 0)
-  assert.ok(traceIndex > overviewIndex)
+  assert.ok(diagnosisIndex > overviewIndex)
+  assert.ok(traceIndex > diagnosisIndex)
   assert.ok(filesIndex > traceIndex)
-  assert.ok(diagnosisIndex > filesIndex)
   assert.match(contents, /RunDiagnosisPanel/)
 })
 

@@ -273,7 +273,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import TaskExecutionDetailPanel from '@/components/task-management/TaskExecutionDetailPanel.vue'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const { showError } = useToast()
 const route = useRoute()
 

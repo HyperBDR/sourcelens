@@ -86,9 +86,21 @@
 
           <div
             v-else
-            class="relative overflow-x-auto rounded-lg border border-line bg-surface"
+            class="assistants-table-wrap overflow-x-auto rounded-lg border border-line bg-surface"
           >
-            <table class="min-w-full divide-y divide-line">
+            <table
+              class="min-w-[72rem] w-full table-fixed divide-y divide-line md:min-w-0"
+            >
+              <colgroup>
+                <col style="width: 26%" />
+                <col style="width: 12%" />
+                <col style="width: 10%" />
+                <col style="width: 8%" />
+                <col style="width: 10%" />
+                <col style="width: 8%" />
+                <col style="width: 12%" />
+                <col style="width: 11.5rem" />
+              </colgroup>
               <thead class="bg-surface-sunken">
                 <tr>
                   <th
@@ -107,15 +119,18 @@
                   :key="row.uuid"
                   class="transition-colors hover:bg-line-soft"
                 >
-                  <td class="table-cell">
+                  <td class="table-cell assistant-name-cell">
                     <button
                       type="button"
-                      class="assistant-name-action"
+                      class="assistant-name-action block max-w-full truncate text-left"
                       @click="openDetails(row)"
                     >
                       {{ row.name }}
                     </button>
-                    <div class="mt-1 font-mono text-xs text-ink-400">
+                    <div
+                      class="assistant-slug mt-1 font-mono text-xs text-ink-400"
+                      :title="row.slug"
+                    >
                       {{ row.slug }}
                     </div>
                   </td>
@@ -196,8 +211,8 @@
                     </BaseButton>
                     <span v-else class="text-ink-400">{{ emptyValue }}</span>
                   </td>
-                  <td class="table-cell">
-                    <div class="flex flex-wrap items-center gap-2">
+                  <td class="table-cell assistant-actions-cell">
+                    <div class="flex flex-nowrap items-center gap-2">
                       <BaseButton
                         v-if="row.status === 'active'"
                         size="sm"
@@ -704,7 +719,7 @@ function buildPayload() {
   return {
     name: form.value.name,
     description: form.value.description?.trim() || '',
-    slug: form.value.slug,
+    slug: form.value.slug?.trim() || '',
     lensnode_uuid: form.value.lensnode_uuid,
     selected_task: form.value.selected_task,
     selected_dirs:
@@ -839,6 +854,10 @@ onMounted(load)
 </script>
 
 <style scoped>
+.assistants-table-wrap {
+  max-width: 100%;
+}
+
 .table-head {
   @apply border-b border-line px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-500;
 }
@@ -847,9 +866,30 @@ onMounted(load)
   @apply px-4 py-4 text-sm text-ink-700;
 }
 
-.assistant-type-column {
+.assistant-name-cell {
+  max-width: 0;
+  overflow: hidden;
+}
+
+.assistant-slug {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-actions-cell {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.table-cell.assistant-type-column,
+.table-head.assistant-type-column {
   white-space: nowrap;
   word-break: keep-all;
+  padding-left: clamp(0.375rem, 0.9vw, 0.5rem);
+  padding-right: clamp(2.25rem, 4vw, 3rem);
 }
 
 .tool-count {

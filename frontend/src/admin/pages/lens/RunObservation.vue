@@ -64,9 +64,7 @@
                   {{ t('lensRuns.statusCancelled') }}
                 </option>
               </BaseSelect>
-              <div
-                class="flex w-full shrink-0 items-center gap-2 md:w-auto"
-              >
+              <div class="flex w-full shrink-0 items-center gap-2 md:w-auto">
                 <BaseDateInput
                   v-model="filters.start_date"
                   compact
@@ -355,6 +353,16 @@
               </span>
             </h2>
             <div class="flex shrink-0 items-center gap-2">
+              <BaseButton
+                v-if="canDiagnoseRun"
+                data-testid="generate-run-diagnosis"
+                size="sm"
+                variant="outline"
+                :disabled="!canGenerateDiagnosis"
+                @click="generateDiagnosis"
+              >
+                {{ t('lensRuns.generateDiagnosis') }}
+              </BaseButton>
               <button
                 data-testid="close-run-detail"
                 type="button"
@@ -396,6 +404,16 @@
                 </button>
                 <button
                   class="detail-tab"
+                  data-testid="run-diagnosis-tab"
+                  :class="
+                    activeDetailTab === 'diagnosis' ? 'detail-tab-active' : ''
+                  "
+                  @click="activeDetailTab = 'diagnosis'"
+                >
+                  {{ t('lensRuns.tabDiagnosis') }}
+                </button>
+                <button
+                  class="detail-tab"
                   :class="
                     activeDetailTab === 'trace' ? 'detail-tab-active' : ''
                   "
@@ -418,16 +436,6 @@
                   <span class="ml-1 text-xs text-gray-400">{{
                     (detail.output_files || []).length
                   }}</span>
-                </button>
-                <button
-                  class="detail-tab"
-                  data-testid="run-diagnosis-tab"
-                  :class="
-                    activeDetailTab === 'diagnosis' ? 'detail-tab-active' : ''
-                  "
-                  @click="activeDetailTab = 'diagnosis'"
-                >
-                  {{ t('lensRuns.tabDiagnosis') }}
                 </button>
               </div>
 
@@ -930,6 +938,7 @@
               <!-- Diagnosis tab -->
               <RunDiagnosisPanel
                 v-show="activeDetailTab === 'diagnosis'"
+                ref="diagnosisPanel"
                 :run-uuid="selectedUuid"
                 :active="activeDetailTab === 'diagnosis'"
                 @navigate="navigateFromEvidence"
@@ -1190,7 +1199,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
@@ -1210,11 +1219,13 @@ import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
+import { useUserStore } from '@/store/user'
 
 const { t } = useI18n()
 const { showError } = useToast()
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const runs = ref([])
@@ -1229,6 +1240,22 @@ const detail = ref(null)
 const selectedUuid = ref(null)
 const activeDetailTab = ref('overview')
 const previewFile = ref(null)
+const diagnosisPanel = ref(null)
+
+const canDiagnoseRun = computed(() => {
+  const user = userStore.userInfo
+  return Boolean(
+    user?.is_staff ||
+      user?.is_superuser ||
+      userStore.userHasPermission('lens.run_diagnostics')
+  )
+})
+
+const canGenerateDiagnosis = computed(
+  () =>
+    Boolean(detail.value) &&
+    ['done', 'failed', 'cancelled'].includes(detail.value.status)
+)
 
 const filters = ref({
   q: '',
@@ -1252,9 +1279,7 @@ const visionQuery = computed(() => {
   return step?.multimodal?.query || ''
 })
 
-const plannedEvidence = computed(
-  () => detail.value?.planned_evidence || {}
-)
+const plannedEvidence = computed(() => detail.value?.planned_evidence || {})
 const hasPlannedEvidence = computed(
   () => Object.keys(plannedEvidence.value).length > 0
 )
@@ -1554,6 +1579,13 @@ function closeDetail() {
   selectedUuid.value = null
   detail.value = null
   previewFile.value = null
+}
+
+async function generateDiagnosis() {
+  if (!canGenerateDiagnosis.value) return
+  activeDetailTab.value = 'diagnosis'
+  await nextTick()
+  diagnosisPanel.value?.generate()
 }
 
 function navigateFromEvidence(evidenceRef) {

@@ -702,7 +702,7 @@ ChartJS.register(
   Legend
 )
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const { showError } = useToast()
 
 function formatNum(value) {
