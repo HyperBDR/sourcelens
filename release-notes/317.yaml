@@ -1,0 +1,4 @@
+type: fix
+audience: user
+en: "Prevented rapid repeated New Session clicks from creating duplicate empty sessions in the chat sidebar."
+zh-CN: "修复聊天侧边栏快速重复点击新建会话时创建多个空会话的问题。"
