@@ -22,6 +22,7 @@ async function mockChat(page) {
       path === '/api/lens/sessions/session-1/attachments/' &&
       request.method() === 'POST'
     ) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
       return
     }
 
@@ -45,6 +46,7 @@ async function mockChat(page) {
         {
           uuid: 'session-1',
           title: 'Image layout test',
+          status: 'active',
           assistant: 'assistant-1'
         }
       ],
@@ -60,7 +62,12 @@ async function mockChat(page) {
 
 async function pasteImage(page) {
   await page.locator('.composer-input').evaluate((element) => {
-    const data = new Uint8Array([137, 80, 78, 71])
+    const encoded =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk' +
+      '+A8AAQUBAScY42YAAAAASUVORK5CYII='
+    const data = Uint8Array.from(atob(encoded), (character) =>
+      character.charCodeAt(0)
+    )
     const transfer = new DataTransfer()
     transfer.items.add(new File([data], 'pasted.png', { type: 'image/png' }))
     element.dispatchEvent(

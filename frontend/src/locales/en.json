@@ -528,11 +528,17 @@
     "virtualEmail": {
       "label": "AI Email Username",
       "placeholder": "Enter username",
-      "info": "This AI email address is used to intelligently process your information."
+      "preview": "Full email address",
+      "info": "This AI email address is used to intelligently process your information.",
+      "tooShort": "Username must be at least 3 characters",
+      "notAvailable": "This username is already in use",
+      "checkFailed": "Unable to check username availability. Please try again later.",
+      "checking": "Checking availability..."
     },
     "scene": {
       "label": "Usage Scenario",
-      "help": "Select your primary use case. The system will optimize AI prompt configurations based on your selection"
+      "help": "Select your primary use case. The system will optimize AI prompt configurations based on your selection",
+      "loadError": "Unable to load scenarios. Please refresh and try again."
     },
     "googleSetup": {
       "subtitle": "Please complete your profile setup"
@@ -541,6 +547,10 @@
       "subtitle": "Please complete your profile setup"
     },
     "google": {
+      "processing": "Processing Google sign-in",
+      "pleaseWait": "Please wait...",
+      "error": "Google sign-in failed",
+      "callbackError": "Google callback processing failed. Please try again.",
       "completeTitle": "Complete Account Setup",
       "completeSubtitle": "Please fill in the information below to complete your account setup",
       "loggedInAs": "Logged in as"

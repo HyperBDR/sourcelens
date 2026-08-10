@@ -70,29 +70,27 @@ test('run overview separates executor status from business outcome', async () =>
   assert.match(contents, /lensRuns\.businessOutcome/)
 })
 
-test('run detail places diagnosis action before close and orders tabs', async () => {
+test('run detail exposes diagnosis tab after files and before the panel', async () => {
   const contents = await source()
-  const actionIndex = contents.indexOf('data-testid="generate-run-diagnosis"')
-  const closeIndex = contents.indexOf('data-testid="close-run-detail"')
   const overviewIndex = contents.indexOf("activeDetailTab = 'overview'")
   const diagnosisIndex = contents.indexOf("activeDetailTab = 'diagnosis'")
   const traceIndex = contents.indexOf("activeDetailTab = 'trace'")
   const filesIndex = contents.indexOf("activeDetailTab = 'files'")
 
-  assert.ok(actionIndex >= 0)
-  assert.ok(closeIndex > actionIndex)
+  assert.match(contents, /data-testid="close-run-detail"/)
+  assert.match(contents, /data-testid="run-diagnosis-tab"/)
   assert.ok(overviewIndex >= 0)
-  assert.ok(diagnosisIndex > overviewIndex)
-  assert.ok(traceIndex > diagnosisIndex)
+  assert.ok(traceIndex > overviewIndex)
   assert.ok(filesIndex > traceIndex)
-  assert.match(contents, /canDiagnoseRun/)
+  assert.ok(diagnosisIndex > filesIndex)
   assert.match(contents, /RunDiagnosisPanel/)
 })
 
-test('generate diagnosis switches tab and invokes the diagnosis panel', async () => {
+test('diagnosis panel is activated by the diagnosis tab', async () => {
   const contents = await source()
 
-  assert.match(contents, /activeDetailTab\.value = 'diagnosis'/)
-  assert.match(contents, /diagnosisPanel\.value\?\.generate\(\)/)
+  assert.match(contents, /data-testid="run-diagnosis-tab"/)
+  assert.match(contents, /activeDetailTab === 'diagnosis'/)
+  assert.match(contents, /:active="activeDetailTab === 'diagnosis'"/)
   assert.match(contents, /@navigate="navigateFromEvidence"/)
 })
