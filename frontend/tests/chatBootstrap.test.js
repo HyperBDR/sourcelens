@@ -5,6 +5,12 @@ import test from 'node:test'
 const chatSource = () =>
   readFile(new URL('../src/pages/lens/Chat.vue', import.meta.url), 'utf8')
 
+const assistantSwitcherSource = () =>
+  readFile(
+    new URL('../src/components/lens/AssistantSwitcher.vue', import.meta.url),
+    'utf8'
+  )
+
 test('reveals loaded chat before waiting for active run recovery', async () => {
   const source = await chatSource()
   const messagesLoaded = source.indexOf('messages.value = loadedMessages')
@@ -66,4 +72,25 @@ test('selects a conversation when its route query changes', async () => {
   assert.notEqual(queryWatcher, -1)
   assert.notEqual(sessionLookup, -1)
   assert.notEqual(selectWithoutRouteUpdate, -1)
+})
+
+test('switches assistants through the assistant chat route', async () => {
+  const source = await assistantSwitcherSource()
+
+  assert.match(
+    source,
+    /await router\.push\(`\/lens\/assistants\/\$\{slug\}\/chat`\)/
+  )
+})
+
+test('loads sessions after selecting the route assistant', async () => {
+  const source = await chatSource()
+  const selectAssistant = source.indexOf(
+    'selectedAssistantUuid.value = current.uuid'
+  )
+  const loadSessions = source.indexOf('await loadSessions()', selectAssistant)
+
+  assert.notEqual(selectAssistant, -1)
+  assert.notEqual(loadSessions, -1)
+  assert.ok(loadSessions > selectAssistant)
 })

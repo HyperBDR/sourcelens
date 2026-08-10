@@ -161,6 +161,13 @@ def generate_session_title(session_uuid, run_uuid):
     return generate_semantic_session_title(session_uuid, run_uuid)
 
 
+@shared_task(name="lens.generate_session_title", queue="lens")
+def generate_session_title_legacy(session_uuid, run_uuid):
+    """Support title tasks published by the previous application revision."""
+
+    return generate_session_title(session_uuid, run_uuid)
+
+
 @shared_task(name="lens.expire_stale_session_titles", queue="lens")
 def expire_stale_session_titles():
     """Fail title tasks that were not completed within their lease."""
@@ -174,10 +181,17 @@ def expire_stale_session_titles():
         Session.TitleGenerationStatus.PENDING,
         Session.TitleGenerationStatus.GENERATING,
     ]
+    active_run_statuses = [
+        Run.Status.QUEUED,
+        Run.Status.RUNNING,
+        Run.Status.STREAMING,
+    ]
     return Session.objects.filter(
         title_manually_edited=False,
         title_generation_status__in=stale_statuses,
         updated_at__lt=cutoff,
+    ).exclude(
+        run_set__status__in=active_run_statuses,
     ).update(
         title_generation_status=Session.TitleGenerationStatus.FAILED,
         updated_at=timezone.now(),

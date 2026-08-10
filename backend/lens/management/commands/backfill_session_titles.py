@@ -48,10 +48,6 @@ class Command(BaseCommand):
                 continue
 
             title = fallback_session_title(user_message.content)
-            if not title:
-                counts["skipped"] += 1
-                continue
-
             runs = session.run_set.filter(
                 status=Run.Status.DONE,
                 output_message__isnull=False,
@@ -69,13 +65,17 @@ class Command(BaseCommand):
                 ),
                 None,
             )
+            if not title and run is None:
+                counts["skipped"] += 1
+                continue
+
             status = (
                 Session.TitleGenerationStatus.PENDING
                 if run is not None
                 else Session.TitleGenerationStatus.FAILED
             )
             if options["dry_run"]:
-                counts["fallback"] += 1
+                counts["fallback"] += int(bool(title))
                 counts["queued"] += int(run is not None)
                 continue
 
@@ -90,7 +90,7 @@ class Command(BaseCommand):
             if not updated:
                 continue
 
-            counts["fallback"] += 1
+            counts["fallback"] += int(bool(title))
             if run is None:
                 counts["failed"] += 1
                 continue

@@ -335,6 +335,10 @@ def delete_document_attachment(
         return False
     document_attachment_storage().delete(metadata["storage_name"])
     cache.delete(_attachment_key(attachment_uuid))
+    _remove_from_index(
+        _session_index_key(metadata["session_uuid"]),
+        attachment_uuid,
+    )
     _release_user_quota(
         metadata["uploaded_by_id"],
         metadata.get("quota_slot"),
@@ -440,6 +444,19 @@ def _append_index(key, attachment_uuid, metadata):
         attachment_uuids,
         timeout=max(_remaining_seconds(metadata), 1),
     )
+
+
+def _remove_from_index(key, attachment_uuid):
+    """Remove one attachment UUID without retaining a stale session entry."""
+
+    attachment_uuids = list(cache.get(key) or [])
+    remaining = [
+        value for value in attachment_uuids if value != attachment_uuid
+    ]
+    if not remaining:
+        cache.delete(key)
+        return
+    cache.set(key, remaining, timeout=_attachment_ttl_seconds())
 
 
 def _remaining_seconds(metadata):

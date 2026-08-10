@@ -18,7 +18,11 @@ from lens.session_titles import (
     generate_semantic_session_title,
     normalize_generated_title,
 )
-from lens.tasks import expire_stale_session_titles, generate_session_title
+from lens.tasks import (
+    expire_stale_session_titles,
+    generate_session_title,
+    generate_session_title_legacy,
+)
 
 
 class SessionTitleTests(TestCase):
@@ -185,6 +189,31 @@ class SessionTitleTests(TestCase):
             900,
         )
 
+    @patch("lens.tasks.generate_session_title.apply_async")
+    def test_backfill_queues_attachment_only_completed_session(self, delay):
+        legacy = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title_generation_status=Session.TitleGenerationStatus.SKIPPED,
+        )
+        run = self._completed_run(question="", session=legacy)
+        run.status = Run.Status.DONE
+        run.outcome = Run.Outcome.COMPLETED
+        run.save(update_fields=["status", "outcome"])
+
+        call_command("backfill_session_titles")
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.title, "")
+        self.assertEqual(
+            legacy.title_generation_status,
+            Session.TitleGenerationStatus.PENDING,
+        )
+        delay.assert_called_once_with(
+            args=[str(legacy.uuid), str(run.uuid)],
+            expires=900,
+        )
+
     def test_title_task_is_versioned_and_stale_titles_expire(self):
         stale_pending = Session.objects.create(
             assistant=self.assistant,
@@ -198,6 +227,15 @@ class SessionTitleTests(TestCase):
             title="Stale generating fallback",
             title_generation_status=Session.TitleGenerationStatus.GENERATING,
         )
+        active = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            title="Active run fallback",
+            title_generation_status=Session.TitleGenerationStatus.PENDING,
+        )
+        active_run = self._completed_run(session=active)
+        active_run.status = Run.Status.RUNNING
+        active_run.save(update_fields=["status"])
         fresh = Session.objects.create(
             assistant=self.assistant,
             user=self.user,
@@ -206,7 +244,7 @@ class SessionTitleTests(TestCase):
         )
         stale_time = timezone.now() - timedelta(minutes=16)
         Session.objects.filter(
-            pk__in=[stale_pending.pk, stale_generating.pk],
+            pk__in=[stale_pending.pk, stale_generating.pk, active.pk],
         ).update(updated_at=stale_time)
 
         expired = expire_stale_session_titles()
@@ -214,6 +252,7 @@ class SessionTitleTests(TestCase):
         self.assertEqual(expired, 2)
         stale_pending.refresh_from_db()
         stale_generating.refresh_from_db()
+        active.refresh_from_db()
         fresh.refresh_from_db()
         self.assertEqual(
             stale_pending.title_generation_status,
@@ -224,12 +263,20 @@ class SessionTitleTests(TestCase):
             Session.TitleGenerationStatus.FAILED,
         )
         self.assertEqual(
+            active.title_generation_status,
+            Session.TitleGenerationStatus.PENDING,
+        )
+        self.assertEqual(
             fresh.title_generation_status,
             Session.TitleGenerationStatus.PENDING,
         )
         self.assertEqual(
             generate_session_title.name,
             "lens.generate_session_title.v2",
+        )
+        self.assertEqual(
+            generate_session_title_legacy.name,
+            "lens.generate_session_title",
         )
 
     def test_database_defaults_support_old_session_inserts(self):

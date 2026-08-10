@@ -26,7 +26,7 @@ def _find_reusable_empty_session(assistant, user):
         status=Session.Status.ACTIVE,
         title="",
         title_manually_edited=False,
-    ).order_by("created_at", "pk")
+    ).select_for_update().order_by("created_at", "pk")
     for session in candidates:
         if session.message_set.exists():
             continue
@@ -53,7 +53,6 @@ def lock_assistant_for_new_work(assistant, user=None):
     return locked
 
 
-@transaction.atomic
 @transaction.atomic
 def create_assistant_session(assistant_uuid, user, title=""):
     """Create a session while serializing against assistant archival."""
