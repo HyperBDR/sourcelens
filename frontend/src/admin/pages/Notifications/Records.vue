@@ -482,7 +482,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const { showError } = useToast()
 
 const loading = ref(false)
