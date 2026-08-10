@@ -94,3 +94,20 @@ test('loads sessions after selecting the route assistant', async () => {
   assert.notEqual(loadSessions, -1)
   assert.ok(loadSessions > selectAssistant)
 })
+
+test('locks new-session creation while the request is pending', async () => {
+  const source = await chatSource()
+  const createSession = source.indexOf('async function createNewSession(')
+  const createRequest = source.indexOf(
+    'session = await createSession(',
+    createSession
+  )
+  const lock = source.indexOf('creatingSession.value = true', createSession)
+  const guard = source.indexOf('creatingSession.value)', createSession)
+
+  assert.notEqual(createSession, -1)
+  assert.notEqual(createRequest, -1)
+  assert.ok(lock < createRequest)
+  assert.ok(guard < createRequest)
+  assert.match(source, /:disabled="creatingSession"/)
+})

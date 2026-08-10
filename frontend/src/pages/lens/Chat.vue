@@ -102,6 +102,7 @@
           class="new-chat-btn"
           :class="sidebarCollapsedActive ? 'new-chat-btn-collapsed' : ''"
           type="button"
+          :disabled="creatingSession"
           @click="createNewSession"
         >
           <Plus :size="18" :stroke-width="2.25" aria-hidden="true" />
@@ -272,6 +273,7 @@
           type="button"
           class="sidebar-collapse-btn"
           :aria-label="t('lens.chat.newSession')"
+          :disabled="creatingSession"
           @click="createNewSession"
         >
           <Plus :size="20" :stroke-width="2.1" aria-hidden="true" />
@@ -1556,6 +1558,7 @@ const sidebarCollapsed = ref(false)
 const showArchivedSessions = ref(false)
 const deleteSessionTarget = ref(null)
 const deletingSession = ref(false)
+const creatingSession = ref(false)
 const renamingSessionUuid = ref('')
 const renameDraft = ref('')
 const composerRef = ref(null)
@@ -2474,9 +2477,10 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
 }
 
 async function createNewSession(notify = true) {
-  if (!selectedAssistant.value) {
+  if (!selectedAssistant.value || creatingSession.value) {
     return null
   }
+  creatingSession.value = true
   mySharesOpen.value = false
   const leavingArchivedView = showArchivedSessions.value
   showArchivedSessions.value = false
@@ -2491,6 +2495,7 @@ async function createNewSession(notify = true) {
       title: ''
     })
   } catch {
+    creatingSession.value = false
     showError(t('lens.chat.sessionCreateFailed'))
     return null
   }
@@ -2523,6 +2528,7 @@ async function createNewSession(notify = true) {
     showSuccess(t('lens.chat.sessionCreated'))
   }
 
+  creatingSession.value = false
   return session
 }
 
