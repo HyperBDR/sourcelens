@@ -47,16 +47,27 @@ def activity_from_event(event):
     return "running"
 
 
-def build_initial_messages(history, question):
-    """Prepend bounded conversation history to the current question."""
+def build_initial_messages(history, question, image_data_urls=None):
+    """Build the current turn and optional text-only conversation history."""
 
     messages = []
-    for item in history or []:
-        role = item.get("role")
-        content = item.get("content")
-        if role in ("user", "assistant") and content:
-            messages.append({"role": role, "content": content})
-    messages.append({"role": "user", "content": question})
+    if not image_data_urls:
+        for item in history or []:
+            role = item.get("role")
+            content = item.get("content")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+    content = question
+    if image_data_urls:
+        content = [{"type": "text", "text": question}]
+        content.extend(
+            {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            }
+            for data_url in image_data_urls
+        )
+    messages.append({"role": "user", "content": content})
     return messages
 
 

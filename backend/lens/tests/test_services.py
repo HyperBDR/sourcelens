@@ -4,6 +4,7 @@ import hashlib
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from agentcore_task.adapters.django.models import TaskExecution
 from asgiref.sync import async_to_sync
@@ -35,6 +36,7 @@ from lens.models import (
     GlobalSetting,
     LensNode,
     Message,
+    MessageAttachment,
     Run,
     RunOutputFile,
     RunStep,
@@ -808,6 +810,48 @@ class LensServiceTests(TransactionTestCase):
             build_artifacts.return_value,
         )
         build_artifacts.assert_called_once_with(run)
+
+    @patch("lens.services.attachment_data_url")
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_includes_images_for_final_agent(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+        mock_attachment_data_url,
+    ):
+        sender = mock_async_to_sync.return_value
+        mock_attachment_data_url.return_value = (
+            "data:image/png;base64,encoded"
+        )
+        self.assistant.multimodal_model_ref = uuid4()
+        self.assistant.save(update_fields=["multimodal_model_ref"])
+        attachment = MessageAttachment.objects.create(
+            session=self.session,
+            uploaded_by=self.user,
+            kind=MessageAttachment.Kind.IMAGE,
+            original_name="error.png",
+            mime_type="image/png",
+            byte_size=7,
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="What is wrong?",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+
+        dispatch_run_to_lensnode(run, "What is wrong?")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            payload["image_data_urls"],
+            ["data:image/png;base64,encoded"],
+        )
+        self.assertEqual(
+            payload["agent_model_ref"],
+            str(self.assistant.multimodal_model_ref),
+        )
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")

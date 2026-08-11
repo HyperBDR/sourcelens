@@ -1113,6 +1113,29 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert model.options["temperature"] == 0
 
 
+def test_route_selection_includes_current_images_in_classifier_input():
+    class Model:
+        def invoke(self, messages, **_kwargs):
+            current = messages[-1]
+            assert current.content[0]["type"] == "text"
+            assert current.content[1]["type"] == "image_url"
+            return SimpleNamespace(
+                content=(
+                    '{"intent":"informational","complexity":"simple",'
+                    '"route":"direct_answer","required_capabilities":[],'
+                    '"evidence_requirement":"none"}'
+                )
+            )
+
+    decision = agent_runtime._select_general_chat_route(
+        Model(),
+        "这个报错是什么原因",
+        image_data_urls=["data:image/png;base64,encoded"],
+    )
+
+    assert decision["route"] == "direct_answer"
+
+
 def test_route_selection_recovers_missing_tool_evidence_capabilities():
     class Model:
         def invoke(self, _messages, **_kwargs):

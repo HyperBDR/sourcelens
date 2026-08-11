@@ -263,6 +263,7 @@
       "emptyAnswerHint": "回答没能顺利返回，可能是网络波动等临时原因。点「重试」再发送一次即可。",
       "errorModelTimeout": "回答未能返回：大语言模型当前响应过慢，系统多次重试后仍超时。这通常是模型服务繁忙所致，并非平台故障。请稍后点「重试」。",
       "errorNodeLost": "回答中断：执行节点连接异常。请点「重试」。",
+      "errorImagePreprocessing": "图片识别失败，请检查配置后重试。",
       "retryAction": "重试",
       "loadFailed": "加载 Lens chat 失败。",
       "assistantNotFound": "你访问的助手不存在，请联系管理员获取有效的助手链接。",

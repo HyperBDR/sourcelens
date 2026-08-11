@@ -64,6 +64,7 @@ def _answer_general_chat_directly(
             else _build_initial_messages(
                 command.get("history"),
                 command.get("question", ""),
+                command.get("image_data_urls"),
             )
         ),
     ]

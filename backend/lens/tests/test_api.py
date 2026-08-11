@@ -33,7 +33,7 @@ from agentcore_task.adapters.django.models import TaskExecution
 from accounts.models import Role
 from lens.datasource_services import (
     DataSourceDispatchError,
-    test_datasource_connection,
+    test_datasource_connection as run_datasource_connection_test,
 )
 from lens.lensnode_auth import hash_lensnode_token
 from lens.models import (
@@ -70,6 +70,7 @@ from lens.services import (
     resolve_loaded_skill_environment,
     validate_run_dispatch,
 )
+
 from lens.skill_packages import package_zip_bytes
 from lens.tasks import acquire_datasource_lock, release_datasource_lock
 
@@ -4621,7 +4622,7 @@ class LensApiTests(TestCase):
                 return_value={"status": "success"},
             ),
         ):
-            test_datasource_connection(
+            run_datasource_connection_test(
                 self.lensnode,
                 "git",
                 config={

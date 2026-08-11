@@ -44,7 +44,7 @@ class TestManagementUserBulk:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"count": 2}
+        assert response.json()["data"] == {"count": 2}
         assert not User.objects.filter(
             pk__in=[user.pk for user in users],
             is_active=True,
@@ -93,7 +93,7 @@ class TestManagementRoleBulk:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"count": 2}
+        assert response.json()["data"] == {"count": 2}
         assert not Role.objects.filter(
             pk__in=[role.pk for role in roles],
             is_active=True,
@@ -128,7 +128,7 @@ class TestManagementGroupBulkDelete:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"count": 2}
+        assert response.json()["data"] == {"count": 2}
         assert not Group.objects.filter(
             pk__in=[group.pk for group in groups]
         ).exists()

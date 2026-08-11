@@ -53,10 +53,40 @@ test.describe('Lens image Q&A', () => {
     }, token)
 
     await page.goto(`/lens/assistants/${ASSISTANT_SLUG}/chat`)
-    await page.waitForSelector('.composer-input', { timeout: 20000 })
+    const sessionUuid = await page.evaluate(async (slug) => {
+      const token = window.localStorage.getItem('access_token')
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+      const assistantResponse = await fetch(
+        '/api/lens/assistants/?page_size=1000&page=1',
+        { headers }
+      )
+      const assistantPayload = await assistantResponse.json()
+      const assistants =
+        assistantPayload.results ||
+        assistantPayload.data?.results ||
+        assistantPayload.data ||
+        []
+      const assistant = assistants.find((item) => item.slug === slug)
+      if (!assistant) throw new Error(`assistant not found: ${slug}`)
+      const sessionResponse = await fetch('/api/lens/sessions/', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ assistant_uuid: assistant.uuid, title: '' })
+      })
+      const sessionPayload = await sessionResponse.json()
+      if (!sessionResponse.ok) {
+        throw new Error(JSON.stringify(sessionPayload))
+      }
+      return sessionPayload.uuid || sessionPayload.data?.uuid
+    }, ASSISTANT_SLUG)
 
-    // Start a clean session so no in-flight run blocks the send button.
-    await page.click('text=New session')
+    await page.goto(
+      `/lens/assistants/${ASSISTANT_SLUG}/chat?session=${sessionUuid}`
+    )
+    await page.waitForSelector('.composer-input', { timeout: 20000 })
     await page.waitForFunction(
       () => !document.querySelector('.composer-action-btn-stop'),
       { timeout: 20000 }
@@ -77,7 +107,9 @@ test.describe('Lens image Q&A', () => {
     await page.click('.composer-action-btn')
 
     // 1) The user bubble shows the uploaded image.
-    await expect(page.locator('.message-images img').first()).toBeVisible({
+    await expect(
+      page.locator('img[alt="error-screenshot.png"]').first()
+    ).toBeVisible({
       timeout: 20000
     })
 
@@ -98,6 +130,8 @@ test.describe('Lens image Q&A', () => {
       .toBe('ANSWER')
 
     // 3) After the server reload, the user image still renders (authed fetch).
-    await expect(page.locator('.message-images img').first()).toBeVisible()
+    await expect(
+      page.locator('img[alt="error-screenshot.png"]').first()
+    ).toBeVisible()
   })
 })
