@@ -1,0 +1,4 @@
+type: fix
+audience: user
+en: "Fixed image attachments being ignored by final answers. Uploaded images are now passed through image analysis and delivered to the answering model."
+zh-CN: "修复图片附件被最终回答忽略的问题。上传的图片现在会经过图像分析并传递给最终回答模型。"
