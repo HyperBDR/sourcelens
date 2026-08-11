@@ -324,6 +324,19 @@ const renderedContent = computed(() => {
   @apply border border-line-strong px-3 py-2 text-theme-secondary;
 }
 
+@media (max-width: 639px) {
+  .markdown-content :deep(table) {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .markdown-content :deep(th),
+  .markdown-content :deep(td) {
+    word-break: keep-all;
+    overflow-wrap: normal;
+  }
+}
+
 .markdown-content :deep(a) {
   @apply text-primary-600 hover:text-primary-700 underline;
 }
