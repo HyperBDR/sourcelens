@@ -585,3 +585,34 @@ def test_knowledge_prompt_uses_explicit_answer_language():
     assert prompt.startswith("ANSWER LANGUAGE REQUIREMENT: English")
     assert "Conversation history" in prompt
     assert prompt.count("ANSWER LANGUAGE REQUIREMENT: English") == 2
+
+
+def test_knowledge_prompt_preserves_simplified_chinese():
+    prompt = _knowledge_system_prompt(
+        {"prompt": "Analyze grounded evidence."},
+        {
+            "question": "请分析所附文档",
+            "answer_language": "zh-CN",
+            "target_dirs": [],
+        },
+    )
+
+    assert prompt.startswith(
+        "ANSWER LANGUAGE REQUIREMENT: Simplified Chinese"
+    )
+    assert "ANSWER LANGUAGE REQUIREMENT: Chinese" not in prompt
+
+
+def test_knowledge_prompt_preserves_traditional_chinese():
+    prompt = _knowledge_system_prompt(
+        {"prompt": "Analyze grounded evidence."},
+        {
+            "question": "請分析所附文件",
+            "answer_language": "zh-TW",
+            "target_dirs": [],
+        },
+    )
+
+    assert prompt.startswith(
+        "ANSWER LANGUAGE REQUIREMENT: Traditional Chinese"
+    )

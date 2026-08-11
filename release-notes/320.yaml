@@ -1,0 +1,4 @@
+type: fix
+audience: user
+en: "Fixed LensNode answers switching from Simplified Chinese to Traditional Chinese by preserving the configured Chinese script."
+zh-CN: "修复 LensNode 回答从简体中文切换为繁体中文的问题，确保保留用户配置的中文简繁体变体。"
