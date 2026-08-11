@@ -757,6 +757,40 @@
                       />
                     </svg>
                   </button>
+                  <button
+                    v-if="isMobile && !isAnonymous && message.run"
+                    type="button"
+                    class="icon-btn mobile-share-btn"
+                    :class="{ 'icon-btn-shared': isMessageShared(message) }"
+                    :title="
+                      isMessageShared(message)
+                        ? t('lens.qa.sharedButton')
+                        : t('lens.qa.shareButton')
+                    "
+                    :aria-label="
+                      isMessageShared(message)
+                        ? t('lens.qa.sharedButton')
+                        : t('lens.qa.shareButton')
+                    "
+                    @click="openShare(message)"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <circle cx="18" cy="5" r="3" />
+                      <circle cx="6" cy="12" r="3" />
+                      <circle cx="18" cy="19" r="3" />
+                      <path
+                        d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
                   <template v-if="!isMobile">
                     <button
                       v-if="message.content"
@@ -862,13 +896,6 @@
                       />
                     </svg>
                   </button>
-                  <RowActionMenu
-                    v-if="isMobile && messageSecondaryActions(message).length"
-                    class="message-more-actions"
-                    :actions="messageSecondaryActions(message)"
-                    :label="t('lens.chat.messageActions')"
-                    @select="handleMessageAction(message, $event)"
-                  />
                 </div>
               </div>
             </div>
@@ -1239,6 +1266,16 @@
                 </div>
               </div>
             </div>
+
+            <p
+              v-if="canCompose && isMobile"
+              class="disclaimer mobile-disclaimer"
+            >
+              {{
+                t('lens.chat.disclaimer') ||
+                '回答由 AI 生成，请自行核实关键信息。'
+              }}
+            </p>
           </div>
         </div>
 
@@ -1294,6 +1331,21 @@
                     <span aria-hidden="true">×</span>
                   </button>
                 </div>
+              </div>
+              <div
+                v-if="isEmptyConversation"
+                class="prompt-suggestions"
+                :aria-label="t('lens.chat.suggestions.label')"
+              >
+                <button
+                  v-for="suggestion in promptSuggestions"
+                  :key="suggestion"
+                  type="button"
+                  class="prompt-suggestion"
+                  @click="applyPromptSuggestion(suggestion)"
+                >
+                  {{ suggestion }}
+                </button>
               </div>
               <div class="composer">
                 <input
@@ -1371,21 +1423,6 @@
                   </svg>
                 </button>
               </div>
-              <div
-                v-if="isEmptyConversation"
-                class="prompt-suggestions"
-                :aria-label="t('lens.chat.suggestions.label')"
-              >
-                <button
-                  v-for="suggestion in promptSuggestions"
-                  :key="suggestion"
-                  type="button"
-                  class="prompt-suggestion"
-                  @click="applyPromptSuggestion(suggestion)"
-                >
-                  {{ suggestion }}
-                </button>
-              </div>
             </div>
 
             <p v-if="!isMobile" class="disclaimer">
@@ -1396,12 +1433,6 @@
             </p>
           </div>
         </div>
-
-        <p v-if="canCompose && isMobile" class="disclaimer mobile-disclaimer">
-          {{
-            t('lens.chat.disclaimer') || '回答由 AI 生成，请自行核实关键信息。'
-          }}
-        </p>
       </template>
     </main>
 
@@ -3579,52 +3610,6 @@ function canRetryLastQuestion(message = null) {
   return retryableUserMessage(messages.value, message) !== null
 }
 
-function messageSecondaryActions(message) {
-  const actions = []
-  if (message.content) {
-    actions.push({
-      key: 'pdf',
-      label: t('lens.qa.exportPdf'),
-      icon: Download
-    })
-  }
-  if (!isAnonymous.value && message.run && message.content) {
-    actions.push(
-      {
-        key: 'feedback-positive',
-        label: t('lens.chat.feedbackHelpful'),
-        icon: ThumbsUp,
-        loading: isFeedbackUpdating(message.run)
-      },
-      {
-        key: 'feedback-negative',
-        label: t('lens.chat.feedbackUnhelpful'),
-        icon: ThumbsDown,
-        loading: isFeedbackUpdating(message.run)
-      }
-    )
-  }
-  if (!isAnonymous.value && message.run) {
-    actions.push({
-      key: 'share',
-      label: isMessageShared(message)
-        ? t('lens.qa.sharedButton')
-        : t('lens.qa.shareButton'),
-      icon: Share2
-    })
-  }
-  return actions
-}
-
-async function handleMessageAction(message, action) {
-  if (action === 'pdf') await exportQa(message)
-  else if (action === 'feedback-positive') {
-    await setFeedback(message, 'positive')
-  } else if (action === 'feedback-negative') {
-    await setFeedback(message, 'negative')
-  } else if (action === 'share') openShare(message)
-}
-
 function formatTime(isoString) {
   if (!isoString) return ''
   return new Date(isoString).toLocaleTimeString('zh-CN', {
@@ -4686,15 +4671,16 @@ onBeforeUnmount(() => {
   .message-actions .icon-btn {
     @apply h-11 w-11;
   }
-
-  .message-actions :deep(.message-more-actions .row-action-trigger) {
-    @apply h-11 w-11;
-  }
 }
 
 @media (max-width: 1023px) {
   .lens-chat-page {
+    position: fixed;
+    inset: 0;
+    width: 100%;
     height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
   }
 
   .mobile-topbar {
@@ -4913,24 +4899,20 @@ onBeforeUnmount(() => {
     max-width: 100%;
   }
 
-  .main-shell .composer-wrap {
-    bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  .main-shell .composer-wrap,
+  .main-shell .composer-wrap-empty {
+    position: fixed;
+    top: auto;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom));
     padding-right: 0.5rem;
     padding-bottom: 0;
     padding-left: 0.5rem;
     background: transparent;
+    transform: none;
   }
 
   .composer-inner {
     max-width: 47.5rem;
-  }
-
-  .main-shell .composer-wrap-empty {
-    top: 49dvh;
-    bottom: auto;
-    padding-bottom: 0;
-    transform: translateY(-50%);
-    background: transparent;
   }
 
   .composer {
@@ -4973,7 +4955,7 @@ onBeforeUnmount(() => {
     flex-wrap: wrap;
     justify-content: center;
     gap: 0.5rem;
-    margin: 0.75rem auto 0;
+    margin: 0 auto 0.75rem;
   }
 
   .prompt-suggestion {
@@ -5006,13 +4988,8 @@ onBeforeUnmount(() => {
   }
 
   .mobile-disclaimer {
-    position: absolute;
-    inset-inline: 0;
-    bottom: calc(0.25rem + env(safe-area-inset-bottom));
-    z-index: 21;
-    margin: 0;
+    margin: 1.5rem 0 0;
     padding: 0 0.75rem;
-    pointer-events: none;
   }
 
   .archived-session-notice {
@@ -5039,12 +5016,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1023px) and (max-height: 600px) {
-  .main-shell .composer-wrap-empty {
-    top: auto;
-    bottom: calc(1.5rem + env(safe-area-inset-bottom));
-    transform: none;
-  }
-
   .prompt-suggestions {
     display: none;
   }

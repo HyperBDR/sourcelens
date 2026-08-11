@@ -89,6 +89,16 @@ test('switches assistants through the assistant chat route', async () => {
   )
 })
 
+test('marks assistant filtering as search without autofill', async () => {
+  const source = await assistantSwitcherSource()
+
+  assert.match(
+    source,
+    /v-model="query"\s+type="search"\s+name="assistant-search"\s+autocomplete="off"/
+  )
+  assert.match(source, /inputmode="search"/)
+})
+
 test('loads sessions after selecting the route assistant', async () => {
   const source = await chatSource()
   const selectAssistant = source.indexOf(
@@ -122,15 +132,15 @@ test('keeps the closed mobile sidebar out of keyboard navigation', async () => {
   assert.match(source, /:aria-hidden="isMobile && !sidebarOpen"/)
 })
 
-test('groups secondary answer actions into a mobile more menu', async () => {
+test('shows only a direct share action for mobile answer tools', async () => {
   const source = await chatSource()
 
   assert.match(
     source,
-    /v-if="isMobile && messageSecondaryActions\(message\)\.length"/
+    /v-if="isMobile && !isAnonymous && message\.run"\s+type="button"\s+class="icon-btn mobile-share-btn"/
   )
-  assert.match(source, /:actions="messageSecondaryActions\(message\)"/)
-  assert.match(source, /@select="handleMessageAction\(message, \$event\)"/)
+  assert.doesNotMatch(source, /messageSecondaryActions\(message\)/)
+  assert.doesNotMatch(source, /handleMessageAction\(message, \$event\)/)
 })
 
 test('reduces secondary account information in the mobile drawer', async () => {
@@ -170,29 +180,54 @@ test('keeps every conversation layout free of repeated message avatars', async (
   assert.doesNotMatch(source, /const avatarBgColor = computed/)
 })
 
-test('separates the mobile AI disclaimer from the floating composer', async () => {
+test('keeps the mobile composer docked below its prompt suggestions', async () => {
+  const source = await chatSource()
+  const promptSuggestions = source.indexOf('class="prompt-suggestions"')
+  const composer = source.indexOf('class="composer"', promptSuggestions)
+
+  assert.notEqual(promptSuggestions, -1)
+  assert.notEqual(composer, -1)
+  assert.ok(promptSuggestions < composer)
+  assert.match(
+    source,
+    /\.main-shell \.composer-wrap,\s*\.main-shell \.composer-wrap-empty \{[\s\S]*?position: fixed;[\s\S]*?top: auto;[\s\S]*?bottom: calc\(0\.75rem \+ env\(safe-area-inset-bottom\)\);[\s\S]*?transform: none;/
+  )
+  assert.match(source, /\.prompt-suggestions \{[^}]*margin: 0 auto 0\.75rem;/)
+  assert.doesNotMatch(source, /top: 49dvh;/)
+})
+
+test('locks the mobile chat shell when the keyboard changes the viewport', async () => {
   const source = await chatSource()
 
-  assert.match(source, /v-if="!isMobile" class="disclaimer"/)
   assert.match(
     source,
-    /v-if="canCompose && isMobile"\s+class="disclaimer mobile-disclaimer"/
-  )
-  assert.match(
-    source,
-    /\.main-shell \.composer-wrap \{[\s\S]*?background: transparent;/
-  )
-  assert.match(
-    source,
-    /\.main-shell \.composer-wrap \{[\s\S]*?background: transparent;[\s\S]*?\.composer \{[\s\S]*?box-shadow:[\s\S]*?0 10px 30px/
-  )
-  assert.match(
-    source,
-    /\.mobile-disclaimer \{[\s\S]*?position: absolute;[\s\S]*?bottom: calc\(0\.25rem \+ env\(safe-area-inset-bottom\)\);/
+    /@media \(max-width: 1023px\) \{[\s\S]*?\.lens-chat-page \{[\s\S]*?position: fixed;[\s\S]*?inset: 0;[\s\S]*?width: 100%;[\s\S]*?height: 100dvh;[\s\S]*?overflow: hidden;[\s\S]*?overscroll-behavior: none;/
   )
 })
 
-test('keeps the mobile welcome copy clear of the centered composer', async () => {
+test('keeps the mobile AI disclaimer in the scrolling thread', async () => {
+  const source = await chatSource()
+  const mobileDisclaimer = source.indexOf(
+    'class="disclaimer mobile-disclaimer"'
+  )
+  const composerWrap = source.indexOf('class="composer-wrap"')
+
+  assert.notEqual(mobileDisclaimer, -1)
+  assert.notEqual(composerWrap, -1)
+  assert.ok(mobileDisclaimer < composerWrap)
+  assert.match(source, /v-if="!isMobile" class="disclaimer"/)
+  assert.match(
+    source,
+    /\.main-shell \.composer-wrap,\s*\.main-shell \.composer-wrap-empty \{[^}]*background: transparent;/
+  )
+  assert.match(
+    source,
+    /\.main-shell \.composer-wrap,\s*\.main-shell \.composer-wrap-empty \{[^}]*background: transparent;[\s\S]*?\.composer \{[\s\S]*?box-shadow:[\s\S]*?0 10px 30px/
+  )
+  assert.doesNotMatch(source, /\.mobile-disclaimer \{[^}]*position: absolute;/)
+})
+
+test('keeps the mobile welcome copy clear of the docked composer', async () => {
   const source = await chatSource()
 
   assert.match(source, /\.chat-welcome \{[\s\S]*?padding: 0 1\.5rem 13\.5rem;/)
