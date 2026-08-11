@@ -190,18 +190,35 @@ test('keeps the mobile composer docked below its prompt suggestions', async () =
   assert.ok(promptSuggestions < composer)
   assert.match(
     source,
-    /\.main-shell \.composer-wrap,\s*\.main-shell \.composer-wrap-empty \{[\s\S]*?position: fixed;[\s\S]*?top: auto;[\s\S]*?bottom: calc\(0\.75rem \+ env\(safe-area-inset-bottom\)\);[\s\S]*?transform: none;/
+    /\.main-shell \.composer-wrap,\s*\.main-shell \.composer-wrap-empty \{[\s\S]*?position: absolute;[\s\S]*?top: auto;[\s\S]*?bottom: calc\(0\.75rem \+ env\(safe-area-inset-bottom\)\);[\s\S]*?transform: none;/
   )
   assert.match(source, /\.prompt-suggestions \{[^}]*margin: 0 auto 0\.75rem;/)
   assert.doesNotMatch(source, /top: 49dvh;/)
 })
 
-test('locks the mobile chat shell when the keyboard changes the viewport', async () => {
+test('tracks the visual viewport so keyboard panning keeps the thread top reachable', async () => {
   const source = await chatSource()
 
   assert.match(
     source,
-    /@media \(max-width: 1023px\) \{[\s\S]*?\.lens-chat-page \{[\s\S]*?position: fixed;[\s\S]*?inset: 0;[\s\S]*?width: 100%;[\s\S]*?height: 100dvh;[\s\S]*?overflow: hidden;[\s\S]*?overscroll-behavior: none;/
+    /class="lens-chat-page qa-screen-view"\s+:style="mobileViewportStyle"/
+  )
+  assert.match(source, /'--chat-viewport-height': `\$\{viewport\.height\}px`/)
+  assert.match(
+    source,
+    /'--chat-viewport-offset-top': `\$\{viewport\.offsetTop\}px`/
+  )
+  assert.match(
+    source,
+    /window\.visualViewport\?\.addEventListener\(\s*'resize',\s*syncMobileViewport\s*\)/
+  )
+  assert.match(
+    source,
+    /window\.visualViewport\?\.addEventListener\(\s*'scroll',\s*syncMobileViewport\s*\)/
+  )
+  assert.match(
+    source,
+    /@media \(max-width: 1023px\) \{[\s\S]*?\.lens-chat-page \{[\s\S]*?position: fixed;[\s\S]*?top: var\(--chat-viewport-offset-top, 0px\);[\s\S]*?right: 0;[\s\S]*?bottom: auto;[\s\S]*?left: 0;[\s\S]*?height: var\(--chat-viewport-height, 100dvh\);[\s\S]*?overflow: hidden;[\s\S]*?overscroll-behavior: none;/
   )
 })
 

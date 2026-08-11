@@ -9,7 +9,7 @@
   >
     <div
       v-if="show"
-      class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+      class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-6"
     >
       <div
         class="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
@@ -29,242 +29,301 @@
           role="dialog"
           aria-modal="true"
           aria-labelledby="settings-modal-title"
-          class="settings-modal relative flex h-[526px] max-h-[82vh] w-full max-w-[700px] overflow-hidden rounded-2xl border border-line bg-surface shadow-soft-lg"
+          class="settings-modal relative flex h-[100dvh] max-h-none w-full max-w-none flex-col overflow-hidden rounded-none border-0 border-line bg-surface shadow-soft-lg sm:h-[526px] sm:max-h-[82vh] sm:max-w-[700px] sm:rounded-2xl sm:border"
         >
-          <!-- Left nav -->
-          <nav
-            class="settings-nav flex w-36 shrink-0 flex-col border-r border-line bg-surface-sunken py-4 sm:w-48"
-          >
-            <div class="px-3 pb-3 sm:px-4">
-              <div
-                class="settings-nav-title text-sm font-semibold text-theme-subtle"
-              >
-                {{ t('settings.modal.label') }}
-              </div>
-            </div>
-
-            <div class="flex-1 space-y-0.5 px-2">
-              <button
-                v-for="section in sections"
-                :key="section.key"
-                type="button"
-                class="flex min-h-11 w-full items-center justify-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors sm:min-h-0 sm:px-3"
-                :aria-label="section.label"
-                :class="
-                  activeSection === section.key
-                    ? 'settings-nav-active bg-surface font-medium text-theme shadow-sm'
-                    : 'text-theme-secondary hover:bg-surface-hover hover:text-theme'
-                "
-                @click="activeSection = section.key"
-              >
-                <component :is="section.icon" class="h-4 w-4 shrink-0" />
-                <span class="min-w-0 flex-1 truncate text-xs sm:text-sm">
-                  {{ section.label }}
-                </span>
-                <span
-                  v-if="
-                    section.key === 'release-notes' &&
-                    uiStore.hasUnreadReleaseNotes
-                  "
-                  class="h-2 w-2 shrink-0 rounded-full bg-primary-500"
-                >
-                  <span class="sr-only">
-                    {{ t('settings.modal.releaseNotesUnread') }}
-                  </span>
-                </span>
-              </button>
-            </div>
-
-            <div class="settings-logout-wrap border-t border-line px-2 pt-2">
-              <button
-                type="button"
-                class="settings-logout flex min-h-11 w-full items-center justify-start gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:min-h-0 sm:px-3"
-                :aria-label="t('common.logout')"
-                @click="handleLogout"
-              >
-                <svg
-                  class="h-4 w-4 shrink-0"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <polyline
-                    points="16 17 21 12 16 7"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <line x1="21" y1="12" x2="9" y2="12" stroke-linecap="round" />
-                </svg>
-                <span class="truncate text-xs sm:text-sm">{{
-                  t('common.logout')
-                }}</span>
-              </button>
-            </div>
-          </nav>
-
-          <!-- Right content -->
-          <div class="flex min-w-0 flex-1 flex-col">
-            <header
-              class="settings-header flex items-center justify-between border-b border-line px-4 pb-2 pt-5 sm:px-6"
+          <div class="settings-layout flex min-h-0 flex-1 flex-col sm:flex-row">
+            <!-- Left nav -->
+            <nav
+              class="settings-nav flex w-full shrink-0 flex-row border-b border-line bg-surface-sunken px-2 py-2 sm:w-48 sm:flex-col sm:border-b-0 sm:border-r sm:px-0 sm:py-4"
             >
-              <h2
-                id="settings-modal-title"
-                class="text-base font-semibold text-theme"
-              >
-                {{ sections.find((s) => s.key === activeSection)?.label }}
-              </h2>
-              <button
-                ref="closeButtonRef"
-                type="button"
-                class="flex h-8 w-8 items-center justify-center rounded-lg text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary"
-                :aria-label="t('common.close')"
-                @click="emit('close')"
-              >
-                <svg
-                  class="h-4 w-4"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.25"
-                  aria-hidden="true"
+              <div class="hidden px-3 pb-3 sm:block sm:px-4">
+                <div
+                  class="settings-nav-title text-sm font-semibold text-theme-subtle"
                 >
-                  <path
-                    d="M6 18L18 6M6 6l12 12"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </button>
-            </header>
-
-            <div class="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3 sm:px-6">
-              <!-- Profile section -->
-              <div v-if="activeSection === 'profile'" class="space-y-5">
-                <div class="flex items-center gap-4">
-                  <div
-                    class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-xl font-semibold text-white"
-                    :class="avatarBgColor"
-                  >
-                    {{ userInitials }}
-                  </div>
-                  <div class="min-w-0">
-                    <div class="truncate text-base font-semibold text-theme">
-                      {{ displayName }}
-                    </div>
-                    <div class="mt-0.5 truncate text-sm text-theme-muted">
-                      {{
-                        userStore.userInfo?.email || t('settings.modal.noEmail')
-                      }}
-                    </div>
-                  </div>
-                </div>
-
-                <div class="divide-y divide-line rounded-xl border border-line">
-                  <div class="space-y-1 px-3 py-3 sm:px-4">
-                    <div class="text-xs font-medium text-theme-muted">
-                      {{ t('settings.modal.username') }}
-                    </div>
-                    <div
-                      class="break-all text-sm font-medium leading-snug text-theme"
-                    >
-                      {{ userStore.userInfo?.username || '—' }}
-                    </div>
-                  </div>
-                  <div class="space-y-1 px-3 py-3 sm:px-4">
-                    <div class="text-xs font-medium text-theme-muted">
-                      {{ t('settings.modal.email') }}
-                    </div>
-                    <div
-                      class="break-all text-sm font-medium leading-snug text-theme"
-                    >
-                      {{ userStore.userInfo?.email || '—' }}
-                    </div>
-                  </div>
+                  {{ t('settings.modal.label') }}
                 </div>
               </div>
 
-              <!-- Language section -->
-              <div v-if="activeSection === 'language'" class="space-y-3">
-                <p class="text-sm text-theme-muted">
-                  {{ t('settings.modal.languageDesc') }}
-                </p>
-                <BaseSelect
-                  id="ui-language"
-                  :model-value="locale"
-                  @update:model-value="selectLanguage"
+              <div
+                class="settings-nav-tabs settings-nav-scrollbar flex min-w-0 flex-1 gap-1 overflow-x-auto sm:block sm:space-y-0.5 sm:overflow-visible sm:px-2"
+              >
+                <button
+                  v-for="section in sections"
+                  :key="section.key"
+                  type="button"
+                  class="flex min-h-11 w-auto shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors sm:min-h-0 sm:w-full sm:justify-start"
+                  :aria-label="section.label"
+                  :aria-current="
+                    activeSection === section.key ? 'page' : undefined
+                  "
+                  :class="
+                    activeSection === section.key
+                      ? 'settings-nav-active bg-surface font-medium text-theme shadow-sm'
+                      : 'text-theme-secondary hover:bg-surface-hover hover:text-theme'
+                  "
+                  @click="activeSection = section.key"
                 >
-                  <option
-                    v-for="lang in languages"
-                    :key="lang.value"
-                    :value="lang.value"
+                  <component :is="section.icon" class="h-4 w-4 shrink-0" />
+                  <span
+                    class="whitespace-nowrap text-sm sm:min-w-0 sm:flex-1 sm:truncate"
                   >
-                    {{ lang.flag }} {{ lang.label }}
-                  </option>
-                </BaseSelect>
-              </div>
-
-              <!-- Appearance section -->
-              <div v-if="activeSection === 'appearance'" class="space-y-3">
-                <p class="text-sm text-theme-muted">
-                  {{ t('settings.modal.appearanceDesc') }}
-                </p>
-                <div class="grid gap-2 sm:grid-cols-2" role="radiogroup">
-                  <label
-                    v-for="option in themeOptions"
-                    :key="option.value"
-                    class="flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 text-sm text-theme transition-colors"
-                    :class="
-                      preferencesStore.themeMode === option.value
-                        ? 'border-primary-500 bg-surface-selected'
-                        : 'border-line/80 bg-surface-raised hover:border-line-strong hover:bg-surface-hover'
+                    {{ section.label }}
+                  </span>
+                  <span
+                    v-if="
+                      section.key === 'release-notes' &&
+                      uiStore.hasUnreadReleaseNotes
                     "
+                    class="h-2 w-2 shrink-0 rounded-full bg-primary-500"
                   >
-                    <span
-                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-theme-secondary"
-                    >
-                      <component :is="option.icon" class="h-4 w-4" />
+                    <span class="sr-only">
+                      {{ t('settings.modal.releaseNotesUnread') }}
                     </span>
-                    <span class="min-w-0 flex-1">
-                      <span class="block font-medium">{{ option.label }}</span>
-                      <span class="mt-0.5 block text-xs text-theme-muted">
-                        {{ option.description }}
-                      </span>
-                    </span>
-                    <input
-                      v-model="preferencesStore.themeMode"
-                      type="radio"
-                      name="appearance-mode"
-                      :value="option.value"
-                      class="h-4 w-4 shrink-0 accent-primary-500"
-                      @change="preferencesStore.setThemeMode(option.value)"
-                    />
-                  </label>
-                </div>
-                <p
-                  v-if="preferencesStore.themeMode === 'scheduled'"
-                  class="text-sm text-theme-muted"
-                >
-                  {{ t('settings.modal.themeScheduleDescription') }}
-                </p>
-                <p class="text-xs text-theme-subtle">
-                  {{ t('settings.modal.themeAdminNote') }}
-                </p>
+                  </span>
+                </button>
               </div>
 
-              <AnswerNotificationSettings
-                v-if="activeSection === 'notifications'"
-              />
+              <div
+                class="settings-logout-wrap hidden border-t border-line px-2 pt-2 sm:block"
+              >
+                <button
+                  type="button"
+                  class="settings-logout flex min-h-11 w-full items-center justify-start gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 sm:min-h-0"
+                  :aria-label="t('common.logout')"
+                  @click="handleLogout"
+                >
+                  <svg
+                    class="h-4 w-4 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                    <polyline
+                      points="16 17 21 12 16 7"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                    <line
+                      x1="21"
+                      y1="12"
+                      x2="9"
+                      y2="12"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                  <span class="truncate text-sm">{{ t('common.logout') }}</span>
+                </button>
+              </div>
+            </nav>
 
-              <ReleaseNotesSettings v-if="activeSection === 'release-notes'" />
+            <!-- Right content -->
+            <div class="settings-content-shell flex min-w-0 flex-1 flex-col">
+              <header
+                class="settings-header flex min-h-14 items-center justify-between border-b border-line px-4 py-2 sm:min-h-0 sm:px-6 sm:pb-2 sm:pt-5"
+              >
+                <h2
+                  id="settings-modal-title"
+                  class="text-base font-semibold text-theme"
+                >
+                  {{ sections.find((s) => s.key === activeSection)?.label }}
+                </h2>
+                <button
+                  ref="closeButtonRef"
+                  type="button"
+                  class="flex h-11 w-11 items-center justify-center rounded-lg text-theme-subtle transition-colors hover:bg-surface-hover hover:text-theme-secondary sm:h-8 sm:w-8"
+                  :aria-label="t('common.close')"
+                  @click="emit('close')"
+                >
+                  <svg
+                    class="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.25"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M6 18L18 6M6 6l12 12"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </header>
 
-              <PasswordChangeSettings v-if="activeSection === 'security'" />
+              <div
+                class="settings-content min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-6 sm:pb-6 sm:pt-3"
+              >
+                <!-- Profile section -->
+                <div v-if="activeSection === 'profile'" class="space-y-5">
+                  <div class="flex items-center gap-4">
+                    <div
+                      class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-xl font-semibold text-white"
+                      :class="avatarBgColor"
+                    >
+                      {{ userInitials }}
+                    </div>
+                    <div class="min-w-0">
+                      <div class="truncate text-base font-semibold text-theme">
+                        {{ displayName }}
+                      </div>
+                      <div class="mt-0.5 truncate text-sm text-theme-muted">
+                        {{
+                          userStore.userInfo?.email ||
+                          t('settings.modal.noEmail')
+                        }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    class="divide-y divide-line rounded-xl border border-line"
+                  >
+                    <div class="space-y-1 px-3 py-3 sm:px-4">
+                      <div class="text-xs font-medium text-theme-muted">
+                        {{ t('settings.modal.username') }}
+                      </div>
+                      <div
+                        class="break-all text-sm font-medium leading-snug text-theme"
+                      >
+                        {{ userStore.userInfo?.username || '—' }}
+                      </div>
+                    </div>
+                    <div class="space-y-1 px-3 py-3 sm:px-4">
+                      <div class="text-xs font-medium text-theme-muted">
+                        {{ t('settings.modal.email') }}
+                      </div>
+                      <div
+                        class="break-all text-sm font-medium leading-snug text-theme"
+                      >
+                        {{ userStore.userInfo?.email || '—' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    class="settings-mobile-logout flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-red-200 px-4 py-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 sm:hidden"
+                    :aria-label="t('common.logout')"
+                    @click="handleLogout"
+                  >
+                    <svg
+                      class="h-4 w-4 shrink-0"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <polyline
+                        points="16 17 21 12 16 7"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <line
+                        x1="21"
+                        y1="12"
+                        x2="9"
+                        y2="12"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                    {{ t('common.logout') }}
+                  </button>
+                </div>
+
+                <!-- Language section -->
+                <div v-if="activeSection === 'language'" class="space-y-3">
+                  <p class="text-sm text-theme-muted">
+                    {{ t('settings.modal.languageDesc') }}
+                  </p>
+                  <BaseSelect
+                    id="ui-language"
+                    :model-value="locale"
+                    @update:model-value="selectLanguage"
+                  >
+                    <option
+                      v-for="lang in languages"
+                      :key="lang.value"
+                      :value="lang.value"
+                    >
+                      {{ lang.flag }} {{ lang.label }}
+                    </option>
+                  </BaseSelect>
+                </div>
+
+                <!-- Appearance section -->
+                <div v-if="activeSection === 'appearance'" class="space-y-3">
+                  <p class="text-sm text-theme-muted">
+                    {{ t('settings.modal.appearanceDesc') }}
+                  </p>
+                  <div class="grid gap-2 sm:grid-cols-2" role="radiogroup">
+                    <label
+                      v-for="option in themeOptions"
+                      :key="option.value"
+                      class="flex min-h-20 cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 text-sm text-theme transition-colors"
+                      :class="
+                        preferencesStore.themeMode === option.value
+                          ? 'border-primary-500 bg-surface-selected'
+                          : 'border-line/80 bg-surface-raised hover:border-line-strong hover:bg-surface-hover'
+                      "
+                    >
+                      <span
+                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-theme-secondary"
+                      >
+                        <component :is="option.icon" class="h-4 w-4" />
+                      </span>
+                      <span class="min-w-0 flex-1">
+                        <span class="block font-medium">{{
+                          option.label
+                        }}</span>
+                        <span class="mt-0.5 block text-xs text-theme-muted">
+                          {{ option.description }}
+                        </span>
+                      </span>
+                      <input
+                        v-model="preferencesStore.themeMode"
+                        type="radio"
+                        name="appearance-mode"
+                        :value="option.value"
+                        class="h-4 w-4 shrink-0 accent-primary-500"
+                        @change="preferencesStore.setThemeMode(option.value)"
+                      />
+                    </label>
+                  </div>
+                  <p
+                    v-if="preferencesStore.themeMode === 'scheduled'"
+                    class="text-sm text-theme-muted"
+                  >
+                    {{ t('settings.modal.themeScheduleDescription') }}
+                  </p>
+                  <p class="text-xs text-theme-subtle">
+                    {{ t('settings.modal.themeAdminNote') }}
+                  </p>
+                </div>
+
+                <AnswerNotificationSettings
+                  v-if="activeSection === 'notifications'"
+                />
+
+                <ReleaseNotesSettings
+                  v-if="activeSection === 'release-notes'"
+                />
+
+                <PasswordChangeSettings v-if="activeSection === 'security'" />
+              </div>
             </div>
           </div>
         </section>
@@ -462,6 +521,14 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.settings-nav-scrollbar {
+  scrollbar-width: none;
+}
+
+.settings-nav-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 :global(:root[data-theme='dark'] .settings-modal) {
   border-color: rgb(var(--sl-border-default-rgb) / 60%);
 }
@@ -481,7 +548,8 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-:global(:root[data-theme='dark'] .settings-logout:hover) {
+:global(:root[data-theme='dark'] .settings-logout:hover),
+:global(:root[data-theme='dark'] .settings-mobile-logout:hover) {
   background: var(--sl-bg-hover);
 }
 </style>
