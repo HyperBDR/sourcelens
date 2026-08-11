@@ -48,7 +48,7 @@ def activity_from_event(event):
 
 
 def build_initial_messages(history, question, image_data_urls=None):
-    """Build the current turn and optional text-only conversation history."""
+    """Build history and the current question with optional images."""
 
     messages = []
     if not image_data_urls:

@@ -95,7 +95,7 @@ def _multimodal_messages(system, user_text, image_data_urls):
 
 
 def model_supports_vision(model_ref):
-    """Return whether a configured model accepts image content blocks."""
+    """Return whether the configured model accepts image content blocks."""
 
     from agentcore_metering.adapters.django.services.runtime_config import (
         get_litellm_params,
@@ -175,5 +175,3 @@ def run_completion_multimodal(
         node_name=node_name,
         user_id=user_id,
     )
-
-

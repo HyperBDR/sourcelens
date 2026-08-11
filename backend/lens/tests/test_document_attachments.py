@@ -444,7 +444,7 @@ class DocumentAttachmentTests(TestCase):
             [second["uuid"]],
         )
 
-    def test_document_cannot_be_rebound_to_another_run(self):
+    def test_document_can_be_reused_by_another_run_in_same_session(self):
         metadata = store_document_attachment(
             self.session,
             self.user,
@@ -472,8 +472,38 @@ class DocumentAttachmentTests(TestCase):
             [metadata["uuid"]],
         )
 
-        self.assertEqual(rebound, [])
-        self.assertEqual(get_run_document_attachments(second.uuid), [])
+        self.assertEqual(len(rebound), 1)
+        self.assertEqual(
+            get_run_document_attachments(second.uuid)[0]["uuid"],
+            metadata["uuid"],
+        )
+        self.assertEqual(
+            get_run_document_attachments(first.uuid)[0]["uuid"],
+            metadata["uuid"],
+        )
+
+    def test_follow_up_reuses_previous_document(self):
+        metadata = store_document_attachment(
+            self.session,
+            self.user,
+            _pdf_upload("contract.pdf"),
+        )
+        create_execution_run(
+            session=self.session,
+            question="Summarize this PDF",
+            enqueue=False,
+            attachment_uuids=[metadata["uuid"]],
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="What is the deadline in the previous PDF?",
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            get_run_document_attachments(run.uuid)[0]["uuid"],
+            metadata["uuid"],
+        )
 
     def test_delete_removes_cache_metadata_and_original_file(self):
         metadata = store_document_attachment(

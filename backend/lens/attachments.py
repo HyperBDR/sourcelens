@@ -160,6 +160,21 @@ def bind_attachments_to_message(
     return bound
 
 
+def get_session_image_attachments(session, attachment_uuids):
+    """Return selected session images in the requested order."""
+
+    wanted = [str(value) for value in attachment_uuids or []]
+    by_uuid = {
+        str(item.uuid): item
+        for item in MessageAttachment.objects.filter(
+            session=session,
+            kind=MessageAttachment.Kind.IMAGE,
+            uuid__in=wanted,
+        )
+    }
+    return [by_uuid[value] for value in wanted if value in by_uuid]
+
+
 def attachment_data_url(attachment):
     """Return a base64 data URL for an image attachment, or None."""
 
