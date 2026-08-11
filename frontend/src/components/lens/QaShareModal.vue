@@ -85,6 +85,20 @@
           {{ t('lens.qa.copyInvitation') }}
         </BaseButton>
       </div>
+
+      <BaseButton
+        v-if="share && nativeShareAvailable"
+        class="qa-share-native"
+        variant="primary"
+        size="md"
+        block
+        :disabled="titleDirty"
+        :loading="nativeSharing"
+        @click="shareNative"
+      >
+        <Share2 :size="16" :stroke-width="2" aria-hidden="true" />
+        {{ t('lens.qa.nativeShare') }}
+      </BaseButton>
     </div>
 
     <template #footer>
@@ -115,13 +129,14 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, Copy } from '@lucide/vue'
+import { Bot, Copy, Share2 } from '@lucide/vue'
 
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import { shareRun, updateMyShare, deleteShare } from '@/api/lens'
 import { copyToClipboard } from '@/utils/clipboard'
 import { qaShareUrl } from '@/utils/lens'
+import { shareWithNative, supportsNativeShare } from '@/utils/nativeShare'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps({
@@ -144,7 +159,9 @@ const { showSuccess, showError } = useToast()
 const title = ref('')
 const share = ref(null)
 const creating = ref(false)
+const nativeSharing = ref(false)
 const saving = ref(false)
+const nativeShareAvailable = supportsNativeShare()
 
 const shareLink = computed(() =>
   share.value ? qaShareUrl(share.value.token) : ''
@@ -155,6 +172,13 @@ const invitationText = computed(() =>
     name: props.assistantName || t('lens.qa.genericAgent'),
     title: title.value.trim() || defaultTitle(props.question),
     url: shareLink.value
+  })
+)
+
+const nativeShareText = computed(() =>
+  t('lens.qa.nativeShareText', {
+    name: props.assistantName || t('lens.qa.genericAgent'),
+    title: title.value.trim() || defaultTitle(props.question)
   })
 )
 
@@ -176,6 +200,7 @@ watch(
       share.value = props.existingShare || null
       title.value = share.value?.title || defaultTitle(props.question)
       creating.value = false
+      nativeSharing.value = false
       saving.value = false
     }
   }
@@ -244,6 +269,30 @@ async function copyInvitation() {
   } else {
     showError(t('lens.qa.copyFailed'))
   }
+}
+
+async function shareNative() {
+  if (!share.value || titleDirty.value) {
+    return
+  }
+  nativeSharing.value = true
+  const result = await shareWithNative({
+    title: title.value.trim() || defaultTitle(props.question),
+    text: nativeShareText.value,
+    url: shareLink.value
+  })
+  nativeSharing.value = false
+
+  if (result.status === 'shared') {
+    emitClose()
+    return
+  }
+  if (result.status === 'cancelled') return
+  if (result.status === 'unsupported') {
+    await copy()
+    return
+  }
+  showError(t('lens.qa.nativeShareFailed'))
 }
 
 async function unshare() {
