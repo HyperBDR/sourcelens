@@ -1,0 +1,9 @@
+type: fix
+audience: user
+en: >-
+  Fixed mobile chat controls so the composer stays visible during scrolling
+  and keyboard input, sharing is easier to access, and assistant search no
+  longer triggers unrelated autofill suggestions.
+zh-CN: >-
+  修复移动端聊天交互：输入框在滚动和键盘输入时保持可见，分享入口更易访问，
+  助手搜索不再触发无关的自动填充建议。
