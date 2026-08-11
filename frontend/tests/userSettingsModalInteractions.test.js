@@ -38,19 +38,59 @@ test('User Settings closes from the visible backdrop click target', () => {
 test('User Settings mobile navigation uses larger touch targets', () => {
   assert.match(
     modalSource,
-    /min-h-11[\s\S]*?rounded-lg[\s\S]*?px-2\.5[\s\S]*?sm:min-h-0/
+    /min-h-11[\s\S]*?shrink-0[\s\S]*?rounded-lg[\s\S]*?px-3[\s\S]*?sm:min-h-0/
   )
 })
 
-test('User Settings navigation shows section labels on mobile', () => {
-  assert.match(modalSource, /settings-nav flex w-36/)
-  assert.doesNotMatch(
+test('User Settings uses a full-screen mobile panel with desktop constraints', () => {
+  assert.match(
     modalSource,
-    /class="hidden min-w-0 flex-1 truncate sm:block"/
+    /settings-modal[\s\S]*?h-\[100dvh\][\s\S]*?max-h-none[\s\S]*?max-w-none[\s\S]*?flex-col[\s\S]*?rounded-none[\s\S]*?border-0/
   )
   assert.match(
     modalSource,
-    /class="min-w-0 flex-1 truncate text-xs sm:text-sm"/
+    /sm:h-\[526px\][\s\S]*?sm:max-h-\[82vh\][\s\S]*?sm:max-w-\[700px\][\s\S]*?sm:rounded-2xl[\s\S]*?sm:border/
+  )
+})
+
+test('User Settings moves mobile sections into a horizontal scroll rail', () => {
+  assert.match(
+    modalSource,
+    /settings-nav-tabs[\s\S]*?flex[\s\S]*?overflow-x-auto[\s\S]*?sm:block[\s\S]*?sm:overflow-visible/
+  )
+  assert.match(
+    modalSource,
+    /whitespace-nowrap[\s\S]*?sm:min-w-0[\s\S]*?sm:flex-1[\s\S]*?sm:truncate/
+  )
+  assert.match(
+    modalSource,
+    /\.settings-nav-scrollbar \{[\s\S]*?scrollbar-width: none;/
+  )
+  assert.match(
+    modalSource,
+    /\.settings-nav-scrollbar::-webkit-scrollbar \{[\s\S]*?display: none;/
+  )
+})
+
+test('User Settings gives mobile content the full width and keeps desktop sidebar', () => {
+  assert.match(
+    modalSource,
+    /settings-layout[\s\S]*?flex-col[\s\S]*?sm:flex-row/
+  )
+  assert.match(
+    modalSource,
+    /settings-nav[\s\S]*?w-full[\s\S]*?border-b[\s\S]*?sm:w-48[\s\S]*?sm:border-b-0[\s\S]*?sm:border-r/
+  )
+  assert.match(
+    modalSource,
+    /settings-content[\s\S]*?min-h-0[\s\S]*?flex-1[\s\S]*?overflow-y-auto/
+  )
+})
+
+test('User Settings places logout in the mobile profile content', () => {
+  assert.match(
+    modalSource,
+    /settings-mobile-logout[\s\S]*?sm:hidden[\s\S]*?@click="handleLogout"/
   )
 })
 

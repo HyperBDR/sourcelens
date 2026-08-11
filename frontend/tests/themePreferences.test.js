@@ -673,7 +673,10 @@ test('settings expose four mutually exclusive appearance modes', () => {
 
 test('settings modal preserves light colors and softens dark dividers', () => {
   assert.match(settingsSource, /bg-surface-sunken/)
-  assert.match(settingsSource, /border-r border-line/)
+  assert.match(
+    settingsSource,
+    /settings-nav[\s\S]*?border-b border-line[\s\S]*?sm:border-b-0[\s\S]*?sm:border-r/
+  )
   assert.match(settingsSource, /border-b border-line/)
   assert.match(settingsSource, /border-t border-line/)
   assert.match(settingsSource, /hover:bg-red-50/)
