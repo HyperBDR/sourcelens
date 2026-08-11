@@ -301,7 +301,12 @@
           <div v-if="assistants.length > 2" class="assistant-switcher-search">
             <input
               v-model="query"
-              type="text"
+              type="search"
+              name="assistant-search"
+              autocomplete="off"
+              inputmode="search"
+              autocapitalize="none"
+              spellcheck="false"
               class="assistant-switcher-input"
               :placeholder="t('common.search')"
             />
