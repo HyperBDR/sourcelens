@@ -1,5 +1,5 @@
 <template>
-  <div class="lens-chat-page qa-screen-view">
+  <div class="lens-chat-page qa-screen-view" :style="mobileViewportStyle">
     <Transition
       enter-active-class="transition-opacity duration-200"
       enter-from-class="opacity-0"
@@ -1662,6 +1662,7 @@ const renamingSessionUuid = ref('')
 const renameDraft = ref('')
 const composerRef = ref(null)
 const scrollRef = ref(null)
+const mobileViewportStyle = ref({})
 const seenStepEventCounts = new Map()
 let sessionLoadGeneration = 0
 const runtimeState = ref(createRuntimeState())
@@ -2441,6 +2442,18 @@ function scrollToBottom() {
   if (!el) return
   el.scrollTop = el.scrollHeight
   answerAutoScroller.handleScroll()
+}
+
+function syncMobileViewport() {
+  const viewport = window.visualViewport
+  if (!viewport || window.innerWidth >= 1024) {
+    mobileViewportStyle.value = {}
+    return
+  }
+  mobileViewportStyle.value = {
+    '--chat-viewport-height': `${viewport.height}px`,
+    '--chat-viewport-offset-top': `${viewport.offsetTop}px`
+  }
 }
 
 async function bootstrap() {
@@ -3687,7 +3700,10 @@ watch(
 onMounted(async () => {
   window.addEventListener('storage', handleCompletionStorage)
   window.addEventListener('focus', handleCompletionVisibility)
+  window.visualViewport?.addEventListener('resize', syncMobileViewport)
+  window.visualViewport?.addEventListener('scroll', syncMobileViewport)
   document.addEventListener('visibilitychange', handleCompletionVisibility)
+  syncMobileViewport()
   refreshUnreadSessions()
   if (window.innerWidth < 1024) {
     sidebarOpen.value = false
@@ -3702,6 +3718,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('storage', handleCompletionStorage)
   window.removeEventListener('focus', handleCompletionVisibility)
+  window.visualViewport?.removeEventListener('resize', syncMobileViewport)
+  window.visualViewport?.removeEventListener('scroll', syncMobileViewport)
   document.removeEventListener('visibilitychange', handleCompletionVisibility)
   streamController.value?.abort()
   answerAutoScroller.dispose()
@@ -4676,9 +4694,12 @@ onBeforeUnmount(() => {
 @media (max-width: 1023px) {
   .lens-chat-page {
     position: fixed;
-    inset: 0;
+    top: var(--chat-viewport-offset-top, 0px);
+    right: 0;
+    bottom: auto;
+    left: 0;
     width: 100%;
-    height: 100dvh;
+    height: var(--chat-viewport-height, 100dvh);
     overflow: hidden;
     overscroll-behavior: none;
   }
@@ -4901,7 +4922,7 @@ onBeforeUnmount(() => {
 
   .main-shell .composer-wrap,
   .main-shell .composer-wrap-empty {
-    position: fixed;
+    position: absolute;
     top: auto;
     bottom: calc(0.75rem + env(safe-area-inset-bottom));
     padding-right: 0.5rem;
