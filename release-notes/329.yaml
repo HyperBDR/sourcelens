@@ -1,0 +1,9 @@
+type: improvement
+audience: user
+en: >-
+  Improved mobile chat and settings so conversations stay reachable with the
+  keyboard open, settings use a roomier full-screen layout, and wide Markdown
+  tables scroll horizontally.
+zh-CN: >-
+  优化移动端聊天与设置：键盘展开时仍可滚动到对话顶部，设置使用更宽松的全屏
+  布局，多列 Markdown 表格支持横向滚动。
