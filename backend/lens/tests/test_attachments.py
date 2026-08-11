@@ -9,8 +9,16 @@ from django.test import TestCase, override_settings
 from PIL import Image
 from rest_framework.test import APIClient
 
-from agentcore_metering.adapters.django.models import LLMUsage
-from lens.llm import LensLLMResult
+from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
+from lens.attachments import (
+    ATTACHMENT_MAX_ASPECT_RATIO,
+    ATTACHMENT_MAX_PIXELS,
+    AttachmentError,
+    bind_attachments_to_message,
+    store_message_attachment,
+)
+from lens.execution import execute_answer_run
+from lens.llm import LensLLMResult, _multimodal_messages
 from lens.models import (
     Assistant,
     LensNode,
@@ -19,14 +27,11 @@ from lens.models import (
     Session,
 )
 from lens.serializers import RunCreateSerializer
-from lens.attachments import (
-    ATTACHMENT_MAX_ASPECT_RATIO,
-    ATTACHMENT_MAX_PIXELS,
-    AttachmentError,
-    bind_attachments_to_message,
-    store_message_attachment,
+from lens.services import (
+    MultimodalPreprocessingError,
+    analyze_multimodal_intent,
+    create_execution_run,
 )
-from lens.services import analyze_multimodal_intent, create_execution_run
 
 User = get_user_model()
 
@@ -185,8 +190,11 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(attachment.message_id, run.input_message_id)
         self.assertEqual(run.input_message.attachments.count(), 1)
 
+    @patch("lens.services.model_supports_vision", return_value=True)
     @patch("lens.services.run_completion_multimodal")
-    def test_analyze_multimodal_intent_folds_image_and_text(self, mock_call):
+    def test_analyze_multimodal_intent_folds_image_and_text(
+        self, mock_call, mock_support
+    ):
         mock_call.return_value = LensLLMResult(
             content="KeyError missing 'token' in auth middleware",
             usage={
@@ -214,6 +222,122 @@ class AttachmentServiceTests(TestCase):
         self.assertTrue(result["rewritten"])
         self.assertIn("KeyError", result["question"])
         self.assertEqual(result["usage"]["total_tokens"], 1234)
+        self.assertEqual(result["status"], "succeeded")
+        mock_call.assert_called_once()
+        call = mock_call.call_args.kwargs
+        self.assertIn("为什么报错", call["user_text"])
+        self.assertEqual(len(call["image_data_urls"]), 1)
+
+    @patch("lens.services.model_supports_vision", return_value=True)
+    @patch("lens.services._recent_history_context")
+    @patch("lens.services.run_completion_multimodal")
+    def test_analyze_multimodal_intent_does_not_replay_history(
+        self, mock_call, mock_history, mock_support
+    ):
+        mock_call.return_value = LensLLMResult(
+            content="The image contains a console error.",
+            usage={},
+            metered=True,
+        )
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload()
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Describe this image.",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+
+        result = analyze_multimodal_intent(run)
+
+        self.assertEqual(result["status"], "succeeded")
+        mock_history.assert_not_called()
+        self.assertNotIn("There is no image", mock_call.call_args.kwargs[
+            "user_text"
+        ])
+
+    def test_multimodal_messages_include_text_and_image_content_blocks(self):
+        messages = _multimodal_messages(
+            "system prompt",
+            "user question",
+            ["data:image/png;base64,encoded-image"],
+        )
+
+        self.assertEqual(messages[0].content, "system prompt")
+        self.assertEqual(
+            messages[1].content,
+            [
+                {"type": "text", "text": "user question"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64,encoded-image"
+                    },
+                },
+            ],
+        )
+
+    @patch("lens.services.run_completion_multimodal")
+    def test_non_vision_model_fails_before_multimodal_call(self, mock_call):
+        config = LLMConfig.objects.create(
+            scope=LLMConfig.Scope.GLOBAL,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="deepseek",
+            config={
+                "api_key": "test",
+                "model": "deepseek-v4-pro",
+            },
+            is_active=True,
+        )
+        self.assistant.multimodal_model_ref = config.uuid
+        self.assistant.save(update_fields=["multimodal_model_ref"])
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload()
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Describe this image.",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+
+        with self.assertRaises(MultimodalPreprocessingError) as context:
+            analyze_multimodal_intent(run)
+
+        self.assertEqual(context.exception.reason, "MODEL_NOT_VISION_CAPABLE")
+        mock_call.assert_not_called()
+
+    @patch("lens.services.model_supports_vision", return_value=True)
+    @patch("lens.services.run_completion_multimodal")
+    def test_multimodal_failure_does_not_fallback_to_workspace_search(
+        self, mock_call, mock_support
+    ):
+        mock_call.side_effect = RuntimeError("provider secret must not leak")
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload()
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="为什么报错",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+
+        with self.assertRaises(MultimodalPreprocessingError):
+            execute_answer_run(run, dispatch=False)
+
+        run.refresh_from_db()
+        step = run.steps.get(step_type="multimodal")
+        self.assertEqual(run.status, run.Status.FAILED)
+        self.assertEqual(run.error, "IMAGE_PREPROCESSING_FAILED")
+        self.assertEqual(step.status, step.Status.FAILED)
+        self.assertEqual(step.detail["status"], "failed")
+        self.assertEqual(
+            step.detail["error"], "IMAGE_PREPROCESSING_FAILED"
+        )
+        self.assertEqual(step.detail["reason"], "MODEL_REQUEST_FAILED")
+        self.assertNotIn("provider secret", step.detail)
 
     def test_admin_run_step_counts_includes_preprocess_usage(self):
         from lens.models import RunStep
@@ -438,6 +562,7 @@ class AttachmentServiceTests(TestCase):
 
         self.assertFalse(result["rewritten"])
         self.assertEqual(result["question"], "原始问题")
+        self.assertEqual(result["status"], "skipped")
 
     def test_run_create_serializer_requires_text_or_image(self):
         serializer = RunCreateSerializer(

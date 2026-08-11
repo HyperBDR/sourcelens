@@ -440,3 +440,6 @@ def source_type_from_credential(credential):
     if credential.auth_type == DataSourceCredential.AuthType.FEISHU_APP:
         return DataSource.SourceType.FEISHU
     return DataSource.SourceType.GIT
+
+
+test_datasource_connection.__test__ = False

@@ -103,6 +103,7 @@ def _select_general_chat_route(
     context_skill_contents=None,
     available_tools=None,
     has_bound_skills=None,
+    image_data_urls=None,
 ):
     """Classify one General Chat request without exposing control output."""
 
@@ -187,7 +188,11 @@ def _select_general_chat_route(
         response = model.invoke(
             [
                 SystemMessage(content=prompt),
-                *_build_initial_messages(history, question),
+                *_build_initial_messages(
+                    history,
+                    question,
+                    image_data_urls,
+                ),
             ],
             runtime_control_call=True,
             temperature=0,

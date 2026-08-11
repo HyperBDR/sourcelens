@@ -32,7 +32,11 @@ from .environment_variables import (
     declared_environment_references,
     expand_environment_references,
 )
-from .llm import run_completion, run_completion_multimodal
+from .llm import (
+    model_supports_vision,
+    run_completion,
+    run_completion_multimodal,
+)
 from .models import (
     Assistant,
     EnvironmentVariableSet,
@@ -105,6 +109,16 @@ MULTIMODAL_INTENT_SYSTEM = (
 
 class LensNodeDispatchError(RuntimeError):
     """Raised when a run cannot be dispatched to its LensNode."""
+
+
+class MultimodalPreprocessingError(RuntimeError):
+    """Raised when image preprocessing cannot produce a safe query."""
+
+    code = "IMAGE_PREPROCESSING_FAILED"
+
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(self.code)
 
 
 def lensnode_group_name(lensnode_uuid):
@@ -874,11 +888,11 @@ def _enqueue_session_title_generation(session_uuid, run_uuid):
 def analyze_multimodal_intent(run):
     """Fold a run's image attachments and text into one search query.
 
-    Calls the assistant's multimodal model with the question, recent
-    history and the attached images, returning a consolidated textual
-    query that drives retrieval and the node answer. Falls back to the
-    original question when no multimodal model is set, no images decode,
-    or the call fails, so dispatch never blocks on this step.
+    Calls the assistant's multimodal model with the current question and
+    attached images, returning a consolidated textual query that drives
+    retrieval and the node answer. Skips preprocessing when it is not
+    applicable and fails the run when a configured multimodal request cannot
+    produce an image-aware query.
     """
 
     assistant = run.session.assistant
@@ -887,7 +901,12 @@ def analyze_multimodal_intent(run):
         run.input_message.attachments.filter(kind=MessageAttachment.Kind.IMAGE)
     )
     if not attachments or not assistant.multimodal_model_ref:
-        return {"question": original, "rewritten": False, "image_count": 0}
+        return {
+            "question": original,
+            "rewritten": False,
+            "image_count": 0,
+            "status": "skipped",
+        }
 
     image_data_urls = []
     for attachment in attachments:
@@ -895,12 +914,25 @@ def analyze_multimodal_intent(run):
         if data_url:
             image_data_urls.append(data_url)
     if not image_data_urls:
-        return {"question": original, "rewritten": False, "image_count": 0}
+        raise MultimodalPreprocessingError("ATTACHMENT_UNREADABLE")
+    try:
+        supports_vision = model_supports_vision(
+            assistant.multimodal_model_ref
+        )
+    except Exception as exc:
+        logger.warning(
+            "multimodal model capability check failed for run %s: %s",
+            run.uuid,
+            exc,
+        )
+        raise MultimodalPreprocessingError(
+            "MODEL_CONFIGURATION_INVALID"
+        ) from exc
+    if not supports_vision:
+        raise MultimodalPreprocessingError("MODEL_NOT_VISION_CAPABLE")
 
-    context = _recent_history_context(run)
     user_text = (
-        (f"Conversation so far:\n{context}\n\n" if context else "")
-        + f"User question: {original or '(no text, analyze the image)'}\n\n"
+        f"User question: {original or '(no text, analyze the image)'}\n\n"
         + "Combined search query:"
     )
     try:
@@ -916,29 +948,20 @@ def analyze_multimodal_intent(run):
         logger.warning(
             "multimodal intent failed for run %s: %s", run.uuid, exc
         )
-        return {
-            "question": original,
-            "rewritten": False,
-            "image_count": len(image_data_urls),
-            "error": str(exc),
-        }
+        raise MultimodalPreprocessingError("MODEL_REQUEST_FAILED") from exc
 
     text = " ".join((result.content or "").split())[
         :MULTIMODAL_INTENT_MAX_CHARS
     ]
     if not text:
-        return {
-            "question": original,
-            "rewritten": False,
-            "image_count": len(image_data_urls),
-            "usage": result.usage,
-        }
+        raise MultimodalPreprocessingError("EMPTY_MODEL_RESPONSE")
     return {
         "question": text,
         "rewritten": text != (original or "").strip(),
         "original": original,
         "image_count": len(image_data_urls),
         "usage": result.usage,
+        "status": "succeeded",
     }
 
 
@@ -1670,6 +1693,20 @@ def dispatch_run_to_lensnode(
         raise LensNodeDispatchError(
             "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"
         )
+    image_data_urls = []
+    if run.input_message_id:
+        for attachment in run.input_message.attachments.all():
+            data_url = attachment_data_url(attachment)
+            if not data_url:
+                raise LensNodeDispatchError("ATTACHMENT_UNREADABLE")
+            image_data_urls.append(data_url)
+    agent_model_ref = (
+        model_refs.get("multimodal")
+        or str(run.session.assistant.multimodal_model_ref or "")
+        if image_data_urls
+        else model_refs.get("agent")
+        or str(run.session.assistant.agent_model_ref or "")
+    )
     channel_layer = get_channel_layer()
     if channel_layer is None:
         raise LensNodeDispatchError("LENS_CHANNEL_LAYER_UNAVAILABLE")
@@ -1709,6 +1746,7 @@ def dispatch_run_to_lensnode(
                 "task": execution.task,
                 "features": features_payload,
                 "question": rewritten_question,
+                "image_data_urls": image_data_urls,
                 "answer_language": answer_language,
                 "subject_documents": subject_documents,
                 "vision_model_ref": (
@@ -1725,8 +1763,7 @@ def dispatch_run_to_lensnode(
                     execution.loaded_mcps
                 ),
                 "agent_model_ref": (
-                    model_refs.get("agent")
-                    or str(run.session.assistant.agent_model_ref or "")
+                    agent_model_ref
                 ),
                 "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(agent_rounds, 26),
                 "agent_rounds": agent_rounds,

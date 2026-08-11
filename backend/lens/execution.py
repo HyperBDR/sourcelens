@@ -9,6 +9,7 @@ from .document_attachments import get_run_document_attachments
 from .models import Run, RunExecution, RunStep
 from .services import (
     LensNodeDispatchError,
+    MultimodalPreprocessingError,
     analyze_multimodal_intent,
     build_loaded_skills,
     create_run_execution_snapshot,
@@ -54,8 +55,11 @@ def run_step(run, step_type, sequence):
         step.status = RunStep.Status.FAILED
         step.detail = {
             **step.detail,
-            "error": str(exc),
+            "status": "failed",
+            "error": getattr(exc, "code", str(exc)),
         }
+        if hasattr(exc, "reason"):
+            step.detail["reason"] = exc.reason
         step.save(update_fields=["status", "detail", "updated_at"])
         raise
     else:
@@ -94,7 +98,13 @@ def _lensnode_dispatch(state):
     if has_images and assistant.multimodal_model_ref:
         with run_step(run, RunStep.StepType.MULTIMODAL, 0) as step:
             analysis = analyze_multimodal_intent(run)
-            question = analysis["question"]
+            question = (
+                "已成功接收并分析用户上传的图片。以下是视觉模型从图片中"
+                "提取的关键信息，请基于这些图片证据回答当前问题，不要声称"
+                "没有上传图片。图片识别结果已经包含在下面；不要因为工作区"
+                "中没有图片文件而否认这张上传图片，也不要为图片问题搜索工作区：\n"
+                f"{analysis['question']}"
+            )
             step.detail = {
                 "rewritten": analysis["rewritten"],
                 "original": analysis.get(
@@ -102,11 +112,17 @@ def _lensnode_dispatch(state):
                 ),
                 "query": question,
                 "image_count": analysis.get("image_count", 0),
+                "status": analysis.get("status", "succeeded"),
             }
             if analysis.get("usage"):
                 step.detail["usage"] = analysis["usage"]
-            if analysis.get("error"):
-                step.detail["error"] = analysis["error"]
+    elif has_images:
+        with run_step(run, RunStep.StepType.MULTIMODAL, 0) as step:
+            step.detail = {
+                "status": "skipped",
+                "reason": "NO_MULTIMODAL_MODEL",
+                "image_count": run.input_message.attachments.count(),
+            }
     elif assistant.preprocess_model_ref and (question or "").strip():
         with run_step(run, RunStep.StepType.QUERY_REWRITE, 0) as step:
             rewrite = rewrite_query(run)
@@ -271,7 +287,7 @@ def execute_answer_run(
             run.status = Run.Status.STREAMING
             run.save(update_fields=["status", "updated_at"])
 
-    except LensNodeDispatchError as exc:
+    except (LensNodeDispatchError, MultimodalPreprocessingError) as exc:
         logger.error("run %s: dispatch failed: %s", run.uuid, exc)
         _mark_run_failed(run, exc)
         raise

@@ -49,7 +49,7 @@ class TestNotificationChannelBulkDelete:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"count": 2}
+        assert response.json()["data"] == {"count": 2}
         assert not NotificationChannel.objects.filter(
             pk__in=[channel.pk for channel in channels]
         ).exists()
@@ -103,7 +103,7 @@ class TestLLMConfigBulk:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"count": 2}
+        assert response.json()["data"] == {"count": 2}
         assert not LLMConfig.objects.filter(
             pk__in=[config.pk for config in configs],
             is_active=True,
@@ -178,7 +178,7 @@ class TestLLMConfigBulk:
         )
 
         assert response.status_code == 200
-        assert response.json() == {"count": 2}
+        assert response.json()["data"] == {"count": 2}
         assert not LLMConfig.objects.filter(
             pk__in=[config.pk for config in configs]
         ).exists()

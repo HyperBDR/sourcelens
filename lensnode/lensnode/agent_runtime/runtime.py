@@ -404,6 +404,7 @@ class LensDeepAgentRuntime:
         state.initial_messages = _build_initial_messages(
             state.command.get("history"),
             state.question,
+            state.command.get("image_data_urls"),
         )
         state.history_assistant_turns = sum(
             1
@@ -638,6 +639,7 @@ class LensDeepAgentRuntime:
                 ),
                 available_tools=[*state.tools, *state.mcp_tools],
                 has_bound_skills=bool(state.resources.skill_paths),
+                image_data_urls=state.command.get("image_data_urls"),
             )
             if state.checkpoint_ready:
                 save_resume_metadata(

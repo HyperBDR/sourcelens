@@ -247,6 +247,7 @@
       "emptyAnswerHint": "The reply didn't come through — this is usually a temporary network hiccup. Tap Retry to send it again.",
       "errorModelTimeout": "No answer was returned: the language model is responding too slowly and timed out after several retries. This is usually the model service being busy, not a platform fault. Please tap Retry.",
       "errorNodeLost": "The answer was interrupted: the execution node connection dropped. Please tap Retry.",
+      "errorImagePreprocessing": "Image analysis failed. Check the image and model, then tap Retry.",
       "retryAction": "Retry",
       "loadFailed": "Failed to load Lens chat.",
       "assistantNotFound": "The assistant you're trying to access doesn't exist. Please contact your administrator for a valid link.",

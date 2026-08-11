@@ -94,6 +94,19 @@ def _multimodal_messages(system, user_text, image_data_urls):
     ]
 
 
+def model_supports_vision(model_ref):
+    """Return whether a configured model accepts image content blocks."""
+
+    from agentcore_metering.adapters.django.services.runtime_config import (
+        get_litellm_params,
+    )
+    from litellm.utils import supports_vision
+
+    params = get_litellm_params(model_uuid=str(model_ref))
+    model = str(params.get("model") or "")
+    return bool(model) and supports_vision(model=model)
+
+
 def _message_to_dict(message):
     """Convert a LangChain message to the metering tracker shape."""
 
@@ -162,6 +175,5 @@ def run_completion_multimodal(
         node_name=node_name,
         user_id=user_id,
     )
-
 
 

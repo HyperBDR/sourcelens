@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TransactionTestCase
 from django.utils import timezone
 
 from lens.consumers import LensNodeConsumer
@@ -36,7 +36,7 @@ from lens.tasks import (
 User = get_user_model()
 
 
-class RunLifecycleTests(TestCase):
+class RunLifecycleTests(TransactionTestCase):
     def setUp(self):
         expiration_patcher = patch(
             "lens.tasks.expire_awaiting_run.apply_async"
@@ -633,7 +633,6 @@ class RunLifecycleTests(TestCase):
                 return_value=2,
             ),
             patch("lens.tasks.enqueue_answer_run_task") as enqueue,
-            self.captureOnCommitCallbacks(execute=True),
         ):
             first = resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
             second = resume_awaiting_runs_for_lensnode(self.lensnode.uuid)
