@@ -1,6 +1,19 @@
 """Language selection and reusable prompt fragments for LensNode runs."""
 
 
+ANSWER_LANGUAGE_NAMES = {
+    "en": "English",
+    "es": "Spanish",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+    "zh-cn": "Simplified Chinese",
+    "zh-hans": "Simplified Chinese",
+    "zh-hk": "Traditional Chinese",
+    "zh-tw": "Traditional Chinese",
+}
+
+
 def detect_answer_language(question):
     """Return the answer language name detected from the question."""
 
@@ -27,14 +40,13 @@ def detect_answer_language(question):
 def command_answer_language(command):
     """Return the requested answer language or infer it from the question."""
 
-    language_code = str(command.get("answer_language") or "").lower()
-    language = {
-        "en": "English",
-        "es": "Spanish",
-        "ja": "Japanese",
-        "ko": "Korean",
-        "zh": "Chinese",
-    }.get(language_code.split("-", 1)[0])
+    language_code = str(command.get("answer_language") or "")
+    normalized_code = language_code.strip().replace("_", "-").lower()
+    language = ANSWER_LANGUAGE_NAMES.get(normalized_code)
+    if language is None:
+        language = ANSWER_LANGUAGE_NAMES.get(
+            normalized_code.split("-", 1)[0]
+        )
     return language or detect_answer_language(command.get("question", ""))
 
 
@@ -52,9 +64,17 @@ def answer_language_requirement(answer_language):
 
 
 def pick_text(zh_text, en_text, answer_language):
-    """Return Chinese text only when Chinese is the output language."""
+    """Return Chinese text for any Chinese output language variant."""
 
-    return zh_text if answer_language == "Chinese" else en_text
+    return (
+        zh_text
+        if answer_language in {
+            "Chinese",
+            "Simplified Chinese",
+            "Traditional Chinese",
+        }
+        else en_text
+    )
 
 
 def history_artifact_guidance(command):

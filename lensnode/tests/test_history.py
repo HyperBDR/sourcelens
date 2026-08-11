@@ -23,6 +23,7 @@ from lensnode.agent_runtime import (
     _strip_dangling_tool_call,
     _synthesize_wrapup_answer,
 )
+from lensnode.agent_runtime.prompts import command_answer_language
 from lensnode.checkpoint import CheckpointResumeError, ResumeState
 from lensnode.gateway_model import GatewayStreamError
 
@@ -2481,9 +2482,28 @@ def test_general_chat_prompt_repeats_configured_language_requirement():
         }
     )
 
-    assert prompt.startswith("ANSWER LANGUAGE REQUIREMENT: Chinese")
+    assert prompt.startswith(
+        "ANSWER LANGUAGE REQUIREMENT: Simplified Chinese"
+    )
     assert "Conversation history" in prompt
-    assert prompt.count("ANSWER LANGUAGE REQUIREMENT: Chinese") == 2
+    assert (
+        prompt.count("ANSWER LANGUAGE REQUIREMENT: Simplified Chinese") == 2
+    )
+
+
+def test_command_answer_language_preserves_chinese_script_variant():
+    assert (
+        command_answer_language({"answer_language": "zh-CN"})
+        == "Simplified Chinese"
+    )
+    assert (
+        command_answer_language({"answer_language": "zh-TW"})
+        == "Traditional Chinese"
+    )
+    assert (
+        command_answer_language({"answer_language": "zh-HK"})
+        == "Traditional Chinese"
+    )
 
 
 def test_plan_execute_prompt_requires_a_stable_initial_plan():
@@ -4056,8 +4076,13 @@ def test_provider_loop_gate_is_preserved_after_natural_agent_finish():
     assert termination_reason == "loop_capped"
 
 
-def test_pick_text_picks_chinese_only_for_chinese():
-    assert _pick_text("zh", "en", "Chinese") == "zh"
+def test_pick_text_picks_chinese_for_all_chinese_variants():
+    for language in (
+        "Chinese",
+        "Simplified Chinese",
+        "Traditional Chinese",
+    ):
+        assert _pick_text("zh", "en", language) == "zh"
     assert _pick_text("zh", "en", "English") == "en"
     # every other detected language falls back to English text too
     assert _pick_text("zh", "en", "Japanese") == "en"
