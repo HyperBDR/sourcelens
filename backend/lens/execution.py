@@ -6,7 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .document_attachments import get_run_document_attachments
-from .models import Run, RunExecution, RunStep
+from .models import MessageAttachment, Run, RunExecution, RunStep
 from .services import (
     LensNodeDispatchError,
     MultimodalPreprocessingError,
@@ -87,7 +87,17 @@ def _lensnode_dispatch(state):
     run = state["run"]
     assistant = run.session.assistant
     question = run.input_message.content
-    has_images = run.input_message.attachments.exists()
+    selected_image_uuids = set(
+        (run.execution.runtime_snapshot or {}).get(
+            "session_attachment_uuids",
+            [],
+        )
+    )
+    has_images = MessageAttachment.objects.filter(
+        session=run.session,
+        kind=MessageAttachment.Kind.IMAGE,
+        uuid__in=selected_image_uuids,
+    ).exists()
     subject_documents = get_run_document_attachments(run.uuid)
     expected_document_count = int(state.get("expected_document_count") or 0)
     if expected_document_count < 0:

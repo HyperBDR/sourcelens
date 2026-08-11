@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import uuid
 from datetime import timedelta
 from time import sleep
@@ -26,6 +27,7 @@ from .document_attachments import (
     bind_document_attachments_to_run,
     get_run_document_attachments,
     get_run_document_expectation,
+    get_session_document_attachments,
     set_run_document_expectation,
 )
 from .environment_variables import (
@@ -702,6 +704,97 @@ def _next_sequence(session):
     return (last_sequence or 0) + 1
 
 
+def _attachment_name_tokens(name):
+    """Return normalized searchable tokens from an attachment name."""
+
+    return {
+        token.lower()
+        for token in re.split(r"[^\w]+", name or "")
+        if token
+    }
+
+
+def select_session_attachment_context(session, question, explicit_uuids=None):
+    """Select current or clearly referenced attachments for a new Run."""
+
+    explicit = {str(value) for value in explicit_uuids or []}
+    images = list(
+        MessageAttachment.objects.filter(session=session).order_by(
+            "-created_at",
+            "-pk",
+        )
+    )
+    documents = get_session_document_attachments(session.uuid)
+    candidates = [
+        {
+            "uuid": str(item.uuid),
+            "kind": "image",
+            "name": item.original_name,
+            "created_at": item.created_at,
+        }
+        for item in images
+    ] + [
+        {
+            "uuid": item["uuid"],
+            "kind": "document",
+            "name": item["original_name"],
+            "created_at": item.get("created_at", ""),
+        }
+        for item in documents
+    ]
+    selected = [item for item in candidates if item["uuid"] in explicit]
+    historical = [item for item in candidates if item["uuid"] not in explicit]
+    if not historical:
+        return selected
+
+    question_tokens = _attachment_name_tokens(question)
+    named = [
+        item
+        for item in historical
+        if question_tokens & _attachment_name_tokens(item["name"])
+    ]
+    if named:
+        return selected + named
+
+    lowered = (question or "").lower()
+    refers_to_attachment = any(
+        marker in lowered
+        for marker in (
+            "previous",
+            "earlier",
+            "before",
+            "that image",
+            "this image",
+            "that document",
+            "this document",
+            "that pdf",
+            "this pdf",
+            "之前",
+            "刚才",
+            "上一个",
+            "图片",
+            "文档",
+            "文件",
+            "pdf",
+        )
+    )
+    if explicit and not refers_to_attachment:
+        return selected
+    if len(historical) == 1 or refers_to_attachment:
+        if refers_to_attachment:
+            requested_kind = (
+                "image"
+                if any(marker in lowered for marker in ("image", "图片"))
+                else "document"
+            )
+            same_kind = [
+                item for item in historical if item["kind"] == requested_kind
+            ]
+            historical = same_kind or historical
+        return selected + historical[:1]
+    return selected
+
+
 @transaction.atomic
 def create_execution_run(
     session,
@@ -774,6 +867,11 @@ def create_execution_run(
     requested_attachment_uuids = [
         str(value) for value in (attachment_uuids or [])
     ]
+    selected_context = select_session_attachment_context(
+        session,
+        question,
+        requested_attachment_uuids,
+    )
     attachment_order = {
         value: order for order, value in enumerate(requested_attachment_uuids)
     }
@@ -784,9 +882,9 @@ def create_execution_run(
         order_by_uuid=attachment_order,
     )
     document_uuids = [
-        value
-        for value in requested_attachment_uuids
-        if str(value) not in image_uuids
+        item["uuid"]
+        for item in selected_context
+        if item["kind"] == "document"
     ]
     if document_uuids and run.execution.task == "general_chat":
         raise AttachmentError("ATTACHMENT_UNSUPPORTED_TYPE")
@@ -798,8 +896,22 @@ def create_execution_run(
         document_uuids,
         order_by_uuid=attachment_order,
     )
-    if len(image_uuids) + len(documents) != len(requested_attachment_uuids):
+    document_uuid_set = {item["uuid"] for item in documents}
+    requested_document_uuids = {
+        value for value in requested_attachment_uuids if value not in image_uuids
+    }
+    if not requested_document_uuids.issubset(document_uuid_set):
         raise AttachmentError("ATTACHMENT_NOT_FOUND")
+
+    execution = run.execution
+    runtime_snapshot = dict(execution.runtime_snapshot or {})
+    runtime_snapshot["session_attachment_uuids"] = [
+        item["uuid"]
+        for item in selected_context
+        if item["kind"] == "image"
+    ]
+    execution.runtime_snapshot = runtime_snapshot
+    execution.save(update_fields=["runtime_snapshot"])
 
     document_count = len(documents)
     set_run_document_expectation(run.uuid, document_count)
@@ -897,9 +1009,25 @@ def analyze_multimodal_intent(run):
 
     assistant = run.session.assistant
     original = run.input_message.content
-    attachments = list(
-        run.input_message.attachments.filter(kind=MessageAttachment.Kind.IMAGE)
+    selected_uuids = set(
+        (run.execution.runtime_snapshot or {}).get(
+            "session_attachment_uuids",
+            [],
+        )
     )
+    attachments = list(
+        MessageAttachment.objects.filter(
+            session=run.session,
+            kind=MessageAttachment.Kind.IMAGE,
+            uuid__in=selected_uuids,
+        ).order_by("created_at", "pk")
+    )
+    if not selected_uuids:
+        attachments = list(
+            run.input_message.attachments.filter(
+                kind=MessageAttachment.Kind.IMAGE
+            )
+        )
     if not attachments or not assistant.multimodal_model_ref:
         return {
             "question": original,
@@ -1734,6 +1862,30 @@ def dispatch_run_to_lensnode(
     answer_language = normalize_answer_language(
         runtime_snapshot.get("answer_language")
         or getattr(profile, "language", None)
+    )
+    selected_image_uuids = set(
+        runtime_snapshot.get("session_attachment_uuids") or []
+    )
+    image_attachments = MessageAttachment.objects.filter(
+        session=run.session,
+        kind=MessageAttachment.Kind.IMAGE,
+        uuid__in=selected_image_uuids,
+    )
+    if not selected_image_uuids:
+        image_attachments = run.input_message.attachments.filter(
+            kind=MessageAttachment.Kind.IMAGE
+        )
+    image_data_urls = [
+        data_url
+        for attachment in image_attachments.order_by("created_at", "pk")
+        if (data_url := attachment_data_url(attachment))
+    ]
+    agent_model_ref = (
+        model_refs.get("multimodal")
+        or str(run.session.assistant.multimodal_model_ref or "")
+        if image_data_urls
+        else model_refs.get("agent")
+        or str(run.session.assistant.agent_model_ref or "")
     )
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),

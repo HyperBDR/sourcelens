@@ -153,6 +153,26 @@ def get_document_attachment(attachment_uuid):
     return metadata
 
 
+def get_session_document_attachments(session_uuid):
+    """Return all unexpired documents indexed for one Session."""
+
+    attachment_uuids = cache.get(_session_index_key(session_uuid)) or []
+    documents = []
+    expired = []
+    for attachment_uuid in attachment_uuids:
+        metadata = get_document_attachment(attachment_uuid)
+        if metadata is None:
+            expired.append(attachment_uuid)
+            continue
+        documents.append(metadata)
+    for attachment_uuid in expired:
+        _remove_from_index(
+            _session_index_key(session_uuid),
+            attachment_uuid,
+        )
+    return sorted(documents, key=lambda item: item.get("order", 0))
+
+
 def document_attachment_response(metadata):
     """Return client-safe metadata matching the attachment API shape."""
 
@@ -195,12 +215,15 @@ def bind_document_attachments_to_run(
             return []
         if metadata["session_uuid"] != str(session.uuid):
             return []
-        if metadata.get("run_uuid") not in {"", str(run.uuid)}:
-            return []
+        bound_runs = set(metadata.get("run_uuids") or [])
+        if metadata.get("run_uuid"):
+            bound_runs.add(metadata["run_uuid"])
+        bound_runs.add(str(run.uuid))
         candidates.append(
             {
                 **metadata,
                 "run_uuid": str(run.uuid),
+                "run_uuids": sorted(bound_runs),
                 "lensnode_uuid": str(run.lensnode.uuid),
                 "order": order_by_uuid.get(str(attachment_uuid), order),
             }
@@ -297,7 +320,10 @@ def get_runs_document_attachments(run_uuids, *, fail_silently=False):
                 if _remaining_seconds(metadata) <= 0:
                     expired_keys.append(attachment_key)
                     continue
-                if metadata.get("run_uuid") != run_uuid:
+                bound_runs = set(metadata.get("run_uuids") or [])
+                if metadata.get("run_uuid"):
+                    bound_runs.add(metadata["run_uuid"])
+                if run_uuid not in bound_runs:
                     continue
                 documents_by_run[run_uuid].append(metadata)
             documents_by_run[run_uuid].sort(

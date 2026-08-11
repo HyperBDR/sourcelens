@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from agentcore_metering.adapters.django.models import LLMUsage
 
 from accounts.permissions import HasRequiredFeature
+from lens.attachments import get_session_image_attachments
 from lens.document_attachments import (
     document_attachment_response,
     get_run_document_attachments,
@@ -434,13 +435,25 @@ def _admin_run_detail(run):
                 "rewritten": detail.get("rewritten"),
             }
         steps.append(item)
-    attachments = (
-        MessageAttachmentSerializer(
-            run.input_message.attachments.all(), many=True
-        ).data
-        if run.input_message
-        else []
-    )
+    attachments = []
+    if run.input_message:
+        selected = (
+            run.execution.runtime_snapshot or {}
+        ).get("session_attachment_uuids", [])
+        selected_images = get_session_image_attachments(
+            run.session,
+            selected,
+        )
+        if selected:
+            attachments = MessageAttachmentSerializer(
+                selected_images,
+                many=True,
+            ).data
+        else:
+            attachments = MessageAttachmentSerializer(
+                run.input_message.attachments.all(),
+                many=True,
+            ).data
     attachments.extend(
         document_attachment_response(item)
         for item in get_run_document_attachments(

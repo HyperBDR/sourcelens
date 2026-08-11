@@ -191,6 +191,64 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(run.input_message.attachments.count(), 1)
 
     @patch("lens.services.model_supports_vision", return_value=True)
+    def test_follow_up_reuses_previous_image(self, mock_support):
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload("diagram.png")
+        )
+        first = create_execution_run(
+            session=self.session,
+            question="Describe this image",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+        second = create_execution_run(
+            session=self.session,
+            question="What color is the previous image?",
+            enqueue=False,
+        )
+
+        selected = second.execution.runtime_snapshot[
+            "session_attachment_uuids"
+        ]
+        self.assertEqual(selected, [str(attachment.uuid)])
+        with patch("lens.services.run_completion_multimodal") as call:
+            call.return_value = LensLLMResult(
+                content="green",
+                usage={},
+                metered=True,
+            )
+            result = analyze_multimodal_intent(second)
+
+        self.assertEqual(result["image_count"], 1)
+        self.assertNotEqual(first.uuid, second.uuid)
+
+    def test_multiple_previous_attachments_are_not_all_reused(self):
+        first = store_message_attachment(
+            self.session, self.user, _png_upload("first.png")
+        )
+        second = store_message_attachment(
+            self.session, self.user, _png_upload("second.png")
+        )
+        create_execution_run(
+            session=self.session,
+            question="Describe the first image",
+            enqueue=False,
+            attachment_uuids=[str(first.uuid)],
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Tell me something unrelated",
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            run.execution.runtime_snapshot["session_attachment_uuids"],
+            [],
+        )
+        second.refresh_from_db()
+        self.assertIsNone(second.message_id)
+
+    @patch("lens.services.model_supports_vision", return_value=True)
     @patch("lens.services.run_completion_multimodal")
     def test_analyze_multimodal_intent_folds_image_and_text(
         self, mock_call, mock_support
