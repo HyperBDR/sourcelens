@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Follow-up questions can now reuse clearly referenced images and documents
+  uploaded earlier in the same chat session.
+zh-CN: >-
+  后续问题现在可以复用同一聊天会话中之前上传且明确引用的图片和文档。
