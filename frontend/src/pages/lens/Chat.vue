@@ -17,6 +17,8 @@
 
     <aside
       class="sidebar"
+      :inert="isMobile && !sidebarOpen"
+      :aria-hidden="isMobile && !sidebarOpen"
       :class="[
         sidebarOpen && isMobile ? 'sidebar-open' : '',
         sidebarCollapsedActive ? 'sidebar-collapsed' : 'sidebar-expanded'
@@ -330,6 +332,18 @@
           </div>
           <div v-else class="thread">
             <div
+              v-if="isMobile && !decoratedMessages.length && !showLiveAnswer"
+              class="chat-welcome"
+            >
+              <p class="chat-welcome-assistant">{{ assistantName }}</p>
+              <h1 class="chat-welcome-title">
+                {{ t('lens.chat.startTitle') }}
+              </h1>
+              <p v-if="assistantDescription" class="chat-welcome-description">
+                {{ assistantDescription }}
+              </p>
+            </div>
+            <div
               v-for="message in decoratedMessages"
               :key="message.uuid"
               class="message-row"
@@ -339,23 +353,6 @@
                   : 'message-row-assistant'
               "
             >
-              <div
-                class="message-avatar"
-                :class="[
-                  message.role,
-                  message.role === 'user' ? avatarBgColor : ''
-                ]"
-              >
-                <span v-if="message.role === 'user'" aria-hidden="true">
-                  {{ userInitials }}
-                </span>
-                <BrandLogo
-                  v-else
-                  variant="mark"
-                  wrapperClass="gap-0 [&_img]:h-[20px] [&_img]:w-[20px]"
-                />
-              </div>
-
               <div class="message-body">
                 <details
                   v-if="structuredProgress(message._runtimeState).items.length"
@@ -734,83 +731,7 @@
                     </svg>
                   </button>
                   <button
-                    v-if="message.content"
-                    type="button"
-                    class="icon-btn"
-                    :title="t('lens.qa.exportPdf')"
-                    :aria-label="t('lens.qa.exportPdf')"
-                    @click="exportQa(message)"
-                  >
-                    <Download :size="16" aria-hidden="true" />
-                  </button>
-                  <button
-                    v-if="!isAnonymous && message.run && message.content"
-                    type="button"
-                    class="icon-btn"
-                    :class="{
-                      'icon-btn-feedback-positive':
-                        message.feedback === 'positive'
-                    }"
-                    :title="t('lens.chat.feedbackHelpful')"
-                    :aria-label="t('lens.chat.feedbackHelpful')"
-                    :aria-pressed="message.feedback === 'positive'"
-                    :disabled="isFeedbackUpdating(message.run)"
-                    @click="setFeedback(message, 'positive')"
-                  >
-                    <ThumbsUp :size="16" />
-                  </button>
-                  <button
-                    v-if="!isAnonymous && message.run && message.content"
-                    type="button"
-                    class="icon-btn"
-                    :class="{
-                      'icon-btn-feedback-negative':
-                        message.feedback === 'negative'
-                    }"
-                    :title="t('lens.chat.feedbackUnhelpful')"
-                    :aria-label="t('lens.chat.feedbackUnhelpful')"
-                    :aria-pressed="message.feedback === 'negative'"
-                    :disabled="isFeedbackUpdating(message.run)"
-                    @click="setFeedback(message, 'negative')"
-                  >
-                    <ThumbsDown :size="16" />
-                  </button>
-                  <button
-                    v-if="!isAnonymous && message.run"
-                    type="button"
-                    class="icon-btn"
-                    :class="{ 'icon-btn-shared': isMessageShared(message) }"
-                    :title="
-                      isMessageShared(message)
-                        ? t('lens.qa.sharedButton')
-                        : t('lens.qa.shareButton')
-                    "
-                    :aria-label="
-                      isMessageShared(message)
-                        ? t('lens.qa.sharedButton')
-                        : t('lens.qa.shareButton')
-                    "
-                    @click="openShare(message)"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      aria-hidden="true"
-                    >
-                      <circle cx="18" cy="5" r="3" />
-                      <circle cx="6" cy="12" r="3" />
-                      <circle cx="18" cy="19" r="3" />
-                      <path
-                        d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    v-if="canRetryLastQuestion(message)"
+                    v-if="isMobile && canRetryLastQuestion(message)"
                     type="button"
                     class="icon-btn"
                     :title="t('lens.chat.retryAction')"
@@ -836,18 +757,124 @@
                       />
                     </svg>
                   </button>
+                  <template v-if="!isMobile">
+                    <button
+                      v-if="message.content"
+                      type="button"
+                      class="icon-btn"
+                      :title="t('lens.qa.exportPdf')"
+                      :aria-label="t('lens.qa.exportPdf')"
+                      @click="exportQa(message)"
+                    >
+                      <Download :size="16" aria-hidden="true" />
+                    </button>
+                    <button
+                      v-if="!isAnonymous && message.run && message.content"
+                      type="button"
+                      class="icon-btn"
+                      :class="{
+                        'icon-btn-feedback-positive':
+                          message.feedback === 'positive'
+                      }"
+                      :title="t('lens.chat.feedbackHelpful')"
+                      :aria-label="t('lens.chat.feedbackHelpful')"
+                      :aria-pressed="message.feedback === 'positive'"
+                      :disabled="isFeedbackUpdating(message.run)"
+                      @click="setFeedback(message, 'positive')"
+                    >
+                      <ThumbsUp :size="16" />
+                    </button>
+                    <button
+                      v-if="!isAnonymous && message.run && message.content"
+                      type="button"
+                      class="icon-btn"
+                      :class="{
+                        'icon-btn-feedback-negative':
+                          message.feedback === 'negative'
+                      }"
+                      :title="t('lens.chat.feedbackUnhelpful')"
+                      :aria-label="t('lens.chat.feedbackUnhelpful')"
+                      :aria-pressed="message.feedback === 'negative'"
+                      :disabled="isFeedbackUpdating(message.run)"
+                      @click="setFeedback(message, 'negative')"
+                    >
+                      <ThumbsDown :size="16" />
+                    </button>
+                    <button
+                      v-if="!isAnonymous && message.run"
+                      type="button"
+                      class="icon-btn"
+                      :class="{ 'icon-btn-shared': isMessageShared(message) }"
+                      :title="
+                        isMessageShared(message)
+                          ? t('lens.qa.sharedButton')
+                          : t('lens.qa.shareButton')
+                      "
+                      :aria-label="
+                        isMessageShared(message)
+                          ? t('lens.qa.sharedButton')
+                          : t('lens.qa.shareButton')
+                      "
+                      @click="openShare(message)"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        aria-hidden="true"
+                      >
+                        <circle cx="18" cy="5" r="3" />
+                        <circle cx="6" cy="12" r="3" />
+                        <circle cx="18" cy="19" r="3" />
+                        <path
+                          d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </template>
+                  <button
+                    v-if="!isMobile && canRetryLastQuestion(message)"
+                    type="button"
+                    class="icon-btn"
+                    :title="t('lens.chat.retryAction')"
+                    :aria-label="t('lens.chat.retryAction')"
+                    @click="retryLastQuestion(message)"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M3 12a9 9 0 1 0 3-6.7L3 8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M3 3v5h5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  <RowActionMenu
+                    v-if="isMobile && messageSecondaryActions(message).length"
+                    class="message-more-actions"
+                    :actions="messageSecondaryActions(message)"
+                    :label="t('lens.chat.messageActions')"
+                    @select="handleMessageAction(message, $event)"
+                  />
                 </div>
               </div>
             </div>
 
             <!-- Empty-answer hint: a finished turn returned no text -->
             <div v-if="showRetryHint" class="message-row message-row-assistant">
-              <div class="message-avatar assistant">
-                <BrandLogo
-                  variant="mark"
-                  wrapperClass="gap-0 [&_img]:h-[20px] [&_img]:w-[20px]"
-                />
-              </div>
               <div class="message-body">
                 <div class="retry-hint">
                   <span class="retry-hint-text">
@@ -865,212 +892,171 @@
               </div>
             </div>
 
-            <!-- Live answer: one row / one avatar — thinking panel + streaming markdown -->
+            <!-- Live answer: one row for progress and streaming markdown -->
             <div
               v-if="showLiveAnswer"
               class="message-row message-row-assistant live-progress-row"
             >
-              <div class="message-avatar assistant">
-                <BrandLogo
-                  variant="mark"
-                  wrapperClass="gap-0 [&_img]:h-[20px] [&_img]:w-[20px]"
-                />
-              </div>
               <div class="message-body">
-                <div
+                <details
                   v-if="isRunActive && liveStructuredProgress.items.length"
                   class="runtime-progress-card runtime-progress-live"
+                  :open="!isMobile"
                   role="status"
                   aria-live="polite"
                 >
-                  <div class="runtime-card-title">
-                    {{
-                      progressTitle(
-                        liveStructuredProgress.kind,
-                        liveStructuredProgress.hasPlan
-                      )
-                    }}
-                  </div>
-                  <div
-                    v-if="liveStructuredProgress.kind === 'workflow'"
-                    class="runtime-workflow"
+                  <summary
+                    class="runtime-progress-summary runtime-progress-live-summary"
                   >
+                    <span class="runtime-card-title">
+                      {{
+                        progressTitle(
+                          liveStructuredProgress.kind,
+                          liveStructuredProgress.hasPlan
+                        )
+                      }}
+                    </span>
+                    <span class="runtime-progress-summary-text">
+                      {{ liveProgressText }}
+                      <span v-if="elapsedText"> · {{ elapsedText }}</span>
+                    </span>
+                    <span class="runtime-progress-chevron" aria-hidden="true">
+                      ⌄
+                    </span>
+                  </summary>
+                  <div class="runtime-progress-content">
                     <div
-                      v-for="task in liveStructuredProgress.tasks"
-                      :key="task.id"
-                      class="runtime-workflow-task"
-                      :class="{
-                        'is-direct': !liveStructuredProgress.hasPlan
-                      }"
+                      class="runtime-card-title runtime-progress-desktop-title"
+                    >
+                      {{
+                        progressTitle(
+                          liveStructuredProgress.kind,
+                          liveStructuredProgress.hasPlan
+                        )
+                      }}
+                    </div>
+                    <div
+                      v-if="liveStructuredProgress.kind === 'workflow'"
+                      class="runtime-workflow"
                     >
                       <div
-                        v-if="liveStructuredProgress.hasPlan"
-                        class="runtime-plan-step runtime-task-row"
+                        v-for="task in liveStructuredProgress.tasks"
+                        :key="task.id"
+                        class="runtime-workflow-task"
                         :class="{
-                          'is-active-ancestor': isActiveProgressAncestor(
-                            task,
-                            task.stages
-                          )
+                          'is-direct': !liveStructuredProgress.hasPlan
                         }"
                       >
-                        <span
-                          class="runtime-plan-status"
-                          :class="[
-                            `is-${task.status}`,
-                            {
-                              'is-active-ancestor': isActiveProgressAncestor(
-                                task,
-                                task.stages
-                              )
-                            }
-                          ]"
-                          aria-hidden="true"
-                        >
-                          {{ progressStatusIcon(task.status) }}
-                        </span>
-                        <span>{{ workflowTaskTitle(task) }}</span>
-                      </div>
-                      <div
-                        v-for="stage in task.stages"
-                        :key="stage.id"
-                        class="runtime-workflow-stage"
-                      >
                         <div
-                          class="runtime-plan-step runtime-stage-row"
+                          v-if="liveStructuredProgress.hasPlan"
+                          class="runtime-plan-step runtime-task-row"
                           :class="{
                             'is-active-ancestor': isActiveProgressAncestor(
-                              stage,
-                              stage.steps
+                              task,
+                              task.stages
                             )
                           }"
                         >
                           <span
                             class="runtime-plan-status"
                             :class="[
-                              `is-${stage.status}`,
+                              `is-${task.status}`,
                               {
                                 'is-active-ancestor': isActiveProgressAncestor(
-                                  stage,
-                                  stage.steps
+                                  task,
+                                  task.stages
                                 )
                               }
                             ]"
                             aria-hidden="true"
                           >
-                            {{ progressStatusIcon(stage.status) }}
+                            {{ progressStatusIcon(task.status) }}
                           </span>
-                          <span>{{ workflowStageTitle(stage.kind) }}</span>
+                          <span>{{ workflowTaskTitle(task) }}</span>
                         </div>
                         <div
-                          :ref="
-                            stage.status === 'in_progress'
-                              ? 'liveActivityScrollRef'
-                              : undefined
-                          "
-                          class="runtime-workflow-steps"
+                          v-for="stage in task.stages"
+                          :key="stage.id"
+                          class="runtime-workflow-stage"
                         >
                           <div
-                            v-for="step in stage.steps"
-                            :key="step.id"
-                            class="runtime-plan-step runtime-step-row"
+                            class="runtime-plan-step runtime-stage-row"
+                            :class="{
+                              'is-active-ancestor': isActiveProgressAncestor(
+                                stage,
+                                stage.steps
+                              )
+                            }"
                           >
                             <span
                               class="runtime-plan-status"
-                              :class="`is-${step.status}`"
+                              :class="[
+                                `is-${stage.status}`,
+                                {
+                                  'is-active-ancestor':
+                                    isActiveProgressAncestor(stage, stage.steps)
+                                }
+                              ]"
                               aria-hidden="true"
                             >
-                              {{ progressStatusIcon(step.status) }}
+                              {{ progressStatusIcon(stage.status) }}
                             </span>
-                            <span>{{ workflowStepTitle(step) }}</span>
+                            <span>{{ workflowStageTitle(stage.kind) }}</span>
+                          </div>
+                          <div
+                            :ref="
+                              stage.status === 'in_progress'
+                                ? 'liveActivityScrollRef'
+                                : undefined
+                            "
+                            class="runtime-workflow-steps"
+                          >
+                            <div
+                              v-for="step in stage.steps"
+                              :key="step.id"
+                              class="runtime-plan-step runtime-step-row"
+                            >
+                              <span
+                                class="runtime-plan-status"
+                                :class="`is-${step.status}`"
+                                aria-hidden="true"
+                              >
+                                {{ progressStatusIcon(step.status) }}
+                              </span>
+                              <span>{{ workflowStepTitle(step) }}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                  <div
-                    v-else-if="liveStructuredProgress.kind === 'activity'"
-                    ref="liveActivityScrollRef"
-                    class="runtime-node-activities runtime-standalone-activities"
-                  >
                     <div
-                      v-for="activity in liveStructuredProgress.items"
-                      :key="activity.id"
-                      class="runtime-node-activity"
-                    >
-                      <span
-                        class="runtime-activity-indicator"
-                        :class="{
-                          'is-current': isCurrentStandaloneActivity(
-                            activity,
-                            liveStructuredProgress.items
-                          )
-                        }"
-                        aria-hidden="true"
-                      >
-                        {{
-                          isCurrentStandaloneActivity(
-                            activity,
-                            liveStructuredProgress.items
-                          )
-                            ? ''
-                            : '✓'
-                        }}
-                      </span>
-                      <span>{{ activityLabel(activity.kind) }}</span>
-                      <span
-                        v-if="activity.count > 1"
-                        class="runtime-activity-count"
-                      >
-                        ×{{ activity.count }}
-                      </span>
-                    </div>
-                  </div>
-                  <div
-                    v-else
-                    v-for="item in liveStructuredProgress.items"
-                    :key="item.id"
-                    class="runtime-plan-node"
-                  >
-                    <div class="runtime-plan-step">
-                      <span
-                        class="runtime-plan-status"
-                        :class="`is-${item.status}`"
-                        aria-hidden="true"
-                      >
-                        {{ progressStatusIcon(item.status) }}
-                      </span>
-                      <span class="runtime-step-content">
-                        <span>{{ item.title }}</span>
-                        <span v-if="item.summary" class="runtime-step-summary">
-                          {{ item.summary }}
-                        </span>
-                      </span>
-                    </div>
-                    <div
-                      v-if="nodeActivities(runtimeState, item.id).length"
-                      :ref="
-                        item.status === 'in_progress'
-                          ? 'liveActivityScrollRef'
-                          : undefined
-                      "
-                      class="runtime-node-activities"
+                      v-else-if="liveStructuredProgress.kind === 'activity'"
+                      ref="liveActivityScrollRef"
+                      class="runtime-node-activities runtime-standalone-activities"
                     >
                       <div
-                        v-for="activity in nodeActivities(
-                          runtimeState,
-                          item.id
-                        )"
+                        v-for="activity in liveStructuredProgress.items"
                         :key="activity.id"
                         class="runtime-node-activity"
                       >
                         <span
                           class="runtime-activity-indicator"
                           :class="{
-                            'is-current': isCurrentActivity(activity, item)
+                            'is-current': isCurrentStandaloneActivity(
+                              activity,
+                              liveStructuredProgress.items
+                            )
                           }"
                           aria-hidden="true"
                         >
-                          {{ isCurrentActivity(activity, item) ? '' : '✓' }}
+                          {{
+                            isCurrentStandaloneActivity(
+                              activity,
+                              liveStructuredProgress.items
+                            )
+                              ? ''
+                              : '✓'
+                          }}
                         </span>
                         <span>{{ activityLabel(activity.kind) }}</span>
                         <span
@@ -1081,12 +1067,72 @@
                         </span>
                       </div>
                     </div>
+                    <div
+                      v-else
+                      v-for="item in liveStructuredProgress.items"
+                      :key="item.id"
+                      class="runtime-plan-node"
+                    >
+                      <div class="runtime-plan-step">
+                        <span
+                          class="runtime-plan-status"
+                          :class="`is-${item.status}`"
+                          aria-hidden="true"
+                        >
+                          {{ progressStatusIcon(item.status) }}
+                        </span>
+                        <span class="runtime-step-content">
+                          <span>{{ item.title }}</span>
+                          <span
+                            v-if="item.summary"
+                            class="runtime-step-summary"
+                          >
+                            {{ item.summary }}
+                          </span>
+                        </span>
+                      </div>
+                      <div
+                        v-if="nodeActivities(runtimeState, item.id).length"
+                        :ref="
+                          item.status === 'in_progress'
+                            ? 'liveActivityScrollRef'
+                            : undefined
+                        "
+                        class="runtime-node-activities"
+                      >
+                        <div
+                          v-for="activity in nodeActivities(
+                            runtimeState,
+                            item.id
+                          )"
+                          :key="activity.id"
+                          class="runtime-node-activity"
+                        >
+                          <span
+                            class="runtime-activity-indicator"
+                            :class="{
+                              'is-current': isCurrentActivity(activity, item)
+                            }"
+                            aria-hidden="true"
+                          >
+                            {{ isCurrentActivity(activity, item) ? '' : '✓' }}
+                          </span>
+                          <span>{{ activityLabel(activity.kind) }}</span>
+                          <span
+                            v-if="activity.count > 1"
+                            class="runtime-activity-count"
+                          >
+                            ×{{ activity.count }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="runtime-progress-footer">
+                      <span>{{ liveProgressText }}</span>
+                      <span v-if="elapsedText"> · {{ elapsedText }}</span>
+                    </div>
                   </div>
-                  <div class="runtime-progress-footer">
-                    <span>{{ liveProgressText }}</span>
-                    <span v-if="elapsedText"> · {{ elapsedText }}</span>
-                  </div>
-                </div>
+                </details>
 
                 <div
                   v-else-if="isRunActive"
@@ -1208,7 +1254,11 @@
           </button>
         </div>
 
-        <div v-else-if="canCompose" class="composer-wrap">
+        <div
+          v-else-if="canCompose"
+          class="composer-wrap"
+          :class="{ 'composer-wrap-empty': isEmptyConversation }"
+        >
           <div class="composer-inner">
             <div class="composer-shell">
               <div v-if="attachments.length" class="composer-attachments">
@@ -1291,10 +1341,7 @@
                   class="composer-action-btn"
                   :class="isRunActive ? 'composer-action-btn-stop' : ''"
                   type="button"
-                  :disabled="
-                    (!isAnonymous && !selectedSessionUuid) ||
-                    (!canSubmit && !isRunActive)
-                  "
+                  :disabled="!canSubmit && !isRunActive"
                   :aria-label="
                     isRunActive ? t('common.stop') : t('common.submit')
                   "
@@ -1324,9 +1371,24 @@
                   </svg>
                 </button>
               </div>
+              <div
+                v-if="isEmptyConversation"
+                class="prompt-suggestions"
+                :aria-label="t('lens.chat.suggestions.label')"
+              >
+                <button
+                  v-for="suggestion in promptSuggestions"
+                  :key="suggestion"
+                  type="button"
+                  class="prompt-suggestion"
+                  @click="applyPromptSuggestion(suggestion)"
+                >
+                  {{ suggestion }}
+                </button>
+              </div>
             </div>
 
-            <p class="disclaimer">
+            <p v-if="!isMobile" class="disclaimer">
               {{
                 t('lens.chat.disclaimer') ||
                 '回答由 AI 生成，请自行核实关键信息。'
@@ -1334,6 +1396,12 @@
             </p>
           </div>
         </div>
+
+        <p v-if="canCompose && isMobile" class="disclaimer mobile-disclaimer">
+          {{
+            t('lens.chat.disclaimer') || '回答由 AI 生成，请自行核实关键信息。'
+          }}
+        </p>
       </template>
     </main>
 
@@ -1441,6 +1509,8 @@ import {
   isPreviewable
 } from '@/utils/filePreview'
 import { downloadQaPdf } from '@/utils/qaPdf'
+import { qaShareUrl } from '@/utils/lens'
+import { shareWithNative, supportsNativeShare } from '@/utils/nativeShare'
 import { useToast } from '@/composables/useToast'
 import { useSessionActivity } from '@/composables/useSessionActivity'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -1463,6 +1533,7 @@ import {
   retryableUserMessage
 } from '@/pages/lens/chatMessageContext'
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
+import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
 import { compactFilename } from '@/pages/lens/filenameDisplay'
 import {
   ATTACHMENT_ACCEPT,
@@ -1636,6 +1707,9 @@ const canSubmit = computed(() => {
   if (!canCompose.value) {
     return false
   }
+  if (loading.value.run) {
+    return false
+  }
   if (hasUploadingAttachment.value) {
     return false
   }
@@ -1652,7 +1726,9 @@ const hasAssistant = computed(() =>
 const canCompose = computed(
   () =>
     hasAssistant.value &&
-    (isAnonymous.value || selectedSession.value?.status === 'active')
+    (isAnonymous.value ||
+      selectedSession.value?.status === 'active' ||
+      (!selectedSessionUuid.value && !showArchivedSessions.value))
 )
 
 const emptyVariant = computed(() =>
@@ -1669,6 +1745,11 @@ const assistantDescription = computed(
     publicAssistant.value?.description?.trim() ||
     ''
 )
+
+const promptSuggestions = computed(() => {
+  const task = (selectedAssistant.value || publicAssistant.value)?.selected_task
+  return promptSuggestionKeys(task).map((key) => t(key))
+})
 
 const isGeneralChatAssistant = computed(
   () =>
@@ -1689,35 +1770,6 @@ const switchable = computed(
 // Slug of the assistant in view — drives the public Q&A list entry in the
 // header for both authenticated and anonymous visitors.
 const assistantSlug = computed(() => route.params.slug || '')
-
-const displayName = computed(() => {
-  const userInfo = userStore.userInfo
-  if (!userInfo) return 'User'
-  if (userInfo.display_name) return userInfo.display_name
-  if (userInfo.first_name && userInfo.last_name) {
-    return `${userInfo.first_name} ${userInfo.last_name}`
-  }
-  if (userInfo.first_name) return userInfo.first_name
-  return userInfo.username || 'User'
-})
-
-const userInitials = computed(() => {
-  const name = displayName.value.trim()
-  return name.charAt(0).toUpperCase() || 'U'
-})
-
-const avatarBgColor = computed(() => {
-  const colors = [
-    'bg-blue-500',
-    'bg-indigo-500',
-    'bg-emerald-500',
-    'bg-rose-500',
-    'bg-amber-500',
-    'bg-cyan-500'
-  ]
-  const charCode = userInitials.value.charCodeAt(0)
-  return colors[charCode % colors.length]
-})
 
 const sidebarCollapsedActive = computed(
   () => sidebarCollapsed.value && !isMobile.value
@@ -2105,6 +2157,19 @@ const decoratedMessages = computed(() =>
       return message
     })
 )
+
+const isEmptyConversation = computed(
+  () =>
+    isMobile.value && !decoratedMessages.value.length && !showLiveAnswer.value
+)
+
+function applyPromptSuggestion(suggestion) {
+  question.value = suggestion
+  nextTick(() => {
+    autoResizeTextarea()
+    composerRef.value?.focus()
+  })
+}
 
 // A finished turn that produced no answer text — show a transient,
 // retry-oriented hint (framed as a temporary hiccup, not a product fault)
@@ -3090,8 +3155,22 @@ async function submit() {
     requireLogin()
     return
   }
+  if (loading.value.run) {
+    return
+  }
   if (!canSubmit.value) {
     return
+  }
+  loading.value.run = true
+  if (!selectedSessionUuid.value) {
+    const draftBeforeSessionCreation = question.value
+    const session = await createNewSession(false)
+    if (!session) {
+      question.value = draftBeforeSessionCreation
+      loading.value.run = false
+      return
+    }
+    question.value = draftBeforeSessionCreation
   }
   // Bind this submit to the session it started in. If the user switches
   // assistant/session mid-flight, the stream is aborted on purpose — that is
@@ -3099,7 +3178,6 @@ async function submit() {
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
   const isFirstMessage = messages.value.length === 0
-  loading.value.run = true
   resetStreamState()
   const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
   question.value = ''
@@ -3353,12 +3431,35 @@ function fileTypeLabel(file) {
   return [ext, size].filter(Boolean).join(' · ')
 }
 
-function openShare(message, sourceMessages = messages.value) {
+function nativeSharePayload(share) {
+  const title = share.title || shareQuestion.value
+  return {
+    title,
+    text: t('lens.qa.nativeShareText', {
+      name: assistantName.value || t('lens.qa.genericAgent'),
+      title
+    }),
+    url: qaShareUrl(share.token)
+  }
+}
+
+async function openShare(message, sourceMessages = messages.value) {
   shareRunUuid.value = message.run || ''
   shareExisting.value = sharesByRun.value[shareRunUuid.value] || null
   shareAnswer.value = message.content || ''
   shareQuestion.value =
     precedingUserMessage(sourceMessages, message)?.content || ''
+
+  if (isMobile.value && shareExisting.value && supportsNativeShare()) {
+    const result = await shareWithNative(
+      nativeSharePayload(shareExisting.value)
+    )
+    if (result.status === 'shared') return
+    if (result.status === 'cancelled') return
+    if (result.status === 'failed') {
+      showError(t('lens.qa.nativeShareFailed'))
+    }
+  }
   shareOpen.value = true
 }
 
@@ -3473,6 +3574,52 @@ function retryLastQuestion(message = null) {
 
 function canRetryLastQuestion(message = null) {
   return retryableUserMessage(messages.value, message) !== null
+}
+
+function messageSecondaryActions(message) {
+  const actions = []
+  if (message.content) {
+    actions.push({
+      key: 'pdf',
+      label: t('lens.qa.exportPdf'),
+      icon: Download
+    })
+  }
+  if (!isAnonymous.value && message.run && message.content) {
+    actions.push(
+      {
+        key: 'feedback-positive',
+        label: t('lens.chat.feedbackHelpful'),
+        icon: ThumbsUp,
+        loading: isFeedbackUpdating(message.run)
+      },
+      {
+        key: 'feedback-negative',
+        label: t('lens.chat.feedbackUnhelpful'),
+        icon: ThumbsDown,
+        loading: isFeedbackUpdating(message.run)
+      }
+    )
+  }
+  if (!isAnonymous.value && message.run) {
+    actions.push({
+      key: 'share',
+      label: isMessageShared(message)
+        ? t('lens.qa.sharedButton')
+        : t('lens.qa.shareButton'),
+      icon: Share2
+    })
+  }
+  return actions
+}
+
+async function handleMessageAction(message, action) {
+  if (action === 'pdf') await exportQa(message)
+  else if (action === 'feedback-positive') {
+    await setFeedback(message, 'positive')
+  } else if (action === 'feedback-negative') {
+    await setFeedback(message, 'negative')
+  } else if (action === 'share') openShare(message)
 }
 
 function formatTime(isoString) {
@@ -3878,26 +4025,13 @@ onBeforeUnmount(() => {
   @apply flex-row-reverse;
 }
 
-.message-avatar {
-  @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold;
-}
-
-.message-avatar.user {
-  color: #fff;
-}
-
-.message-avatar.assistant {
-  background: var(--sl-bg-surface);
-  border: 1px solid #e5e7eb;
-}
-
 .message-body {
   @apply min-w-0 flex-1;
 }
 
 .message-row-user .message-body {
   @apply w-fit flex-none text-right;
-  max-width: min(620px, calc(100% - 40px));
+  max-width: min(620px, 86%);
 }
 
 .message-card {
@@ -3921,7 +4055,7 @@ onBeforeUnmount(() => {
 
 .message-markdown :deep(.markdown-content) {
   @apply max-w-none break-words;
-  color: var(--sl-text-secondary);
+  color: var(--sl-text-primary);
 }
 
 .message-markdown :deep(.markdown-content h1),
@@ -3933,7 +4067,7 @@ onBeforeUnmount(() => {
 
 .message-markdown :deep(.markdown-content p) {
   @apply mb-2.5 text-[15px] leading-6;
-  color: var(--sl-text-secondary);
+  color: var(--sl-text-primary);
 }
 
 .message-markdown :deep(.markdown-content ul),
@@ -3943,7 +4077,7 @@ onBeforeUnmount(() => {
 
 .message-markdown :deep(.markdown-content li) {
   @apply mb-1.5 text-[15px] leading-6;
-  color: var(--sl-text-secondary);
+  color: var(--sl-text-primary);
 }
 
 .message-markdown :deep(.markdown-content :not(pre) > code) {
@@ -4066,6 +4200,10 @@ onBeforeUnmount(() => {
 .runtime-progress-live {
   border-color: var(--sl-border-default);
   background: var(--sl-bg-raised);
+}
+
+.runtime-progress-live > .runtime-progress-summary {
+  display: none;
 }
 
 .runtime-progress-summary {
@@ -4513,7 +4651,7 @@ onBeforeUnmount(() => {
     text-sm leading-none text-white;
 }
 
-@media (max-width: 767px), (hover: none), (pointer: coarse) {
+@media (max-width: 1023px), (hover: none), (pointer: coarse) {
   .sidebar-collapse-btn,
   .composer-action-btn,
   .icon-btn,
@@ -4543,7 +4681,369 @@ onBeforeUnmount(() => {
   }
 
   .message-actions .icon-btn {
-    @apply h-9 w-9;
+    @apply h-11 w-11;
+  }
+
+  .message-actions :deep(.message-more-actions .row-action-trigger) {
+    @apply h-11 w-11;
+  }
+}
+
+@media (max-width: 1023px) {
+  .lens-chat-page {
+    height: 100dvh;
+  }
+
+  .mobile-topbar {
+    min-height: 52px;
+    padding: 0.25rem 0.5rem;
+    background: rgb(var(--sl-bg-surface-rgb) / 96%);
+    border-color: var(--sl-border-soft);
+  }
+
+  .mobile-topbar .sidebar-collapse-btn {
+    position: static;
+    border-radius: 9999px;
+    transform: none;
+  }
+
+  .mobile-topbar-title {
+    align-items: center;
+  }
+
+  .mobile-topbar-title-text {
+    font-size: 0.9375rem;
+    line-height: 1.25rem;
+  }
+
+  .mobile-topbar-title :deep(.assistant-switcher-header-trigger) {
+    max-width: min(62vw, 15rem);
+    padding: 0.5rem 0.625rem;
+    border-radius: 9999px;
+  }
+
+  .thread-scroll {
+    scrollbar-gutter: auto;
+    scrollbar-width: none;
+  }
+
+  .thread-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .thread-scroll .thread {
+    max-width: 47.5rem;
+    padding: 1.125rem 1rem 9.5rem;
+  }
+
+  .chat-welcome {
+    display: flex;
+    min-height: calc(100dvh - 13rem);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    padding: 0 1.5rem 13.5rem;
+    text-align: center;
+  }
+
+  .chat-welcome-assistant {
+    margin-bottom: 0.5rem;
+    color: var(--sl-text-muted);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+  }
+
+  .chat-welcome-title {
+    color: var(--sl-text-primary);
+    font-size: 1.375rem;
+    font-weight: 600;
+    line-height: 1.75rem;
+    letter-spacing: -0.015em;
+  }
+
+  .chat-welcome-description {
+    width: 100%;
+    max-width: 19rem;
+    margin-top: 0.5rem;
+    overflow: hidden;
+    color: var(--sl-text-muted);
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .message-row {
+    margin-bottom: 1.5rem;
+    gap: 0;
+  }
+
+  .message-body,
+  .message-row-assistant .message-body {
+    width: 100%;
+  }
+
+  .message-row-user .message-body {
+    width: fit-content;
+    max-width: 86%;
+  }
+
+  .message-card.user {
+    padding: 0.625rem 0.875rem;
+    border-radius: 1.25rem;
+    background: var(--sl-bg-hover);
+  }
+
+  .message-text,
+  .live-text,
+  .message-markdown :deep(.markdown-content p),
+  .message-markdown :deep(.markdown-content li) {
+    font-size: 1rem;
+    line-height: 1.625rem;
+  }
+
+  .message-markdown :deep(.markdown-content p) {
+    margin-bottom: 0.75rem;
+  }
+
+  .message-markdown :deep(.markdown-content ul),
+  .message-markdown :deep(.markdown-content ol) {
+    margin-bottom: 0.875rem;
+  }
+
+  .message-time {
+    display: none;
+  }
+
+  .message-actions {
+    margin-top: 0.25rem;
+    margin-left: -0.5rem;
+  }
+
+  .runtime-block-card,
+  .runtime-artifact-card,
+  .runtime-outcome-card {
+    border-radius: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    background: var(--sl-bg-canvas);
+  }
+
+  .runtime-progress-card {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  .runtime-progress-card > .runtime-progress-summary {
+    min-height: 2.75rem;
+    gap: 0.375rem;
+    padding: 0;
+  }
+
+  .runtime-progress-live > .runtime-progress-summary {
+    display: flex;
+    min-height: 2.75rem;
+  }
+
+  .runtime-progress-summary .runtime-card-title {
+    color: var(--sl-text-primary);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .runtime-progress-summary-text {
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .runtime-progress-chevron {
+    display: inline-flex;
+    width: 2.75rem;
+    height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    margin-right: -0.75rem;
+  }
+
+  .runtime-progress-card[open] .runtime-progress-summary {
+    margin-bottom: 0.25rem;
+  }
+
+  .runtime-progress-content {
+    margin-left: 0.5rem;
+    border-left: 1px solid var(--sl-border-default);
+    padding: 0.125rem 0 0.25rem 0.75rem;
+  }
+
+  .runtime-progress-card:not(.runtime-progress-live) > .runtime-workflow,
+  .runtime-progress-card:not(.runtime-progress-live) > .runtime-node-activities,
+  .runtime-progress-card:not(.runtime-progress-live) > .runtime-plan-node {
+    margin-left: 0.5rem;
+    padding-left: 0.75rem;
+  }
+
+  .runtime-progress-live .runtime-progress-desktop-title,
+  .runtime-progress-live .runtime-progress-footer {
+    display: none;
+  }
+
+  .live-status-card {
+    padding: 0.25rem 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .retry-hint {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .message-attachments,
+  .message-deliverables {
+    width: 100%;
+  }
+
+  .message-document-card,
+  .deliverable-card {
+    max-width: 100%;
+  }
+
+  .main-shell .composer-wrap {
+    bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    padding-right: 0.5rem;
+    padding-bottom: 0;
+    padding-left: 0.5rem;
+    background: transparent;
+  }
+
+  .composer-inner {
+    max-width: 47.5rem;
+  }
+
+  .main-shell .composer-wrap-empty {
+    top: 49dvh;
+    bottom: auto;
+    padding-bottom: 0;
+    transform: translateY(-50%);
+    background: transparent;
+  }
+
+  .composer {
+    gap: 0.375rem;
+    padding: 0.4375rem;
+    border-color: var(--sl-border-strong);
+    border-radius: 1.75rem;
+    box-shadow:
+      0 10px 30px rgba(15, 23, 42, 0.12),
+      0 2px 8px rgba(15, 23, 42, 0.06);
+  }
+
+  .composer:focus-within {
+    @apply border-primary-400;
+    box-shadow:
+      0 0 0 3px rgba(43, 78, 230, 0.12),
+      0 10px 30px rgba(15, 23, 42, 0.12),
+      0 2px 8px rgba(15, 23, 42, 0.06);
+  }
+
+  .composer-input {
+    min-height: 2.75rem;
+    max-height: 8.75rem;
+    padding: 0.625rem 0.25rem;
+    line-height: 1.5rem;
+  }
+
+  .composer-attach-btn {
+    border-color: transparent;
+  }
+
+  .composer-action-btn {
+    height: 2.75rem;
+    width: 2.75rem;
+  }
+
+  .prompt-suggestions {
+    display: flex;
+    max-width: 36rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    margin: 0.75rem auto 0;
+  }
+
+  .prompt-suggestion {
+    min-height: 2.75rem;
+    border: 1px solid var(--sl-border-default);
+    border-radius: 9999px;
+    padding: 0.5rem 0.875rem;
+    background: var(--sl-bg-surface);
+    color: var(--sl-text-secondary);
+    font-size: 0.8125rem;
+    line-height: 1.125rem;
+    transition:
+      border-color 150ms ease,
+      background-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .prompt-suggestion:hover,
+  .prompt-suggestion:focus-visible {
+    @apply border-primary-300;
+    background: var(--sl-bg-hover);
+    color: var(--sl-text-primary);
+    outline: none;
+  }
+
+  .disclaimer {
+    margin-top: 0.375rem;
+    font-size: 0.625rem;
+    line-height: 0.875rem;
+  }
+
+  .mobile-disclaimer {
+    position: absolute;
+    inset-inline: 0;
+    bottom: calc(0.25rem + env(safe-area-inset-bottom));
+    z-index: 21;
+    margin: 0;
+    padding: 0 0.75rem;
+    pointer-events: none;
+  }
+
+  .archived-session-notice {
+    bottom: calc(0.5rem + env(safe-area-inset-bottom));
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    border-radius: 1rem;
+  }
+
+  .lens-chat-page .sidebar {
+    width: min(calc(100vw - 2.5rem), 20rem);
+    border-radius: 0;
+  }
+
+  .sidebar .side-scroll {
+    padding-right: 0.5rem;
+    padding-left: 0.5rem;
+  }
+
+  .sessions-list .session-item {
+    border-radius: 0.625rem;
+  }
+}
+
+@media (max-width: 1023px) and (max-height: 600px) {
+  .main-shell .composer-wrap-empty {
+    top: auto;
+    bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    transform: none;
+  }
+
+  .prompt-suggestions {
+    display: none;
   }
 }
 
@@ -4676,7 +5176,7 @@ onBeforeUnmount(() => {
 @media (max-width: 1023px) {
   .sidebar {
     @apply fixed inset-y-0 left-0 z-30 -translate-x-full transition-transform duration-300;
-    width: min(86vw, 320px);
+    width: min(calc(100vw - 2.5rem), 20rem);
     border-right: none;
     border-radius: 0 1rem 1rem 0;
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
@@ -4687,11 +5187,16 @@ onBeforeUnmount(() => {
   }
 
   .side-head {
-    @apply px-4 pt-5 pb-3;
+    @apply px-3 pt-3 pb-2;
+  }
+
+  .sidebar-brand {
+    height: 44px;
+    padding-bottom: 0.5rem;
   }
 
   .side-scroll {
-    @apply px-4;
+    @apply px-2;
   }
 
   .new-chat-btn {
@@ -4703,11 +5208,11 @@ onBeforeUnmount(() => {
   }
 
   .sessions-list {
-    @apply space-y-1.5;
+    @apply space-y-1;
   }
 
   .session-item {
-    @apply py-3 rounded-2xl;
+    @apply min-h-11 rounded-lg py-2;
   }
 
   .session-title {
@@ -4715,7 +5220,15 @@ onBeforeUnmount(() => {
   }
 
   .sidebar-footer {
-    @apply p-4;
+    @apply p-2;
+  }
+
+  .session-filters {
+    @apply gap-0;
+  }
+
+  .session-filters button {
+    @apply min-h-11 flex-1 px-3 py-2 text-xs;
   }
 
   .thread {

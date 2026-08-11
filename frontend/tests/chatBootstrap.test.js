@@ -11,6 +11,12 @@ const assistantSwitcherSource = () =>
     'utf8'
   )
 
+const userDockSource = () =>
+  readFile(
+    new URL('../src/components/lens/UserDock.vue', import.meta.url),
+    'utf8'
+  )
+
 test('reveals loaded chat before waiting for active run recovery', async () => {
   const source = await chatSource()
   const messagesLoaded = source.indexOf('messages.value = loadedMessages')
@@ -93,4 +99,127 @@ test('loads sessions after selecting the route assistant', async () => {
   assert.notEqual(selectAssistant, -1)
   assert.notEqual(loadSessions, -1)
   assert.ok(loadSessions > selectAssistant)
+})
+
+test('shows an assistant welcome state on mobile before the first message', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /v-if="\s*isMobile && !decoratedMessages\.length && !showLiveAnswer\s*"\s+class="chat-welcome"/
+  )
+  assert.match(source, /<h1 class="chat-welcome-title">/)
+  assert.match(source, /\{\{ assistantName \}\}/)
+  assert.match(source, /v-for="suggestion in promptSuggestions"/)
+  assert.match(source, /@click="applyPromptSuggestion\(suggestion\)"/)
+  assert.match(source, /'composer-wrap-empty': isEmptyConversation/)
+})
+
+test('keeps the closed mobile sidebar out of keyboard navigation', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /:inert="isMobile && !sidebarOpen"/)
+  assert.match(source, /:aria-hidden="isMobile && !sidebarOpen"/)
+})
+
+test('groups secondary answer actions into a mobile more menu', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /v-if="isMobile && messageSecondaryActions\(message\)\.length"/
+  )
+  assert.match(source, /:actions="messageSecondaryActions\(message\)"/)
+  assert.match(source, /@select="handleMessageAction\(message, \$event\)"/)
+})
+
+test('reduces secondary account information in the mobile drawer', async () => {
+  const source = await userDockSource()
+
+  assert.match(source, /v-if="!isMobile" class="truncate text-xs/)
+  assert.match(source, /'dock-trigger-mobile': isMobile/)
+})
+
+test('creates the first session only when the user submits a prompt', async () => {
+  const source = await chatSource()
+  const submit = source.indexOf('async function submit()')
+  const createFirstSession = source.indexOf(
+    'await createNewSession(false)',
+    submit
+  )
+  const bindSession = source.indexOf(
+    'const sessionAtSubmit = selectedSessionUuid.value',
+    submit
+  )
+  const submitGuard = source.indexOf('if (loading.value.run)', submit)
+  const markSubmitting = source.indexOf('loading.value.run = true', submit)
+
+  assert.notEqual(createFirstSession, -1)
+  assert.notEqual(bindSession, -1)
+  assert.notEqual(submitGuard, -1)
+  assert.ok(submitGuard < createFirstSession)
+  assert.ok(markSubmitting < createFirstSession)
+  assert.ok(createFirstSession < bindSession)
+})
+
+test('keeps every conversation layout free of repeated message avatars', async () => {
+  const source = await chatSource()
+
+  assert.doesNotMatch(source, /class="message-avatar/)
+  assert.doesNotMatch(source, /\.message-avatar/)
+  assert.doesNotMatch(source, /const avatarBgColor = computed/)
+})
+
+test('separates the mobile AI disclaimer from the floating composer', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /v-if="!isMobile" class="disclaimer"/)
+  assert.match(
+    source,
+    /v-if="canCompose && isMobile"\s+class="disclaimer mobile-disclaimer"/
+  )
+  assert.match(
+    source,
+    /\.main-shell \.composer-wrap \{[\s\S]*?background: transparent;/
+  )
+  assert.match(
+    source,
+    /\.main-shell \.composer-wrap \{[\s\S]*?background: transparent;[\s\S]*?\.composer \{[\s\S]*?box-shadow:[\s\S]*?0 10px 30px/
+  )
+  assert.match(
+    source,
+    /\.mobile-disclaimer \{[\s\S]*?position: absolute;[\s\S]*?bottom: calc\(0\.25rem \+ env\(safe-area-inset-bottom\)\);/
+  )
+})
+
+test('keeps the mobile welcome copy clear of the centered composer', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /\.chat-welcome \{[\s\S]*?padding: 0 1\.5rem 13\.5rem;/)
+})
+
+test('uses a compact disclosure for live analysis on mobile', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /v-if="isRunActive && liveStructuredProgress\.items\.length"\s+class="runtime-progress-card runtime-progress-live"\s+:open="!isMobile"/
+  )
+  assert.match(
+    source,
+    /class="runtime-progress-summary runtime-progress-live-summary"[\s\S]*?\{\{ liveProgressText \}\}/
+  )
+  assert.match(source, /class="runtime-progress-content"/)
+  assert.match(
+    source,
+    /\.runtime-progress-live > \.runtime-progress-summary \{[\s\S]*?display: none;/
+  )
+  assert.match(
+    source,
+    /\.runtime-progress-card \{[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?padding: 0;/
+  )
+  assert.match(
+    source,
+    /\.runtime-progress-live > \.runtime-progress-summary \{[\s\S]*?display: flex;[\s\S]*?min-height: 2\.75rem;/
+  )
 })

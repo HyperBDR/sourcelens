@@ -16,7 +16,8 @@
       class="dock-trigger"
       :class="[
         dockMenuOpen ? 'dock-trigger-open' : '',
-        collapsed ? 'dock-trigger-collapsed' : ''
+        collapsed ? 'dock-trigger-collapsed' : '',
+        { 'dock-trigger-mobile': isMobile }
       ]"
       type="button"
       @click="dockMenuOpen = !dockMenuOpen"
@@ -28,7 +29,7 @@
         <div class="truncate text-sm font-medium text-theme">
           {{ displayName }}
         </div>
-        <div class="truncate text-xs text-theme-muted">
+        <div v-if="!isMobile" class="truncate text-xs text-theme-muted">
           {{ t('platforms.workspace') }}
         </div>
       </div>
@@ -196,6 +197,11 @@ async function handleLogout() {
 
 .dock-trigger-collapsed {
   @apply justify-center px-0;
+}
+
+.dock-trigger-mobile {
+  @apply min-h-11 rounded-lg border-transparent px-2 shadow-none;
+  background: transparent;
 }
 
 .anon-login-btn {
