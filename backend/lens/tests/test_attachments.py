@@ -216,6 +216,28 @@ class AttachmentServiceTests(TestCase):
             [str(current.uuid)],
         )
 
+    def test_unrelated_follow_up_does_not_reuse_single_image(self):
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload("historical.png")
+        )
+        create_execution_run(
+            session=self.session,
+            question="Describe this image",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+
+        run = create_execution_run(
+            session=self.session,
+            question="debian 可以支持agent模式吗",
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            run.execution.runtime_snapshot["session_attachment_uuids"],
+            [],
+        )
+
     @patch("lens.services.model_supports_vision", return_value=True)
     def test_follow_up_reuses_previous_image(self, mock_support):
         attachment = store_message_attachment(
@@ -391,6 +413,71 @@ class AttachmentServiceTests(TestCase):
 
         self.assertEqual(context.exception.reason, "MODEL_NOT_VISION_CAPABLE")
         mock_call.assert_not_called()
+
+    @patch("lens.services.run_completion_multimodal")
+    @patch("litellm.utils.supports_vision", return_value=False)
+    def test_custom_gateway_vision_config_allows_unknown_model(
+        self, mock_support, mock_call
+    ):
+        config = LLMConfig.objects.create(
+            scope=LLMConfig.Scope.GLOBAL,
+            model_type=LLMConfig.MODEL_TYPE_LLM,
+            provider="openai_compatible",
+            config={
+                "api_key": "test",
+                "api_base": "https://gateway.example/v1",
+                "model": "custom-vision-model",
+                "vision": True,
+            },
+            is_active=True,
+        )
+        self.assistant.multimodal_model_ref = config.uuid
+        self.assistant.save(update_fields=["multimodal_model_ref"])
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload()
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Describe this image.",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+        mock_call.return_value = LensLLMResult(
+            content="A green image.", usage={}, metered=True
+        )
+
+        result = analyze_multimodal_intent(run)
+
+        self.assertEqual(result["status"], "succeeded")
+        mock_support.assert_not_called()
+        mock_call.assert_called_once()
+
+    def test_admin_run_detail_marks_inherited_attachment_context(self):
+        from lens.views.admin_runs import _admin_run_detail
+
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload("diagram.png")
+        )
+        direct = create_execution_run(
+            session=self.session,
+            question="Describe this image",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+        inherited = create_execution_run(
+            session=self.session,
+            question="What color is the previous image?",
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            _admin_run_detail(direct)["attachments"][0]["source"],
+            "direct",
+        )
+        self.assertEqual(
+            _admin_run_detail(inherited)["attachments"][0]["source"],
+            "inherited",
+        )
 
     @patch("lens.services.model_supports_vision", return_value=True)
     @patch("lens.services.run_completion_multimodal")

@@ -436,7 +436,14 @@ def _admin_run_detail(run):
             }
         steps.append(item)
     attachments = []
+    direct_attachment_uuids = set()
     if run.input_message:
+        direct_attachment_uuids = {
+            str(value)
+            for value in run.input_message.attachments.values_list(
+                "uuid", flat=True
+            )
+        }
         selected = (
             run.execution.runtime_snapshot or {}
         ).get("session_attachment_uuids", [])
@@ -461,6 +468,12 @@ def _admin_run_detail(run):
             fail_silently=True,
         )
     )
+    for attachment in attachments:
+        attachment["source"] = (
+            "direct"
+            if str(attachment.get("uuid")) in direct_attachment_uuids
+            else "inherited"
+        )
     output_files = RunOutputFileSerializer(
         run.output_files.all(), many=True
     ).data

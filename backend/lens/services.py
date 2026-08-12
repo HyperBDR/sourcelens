@@ -780,17 +780,16 @@ def select_session_attachment_context(session, question, explicit_uuids=None):
             "pdf",
         )
     )
-    if len(historical) == 1 or refers_to_attachment:
-        if refers_to_attachment:
-            requested_kind = (
-                "image"
-                if any(marker in lowered for marker in ("image", "图片"))
-                else "document"
-            )
-            same_kind = [
-                item for item in historical if item["kind"] == requested_kind
-            ]
-            historical = same_kind or historical
+    if refers_to_attachment:
+        requested_kind = (
+            "image"
+            if any(marker in lowered for marker in ("image", "图片"))
+            else "document"
+        )
+        same_kind = [
+            item for item in historical if item["kind"] == requested_kind
+        ]
+        historical = same_kind or historical
         return selected + historical[:1]
     return selected
 

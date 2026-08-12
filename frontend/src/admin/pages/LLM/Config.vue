@@ -1004,6 +1004,14 @@
                   {{ parameterLabel(parameter) }}
                 </label>
                 <input
+                  v-if="parameter === 'vision'"
+                  type="checkbox"
+                  :checked="form.config[parameter] === true"
+                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  @change="updateParameterValue(parameter, $event.target.checked)"
+                />
+                <input
+                  v-else
                   :value="form.config[parameter]"
                   :type="parameterInputType(parameter)"
                   :step="parameterInputStep(parameter)"
@@ -1108,6 +1116,7 @@ const COMMON_EDITABLE_PARAMS = [
   'top_p',
   'request_timeout_seconds'
 ]
+const CUSTOM_EDITABLE_PARAMS = [...COMMON_EDITABLE_PARAMS, 'vision']
 const GLOBAL_PARAM_DEFAULTS = {
   max_tokens: 16384,
   temperature: 0.7,
@@ -1119,6 +1128,7 @@ const PARAM_LABEL_KEYS = {
   deployment: 'deployment',
   max_tokens: 'maxOutputTokens',
   request_timeout_seconds: 'requestTimeoutSeconds',
+  vision: 'visionCapability',
   temperature: 'temperature',
   top_p: 'topP'
 }
@@ -1453,6 +1463,9 @@ function getRowCapabilities(row) {
 }
 
 function getProviderEditableParams(provider) {
+  if (provider === 'openai_compatible') {
+    return CUSTOM_EDITABLE_PARAMS
+  }
   const editableParams = providerSchemas.value[provider]?.editable_params
   if (Array.isArray(editableParams) && editableParams.length) {
     return editableParams
@@ -1537,6 +1550,10 @@ function parameterPlaceholder(parameter) {
 }
 
 function updateParameterValue(parameter, value) {
+  if (parameter === 'vision') {
+    form.config[parameter] = value === true
+    return
+  }
   if (value === '') {
     form.config[parameter] = null
     return

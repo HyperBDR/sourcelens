@@ -97,11 +97,16 @@ def _multimodal_messages(system, user_text, image_data_urls):
 def model_supports_vision(model_ref):
     """Return whether the configured model accepts image content blocks."""
 
+    from agentcore_metering.adapters.django.models import LLMConfig
     from agentcore_metering.adapters.django.services.runtime_config import (
         get_litellm_params,
     )
     from litellm.utils import supports_vision
 
+    config = LLMConfig.objects.get(uuid=model_ref)
+    declared_vision = (config.config or {}).get("vision")
+    if declared_vision is not None:
+        return bool(declared_vision)
     params = get_litellm_params(model_uuid=str(model_ref))
     model = str(params.get("model") or "")
     return bool(model) and supports_vision(model=model)
