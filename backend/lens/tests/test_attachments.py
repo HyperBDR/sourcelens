@@ -190,6 +190,32 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(attachment.message_id, run.input_message_id)
         self.assertEqual(run.input_message.attachments.count(), 1)
 
+    def test_explicit_attachment_does_not_reuse_historical_images(self):
+        historical = store_message_attachment(
+            self.session, self.user, _png_upload("historical.png")
+        )
+        current = store_message_attachment(
+            self.session, self.user, _png_upload("current.png")
+        )
+        create_execution_run(
+            session=self.session,
+            question="Describe the historical image",
+            enqueue=False,
+            attachment_uuids=[str(historical.uuid)],
+        )
+
+        run = create_execution_run(
+            session=self.session,
+            question="请描述这张图片",
+            enqueue=False,
+            attachment_uuids=[str(current.uuid)],
+        )
+
+        self.assertEqual(
+            run.execution.runtime_snapshot["session_attachment_uuids"],
+            [str(current.uuid)],
+        )
+
     @patch("lens.services.model_supports_vision", return_value=True)
     def test_follow_up_reuses_previous_image(self, mock_support):
         attachment = store_message_attachment(

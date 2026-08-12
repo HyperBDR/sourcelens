@@ -744,6 +744,8 @@ def select_session_attachment_context(session, question, explicit_uuids=None):
     ]
     selected = [item for item in candidates if item["uuid"] in explicit]
     historical = [item for item in candidates if item["uuid"] not in explicit]
+    if explicit:
+        return selected
     if not historical:
         return selected
 
@@ -778,8 +780,6 @@ def select_session_attachment_context(session, question, explicit_uuids=None):
             "pdf",
         )
     )
-    if explicit and not refers_to_attachment:
-        return selected
     if len(historical) == 1 or refers_to_attachment:
         if refers_to_attachment:
             requested_kind = (
