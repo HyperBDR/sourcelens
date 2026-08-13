@@ -87,8 +87,9 @@ def _lensnode_dispatch(state):
     run = state["run"]
     assistant = run.session.assistant
     question = run.input_message.content
+    execution = RunExecution.objects.filter(run=run).first()
     selected_image_uuids = set(
-        (run.execution.runtime_snapshot or {}).get(
+        (execution.runtime_snapshot if execution else {}).get(
             "session_attachment_uuids",
             [],
         )

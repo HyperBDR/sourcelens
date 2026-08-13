@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed image questions so a newly uploaded image is not mixed with unrelated
+  images from earlier messages in the same conversation.
+zh-CN: >-
+  修复图片提问：新上传的图片不再与同一会话中早先消息的无关图片混用。

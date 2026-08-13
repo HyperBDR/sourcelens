@@ -36,6 +36,8 @@
     "detailTitle": "Run 完整追踪",
     "question": "问题",
     "attachments": "图片附件",
+    "directAttachment": "本次直接上传",
+    "inheritedAttachment": "历史上下文复用",
     "visionQuery": "图片识别结果",
     "answer": "回答",
     "error": "错误",
@@ -390,6 +392,7 @@
       "temperature": "Temperature",
       "topP": "Top P",
       "advancedOptions": "高级选项",
+      "visionCapability": "确认支持视觉输入",
       "errors": {
         "invalid_api_key": "API Key 无效或已过期，请检查后重试。",
         "auth_failed": "认证失败，请检查 API Key 或账号权限。",

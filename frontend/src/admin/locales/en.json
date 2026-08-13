@@ -36,6 +36,8 @@
     "detailTitle": "Run Trace",
     "question": "Question",
     "attachments": "Image Attachments",
+    "directAttachment": "Direct attachment",
+    "inheritedAttachment": "Inherited context",
     "visionQuery": "Image-derived query",
     "answer": "Answer",
     "error": "Error",
@@ -390,6 +392,7 @@
       "temperature": "Temperature",
       "topP": "Top P",
       "advancedOptions": "Advanced Options",
+      "visionCapability": "Confirmed vision input",
       "errors": {
         "invalid_api_key": "Invalid or expired API key. Please check and try again.",
         "auth_failed": "Authentication failed. Please check API key or account permissions.",

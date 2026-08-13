@@ -880,16 +880,27 @@
                     {{ t('lensRuns.attachments') }}
                   </h3>
                   <div class="flex flex-wrap gap-3">
-                    <AuthImage
+                    <div
                       v-for="img in detail.attachments.filter(
                         (item) => item.kind !== 'document'
                       )"
                       :key="img.uuid"
-                      :src="img.url"
-                      :alt="img.original_name || 'image'"
-                      class="run-attachment"
-                      zoomable
-                    />
+                      class="flex flex-col gap-1"
+                    >
+                      <AuthImage
+                        :src="img.url"
+                        :alt="img.original_name || 'image'"
+                        class="run-attachment"
+                        zoomable
+                      />
+                      <span class="text-xs text-gray-500">
+                        {{
+                          img.source === 'inherited'
+                            ? t('lensRuns.inheritedAttachment')
+                            : t('lensRuns.directAttachment')
+                        }}
+                      </span>
+                    </div>
                     <button
                       v-for="file in detail.attachments.filter(
                         (item) => item.kind === 'document'
@@ -906,6 +917,13 @@
                     >
                       <FileText :size="20" aria-hidden="true" />
                       <span>{{ file.original_name }}</span>
+                      <span class="text-xs text-gray-500">
+                        {{
+                          file.source === 'inherited'
+                            ? t('lensRuns.inheritedAttachment')
+                            : t('lensRuns.directAttachment')
+                        }}
+                      </span>
                       <Download :size="16" aria-hidden="true" />
                     </button>
                   </div>
