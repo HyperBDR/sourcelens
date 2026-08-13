@@ -154,6 +154,83 @@ class LensServiceTests(TransactionTestCase):
                     timeout_s,
                 )
 
+    def test_explicit_language_request_overrides_profile_language(self):
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
+
+        run = create_execution_run(
+            session=self.session,
+            question="请用中文回答，可以吗？",
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            run.execution.runtime_snapshot["answer_language"],
+            "zh-CN",
+        )
+
+    def test_follow_up_inherits_latest_resolved_language(self):
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
+        first = create_execution_run(
+            session=self.session,
+            question="Please answer in Chinese.",
+            enqueue=False,
+        )
+
+        follow_up = create_execution_run(
+            session=self.session,
+            question="继续",
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            first.execution.runtime_snapshot["answer_language"],
+            "zh-CN",
+        )
+        self.assertEqual(
+            follow_up.execution.runtime_snapshot["answer_language"],
+            "zh-CN",
+        )
+
+    def test_retry_inherits_original_run_language(self):
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
+        original = create_execution_run(
+            session=self.session,
+            question="请用中文回答。",
+            enqueue=False,
+        )
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
+
+        retry = create_execution_run(
+            session=self.session,
+            question="Retry this answer in English.",
+            retry_of_run=original,
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            retry.execution.runtime_snapshot["answer_language"],
+            "zh-CN",
+        )
+
+    def test_unrelated_message_language_does_not_override_profile(self):
+        self.user.profile.language = "en-US"
+        self.user.profile.save(update_fields=["language"])
+
+        run = create_execution_run(
+            session=self.session,
+            question="请分析这份中文文档。",
+            enqueue=False,
+        )
+
+        self.assertEqual(
+            run.execution.runtime_snapshot["answer_language"],
+            "en-US",
+        )
+
     def test_timeout_migration_backfills_from_current_assistant(self):
         self.assistant.agent_rounds = Assistant.AgentRounds.MAX
         self.assistant.save(update_fields=["agent_rounds"])

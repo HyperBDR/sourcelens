@@ -794,6 +794,95 @@ def select_session_attachment_context(session, question, explicit_uuids=None):
     return selected
 
 
+def _explicit_answer_language(question):
+    """Return the language explicitly requested by the current message."""
+
+    text = str(question or "").strip().lower()
+    if not text:
+        return None
+    chinese_request = re.search(
+        r"(?:用|使用|切换到|切換到|改用|改成|请用|請用)"
+        r"(?:简体中文|簡體中文|中文|普通话|普通話)"
+        r"(?:回答|回复|回覆|作答|答复|答覆)?",
+        text,
+    )
+    if chinese_request and re.search(
+        r"(?:回答|回复|回覆|作答|答复|答覆|语言|語言)|^请|^請",
+        text,
+    ):
+        return "zh-CN"
+    chinese_english_request = re.search(
+        r"(?:用|使用|切换到|切換到|改用|改成|请用|請用)"
+        r"(?:英文|英语|英語)"
+        r"(?:回答|回复|回覆|作答|答复|答覆)?",
+        text,
+    )
+    if chinese_english_request:
+        return "en-US"
+    english_request = re.search(
+        r"(?:answer|respond|reply|write|speak|use|switch)"
+        r"(?:\s+(?:in|to))?\s+(?:english|en-us|en)\b",
+        text,
+    )
+    if english_request:
+        return "en-US"
+    english_chinese_request = re.search(
+        r"(?:answer|respond|reply|write|speak|use|switch)"
+        r"(?:\s+(?:in|to))?\s+(?:chinese|simplified chinese|中文)",
+        text,
+    )
+    if english_chinese_request:
+        return "zh-CN"
+    return None
+
+
+def _latest_session_answer_language(session):
+    """Return the latest resolved language stored for a Session."""
+
+    latest_run = (
+        Run.objects.filter(session=session)
+        .select_related("execution")
+        .order_by("-input_message__sequence", "-pk")
+        .first()
+    )
+    if latest_run is None:
+        return None
+    try:
+        execution = latest_run.execution
+    except RunExecution.DoesNotExist:
+        execution = None
+    if execution is None:
+        return None
+    snapshot = execution.runtime_snapshot or {}
+    return snapshot.get("answer_language")
+
+
+def resolve_run_answer_language(session, question, retry_of_run=None):
+    """Resolve one Run language without allowing context to override intent."""
+
+    if retry_of_run is not None:
+        try:
+            execution = retry_of_run.execution
+        except RunExecution.DoesNotExist:
+            execution = None
+        if execution is not None:
+            snapshot = execution.runtime_snapshot or {}
+            retry_language = snapshot.get("answer_language")
+            if retry_language:
+                return normalize_answer_language(retry_language)
+
+    explicit_language = _explicit_answer_language(question)
+    if explicit_language:
+        return explicit_language
+
+    session_language = _latest_session_answer_language(session)
+    if session_language:
+        return normalize_answer_language(session_language)
+
+    profile = getattr(session.user, "profile", None)
+    return normalize_answer_language(getattr(profile, "language", None))
+
+
 @transaction.atomic
 def create_execution_run(
     session,
@@ -809,6 +898,12 @@ def create_execution_run(
     assistant = lock_assistant_for_new_work(session.assistant, user)
     session = lock_active_session(session)
     session.assistant = assistant
+
+    answer_language = resolve_run_answer_language(
+        session,
+        question,
+        retry_of_run,
+    )
 
     if idempotency_key:
         existing = (
@@ -862,7 +957,7 @@ def create_execution_run(
     )
     input_message.run = run
     input_message.save(update_fields=["run"])
-    create_run_execution_snapshot(run)
+    create_run_execution_snapshot(run, answer_language=answer_language)
     requested_attachment_uuids = [
         str(value) for value in (attachment_uuids or [])
     ]
@@ -1384,14 +1479,14 @@ def run_timeout_for_rounds(agent_rounds):
 
 
 @transaction.atomic
-def create_run_execution_snapshot(run):
+def create_run_execution_snapshot(run, answer_language=None):
     """Create or return the per-run LensNode execution snapshot."""
 
     assistant = run.session.assistant
     token_budget = token_budget_for_profile(assistant.token_budget_profile)
     profile = getattr(run.session.user, "profile", None)
     answer_language = normalize_answer_language(
-        getattr(profile, "language", None)
+        answer_language or getattr(profile, "language", None)
     )
     runtime_snapshot = _build_run_runtime_snapshot(
         assistant,

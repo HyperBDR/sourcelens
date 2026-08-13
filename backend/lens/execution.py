@@ -16,6 +16,7 @@ from .services import (
     dispatch_run_to_lensnode,
     finish_lensnode_run,
     rewrite_query,
+    resolve_run_answer_language,
     validate_run_dispatch,
 )
 
@@ -155,7 +156,14 @@ def _lensnode_dispatch(state):
     if has_documents and not (question or "").strip():
         question = _document_analysis_prompt(run)
     with run_step(run, RunStep.StepType.RETRIEVAL, 1) as step:
-        execution = create_run_execution_snapshot(run)
+        execution = create_run_execution_snapshot(
+            run,
+            answer_language=resolve_run_answer_language(
+                run.session,
+                run.input_message.content,
+                run.retry_of_run,
+            ),
+        )
         execution.loaded_skills = build_loaded_skills(assistant)
         execution.save(update_fields=["loaded_skills"])
         validate_run_dispatch(run)
