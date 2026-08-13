@@ -452,6 +452,30 @@ class AttachmentServiceTests(TestCase):
         mock_support.assert_not_called()
         mock_call.assert_called_once()
 
+    @patch("lens.services.model_supports_vision", return_value="unknown")
+    @patch("lens.services.run_completion_multimodal")
+    def test_unknown_vision_capability_attempts_multimodal_call(
+        self, mock_call, mock_support
+    ):
+        mock_call.return_value = LensLLMResult(
+            content="A green image.", usage={}, metered=True
+        )
+        attachment = store_message_attachment(
+            self.session, self.user, _png_upload()
+        )
+        run = create_execution_run(
+            session=self.session,
+            question="Describe this image.",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+
+        result = analyze_multimodal_intent(run)
+
+        self.assertEqual(result["status"], "succeeded")
+        mock_support.assert_called_once()
+        mock_call.assert_called_once()
+
     def test_admin_run_detail_marks_inherited_attachment_context(self):
         from lens.views.admin_runs import _admin_run_detail
 

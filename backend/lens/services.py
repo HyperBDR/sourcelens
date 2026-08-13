@@ -35,6 +35,8 @@ from .environment_variables import (
     expand_environment_references,
 )
 from .llm import (
+    VISION_SUPPORTED,
+    VISION_UNKNOWN,
     model_supports_vision,
     run_completion,
     run_completion_multimodal,
@@ -1055,7 +1057,7 @@ def analyze_multimodal_intent(run):
         raise MultimodalPreprocessingError(
             "MODEL_CONFIGURATION_INVALID"
         ) from exc
-    if not supports_vision:
+    if supports_vision not in (True, VISION_SUPPORTED, VISION_UNKNOWN):
         raise MultimodalPreprocessingError("MODEL_NOT_VISION_CAPABLE")
 
     user_text = (

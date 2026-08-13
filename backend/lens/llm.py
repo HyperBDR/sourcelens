@@ -2,6 +2,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 
+VISION_SUPPORTED = "supported"
+VISION_UNSUPPORTED = "unsupported"
+VISION_UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class LensLLMResult:
     """LLM completion result plus metering usage."""
@@ -95,7 +100,7 @@ def _multimodal_messages(system, user_text, image_data_urls):
 
 
 def model_supports_vision(model_ref):
-    """Return whether the configured model accepts image content blocks."""
+    """Return the configured model's known image capability."""
 
     from agentcore_metering.adapters.django.models import LLMConfig
     from agentcore_metering.adapters.django.services.runtime_config import (
@@ -103,13 +108,38 @@ def model_supports_vision(model_ref):
     )
     from litellm.utils import supports_vision
 
-    config = LLMConfig.objects.get(uuid=model_ref)
-    declared_vision = (config.config or {}).get("vision")
-    if declared_vision is not None:
-        return bool(declared_vision)
     params = get_litellm_params(model_uuid=str(model_ref))
+    config = LLMConfig.objects.filter(uuid=model_ref).values(
+        "provider", "config"
+    ).first() or {}
+    config_data = config.get("config") or {}
     model = str(params.get("model") or "")
-    return bool(model) and supports_vision(model=model)
+    if not model:
+        return VISION_UNSUPPORTED
+
+    explicit = params.get("supports_vision")
+    if explicit is None:
+        explicit = params.get("vision")
+    if explicit is None:
+        explicit = config_data.get("supports_vision")
+    if explicit is None:
+        explicit = config_data.get("vision")
+    if isinstance(explicit, bool):
+        return VISION_SUPPORTED if explicit else VISION_UNSUPPORTED
+
+    if supports_vision(model=model):
+        return VISION_SUPPORTED
+
+    provider = str(
+        params.get("custom_llm_provider")
+        or params.get("provider")
+        or config.get("provider")
+        or config_data.get("provider")
+        or ""
+    ).lower()
+    if provider in {"openai_compatible", "openai-compatible"}:
+        return VISION_UNKNOWN
+    return VISION_UNSUPPORTED
 
 
 def _message_to_dict(message):
