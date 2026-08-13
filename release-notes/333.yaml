@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed tablet chat layouts so the composer stays visible when browser chrome
+  or the on-screen keyboard reduces the available viewport.
+zh-CN: >-
+  修复平板端聊天布局：浏览器工具栏或屏幕键盘压缩可视区域时，输入框仍保持可见。

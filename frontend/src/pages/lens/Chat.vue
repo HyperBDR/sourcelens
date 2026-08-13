@@ -1,5 +1,11 @@
 <template>
-  <div class="lens-chat-page qa-screen-view" :style="mobileViewportStyle">
+  <div
+    class="lens-chat-page qa-screen-view"
+    :class="{
+      'visual-viewport-constrained': visualViewportConstrained
+    }"
+    :style="mobileViewportStyle"
+  >
     <Transition
       enter-active-class="transition-opacity duration-200"
       enter-from-class="opacity-0"
@@ -1565,6 +1571,7 @@ import {
 } from '@/pages/lens/chatMessageContext'
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
+import { resolveChatViewport } from '@/pages/lens/chatViewport'
 import { compactFilename } from '@/pages/lens/filenameDisplay'
 import {
   ATTACHMENT_ACCEPT,
@@ -1663,6 +1670,7 @@ const renameDraft = ref('')
 const composerRef = ref(null)
 const scrollRef = ref(null)
 const mobileViewportStyle = ref({})
+const visualViewportConstrained = ref(false)
 const seenStepEventCounts = new Map()
 let sessionLoadGeneration = 0
 const runtimeState = ref(createRuntimeState())
@@ -2446,13 +2454,20 @@ function scrollToBottom() {
 
 function syncMobileViewport() {
   const viewport = window.visualViewport
-  if (!viewport || window.innerWidth >= 1024) {
+  const resolved = resolveChatViewport({
+    layoutHeight: window.innerHeight,
+    viewportHeight: viewport?.height,
+    viewportOffsetTop: viewport?.offsetTop,
+    viewportScale: viewport?.scale
+  })
+  visualViewportConstrained.value = resolved.constrained
+  if (!viewport) {
     mobileViewportStyle.value = {}
     return
   }
   mobileViewportStyle.value = {
-    '--chat-viewport-height': `${viewport.height}px`,
-    '--chat-viewport-offset-top': `${viewport.offsetTop}px`
+    '--chat-viewport-height': `${resolved.height}px`,
+    '--chat-viewport-offset-top': `${resolved.offsetTop}px`
   }
 }
 
@@ -3732,6 +3747,18 @@ onBeforeUnmount(() => {
   @apply flex h-screen w-full overflow-hidden;
   background: var(--sl-bg-surface);
   color: var(--sl-text-primary);
+}
+
+.lens-chat-page.visual-viewport-constrained {
+  position: fixed;
+  top: var(--chat-viewport-offset-top, 0px);
+  right: 0;
+  bottom: auto;
+  left: 0;
+  width: 100%;
+  height: var(--chat-viewport-height, 100dvh);
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .sidebar {

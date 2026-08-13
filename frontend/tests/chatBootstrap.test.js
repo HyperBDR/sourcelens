@@ -201,12 +201,14 @@ test('tracks the visual viewport so keyboard panning keeps the thread top reacha
 
   assert.match(
     source,
-    /class="lens-chat-page qa-screen-view"\s+:style="mobileViewportStyle"/
+    /class="lens-chat-page qa-screen-view"[\s\S]*?'visual-viewport-constrained': visualViewportConstrained[\s\S]*?:style="mobileViewportStyle"/
   )
-  assert.match(source, /'--chat-viewport-height': `\$\{viewport\.height\}px`/)
+  assert.match(source, /resolveChatViewport\(\{[\s\S]*?layoutHeight:/)
+  assert.doesNotMatch(source, /window\.innerWidth >= 1024/)
+  assert.match(source, /'--chat-viewport-height': `\$\{resolved\.height\}px`/)
   assert.match(
     source,
-    /'--chat-viewport-offset-top': `\$\{viewport\.offsetTop\}px`/
+    /'--chat-viewport-offset-top': `\$\{resolved\.offsetTop\}px`/
   )
   assert.match(
     source,
@@ -219,6 +221,10 @@ test('tracks the visual viewport so keyboard panning keeps the thread top reacha
   assert.match(
     source,
     /@media \(max-width: 1023px\) \{[\s\S]*?\.lens-chat-page \{[\s\S]*?position: fixed;[\s\S]*?top: var\(--chat-viewport-offset-top, 0px\);[\s\S]*?right: 0;[\s\S]*?bottom: auto;[\s\S]*?left: 0;[\s\S]*?height: var\(--chat-viewport-height, 100dvh\);[\s\S]*?overflow: hidden;[\s\S]*?overscroll-behavior: none;/
+  )
+  assert.match(
+    source,
+    /\.lens-chat-page\.visual-viewport-constrained \{[\s\S]*?position: fixed;[\s\S]*?top: var\(--chat-viewport-offset-top, 0px\);[\s\S]*?height: var\(--chat-viewport-height, 100dvh\);/
   )
 })
 
