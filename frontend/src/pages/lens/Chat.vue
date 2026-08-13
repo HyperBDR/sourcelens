@@ -2583,14 +2583,8 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
     requestedUuid &&
     !sessions.value.some((session) => session.uuid === requestedUuid)
   ) {
-    showError(t('lens.chat.sessionAccessDenied'))
-    targetUuid = sessions.value[0]?.uuid
-    if (targetUuid) {
-      router.replace({
-        path: route.path,
-        query: { session: targetUuid }
-      })
-    }
+    const replacement = await createNewSession(false)
+    targetUuid = replacement?.uuid || ''
   }
   if (targetUuid) {
     await selectSession({ uuid: targetUuid })

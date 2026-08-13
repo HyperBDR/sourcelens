@@ -41,7 +41,8 @@
             <LanguageSwitcher variant="dark" />
           </div>
           <router-link
-            to="/"
+            :to="assistantReturnPath"
+            @click="clearAssistantReturnPath"
             :aria-label="t('management.backToUserPlatform')"
             class="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-sm font-medium text-slate-100 shadow-sm transition-colors hover:border-slate-500 hover:bg-slate-700 sm:px-3"
           >
@@ -171,6 +172,10 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
+import {
+  consumeAdminReturnPath,
+  getAdminReturnPath
+} from '@/utils/platformAccess'
 
 defineProps({
   showMobileMenu: {
@@ -186,6 +191,11 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const uiStore = useUiStore()
+const assistantReturnPath = ref(getAdminReturnPath())
+
+const clearAssistantReturnPath = () => {
+  consumeAdminReturnPath()
+}
 
 const showUserMenu = ref(false)
 const userMenuRef = ref(null)

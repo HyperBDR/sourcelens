@@ -60,7 +60,7 @@
           <router-link
             to="/management/users"
             class="dock-link"
-            @click="dockMenuOpen = false"
+            @click="openAdminConsole"
           >
             <Shield :size="18" :stroke-width="2" aria-hidden="true" />
             <span class="truncate">{{ t('platforms.adminConsole') }}</span>
@@ -104,6 +104,7 @@ import { LogIn, LogOut, Settings, Share2, Shield } from '@lucide/vue'
 
 import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
+import { saveAdminReturnPath } from '@/utils/platformAccess'
 
 defineProps({
   collapsed: { type: Boolean, default: false },
@@ -161,6 +162,11 @@ const avatarBgColor = computed(() => {
 
 function openMyShares() {
   emit('open-my-shares')
+  dockMenuOpen.value = false
+}
+
+function openAdminConsole() {
+  saveAdminReturnPath(router.currentRoute.value.fullPath)
   dockMenuOpen.value = false
 }
 
