@@ -1,0 +1,8 @@
+type: improvement
+audience: user
+en: >-
+  Users can now explicitly switch the AI answer language within an existing
+  conversation, while follow-ups and retries preserve the resolved language.
+zh-CN: >-
+  用户现在可以在现有会话中明确切换 AI 回答语言，后续追问和重试会保持已解析的
+  回答语言。
