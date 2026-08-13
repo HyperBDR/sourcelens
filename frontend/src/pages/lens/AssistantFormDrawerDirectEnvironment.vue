@@ -100,10 +100,22 @@
       <FormRow :label="t('lensAdmin.fields.multimodalModel')">
         <BaseSelect v-model="form.multimodal_model_ref">
           <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
-          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">
+          <option
+            v-for="c in visionModelOptions"
+            :key="c.uuid"
+            :value="c.uuid"
+            :disabled="!isVisionModelEligible(c)"
+          >
             {{ formatLLMConfigLabel(c) }}
+            {{ isVisionModelEligible(c) ? ' · Vision' : ' · Unavailable' }}
           </option>
         </BaseSelect>
+        <p
+          v-if="!visionModelOptions.some(isVisionModelEligible)"
+          class="mt-1 text-xs text-amber-700"
+        >
+          {{ t('lensAdmin.wizard.noVisionModel') }}
+        </p>
         <p class="mt-1 text-xs text-ink-500">
           {{ t('lensAdmin.wizard.multimodalModelHint') }}
         </p>
@@ -1044,6 +1056,34 @@ const ACCESS_PAGE_SIZE = 20
 const SEARCH_DELAY_MS = 250
 const LOAD_MORE_THRESHOLD_PX = 96
 const wizardStep = ref(1)
+
+const visionModelOptions = computed(() => {
+  const selected = props.form.multimodal_model_ref
+  const eligible = props.llmConfigOptions.filter(
+    (config) =>
+      config.is_active !== false &&
+      (config.vision_capability === 'supported' ||
+        config.capabilities?.includes?.('vision'))
+  )
+  const historical = props.llmConfigOptions.find(
+    (config) => config.uuid === selected
+  )
+  if (historical && !eligible.some((config) => config.uuid === selected)) {
+    return [historical, ...eligible]
+  }
+  return eligible
+})
+
+function isVisionModelEligible(config) {
+  const declared = config.config?.supports_vision ?? config.config?.vision
+  return (
+    config.is_active !== false &&
+    (config.vision_capability === 'supported' ||
+      config.supports_vision === true ||
+      declared === true ||
+      config.capabilities?.includes?.('vision'))
+  )
+}
 const groupPage = ref(1)
 const groupTotal = ref(0)
 const groupResults = ref([])

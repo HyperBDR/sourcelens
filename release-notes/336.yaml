@@ -1,0 +1,9 @@
+type: fix
+audience: admin
+en: >-
+  Improved vision capability detection for custom OpenAI-compatible models,
+  allowing administrators to confirm vision support when the model is not in
+  LiteLLM's catalog.
+zh-CN: >-
+  改进自定义 OpenAI 兼容模型的视觉能力检测：当模型不在 LiteLLM
+  模型目录中时，管理员可以确认其支持视觉输入。

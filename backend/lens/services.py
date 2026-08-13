@@ -35,6 +35,7 @@ from .environment_variables import (
     expand_environment_references,
 )
 from .llm import (
+    VISION_SUPPORTED,
     model_supports_vision,
     run_completion,
     run_completion_multimodal,
@@ -120,6 +121,16 @@ class MultimodalPreprocessingError(RuntimeError):
 
     def __init__(self, reason):
         self.reason = reason
+        self.code = {
+            "ATTACHMENT_UNREADABLE": "IMAGE_ATTACHMENT_UNREADABLE",
+            "MODEL_NOT_VISION_CAPABLE": "MODEL_NOT_VISION_CAPABLE",
+            "VISION_MODEL_NOT_CONFIGURED": "VISION_MODEL_NOT_CONFIGURED",
+            "PROVIDER_QUOTA_EXCEEDED": "VISION_PROVIDER_QUOTA_EXCEEDED",
+            "PROVIDER_UNAVAILABLE": "VISION_PROVIDER_UNAVAILABLE",
+            "MODEL_CONFIGURATION_INVALID": (
+                "VISION_MODEL_CONFIGURATION_INVALID"
+            ),
+        }.get(reason, "IMAGE_PREPROCESSING_FAILED")
         super().__init__(self.code)
 
 
@@ -1027,11 +1038,18 @@ def analyze_multimodal_intent(run):
                 kind=MessageAttachment.Kind.IMAGE
             )
         )
-    if not attachments or not assistant.multimodal_model_ref:
+    if not attachments:
         return {
             "question": original,
             "rewritten": False,
             "image_count": 0,
+            "status": "skipped",
+        }
+    if not assistant.multimodal_model_ref:
+        return {
+            "question": original,
+            "rewritten": False,
+            "image_count": len(attachments),
             "status": "skipped",
         }
 
@@ -1055,7 +1073,7 @@ def analyze_multimodal_intent(run):
         raise MultimodalPreprocessingError(
             "MODEL_CONFIGURATION_INVALID"
         ) from exc
-    if not supports_vision:
+    if supports_vision not in (True, VISION_SUPPORTED):
         raise MultimodalPreprocessingError("MODEL_NOT_VISION_CAPABLE")
 
     user_text = (
@@ -1075,7 +1093,16 @@ def analyze_multimodal_intent(run):
         logger.warning(
             "multimodal intent failed for run %s: %s", run.uuid, exc
         )
-        raise MultimodalPreprocessingError("MODEL_REQUEST_FAILED") from exc
+        message = str(exc).lower()
+        if "429" in message or "quota" in message or "rate limit" in message:
+            reason = "PROVIDER_QUOTA_EXCEEDED"
+        elif "400" in message or "invalid_parameter" in message:
+            reason = "MODEL_CONFIGURATION_INVALID"
+        elif "timeout" in message or "unavailable" in message:
+            reason = "PROVIDER_UNAVAILABLE"
+        else:
+            reason = "MODEL_REQUEST_FAILED"
+        raise MultimodalPreprocessingError(reason) from exc
 
     text = " ".join((result.content or "").split())[
         :MULTIMODAL_INTENT_MAX_CHARS

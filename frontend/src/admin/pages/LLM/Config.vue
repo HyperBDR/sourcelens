@@ -969,6 +969,45 @@
             />
           </div>
 
+          <div class="rounded-xl border border-gray-200 bg-gray-50/80 p-4">
+            <h3 class="text-sm font-semibold text-gray-700">
+              {{ t('llm.config.modelCapabilities') }}
+            </h3>
+            <p class="mt-1 text-xs text-gray-500">
+              {{ t('llm.config.modelCapabilitiesHint') }}
+            </p>
+            <label
+              v-if="isCustomProvider"
+              class="mt-3 flex min-h-11 cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-gray-100 focus-within:ring-2 focus-within:ring-primary-500"
+            >
+              <input
+                type="checkbox"
+                :checked="form.config.vision === true"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                @change="updateParameterValue('vision', $event.target.checked)"
+              />
+              <span>
+                <span class="block text-sm font-medium text-gray-700">
+                  {{ t('llm.config.confirmVisionSupport') }}
+                </span>
+                <span class="block text-xs text-gray-500">
+                  {{ t('llm.config.confirmVisionSupportHint') }}
+                </span>
+              </span>
+            </label>
+            <div v-else class="mt-3 text-sm text-gray-700">
+              <span
+                v-if="selectedModelInfo?.capabilities?.includes('vision')"
+                class="inline-flex rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800"
+              >
+                {{ t('llm.config.visionDetected') }}
+              </span>
+              <span v-else class="text-xs text-gray-500">
+                {{ t('llm.config.visionNotDetected') }}
+              </span>
+            </div>
+          </div>
+
           <div
             v-if="advancedEditableParams.length"
             class="rounded-xl border border-gray-200 bg-gray-50/80 p-4"
@@ -1004,14 +1043,6 @@
                   {{ parameterLabel(parameter) }}
                 </label>
                 <input
-                  v-if="parameter === 'vision'"
-                  type="checkbox"
-                  :checked="form.config[parameter] === true"
-                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  @change="updateParameterValue(parameter, $event.target.checked)"
-                />
-                <input
-                  v-else
                   :value="form.config[parameter]"
                   :type="parameterInputType(parameter)"
                   :step="parameterInputStep(parameter)"
@@ -1215,9 +1246,13 @@ const currentProviderSchema = computed(
 )
 
 const advancedEditableParams = computed(() =>
-  getProviderEditableParams(form.provider).filter(
-    (parameter) => !CORE_CONFIG_PARAMS.has(parameter)
+  getProviderEditableParams(form.provider).filter((parameter) =>
+    !CORE_CONFIG_PARAMS.has(parameter) && parameter !== 'vision'
   )
+)
+
+const isCustomProvider = computed(
+  () => form.provider === 'openai_compatible'
 )
 
 const currentProviderModels = computed(() => {
