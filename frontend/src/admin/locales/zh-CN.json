@@ -1521,6 +1521,7 @@
       "agentModelHint": "必填 — LensNode 使用该模型运行深度分析 Agent。",
       "multimodalModelHint": "可选 — 用于视觉或图像相关任务。",
       "noVisionModel": "当前没有配置支持图片输入的模型。",
+      "configureVisionModel": "配置视觉模型",
       "maxConcurrencyHint": "该 Assistant 同时运行的最大任务数，超出后自动排队。",
       "step2Title": "执行配置",
       "step2Desc": "选择执行节点、类型、目录与检索策略",

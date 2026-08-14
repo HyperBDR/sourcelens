@@ -115,6 +115,13 @@
           class="mt-1 text-xs text-amber-700"
         >
           {{ t('lensAdmin.wizard.noVisionModel') }}
+          <router-link
+            v-if="isAdmin"
+            to="/management/llm/config"
+            class="ml-1 font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800"
+          >
+            {{ t('lensAdmin.wizard.configureVisionModel') }}
+          </router-link>
         </p>
         <p class="mt-1 text-xs text-ink-500">
           {{ t('lensAdmin.wizard.multimodalModelHint') }}
@@ -1016,6 +1023,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
+import { useUserStore } from '@/store/user'
 
 import {
   EMPTY_VALUE,
@@ -1049,6 +1057,8 @@ const props = defineProps({
 defineEmits(['close', 'save', 'refresh-dirs'])
 
 const { t } = useI18n()
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.userHasFeature('admin_console'))
 
 const emptyValue = EMPTY_VALUE
 const WIZARD_STEP_COUNT = 4

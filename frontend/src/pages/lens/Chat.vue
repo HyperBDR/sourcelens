@@ -2247,6 +2247,12 @@ function mapRunError(code) {
   if (c.includes('VISION_MODEL_NOT_CONFIGURED')) {
     return t('lens.chat.errorVisionModelNotConfigured')
   }
+  if (c.includes('VISION_PROVIDER_QUOTA_EXCEEDED')) {
+    return t('lens.chat.errorVisionProviderQuotaExceeded')
+  }
+  if (c.includes('VISION_PROVIDER_UNAVAILABLE')) {
+    return t('lens.chat.errorVisionProviderUnavailable')
+  }
   if (c.includes('TIMEOUT')) {
     return t('lens.chat.errorModelTimeout')
   }

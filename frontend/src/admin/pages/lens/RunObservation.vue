@@ -1311,13 +1311,6 @@ const visionFailureReason = computed(() => {
   return step?.failure_reason || ''
 })
 
-const visionFailureReason = computed(() => {
-  const step = (detail.value?.steps || []).find(
-    (item) => item.step_type === 'multimodal'
-  )
-  return step?.failure_reason || ''
-})
-
 const plannedEvidence = computed(() => detail.value?.planned_evidence || {})
 const hasPlannedEvidence = computed(
   () => Object.keys(plannedEvidence.value).length > 0
