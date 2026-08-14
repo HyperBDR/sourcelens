@@ -28,6 +28,7 @@ from .global_settings import GlobalSettingViewSet
 from .lensnodes import LensNodeViewSet
 from .sessions import (
     LensAttachmentView,
+    RunCitationSourceView,
     RunOutputFileDownloadView,
     RunViewSet,
     SessionViewSet,
@@ -69,6 +70,7 @@ __all__ = [
     "PublicSharedQAListView",
     "PublicSharedQAPdfView",
     "PublicSharedQAView",
+    "RunCitationSourceView",
     "RunOutputFileDownloadView",
     "RunViewSet",
     "SessionViewSet",

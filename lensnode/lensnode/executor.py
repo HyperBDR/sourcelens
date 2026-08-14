@@ -541,7 +541,14 @@ class LensNodeExecutor:
                         "planned_evidence": (
                             result.get("planned_evidence") or {}
                         ),
-                        "citations": result.get("citations") or [],
+                        "citations": [
+                            {
+                                key: value
+                                for key, value in citation.items()
+                                if key != "source"
+                            }
+                            for citation in result.get("citations") or []
+                        ],
                     },
                 }
             )
@@ -550,6 +557,10 @@ class LensNodeExecutor:
                     "type": "run_output",
                     "run_uuid": run_uuid,
                     "final_content": result["answer"],
+                    "citations": result.get("citations") or [],
+                    "planned_evidence": (
+                        result.get("planned_evidence") or {}
+                    ),
                 }
             )
             done_message = task_log(

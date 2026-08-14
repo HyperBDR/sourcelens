@@ -8,7 +8,6 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import subprocess
 
 
 MAX_FILES = 15
@@ -479,64 +478,67 @@ def validate_evidence_sufficiency(bundle, requirements):
     )
 
 
-def validate_citations(citations, bundle, workspace_root):
-    """Return citations that match real files, lines, and evidence items."""
+def validate_citations(
+    citations,
+    bundle,
+    workspace_root,
+    citation_context=None,
+):
+    """Map model-selected evidence IDs to trusted source citations."""
 
     root = Path(workspace_root).resolve()
+    context = dict(citation_context or {})
+    evidence_by_id = {
+        item.evidence_id: item
+        for item in bundle.items
+        if item.evidence_type == "source"
+    }
     valid = []
     invalid = []
     for citation in citations or ():
         citation = citation if isinstance(citation, dict) else {}
-        path_text = str(citation.get("path") or "")
+        evidence_id = str(citation.get("evidence_id") or "").strip()
         try:
-            for field in (
-                "project",
-                "repository",
-                "revision",
-                "symbol",
-                "evidence_type",
-            ):
-                if not str((citation or {}).get(field) or "").strip():
-                    raise ValueError
-            if citation.get("evidence_type") != "source":
+            item = evidence_by_id[evidence_id]
+            supports = str(citation.get("supports") or "").strip()
+            if not supports:
                 raise ValueError
-            path = (root / path_text).resolve()
-            path.relative_to(root)
-            start = int(citation.get("start_line"))
-            end = int(citation.get("end_line"))
-            line_count = _citation_line_count(
-                root,
-                path,
-                path_text,
-                str(citation["revision"]),
+            item_path = Path(item.path)
+            path = (
+                item_path.resolve()
+                if item_path.is_absolute()
+                else (root / item_path).resolve()
             )
-            matches = any(
-                item.evidence_type == "source"
-                and item.path == path_text
-                and item.start_line is not None
-                and item.end_line is not None
-                and item.start_line <= start <= item.end_line
-                and item.start_line <= end <= item.end_line
-                for item in bundle.items
-            )
+            relative_path = path.relative_to(root).as_posix()
+            start = int(item.start_line)
+            end = int(item.end_line)
             if (
                 not path.is_file()
                 or start < 1
                 or end < start
-                or end > line_count
-                or not matches
+                or len(item.content.splitlines()) < end - start + 1
             ):
                 raise ValueError
-        except (
-            OSError,
-            TypeError,
-            ValueError,
-            AttributeError,
-            subprocess.SubprocessError,
-        ):
-            invalid.append(path_text or "<missing-path>")
+        except (KeyError, OSError, TypeError, ValueError, AttributeError):
+            invalid.append(evidence_id or "<missing-evidence-id>")
             continue
-        valid.append(dict(citation))
+        valid.append(
+            {
+                "id": evidence_id,
+                "evidence_id": evidence_id,
+                "project": str(context.get("project") or "workspace"),
+                "repository": str(
+                    context.get("repository") or "workspace"
+                ),
+                "revision": str(context.get("revision") or "workspace"),
+                "path": relative_path,
+                "symbol": item.symbol,
+                "start_line": start,
+                "end_line": end,
+                "supports": supports,
+                "source": item.content,
+            }
+        )
     return tuple(valid), tuple(invalid)
 
 
@@ -548,9 +550,13 @@ def _invoke_adapter(adapter, args):
 
 def _items_from_result(result, evidence_type, provenance):
     if isinstance(result, str):
+        if not result.strip():
+            return []
         try:
             result = json.loads(result)
         except json.JSONDecodeError:
+            if evidence_type == "codegraph":
+                evidence_type = "structural"
             return [
                 {
                     "evidence_type": evidence_type,
@@ -559,6 +565,33 @@ def _items_from_result(result, evidence_type, provenance):
                 }
             ]
     if isinstance(result, dict):
+        if isinstance(result.get("ok"), bool):
+            if not result["ok"]:
+                return [
+                    {
+                        "evidence_type": "retrieval_error",
+                        "content": str(
+                            result.get("error") or "MCP_TOOL_FAILED"
+                        ),
+                        "provenance": provenance,
+                    }
+                ]
+            return _items_from_result(
+                result.get("result"),
+                evidence_type,
+                provenance,
+            )
+        if result.get("error"):
+            return [
+                {
+                    "evidence_type": "retrieval_error",
+                    "path": result.get("path", ""),
+                    "content": str(result["error"]),
+                    "provenance": provenance,
+                }
+            ]
+        if evidence_type == "codegraph":
+            evidence_type = "structural"
         if isinstance(result.get("matches"), list):
             return [
                 {
@@ -584,7 +617,19 @@ def _items_from_result(result, evidence_type, provenance):
                     "provenance": provenance,
                 }
             ]
+        if not result:
+            return []
         result = json.dumps(result, ensure_ascii=False)
+    elif isinstance(result, list):
+        if not result:
+            return []
+        if evidence_type == "codegraph":
+            evidence_type = "structural"
+        result = json.dumps(result, ensure_ascii=False)
+    elif result is None:
+        return []
+    elif evidence_type == "codegraph":
+        evidence_type = "structural"
     return [
         {
             "evidence_type": evidence_type,
@@ -741,21 +786,3 @@ def _optional_int(value):
 
 def _estimate_tokens(text):
     return max(1, math.ceil(len(text) / 4))
-
-
-def _citation_line_count(root, path, path_text, revision):
-    """Read line count from the cited revision or current source snapshot."""
-
-    if revision in {"workspace", "working-tree", "snapshot"}:
-        return len(path.read_text(encoding="utf-8").splitlines())
-    result = subprocess.run(
-        ["git", "show", f"{revision}:{path_text}"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        timeout=5,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise ValueError("cited revision or path is unavailable")
-    return len(result.stdout.splitlines())

@@ -1,0 +1,7 @@
+type: improvement
+audience: user
+en: >-
+  Added verified, clickable source references to Code Analysis answers and
+  improved evidence checks before an answer is marked complete.
+zh-CN: >-
+  为代码分析回答新增经过验证、可点击的源码引用，并加强回答完成前的证据校验。

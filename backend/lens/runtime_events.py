@@ -85,6 +85,7 @@ PUBLIC_TERMINATION_REASONS = {
     "capability_unavailable",
     "execution_failed",
     "evidence_unavailable",
+    "evidence_insufficient",
     "execution_limit",
     "turn_limit",
     "soft_deadline",

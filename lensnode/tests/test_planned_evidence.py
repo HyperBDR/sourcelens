@@ -216,32 +216,166 @@ def test_citations_require_existing_source_lines_and_matching_evidence(
         max_tokens=100,
     )
 
+    evidence_id = bundle.items[0].evidence_id
     valid, invalid = validate_citations(
         [
             {
-                "project": "SourceLens",
-                "repository": "SourceLens",
-                "revision": "workspace",
-                "path": "app.py",
-                "symbol": "load",
-                "start_line": 1,
-                "end_line": 2,
-                "evidence_type": "source",
+                "evidence_id": evidence_id,
+                "supports": "load returns the value",
             },
             {
-                "project": "SourceLens",
-                "repository": "SourceLens",
-                "revision": "workspace",
-                "path": "missing.py",
-                "symbol": "missing",
-                "start_line": 1,
-                "end_line": 4,
-                "evidence_type": "source",
+                "evidence_id": "evidence-missing",
+                "supports": "missing claim",
             },
         ],
         bundle,
         workspace_root=tmp_path,
+        citation_context={
+            "project": "SourceLens",
+            "repository": "SourceLens",
+            "revision": "abc123",
+        },
     )
 
     assert len(valid) == 1
-    assert invalid == ("missing.py",)
+    assert valid[0] == {
+        "id": evidence_id,
+        "evidence_id": evidence_id,
+        "project": "SourceLens",
+        "repository": "SourceLens",
+        "revision": "abc123",
+        "path": "app.py",
+        "symbol": "load",
+        "start_line": 1,
+        "end_line": 2,
+        "supports": "load returns the value",
+        "source": "def load():\n    return 1",
+    }
+    assert invalid == ("evidence-missing",)
+
+
+def test_citations_normalize_absolute_paths_and_reject_workspace_escape(
+    tmp_path,
+):
+    source = tmp_path / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("value = 1\n", encoding="utf-8")
+    outside = tmp_path.parent / "outside.py"
+    outside.write_text("secret = 1\n", encoding="utf-8")
+    bundle = build_evidence_bundle(
+        [
+            {
+                "evidence_type": "source",
+                "path": str(source),
+                "symbol": "value",
+                "start_line": 1,
+                "end_line": 1,
+                "content": "value = 1",
+            },
+            {
+                "evidence_type": "source",
+                "path": str(outside),
+                "symbol": "secret",
+                "start_line": 1,
+                "end_line": 1,
+                "content": "secret = 1",
+            },
+        ],
+        max_tokens=100,
+    )
+    evidence_by_symbol = {item.symbol: item for item in bundle.items}
+
+    valid, invalid = validate_citations(
+        [
+            {
+                "evidence_id": evidence_by_symbol["value"].evidence_id,
+                "supports": "workspace value",
+            },
+            {
+                "evidence_id": evidence_by_symbol["secret"].evidence_id,
+                "supports": "outside value",
+            },
+        ],
+        bundle,
+        workspace_root=tmp_path,
+        citation_context={"revision": "abc123"},
+    )
+
+    assert len(valid) == 1
+    assert valid[0]["path"] == "src/app.py"
+    assert not valid[0]["path"].startswith("/")
+    assert invalid == (evidence_by_symbol["secret"].evidence_id,)
+
+
+def test_codegraph_results_satisfy_structural_requirements():
+    bundle = EvidenceExecutor(
+        codegraph_tools={"explore": lambda **_kwargs: "caller invokes load"}
+    ).execute(
+        parse_retrieval_plan(
+            {
+                "objective": "trace load",
+                "evidence_requirements": ["structural flow"],
+                "codegraph_queries": [
+                    {"operation": "explore", "query": "load"}
+                ],
+            }
+        )
+    )
+
+    result = validate_evidence_sufficiency(bundle, ["structural flow"])
+
+    assert bundle.items[0].evidence_type == "structural"
+    assert result.sufficient is True
+
+
+def test_codegraph_error_results_do_not_satisfy_structural_requirements():
+    bundle = EvidenceExecutor(
+        codegraph_tools={
+            "explore": lambda **_kwargs: {
+                "ok": False,
+                "error": "CODEGRAPH_NOT_INITIALIZED",
+            }
+        }
+    ).execute(
+        parse_retrieval_plan(
+            {
+                "objective": "trace load",
+                "evidence_requirements": ["structural flow"],
+                "codegraph_queries": [
+                    {"operation": "explore", "query": "load"}
+                ],
+            }
+        )
+    )
+
+    result = validate_evidence_sufficiency(bundle, ["structural flow"])
+
+    assert bundle.items[0].evidence_type == "retrieval_error"
+    assert result.sufficient is False
+    assert result.gaps == ("structural",)
+
+
+def test_codegraph_success_wrapper_exposes_structural_result():
+    bundle = EvidenceExecutor(
+        codegraph_tools={
+            "explore": lambda **_kwargs: {
+                "ok": True,
+                "result": "caller invokes load",
+            }
+        }
+    ).execute(
+        parse_retrieval_plan(
+            {
+                "objective": "trace load",
+                "evidence_requirements": ["structural flow"],
+                "codegraph_queries": [
+                    {"operation": "explore", "query": "load"}
+                ],
+            }
+        )
+    )
+
+    result = validate_evidence_sufficiency(bundle, ["structural flow"])
+
+    assert bundle.items[0].content == "caller invokes load"
+    assert result.sufficient is True

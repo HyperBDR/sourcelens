@@ -657,6 +657,15 @@
                       {{ message.content }}
                     </div>
                   </template>
+                  <MessageCitations
+                    v-if="
+                      message.role === 'assistant' &&
+                      message.citations?.length &&
+                      !isAnonymous
+                    "
+                    :citations="message.citations"
+                    @open="openCodeCitation(message, $event)"
+                  />
                   <div
                     v-if="message.output_files && message.output_files.length"
                     class="message-deliverables"
@@ -1498,6 +1507,15 @@
       @close="closePreview"
       @download="downloadOutputFile"
     />
+
+    <CodeCitationDrawer
+      :show="citationDrawerOpen"
+      :citation="citationSource"
+      :loading="citationSourceLoading"
+      :error="citationSourceError"
+      @close="closeCodeCitation"
+      @retry="loadCodeCitation"
+    />
   </div>
 </template>
 
@@ -1540,6 +1558,8 @@ import AssistantEmptyState from '@/components/lens/AssistantEmptyState.vue'
 import LoginModal from '@/components/auth/LoginModal.vue'
 import QaShareModal from '@/components/lens/QaShareModal.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
+import CodeCitationDrawer from '@/pages/lens/components/CodeCitationDrawer.vue'
+import MessageCitations from '@/pages/lens/components/MessageCitations.vue'
 import {
   extensionOf,
   fetchDeliverableBlob,
@@ -1615,6 +1635,7 @@ import {
   deleteSession,
   getPublicAssistant,
   getRun,
+  getRunCitationSource,
   getRunPdf,
   listMyShares,
   listAssistants,
@@ -1647,6 +1668,12 @@ const question = ref('')
 const attachments = ref([])
 const fileInput = ref(null)
 const partialAnswer = ref('')
+const citationDrawerOpen = ref(false)
+const activeCitation = ref(null)
+const citationSource = ref(null)
+const citationSourceLoading = ref(false)
+const citationSourceError = ref('')
+let citationRequestId = 0
 
 const RUN_POLL_INTERVAL_MS = 3000
 const RUN_POLL_MAX_ATTEMPTS = 160
@@ -3085,9 +3112,8 @@ async function selectSession(session, updateRoute = true) {
   }
   await nextTick(scrollToBottom)
   if (!isCurrentLoad()) return
-  if (clearUnreadSession(window.localStorage, session.uuid)) {
-    refreshUnreadSessions()
-  }
+  clearUnreadSession(window.localStorage, session.uuid)
+  refreshUnreadSessions()
   await maybeResumeActiveRun(session.uuid, isCurrentLoad)
 }
 
@@ -3455,6 +3481,44 @@ function openPreview(file) {
 
 function closePreview() {
   previewFile.value = null
+}
+
+function openCodeCitation(message, citation) {
+  if (!message?.run || !citation?.id) return
+  activeCitation.value = { runUuid: message.run, citation }
+  citationDrawerOpen.value = true
+  loadCodeCitation()
+}
+
+async function loadCodeCitation() {
+  const active = activeCitation.value
+  if (!active) return
+  const requestId = ++citationRequestId
+  citationSourceLoading.value = true
+  citationSourceError.value = ''
+  citationSource.value = null
+  try {
+    const source = await getRunCitationSource(
+      active.runUuid,
+      active.citation.id
+    )
+    if (requestId === citationRequestId) citationSource.value = source
+  } catch {
+    if (requestId === citationRequestId) {
+      citationSourceError.value = t('lens.chat.citations.unavailable')
+    }
+  } finally {
+    if (requestId === citationRequestId) citationSourceLoading.value = false
+  }
+}
+
+function closeCodeCitation() {
+  citationRequestId += 1
+  citationDrawerOpen.value = false
+  activeCitation.value = null
+  citationSource.value = null
+  citationSourceLoading.value = false
+  citationSourceError.value = ''
 }
 
 function handleCardClick(file) {

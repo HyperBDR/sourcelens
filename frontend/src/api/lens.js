@@ -1,4 +1,5 @@
 import api from '@/api'
+import { citationSourceUrl } from '@/pages/lens/codeCitations'
 
 import { collectPaginatedResults } from './pagination'
 
@@ -250,6 +251,11 @@ export async function deleteAttachment(uuid) {
 
 export async function getRun(uuid) {
   const response = await api.get(`/lens/runs/${uuid}/`)
+  return unwrapResponse(response)
+}
+
+export async function getRunCitationSource(runUuid, citationId) {
+  const response = await api.get(citationSourceUrl(runUuid, citationId))
   return unwrapResponse(response)
 }
 

@@ -48,6 +48,10 @@
   --sl-brand-strong: #2440c5;
   --sl-brand-disabled: #d9e7ff;
   --sl-success: #1f9d6b;
+  --sl-code-bg: #111827;
+  --sl-code-text: #f9fafb;
+  --sl-code-line-number: #9ca3af;
+  --sl-code-highlight: rgba(43, 78, 230, 0.3);
 }
 
 :root[data-theme='dark'] {
@@ -83,6 +87,10 @@
   --sl-neutral-text-900-rgb: 204 204 204;
   --sl-form-bg: #252526;
   --sl-form-text: #cccccc;
+  --sl-code-bg: #111827;
+  --sl-code-text: #f9fafb;
+  --sl-code-line-number: #9ca3af;
+  --sl-code-highlight: rgba(73, 109, 255, 0.3);
   --sl-form-border: #3c3c3c;
   --sl-form-disabled-bg: #2a2d2e;
   --sl-form-disabled-text: #858585;

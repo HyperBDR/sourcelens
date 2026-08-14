@@ -234,6 +234,18 @@
       "executionTimeline": "执行时间线",
       "showTimeline": "查看 {count} 条事件",
       "hideTimeline": "收起事件",
+      "citations": {
+        "title": "内容依据",
+        "count": "{count} 处代码引用",
+        "open": "打开代码引用 {location}",
+        "viewerTitle": "代码引用",
+        "revision": "版本",
+        "symbol": "符号",
+        "lines": "行号",
+        "loading": "正在加载代码引用…",
+        "retry": "重试",
+        "unavailable": "该代码引用当前不可用，可能是运行快照已缺失或你没有访问权限。"
+      },
       "questionPlaceholder": "有什么问题，尽管问",
       "startTitle": "今天想处理什么？",
       "suggestions": {
