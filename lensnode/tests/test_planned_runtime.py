@@ -150,12 +150,9 @@ def test_planned_answer_extracts_json_after_explanatory_prefix(tmp_path):
         tmp_path,
     )
 
-    assert answer == (
-        "## Conclusion\n\nReadable answer\n\n"
-        "No verified citations were returned."
-    )
+    assert answer == "Readable answer"
     assert citations == ()
-    assert unsupported == 0
+    assert unsupported == 1
     assert "structured result" not in answer
     assert '"citations"' not in answer
 
@@ -178,7 +175,7 @@ def test_invalid_planned_envelope_is_not_exposed(tmp_path):
     assert "Internal answer" not in answer
     assert "private.py" not in answer
     assert "supports" not in answer
-    assert "could not be validated" in answer
+    assert answer == "The code analysis result could not be validated."
     assert citations == ()
     assert unsupported == 1
 
@@ -199,16 +196,10 @@ def test_planned_answer_leads_with_conclusion_and_limits_evidence(tmp_path):
         ],
         max_tokens=100,
     )
+    evidence_id = bundle.items[0].evidence_id
     citations = [
         {
-            "project": "SourceLens",
-            "repository": "SourceLens",
-            "revision": "workspace",
-            "path": "app.py",
-            "symbol": f"analyze_{index}",
-            "start_line": index,
-            "end_line": index,
-            "evidence_type": "source",
+            "evidence_id": evidence_id,
             "supports": f"finding {index}",
         }
         for index in range(1, 8)
@@ -227,13 +218,17 @@ def test_planned_answer_leads_with_conclusion_and_limits_evidence(tmp_path):
         response,
         bundle,
         tmp_path,
+        citation_context={
+            "project": "SourceLens",
+            "repository": "SourceLens",
+            "revision": "abc123",
+        },
     )
 
-    assert answer.startswith(
-        "## Conclusion\n\nThe implementation has one root cause."
-    )
-    assert answer.count("- SourceLens / SourceLens") == 5
-    assert len(valid) == 5
+    assert answer == "The implementation has one root cause."
+    assert len(valid) == 1
+    assert valid[0]["path"] == "app.py"
+    assert valid[0]["revision"] == "abc123"
     assert unsupported == 0
 
 
@@ -291,11 +286,377 @@ def test_planned_code_analysis_retries_truncated_final_concisely(tmp_path):
         workspace_root=tmp_path,
     )
 
-    assert result["answer"].startswith(
-        "## Conclusion\n\nThe retry produced a complete conclusion."
+    assert result["answer"] == (
+        "The available code evidence is insufficient for a reliable answer."
     )
+    assert result["outcome"] == "blocked"
     assert result["planned_evidence"]["final_retry_count"] == 1
     assert result["planned_evidence"]["model_call_count"] == 3
     assert len(model.calls) == 3
     assert model.calls[1][1]["runtime_structured_output"] is True
     assert model.calls[2][1]["runtime_structured_output"] is True
+
+
+def test_planned_code_analysis_repairs_invalid_planner_schema(tmp_path):
+    repaired_plan = {
+        "objective": "Find the implementation",
+        "project": "SourceLens",
+        "repository": "SourceLens",
+        "revision": "abc123",
+        "question_type": "implementation",
+        "evidence_requirements": [],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [],
+        "max_files": 3,
+        "max_fallback_rounds": 0,
+        "budgets": {"max_evidence_tokens": 100},
+    }
+    responses = [
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    **repaired_plan,
+                    "codegraph_queries": ["invalid schema"],
+                }
+            )
+        ),
+        SimpleNamespace(content=json.dumps(repaired_plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "Repaired planner answer.",
+                    "citations": [],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return responses[len(self.calls) - 1]
+
+    model = Model()
+    result = agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": "Where is it implemented?"},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["planned_evidence"]["planner_status"] == "repaired"
+    assert result["planned_evidence"]["planner_retry_count"] == 1
+    assert result["planned_evidence"]["model_call_count"] == 3
+
+
+def test_insufficient_evidence_is_not_completed_or_added_to_answer(tmp_path):
+    plan = {
+        "objective": "Find the implementation",
+        "project": "SourceLens",
+        "repository": "SourceLens",
+        "revision": "abc123",
+        "question_type": "implementation",
+        "evidence_requirements": ["source lines"],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [],
+        "max_files": 3,
+        "max_fallback_rounds": 0,
+        "budgets": {"max_evidence_tokens": 100},
+    }
+    responses = [
+        SimpleNamespace(content=json.dumps(plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "The implementation appears to be here.",
+                    "citations": [],
+                    "unsupported_claims": ["implementation location"],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def invoke(self, _messages, **_kwargs):
+            return responses.pop(0)
+
+    result = agent_runtime._run_planned_code_analysis(
+        model=Model(),
+        command={"question": "Where is it implemented?"},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["outcome"] == "blocked"
+    assert result["termination_detail"] == {
+        "reason": "evidence_insufficient"
+    }
+    assert result["planned_evidence"]["sufficient"] is False
+    assert result["planned_evidence"]["gap_categories"] == ["source"]
+    assert "Evidence gap" not in result["answer"]
+    assert "unverified" not in result["answer"].lower()
+
+
+def test_unsupported_claims_prevent_completed_outcome(tmp_path):
+    plan = {
+        "objective": "Find the implementation",
+        "project": "SourceLens",
+        "repository": "SourceLens",
+        "revision": "abc123",
+        "question_type": "implementation",
+        "evidence_requirements": [],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [],
+        "max_files": 3,
+        "max_fallback_rounds": 0,
+        "budgets": {"max_evidence_tokens": 100},
+    }
+    responses = [
+        SimpleNamespace(content=json.dumps(plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "The handler may be in services.py.",
+                    "citations": [],
+                    "unsupported_claims": ["handler location"],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def invoke(self, _messages, **_kwargs):
+            return responses.pop(0)
+
+    result = agent_runtime._run_planned_code_analysis(
+        model=Model(),
+        command={"question": "Where is the handler?"},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["outcome"] == "blocked"
+    assert result["termination_detail"] == {
+        "reason": "evidence_insufficient"
+    }
+    assert result["planned_evidence"]["sufficient"] is True
+    assert "reliable answer" in result["answer"]
+
+
+def test_incomplete_final_protocol_prevents_completed_outcome(tmp_path):
+    plan = {
+        "objective": "Find the implementation",
+        "project": "SourceLens",
+        "repository": "SourceLens",
+        "revision": "abc123",
+        "question_type": "implementation",
+        "evidence_requirements": [],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [],
+        "max_files": 3,
+        "max_fallback_rounds": 0,
+        "budgets": {"max_evidence_tokens": 100},
+    }
+    responses = [
+        SimpleNamespace(content=json.dumps(plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {"answer": "The handler is implemented in missing.py."}
+            )
+        ),
+        SimpleNamespace(
+            content=json.dumps(
+                {"answer": "The handler is implemented in missing.py."}
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def invoke(self, _messages, **_kwargs):
+            return responses.pop(0)
+
+    result = agent_runtime._run_planned_code_analysis(
+        model=Model(),
+        command={"question": "Where is the handler?"},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["outcome"] == "blocked"
+    assert result["termination_detail"] == {
+        "reason": "evidence_insufficient"
+    }
+    assert "missing.py" not in result["answer"]
+
+
+def test_planner_repair_keeps_question_and_workspace_guidance(tmp_path):
+    repaired_plan = {
+        "objective": "Find the implementation",
+        "question_type": "implementation",
+        "evidence_requirements": [],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [],
+        "max_fallback_rounds": 0,
+    }
+    responses = [
+        SimpleNamespace(
+            content='{"objective":"Find it","codegraph_queries":['
+        ),
+        SimpleNamespace(content=json.dumps(repaired_plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "No supported code conclusion.",
+                    "citations": [],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return responses[len(self.calls) - 1]
+
+    model = Model()
+    question = "Where is the request handler implemented?"
+    guidance = "Search the API package before infrastructure modules."
+    agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": question},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+        context_skill_contents=[guidance],
+    )
+
+    repair_messages = model.calls[1][0]
+    repair_text = "\n".join(message.content for message in repair_messages)
+    assert question in repair_text
+    assert guidance in repair_text
+
+
+def test_citations_use_trusted_workspace_provenance(tmp_path):
+    source = tmp_path / "app.py"
+    source.write_text("def load():\n    return 1\n", encoding="utf-8")
+    source_payload = {
+        "evidence_type": "source",
+        "path": "app.py",
+        "symbol": "load",
+        "start_line": 1,
+        "end_line": 2,
+        "content": "def load():\n    return 1",
+    }
+    evidence_id = build_evidence_bundle(
+        [source_payload],
+        max_tokens=100,
+    ).items[0].evidence_id
+    plan = {
+        "objective": "Find the implementation",
+        "project": "Invented Project",
+        "repository": "invented/repository",
+        "revision": "invented-revision",
+        "question_type": "implementation",
+        "evidence_requirements": ["source lines"],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [
+            {"path": "app.py", "start_line": 1, "end_line": 2}
+        ],
+        "max_fallback_rounds": 0,
+    }
+    responses = [
+        SimpleNamespace(content=json.dumps(plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "load returns one.",
+                    "citations": [
+                        {
+                            "evidence_id": evidence_id,
+                            "supports": "load returns one",
+                        }
+                    ],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def invoke(self, _messages, **_kwargs):
+            return responses.pop(0)
+
+    class Reader:
+        name = "read_workspace_file"
+
+        def invoke(self, _args):
+            return json.dumps(source_payload)
+
+    result = agent_runtime._run_planned_code_analysis(
+        model=Model(),
+        command={"question": "What does load return?"},
+        tools=[Reader()],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["citations"][0]["project"] == "workspace"
+    assert result["citations"][0]["repository"] == "workspace"
+    assert result["citations"][0]["revision"] == "working-tree"
+
+
+def test_planned_prompts_include_bound_workspace_guidance():
+    guidance = "Search porter before checking infrastructure modules."
+
+    planner_prompt = agent_runtime._planned_planner_prompt(
+        {"workspace_path": "/workspace"},
+        context_skill_contents=[guidance],
+    )
+    final_prompt = agent_runtime._planned_final_prompt(
+        context_skill_contents=[guidance]
+    )
+
+    assert guidance in planner_prompt
+    assert guidance in final_prompt

@@ -42,6 +42,15 @@ class FakeAgent:
         return {
             "answer": "streamed final",
             "samples": [],
+            "citations": [
+                {
+                    "id": "evidence-123",
+                    "path": "src/app.py",
+                    "start_line": 10,
+                    "end_line": 12,
+                }
+            ],
+            "planned_evidence": {"sufficient": True},
             "outcome": "partial",
             "termination_detail": {
                 "reason": "capability_unavailable",
@@ -84,11 +93,21 @@ def test_executor_emits_streamed_output_delta():
         and event.get("reset") is False
         for event in events
     )
-    assert {
-        "type": "run_output",
-        "run_uuid": "00000000-0000-0000-0000-000000000001",
-        "final_content": "streamed final",
-    } in events
+    final_output = next(
+        event
+        for event in events
+        if event.get("type") == "run_output"
+        and event.get("final_content") == "streamed final"
+    )
+    assert final_output["citations"] == [
+        {
+            "id": "evidence-123",
+            "path": "src/app.py",
+            "start_line": 10,
+            "end_line": 12,
+        }
+    ]
+    assert final_output["planned_evidence"] == {"sufficient": True}
     done = [event for event in events if event["type"] == "run_done"][-1]
     assert done["outcome"] == "partial"
     assert done["termination_detail"] == {
