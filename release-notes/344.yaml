@@ -1,0 +1,4 @@
+type: fix
+audience: admin
+en: Widened the assistant filter in Q&A history so longer assistant names are easier to read.
+zh-CN: 加宽问答历史记录中的助手筛选框，方便查看较长的助手名称。
