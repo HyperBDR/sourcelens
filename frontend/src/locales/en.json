@@ -234,6 +234,18 @@
       "executionTimeline": "Execution timeline",
       "showTimeline": "Show {count} events",
       "hideTimeline": "Hide events",
+      "citations": {
+        "title": "Sources",
+        "count": "{count} code citations",
+        "open": "Open code citation {location}",
+        "viewerTitle": "Code citation",
+        "revision": "Revision",
+        "symbol": "Symbol",
+        "lines": "Lines",
+        "loading": "Loading code citation…",
+        "retry": "Retry",
+        "unavailable": "This code citation is unavailable. Its run snapshot may be missing, or you may not have access."
+      },
       "questionPlaceholder": "Ask anything",
       "startTitle": "What would you like to work on?",
       "suggestions": {
