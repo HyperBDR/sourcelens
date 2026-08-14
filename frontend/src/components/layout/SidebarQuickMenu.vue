@@ -73,7 +73,7 @@
             <router-link
               to="/management/users"
               class="quick-menu-link"
-              @click="open = false"
+              @click="openAdminConsole"
             >
               <span class="truncate">{{ t('platforms.adminConsole') }}</span>
             </router-link>
@@ -108,7 +108,8 @@ import { useUserStore } from '@/store/user'
 import {
   getAvailablePlatforms,
   getCurrentPlatformKey,
-  getPlatformByKey
+  getPlatformByKey,
+  saveAdminReturnPath
 } from '@/utils/platformAccess'
 
 const { t } = useI18n()
@@ -161,6 +162,11 @@ const currentPlatformLabel = computed(() => {
 
 const toggleMenu = () => {
   open.value = !open.value
+}
+
+const openAdminConsole = () => {
+  saveAdminReturnPath(route.fullPath)
+  open.value = false
 }
 
 const openSettings = () => {

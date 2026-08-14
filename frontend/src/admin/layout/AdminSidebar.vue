@@ -1033,9 +1033,9 @@
 
       <div class="mt-auto border-t border-ink-800 pt-4">
         <router-link
-          to="/"
+          :to="assistantReturnPath"
           class="admin-nav-item"
-          @click="isMobile && $emit('close')"
+          @click="clearAssistantReturnPath"
           @mouseenter="preloadRoute('/')"
         >
           <svg
@@ -1066,6 +1066,10 @@ import BrandLogo from '@/components/layout/BrandLogo.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useUiStore } from '@/store/ui'
 import { useUserStore } from '@/store/user'
+import {
+  consumeAdminReturnPath,
+  getAdminReturnPath
+} from '@/utils/platformAccess'
 
 defineProps({
   showMobileMenu: {
@@ -1074,13 +1078,19 @@ defineProps({
   }
 })
 
-defineEmits(['close'])
+const emit = defineEmits(['close'])
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const uiStore = useUiStore()
 const userStore = useUserStore()
+const assistantReturnPath = ref(getAdminReturnPath())
+
+const clearAssistantReturnPath = () => {
+  consumeAdminReturnPath()
+  if (isMobile.value) emit('close')
+}
 
 const navigation = ref(null)
 const userManagementMenuOpen = ref(true)

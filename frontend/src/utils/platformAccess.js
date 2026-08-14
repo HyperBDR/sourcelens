@@ -19,6 +19,24 @@ export const FEATURE_DEFINITIONS = [
   }
 ]
 
+const ADMIN_RETURN_PATH_KEY = 'sourcelens.adminReturnPath'
+
+export function saveAdminReturnPath(path) {
+  if (!path || !path.startsWith('/')) return
+  window.sessionStorage.setItem(ADMIN_RETURN_PATH_KEY, path)
+}
+
+export function getAdminReturnPath() {
+  const path = window.sessionStorage.getItem(ADMIN_RETURN_PATH_KEY)
+  return path && path.startsWith('/') ? path : '/'
+}
+
+export function consumeAdminReturnPath() {
+  const path = getAdminReturnPath()
+  window.sessionStorage.removeItem(ADMIN_RETURN_PATH_KEY)
+  return path
+}
+
 export const FEATURE_KEY_SET = new Set(
   FEATURE_DEFINITIONS.map((item) => item.key)
 )

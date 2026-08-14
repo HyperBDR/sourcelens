@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed admin-console navigation so returning to chat preserves the active
+  assistant, session, and conversation history.
+zh-CN: >-
+  修复管理台导航：返回聊天页面时保留当前助手、会话和对话历史。
