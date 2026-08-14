@@ -38,7 +38,7 @@
               />
               <BaseSelect
                 v-model="filters.assistant"
-                class="md:w-32"
+                class="md:w-48"
                 mobile-touch
                 @change="onFiltersChanged"
               >
