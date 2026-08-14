@@ -1357,7 +1357,7 @@
                 <input
                   ref="fileInput"
                   type="file"
-                  :accept="ATTACHMENT_ACCEPT"
+                  :accept="attachmentAccept"
                   multiple
                   class="composer-file-input"
                   @change="onFileInputChange"
@@ -1574,7 +1574,8 @@ import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
 import { resolveChatViewport } from '@/pages/lens/chatViewport'
 import { compactFilename } from '@/pages/lens/filenameDisplay'
 import {
-  ATTACHMENT_ACCEPT,
+  DOCUMENT_EXTENSIONS,
+  IMAGE_MIME,
   attachmentUploadError,
   hasAttachmentErrorCode,
   MAX_ATTACHMENTS,
@@ -1723,7 +1724,7 @@ const acceptsImages = computed(
   () =>
     canCompose.value &&
     !isAnonymous.value &&
-    !!selectedAssistant.value?.multimodal_model_ref
+    selectedAssistant.value?.can_process_images === true
 )
 
 const acceptsDocuments = computed(
@@ -1738,6 +1739,13 @@ const acceptsDocuments = computed(
 const acceptsAttachments = computed(
   () => acceptsImages.value || acceptsDocuments.value
 )
+
+const attachmentAccept = computed(() => {
+  const values = []
+  if (acceptsImages.value) values.push(...IMAGE_MIME)
+  if (acceptsDocuments.value) values.push(...DOCUMENT_EXTENSIONS)
+  return values.join(',')
+})
 
 const hasUploadingAttachment = computed(() =>
   attachments.value.some((item) => item.status === 'uploading')
@@ -2229,6 +2237,21 @@ function mapRunError(code) {
   const c = String(code || '').toUpperCase()
   if (c.includes('IMAGE_PREPROCESSING')) {
     return t('lens.chat.errorImagePreprocessing')
+  }
+  if (c.includes('VISION_MODEL_CONFIGURATION_INVALID')) {
+    return t('lens.chat.errorVisionModelConfiguration')
+  }
+  if (c.includes('MODEL_NOT_VISION_CAPABLE')) {
+    return t('lens.chat.errorModelNotVisionCapable')
+  }
+  if (c.includes('VISION_MODEL_NOT_CONFIGURED')) {
+    return t('lens.chat.errorVisionModelNotConfigured')
+  }
+  if (c.includes('VISION_PROVIDER_QUOTA_EXCEEDED')) {
+    return t('lens.chat.errorVisionProviderQuotaExceeded')
+  }
+  if (c.includes('VISION_PROVIDER_UNAVAILABLE')) {
+    return t('lens.chat.errorVisionProviderUnavailable')
   }
   if (c.includes('TIMEOUT')) {
     return t('lens.chat.errorModelTimeout')

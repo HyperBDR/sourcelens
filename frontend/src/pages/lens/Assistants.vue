@@ -541,6 +541,21 @@ function startEditFromDetail(row) {
   startEdit(row)
 }
 
+function selectedVisionModelIsEligible(modelRef) {
+  if (!modelRef) return true
+  const config = llmConfigOptions.value.find(
+    (item) => item.uuid === modelRef
+  )
+  if (!config || config.is_active === false) return false
+  const declared = config.config?.supports_vision ?? config.config?.vision
+  return (
+    config.vision_capability === 'supported' ||
+    config.supports_vision === true ||
+    declared === true ||
+    config.capabilities?.includes?.('vision')
+  )
+}
+
 function requestArchive(row) {
   archiveConfirmRow.value = row
 }
@@ -689,6 +704,11 @@ async function save() {
   saving.value = true
   formError.value = ''
   try {
+    if (!selectedVisionModelIsEligible(form.value.multimodal_model_ref)) {
+      formError.value = t('lensAdmin.messages.invalidVisionModel')
+      showError(formError.value)
+      return
+    }
     const payload = buildPayload()
     const uuid = form.value.uuid
     await saveByMode(uuid, payload, createAssistant, updateAssistant)

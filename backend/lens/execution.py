@@ -107,7 +107,7 @@ def _lensnode_dispatch(state):
     if len(subject_documents) < expected_document_count:
         raise LensNodeDispatchError("DOCUMENT_ATTACHMENT_UNAVAILABLE")
     has_documents = bool(subject_documents)
-    if has_images and assistant.multimodal_model_ref:
+    if has_images:
         with run_step(run, RunStep.StepType.MULTIMODAL, 0) as step:
             analysis = analyze_multimodal_intent(run)
             question = (
@@ -128,13 +128,6 @@ def _lensnode_dispatch(state):
             }
             if analysis.get("usage"):
                 step.detail["usage"] = analysis["usage"]
-    elif has_images:
-        with run_step(run, RunStep.StepType.MULTIMODAL, 0) as step:
-            step.detail = {
-                "status": "skipped",
-                "reason": "NO_MULTIMODAL_MODEL",
-                "image_count": run.input_message.attachments.count(),
-            }
     elif assistant.preprocess_model_ref and (question or "").strip():
         with run_step(run, RunStep.StepType.QUERY_REWRITE, 0) as step:
             rewrite = rewrite_query(run)

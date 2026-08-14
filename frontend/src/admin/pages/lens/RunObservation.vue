@@ -930,6 +930,13 @@
                   <p v-if="visionQuery" class="mt-2 text-xs text-gray-500">
                     {{ t('lensRuns.visionQuery') }}: {{ visionQuery }}
                   </p>
+                  <p
+                    v-if="visionFailureReason"
+                    class="mt-2 text-xs text-red-600"
+                  >
+                    {{ t('lensRuns.visionFailureReason') }}:
+                    {{ visionFailureReason }}
+                  </p>
                 </section>
 
                 <section v-if="detail.answer">
@@ -1295,6 +1302,13 @@ const visionQuery = computed(() => {
     (item) => item.step_type === 'multimodal'
   )
   return step?.multimodal?.query || ''
+})
+
+const visionFailureReason = computed(() => {
+  const step = (detail.value?.steps || []).find(
+    (item) => item.step_type === 'multimodal'
+  )
+  return step?.failure_reason || ''
 })
 
 const plannedEvidence = computed(() => detail.value?.planned_evidence || {})

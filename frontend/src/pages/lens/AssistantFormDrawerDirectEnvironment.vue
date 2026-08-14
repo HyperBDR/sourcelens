@@ -100,10 +100,29 @@
       <FormRow :label="t('lensAdmin.fields.multimodalModel')">
         <BaseSelect v-model="form.multimodal_model_ref">
           <option value="">{{ t('lensAdmin.placeholders.noModel') }}</option>
-          <option v-for="c in llmConfigOptions" :key="c.uuid" :value="c.uuid">
+          <option
+            v-for="c in visionModelOptions"
+            :key="c.uuid"
+            :value="c.uuid"
+            :disabled="!isVisionModelEligible(c)"
+          >
             {{ formatLLMConfigLabel(c) }}
+            {{ isVisionModelEligible(c) ? ' · Vision' : ' · Unavailable' }}
           </option>
         </BaseSelect>
+        <p
+          v-if="!visionModelOptions.some(isVisionModelEligible)"
+          class="mt-1 text-xs text-amber-700"
+        >
+          {{ t('lensAdmin.wizard.noVisionModel') }}
+          <router-link
+            v-if="isAdmin"
+            to="/management/llm/config"
+            class="ml-1 font-medium text-brand-700 underline underline-offset-2 hover:text-brand-800"
+          >
+            {{ t('lensAdmin.wizard.configureVisionModel') }}
+          </router-link>
+        </p>
         <p class="mt-1 text-xs text-ink-500">
           {{ t('lensAdmin.wizard.multimodalModelHint') }}
         </p>
@@ -1004,6 +1023,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
+import { useUserStore } from '@/store/user'
 
 import {
   EMPTY_VALUE,
@@ -1037,6 +1057,8 @@ const props = defineProps({
 defineEmits(['close', 'save', 'refresh-dirs'])
 
 const { t } = useI18n()
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.userHasFeature('admin_console'))
 
 const emptyValue = EMPTY_VALUE
 const WIZARD_STEP_COUNT = 4
@@ -1044,6 +1066,34 @@ const ACCESS_PAGE_SIZE = 20
 const SEARCH_DELAY_MS = 250
 const LOAD_MORE_THRESHOLD_PX = 96
 const wizardStep = ref(1)
+
+const visionModelOptions = computed(() => {
+  const selected = props.form.multimodal_model_ref
+  const eligible = props.llmConfigOptions.filter(
+    (config) =>
+      config.is_active !== false &&
+      (config.vision_capability === 'supported' ||
+        config.capabilities?.includes?.('vision'))
+  )
+  const historical = props.llmConfigOptions.find(
+    (config) => config.uuid === selected
+  )
+  if (historical && !eligible.some((config) => config.uuid === selected)) {
+    return [historical, ...eligible]
+  }
+  return eligible
+})
+
+function isVisionModelEligible(config) {
+  const declared = config.config?.supports_vision ?? config.config?.vision
+  return (
+    config.is_active !== false &&
+    (config.vision_capability === 'supported' ||
+      config.supports_vision === true ||
+      declared === true ||
+      config.capabilities?.includes?.('vision'))
+  )
+}
 const groupPage = ref(1)
 const groupTotal = ref(0)
 const groupResults = ref([])

@@ -429,6 +429,10 @@ def _admin_run_detail(run):
             ),
         }
         if step.step_type == "multimodal":
+            reason = detail.get("reason")
+            if isinstance(reason, str) and reason.isascii() and len(reason) <= 64:
+                item["failure_reason"] = reason
+        if step.step_type == "multimodal":
             item["multimodal"] = {
                 "query": detail.get("query"),
                 "image_count": detail.get("image_count"),

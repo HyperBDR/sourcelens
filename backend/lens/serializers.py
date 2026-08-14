@@ -65,6 +65,10 @@ from .services import (
     supports_document_attachments,
     validate_retry_run,
 )
+from .vision_capabilities import (
+    resolve_model_capability,
+    validate_vision_model_ref,
+)
 from .skill_generation import (
     get_workspace_guide_payload,
     sync_workspace_guide_skill,
@@ -499,6 +503,8 @@ class AssistantSerializer(serializers.ModelSerializer):
     skill_summary = serializers.SerializerMethodField()
     mcp_summary = serializers.SerializerMethodField()
     supports_document_attachments = serializers.SerializerMethodField()
+    vision_model_capability = serializers.SerializerMethodField()
+    can_process_images = serializers.SerializerMethodField()
 
     class Meta:
         model = Assistant
@@ -526,6 +532,8 @@ class AssistantSerializer(serializers.ModelSerializer):
             "skill_summary",
             "mcp_summary",
             "supports_document_attachments",
+            "vision_model_capability",
+            "can_process_images",
             "created_at",
             "updated_at",
         ]
@@ -553,6 +561,21 @@ class AssistantSerializer(serializers.ModelSerializer):
         """Return whether the assigned LensNode accepts Run documents."""
 
         return supports_document_attachments(assistant.lensnode)
+
+    def get_vision_model_capability(self, assistant):
+        """Return the authoritative capability of the assigned vision model."""
+
+        return resolve_model_capability(assistant.multimodal_model_ref)
+
+    def get_can_process_images(self, assistant):
+        """Return whether the current assistant can accept image input."""
+
+        capability = resolve_model_capability(assistant.multimodal_model_ref)
+        return bool(
+            assistant.status == Assistant.Status.ACTIVE
+            and capability.get("enabled")
+            and capability.get("supports_vision")
+        )
 
     def get_mcp_summary(self, assistant):
         """Return MCP binding summary for list views."""
@@ -632,6 +655,17 @@ class AssistantSerializer(serializers.ModelSerializer):
         )
         if isinstance(settings, dict) and "retrieval_policy" in settings:
             validate_retrieval_policy(settings.get("retrieval_policy"))
+        if "multimodal_model_ref" in attrs:
+            reason = validate_vision_model_ref(attrs["multimodal_model_ref"])
+            if reason:
+                raise serializers.ValidationError(
+                    {
+                        "multimodal_model_ref": {
+                            "code": reason,
+                            "message": reason,
+                        }
+                    }
+                )
         return attrs
 
     def _sync_bindings(self, assistant, validated_data):
