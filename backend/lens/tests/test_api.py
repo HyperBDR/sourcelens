@@ -63,6 +63,7 @@ from lens.serializers import (
 )
 from lens.services import (
     LensNodeDispatchError,
+    append_lensnode_output,
     build_loaded_mcps,
     build_loaded_skills,
     create_execution_run,
@@ -2993,6 +2994,147 @@ class LensApiTests(TestCase):
         )
         output.save()
         return session, run, output
+
+    def _make_cited_run(self, user=None):
+        """Create a run with one trusted citation and invalid path inputs."""
+
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=user or self.user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="Where is the handler?",
+            enqueue=False,
+        )
+        append_lensnode_output(
+            run.uuid,
+            final_content="The handler is implemented in run.py.",
+            citations=[
+                {
+                    "id": "evidence-handler",
+                    "evidence_id": "evidence-handler",
+                    "project": "SourceLens",
+                    "repository": "sourcelens",
+                    "revision": "abc123",
+                    "path": "backend/lens/run.py",
+                    "symbol": "run_handler",
+                    "start_line": 40,
+                    "end_line": 42,
+                    "supports": "This function handles the run.",
+                    "source": (
+                        "def run_handler():\n"
+                        "    execute_run()\n"
+                        "    return True"
+                    ),
+                },
+                {
+                    "id": "evidence-absolute",
+                    "path": "/workspace/private.py",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "source": "secret = True",
+                },
+                {
+                    "id": "evidence-traversal",
+                    "path": "../private.py",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "source": "secret = True",
+                },
+            ],
+            planned_evidence={
+                "sufficient": True,
+                "gap_categories": [],
+            },
+        )
+        return session, run
+
+    def test_session_messages_expose_safe_citation_metadata(self):
+        session, run = self._make_cited_run()
+
+        response = self.client.get(
+            f"/api/lens/sessions/{session.uuid}/messages/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        answer = next(
+            item for item in response.data if item["role"] == "assistant"
+        )
+        self.assertEqual(len(answer["citations"]), 1)
+        citation = answer["citations"][0]
+        self.assertEqual(citation["id"], "evidence-handler")
+        self.assertEqual(citation["path"], "backend/lens/run.py")
+        self.assertEqual(citation["start_line"], 40)
+        self.assertEqual(citation["end_line"], 42)
+        self.assertNotIn("source", citation)
+        run.refresh_from_db()
+        self.assertEqual(len(run.citations), 1)
+        self.assertEqual(run.planned_evidence["sufficient"], True)
+
+    def test_citation_source_returns_numbered_snapshot_to_run_owner(self):
+        owner = User.objects.create_user(
+            username="citation-reader",
+            email="citation-reader@example.com",
+            password="pass12345",
+        )
+        session, run = self._make_cited_run(owner)
+        client = APIClient()
+        client.force_authenticate(owner)
+
+        response = client.get(
+            f"/api/lens/runs/{run.uuid}/citations/evidence-handler/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["path"], "backend/lens/run.py")
+        self.assertEqual(response.data["revision"], "abc123")
+        self.assertEqual(response.data["highlight_start_line"], 40)
+        self.assertEqual(response.data["highlight_end_line"], 42)
+        self.assertEqual(
+            response.data["lines"],
+            [
+                {"number": 40, "content": "def run_handler():"},
+                {"number": 41, "content": "    execute_run()"},
+                {"number": 42, "content": "    return True"},
+            ],
+        )
+        self.assertNotIn("/workspace", str(response.data))
+
+    def test_citation_source_is_not_available_to_another_user(self):
+        owner = User.objects.create_user(
+            username="citation-owner",
+            email="citation-owner@example.com",
+            password="pass12345",
+        )
+        session, run = self._make_cited_run(owner)
+        other = User.objects.create_user(
+            username="citation-other",
+            email="citation-other@example.com",
+            password="pass12345",
+        )
+        client = APIClient()
+        client.force_authenticate(other)
+
+        response = client.get(
+            f"/api/lens/runs/{run.uuid}/citations/evidence-handler/"
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_citation_source_is_available_to_staff_admin(self):
+        owner = User.objects.create_user(
+            username="citation-user",
+            email="citation-user@example.com",
+            password="pass12345",
+        )
+        session, run = self._make_cited_run(owner)
+
+        response = self.client.get(
+            f"/api/lens/runs/{run.uuid}/citations/evidence-handler/"
+        )
+
+        self.assertEqual(response.status_code, 200)
 
     def test_lensnode_can_download_prior_same_session_deliverable(self):
         from lens.services import create_execution_run

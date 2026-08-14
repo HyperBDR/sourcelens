@@ -15,6 +15,7 @@ from .assistant_lifecycle import (
     create_assistant_session,
 )
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE, AttachmentError
+from .citations import public_run_citations, sanitize_planned_evidence
 from .datasource_services import (
     check_datasource_path,
     DataSourceDispatchError,
@@ -2421,6 +2422,8 @@ class MessageSerializer(serializers.ModelSerializer):
     feedback_updated_at = serializers.SerializerMethodField()
     attachments = serializers.SerializerMethodField()
     output_files = RunOutputFileSerializer(many=True, read_only=True)
+    citations = serializers.SerializerMethodField()
+    planned_evidence = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -2436,6 +2439,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "feedback_updated_at",
             "attachments",
             "output_files",
+            "citations",
+            "planned_evidence",
             "created_at",
         ]
         read_only_fields = [
@@ -2450,8 +2455,26 @@ class MessageSerializer(serializers.ModelSerializer):
             "feedback_updated_at",
             "attachments",
             "output_files",
+            "citations",
+            "planned_evidence",
             "created_at",
         ]
+
+    def get_citations(self, obj):
+        """Return trusted citation metadata without captured source text."""
+
+        if obj.role != Message.Role.ASSISTANT:
+            return []
+        run = self._run_for_message(obj)
+        return public_run_citations(run.citations) if run else []
+
+    def get_planned_evidence(self, obj):
+        """Return the user-safe evidence quality summary."""
+
+        if obj.role != Message.Role.ASSISTANT:
+            return {}
+        run = self._run_for_message(obj)
+        return sanitize_planned_evidence(run.planned_evidence) if run else {}
 
     def get_attachments(self, obj):
         """Return persistent images plus unexpired transient documents."""
@@ -2614,11 +2637,23 @@ class RunSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     termination_detail = serializers.SerializerMethodField()
+    citations = serializers.SerializerMethodField()
+    planned_evidence = serializers.SerializerMethodField()
 
     def get_termination_detail(self, obj):
         """Return allowlisted terminal metadata only."""
 
         return sanitize_termination_detail(obj.termination_detail)
+
+    def get_citations(self, obj):
+        """Return trusted citation metadata without source snapshots."""
+
+        return public_run_citations(obj.citations)
+
+    def get_planned_evidence(self, obj):
+        """Return the user-safe evidence quality summary."""
+
+        return sanitize_planned_evidence(obj.planned_evidence)
 
     class Meta:
         model = Run
@@ -2633,6 +2668,8 @@ class RunSerializer(serializers.ModelSerializer):
             "error",
             "outcome",
             "termination_detail",
+            "citations",
+            "planned_evidence",
             "feedback",
             "feedback_updated_at",
             "started_at",

@@ -27,6 +27,7 @@ from .views import (
     PublicSharedQAListView,
     PublicSharedQAPdfView,
     PublicSharedQAView,
+    RunCitationSourceView,
     RunOutputFileDownloadView,
     RunViewSet,
     SessionViewSet,
@@ -115,6 +116,11 @@ urlpatterns = [
         "runs/<uuid:uuid>/stream/",
         run_stream_view,
         name="lens-run-stream",
+    ),
+    path(
+        "runs/<uuid:run_uuid>/citations/<str:citation_id>/",
+        RunCitationSourceView.as_view(),
+        name="lens-run-citation-source",
     ),
     path(
         "admin/runs/",

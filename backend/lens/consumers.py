@@ -335,6 +335,8 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             content_delta=content.get("content_delta") or "",
             final_content=content.get("final_content"),
             reset=bool(content.get("reset")),
+            citations=content.get("citations"),
+            planned_evidence=content.get("planned_evidence"),
         )
         delta_chars = len(content.get("content_delta") or "")
         final_chars = len(content.get("final_content") or "")

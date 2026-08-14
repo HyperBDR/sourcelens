@@ -769,6 +769,8 @@ class Run(models.Model):
         default="",
     )
     termination_detail = models.JSONField(default=dict, blank=True)
+    citations = models.JSONField(default=list, blank=True)
+    planned_evidence = models.JSONField(default=dict, blank=True)
     feedback = models.CharField(
         max_length=16,
         choices=Feedback.choices,

@@ -24,6 +24,7 @@ from rest_framework.views import APIView
 
 from lens.assistant_lifecycle import AssistantNotRunnableError
 from lens.attachments import AttachmentError, store_message_attachment
+from lens.citations import citation_source_payload, sanitize_run_citations
 from lens.document_attachments import (
     DocumentAttachmentError,
     delete_document_attachment,
@@ -443,6 +444,33 @@ class RunOutputFileDownloadView(APIView):
             content_type=output.content_type or "application/octet-stream",
         )
         response["Cache-Control"] = "private, max-age=3600"
+        return response
+
+
+class RunCitationSourceView(APIView):
+    """Serve a captured source citation to the run owner or a staff admin."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, run_uuid, citation_id):
+        """Return line-numbered source without exposing a physical path."""
+
+        runs = Run.objects.filter(uuid=run_uuid)
+        if not request.user.is_staff:
+            runs = runs.filter(session__user=request.user)
+        run = get_object_or_404(runs)
+        citation = next(
+            (
+                item
+                for item in sanitize_run_citations(run.citations)
+                if item["id"] == citation_id
+            ),
+            None,
+        )
+        if citation is None:
+            raise Http404
+        response = Response(citation_source_payload(citation))
+        response["Cache-Control"] = "private, no-store"
         return response
 
 

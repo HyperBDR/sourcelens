@@ -23,6 +23,7 @@ from .attachments import (
     attachment_data_url,
     bind_attachments_to_message,
 )
+from .citations import sanitize_planned_evidence, sanitize_run_citations
 from .document_attachments import (
     bind_document_attachments_to_run,
     get_run_document_attachments,
@@ -2031,7 +2032,12 @@ def touch_run_activity(run_pk):
 
 
 def append_lensnode_output(
-    run_uuid, content_delta="", final_content=None, reset=False
+    run_uuid,
+    content_delta="",
+    final_content=None,
+    reset=False,
+    citations=None,
+    planned_evidence=None,
 ):
     """Persist output content streamed back from a LensNode.
 
@@ -2058,6 +2064,15 @@ def append_lensnode_output(
         )
     run.output_message.run = run
     run.output_message.save(update_fields=["content", "run"])
+    run_update_fields = []
+    if citations is not None:
+        run.citations = sanitize_run_citations(citations)
+        run_update_fields.append("citations")
+    if planned_evidence is not None:
+        run.planned_evidence = sanitize_planned_evidence(planned_evidence)
+        run_update_fields.append("planned_evidence")
+    if run_update_fields:
+        run.save(update_fields=run_update_fields)
     touch_run_activity(run.pk)
     return run
 
