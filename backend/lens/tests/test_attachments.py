@@ -454,12 +454,9 @@ class AttachmentServiceTests(TestCase):
 
     @patch("lens.services.model_supports_vision", return_value="unknown")
     @patch("lens.services.run_completion_multimodal")
-    def test_unknown_vision_capability_attempts_multimodal_call(
+    def test_unknown_vision_capability_blocks_multimodal_call(
         self, mock_call, mock_support
     ):
-        mock_call.return_value = LensLLMResult(
-            content="A green image.", usage={}, metered=True
-        )
         attachment = store_message_attachment(
             self.session, self.user, _png_upload()
         )
@@ -470,11 +467,12 @@ class AttachmentServiceTests(TestCase):
             attachment_uuids=[str(attachment.uuid)],
         )
 
-        result = analyze_multimodal_intent(run)
+        with self.assertRaises(MultimodalPreprocessingError) as context:
+            analyze_multimodal_intent(run)
 
-        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(context.exception.reason, "MODEL_NOT_VISION_CAPABLE")
         mock_support.assert_called_once()
-        mock_call.assert_called_once()
+        mock_call.assert_not_called()
 
 
     def test_admin_run_detail_marks_inherited_attachment_context(self):
@@ -741,7 +739,7 @@ class AttachmentServiceTests(TestCase):
             ["deepseek-v4-flash", "qwen3-coder-plus"],
         )
 
-    def test_analyze_multimodal_intent_passthrough_without_model(self):
+    def test_analyze_multimodal_intent_requires_model(self):
         self.assistant.multimodal_model_ref = None
         self.assistant.save(update_fields=["multimodal_model_ref"])
         attachment = store_message_attachment(
@@ -754,11 +752,10 @@ class AttachmentServiceTests(TestCase):
             attachment_uuids=[str(attachment.uuid)],
         )
 
-        result = analyze_multimodal_intent(run)
+        with self.assertRaises(MultimodalPreprocessingError) as context:
+            analyze_multimodal_intent(run)
 
-        self.assertFalse(result["rewritten"])
-        self.assertEqual(result["question"], "原始问题")
-        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(context.exception.code, "VISION_MODEL_NOT_CONFIGURED")
 
     def test_run_create_serializer_requires_text_or_image(self):
         serializer = RunCreateSerializer(

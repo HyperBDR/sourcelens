@@ -1046,12 +1046,9 @@ def analyze_multimodal_intent(run):
             "status": "skipped",
         }
     if not assistant.multimodal_model_ref:
-        return {
-            "question": original,
-            "rewritten": False,
-            "image_count": len(attachments),
-            "status": "skipped",
-        }
+        raise MultimodalPreprocessingError(
+            "VISION_MODEL_NOT_CONFIGURED"
+        )
 
     image_data_urls = []
     for attachment in attachments:
