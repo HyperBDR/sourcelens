@@ -334,8 +334,14 @@ class EvidenceExecutor:
 
         reader = self.workspace_tools.get("read_workspace_file")
         if reader is not None:
+            source_windows = list(plan.source_windows[: plan.max_files])
+            source_windows.extend(
+                _source_windows_from_items(raw_items)[
+                    : max(plan.max_files - len(source_windows), 0)
+                ]
+            )
             windows = _coalesce_source_windows(
-                plan.source_windows[: plan.max_files],
+                tuple(source_windows),
                 plan.budgets.max_source_window_lines,
             )
             read_requests = []
@@ -666,6 +672,26 @@ def _coalesce_source_windows(windows, max_lines):
         if current_start is not None:
             merged.append(SourceWindow(path, current_start, current_end))
     return tuple(merged)
+
+
+def _source_windows_from_items(items):
+    """Derive exact source windows from retrieved file locations."""
+
+    windows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("evidence_type") not in {"structural", "literal"}:
+            continue
+        path = str(item.get("path") or "").strip()
+        start = _optional_int(item.get("start_line"))
+        end = _optional_int(item.get("end_line")) or start
+        if not path or start is None or start < 1 or end is None:
+            continue
+        if end < start:
+            end = start
+        windows.append(SourceWindow(path, start, end))
+    return tuple(windows)
 
 
 def _evidence_item(item):
