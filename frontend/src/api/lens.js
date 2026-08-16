@@ -268,6 +268,14 @@ export async function cancelRun(runUuid) {
   return unwrapResponse(response)
 }
 
+export async function answerRunClarification(runUuid, requestId, answer) {
+  const response = await api.post(`/lens/runs/${runUuid}/clarification/`, {
+    request_id: requestId,
+    answer
+  })
+  return unwrapResponse(response)
+}
+
 export async function updateRunFeedback(runUuid, feedback) {
   const response = await api.patch(`/lens/runs/${runUuid}/feedback/`, {
     feedback

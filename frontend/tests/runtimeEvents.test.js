@@ -875,6 +875,58 @@ test('waits for a terminal SSE payload before closing live progress', () => {
       termination_detail: { reason: 'token_budget_wrapup' }
     }
   )
+  assert.deepEqual(
+    terminalSyncEvent({
+      type: 'sync',
+      status: 'awaiting_user_input',
+      outcome: 'blocked',
+      termination_detail: {
+        reason: 'needs_user_input',
+        request: {
+          request_id: 'clarification-1',
+          question: 'Which environment should I inspect?',
+          reason: 'ambiguous_scope',
+          answer_type: 'text'
+        }
+      }
+    }),
+    {
+      type: 'awaiting_user_input',
+      outcome: 'blocked',
+      termination_detail: {
+        reason: 'needs_user_input',
+        request: {
+          request_id: 'clarification-1',
+          question: 'Which environment should I inspect?',
+          reason: 'ambiguous_scope',
+          answer_type: 'text'
+        }
+      }
+    }
+  )
+})
+
+test('keeps a text clarification out of retry failure state', () => {
+  const state = applyRuntimeEvent(createRuntimeState(), {
+    type: 'awaiting_user_input',
+    status: 'awaiting_user_input',
+    outcome: 'blocked',
+    termination_detail: {
+      reason: 'needs_user_input',
+      request: {
+        request_id: 'clarification-1',
+        question: 'Which environment should I inspect?',
+        reason: 'ambiguous_scope',
+        answer_type: 'text'
+      }
+    }
+  })
+
+  assert.equal(state.outcome, 'blocked')
+  assert.equal(state.clarificationRequest.request_id, 'clarification-1')
+  assert.equal(state.plan.length, 0)
+  assert.equal(state.executionFailure, null)
+  assert.equal(state.verificationFailure, null)
 })
 
 test('attaches final summary to the last real plan task', () => {
