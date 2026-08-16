@@ -169,6 +169,49 @@ def test_executor_merges_overlapping_source_windows():
     assert bundle.metrics["file_read_call_count"] == 1
 
 
+def test_executor_derives_source_windows_from_retrieval_matches():
+    reads = []
+
+    def search_workspace(**_kwargs):
+        return json.dumps(
+            {
+                "matches": [
+                    {"path": "app.py", "line": 10, "text": "return 1"}
+                ]
+            }
+        )
+
+    def read_workspace_file(**kwargs):
+        reads.append(kwargs)
+        return json.dumps(
+            {
+                "path": kwargs["path"],
+                "start_line": kwargs["offset"],
+                "end_line": kwargs["offset"] + kwargs["limit"] - 1,
+                "content": "return 1",
+            }
+        )
+
+    plan = parse_retrieval_plan(
+        {
+            "objective": "find the implementation",
+            "literal_queries": ["return 1"],
+            "source_windows": [],
+        }
+    )
+
+    bundle = EvidenceExecutor(
+        workspace_tools={
+            "search_workspace": search_workspace,
+            "read_workspace_file": read_workspace_file,
+        }
+    ).execute(plan)
+
+    assert reads == [{"path": "app.py", "offset": 10, "limit": 1}]
+    assert any(item.evidence_type == "source" for item in bundle.items)
+    assert bundle.metrics["file_read_call_count"] == 1
+
+
 def test_sufficiency_reports_missing_categories_without_fabrication():
     bundle = build_evidence_bundle(
         [

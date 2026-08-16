@@ -297,35 +297,22 @@ def test_planned_code_analysis_retries_truncated_final_concisely(tmp_path):
     assert model.calls[2][1]["runtime_structured_output"] is True
 
 
-def test_planned_code_analysis_repairs_invalid_planner_schema(tmp_path):
-    repaired_plan = {
-        "objective": "Find the implementation",
-        "project": "SourceLens",
-        "repository": "SourceLens",
-        "revision": "abc123",
-        "question_type": "implementation",
-        "evidence_requirements": [],
-        "codegraph_queries": [],
-        "literal_queries": [],
-        "source_windows": [],
-        "max_files": 3,
-        "max_fallback_rounds": 0,
-        "budgets": {"max_evidence_tokens": 100},
-    }
+def test_planned_code_analysis_uses_bounded_fallback_for_invalid_plan(
+    tmp_path,
+):
     responses = [
         SimpleNamespace(
             content=json.dumps(
                 {
-                    **repaired_plan,
+                    "objective": "Find the implementation",
                     "codegraph_queries": ["invalid schema"],
                 }
             )
         ),
-        SimpleNamespace(content=json.dumps(repaired_plan)),
         SimpleNamespace(
             content=json.dumps(
                 {
-                    "answer": "Repaired planner answer.",
+                    "answer": "Fallback planner answer.",
                     "citations": [],
                     "unsupported_claims": [],
                 }
@@ -354,9 +341,10 @@ def test_planned_code_analysis_repairs_invalid_planner_schema(tmp_path):
         workspace_root=tmp_path,
     )
 
-    assert result["planned_evidence"]["planner_status"] == "repaired"
-    assert result["planned_evidence"]["planner_retry_count"] == 1
-    assert result["planned_evidence"]["model_call_count"] == 3
+    assert result["planned_evidence"]["planner_status"] == "fallback"
+    assert result["planned_evidence"]["planner_retry_count"] == 0
+    assert result["planned_evidence"]["model_call_count"] == 2
+    assert len(model.calls) == 2
 
 
 def test_insufficient_evidence_is_not_completed_or_added_to_answer(tmp_path):
@@ -465,6 +453,63 @@ def test_unsupported_claims_prevent_completed_outcome(tmp_path):
     assert "reliable answer" in result["answer"]
 
 
+def test_structural_evidence_without_source_citation_returns_answer(tmp_path):
+    plan = {
+        "objective": "Trace the load flow",
+        "question_type": "implementation",
+        "evidence_requirements": ["structural flow"],
+        "codegraph_queries": [
+            {"operation": "explore", "query": "load"},
+        ],
+        "literal_queries": [],
+        "source_windows": [],
+        "max_fallback_rounds": 0,
+    }
+    responses = [
+        SimpleNamespace(content=json.dumps(plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "load delegates to the driver.",
+                    "citations": [],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def invoke(self, _messages, **_kwargs):
+            return responses.pop(0)
+
+    class CodeGraphTool:
+        name = "mcp__codegraph__codegraph_explore"
+
+        def invoke(self, _args):
+            return json.dumps(
+                {
+                    "ok": True,
+                    "result": "load delegates to the driver",
+                }
+            )
+
+    result = agent_runtime._run_planned_code_analysis(
+        model=Model(),
+        command={"question": "How does load work?"},
+        tools=[],
+        mcp_tools=[CodeGraphTool()],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["answer"] == "load delegates to the driver."
+    assert result["outcome"] == "completed"
+    assert result["planned_evidence"]["citation_count"] == 0
+
+
 def test_incomplete_final_protocol_prevents_completed_outcome(tmp_path):
     plan = {
         "objective": "Find the implementation",
@@ -517,25 +562,15 @@ def test_incomplete_final_protocol_prevents_completed_outcome(tmp_path):
     assert "missing.py" not in result["answer"]
 
 
-def test_planner_repair_keeps_question_and_workspace_guidance(tmp_path):
-    repaired_plan = {
-        "objective": "Find the implementation",
-        "question_type": "implementation",
-        "evidence_requirements": [],
-        "codegraph_queries": [],
-        "literal_queries": [],
-        "source_windows": [],
-        "max_fallback_rounds": 0,
-    }
+def test_planner_fallback_keeps_question_and_workspace_guidance(tmp_path):
     responses = [
         SimpleNamespace(
             content='{"objective":"Find it","codegraph_queries":['
         ),
-        SimpleNamespace(content=json.dumps(repaired_plan)),
         SimpleNamespace(
             content=json.dumps(
                 {
-                    "answer": "No supported code conclusion.",
+                    "answer": "Fallback answer.",
                     "citations": [],
                     "unsupported_claims": [],
                 }
@@ -567,10 +602,11 @@ def test_planner_repair_keeps_question_and_workspace_guidance(tmp_path):
         context_skill_contents=[guidance],
     )
 
-    repair_messages = model.calls[1][0]
-    repair_text = "\n".join(message.content for message in repair_messages)
-    assert question in repair_text
-    assert guidance in repair_text
+    planner_messages = model.calls[0][0]
+    planner_text = "\n".join(message.content for message in planner_messages)
+    assert question in planner_text
+    assert guidance in planner_text
+    assert len(model.calls) == 2
 
 
 def test_citations_use_trusted_workspace_provenance(tmp_path):
@@ -659,4 +695,7 @@ def test_planned_prompts_include_bound_workspace_guidance():
     )
 
     assert guidance in planner_prompt
+    assert "Leave source_windows empty unless exact file paths" in (
+        planner_prompt
+    )
     assert guidance in final_prompt
