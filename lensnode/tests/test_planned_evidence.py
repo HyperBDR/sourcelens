@@ -7,11 +7,35 @@ import pytest
 from lensnode.planned_evidence import (
     EvidenceExecutor,
     PlanValidationError,
+    assess_code_analysis_capabilities,
     build_evidence_bundle,
     parse_retrieval_plan,
     validate_citations,
     validate_evidence_sufficiency,
 )
+
+
+def test_code_analysis_capability_assessment_requires_one_retrieval_path():
+    unavailable = assess_code_analysis_capabilities({}, {})
+    assert unavailable["ready"] is False
+    assert unavailable["missing"] == ("workspace", "codegraph")
+
+    workspace_ready = assess_code_analysis_capabilities(
+        {
+            "search_workspace": object(),
+            "read_workspace_file": object(),
+        },
+        {},
+    )
+    assert workspace_ready["ready"] is True
+    assert workspace_ready["available"] == ("workspace",)
+
+    codegraph_ready = assess_code_analysis_capabilities(
+        {},
+        {"explore": object()},
+    )
+    assert codegraph_ready["ready"] is True
+    assert codegraph_ready["available"] == ("codegraph",)
 
 
 def test_retrieval_plan_normalizes_bounded_limits():

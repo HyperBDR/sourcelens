@@ -6,6 +6,15 @@ from lensnode.checkpoint import ResumeState
 from lensnode.planned_evidence import build_evidence_bundle
 
 
+def _workspace_tools():
+    return [
+        SimpleNamespace(
+            name="search_workspace",
+            invoke=lambda _args: "",
+        )
+    ]
+
+
 def _runtime_state(tmp_path, resume_state=None):
     ready_events = []
     state = SimpleNamespace(
@@ -87,6 +96,42 @@ def test_planned_code_analysis_seeds_checkpoint_before_execution(
     assert ready_events == ["ready"]
     assert state.checkpoint_ready is True
     assert state.initial_checkpoint_seeded is True
+
+
+def test_planned_code_analysis_blocks_before_model_when_capabilities_missing(
+    tmp_path,
+):
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("capability precheck should run first")
+
+    model = Model()
+    result = agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": "Where is it implemented?"},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert model.calls == 0
+    assert result["outcome"] == "blocked"
+    assert result["termination_detail"]["reason"] == (
+        "capability_unavailable"
+    )
+    assert result["planned_evidence"] == {
+        "capability_status": "unavailable",
+        "available_capabilities": [],
+        "missing_capabilities": ["workspace", "codegraph"],
+    }
 
 
 def test_planned_code_analysis_resume_replays_planned_pipeline(
@@ -280,7 +325,7 @@ def test_planned_code_analysis_retries_truncated_final_concisely(tmp_path):
     result = agent_runtime._run_planned_code_analysis(
         model=model,
         command={"question": "Why is the output incomplete?"},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
@@ -339,7 +384,7 @@ def test_planned_code_analysis_uses_bounded_fallback_for_invalid_plan(
     result = agent_runtime._run_planned_code_analysis(
         model=model,
         command={"question": "Where is it implemented?"},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
@@ -393,7 +438,7 @@ def test_planner_repairs_invalid_plan_once_before_fallback(tmp_path):
     result = agent_runtime._run_planned_code_analysis(
         model=model,
         command={"question": "Where is it implemented?"},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
@@ -459,7 +504,7 @@ def test_insufficient_evidence_is_not_completed_or_added_to_answer(tmp_path):
     result = agent_runtime._run_planned_code_analysis(
         model=Model(),
         command={"question": "Where is it implemented?"},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
@@ -513,7 +558,7 @@ def test_unsupported_claims_prevent_completed_outcome(tmp_path):
     result = agent_runtime._run_planned_code_analysis(
         model=Model(),
         command={"question": "Where is the handler?"},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
@@ -573,7 +618,7 @@ def test_structural_evidence_without_source_citation_returns_answer(tmp_path):
     result = agent_runtime._run_planned_code_analysis(
         model=Model(),
         command={"question": "How does load work?"},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[CodeGraphTool()],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
@@ -623,7 +668,7 @@ def test_incomplete_final_protocol_prevents_completed_outcome(tmp_path):
     result = agent_runtime._run_planned_code_analysis(
         model=Model(),
         command={"question": "Where is the handler?"},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
@@ -673,7 +718,7 @@ def test_planner_fallback_keeps_question_and_workspace_guidance(tmp_path):
     agent_runtime._run_planned_code_analysis(
         model=model,
         command={"question": question},
-        tools=[],
+        tools=_workspace_tools(),
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,

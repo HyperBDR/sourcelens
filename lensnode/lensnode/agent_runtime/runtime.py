@@ -38,6 +38,7 @@ from ..plugins import collect_agent_runtime_contributions
 from ..planned_evidence import (
     EvidenceExecutor,
     build_evidence_bundle,
+    assess_code_analysis_capabilities,
     parse_retrieval_plan,
     validate_citations,
     validate_evidence_sufficiency,
@@ -1077,6 +1078,52 @@ def _run_planned_code_analysis(
     """Run Code Analysis through one plan and one compact evidence bundle."""
 
     question = str(command.get("question") or "")
+    workspace_adapters = _planned_workspace_adapters(tools)
+    codegraph_adapters = _planned_codegraph_adapters(mcp_tools)
+    capability_assessment = assess_code_analysis_capabilities(
+        workspace_adapters,
+        codegraph_adapters,
+    )
+    if not capability_assessment["ready"]:
+        termination_detail = {
+            "reason": "capability_unavailable",
+            "capability": "code_analysis_retrieval",
+            "error_type": "capability",
+            "missing_capabilities": list(capability_assessment["missing"]),
+            "recovery": (
+                "Bind workspace search and file reading or enable CodeGraph, "
+                "then retry the analysis."
+            ),
+        }
+        emit_agent_event(
+            "planned_evidence.capability.blocked",
+            termination_detail,
+        )
+        return {
+            "answer": _pick_text(
+                "当前助手没有可用的代码检索能力，无法安全分析该问题。请绑定"
+                "工作区搜索/文件读取能力或启用 CodeGraph 后重试。",
+                "This assistant has no available code-retrieval capability, "
+                "so the question cannot be analyzed safely. Bind workspace "
+                "search/file reading or enable CodeGraph, then retry.",
+                _command_answer_language(command),
+            ),
+            "samples": [],
+            "stop_reason": model.stop_reason,
+            "token_usage": model.token_usage,
+            "outcome": "blocked",
+            "termination_detail": termination_detail,
+            "planned_evidence": {
+                "capability_status": "unavailable",
+                "available_capabilities": list(
+                    capability_assessment["available"]
+                ),
+                "missing_capabilities": list(
+                    capability_assessment["missing"]
+                ),
+            },
+            "citations": [],
+        }
     planner_prompt = _planned_planner_prompt(
         command,
         context_skill_contents=context_skill_contents,
@@ -1133,8 +1180,8 @@ def _run_planned_code_analysis(
     )
 
     executor = EvidenceExecutor(
-        workspace_tools=_planned_workspace_adapters(tools),
-        codegraph_tools=_planned_codegraph_adapters(mcp_tools),
+        workspace_tools=workspace_adapters,
+        codegraph_tools=codegraph_adapters,
     )
     bundle = executor.execute(plan)
     sufficiency = validate_evidence_sufficiency(
@@ -1183,6 +1230,10 @@ def _run_planned_code_analysis(
     )
     bundle.metrics["evidence_gap_count"] = len(sufficiency.gaps)
     bundle.metrics["plan_version"] = "planned-evidence-v1"
+    bundle.metrics["capability_status"] = "ready"
+    bundle.metrics["available_capabilities"] = list(
+        capability_assessment["available"]
+    )
     bundle.metrics["planner_status"] = planner_status
     bundle.metrics["planner_retry_count"] = planner_retry_count
     bundle.metrics["planned_operation_count"] = (

@@ -167,6 +167,36 @@ class SufficiencyResult:
     disproved: tuple[str, ...] = ()
 
 
+def assess_code_analysis_capabilities(workspace_tools, codegraph_tools):
+    """Check whether Code Analysis has at least one retrieval path."""
+
+    workspace = {
+        str(name)
+        for name in (workspace_tools or {})
+        if name
+    }
+    codegraph = {
+        str(name)
+        for name in (codegraph_tools or {})
+        if name
+    }
+    available = []
+    if workspace & {"search_workspace", "read_workspace_file"}:
+        available.append("workspace")
+    if codegraph:
+        available.append("codegraph")
+    capabilities = ("workspace", "codegraph")
+    return {
+        "ready": bool(available),
+        "available": tuple(available),
+        "missing": tuple(
+            capability
+            for capability in capabilities
+            if capability not in available
+        ),
+    }
+
+
 def parse_retrieval_plan(raw):
     """Parse, validate, and bound an untrusted planner response."""
 
