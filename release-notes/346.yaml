@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Improved Code Analysis evidence retrieval so answers can use structural
+  evidence and source windows are derived automatically from search results.
+zh-CN: >-
+  优化代码分析的证据检索，支持使用结构化证据，并根据搜索结果自动读取源码窗口。
