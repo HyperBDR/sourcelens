@@ -134,6 +134,54 @@ def test_planned_code_analysis_blocks_before_model_when_capabilities_missing(
     }
 
 
+def test_planned_code_analysis_returns_awaiting_user_input_for_clarification(
+    tmp_path,
+):
+    clarification_plan = {
+        "objective": "Inspect the deployment path",
+        "clarification": {
+            "question": "Which deployment environment should I inspect?",
+            "reason": "ambiguous_scope",
+            "answer_type": "text",
+        },
+    }
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return SimpleNamespace(content=json.dumps(clarification_plan))
+
+    model = Model()
+    result = agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={
+            "run_uuid": "run-123",
+            "question": "Why did deployment fail?",
+        },
+        tools=_workspace_tools(),
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert len(model.calls) == 1
+    assert result["status"] == "awaiting_user_input"
+    assert result["outcome"] == "blocked"
+    assert result["termination_detail"]["reason"] == "needs_user_input"
+    request = result["termination_detail"]["request"]
+    assert request["request_id"].startswith("clarification-")
+    assert request["answer_type"] == "text"
+    assert request["question"] == (
+        "Which deployment environment should I inspect?"
+    )
+
+
 def test_planned_code_analysis_resume_replays_planned_pipeline(
     monkeypatch,
     tmp_path,

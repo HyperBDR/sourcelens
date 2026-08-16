@@ -83,6 +83,38 @@ def test_retrieval_plan_rejects_missing_objective_and_invalid_operation():
         )
 
 
+def test_retrieval_plan_parses_bounded_text_clarification():
+    plan = parse_retrieval_plan(
+        {
+            "objective": "Identify the affected service",
+            "clarification": {
+                "question": "Which deployment environment should I inspect?",
+                "reason": "ambiguous_scope",
+                "answer_type": "text",
+            },
+        }
+    )
+
+    assert plan.clarification.question == (
+        "Which deployment environment should I inspect?"
+    )
+    assert plan.clarification.reason == "ambiguous_scope"
+    assert plan.clarification.answer_type == "text"
+
+
+def test_retrieval_plan_rejects_non_text_clarification():
+    with pytest.raises(PlanValidationError):
+        parse_retrieval_plan(
+            {
+                "objective": "Identify the affected service",
+                "clarification": {
+                    "question": "Choose an environment",
+                    "answer_type": "choice",
+                },
+            }
+        )
+
+
 def test_executor_runs_independent_retrievals_in_parallel_and_deduplicates():
     started = []
     barrier = threading.Barrier(2)

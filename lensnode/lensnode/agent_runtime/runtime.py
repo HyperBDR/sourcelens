@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import threading
+import uuid
 from types import SimpleNamespace
 
 from deepagents import (
@@ -1178,6 +1179,35 @@ def _run_planned_code_analysis(
             "max_files": plan.max_files,
         },
     )
+    if plan.clarification is not None:
+        request = {
+            "request_id": f"clarification-{uuid.uuid4().hex}",
+            **plan.clarification.as_dict(),
+        }
+        termination_detail = {
+            "reason": "needs_user_input",
+            "request": request,
+        }
+        emit_agent_event(
+            "planned_evidence.user_input.required",
+            {"reason": plan.clarification.reason},
+        )
+        return {
+            "answer": request["question"],
+            "samples": [],
+            "stop_reason": model.stop_reason,
+            "token_usage": model.token_usage,
+            "status": "awaiting_user_input",
+            "outcome": "blocked",
+            "termination_detail": termination_detail,
+            "planned_evidence": {
+                "clarification_status": "awaiting_user_input",
+                "model_call_count": 1 + planner_retry_count,
+                "planner_status": planner_status,
+                "planner_retry_count": planner_retry_count,
+            },
+            "citations": [],
+        }
 
     executor = EvidenceExecutor(
         workspace_tools=workspace_adapters,
@@ -1637,7 +1667,11 @@ def _planned_planner_prompt(command, context_skill_contents=None):
         "tools. The backend will execute every bounded operation. Include "
         "objective, project, repository, revision, question_type, "
         "evidence_requirements, codegraph_queries, literal_queries, "
-        "max_files, max_fallback_rounds, and budgets. Leave "
+        "clarification, max_files, max_fallback_rounds, and budgets. If a "
+        "critical input is missing or the target is materially ambiguous, "
+        "set clarification to an object with a plain-text question, reason, "
+        "and answer_type=text; do not guess or retrieve until the answer "
+        "arrives. Otherwise set clarification to null. Leave "
         "source_windows empty unless exact file paths and line ranges are "
         "already known; the executor derives source windows from retrieval "
         "results. "
