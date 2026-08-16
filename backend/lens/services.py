@@ -63,6 +63,7 @@ from .trace_context import root_observation_id_for_run, trace_id_for_run
 logger = logging.getLogger(__name__)
 
 TERMINAL_RUN_STATUSES = {
+    Run.Status.AWAITING_USER_INPUT,
     Run.Status.DONE,
     Run.Status.FAILED,
     Run.Status.CANCELLED,
@@ -1839,10 +1840,13 @@ def _trusted_history_entries(run):
 def _assistant_output_is_trusted(run):
     """Return whether a Run's assistant output is safe as history."""
 
-    return run.status == Run.Status.DONE and run.outcome in {
-        "",
-        Run.Outcome.COMPLETED,
-    }
+    if run.status == Run.Status.DONE:
+        return run.outcome in {"", Run.Outcome.COMPLETED}
+    return (
+        run.status == Run.Status.AWAITING_USER_INPUT
+        and (run.termination_detail or {}).get("reason")
+        == "needs_user_input"
+    )
 
 
 def _recent_history_context(run):
@@ -2470,7 +2474,12 @@ def finish_lensnode_run(
             BUSY_RETRY_WINDOW_S,
         )
 
-    if status == Run.Status.DONE:
+    if status == Run.Status.AWAITING_USER_INPUT:
+        run.status = Run.Status.AWAITING_USER_INPUT
+        run.error = ""
+        default_outcome = Run.Outcome.BLOCKED
+        execution_status = RunExecution.Status.COMPLETED
+    elif status == Run.Status.DONE:
         run.status = Run.Status.DONE
         run.error = ""
         default_outcome = Run.Outcome.COMPLETED
@@ -2832,6 +2841,16 @@ def _build_sync_event(run):
 def _terminal_stream_event(run):
     """Build the terminal SSE event for a run."""
 
+    if run.status == Run.Status.AWAITING_USER_INPUT:
+        return {
+            "type": "awaiting_user_input",
+            "status": run.status,
+            "outcome": run.outcome,
+            "termination_detail": sanitize_termination_detail(
+                run.termination_detail
+            ),
+            "ts": timezone.now().isoformat(),
+        }
     if run.status == Run.Status.FAILED:
         return {
             "type": "error",

@@ -1569,6 +1569,7 @@ def run_retention_task():
 
     deleted, _ = Run.objects.filter(
         status__in=[
+            Run.Status.AWAITING_USER_INPUT,
             Run.Status.DONE,
             Run.Status.FAILED,
             Run.Status.CANCELLED,

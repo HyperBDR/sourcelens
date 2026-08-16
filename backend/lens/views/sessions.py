@@ -60,6 +60,7 @@ from lens.serializers import (
     MessageAttachmentSerializer,
     MessageSerializer,
     RunCreateSerializer,
+    RunClarificationAnswerSerializer,
     RunFeedbackSerializer,
     RunSerializer,
     SessionCreateSerializer,
@@ -68,6 +69,7 @@ from lens.serializers import (
 )
 from lens.services import (
     cancel_run_on_lensnode,
+    create_execution_run,
     stream_run_events_async,
     supports_document_attachments,
 )
@@ -501,6 +503,51 @@ class RunViewSet(BaseAuthenticatedViewSet):
         serializer.save()
         return Response(serializer.data)
 
+    @action(detail=True, methods=["post"])
+    def clarification(self, request, uuid=None):
+        """Create one continuation Run from a pending text clarification."""
+
+        serializer = RunClarificationAnswerSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+        with transaction.atomic():
+            run = (
+                Run.objects.select_for_update()
+                .select_related("session", "session__assistant")
+                .get(pk=self.get_object().pk)
+            )
+            if run.status != Run.Status.AWAITING_USER_INPUT:
+                raise ValidationError("RUN_NOT_AWAITING_USER_INPUT")
+            expected = (run.termination_detail or {}).get("request") or {}
+            if payload["request_id"] != expected.get("request_id"):
+                raise ValidationError("CLARIFICATION_REQUEST_MISMATCH")
+            idempotency_key = (
+                f"clarification:{run.uuid}:{payload['request_id']}"
+            )
+            existing = (
+                Run.objects.filter(
+                    retry_of_run=run,
+                    idempotency_key=idempotency_key[:128],
+                )
+                .order_by("created_at", "pk")
+                .first()
+            )
+            if existing is not None:
+                return Response(RunSerializer(existing).data)
+            continuation = create_execution_run(
+                session=run.session,
+                question=payload["answer"],
+                idempotency_key=idempotency_key[:128],
+                retry_of_run=run,
+                enqueue=payload.get("enqueue", True),
+                user=request.user,
+            )
+            run.clarification_answered_at = timezone.now()
+            run.save(
+                update_fields=["clarification_answered_at", "updated_at"]
+            )
+        return Response(RunSerializer(continuation).data, status=201)
+
     @action(detail=True, methods=["get"])
     def pdf(self, request, uuid=None):
         """Download one completed answer as a styled text PDF."""
@@ -566,6 +613,7 @@ class RunViewSet(BaseAuthenticatedViewSet):
 
         run = self.get_object()
         if run.status in [
+            Run.Status.AWAITING_USER_INPUT,
             Run.Status.DONE,
             Run.Status.FAILED,
             Run.Status.CANCELLED,

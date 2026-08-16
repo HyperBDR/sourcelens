@@ -713,6 +713,7 @@ class Run(models.Model):
         QUEUED = "queued", "Queued"
         RUNNING = "running", "Running"
         STREAMING = "streaming", "Streaming"
+        AWAITING_USER_INPUT = "awaiting_user_input", "Awaiting user input"
         DONE = "done", "Done"
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled"
@@ -729,7 +730,7 @@ class Run(models.Model):
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     session = models.ForeignKey(Session, on_delete=models.CASCADE)
     status = models.CharField(
-        max_length=16,
+        max_length=24,
         choices=Status.choices,
         default=Status.QUEUED,
         db_index=True,
@@ -782,6 +783,7 @@ class Run(models.Model):
     finished_at = models.DateTimeField(null=True, blank=True)
     last_activity_at = models.DateTimeField(null=True, blank=True)
     resume_by = models.DateTimeField(null=True, blank=True)
+    clarification_answered_at = models.DateTimeField(null=True, blank=True)
     idempotency_key = models.CharField(max_length=128, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

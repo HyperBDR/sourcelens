@@ -3513,6 +3513,90 @@ class LensApiTests(TestCase):
         self.assertIn('"type": "sync"', body)
         self.assertIn('"type": "done"', body)
 
+    def test_clarification_answer_creates_one_continuation_run(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        parent = create_execution_run(
+            session=session,
+            question="Why did deployment fail?",
+            enqueue=False,
+        )
+        request = {
+            "request_id": "clarification-1",
+            "question": "Which environment should I inspect?",
+            "reason": "ambiguous_scope",
+            "answer_type": "text",
+        }
+        parent.status = Run.Status.AWAITING_USER_INPUT
+        parent.termination_detail = {
+            "reason": "needs_user_input",
+            "request": request,
+        }
+        parent.save(update_fields=["status", "termination_detail"])
+
+        response = self.client.post(
+            f"/api/lens/runs/{parent.uuid}/clarification/",
+            {
+                "request_id": "clarification-1",
+                "answer": "Production",
+                "enqueue": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        continuation = Run.objects.get(uuid=response.data["uuid"])
+        self.assertEqual(continuation.retry_of_run_id, parent.id)
+        self.assertEqual(continuation.input_message.content, "Production")
+
+        replay = self.client.post(
+            f"/api/lens/runs/{parent.uuid}/clarification/",
+            {
+                "request_id": "clarification-1",
+                "answer": "Another environment",
+                "enqueue": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(replay.status_code, 200, replay.data)
+        self.assertEqual(replay.data["uuid"], response.data["uuid"])
+
+    def test_clarification_answer_rejects_wrong_request_id(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        parent = create_execution_run(
+            session=session,
+            question="Why did deployment fail?",
+            enqueue=False,
+        )
+        parent.status = Run.Status.AWAITING_USER_INPUT
+        parent.termination_detail = {
+            "reason": "needs_user_input",
+            "request": {
+                "request_id": "clarification-1",
+                "question": "Which environment should I inspect?",
+                "reason": "ambiguous_scope",
+                "answer_type": "text",
+            },
+        }
+        parent.save(update_fields=["status", "termination_detail"])
+
+        response = self.client.post(
+            f"/api/lens/runs/{parent.uuid}/clarification/",
+            {
+                "request_id": "clarification-other",
+                "answer": "Production",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     def test_explicit_retry_is_linked_and_idempotent(self):
         session = Session.objects.create(
             assistant=self.assistant,

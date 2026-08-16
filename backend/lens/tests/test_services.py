@@ -1982,6 +1982,48 @@ class LensServiceTests(TransactionTestCase):
         )
         self.assertNotIn("secret-token", str(detail))
 
+    def test_termination_detail_exposes_only_text_clarification_request(self):
+        detail = sanitize_termination_detail(
+            {
+                "reason": "needs_user_input",
+                "request": {
+                    "request_id": "clarification-1",
+                    "question": "Which environment should I inspect?",
+                    "reason": "ambiguous_scope",
+                    "answer_type": "text",
+                    "internal": "do not expose",
+                },
+            }
+        )
+
+        self.assertEqual(
+            detail,
+            {
+                "reason": "needs_user_input",
+                "request": {
+                    "request_id": "clarification-1",
+                    "question": "Which environment should I inspect?",
+                    "reason": "ambiguous_scope",
+                    "answer_type": "text",
+                },
+            },
+        )
+
+    def test_termination_detail_rejects_non_text_clarification_request(self):
+        detail = sanitize_termination_detail(
+            {
+                "reason": "needs_user_input",
+                "request": {
+                    "request_id": "clarification-1",
+                    "question": "Choose an environment",
+                    "reason": "ambiguous_scope",
+                    "answer_type": "choice",
+                },
+            }
+        )
+
+        self.assertEqual(detail, {"reason": "needs_user_input"})
+
     def test_run_serializer_hides_runtime_credentials(self):
         run = create_execution_run(
             session=self.session,
