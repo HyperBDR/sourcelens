@@ -310,6 +310,10 @@ def test_planned_code_analysis_uses_bounded_fallback_for_invalid_plan(
             )
         ),
         SimpleNamespace(
+            content='{"objective":"still invalid",'
+            '"codegraph_queries":["bad"]}'
+        ),
+        SimpleNamespace(
             content=json.dumps(
                 {
                     "answer": "Fallback planner answer.",
@@ -342,9 +346,79 @@ def test_planned_code_analysis_uses_bounded_fallback_for_invalid_plan(
     )
 
     assert result["planned_evidence"]["planner_status"] == "fallback"
-    assert result["planned_evidence"]["planner_retry_count"] == 0
-    assert result["planned_evidence"]["model_call_count"] == 2
-    assert len(model.calls) == 2
+    assert result["planned_evidence"]["planner_retry_count"] == 1
+    assert result["planned_evidence"]["model_call_count"] == 3
+    assert len(model.calls) == 3
+
+
+def test_planner_repairs_invalid_plan_once_before_fallback(tmp_path):
+    repaired_plan = {
+        "objective": "Find the implementation",
+        "question_type": "implementation",
+        "evidence_requirements": ["source lines"],
+        "codegraph_queries": [],
+        "literal_queries": ["load"],
+        "source_windows": [],
+        "max_fallback_rounds": 0,
+    }
+    responses = [
+        SimpleNamespace(
+            content='{"objective":"invalid",'
+            '"codegraph_queries":["bad"]}'
+        ),
+        SimpleNamespace(content=json.dumps(repaired_plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "The implementation is in app.py.",
+                    "citations": [],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return responses[len(self.calls) - 1]
+
+    model = Model()
+    result = agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": "Where is it implemented?"},
+        tools=[],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["planned_evidence"]["planner_status"] == "repaired"
+    assert result["planned_evidence"]["planner_retry_count"] == 1
+    assert result["planned_evidence"]["model_call_count"] == 3
+    assert len(model.calls) == 3
+
+
+def test_invalid_plan_fallback_uses_decomposed_queries():
+    plan = agent_runtime._parse_planner_response(
+        '{"objective":"invalid","codegraph_queries":["bad"]}',
+        "为什么会证据不足，是否需要先做能力分析？",
+        {},
+    )
+
+    queries = [item.query for item in plan.codegraph_queries]
+    assert queries == ["证据不足"]
+    assert plan.literal_queries == ("证据不足", "能力分析")
+    assert "为什么会证据不足，是否需要先做能力分析？" not in (
+        *queries,
+        *plan.literal_queries,
+    )
 
 
 def test_insufficient_evidence_is_not_completed_or_added_to_answer(tmp_path):
@@ -568,6 +642,10 @@ def test_planner_fallback_keeps_question_and_workspace_guidance(tmp_path):
             content='{"objective":"Find it","codegraph_queries":['
         ),
         SimpleNamespace(
+            content='{"objective":"Still invalid",'
+            '"codegraph_queries":["bad"]}'
+        ),
+        SimpleNamespace(
             content=json.dumps(
                 {
                     "answer": "Fallback answer.",
@@ -606,7 +684,7 @@ def test_planner_fallback_keeps_question_and_workspace_guidance(tmp_path):
     planner_text = "\n".join(message.content for message in planner_messages)
     assert question in planner_text
     assert guidance in planner_text
-    assert len(model.calls) == 2
+    assert len(model.calls) == 3
 
 
 def test_citations_use_trusted_workspace_provenance(tmp_path):
