@@ -85,6 +85,54 @@ test('does not show retry guidance when the last message has answer text', () =>
   )
 })
 
+test('does not show retry guidance for a pending clarification', () => {
+  assert.equal(
+    shouldShowRetryHint({
+      isRunActive: false,
+      messages: [
+        { role: 'user', content: 'Analyze the deployment.' },
+        {
+          role: 'assistant',
+          content: '',
+          thinking: {
+            status: 'awaiting_user_input',
+            outcome: 'blocked',
+            termination_detail: {
+              reason: 'needs_user_input'
+            }
+          }
+        }
+      ],
+      runStatusResolving: false
+    }),
+    false
+  )
+})
+
+test('does not show retry guidance when runtime details explain an empty answer', () => {
+  assert.equal(
+    shouldShowRetryHint({
+      isRunActive: false,
+      messages: [
+        { role: 'user', content: 'Analyze the deployment.' },
+        {
+          role: 'assistant',
+          content: '',
+          thinking: {
+            status: 'done',
+            outcome: 'blocked',
+            termination_detail: {
+              reason: 'evidence_unavailable'
+            }
+          }
+        }
+      ],
+      runStatusResolving: false
+    }),
+    false
+  )
+})
+
 test('keeps retry guidance hidden when run status cannot be loaded', async () => {
   const resolution = await resolveRunStatus(async () => {
     throw new Error('temporary network failure')

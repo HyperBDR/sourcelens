@@ -598,6 +598,7 @@
                   v-if="
                     message._runtimeState?.outcome === 'partial' ||
                     (message._runtimeState?.outcome === 'blocked' &&
+                      !message._runtimeState?.clarificationRequest &&
                       !message._runtimeState?.capabilityBlock &&
                       !message._runtimeState?.executionFailure &&
                       !message._runtimeState?.verificationFailure)
@@ -1311,6 +1312,7 @@
                   v-if="
                     runtimeState.outcome === 'partial' ||
                     (runtimeState.outcome === 'blocked' &&
+                      !runtimeState.clarificationRequest &&
                       !runtimeState.capabilityBlock &&
                       !runtimeState.executionFailure &&
                       !runtimeState.verificationFailure)
