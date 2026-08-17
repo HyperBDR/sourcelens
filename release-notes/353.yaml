@@ -1,0 +1,7 @@
+type: improvement
+audience: user
+en: >-
+  Accelerated multi-step assistant tasks by delegating independent heavy
+  subtasks to parallel subagents and trimming plan-classification input.
+zh-CN: >-
+  加快多步助手任务：将独立的重型子任务委托给并行子代理，并精简计划分类输入。
