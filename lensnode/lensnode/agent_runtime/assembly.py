@@ -15,6 +15,7 @@ def _agent_middleware(
     mcp_middleware=None,
     trace_middleware=None,
     runtime_middleware=(),
+    allow_task_tool=False,
 ):
     """Return task-specific middleware for one Deep Agent run."""
 
@@ -23,7 +24,12 @@ def _agent_middleware(
         middleware.append(summarizer)
     middleware.extend(runtime_middleware)
     if _is_general_chat(command):
-        middleware.append(_NoTaskMiddleware(emit_event))
+        middleware.append(
+            _NoTaskMiddleware(
+                emit_event,
+                allow_task_tool=allow_task_tool,
+            )
+        )
         if capability_middleware is not None:
             middleware.append(capability_middleware)
     if trace_middleware is not None:

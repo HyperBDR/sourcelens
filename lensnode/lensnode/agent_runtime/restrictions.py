@@ -9,12 +9,14 @@ from langchain_core.messages import ToolMessage
 class NoTaskMiddleware(AgentMiddleware):
     """Enforce General Chat restrictions on built-in agent tools."""
 
-    def __init__(self, emit_event=None):
+    def __init__(self, emit_event=None, allow_task_tool=False):
         self.emit_event = emit_event
+        self.allow_task_tool = allow_task_tool
         self.model_round = 0
 
-    @staticmethod
-    def _filter_tools(tools):
+    def _filter_tools(self, tools):
+        if self.allow_task_tool:
+            return list(tools)
         return [
             tool
             for tool in tools
@@ -170,7 +172,7 @@ class NoTaskMiddleware(AgentMiddleware):
     def wrap_tool_call(self, request, handler):
         """Block synchronous task execution for General Chat."""
 
-        if self._is_task_call(request):
+        if self._is_task_call(request) and not self.allow_task_tool:
             return self._deny_task_call(request)
         if self._is_large_result_access(request):
             return self._deny_large_result_access(request)
@@ -179,7 +181,7 @@ class NoTaskMiddleware(AgentMiddleware):
     async def awrap_tool_call(self, request, handler):
         """Block asynchronous task execution for General Chat."""
 
-        if self._is_task_call(request):
+        if self._is_task_call(request) and not self.allow_task_tool:
             return self._deny_task_call(request)
         if self._is_large_result_access(request):
             return self._deny_large_result_access(request)

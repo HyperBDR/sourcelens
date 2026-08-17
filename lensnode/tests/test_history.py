@@ -4335,3 +4335,275 @@ def test_empty_terminal_response_raises_after_one_failed_recovery():
     assert raised is not None
     assert raised.code == "EMPTY_AGENT_RESPONSE"
     assert model.call_count == 1
+
+
+def test_plan_execute_route_enables_subagent_delegation(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 1}
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "intent": "action",
+                        "complexity": "complex",
+                        "route": "plan_execute",
+                        "required_capabilities": ["skill"],
+                        "evidence_requirement": "tool_result",
+                    }
+                )
+            )
+
+        def export_runtime_state(self):
+            return {}
+
+    resources = SimpleNamespace(
+        root=tmp_path,
+        context_skill_contents=["This Skill can query Income orders."],
+        mcp_configs=[],
+        skill_paths=["skills/income"],
+        mcp_config_path=tmp_path / "mcp.json",
+    )
+    config = SimpleNamespace(
+        workspace_path=str(tmp_path),
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+        summary_trigger_tokens=0,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _config: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_general_chat_tools",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_summarization_middleware",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def capture_deep_agent(**kwargs):
+        captured["subagents"] = kwargs.get("subagents")
+        captured["skills"] = kwargs.get("skills")
+        captured["middleware"] = kwargs.get("middleware")
+        return object()
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        capture_deep_agent,
+    )
+
+    def run_agent(*_args, **_kwargs):
+        return "已生成并交付流程图。", False, None
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_run_agent_with_turn_limit",
+        run_agent,
+    )
+
+    agent_runtime.LensDeepAgentRuntime(config)._answer_sync(
+        {
+            "run_uuid": "00000000-0000-0000-0000-000000000021",
+            "task": "general_chat",
+            "question": "汇总各渠道订单并生成对比报告",
+            "agent_model_ref": "model-ref",
+        }
+    )
+
+    assert len(captured["subagents"]) == 1
+    assert captured["subagents"][0]["name"] == "general-purpose"
+    assert captured["skills"] == ["skills/income"]
+    assert any(
+        isinstance(item, agent_runtime._NoTaskMiddleware)
+        and item.allow_task_tool
+        for item in captured["middleware"]
+    )
+
+
+def test_simple_general_chat_route_keeps_subagents_disabled(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 1}
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def invoke(self, _messages, **_kwargs):
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "intent": "action",
+                        "complexity": "simple",
+                        "route": "direct_execute",
+                        "required_capabilities": ["skill"],
+                        "evidence_requirement": "tool_result",
+                    }
+                )
+            )
+
+        def export_runtime_state(self):
+            return {}
+
+    resources = SimpleNamespace(
+        root=tmp_path,
+        context_skill_contents=["This Skill can query Income orders."],
+        mcp_configs=[],
+        skill_paths=["skills/income"],
+        mcp_config_path=tmp_path / "mcp.json",
+    )
+    config = SimpleNamespace(
+        workspace_path=str(tmp_path),
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+        summary_trigger_tokens=0,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _config: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_general_chat_tools",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                name="run_skill_artifact",
+                description="Run a bound Skill Artifact.",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_summarization_middleware",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def capture_deep_agent(**kwargs):
+        captured["subagents"] = kwargs.get("subagents")
+        captured["skills"] = kwargs.get("skills")
+        captured["middleware"] = kwargs.get("middleware")
+        return object()
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        capture_deep_agent,
+    )
+
+    def run_agent(*_args, **_kwargs):
+        return "已查询订单。", False, None
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "_run_agent_with_turn_limit",
+        run_agent,
+    )
+
+    agent_runtime.LensDeepAgentRuntime(config)._answer_sync(
+        {
+            "run_uuid": "00000000-0000-0000-0000-000000000022",
+            "task": "general_chat",
+            "question": "查询最近一笔订单",
+            "agent_model_ref": "model-ref",
+        }
+    )
+
+    assert captured["subagents"] == []
+    assert "skills" not in captured or captured["skills"] is None
+    assert any(
+        isinstance(item, agent_runtime._NoTaskMiddleware)
+        and not item.allow_task_tool
+        for item in captured["middleware"]
+    )
+
+
+def test_general_chat_prompt_adds_subagent_guidance_for_plan_execute():
+    prompt = agent_runtime._general_chat_system_prompt(
+        {"question": "汇总订单并生成报告", "runtime_route": "plan_execute"},
+        ["This Skill can query Income orders."],
+    )
+
+    assert "task subagent is available" in prompt
+    assert "multiple task calls in one message" in prompt
+
+
+def test_general_chat_prompt_omits_subagent_guidance_for_simple_routes():
+    prompt = agent_runtime._general_chat_system_prompt(
+        {"question": "解释什么是订单", "runtime_route": "direct_answer"},
+        [],
+    )
+
+    assert "task subagent is available" not in prompt
