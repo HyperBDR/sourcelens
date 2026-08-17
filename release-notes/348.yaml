@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed code analysis follow-ups so clarification context and inherited
+  attachments are preserved across continuation runs.
+zh-CN: >-
+  修复代码分析追问续跑问题，确保澄清上下文和继承的附件能够在后续运行中保留。
