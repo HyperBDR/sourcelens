@@ -380,7 +380,14 @@ def test_planned_code_analysis_retries_truncated_final_concisely(tmp_path):
     )
 
     assert result["answer"] == (
-        "The available code evidence is insufficient for a reliable answer."
+        "The available code evidence is insufficient for a "
+        "reliable conclusion.\n\n"
+        "I searched the current scope but could not find reliable evidence "
+        "linking the issue to a specific code path.\n"
+        "Please provide any of these clues: a file path, class or function "
+        "name, full traceback, or the relevant business call chain.\n"
+        'If you only want a conceptual explanation, reply "explain the '
+        'concept only".'
     )
     assert result["outcome"] == "blocked"
     assert result["planned_evidence"]["final_retry_count"] == 1
@@ -566,6 +573,9 @@ def test_insufficient_evidence_is_not_completed_or_added_to_answer(tmp_path):
     assert result["planned_evidence"]["gap_categories"] == ["source"]
     assert "Evidence gap" not in result["answer"]
     assert "unverified" not in result["answer"].lower()
+    assert "file path" in result["answer"]
+    assert "full traceback" in result["answer"]
+    assert "explain the concept only" in result["answer"]
 
 
 def test_unsupported_claims_prevent_completed_outcome(tmp_path):
@@ -617,7 +627,7 @@ def test_unsupported_claims_prevent_completed_outcome(tmp_path):
         "reason": "evidence_insufficient"
     }
     assert result["planned_evidence"]["sufficient"] is True
-    assert "reliable answer" in result["answer"]
+    assert "reliable conclusion" in result["answer"]
 
 
 def test_structural_evidence_without_source_citation_returns_answer(tmp_path):

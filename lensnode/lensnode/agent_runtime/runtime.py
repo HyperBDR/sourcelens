@@ -1334,9 +1334,29 @@ def _run_planned_code_analysis(
         termination_detail = {"reason": "evidence_insufficient"}
     if outcome == "blocked":
         answer = _pick_text(
-            "当前代码证据不足，暂时无法给出可靠结论。",
-            "The available code evidence is insufficient for a reliable "
-            "answer.",
+            (
+                "当前代码证据不足，暂时无法给出"
+                "可靠结论。\n\n"
+                "我已按当前范围检索，但还没有找到能"
+                "将问题与具体代码路径关联起来的"
+                "可靠证据。\n"
+                "你可以补充任一线索："
+                "文件路径、类或函数名、"
+                "完整错误堆栈，或涉及的业务调用链。\n"
+                "如果只想了解异常概念，请回复"
+                "“只解释概念”。"
+            ),
+            (
+                "The available code evidence is insufficient for a "
+                "reliable conclusion.\n\n"
+                "I searched the current scope but could not find reliable "
+                "evidence linking the issue to a specific code path.\n"
+                "Please provide any of these clues: a file path, class or "
+                "function name, full traceback, or the relevant business "
+                "call chain.\n"
+                'If you only want a conceptual explanation, reply "explain '
+                'the concept only".'
+            ),
             _command_answer_language(command),
         )
     return {
