@@ -278,7 +278,13 @@ def _route_guidance(route):
             "execution starts, keep the task count, order, and wording fixed; "
             "later write_todos calls may only update statuses. Put newly "
             "discovered execution details under the closest existing task. "
-            "Stop when the requested outcome is verified."
+            "Stop when the requested outcome is verified.\n\n"
+            "The task subagent is available. When the plan splits into "
+            "genuinely independent, heavy subtasks, delegate each one to a "
+            "task subagent (issue multiple task calls in one message to run "
+            "them in parallel), then synthesize their results. Do NOT "
+            "delegate light work — handle it directly with batched tool "
+            "calls, which is faster."
         )
     if route == "direct_execute":
         return (

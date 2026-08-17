@@ -107,7 +107,7 @@ def _select_general_chat_route(
 ):
     """Classify one General Chat request without exposing control output."""
 
-    skills = "\n\n".join(context_skill_contents or [])[:16000]
+    skills = "\n\n".join(context_skill_contents or [])[:6000]
     artifact_inventory = json.dumps(
         history_artifacts or [],
         ensure_ascii=False,
@@ -126,11 +126,11 @@ def _select_general_chat_route(
         seen_tools.add(name)
         description = str(
             getattr(tool, "description", "") or ""
-        ).strip()[:500]
+        ).strip()[:200]
         tool_inventory.append(
             {"name": name, "description": description}
         )
-        if len(tool_inventory) >= 80:
+        if len(tool_inventory) >= 40:
             break
     prompt = (
         "Classify the request for a bounded agent runtime. Return JSON only "

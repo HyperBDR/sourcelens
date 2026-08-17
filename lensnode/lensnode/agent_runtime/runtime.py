@@ -252,6 +252,20 @@ class LensDeepAgentRuntime:
             state.resume_state.route_decision == _PLANNED_CODE_ANALYSIS_ROUTE
         )
 
+    def _subagents_enabled(self, state):
+        """Return whether this run may delegate work to a subagent.
+
+        General Chat exposes the task tool only on the plan_execute route,
+        where a complex multi-step task can be split across subagents;
+        simple direct-answer and direct-execute runs keep it disabled.
+        Legacy modes always keep the task tool available.
+        """
+
+        if not state.runtime_mode.general_chat:
+            return True
+        route_decision = getattr(state, "route_decision", None) or {}
+        return route_decision.get("route") == "plan_execute"
+
     def _prepare_planned_checkpoint(self, state):
         """Seed durable state before the planned pipeline invokes a model."""
 
@@ -800,6 +814,7 @@ class LensDeepAgentRuntime:
             if state.root_observation_id
             else None
         )
+        use_subagents = self._subagents_enabled(state)
         state.kwargs = {
             "model": state.model,
             "tools": state.tools,
@@ -815,19 +830,19 @@ class LensDeepAgentRuntime:
                 virtual_mode=True,
             ),
             "subagents": (
-                []
-                if state.runtime_mode.general_chat
-                else [
+                [
                     _fast_subagent(
                         state.mcp_middleware,
                         state.trace_middleware,
                         state.subagent_middleware,
                     )
                 ]
+                if use_subagents
+                else []
             ),
             "name": f"lensnode-{state.command.get('task') or 'agent'}",
         }
-        if state.resources.skill_paths and not state.runtime_mode.general_chat:
+        if state.resources.skill_paths and use_subagents:
             state.kwargs["skills"] = state.resources.skill_paths
 
         state.summarizer = _build_summarization_middleware(
@@ -848,6 +863,7 @@ class LensDeepAgentRuntime:
             mcp_middleware=state.mcp_middleware,
             trace_middleware=state.trace_middleware,
             runtime_middleware=state.runtime_middleware,
+            allow_task_tool=use_subagents,
         )
         if middleware:
             state.kwargs["middleware"] = middleware
@@ -867,7 +883,7 @@ class LensDeepAgentRuntime:
                 "skill_count": len(state.resources.skill_paths),
                 "mcp_tool_count": len(state.mcp_tools),
                 "mcp_deferred": state.mcp_middleware is not None,
-                "task_tool_enabled": not state.runtime_mode.general_chat,
+                "task_tool_enabled": use_subagents,
                 "mcp_config_path": str(state.resources.mcp_config_path),
             },
         )
