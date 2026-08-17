@@ -1,0 +1,9 @@
+type: fix
+audience: user
+en: >-
+  Improved runtime failure guidance: when code evidence is insufficient,
+  SourceLens now asks for concrete clues (file path, class or function name,
+  traceback) and no longer shows duplicate retry hints in chat.
+zh-CN: >-
+  改进运行失败引导：当代码证据不足时，SourceLens 会提示补充具体线索（文件路径、
+  类名或函数名、错误堆栈），并且聊天中不再重复显示重试提示。
