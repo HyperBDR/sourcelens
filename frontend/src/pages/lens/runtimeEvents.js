@@ -108,9 +108,18 @@ export function getMessageTimestamp(message) {
 export function terminalSyncEvent(event) {
   if (
     event?.type !== 'sync' ||
-    !['done', 'failed', 'cancelled'].includes(event.status)
+    !['awaiting_user_input', 'done', 'failed', 'cancelled'].includes(
+      event.status
+    )
   ) {
     return null
+  }
+  if (event.status === 'awaiting_user_input') {
+    return {
+      type: 'awaiting_user_input',
+      outcome: event.outcome,
+      termination_detail: event.termination_detail
+    }
   }
   return {
     type: event.status === 'done' ? 'done' : 'error',
@@ -190,7 +199,9 @@ export function createRuntimeState() {
     verificationFailure: null,
     artifacts: [],
     outcome: null,
-    terminationDetail: null
+    terminationDetail: null,
+    clarificationRequest: null,
+    clarificationAnsweredAt: null
   }
 }
 
@@ -778,14 +789,23 @@ export function applyRuntimeEvent(state, event) {
   if (
     event?.type === 'sync' ||
     event?.type === 'done' ||
-    event?.type === 'error'
+    event?.type === 'error' ||
+    event?.type === 'awaiting_user_input'
   ) {
     const terminationDetail =
       event.termination_detail || current.terminationDetail
+    const request =
+      terminationDetail?.reason === 'needs_user_input' &&
+      terminationDetail.request?.answer_type === 'text'
+        ? terminationDetail.request
+        : null
     const terminal = {
       ...current,
       outcome: event.outcome || current.outcome,
       terminationDetail,
+      clarificationRequest: request,
+      clarificationAnsweredAt:
+        event.clarification_answered_at || current.clarificationAnsweredAt,
       capabilityBlock:
         terminationDetail?.reason === 'capability_unavailable'
           ? { ...terminationDetail }
@@ -805,6 +825,9 @@ export function applyRuntimeEvent(state, event) {
     }
     if (event.type === 'error') {
       return closeRuntimeProgress(terminal, 'failed')
+    }
+    if (event.type === 'awaiting_user_input') {
+      return closeRuntimeProgress(terminal, 'awaiting_user_input')
     }
     return terminal
   }

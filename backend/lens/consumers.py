@@ -367,7 +367,11 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._send_bad_frame("run_uuid is invalid")
             return
         status = content.get("status") or Run.Status.DONE
-        if status not in [Run.Status.DONE, Run.Status.FAILED]:
+        if status not in [
+            Run.Status.AWAITING_USER_INPUT,
+            Run.Status.DONE,
+            Run.Status.FAILED,
+        ]:
             status = Run.Status.FAILED
         run = await database_sync_to_async(finish_lensnode_run)(
             run_uuid,
@@ -386,6 +390,7 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             Run.Status.DONE,
             Run.Status.FAILED,
             Run.Status.CANCELLED,
+            Run.Status.AWAITING_USER_INPUT,
         ]:
             await self.send_json(
                 {

@@ -137,6 +137,34 @@ class RunLifecycleTests(TransactionTestCase):
         self.assertIsNotNone(step)
         self.assertEqual(run.steps.count(), 1)
 
+    def test_finish_lensnode_run_persists_awaiting_user_input(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        request = {
+            "request_id": "clarification-1",
+            "question": "Which environment should I inspect?",
+            "reason": "ambiguous_scope",
+            "answer_type": "text",
+        }
+
+        finish_lensnode_run(
+            run.uuid,
+            Run.Status.AWAITING_USER_INPUT,
+            outcome=Run.Outcome.BLOCKED,
+            termination_detail={
+                "reason": "needs_user_input",
+                "request": request,
+            },
+        )
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.AWAITING_USER_INPUT)
+        self.assertEqual(run.termination_detail["reason"], "needs_user_input")
+        self.assertEqual(run.execution.status, RunExecution.Status.COMPLETED)
+
     def test_first_running_event_marks_dispatched_execution_admitted(self):
         run = self._run(
             Run.Status.STREAMING,

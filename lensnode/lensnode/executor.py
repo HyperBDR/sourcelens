@@ -574,7 +574,7 @@ class LensNodeExecutor:
                 {
                     "type": "run_done",
                     "run_uuid": run_uuid,
-                    "status": "done",
+                    "status": result.get("status") or "done",
                     "outcome": result.get("outcome") or "completed",
                     "termination_detail": (
                         result.get("termination_detail") or {}

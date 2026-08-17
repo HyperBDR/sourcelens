@@ -70,6 +70,24 @@ class SourceWindow:
 
 
 @dataclass(frozen=True)
+class ClarificationRequest:
+    """One bounded plain-text question required before retrieval."""
+
+    question: str
+    reason: str = "missing_input"
+    answer_type: str = "text"
+
+    def as_dict(self):
+        """Return the public clarification contract."""
+
+        return {
+            "question": self.question,
+            "reason": self.reason,
+            "answer_type": self.answer_type,
+        }
+
+
+@dataclass(frozen=True)
 class RetrievalPlan:
     """Validated and bounded deterministic retrieval instructions."""
 
@@ -83,6 +101,7 @@ class RetrievalPlan:
     literal_queries: tuple[str, ...] = ()
     file_scopes: tuple[str, ...] = ()
     source_windows: tuple[SourceWindow, ...] = ()
+    clarification: ClarificationRequest | None = None
     max_files: int = MAX_FILES
     max_fallback_rounds: int = 1
     budgets: RetrievalBudgets = RetrievalBudgets()
@@ -167,6 +186,36 @@ class SufficiencyResult:
     disproved: tuple[str, ...] = ()
 
 
+def assess_code_analysis_capabilities(workspace_tools, codegraph_tools):
+    """Check whether Code Analysis has at least one retrieval path."""
+
+    workspace = {
+        str(name)
+        for name in (workspace_tools or {})
+        if name
+    }
+    codegraph = {
+        str(name)
+        for name in (codegraph_tools or {})
+        if name
+    }
+    available = []
+    if workspace & {"search_workspace", "read_workspace_file"}:
+        available.append("workspace")
+    if codegraph:
+        available.append("codegraph")
+    capabilities = ("workspace", "codegraph")
+    return {
+        "ready": bool(available),
+        "available": tuple(available),
+        "missing": tuple(
+            capability
+            for capability in capabilities
+            if capability not in available
+        ),
+    }
+
+
 def parse_retrieval_plan(raw):
     """Parse, validate, and bound an untrusted planner response."""
 
@@ -241,6 +290,7 @@ def parse_retrieval_plan(raw):
             MAX_EVIDENCE_TOKENS,
         ),
     )
+    clarification = _parse_clarification(raw.get("clarification"))
     return RetrievalPlan(
         objective=objective,
         project=_bounded_query(raw.get("project")),
@@ -258,6 +308,7 @@ def parse_retrieval_plan(raw):
             :MAX_LITERAL_QUERIES
         ],
         source_windows=tuple(windows),
+        clarification=clarification,
         max_files=min(
             max(_positive_int(raw.get("max_files"), MAX_FILES), 1),
             MAX_FILES,
@@ -757,6 +808,32 @@ def _required_text(value, label):
     if not text or len(text) > MAX_QUERY_CHARS:
         raise PlanValidationError(f"{label} is missing or too long")
     return text
+
+
+def _parse_clarification(value):
+    if value in (None, {}):
+        return None
+    if not isinstance(value, dict):
+        raise PlanValidationError("clarification must be an object")
+    question = _required_text(
+        value.get("question"),
+        "clarification question",
+    )
+    if len(question) > 1_000:
+        raise PlanValidationError("clarification question is too long")
+    if value.get("answer_type", "text") != "text":
+        raise PlanValidationError("only text clarification is supported")
+    reason = str(value.get("reason") or "missing_input").strip()
+    if reason not in {
+        "missing_input",
+        "ambiguous_scope",
+        "ambiguous_target",
+    }:
+        reason = "missing_input"
+    return ClarificationRequest(
+        question=question,
+        reason=reason,
+    )
 
 
 def _bounded_query(value):

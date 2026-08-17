@@ -7,11 +7,35 @@ import pytest
 from lensnode.planned_evidence import (
     EvidenceExecutor,
     PlanValidationError,
+    assess_code_analysis_capabilities,
     build_evidence_bundle,
     parse_retrieval_plan,
     validate_citations,
     validate_evidence_sufficiency,
 )
+
+
+def test_code_analysis_capability_assessment_requires_one_retrieval_path():
+    unavailable = assess_code_analysis_capabilities({}, {})
+    assert unavailable["ready"] is False
+    assert unavailable["missing"] == ("workspace", "codegraph")
+
+    workspace_ready = assess_code_analysis_capabilities(
+        {
+            "search_workspace": object(),
+            "read_workspace_file": object(),
+        },
+        {},
+    )
+    assert workspace_ready["ready"] is True
+    assert workspace_ready["available"] == ("workspace",)
+
+    codegraph_ready = assess_code_analysis_capabilities(
+        {},
+        {"explore": object()},
+    )
+    assert codegraph_ready["ready"] is True
+    assert codegraph_ready["available"] == ("codegraph",)
 
 
 def test_retrieval_plan_normalizes_bounded_limits():
@@ -55,6 +79,38 @@ def test_retrieval_plan_rejects_missing_objective_and_invalid_operation():
                 "codegraph_queries": [
                     {"operation": "execute_shell", "query": "rm -rf"}
                 ],
+            }
+        )
+
+
+def test_retrieval_plan_parses_bounded_text_clarification():
+    plan = parse_retrieval_plan(
+        {
+            "objective": "Identify the affected service",
+            "clarification": {
+                "question": "Which deployment environment should I inspect?",
+                "reason": "ambiguous_scope",
+                "answer_type": "text",
+            },
+        }
+    )
+
+    assert plan.clarification.question == (
+        "Which deployment environment should I inspect?"
+    )
+    assert plan.clarification.reason == "ambiguous_scope"
+    assert plan.clarification.answer_type == "text"
+
+
+def test_retrieval_plan_rejects_non_text_clarification():
+    with pytest.raises(PlanValidationError):
+        parse_retrieval_plan(
+            {
+                "objective": "Identify the affected service",
+                "clarification": {
+                    "question": "Choose an environment",
+                    "answer_type": "choice",
+                },
             }
         )
 

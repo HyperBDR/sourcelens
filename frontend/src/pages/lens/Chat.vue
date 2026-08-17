@@ -612,6 +612,67 @@
                   }}
                 </div>
 
+                <div
+                  v-if="clarificationRequestFor(message)"
+                  class="clarification-card"
+                  role="status"
+                >
+                  <div class="runtime-card-title">
+                    {{ t('lens.chat.runtime.clarificationTitle') }}
+                  </div>
+                  <p class="clarification-question">
+                    {{ clarificationRequestFor(message).question }}
+                  </p>
+                  <label
+                    class="clarification-label"
+                    :for="`clarification-${message.run}`"
+                  >
+                    {{ t('lens.chat.runtime.clarificationHint') }}
+                  </label>
+                  <textarea
+                    :id="`clarification-${message.run}`"
+                    class="clarification-input"
+                    rows="2"
+                    :value="clarificationAnswerFor(message)"
+                    :placeholder="
+                      t('lens.chat.runtime.clarificationPlaceholder')
+                    "
+                    :disabled="
+                      isClarificationAnswered(message) ||
+                      isClarificationSubmitting(message)
+                    "
+                    @input="setClarificationAnswer(message, $event)"
+                  />
+                  <div class="clarification-actions">
+                    <span
+                      v-if="isClarificationAnswered(message)"
+                      class="clarification-submitted"
+                    >
+                      {{ t('lens.chat.runtime.clarificationAnswered') }}
+                    </span>
+                    <span
+                      v-if="clarificationErrorFor(message)"
+                      class="clarification-error"
+                      role="alert"
+                    >
+                      {{ clarificationErrorFor(message) }}
+                    </span>
+                    <button
+                      v-if="!isClarificationAnswered(message)"
+                      type="button"
+                      class="clarification-submit"
+                      :disabled="isClarificationSubmitting(message)"
+                      @click="submitClarification(message)"
+                    >
+                      {{
+                        isClarificationSubmitting(message)
+                          ? t('lens.chat.runtime.clarificationSubmitting')
+                          : t('lens.chat.runtime.clarificationSubmit')
+                      }}
+                    </button>
+                  </div>
+                </div>
+
                 <div class="message-card" :class="message.role">
                   <div
                     v-if="message.role === 'assistant' && message.content"
@@ -1628,6 +1689,7 @@ import {
 } from '@/pages/lens/runtimeEvents'
 import {
   archiveSession,
+  answerRunClarification,
   cancelRun,
   createRun,
   createSession,
@@ -1702,6 +1764,9 @@ const visualViewportConstrained = ref(false)
 const seenStepEventCounts = new Map()
 let sessionLoadGeneration = 0
 const runtimeState = ref(createRuntimeState())
+const clarificationAnswers = ref({})
+const clarificationSubmitting = ref(new Set())
+const clarificationErrors = ref({})
 const liveActivityScrollRef = ref(null)
 const elapsedSeconds = ref(0)
 let elapsedTimer = null
@@ -2186,10 +2251,46 @@ function runtimeStateFor(thinking) {
     state = applyRuntimeEvent(state, event)
   }
   return applyRuntimeEvent(state, {
-    type: 'done',
+    type:
+      thinking?.status === 'awaiting_user_input'
+        ? 'awaiting_user_input'
+        : 'done',
+    status: thinking?.status,
     outcome: thinking?.outcome,
+    clarification_answered_at: thinking?.clarification_answered_at,
     termination_detail: thinking?.termination_detail
   })
+}
+
+function clarificationRequestFor(message) {
+  const request = message?._runtimeState?.clarificationRequest
+  return request?.answer_type === 'text' ? request : null
+}
+
+function clarificationAnswerFor(message) {
+  return clarificationAnswers.value[message?.run] || ''
+}
+
+function setClarificationAnswer(message, event) {
+  clarificationAnswers.value = {
+    ...clarificationAnswers.value,
+    [message.run]: event.target.value
+  }
+  const errors = { ...clarificationErrors.value }
+  delete errors[message.run]
+  clarificationErrors.value = errors
+}
+
+function isClarificationAnswered(message) {
+  return Boolean(message?._runtimeState?.clarificationAnsweredAt)
+}
+
+function isClarificationSubmitting(message) {
+  return clarificationSubmitting.value.has(message?.run)
+}
+
+function clarificationErrorFor(message) {
+  return clarificationErrors.value[message?.run] || ''
 }
 
 function capabilityRecovery(block) {
@@ -2290,7 +2391,7 @@ function mapRunError(code) {
 }
 
 function isTerminalRunStatus(status) {
-  return ['done', 'failed', 'cancelled'].includes(status)
+  return ['awaiting_user_input', 'done', 'failed', 'cancelled'].includes(status)
 }
 
 const retryHintMessage = computed(() =>
@@ -2533,6 +2634,9 @@ async function bootstrap() {
   currentRun.value = null
   runStatusResolvingSessionUuid.value = ''
   messages.value = []
+  clarificationAnswers.value = {}
+  clarificationSubmitting.value = new Set()
+  clarificationErrors.value = {}
   mySharesOpen.value = false
   showArchivedSessions.value = false
   resetStreamState()
@@ -2680,6 +2784,8 @@ async function createNewSession(notify = true) {
   selectedSessionUuid.value = session.uuid
   question.value = ''
   retryDraft.value = null
+  clarificationAnswers.value = {}
+  clarificationErrors.value = {}
   if (composerRef.value) composerRef.value.style.height = 'auto'
   clearAttachments()
   messages.value = []
@@ -2712,6 +2818,8 @@ function clearSessionSelection() {
   currentRun.value = null
   question.value = ''
   retryDraft.value = null
+  clarificationAnswers.value = {}
+  clarificationErrors.value = {}
   resetStreamState()
   router.replace({ path: route.path })
 }
@@ -3207,7 +3315,11 @@ async function readSse(runUuid) {
 
 function handleEvent(event) {
   runtimeState.value = applyRuntimeEvent(runtimeState.value, event)
-  if (event.type === 'sync' || event.type === 'status') {
+  if (
+    event.type === 'sync' ||
+    event.type === 'status' ||
+    event.type === 'awaiting_user_input'
+  ) {
     currentRun.value = {
       ...currentRun.value,
       status: event.status,
@@ -3252,6 +3364,71 @@ function handleStepEvent(event) {
   seenStepEventCounts.set(stepKey, events.length)
 
   newEvents.forEach(pushAgentActivity)
+}
+
+async function submitClarification(message) {
+  const request = clarificationRequestFor(message)
+  const runUuid = message?.run
+  if (
+    !request ||
+    !runUuid ||
+    isClarificationAnswered(message) ||
+    isClarificationSubmitting(message)
+  ) {
+    return
+  }
+  const answer = clarificationAnswerFor(message).trim()
+  if (!answer) {
+    clarificationErrors.value = {
+      ...clarificationErrors.value,
+      [runUuid]: t('lens.chat.runtime.clarificationRequired')
+    }
+    return
+  }
+
+  clarificationSubmitting.value = new Set([
+    ...clarificationSubmitting.value,
+    runUuid
+  ])
+  const sessionAtSubmit = selectedSessionUuid.value
+  loading.value.run = true
+  try {
+    const continuation = await answerRunClarification(
+      runUuid,
+      request.request_id,
+      answer
+    )
+    if (selectedSessionUuid.value !== sessionAtSubmit) return
+    clarificationAnswers.value = {
+      ...clarificationAnswers.value,
+      [runUuid]: answer
+    }
+    const errors = { ...clarificationErrors.value }
+    delete errors[runUuid]
+    clarificationErrors.value = errors
+    resetStreamState()
+    currentRun.value = continuation
+    startCompletionTracking(continuation, sessionAtSubmit)
+    messages.value = await listMessages(sessionAtSubmit)
+    await nextTick(scrollToBottom)
+    await readSse(continuation.uuid)
+    if (selectedSessionUuid.value !== sessionAtSubmit) return
+    await finishSubmittedRun(continuation.uuid, sessionAtSubmit)
+  } catch (error) {
+    if (error?.name !== 'AbortError') {
+      clarificationErrors.value = {
+        ...clarificationErrors.value,
+        [runUuid]: t('lens.chat.runtime.clarificationFailed')
+      }
+    }
+  } finally {
+    const submitting = new Set(clarificationSubmitting.value)
+    submitting.delete(runUuid)
+    clarificationSubmitting.value = submitting
+    if (selectedSessionUuid.value === sessionAtSubmit) {
+      loading.value.run = false
+    }
+  }
 }
 
 async function submit() {
@@ -4541,6 +4718,67 @@ onBeforeUnmount(() => {
 .runtime-outcome-card {
   border-color: #d5c8ae;
   background: #f7f1e4;
+}
+
+.clarification-card {
+  @apply mt-2 rounded-lg border px-3 py-3;
+  border-color: #b8c7ef;
+  background: var(--sl-bg-raised);
+}
+
+.clarification-question {
+  @apply mt-1 text-sm leading-5;
+  color: var(--sl-text-primary);
+}
+
+.clarification-label {
+  @apply mt-3 block text-xs font-medium;
+  color: var(--sl-text-secondary);
+}
+
+.clarification-input {
+  @apply mt-1 block w-full resize-y rounded-md border px-2.5 py-2 text-sm leading-5 outline-none;
+  border-color: var(--sl-border-default);
+  background: var(--sl-bg-canvas);
+  color: var(--sl-text-primary);
+}
+
+.clarification-input:focus {
+  border-color: #6b82db;
+  box-shadow: 0 0 0 2px rgb(107 130 219 / 15%);
+}
+
+.clarification-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.clarification-actions {
+  @apply mt-2 flex flex-wrap items-center justify-end gap-2;
+}
+
+.clarification-submit {
+  @apply rounded-md px-3 py-1.5 text-sm font-medium text-white transition-colors;
+  background: #3152c9;
+}
+
+.clarification-submit:hover:not(:disabled) {
+  background: #2744ab;
+}
+
+.clarification-submit:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.clarification-submitted {
+  @apply mr-auto text-xs;
+  color: var(--sl-text-muted);
+}
+
+.clarification-error {
+  @apply mr-auto text-xs;
+  color: #b42318;
 }
 
 .live-progress-dot {

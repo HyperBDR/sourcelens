@@ -96,6 +96,7 @@ PUBLIC_TERMINATION_REASONS = {
     "token_budget_wrapup",
     "loop_capped",
     "runtime_failure",
+    "needs_user_input",
 }
 
 PUBLIC_ERROR_TYPES = {
@@ -398,6 +399,28 @@ def sanitize_termination_detail(detail):
     code = detail.get("code")
     if code in PUBLIC_RUNTIME_CODES:
         output["code"] = code
+    if reason == "needs_user_input":
+        request = detail.get("request")
+        if isinstance(request, dict):
+            request_id = str(request.get("request_id") or "").strip()
+            question = str(request.get("question") or "").strip()
+            answer_type = request.get("answer_type")
+            clarification_reason = request.get("reason")
+            if (
+                request_id
+                and len(request_id) <= 128
+                and question
+                and len(question) <= 1_000
+                and answer_type == "text"
+                and clarification_reason
+                in {"missing_input", "ambiguous_scope", "ambiguous_target"}
+            ):
+                output["request"] = {
+                    "request_id": request_id,
+                    "question": question,
+                    "reason": clarification_reason,
+                    "answer_type": "text",
+                }
     return output
 
 

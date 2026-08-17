@@ -63,6 +63,7 @@ from .trace_context import root_observation_id_for_run, trace_id_for_run
 logger = logging.getLogger(__name__)
 
 TERMINAL_RUN_STATUSES = {
+    Run.Status.AWAITING_USER_INPUT,
     Run.Status.DONE,
     Run.Status.FAILED,
     Run.Status.CANCELLED,
@@ -79,7 +80,10 @@ RUN_ADMISSION_CHECKPOINT_CAPABILITY = "run_admission_checkpoint_v1"
 
 HISTORY_MAX_PAIRS = 5
 HISTORY_MAX_MESSAGE_CHARS = 2000
+CLARIFICATION_MAX_ANSWER_CHARS = 4000
 HISTORY_MAX_TOTAL_CHARS = 8000
+CLARIFICATION_MAX_ORIGINAL_CHARS = HISTORY_MAX_TOTAL_CHARS
+CLARIFICATION_MAX_PROMPT_CHARS = 20000
 HISTORY_ARTIFACT_MAX_FILES = 3
 
 QUERY_REWRITE_HISTORY_TURNS = 3
@@ -1003,12 +1007,20 @@ def create_execution_run(
         order_by_uuid=attachment_order,
     )
     document_uuid_set = {item["uuid"] for item in documents}
+    selected_image_uuids = {
+        item["uuid"]
+        for item in selected_context
+        if item["kind"] == "image"
+    }
     requested_document_uuids = {
-        value for value in requested_attachment_uuids if value not in image_uuids
+        value
+        for value in requested_attachment_uuids
+        if value not in selected_image_uuids
     }
     if not requested_document_uuids.issubset(document_uuid_set):
         raise AttachmentError("ATTACHMENT_NOT_FOUND")
 
+    document_count = len(documents)
     execution = run.execution
     runtime_snapshot = dict(execution.runtime_snapshot or {})
     runtime_snapshot["session_attachment_uuids"] = [
@@ -1016,10 +1028,10 @@ def create_execution_run(
         for item in selected_context
         if item["kind"] == "image"
     ]
+    runtime_snapshot["document_attachment_count"] = document_count
     execution.runtime_snapshot = runtime_snapshot
     execution.save(update_fields=["runtime_snapshot"])
 
-    document_count = len(documents)
     set_run_document_expectation(run.uuid, document_count)
     if enqueue:
         transaction.on_commit(
@@ -1617,6 +1629,88 @@ def build_run_history(run):
     return history
 
 
+def build_clarification_continuation_question(run, current_question):
+    """Restore the original request and answers for a clarification retry."""
+
+    if not run.retry_of_run_id:
+        return current_question
+    runs_by_id = {
+        item.pk: item
+        for item in Run.objects.filter(
+            session_id=run.session_id,
+            input_message__sequence__lte=run.input_message.sequence,
+        ).select_related("input_message")
+    }
+    current = runs_by_id.get(run.pk, run)
+    turns = []
+    seen = set()
+    while current.pk not in seen:
+        seen.add(current.pk)
+        if not current.retry_of_run_id:
+            break
+        parent = runs_by_id.get(current.retry_of_run_id)
+        if parent is None:
+            break
+        detail = parent.termination_detail or {}
+        request = detail.get("request")
+        if (
+            parent.status != Run.Status.AWAITING_USER_INPUT
+            or detail.get("reason") != "needs_user_input"
+            or not isinstance(request, dict)
+        ):
+            break
+        clarification_question = str(request.get("question") or "").strip()
+        answer = str(current.input_message.content or "").strip()
+        if not clarification_question or not answer:
+            break
+        turns.append(
+            (
+                clarification_question[:HISTORY_MAX_MESSAGE_CHARS],
+                answer[:CLARIFICATION_MAX_ANSWER_CHARS],
+            )
+        )
+        if len(turns) > HISTORY_MAX_PAIRS:
+            turns.pop()
+        current = parent
+
+    if not turns:
+        return current_question
+    original_question = str(current.input_message.content or "").strip()
+
+    sections = [
+        "Original user request:",
+        original_question[:CLARIFICATION_MAX_ORIGINAL_CHARS]
+        or "(attachment-only request)",
+    ]
+    selected_turns = []
+    clarification_chars = 0
+    for clarification_question, answer in turns:
+        block = [
+            "Clarification question:",
+            clarification_question,
+            "User clarification:",
+            answer,
+        ]
+        block_chars = sum(len(item) for item in block)
+        if clarification_chars + block_chars > HISTORY_MAX_TOTAL_CHARS:
+            continue
+        selected_turns.append(block)
+        clarification_chars += block_chars
+    for block in reversed(selected_turns):
+        sections.extend(["", *block])
+
+    raw_question = str(run.input_message.content or "").strip()
+    if current_question and current_question.strip() != raw_question:
+        sections.extend(
+            [
+                "",
+                "Current execution prompt:",
+                current_question[:HISTORY_MAX_MESSAGE_CHARS],
+            ]
+        )
+    return "\n".join(sections)[:CLARIFICATION_MAX_PROMPT_CHARS]
+
+
 def build_run_history_artifacts(run):
     """Return bounded deliverables from trusted prior Run attempts."""
 
@@ -1839,10 +1933,13 @@ def _trusted_history_entries(run):
 def _assistant_output_is_trusted(run):
     """Return whether a Run's assistant output is safe as history."""
 
-    return run.status == Run.Status.DONE and run.outcome in {
-        "",
-        Run.Outcome.COMPLETED,
-    }
+    if run.status == Run.Status.DONE:
+        return run.outcome in {"", Run.Outcome.COMPLETED}
+    return (
+        run.status == Run.Status.AWAITING_USER_INPUT
+        and (run.termination_detail or {}).get("reason")
+        == "needs_user_input"
+    )
 
 
 def _recent_history_context(run):
@@ -2005,6 +2102,10 @@ def dispatch_run_to_lensnode(
         if image_data_urls
         else model_refs.get("agent")
         or str(run.session.assistant.agent_model_ref or "")
+    )
+    rewritten_question = build_clarification_continuation_question(
+        run,
+        rewritten_question,
     )
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),
@@ -2470,7 +2571,12 @@ def finish_lensnode_run(
             BUSY_RETRY_WINDOW_S,
         )
 
-    if status == Run.Status.DONE:
+    if status == Run.Status.AWAITING_USER_INPUT:
+        run.status = Run.Status.AWAITING_USER_INPUT
+        run.error = ""
+        default_outcome = Run.Outcome.BLOCKED
+        execution_status = RunExecution.Status.COMPLETED
+    elif status == Run.Status.DONE:
         run.status = Run.Status.DONE
         run.error = ""
         default_outcome = Run.Outcome.COMPLETED
@@ -2832,6 +2938,16 @@ def _build_sync_event(run):
 def _terminal_stream_event(run):
     """Build the terminal SSE event for a run."""
 
+    if run.status == Run.Status.AWAITING_USER_INPUT:
+        return {
+            "type": "awaiting_user_input",
+            "status": run.status,
+            "outcome": run.outcome,
+            "termination_detail": sanitize_termination_detail(
+                run.termination_detail
+            ),
+            "ts": timezone.now().isoformat(),
+        }
     if run.status == Run.Status.FAILED:
         return {
             "type": "error",

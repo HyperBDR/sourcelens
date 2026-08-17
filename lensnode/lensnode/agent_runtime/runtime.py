@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import threading
+import uuid
 from types import SimpleNamespace
 
 from deepagents import (
@@ -38,6 +39,7 @@ from ..plugins import collect_agent_runtime_contributions
 from ..planned_evidence import (
     EvidenceExecutor,
     build_evidence_bundle,
+    assess_code_analysis_capabilities,
     parse_retrieval_plan,
     validate_citations,
     validate_evidence_sufficiency,
@@ -1077,6 +1079,52 @@ def _run_planned_code_analysis(
     """Run Code Analysis through one plan and one compact evidence bundle."""
 
     question = str(command.get("question") or "")
+    workspace_adapters = _planned_workspace_adapters(tools)
+    codegraph_adapters = _planned_codegraph_adapters(mcp_tools)
+    capability_assessment = assess_code_analysis_capabilities(
+        workspace_adapters,
+        codegraph_adapters,
+    )
+    if not capability_assessment["ready"]:
+        termination_detail = {
+            "reason": "capability_unavailable",
+            "capability": "code_analysis_retrieval",
+            "error_type": "capability",
+            "missing_capabilities": list(capability_assessment["missing"]),
+            "recovery": (
+                "Bind workspace search and file reading or enable CodeGraph, "
+                "then retry the analysis."
+            ),
+        }
+        emit_agent_event(
+            "planned_evidence.capability.blocked",
+            termination_detail,
+        )
+        return {
+            "answer": _pick_text(
+                "当前助手没有可用的代码检索能力，无法安全分析该问题。请绑定"
+                "工作区搜索/文件读取能力或启用 CodeGraph 后重试。",
+                "This assistant has no available code-retrieval capability, "
+                "so the question cannot be analyzed safely. Bind workspace "
+                "search/file reading or enable CodeGraph, then retry.",
+                _command_answer_language(command),
+            ),
+            "samples": [],
+            "stop_reason": model.stop_reason,
+            "token_usage": model.token_usage,
+            "outcome": "blocked",
+            "termination_detail": termination_detail,
+            "planned_evidence": {
+                "capability_status": "unavailable",
+                "available_capabilities": list(
+                    capability_assessment["available"]
+                ),
+                "missing_capabilities": list(
+                    capability_assessment["missing"]
+                ),
+            },
+            "citations": [],
+        }
     planner_prompt = _planned_planner_prompt(
         command,
         context_skill_contents=context_skill_contents,
@@ -1093,12 +1141,34 @@ def _run_planned_code_analysis(
     try:
         plan = parse_retrieval_plan(_message_content(planner_response))
     except Exception:
-        plan = _parse_planner_response(
-            planner_response,
-            question,
-            command,
+        planner_retry_count = 1
+        repair_response = model.invoke(
+            [
+                SystemMessage(content=_planned_planner_repair_prompt()),
+                HumanMessage(
+                    content=json.dumps(
+                        {
+                            "question": question,
+                            "invalid_plan": _message_content(
+                                planner_response
+                            )[:4000],
+                        },
+                        ensure_ascii=False,
+                    )
+                ),
+            ],
+            runtime_control_call=True,
         )
-        planner_status = "fallback"
+        try:
+            plan = parse_retrieval_plan(_message_content(repair_response))
+            planner_status = "repaired"
+        except Exception:
+            plan = _parse_planner_response(
+                repair_response,
+                question,
+                command,
+            )
+            planner_status = "fallback"
     emit_agent_event(
         "planned_evidence.plan.ready",
         {
@@ -1109,10 +1179,39 @@ def _run_planned_code_analysis(
             "max_files": plan.max_files,
         },
     )
+    if plan.clarification is not None:
+        request = {
+            "request_id": f"clarification-{uuid.uuid4().hex}",
+            **plan.clarification.as_dict(),
+        }
+        termination_detail = {
+            "reason": "needs_user_input",
+            "request": request,
+        }
+        emit_agent_event(
+            "planned_evidence.user_input.required",
+            {"reason": plan.clarification.reason},
+        )
+        return {
+            "answer": request["question"],
+            "samples": [],
+            "stop_reason": model.stop_reason,
+            "token_usage": model.token_usage,
+            "status": "awaiting_user_input",
+            "outcome": "blocked",
+            "termination_detail": termination_detail,
+            "planned_evidence": {
+                "clarification_status": "awaiting_user_input",
+                "model_call_count": 1 + planner_retry_count,
+                "planner_status": planner_status,
+                "planner_retry_count": planner_retry_count,
+            },
+            "citations": [],
+        }
 
     executor = EvidenceExecutor(
-        workspace_tools=_planned_workspace_adapters(tools),
-        codegraph_tools=_planned_codegraph_adapters(mcp_tools),
+        workspace_tools=workspace_adapters,
+        codegraph_tools=codegraph_adapters,
     )
     bundle = executor.execute(plan)
     sufficiency = validate_evidence_sufficiency(
@@ -1161,6 +1260,10 @@ def _run_planned_code_analysis(
     )
     bundle.metrics["evidence_gap_count"] = len(sufficiency.gaps)
     bundle.metrics["plan_version"] = "planned-evidence-v1"
+    bundle.metrics["capability_status"] = "ready"
+    bundle.metrics["available_capabilities"] = list(
+        capability_assessment["available"]
+    )
     bundle.metrics["planner_status"] = planner_status
     bundle.metrics["planner_retry_count"] = planner_retry_count
     bundle.metrics["planned_operation_count"] = (
@@ -1290,6 +1393,7 @@ def _parse_planner_response(response, question, command, fallback=False):
     try:
         return parse_retrieval_plan(content)
     except Exception:
+        query_terms = _fallback_query_terms(question)
         return parse_retrieval_plan(
             {
                 "objective": question[:500] or "analyze the workspace",
@@ -1302,13 +1406,89 @@ def _parse_planner_response(response, question, command, fallback=False):
                     "caller context" if fallback else "structural flow",
                 ],
                 "codegraph_queries": [
-                    {"operation": "explore", "query": question[:500]}
+                    {"operation": "explore", "query": query_terms[0]}
                 ],
-                "literal_queries": [question[:500]],
+                "literal_queries": list(query_terms[:2]),
                 "max_files": 8,
                 "max_fallback_rounds": 0,
             }
         )
+
+
+def _fallback_query_terms(question):
+    """Extract a few bounded search terms from an unstructured question."""
+
+    text = re.sub(r"\s+", " ", str(question or "")).strip()
+    if not text:
+        return ("workspace",)
+
+    stop_phrases = (
+        "为什么",
+        "是否",
+        "需要",
+        "请问",
+        "如何",
+        "怎么",
+        "怎样",
+        "哪些",
+        "什么",
+        "哪里",
+        "这个",
+        "那个",
+        "当前",
+        "先",
+        "做",
+        "会",
+        "吗",
+        "呢",
+        "了",
+        "的",
+        "是",
+        "在",
+        "对",
+    )
+    stop_pattern = "|".join(map(re.escape, stop_phrases))
+    stop_words = {
+        "a",
+        "an",
+        "and",
+        "are",
+        "be",
+        "can",
+        "do",
+        "does",
+        "how",
+        "is",
+        "it",
+        "of",
+        "the",
+        "this",
+        "to",
+        "what",
+        "where",
+        "which",
+        "why",
+    }
+    terms = []
+    chunks = re.findall(
+        r"[\u4e00-\u9fff]+|[A-Za-z_][A-Za-z0-9_./:-]*",
+        text,
+    )
+    for chunk in chunks:
+        pieces = (
+            re.split(stop_pattern, chunk)
+            if re.search(r"[\u4e00-\u9fff]", chunk)
+            else [chunk]
+        )
+        for piece in pieces:
+            term = piece.strip(" _-./:")
+            if len(term) < 2 or term.lower() in stop_words:
+                continue
+            if term not in terms:
+                terms.append(term)
+            if len(terms) >= 3:
+                return tuple(terms)
+    return tuple(terms) or ("workspace",)
 
 
 def _validated_planned_answer(
@@ -1487,7 +1667,11 @@ def _planned_planner_prompt(command, context_skill_contents=None):
         "tools. The backend will execute every bounded operation. Include "
         "objective, project, repository, revision, question_type, "
         "evidence_requirements, codegraph_queries, literal_queries, "
-        "max_files, max_fallback_rounds, and budgets. Leave "
+        "clarification, max_files, max_fallback_rounds, and budgets. If a "
+        "critical input is missing or the target is materially ambiguous, "
+        "set clarification to an object with a plain-text question, reason, "
+        "and answer_type=text; do not guess or retrieve until the answer "
+        "arrives. Otherwise set clarification to null. Leave "
         "source_windows empty unless exact file paths and line ranges are "
         "already known; the executor derives source windows from retrieval "
         "results. "
@@ -1497,6 +1681,20 @@ def _planned_planner_prompt(command, context_skill_contents=None):
         f"{command.get('workspace_path') or 'the selected workspace'}."
     )
     return prompt + _context_guidance(context_skill_contents)
+
+
+def _planned_planner_repair_prompt():
+    """Build the single repair prompt for an invalid retrieval plan."""
+
+    return (
+        "Repair the invalid retrieval plan and return only one valid JSON "
+        "retrieval plan. Required fields are objective, question_type, "
+        "evidence_requirements, codegraph_queries, literal_queries, "
+        "source_windows, max_files, max_fallback_rounds, and budgets. "
+        "Each CodeGraph query must be an object with an allowed operation "
+        "and query or symbol. Keep all searches bounded and set "
+        "max_fallback_rounds to 1 or less. Do not answer the question."
+    )
 
 
 def _planned_fallback_prompt():

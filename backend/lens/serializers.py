@@ -62,6 +62,7 @@ from .runtime_events import (
     sanitize_termination_detail,
 )
 from .services import (
+    CLARIFICATION_MAX_ORIGINAL_CHARS,
     create_execution_run,
     supports_document_attachments,
     validate_retry_run,
@@ -2592,6 +2593,10 @@ class MessageSerializer(serializers.ModelSerializer):
             "duration_seconds": duration,
             "steps": steps,
             "outcome": run.outcome,
+            "status": run.status,
+            "clarification_answered_at": (
+                run.clarification_answered_at
+            ),
             "termination_detail": sanitize_termination_detail(
                 run.termination_detail
             ),
@@ -2715,6 +2720,22 @@ class RunSerializer(serializers.ModelSerializer):
             "execution",
         ]
         read_only_fields = fields
+
+
+class RunClarificationAnswerSerializer(serializers.Serializer):
+    """Validate one plain-text answer to a persisted clarification."""
+
+    request_id = serializers.CharField(max_length=128)
+    answer = serializers.CharField(max_length=4_000)
+    enqueue = serializers.BooleanField(required=False, default=True)
+
+    def validate_answer(self, value):
+        """Reject empty or whitespace-only clarification answers."""
+
+        answer = value.strip()
+        if not answer:
+            raise serializers.ValidationError("Answer cannot be empty.")
+        return answer
 
 
 class RunFeedbackSerializer(serializers.ModelSerializer):
@@ -2859,6 +2880,7 @@ class RunCreateSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
         default="",
+        max_length=CLARIFICATION_MAX_ORIGINAL_CHARS,
     )
     idempotency_key = serializers.CharField(
         required=False,

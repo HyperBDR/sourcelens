@@ -292,6 +292,7 @@ def execute_answer_run(
         )
         run.refresh_from_db()
         if dispatch and run.status not in [
+            Run.Status.AWAITING_USER_INPUT,
             Run.Status.DONE,
             Run.Status.FAILED,
             Run.Status.CANCELLED,
