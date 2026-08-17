@@ -435,7 +435,8 @@
               <pre
                 v-if="item.exception"
                 class="mt-2 text-xs font-mono text-red-700 whitespace-pre-wrap bg-red-50 p-2 rounded border border-red-100"
-                >{{ item.exception }}</pre>
+                >{{ item.exception }}</pre
+              >
             </div>
           </div>
         </div>
@@ -455,7 +456,8 @@
       <div class="bg-red-50 border border-red-200 rounded-lg p-4 shadow-sm">
         <pre
           class="text-xs font-mono text-red-800 whitespace-pre-wrap overflow-auto max-h-96"
-          >{{ task.traceback }}</pre>
+          >{{ task.traceback }}</pre
+        >
       </div>
     </div>
   </div>
@@ -900,8 +902,8 @@ const conversionEnabled = computed(() => {
   const options = conversionOptions.value
   return Boolean(
     options.document === true ||
-    options.image === true ||
-    options.embedded_image === true
+      options.image === true ||
+      options.embedded_image === true
   )
 })
 

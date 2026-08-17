@@ -623,7 +623,8 @@
               >
                 <pre
                   class="text-xs font-mono text-red-800 whitespace-pre-wrap break-words"
-                  >{{ selectedDetail.error }}</pre>
+                  >{{ selectedDetail.error }}</pre
+                >
               </div>
             </div>
             <div
@@ -641,7 +642,8 @@
               >
                 <pre
                   class="text-xs font-mono text-gray-800 whitespace-pre-wrap break-words"
-                  >{{ JSON.stringify(selectedDetail.metadata, null, 2) }}</pre>
+                  >{{ JSON.stringify(selectedDetail.metadata, null, 2) }}</pre
+                >
               </div>
             </div>
           </div>

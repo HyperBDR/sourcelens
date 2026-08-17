@@ -543,9 +543,7 @@ function startEditFromDetail(row) {
 
 function selectedVisionModelIsEligible(modelRef) {
   if (!modelRef) return true
-  const config = llmConfigOptions.value.find(
-    (item) => item.uuid === modelRef
-  )
+  const config = llmConfigOptions.value.find((item) => item.uuid === modelRef)
   if (!config || config.is_active === false) return false
   const declared = config.config?.supports_vision ?? config.config?.vision
   return (

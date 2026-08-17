@@ -44,7 +44,7 @@ function LABELS(lang) {
 const esc = (s) =>
   String(s || '').replace(
     /[&<>"]/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   )
 
 function indexHtml(result, rows, lang) {

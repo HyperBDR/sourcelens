@@ -416,7 +416,8 @@
                 >
                   <pre
                     class="text-xs font-mono text-red-800 whitespace-pre-wrap break-words"
-                    >{{ detailRecord.error_message }}</pre>
+                    >{{ detailRecord.error_message }}</pre
+                  >
                 </div>
               </div>
               <div
@@ -434,7 +435,8 @@
                 >
                   <pre
                     class="text-xs font-mono text-gray-800 whitespace-pre-wrap break-words"
-                    >{{ JSON.stringify(detailRecord.payload, null, 2) }}</pre>
+                    >{{ JSON.stringify(detailRecord.payload, null, 2) }}</pre
+                  >
                 </div>
               </div>
               <div
@@ -453,7 +455,8 @@
                       typeof detailRecord.response === 'object'
                         ? JSON.stringify(detailRecord.response, null, 2)
                         : detailRecord.response
-                    }}</pre>
+                    }}</pre
+                  >
                 </div>
               </div>
             </template>

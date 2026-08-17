@@ -44,8 +44,14 @@ test('main.css positions BaseDateInput calendar and hides native empty text', ()
     new URL('../src/assets/css/main.css', import.meta.url),
     'utf8'
   )
-  assert.match(source, /input\.base-date-input\.is-empty::-webkit-datetime-edit/)
-  assert.match(source, /input\.base-date-input::-webkit-calendar-picker-indicator/)
+  assert.match(
+    source,
+    /input\.base-date-input\.is-empty::-webkit-datetime-edit/
+  )
+  assert.match(
+    source,
+    /input\.base-date-input::-webkit-calendar-picker-indicator/
+  )
 })
 test('common locales define datePlaceholder', () => {
   const en = JSON.parse(

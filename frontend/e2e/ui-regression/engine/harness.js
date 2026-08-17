@@ -96,8 +96,10 @@ export async function checkCell(page, { route, locale, viewport, state }) {
     expect(leaks, `i18n leaks on ${route.id} [${locale}]`).toEqual([])
 
     const problems = consoleProblems()
-    expect(problems, `console problems on ${route.id} [${locale}/${viewport}]`)
-      .toEqual([])
+    expect(
+      problems,
+      `console problems on ${route.id} [${locale}/${viewport}]`
+    ).toEqual([])
   } catch (err) {
     deterministic = 'fail'
     throw err
@@ -109,9 +111,7 @@ export async function checkCell(page, { route, locale, viewport, state }) {
       // requirement to verify and judges against something that isn't there.
       id: `${route.id} · ${locale} · ${viewport} · ${state}`,
       intent:
-        route.intent?.[locale] ||
-        route.intent?.en ||
-        'Page renders correctly.',
+        route.intent?.[locale] || route.intent?.en || 'Page renders correctly.',
       screenshot: shot,
       locale,
       viewport,

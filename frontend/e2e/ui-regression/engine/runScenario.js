@@ -67,7 +67,7 @@ export async function runScenario(page, { scenario, locale, state, seed }) {
       step: step.name,
       stepIndex: i,
       intent:
-        (step.expect?.[locale] || step.expect?.en || 'Step renders correctly.'),
+        step.expect?.[locale] || step.expect?.en || 'Step renders correctly.',
       screenshot: shot,
       locale,
       state,

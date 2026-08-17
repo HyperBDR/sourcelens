@@ -24,11 +24,7 @@ for (const scenario of scenarios) {
       await page.setViewportSize({ width: 1280, height: 800 })
       await seed(page, locale)
       // Install the scenario's mocks (a fake route context) before any step.
-      await installMocks(
-        page,
-        { mocks: scenario.mocks || {} },
-        'error'
-      )
+      await installMocks(page, { mocks: scenario.mocks || {} }, 'error')
       await runScenario(page, {
         scenario,
         locale,

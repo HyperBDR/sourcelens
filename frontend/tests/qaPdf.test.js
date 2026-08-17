@@ -31,8 +31,9 @@ test('PDF filename falls back to the current question', async () => {
 })
 
 test('content disposition filename is decoded and sanitized', async () => {
-  const { filenameFromContentDisposition } =
-    await import('../src/utils/qaPdf.js')
+  const { filenameFromContentDisposition } = await import(
+    '../src/utils/qaPdf.js'
+  )
 
   assert.equal(
     filenameFromContentDisposition(

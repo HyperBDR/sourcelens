@@ -78,7 +78,9 @@ if (resultPath) {
 const htmlPath = arg('html')
 if (htmlPath) {
   const reportTitle =
-    lang === 'zh-CN' ? '视觉审计交叉核对 — 完整运行' : 'Visual-audit cross-check — full run'
+    lang === 'zh-CN'
+      ? '视觉审计交叉核对 — 完整运行'
+      : 'Visual-audit cross-check — full run'
   writeFileSync(htmlPath, renderHtml(result, reportTitle, lang))
   console.log(`\nHTML report: ${htmlPath}`)
 }

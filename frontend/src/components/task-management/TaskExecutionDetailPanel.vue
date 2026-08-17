@@ -195,7 +195,8 @@
                   <dd class="text-sm text-gray-600">
                     <pre
                       class="bg-gray-50 p-3 rounded text-xs overflow-auto max-h-64"
-                      >{{ JSON.stringify(task.result, null, 2) }}</pre>
+                      >{{ JSON.stringify(task.result, null, 2) }}</pre
+                    >
                   </dd>
                 </div>
               </dl>
