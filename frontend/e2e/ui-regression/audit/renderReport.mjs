@@ -28,15 +28,18 @@ const esc = (s) =>
 const STRINGS = {
   en: {
     pass: 'PASS',
-    fail: 'FAIL', warn: 'WARN',
-    failReason: 'Why it failed: ', warnReason: 'Style / layout / i18n notes: ',
+    fail: 'FAIL',
+    warn: 'WARN',
+    failReason: 'Why it failed: ',
+    warnReason: 'Style / layout / i18n notes: ',
     noReason: 'The screen does not match the intent.',
     intent: 'intent',
     deterministic: 'deterministic test',
     visual: 'visual audit',
     note: 'visual note',
     issues: 'issues found',
-    fAll: 'All', fAllRoutes: 'All pages',
+    fAll: 'All',
+    fAllRoutes: 'All pages',
     summary: (r) =>
       `${r.total} cases · ${r.passed} pass · ${r.warned || 0} warn · ${
         r.failed || 0
@@ -45,24 +48,30 @@ const STRINGS = {
   },
   'zh-CN': {
     pass: '测试通过',
-    fail: '测试失败', warn: '警告',
-    failReason: '失败原因：', warnReason: '样式/布局/翻译提示：',
+    fail: '测试失败',
+    warn: '警告',
+    failReason: '失败原因：',
+    warnReason: '样式/布局/翻译提示：',
     noReason: '画面与预期不符。',
     intent: '预期',
     deterministic: '确定性测试',
     visual: '视觉审计',
     note: '视觉说明',
     issues: '发现的问题',
-    fAll: '全部', fAllRoutes: '全部页面',
+    fAll: '全部',
+    fAllRoutes: '全部页面',
     summary: (r) =>
       `共 ${r.total} 项 · 通过 ${r.passed} · 警告 ${r.warned || 0} · 失败 ${
         r.failed || 0
-      }` +
-      ` —— <b>警告=样式/布局/翻译建议；失败=意图不符。</b>`
+      }` + ` —— <b>警告=样式/布局/翻译建议；失败=意图不符。</b>`
   }
 }
 
-export function renderHtml(result, title = 'Visual-audit cross-check', lang = 'en') {
+export function renderHtml(
+  result,
+  title = 'Visual-audit cross-check',
+  lang = 'en'
+) {
   const S = STRINGS[lang] || STRINGS.en
   // Distinct routes (first id segment) for the route dropdown.
   const routes = [

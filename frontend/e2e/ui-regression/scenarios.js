@@ -60,7 +60,10 @@ export const scenarios = [
           // would (the widget sets turnstilePassed=true on @verified), then
           // send. Without passing the turnstile the send path is unreachable —
           // itself a middle-of-flow dependency a final-screen check misses.
-          await page.locator('input[type="email"]').first().fill('user@example.com')
+          await page
+            .locator('input[type="email"]')
+            .first()
+            .fill('user@example.com')
           await page.evaluate(() => {
             const btn = [...document.querySelectorAll('button')].find((b) =>
               /send|发送/i.test(b.textContent || '')

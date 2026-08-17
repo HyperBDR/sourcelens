@@ -49,9 +49,7 @@ export async function installMocks(page, route, state) {
     }
 
     const hit = entries.find(([glob]) => matches(url.pathname, glob))
-    const response = hit
-      ? resolveResponse(hit[1], state)
-      : DEFAULT_UNMATCHED
+    const response = hit ? resolveResponse(hit[1], state) : DEFAULT_UNMATCHED
 
     const fulfill = { status: response.status || 200 }
     if (response.json !== undefined) {

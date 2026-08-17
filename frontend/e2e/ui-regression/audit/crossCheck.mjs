@@ -30,7 +30,11 @@ function verdictFor(det, satisfied) {
   // be lying, and only THAT escalates to a human.
   const detPass = det === 'pass'
   const agree = detPass === satisfied
-  return agree ? (detPass ? 'AGREE · pass' : 'AGREE · fail') : 'DISAGREE → human'
+  return agree
+    ? detPass
+      ? 'AGREE · pass'
+      : 'AGREE · fail'
+    : 'DISAGREE → human'
 }
 
 // Bounded-concurrency map that PRESERVES input order — the visual backend is
@@ -44,7 +48,9 @@ async function mapLimit(items, limit, fn) {
       out[i] = await fn(items[i], i)
     }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker)
+  )
   return out
 }
 
@@ -58,8 +64,7 @@ export async function crossCheck(cases, judge, concurrency = 6) {
     //   warn — intent met, but the visual audit raised style/layout/i18n
     //          issues (yellow) — surfaced, not blocking.
     //   pass — intent met, no issues (green).
-    const isFail =
-      verdict.startsWith('DISAGREE') || verdict.startsWith('FAIL')
+    const isFail = verdict.startsWith('DISAGREE') || verdict.startsWith('FAIL')
     const severity = isFail ? 'fail' : issues.length ? 'warn' : 'pass'
     return {
       id: c.id,

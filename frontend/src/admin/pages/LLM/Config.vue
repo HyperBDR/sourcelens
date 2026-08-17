@@ -1246,14 +1246,12 @@ const currentProviderSchema = computed(
 )
 
 const advancedEditableParams = computed(() =>
-  getProviderEditableParams(form.provider).filter((parameter) =>
-    !CORE_CONFIG_PARAMS.has(parameter) && parameter !== 'vision'
+  getProviderEditableParams(form.provider).filter(
+    (parameter) => !CORE_CONFIG_PARAMS.has(parameter) && parameter !== 'vision'
   )
 )
 
-const isCustomProvider = computed(
-  () => form.provider === 'openai_compatible'
-)
+const isCustomProvider = computed(() => form.provider === 'openai_compatible')
 
 const currentProviderModels = computed(() => {
   const list = (modelsData.value?.providers || []).find(

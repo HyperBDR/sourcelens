@@ -8,10 +8,10 @@ function sameAttachmentUuids(left, right) {
 function isSameSubmission(pending, candidate) {
   return Boolean(
     pending &&
-    pending.sessionUuid === candidate.sessionUuid &&
-    pending.question === candidate.question &&
-    pending.retryOfRunUuid === candidate.retryOfRunUuid &&
-    sameAttachmentUuids(pending.attachmentUuids, candidate.attachmentUuids)
+      pending.sessionUuid === candidate.sessionUuid &&
+      pending.question === candidate.question &&
+      pending.retryOfRunUuid === candidate.retryOfRunUuid &&
+      sameAttachmentUuids(pending.attachmentUuids, candidate.attachmentUuids)
   )
 }
 

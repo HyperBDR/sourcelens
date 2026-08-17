@@ -23,7 +23,8 @@ module.exports = {
   },
   webServer: {
     command:
-      process.env.UI_WEB_CMD || 'npm run build && npm run preview -- --port 4173',
+      process.env.UI_WEB_CMD ||
+      'npm run build && npm run preview -- --port 4173',
     url: baseURL,
     timeout: 180000,
     reuseExistingServer: !process.env.CI

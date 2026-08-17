@@ -45,18 +45,18 @@ export function collectConsoleProblems(page, { ignore = [] } = {}) {
 export async function findI18nLeaks(page) {
   const scan = () =>
     page.evaluate(() => {
-    const leakPattern = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*){2,}$/
-    const leaks = new Set()
-    const walker = document.createTreeWalker(
-      document.body,
-      NodeFilter.SHOW_TEXT
-    )
-    let node
-    while ((node = walker.nextNode())) {
-      const text = node.textContent.trim()
-      if (leakPattern.test(text)) leaks.add(text)
-    }
-    return [...leaks]
+      const leakPattern = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*){2,}$/
+      const leaks = new Set()
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT
+      )
+      let node
+      while ((node = walker.nextNode())) {
+        const text = node.textContent.trim()
+        if (leakPattern.test(text)) leaks.add(text)
+      }
+      return [...leaks]
     })
 
   try {

@@ -43,7 +43,8 @@
       </div>
       <pre
         class="max-h-80 overflow-auto rounded-md border border-line bg-ink-900 p-3 font-mono text-xs leading-relaxed text-ink-100"
-        >{{ composeText }}</pre>
+        >{{ composeText }}</pre
+      >
     </div>
 
     <p class="text-xs text-ink-400">
