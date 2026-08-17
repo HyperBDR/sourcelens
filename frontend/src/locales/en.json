@@ -306,7 +306,6 @@
       "stop": "Stop",
       "runStopped": "Execution stopped.",
       "runSubmitted": "Run submitted.",
-      "tabAnswerCompleted": "Answer completed",
       "submitFailed": "Failed to submit query.",
       "waitingForResult": "Still waiting for execution result.",
       "thinking": "Analyzing project context",

@@ -16,7 +16,6 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
 
 import { useSessionActivity } from '@/composables/useSessionActivity'
 import { useUserStore } from '@/store/user'
@@ -27,33 +26,18 @@ import ActivityNotificationStack from '@/components/ui/ActivityNotificationStack
 import Toast from '@/components/ui/Toast.vue'
 import UserSettingsModal from '@/components/settings/UserSettingsModal.vue'
 import {
-  answerCompletionTitle,
   readUnreadSessions,
   UNREAD_STORAGE_KEY
 } from '@/utils/answerCompletionNotifications'
 import { stopRunCompletionTracking } from '@/utils/runCompletionTracking'
 
-const { t } = useI18n()
 const userStore = useUserStore()
 const uiStore = useUiStore()
 const preferencesStore = usePreferencesStore()
 const sessionActivity = useSessionActivity()
-const baseDocumentTitle = document.title || 'SourceLens'
 
 function refreshUnreadSessions() {
   sessionActivity.setUnreadSessions(readUnreadSessions(window.localStorage))
-}
-
-function refreshDocumentTitle() {
-  const hasUnread =
-    Boolean(userStore.token) &&
-    preferencesStore.answerCompletionIndicator &&
-    Object.keys(sessionActivity.state.unreadSessions).length > 0
-  document.title = answerCompletionTitle({
-    baseTitle: baseDocumentTitle,
-    completionLabel: t('lens.chat.tabAnswerCompleted'),
-    hasUnread
-  })
 }
 
 function handleCompletionStorage(event) {
@@ -69,19 +53,9 @@ function handleCompletionStorage(event) {
 }
 
 watch(
-  [
-    () => preferencesStore.currentLanguage,
-    () => Object.keys(sessionActivity.state.unreadSessions).join(','),
-    () => userStore.token
-  ],
-  refreshDocumentTitle
-)
-
-watch(
   () => preferencesStore.answerCompletionIndicator,
   () => {
     refreshUnreadSessions()
-    refreshDocumentTitle()
   }
 )
 
@@ -99,7 +73,6 @@ watch(
 onMounted(() => {
   window.addEventListener('storage', handleCompletionStorage)
   refreshUnreadSessions()
-  refreshDocumentTitle()
   // Check if user is logged in, but only if we have a token and user is not loaded
   // This avoids duplicate calls with router guard
   const hasToken = !!localStorage.getItem('access_token')
