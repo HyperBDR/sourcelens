@@ -13,5 +13,6 @@ export function shouldShowRetryHint({
 }) {
   if (runStatusResolving || isRunActive) return false
   const last = messages[messages.length - 1]
+  if (last?.thinking) return false
   return !!last && last.role === 'assistant' && !(last.content || '').trim()
 }
