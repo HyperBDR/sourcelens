@@ -62,6 +62,7 @@ from .runtime_events import (
     sanitize_termination_detail,
 )
 from .services import (
+    CLARIFICATION_MAX_ORIGINAL_CHARS,
     create_execution_run,
     supports_document_attachments,
     validate_retry_run,
@@ -2879,6 +2880,7 @@ class RunCreateSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
         default="",
+        max_length=CLARIFICATION_MAX_ORIGINAL_CHARS,
     )
     idempotency_key = serializers.CharField(
         required=False,

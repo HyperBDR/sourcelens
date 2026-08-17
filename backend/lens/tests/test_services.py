@@ -57,6 +57,7 @@ from lens.serializers import MessageSerializer, RunSerializer
 from lens.services import (
     _build_sync_event,
     _step_sequence,
+    build_clarification_continuation_question,
     append_lensnode_output,
     build_run_history,
     build_run_history_artifacts,
@@ -887,6 +888,259 @@ class LensServiceTests(TransactionTestCase):
             build_artifacts.return_value,
         )
         build_artifacts.assert_called_once_with(run)
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_preserves_clarification_context(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        parent = create_execution_run(
+            session=self.session,
+            question="Why did the deployment fail?",
+            enqueue=False,
+        )
+        parent.status = Run.Status.AWAITING_USER_INPUT
+        parent.termination_detail = {
+            "reason": "needs_user_input",
+            "request": {
+                "request_id": "clarification-1",
+                "question": "Which environment should I inspect?",
+                "reason": "ambiguous_scope",
+                "answer_type": "text",
+            },
+        }
+        parent.save(update_fields=["status", "termination_detail"])
+        continuation = create_execution_run(
+            session=self.session,
+            question="Production",
+            retry_of_run=parent,
+            enqueue=False,
+        )
+
+        dispatch_run_to_lensnode(continuation, "Production")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            payload["question"],
+            "Original user request:\n"
+            "Why did the deployment fail?\n\n"
+            "Clarification question:\n"
+            "Which environment should I inspect?\n"
+            "User clarification:\n"
+            "Production",
+        )
+
+    def test_dispatch_preserves_multiple_clarification_answers(self):
+        first = create_execution_run(
+            session=self.session,
+            question="Why did the deployment fail?",
+            enqueue=False,
+        )
+        first.status = Run.Status.AWAITING_USER_INPUT
+        first.termination_detail = {
+            "reason": "needs_user_input",
+            "request": {
+                "request_id": "clarification-1",
+                "question": "Which environment should I inspect?",
+                "reason": "ambiguous_scope",
+                "answer_type": "text",
+            },
+        }
+        first.save(update_fields=["status", "termination_detail"])
+        second = create_execution_run(
+            session=self.session,
+            question="Production",
+            retry_of_run=first,
+            enqueue=False,
+        )
+        second.status = Run.Status.AWAITING_USER_INPUT
+        second.termination_detail = {
+            "reason": "needs_user_input",
+            "request": {
+                "request_id": "clarification-2",
+                "question": "Which service should I inspect?",
+                "reason": "ambiguous_target",
+                "answer_type": "text",
+            },
+        }
+        second.save(update_fields=["status", "termination_detail"])
+        third = create_execution_run(
+            session=self.session,
+            question="API gateway",
+            retry_of_run=second,
+            enqueue=False,
+        )
+
+        question = build_clarification_continuation_question(
+            third,
+            "API gateway",
+        )
+
+        self.assertEqual(
+            question,
+            "Original user request:\n"
+            "Why did the deployment fail?\n\n"
+            "Clarification question:\n"
+            "Which environment should I inspect?\n"
+            "User clarification:\n"
+            "Production\n\n"
+            "Clarification question:\n"
+            "Which service should I inspect?\n"
+            "User clarification:\n"
+            "API gateway",
+        )
+
+    def test_dispatch_preserves_original_after_many_clarifications(self):
+        current = create_execution_run(
+            session=self.session,
+            question="Why did the deployment fail?",
+            enqueue=False,
+        )
+        for index in range(6):
+            current.status = Run.Status.AWAITING_USER_INPUT
+            current.termination_detail = {
+                "reason": "needs_user_input",
+                "request": {
+                    "request_id": f"clarification-{index}",
+                    "question": f"Clarification question {index}",
+                    "reason": "missing_input",
+                    "answer_type": "text",
+                },
+            }
+            current.save(update_fields=["status", "termination_detail"])
+            current = create_execution_run(
+                session=self.session,
+                question=f"Answer {index}",
+                retry_of_run=current,
+                enqueue=False,
+            )
+
+        question = build_clarification_continuation_question(
+            current,
+            "Answer 5",
+        )
+
+        self.assertIn(
+            "Original user request:\nWhy did the deployment fail?",
+            question,
+        )
+        self.assertNotIn("Clarification question 0", question)
+        self.assertIn("Clarification question 1", question)
+        self.assertIn("User clarification:\nAnswer 5", question)
+
+    def test_dispatch_preserves_long_clarification_answer(self):
+        parent = create_execution_run(
+            session=self.session,
+            question="Which deployment should I inspect?",
+            enqueue=False,
+        )
+        parent.status = Run.Status.AWAITING_USER_INPUT
+        parent.termination_detail = {
+            "reason": "needs_user_input",
+            "request": {
+                "request_id": "clarification-1",
+                "question": "Provide the deployment identifier.",
+                "reason": "missing_input",
+                "answer_type": "text",
+            },
+        }
+        parent.save(update_fields=["status", "termination_detail"])
+        answer = "A" * 2501
+        continuation = create_execution_run(
+            session=self.session,
+            question=answer,
+            retry_of_run=parent,
+            enqueue=False,
+        )
+
+        question = build_clarification_continuation_question(
+            continuation,
+            answer,
+        )
+
+        self.assertIn(answer, question)
+
+    def test_dispatch_preserves_long_original_request(self):
+        original = "Investigate this deployment in detail: " + ("A" * 2501)
+        parent = create_execution_run(
+            session=self.session,
+            question=original,
+            enqueue=False,
+        )
+        parent.status = Run.Status.AWAITING_USER_INPUT
+        parent.termination_detail = {
+            "reason": "needs_user_input",
+            "request": {
+                "request_id": "clarification-1",
+                "question": "Which environment should I inspect?",
+                "reason": "ambiguous_scope",
+                "answer_type": "text",
+            },
+        }
+        parent.save(update_fields=["status", "termination_detail"])
+        continuation = create_execution_run(
+            session=self.session,
+            question="Production",
+            retry_of_run=parent,
+            enqueue=False,
+        )
+
+        question = build_clarification_continuation_question(
+            continuation,
+            "Production",
+        )
+
+        self.assertIn(original, question)
+
+    def test_dispatch_preserves_clarification_for_attachment_only_request(
+        self,
+    ):
+        attachment = MessageAttachment.objects.create(
+            session=self.session,
+            uploaded_by=self.user,
+            kind=MessageAttachment.Kind.IMAGE,
+            original_name="error.png",
+            mime_type="image/png",
+            byte_size=7,
+        )
+        parent = create_execution_run(
+            session=self.session,
+            question="",
+            enqueue=False,
+            attachment_uuids=[str(attachment.uuid)],
+        )
+        parent.status = Run.Status.AWAITING_USER_INPUT
+        parent.termination_detail = {
+            "reason": "needs_user_input",
+            "request": {
+                "request_id": "clarification-1",
+                "question": "Which image issue should I inspect?",
+                "reason": "ambiguous_scope",
+                "answer_type": "text",
+            },
+        }
+        parent.save(update_fields=["status", "termination_detail"])
+        continuation = create_execution_run(
+            session=self.session,
+            question="The deployment error",
+            retry_of_run=parent,
+            enqueue=False,
+        )
+
+        question = build_clarification_continuation_question(
+            continuation,
+            "The deployment error",
+        )
+
+        self.assertIn("(attachment-only request)", question)
+        self.assertIn(
+            "Clarification question:\nWhich image issue should I inspect?",
+            question,
+        )
+        self.assertIn("User clarification:\nThe deployment error", question)
 
     @patch("lens.services.attachment_data_url")
     @patch("lens.services.async_to_sync")
