@@ -1,0 +1,8 @@
+type: improvement
+audience: user
+en: >-
+  Removed the "answer completed" browser-tab title hint; completion is now
+  surfaced only through in-app badges and optional system notifications.
+zh-CN: >-
+  移除浏览器标签页的“回答已完成”标题提示；回答完成改为仅通过站内未读标记和
+  可选系统通知提示。
