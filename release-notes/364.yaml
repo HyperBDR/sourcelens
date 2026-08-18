@@ -1,0 +1,9 @@
+type: feature
+audience: admin
+en: >-
+  Added a replayable per-run trajectory to Run Observation, including model
+  timing and usage, nested tool calls, retries, interruptions, and
+  checkpoint-aware continuity.
+zh-CN: >-
+  在运行观测中新增可回放的单次运行轨迹，涵盖模型耗时与用量、嵌套工具调用、
+  重试、中断以及感知检查点的连续记录。
