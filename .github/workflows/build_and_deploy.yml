@@ -209,6 +209,12 @@ jobs:
             VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
             VITE_SENTRY_ENVIRONMENT=${{ vars.VITE_SENTRY_ENVIRONMENT }}
             VITE_GA_ID=${{ vars.VITE_GA_ID }}
+          # Aliyun ACR rejects buildx's default OCI attestation manifests
+          # (application/vnd.oci.empty.v1+json) with "unknown manifest class".
+          # Disable provenance/SBOM so the same image pushes to both Docker Hub
+          # and ACR; nothing in this repo consumes attestations.
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
