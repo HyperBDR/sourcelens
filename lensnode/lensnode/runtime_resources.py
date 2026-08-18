@@ -160,6 +160,7 @@ def prepare_runtime_resources(
         config,
         mcp_configs,
         emit_event=emit_event,
+        command=command,
     )
 
     mcp_config_path = mcp_root / "mcp.json"

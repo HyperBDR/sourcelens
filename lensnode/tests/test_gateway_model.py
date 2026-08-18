@@ -1057,6 +1057,37 @@ def test_sql_syntax_failure_is_classified_as_correctable_request():
     assert result["result_meta"]["recoverable_by_model"] is True
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        (
+            '{"ok":false,"status_code":422,'
+            '"detail":"Unknown JSON field: state_reason"}'
+        ),
+        (
+            '{"ok":false,"status_code":400,'
+            '"detail":"project must not be empty"}'
+        ),
+    ],
+)
+def test_http_client_input_failure_is_classified_as_request(content):
+    message = ToolMessage(
+        content=content,
+        name="run_skill_artifact",
+        tool_call_id="call_1",
+        status="error",
+    )
+
+    payload = _message_to_gateway(
+        message,
+        include_recovery_metadata=True,
+    )
+    result = json.loads(payload["content"])
+
+    assert result["result_meta"]["error_type"] == "request"
+    assert result["result_meta"]["recoverable_by_model"] is True
+
+
 def test_unclassified_tool_failure_allows_one_model_correction():
     message = ToolMessage(
         content='{"ok":false,"error":"REMOTE_BROKEN"}',

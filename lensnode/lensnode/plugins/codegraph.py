@@ -57,9 +57,16 @@ class CodeGraphPlugin(LensNodePlugin):
             and shutil.which(command)
         )
 
-    def contribute_mcp_servers(self, config, emit_event=None):
+    def contribute_mcp_servers(
+        self,
+        config,
+        emit_event=None,
+        command=None,
+    ):
         """Return the CodeGraph stdio server once the index is usable."""
 
+        if command is not None and command.get("task") != "code_analysis":
+            return []
         workspace = Path(config.workspace_path)
         if not _ensure_codegraph_index(
             config,

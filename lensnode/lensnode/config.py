@@ -40,6 +40,7 @@ class LensNodeConfig:
     codegraph_command: str = "codegraph"
     codegraph_init_timeout_s: int = 300
     reasoning_effort: str | None = None
+    planning_reasoning_effort: str | None = "none"
 
 
 def _optional_int(value):
@@ -163,6 +164,13 @@ def load_config():
             os.getenv("LENSNODE_CODEGRAPH_INIT_TIMEOUT_S", "300")
         ),
         reasoning_effort=os.getenv("LENSNODE_REASONING_EFFORT") or None,
+        planning_reasoning_effort=(
+            os.getenv(
+                "LENSNODE_PLANNING_REASONING_EFFORT",
+                "none",
+            )
+            or None
+        ),
         offload_tool_tokens=int(
             os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"
         ),

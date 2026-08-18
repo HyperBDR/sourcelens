@@ -1166,8 +1166,12 @@ def _tool_result_metadata(result, tool_name):
         status_code = int(result.get("status_code") or 0)
     except (TypeError, ValueError):
         status_code = 0
+    upstream_auth_failure = status_code in {401, 403}
+    upstream_request_failure = 400 <= status_code < 500 and not (
+        upstream_auth_failure
+    )
     upstream_server_failure = 500 <= status_code < 600
-    if any(
+    if upstream_auth_failure or any(
         marker in error_code
         for marker in ("AUTH", "CONFIG", "CREDENTIAL", "PERMISSION")
     ):
@@ -1203,7 +1207,7 @@ def _tool_result_metadata(result, tool_name):
             "Stop calling this tool and synthesize the answer from evidence "
             "already collected."
         )
-    elif artifact_request_failure or any(
+    elif upstream_request_failure or artifact_request_failure or any(
         marker in error_code
         for marker in (
             "INVALID",
@@ -1223,9 +1227,12 @@ def _tool_result_metadata(result, tool_name):
             "SQL SYNTAX",
             "SYNTAX ERROR",
             "UNKNOWN FLAG",
+            "UNKNOWN JSON FIELD",
             "USAGE:",
             "VALIDATION ERROR",
             "RESPONSE VALIDATION",
+            "MUST NOT BE EMPTY",
+            "MISSING REQUIRED",
         )
     ):
         error_type = "request"
