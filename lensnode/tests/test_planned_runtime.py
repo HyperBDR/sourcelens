@@ -182,6 +182,67 @@ def test_planned_code_analysis_returns_awaiting_user_input_for_clarification(
     )
 
 
+def test_planned_planner_emits_planning_phase_and_reasoning_pulse(
+    tmp_path,
+):
+    clarification_plan = {
+        "objective": "Inspect the deployment path",
+        "clarification": {
+            "question": "Which deployment environment should I inspect?",
+            "reason": "ambiguous_scope",
+            "answer_type": "text",
+        },
+    }
+    events = []
+    invoke_kwargs = []
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def invoke(self, _messages, **kwargs):
+            invoke_kwargs.append(kwargs)
+            return SimpleNamespace(content=json.dumps(clarification_plan))
+
+    model = Model()
+    agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": "Why did deployment fail?"},
+        tools=_workspace_tools(),
+        mcp_tools=[],
+        emit_agent_event=lambda *args: events.append(args),
+        workspace_root=tmp_path,
+    )
+
+    # The planner call went streaming with a reasoning pulse callback.
+    assert invoke_kwargs[0]["runtime_structured_output"] is True
+    assert callable(invoke_kwargs[0]["on_reasoning_delta"])
+    # A planning phase event was emitted before the planner call.
+    planning_events = [
+        detail
+        for (_event, detail) in events
+        if detail.get("event_type") == "phase.changed"
+        and detail.get("payload", {}).get("phase") == "planning"
+    ]
+    assert planning_events, "expected a planning phase event"
+
+
+def test_planned_reasoning_pulse_throttles_phase_events(tmp_path):
+    events = []
+
+    def emit(*args):
+        events.append(args)
+
+    callback = agent_runtime._planned_reasoning_pulse(emit, throttle_s=60.0)
+    # Two reasoning deltas inside the throttle window -> one pulse.
+    callback("token-a")
+    callback("token-b")
+    assert len(events) == 1
+    _event, detail = events[0]
+    assert detail["event_type"] == "phase.changed"
+    assert detail["payload"] == {"phase": "planning"}
+
+
 def test_planned_code_analysis_resume_replays_planned_pipeline(
     monkeypatch,
     tmp_path,

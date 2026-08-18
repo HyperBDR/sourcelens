@@ -1075,6 +1075,39 @@ class LensApiTests(TestCase):
             "016d5cf7-2245-4015-b242-d6323e795b58",
         )
 
+    def test_global_setting_accepts_history_budget_object(self):
+        response = self.client.post(
+            "/api/lens/admin/global-settings/",
+            {
+                "key": "lens.history_budget",
+                "value": {
+                    "pairs": 8,
+                    "message_chars": 3000,
+                    "total_chars": 15000,
+                },
+                "description": "History replay budget",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        setting = GlobalSetting.objects.get(key="lens.history_budget")
+        self.assertEqual(setting.value["pairs"], 8)
+
+    def test_global_setting_rejects_non_positive_history_budget(self):
+        response = self.client.post(
+            "/api/lens/admin/global-settings/",
+            {
+                "key": "lens.history_budget",
+                "value": {"pairs": -2, "message_chars": 0},
+                "description": "History replay budget",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("pairs", str(response.data["value"]))
+
     def test_global_setting_list_returns_every_setting(self):
         GlobalSetting.objects.bulk_create(
             [

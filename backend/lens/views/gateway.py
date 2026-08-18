@@ -130,6 +130,7 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
             tool_choice=request.data.get("tool_choice"),
             temperature=request.data.get("temperature"),
             max_tokens=request.data.get("max_tokens"),
+            reasoning_effort=request.data.get("reasoning_effort"),
             return_message=bool(request.data.get("return_message")),
         )
         data = {
@@ -201,6 +202,7 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
                         tool_choice=payload.get("tool_choice"),
                         temperature=payload.get("temperature"),
                         max_tokens=payload.get("max_tokens"),
+                        reasoning_effort=payload.get("reasoning_effort"),
                     )
                     token_count = 0
                     while True:

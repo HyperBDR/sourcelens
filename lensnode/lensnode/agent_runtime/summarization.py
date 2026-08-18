@@ -123,6 +123,13 @@ def build_summarization_middleware(
     trigger_tokens = config.summary_trigger_tokens
     if trigger_tokens <= 0:
         return None
+    context_window = getattr(config, "context_window_tokens", 0)
+    trigger_ratio = getattr(config, "summary_trigger_ratio", 0.0)
+    window_trigger = (
+        int(context_window * trigger_ratio) if context_window > 0 else 0
+    )
+    if window_trigger > 0:
+        trigger_tokens = min(trigger_tokens, window_trigger)
     summary_model = model_class(
         model_ref=str(model_ref),
         ai_gateway_url=config.ai_gateway_url,

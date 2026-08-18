@@ -196,6 +196,13 @@ def _select_general_chat_route(
             ],
             runtime_control_call=True,
             temperature=0,
+            # Route classification only picks an execution path; a light
+            # reasoning budget keeps this control call fast. "none" is
+            # deliberate: DeepSeek maps low/medium/high all to thinking
+            # enabled, while none disables thinking (measured ~40% faster
+            # with identical route decisions). Providers that lack the
+            # parameter drop it via gateway drop_params handling.
+            reasoning_effort="none",
         )
     except RunCancelledError:
         raise

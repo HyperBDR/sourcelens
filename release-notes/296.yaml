@@ -1,0 +1,8 @@
+type: improvement
+audience: user
+en: >-
+  Faster first response on assistant chats and a clearer "planning" pulse
+  while multi-step work is being prepared, with tunable chat-history budgets.
+zh-CN: >-
+  助手对话首条回复更快，多步任务准备阶段有更清晰的"规划中"进度提示，
+  并支持调整聊天历史预算。

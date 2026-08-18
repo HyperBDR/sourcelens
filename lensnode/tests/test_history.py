@@ -1112,6 +1112,8 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     assert "run_skill_artifact" in prompt
     assert "creating an order" in prompt
     assert model.options["temperature"] == 0
+    # Route classification is a control call: light reasoning budget only.
+    assert model.options["reasoning_effort"] == "none"
 
 
 def test_route_selection_includes_current_images_in_classifier_input():

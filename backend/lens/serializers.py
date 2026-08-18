@@ -2388,6 +2388,23 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
                     {"value": f"{model_ref_keys[key]} must be a string or empty"}
                 )
 
+        if key == "lens.history_budget":
+            if not isinstance(value, dict):
+                raise serializers.ValidationError(
+                    {"value": "must be a JSON object"}
+                )
+            for sub_key in ("pairs", "message_chars", "total_chars"):
+                if sub_key in value and (
+                    not isinstance(value[sub_key], int) or value[sub_key] <= 0
+                ):
+                    raise serializers.ValidationError(
+                        {
+                            "value": (
+                                f"{sub_key} must be a positive integer"
+                            )
+                        }
+                    )
+
         return attrs
 
     class Meta:

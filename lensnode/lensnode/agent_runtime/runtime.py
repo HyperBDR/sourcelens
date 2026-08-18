@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from types import SimpleNamespace
 
@@ -266,27 +267,50 @@ class LensDeepAgentRuntime:
         route_decision = getattr(state, "route_decision", None) or {}
         return route_decision.get("route") == "plan_execute"
 
+    def _seed_run_checkpoint(
+        self,
+        state,
+        route_decision=None,
+        call_saver=True,
+    ):
+        """Seed durable checkpoint state for a run before its first model
+        call.
+
+        Shared by the planned, route-classified, and deep-agent paths so the
+        saver, resume metadata, and initial checkpoint are always seeded the
+        same way. Callers guard on resume/checkpoint availability and own any
+        error handling on top of the returned success flag. ``call_saver`` is
+        False when the caller already resolved the saver (e.g. to store it as
+        the graph checkpointer) to avoid a duplicate saver lookup.
+        """
+
+        if call_saver:
+            get_checkpoint_saver(self.config.workspace_path)
+        save_resume_metadata(
+            state.run_uuid,
+            self.config.workspace_path,
+            route_decision=route_decision,
+            history_assistant_turns=state.history_assistant_turns,
+        )
+        save_initial_checkpoint(
+            state.run_uuid,
+            self.config.workspace_path,
+            state.initial_messages,
+        )
+        state.checkpoint_ready = True
+        state.initial_checkpoint_seeded = True
+        state.notify_checkpoint_ready()
+
     def _prepare_planned_checkpoint(self, state):
         """Seed durable state before the planned pipeline invokes a model."""
 
         if state.resume_state is not None or not checkpoint_enabled():
             return
         try:
-            get_checkpoint_saver(self.config.workspace_path)
-            save_resume_metadata(
-                state.run_uuid,
-                self.config.workspace_path,
+            self._seed_run_checkpoint(
+                state,
                 route_decision=_PLANNED_CODE_ANALYSIS_ROUTE,
-                history_assistant_turns=state.history_assistant_turns,
             )
-            save_initial_checkpoint(
-                state.run_uuid,
-                self.config.workspace_path,
-                state.initial_messages,
-            )
-            state.checkpoint_ready = True
-            state.initial_checkpoint_seeded = True
-            state.notify_checkpoint_ready()
         except Exception:
             LOGGER.exception(
                 "Failed to enable planned code analysis checkpoint"
@@ -520,6 +544,7 @@ class LensDeepAgentRuntime:
                 0.8,
             ),
             token_budget_wrapup_event=state.token_budget_wrapup_event,
+            reasoning_effort=getattr(self.config, "reasoning_effort", None),
             on_runtime_state_change=lambda runtime_state: (
                 state.persist_execution_state(
                     guardrail_state=runtime_state
@@ -629,22 +654,7 @@ class LensDeepAgentRuntime:
         else:
             if state.resume_state is None and checkpoint_enabled():
                 try:
-                    get_checkpoint_saver(self.config.workspace_path)
-                    save_resume_metadata(
-                        state.run_uuid,
-                        self.config.workspace_path,
-                        history_assistant_turns=(
-                            state.history_assistant_turns
-                        ),
-                    )
-                    save_initial_checkpoint(
-                        state.run_uuid,
-                        self.config.workspace_path,
-                        state.initial_messages,
-                    )
-                    state.checkpoint_ready = True
-                    state.initial_checkpoint_seeded = True
-                    state.notify_checkpoint_ready()
+                    self._seed_run_checkpoint(state)
                 except Exception:
                     LOGGER.exception("Failed to enable route checkpoint")
             state.route_decision = _select_general_chat_route(
@@ -903,24 +913,15 @@ class LensDeepAgentRuntime:
                     state.kwargs["checkpointer"] = get_checkpoint_saver(
                         self.config.workspace_path
                     )
-                    save_resume_metadata(
-                        state.run_uuid,
-                        self.config.workspace_path,
+                    self._seed_run_checkpoint(
+                        state,
                         route_decision=(
                             state.route_decision
                             if state.runtime_mode.execution_gates
                             else {}
                         ),
-                        history_assistant_turns=state.history_assistant_turns,
+                        call_saver=False,
                     )
-                    save_initial_checkpoint(
-                        state.run_uuid,
-                        self.config.workspace_path,
-                        state.initial_messages,
-                    )
-                    state.checkpoint_ready = True
-                    state.initial_checkpoint_seeded = True
-                    state.notify_checkpoint_ready()
                 except Exception:
                     state.kwargs.pop("checkpointer", None)
                     LOGGER.exception(
@@ -1082,6 +1083,38 @@ def _scenario_for_task(task):
     return SCENARIOS.get(task or "", SCENARIOS["knowledge_qa"])
 
 
+def _planned_reasoning_pulse(
+    emit_agent_event,
+    *,
+    throttle_s=3.0,
+):
+    """Return a reasoning callback that throttles lightweight phase pulses.
+
+    Reasoning tokens prove the planner is still working without leaking
+    the chain of thought. The callback re-emits `phase.changed: planning`
+    at most once every throttle_s so the frontend sees continued liveness
+    (elapsed timer keeps advancing) instead of a frozen "planning" state.
+    """
+
+    last_pulse = [0.0]
+
+    def on_reasoning_delta(_text):
+        now = time.monotonic()
+        if now - last_pulse[0] < throttle_s:
+            return
+        last_pulse[0] = now
+        emit_agent_event(
+            "workflow.phase.changed",
+            {
+                "event_type": "phase.changed",
+                "visibility": "user",
+                "payload": {"phase": "planning"},
+            },
+        )
+
+    return on_reasoning_delta
+
+
 def _run_planned_code_analysis(
     *,
     model,
@@ -1145,12 +1178,22 @@ def _run_planned_code_analysis(
         command,
         context_skill_contents=context_skill_contents,
     )
+    emit_agent_event(
+        "workflow.phase.changed",
+        {
+            "event_type": "phase.changed",
+            "visibility": "user",
+            "payload": {"phase": "planning"},
+        },
+    )
+    pulse_callback = _planned_reasoning_pulse(emit_agent_event)
     planner_response = model.invoke(
         [
             SystemMessage(content=planner_prompt),
             HumanMessage(content=question),
         ],
-        runtime_control_call=True,
+        runtime_structured_output=True,
+        on_reasoning_delta=pulse_callback,
     )
     planner_status = "valid"
     planner_retry_count = 0
@@ -1173,7 +1216,8 @@ def _run_planned_code_analysis(
                     )
                 ),
             ],
-            runtime_control_call=True,
+            runtime_structured_output=True,
+            on_reasoning_delta=pulse_callback,
         )
         try:
             plan = parse_retrieval_plan(_message_content(repair_response))
@@ -1249,7 +1293,8 @@ def _run_planned_code_analysis(
                     )
                 ),
             ],
-            runtime_control_call=True,
+            runtime_structured_output=True,
+            on_reasoning_delta=pulse_callback,
         )
         fallback_plan = _parse_planner_response(
             fallback_response,
