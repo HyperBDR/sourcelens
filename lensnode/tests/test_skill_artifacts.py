@@ -64,12 +64,13 @@ def _resources(root, content, sha256=None, os_name=None, arch=None):
     )
 
 
-def _artifact_tool(resources, command=None, emit_event=None):
+def _artifact_tool(resources, command=None, emit_event=None, config=None):
     """Return the General Chat artifact tool."""
 
     tools = build_general_chat_tools(
         command or {},
         resources,
+        config=config,
         emit_event=emit_event,
     )
     return next(item for item in tools if item.name == "run_skill_artifact")
@@ -221,6 +222,50 @@ def test_run_skill_artifact_stops_after_configured_call_budget(tmp_path):
     assert events[-1][0] == "tool.run_skill_artifact.budget_exceeded"
     assert events[-1][1]["call_count"] == 3
     assert events[-1][1]["max_calls"] == 2
+
+
+def test_run_skill_artifact_uses_config_default_call_budget(tmp_path):
+    content = b"#!/bin/sh\nprintf '%s' \"$1\"\n"
+    resources = _resources(tmp_path, content)
+    config = type(
+        "Config",
+        (),
+        {"skill_artifact_max_calls": 25},
+    )()
+    events = []
+    artifact = _artifact_tool(
+        resources,
+        emit_event=lambda name, detail: events.append((name, detail)),
+        config=config,
+    )
+
+    for index in range(1, 26):
+        payload = json.loads(
+            artifact.invoke(
+                {
+                    "skill": "income-cli",
+                    "artifact": "income",
+                    "args": [str(index)],
+                }
+            )
+        )
+        assert payload["ok"] is True, payload
+
+    over_budget = json.loads(
+        artifact.invoke(
+            {
+                "skill": "income-cli",
+                "artifact": "income",
+                "args": ["26"],
+            }
+        )
+    )
+    assert over_budget["ok"] is False
+    assert over_budget["error"] == "ARTIFACT_CALL_LIMIT"
+    assert over_budget["max_calls"] == 25
+    assert events[-1][0] == "tool.run_skill_artifact.budget_exceeded"
+    assert events[-1][1]["call_count"] == 26
+    assert events[-1][1]["max_calls"] == 25
 
 
 def test_run_skill_artifact_allows_more_than_four_progressing_calls(

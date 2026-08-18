@@ -35,17 +35,34 @@
         data-testid="trajectory-time-overview"
         class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3"
       >
-        <div class="relative h-8 rounded bg-white ring-1 ring-gray-200">
-          <button
-            v-for="event in events"
-            :key="`overview-${event.event_id}`"
-            type="button"
-            class="absolute top-1/2 h-3 w-1 -translate-y-1/2 rounded-full"
-            :class="categoryColor(eventCategory(event))"
-            :style="{ left: `${eventPosition(event)}%` }"
-            :title="`${event.sequence} · ${event.event_type}`"
-            @click="selectedEvent = event"
-          />
+        <div class="overflow-hidden rounded-md bg-white ring-1 ring-gray-200">
+          <div
+            v-for="lane in timelineLanes"
+            :key="lane.key"
+            class="flex items-center gap-2 border-b border-gray-100 px-2 py-1 last:border-b-0"
+          >
+            <span class="w-12 shrink-0 text-[11px] font-medium text-gray-500">
+              {{ laneLabel(lane.key) }}
+            </span>
+            <div class="relative h-3 flex-1">
+              <button
+                v-for="step in lane.steps"
+                :key="`overview-${lane.key}-${step.event.event_id}`"
+                type="button"
+                class="absolute top-0 h-full rounded-sm"
+                :class="[
+                  categoryColor(eventCategory(step.event)),
+                  step.subagent ? 'ring-1 ring-amber-400' : ''
+                ]"
+                :style="{
+                  left: `${step.left}%`,
+                  width: `${step.width}%`
+                }"
+                :title="`${step.event.sequence} · ${step.event.event_type}`"
+                @click="selectedEvent = step.event"
+              />
+            </div>
+          </div>
         </div>
         <div class="mt-1 flex justify-between text-[11px] text-gray-400">
           <span>{{ timeText(summary.first_timestamp) }}</span>
@@ -243,7 +260,11 @@ import { useToast } from '@/composables/useToast'
 import { extractErrorMessage } from '@/utils/api'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
-import { buildTrajectoryRows, eventCategory } from './runTrajectory'
+import {
+  buildTimelineLanes,
+  buildTrajectoryRows,
+  eventCategory
+} from './runTrajectory'
 
 const props = defineProps({
   runUuid: { type: String, default: '' },
@@ -265,17 +286,20 @@ let requestId = 0
 
 const categoryOptions = computed(() => {
   const counts = summary.value.categories || {}
+  const hiddenCategories = new Set(['checkpoint', 'system', 'user', 'run'])
   return [
     {
       value: 'all',
       label: t('lensRuns.trajectoryAll'),
       count: summary.value.event_count || 0
     },
-    ...Object.entries(counts).map(([value, count]) => ({
-      value,
-      label: value,
-      count
-    }))
+    ...Object.entries(counts)
+      .filter(([value]) => !hiddenCategories.has(value))
+      .map(([value, count]) => ({
+        value,
+        label: value,
+        count
+      }))
   ]
 })
 
@@ -284,6 +308,20 @@ const filteredEvents = computed(() => events.value)
 const rows = computed(() =>
   buildTrajectoryRows(filteredEvents.value, collapsed.value)
 )
+
+const timelineLanes = computed(() =>
+  buildTimelineLanes(events.value, summary.value)
+)
+
+function laneLabel(key) {
+  return (
+    {
+      input: t('lensRuns.trajectoryLaneInput'),
+      model: t('lensRuns.trajectoryLaneModel'),
+      tools: t('lensRuns.trajectoryLaneTools')
+    }[key] || key
+  )
+}
 
 async function fetchTrajectory(append = false) {
   if (!props.runUuid) return
@@ -351,17 +389,6 @@ function eventMetric(event) {
   return parts.join(' · ')
 }
 
-function eventPosition(event) {
-  const first = new Date(summary.value.first_timestamp).getTime()
-  const last = new Date(summary.value.last_timestamp).getTime()
-  const current = new Date(event.timestamp).getTime()
-  if (!Number.isFinite(current) || last <= first) return 0
-  return Math.max(
-    0,
-    Math.min(99.5, ((current - first) / (last - first)) * 99.5)
-  )
-}
-
 function categoryColor(value) {
   return (
     {
@@ -419,10 +446,6 @@ watch([query, category], () => {
   if (!props.active) return
   clearTimeout(filterTimer)
   filterTimer = setTimeout(() => {
-    events.value = []
-    selectedEvent.value = null
-    collapsed.value = new Set()
-    hasMore.value = false
     fetchTrajectory()
   }, 250)
 })
