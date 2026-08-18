@@ -1,0 +1,10 @@
+type: improvement
+audience: admin
+en: >-
+  Reworked the environment variable set page with search, filtering, and
+  pagination, and added the ability to view configured values (masked by
+  default) from the list and inside the assistant wizard when a set is
+  bound to a Skill or MCP.
+zh-CN: >-
+  重新设计了环境变量配置集页面，支持搜索、筛选与分页；并可在列表页及助手
+  向导中为 Skill/MCP 绑定已有配置集时查看已配置的值（默认掩码显示）。
