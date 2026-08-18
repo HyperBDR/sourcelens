@@ -108,7 +108,31 @@ def _finalize_runtime_outcome(
     recovered = set(
         getattr(capability_middleware, "recovered_capabilities", set())
     )
-    unrecovered_failures = (failed - recovered) & required
+    failure_records = getattr(
+        capability_middleware,
+        "failure_records",
+        None,
+    )
+    if isinstance(failure_records, dict):
+        unresolved_records = [
+            detail
+            for detail in failure_records.values()
+            if isinstance(detail, dict)
+            and detail.get("scope") == "unresolved"
+            and detail.get("capability") in required
+        ]
+        unrecovered_failures = {
+            detail.get("capability") for detail in unresolved_records
+        }
+        unresolved_sources = {
+            detail.get("source")
+            for detail in unresolved_records
+            if detail.get("source")
+        }
+    else:
+        unresolved_records = []
+        unrecovered_failures = (failed - recovered) & required
+        unresolved_sources = set()
     exhaustion_details = getattr(
         capability_middleware,
         "exhaustion_details",
@@ -119,6 +143,10 @@ def _finalize_runtime_outcome(
             dict(detail)
             for detail in exhaustion_details
             if detail.get("capability") in required
+            and (
+                not unresolved_sources
+                or detail.get("source") in unresolved_sources
+            )
         ),
         {},
     )

@@ -38,14 +38,20 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         self.initial_plan_exists = False
         self.blocked_tools = set()
         self.blocked_capabilities = set()
+        self.blocked_sources = set()
+        self.blocked_requests = set()
         self.failure_counts = defaultdict(int)
         self.capability_failure_counts = defaultdict(int)
         self.capability_correction_counts = defaultdict(int)
+        self.source_failure_counts = defaultdict(int)
+        self.source_correction_counts = defaultdict(int)
         self.success_count = 0
         self.successful_capabilities = set()
         self.successful_evidence = []
         self.failed_capabilities = set()
         self.recovered_capabilities = set()
+        self.failed_sources = set()
+        self.recovered_sources = set()
         self.correction_recovery_count = 0
         self.alternative_recovery_count = 0
         self.termination_detail = {}
@@ -59,6 +65,10 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             "initial_plan_exists": self.initial_plan_exists,
             "blocked_tools": sorted(self.blocked_tools),
             "blocked_capabilities": sorted(self.blocked_capabilities),
+            "blocked_sources": sorted(self.blocked_sources),
+            "blocked_requests": [
+                list(key) for key in sorted(self.blocked_requests)
+            ],
             "failure_counts": [
                 [*key, count]
                 for key, count in sorted(self.failure_counts.items())
@@ -68,6 +78,10 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             ),
             "capability_correction_counts": dict(
                 self.capability_correction_counts
+            ),
+            "source_failure_counts": dict(self.source_failure_counts),
+            "source_correction_counts": dict(
+                self.source_correction_counts
             ),
             "success_count": self.success_count,
             "successful_capabilities": sorted(
@@ -80,6 +94,8 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             "recovered_capabilities": sorted(
                 self.recovered_capabilities
             ),
+            "failed_sources": sorted(self.failed_sources),
+            "recovered_sources": sorted(self.recovered_sources),
             "correction_recovery_count": self.correction_recovery_count,
             "alternative_recovery_count": self.alternative_recovery_count,
             "termination_detail": dict(self.termination_detail),
@@ -105,6 +121,13 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             self.blocked_capabilities = set(
                 state.get("blocked_capabilities") or []
             )
+            self.blocked_sources = set(
+                state.get("blocked_sources") or []
+            )
+            self.blocked_requests = {
+                tuple(item[:2])
+                for item in state.get("blocked_requests") or []
+            }
             self.failure_counts = defaultdict(
                 int,
                 {
@@ -120,6 +143,14 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
                 int,
                 state.get("capability_correction_counts") or {},
             )
+            self.source_failure_counts = defaultdict(
+                int,
+                state.get("source_failure_counts") or {},
+            )
+            self.source_correction_counts = defaultdict(
+                int,
+                state.get("source_correction_counts") or {},
+            )
             self.success_count = int(state.get("success_count") or 0)
             self.successful_capabilities = set(
                 state.get("successful_capabilities") or []
@@ -133,6 +164,10 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             )
             self.recovered_capabilities = set(
                 state.get("recovered_capabilities") or []
+            )
+            self.failed_sources = set(state.get("failed_sources") or [])
+            self.recovered_sources = set(
+                state.get("recovered_sources") or []
             )
             self.correction_recovery_count = int(
                 state.get("correction_recovery_count") or 0
@@ -238,27 +273,33 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             normalized = str(arguments)
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
-    def _record_recovery(self, capability, tool_name):
-        pending = self.failed_capabilities - self.recovered_capabilities
+    def _record_recovery(self, capability, source):
+        pending_sources = self.failed_sources - self.recovered_sources
         recovery_type = None
-        recovered_capabilities = set()
-        if capability in pending:
+        recovered_sources = set()
+        if source in pending_sources:
             self.correction_recovery_count += 1
-            self.recovered_capabilities.add(capability)
+            self.recovered_sources.add(source)
+            self.blocked_sources.discard(source)
             recovery_type = "corrected_request"
-            recovered_capabilities.add(capability)
+            recovered_sources.add(source)
         else:
-            alternatives = (
-                pending & self.required_capabilities
-            ) - {capability}
+            alternatives = {
+                detail.get("source")
+                for detail in self.failure_records.values()
+                if detail.get("capability") != capability
+                and detail.get("capability") in self.required_capabilities
+                and detail.get("scope") == "unresolved"
+                and detail.get("source")
+            }
             if capability in self.required_capabilities and alternatives:
                 self.alternative_recovery_count += 1
-                self.recovered_capabilities.update(alternatives)
+                self.recovered_sources.update(alternatives)
                 recovery_type = "alternative_capability"
-                recovered_capabilities.update(alternatives)
+                recovered_sources.update(alternatives)
         for detail in self.failure_records.values():
             if (
-                detail.get("capability") in recovered_capabilities
+                detail.get("source") in recovered_sources
                 and detail.get("scope") == "unresolved"
             ):
                 detail["scope"] = "recovered"
@@ -268,7 +309,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
                 detail
                 for detail in self.failure_records.values()
                 if detail.get("capability") == capability
-                and detail.get("tool") == tool_name
+                and detail.get("source") == source
                 and detail.get("scope") == "warning"
             ]
             if recovered:
@@ -277,11 +318,23 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
                     detail["affects_required_evidence"] = False
                 self.correction_recovery_count += 1
                 recovery_type = "corrected_request"
+        pending_capability_sources = {
+            detail.get("source")
+            for detail in self.failure_records.values()
+            if detail.get("capability") == capability
+            and detail.get("scope") == "unresolved"
+        }
+        if capability in self.failed_capabilities:
+            if pending_capability_sources:
+                self.recovered_capabilities.discard(capability)
+            else:
+                self.recovered_capabilities.add(capability)
         if recovery_type and self.emit_event is not None:
             self.emit_event(
                 "deepagents.capability.recovered",
                 {
                     "capability": capability,
+                    "source": source,
                     "recovery_type": recovery_type,
                     "correction_recovery_count": (
                         self.correction_recovery_count
@@ -293,8 +346,8 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             )
 
     @staticmethod
-    def _evidence_source(capability, tool_name, request):
-        """Return a secret-safe source label for verified evidence."""
+    def _source_scope(capability, tool_name, request):
+        """Return a secret-safe source scope for one invocation."""
 
         tool_call = request.tool_call or {}
         arguments = tool_call.get("args") or {}
@@ -302,32 +355,52 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             skill = str(arguments.get("skill") or "").strip()[:128]
             if skill:
                 return f"skill:{skill}"
-        return tool_name
+            return f"skill:{tool_name}"
+        if capability == "mcp":
+            return f"mcp:{tool_name}"
+        return f"tool:{tool_name}"
 
     def _record_success(self, capability, tool_name, request):
         if capability is None:
             return
+        source = self._source_scope(capability, tool_name, request)
+        request_sha256 = self._normalized_arguments(request)
+        request_scope = (tool_name, request_sha256)
+        self.blocked_requests.discard(request_scope)
+        for key in list(self.failure_counts):
+            if key[0] == tool_name and key[2] == request_sha256:
+                del self.failure_counts[key]
+        if source in self.source_failure_counts:
+            self.source_failure_counts[source] = 0
+        if source in self.source_correction_counts:
+            self.source_correction_counts[source] = 0
         self.success_count += 1
         self.successful_capabilities.add(capability)
         self.successful_evidence.append(
             {
                 "capability": capability,
                 "tool": tool_name,
-                "source": self._evidence_source(
-                    capability,
-                    tool_name,
-                    request,
-                ),
-                "request_sha256": self._normalized_arguments(request),
+                "source": source,
+                "request_sha256": request_sha256,
             }
         )
-        self._record_recovery(capability, tool_name)
+        self._record_recovery(capability, source)
 
-    def _record_warning(self, key, capability, error_type, tool_name):
+    def _record_warning(
+        self,
+        key,
+        capability,
+        error_type,
+        tool_name,
+        source,
+        request_sha256,
+    ):
         detail = {
             "capability": capability,
             "error_type": error_type,
             "tool": tool_name,
+            "source": source,
+            "request_sha256": request_sha256,
             "scope": "warning",
             "required": capability in self.required_capabilities,
             "affects_required_evidence": False,
@@ -401,6 +474,8 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
     def _record_result(self, request, result):
         tool_name = self._tool_name(request)
         capability = self._evidence_capability(tool_name)
+        request_sha256 = self._normalized_arguments(request)
+        request_scope = (tool_name, request_sha256)
         payload = self._parse_result(result)
         if payload is None or "ok" not in payload:
             if not tool_name.startswith("mcp__"):
@@ -419,63 +494,88 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             key = (
                 tool_name,
                 "policy",
-                self._normalized_arguments(request),
+                request_sha256,
             )
-            self._record_warning(key, capability, "policy", tool_name)
+            source = self._source_scope(capability, tool_name, request)
+            self._record_warning(
+                key,
+                capability,
+                "policy",
+                tool_name,
+                source,
+                request_sha256,
+            )
             return result
         if capability is None:
             return result
 
         metadata = _tool_result_metadata(payload, tool_name)
         error_type = metadata.get("error_type") or "tool"
+        source = self._source_scope(capability, tool_name, request)
         key = (
             tool_name,
             error_type,
-            self._normalized_arguments(request),
+            request_sha256,
         )
         self.failure_counts[key] += 1
         self.capability_failure_counts[capability] += 1
+        self.source_failure_counts[source] += 1
         if error_type in {"request", "tool"}:
             self.capability_correction_counts[capability] += 1
+            self.source_correction_counts[source] += 1
         exact_failures = self.failure_counts[key]
         capability_failures = self.capability_failure_counts[capability]
         capability_corrections = self.capability_correction_counts[
             capability
         ]
-        block_capability = error_type in {"configuration", "policy"}
+        source_failures = self.source_failure_counts[source]
+        source_corrections = self.source_correction_counts[source]
+        block_source = error_type in {"configuration", "policy"}
         if error_type in {"request", "tool"}:
-            block_capability = block_capability or (
-                capability_corrections
+            block_source = block_source or (
+                source_corrections
                 >= self.CAPABILITY_CORRECTION_LIMIT
             )
-        block_tool = exact_failures >= self._failure_budget(
+        block_request = exact_failures >= self._failure_budget(
             request,
             error_type,
         )
-        if not block_capability and not block_tool:
-            self._record_warning(key, capability, error_type, tool_name)
+        if not block_source and not block_request:
+            self._record_warning(
+                key,
+                capability,
+                error_type,
+                tool_name,
+                source,
+                request_sha256,
+            )
             return result
 
         self.failed_capabilities.add(capability)
         self.recovered_capabilities.discard(capability)
+        self.failed_sources.add(source)
+        self.recovered_sources.discard(source)
 
-        if block_capability:
-            self.blocked_capabilities.add(capability)
-            blocked_scope = "capability"
+        if block_source:
+            self.blocked_sources.add(source)
+            blocked_scope = "source"
         else:
-            self.blocked_tools.add(tool_name)
-            blocked_scope = "tool"
+            self.blocked_requests.add(request_scope)
+            blocked_scope = "request"
         detail = {
             "reason": "execution_failed",
             "capability": capability,
             "error_type": error_type,
             "tool": tool_name,
+            "source": source,
             "recovery": self._recovery_message(error_type),
         }
         self.failure_records[key] = {
             "capability": capability,
             "error_type": error_type,
             "tool": tool_name,
+            "source": source,
+            "request_sha256": request_sha256,
             "scope": "unresolved",
             "required": capability in self.required_capabilities,
             "affects_required_evidence": (
@@ -494,6 +594,8 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
                     "exact_request_failures": exact_failures,
                     "capability_failures": capability_failures,
                     "capability_corrections": capability_corrections,
+                    "source_failures": source_failures,
+                    "source_corrections": source_corrections,
                 },
             )
         return result
@@ -565,19 +667,39 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             self.initial_plan_exists = True
 
     def _filter_tools(self, tools):
-        return [
-            tool
-            for tool in tools
-            if getattr(tool, "name", None) not in self.blocked_tools
-            and self._capability_name(getattr(tool, "name", ""))
-            not in self.blocked_capabilities
-        ]
+        remaining = []
+        for tool in tools:
+            tool_name = getattr(tool, "name", None)
+            capability = self._capability_name(tool_name or "")
+            if tool_name in self.blocked_tools:
+                continue
+            if capability in self.blocked_capabilities:
+                continue
+            if capability == "mcp":
+                source = f"mcp:{tool_name}"
+            elif capability == "skill":
+                source = None
+            else:
+                source = f"tool:{tool_name}"
+            if source in self.blocked_sources:
+                continue
+            remaining.append(tool)
+        return remaining
 
-    def _is_blocked(self, tool_name):
+    def _is_blocked(self, request):
+        tool_name = self._tool_name(request)
+        capability = self._evidence_capability(tool_name)
+        source = self._source_scope(capability, tool_name, request)
+        request_scope = (
+            tool_name,
+            self._normalized_arguments(request),
+        )
         return (
             tool_name in self.blocked_tools
             or self._capability_name(tool_name)
             in self.blocked_capabilities
+            or source in self.blocked_sources
+            or request_scope in self.blocked_requests
         )
 
     def wrap_model_call(self, request, handler):
@@ -598,7 +720,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         tool_name = self._tool_name(request)
         if self._requires_initial_plan(tool_name):
             return self._deny_unplanned_call(request)
-        if self._is_blocked(tool_name):
+        if self._is_blocked(request):
             return self._deny_blocked_call(request)
         result = handler(request)
         self._observe_plan_call(request, result)
@@ -612,7 +734,7 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         tool_name = self._tool_name(request)
         if self._requires_initial_plan(tool_name):
             return self._deny_unplanned_call(request)
-        if self._is_blocked(tool_name):
+        if self._is_blocked(request):
             return self._deny_blocked_call(request)
         result = await handler(request)
         self._observe_plan_call(request, result)

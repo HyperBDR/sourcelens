@@ -733,6 +733,12 @@ def test_capability_boundary_state_round_trips_for_resume():
     ]
     original.failure_counts[("run_skill", "tool", "digest")] = 1
     original.capability_failure_counts["skill"] = 1
+    original.source_failure_counts["skill:income"] = 1
+    original.source_correction_counts["skill:income"] = 1
+    original.blocked_sources = {"skill:github-cli"}
+    original.blocked_requests = {("run_skill", "digest")}
+    original.failed_sources = {"skill:github-cli"}
+    original.recovered_sources = {"skill:income"}
 
     restored = agent_runtime.CapabilityBoundaryMiddleware(
         required_capabilities=["skill"]
@@ -752,9 +758,35 @@ def test_capability_boundary_state_round_trips_for_resume():
         ("run_skill", "tool", "digest")
     ] == 1
     assert restored.capability_failure_counts["skill"] == 1
+    assert restored.source_failure_counts["skill:income"] == 1
+    assert restored.source_correction_counts["skill:income"] == 1
+    assert restored.blocked_sources == {"skill:github-cli"}
+    assert restored.blocked_requests == {("run_skill", "digest")}
+    assert restored.failed_sources == {"skill:github-cli"}
+    assert restored.recovered_sources == {"skill:income"}
     assert restored.successful_evidence == original.successful_evidence
     assert outcome == "completed"
     assert detail == {}
+
+
+def test_capability_boundary_restores_legacy_state_without_source_fields():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+
+    middleware.restore_state(
+        {
+            "blocked_tools": ["mcp__legacy"],
+            "blocked_capabilities": ["skill"],
+            "failure_counts": [],
+            "failure_records": [],
+        }
+    )
+
+    assert middleware.blocked_tools == {"mcp__legacy"}
+    assert middleware.blocked_capabilities == {"skill"}
+    assert middleware.blocked_sources == set()
+    assert middleware.blocked_requests == set()
+    assert middleware.failed_sources == set()
+    assert middleware.recovered_sources == set()
 
 
 def test_capability_boundary_rejects_invalid_resume_state():
@@ -2792,14 +2824,18 @@ def test_validated_delivery_survives_format_warning_and_call_limit():
     )
 
 
-def test_execution_boundary_disables_configuration_failure_capability():
+def test_execution_boundary_disables_configuration_failure_source():
     events = []
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
         emit_event=lambda name, detail: events.append((name, detail)),
     )
     request = SimpleNamespace(
         tool=SimpleNamespace(name="call_skill_api"),
-        tool_call={"name": "call_skill_api", "id": "call-1"},
+        tool_call={
+            "name": "call_skill_api",
+            "id": "call-1",
+            "args": {"skill": "github-cli"},
+        },
     )
 
     result = middleware.wrap_tool_call(
@@ -2814,14 +2850,18 @@ def test_execution_boundary_disables_configuration_failure_capability():
 
     assert result.status == "error"
     assert middleware.outcome == "blocked"
-    assert middleware.blocked_capabilities == {"skill"}
+    assert middleware.blocked_capabilities == set()
+    assert middleware.blocked_sources == {"skill:github-cli"}
     remaining = middleware._filter_tools(
         [
             SimpleNamespace(name="call_skill_api"),
             SimpleNamespace(name="mcp__orders"),
         ]
     )
-    assert [tool.name for tool in remaining] == ["mcp__orders"]
+    assert [tool.name for tool in remaining] == [
+        "call_skill_api",
+        "mcp__orders",
+    ]
     assert middleware.termination_detail["capability"] == "skill"
     assert middleware.termination_detail["reason"] == "execution_failed"
     assert [name for name, _detail in events] == [
@@ -2829,7 +2869,7 @@ def test_execution_boundary_disables_configuration_failure_capability():
     ]
 
 
-def test_capability_boundary_allows_one_transient_retry():
+def test_capability_boundary_blocks_only_repeated_transient_request():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
     request = SimpleNamespace(
         tool=SimpleNamespace(name="mcp__orders"),
@@ -2846,7 +2886,15 @@ def test_capability_boundary_allows_one_transient_retry():
 
     middleware.wrap_tool_call(request, fail)
     middleware.wrap_tool_call(request, fail)
-    assert middleware.blocked_tools == {"mcp__orders"}
+    assert middleware.blocked_tools == set()
+    assert len(middleware.blocked_requests) == 1
+    denied = middleware.wrap_tool_call(
+        request,
+        lambda _request: (_ for _ in ()).throw(
+            AssertionError("The repeated request must not execute again")
+        ),
+    )
+    assert json.loads(denied.content)["error"] == "CAPABILITY_BLOCKED"
     assert middleware.termination_detail["capability"] == "mcp"
 
 
@@ -2970,10 +3018,11 @@ def test_request_failures_are_isolated_by_normalized_arguments():
 
     middleware.wrap_tool_call(reordered, fail)
 
-    assert middleware.blocked_tools == {"mcp__orders"}
+    assert middleware.blocked_tools == set()
+    assert len(middleware.blocked_requests) == 1
 
 
-def test_request_corrections_have_a_separate_capability_failure_cap():
+def test_request_corrections_have_a_separate_source_failure_cap():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
 
     for index in range(4):
@@ -2995,8 +3044,197 @@ def test_request_corrections_have_a_separate_capability_failure_cap():
             ),
         )
 
-    assert middleware.blocked_capabilities == {"mcp"}
+    assert middleware.blocked_capabilities == set()
+    assert middleware.blocked_sources == {"mcp:mcp__orders"}
     assert middleware.capability_failure_counts["mcp"] == 4
+
+
+def test_skill_request_failures_are_isolated_by_source():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["skill"]
+    )
+
+    def fail(request):
+        return ToolMessage(
+            content='{"ok":false,"error":"INVALID_QUERY"}',
+            name="run_skill_artifact",
+            tool_call_id=request.tool_call["id"],
+            status="error",
+        )
+
+    for index, skill in enumerate(
+        ["github-cli", "github-cli", "jira-cli", "jira-cli"]
+    ):
+        request = SimpleNamespace(
+            tool=SimpleNamespace(name="run_skill_artifact"),
+            tool_call={
+                "name": "run_skill_artifact",
+                "id": f"failure-{index}",
+                "args": {
+                    "skill": skill,
+                    "query": f"invalid query {index}",
+                },
+            },
+        )
+        middleware.wrap_tool_call(request, fail)
+
+    gitlab_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "gitlab-success",
+            "args": {"skill": "gitlab-cli", "query": "projects"},
+        },
+    )
+    result = middleware.wrap_tool_call(
+        gitlab_request,
+        lambda request: ToolMessage(
+            content='{"ok":true,"projects":[]}',
+            name="run_skill_artifact",
+            tool_call_id=request.tool_call["id"],
+        ),
+    )
+
+    assert json.loads(result.content)["ok"] is True
+    assert middleware.blocked_capabilities == set()
+    assert middleware.blocked_sources == set()
+    assert middleware.blocked_requests == set()
+    assert middleware.source_correction_counts == {
+        "skill:github-cli": 2,
+        "skill:jira-cli": 2,
+    }
+
+
+def test_repeated_skill_request_does_not_hide_other_skills():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    github_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "github-failure",
+            "args": {"skill": "github-cli", "query": "invalid"},
+        },
+    )
+
+    def fail(request):
+        return ToolMessage(
+            content='{"ok":false,"error":"INVALID_QUERY"}',
+            name="run_skill_artifact",
+            tool_call_id=request.tool_call["id"],
+            status="error",
+        )
+
+    middleware.wrap_tool_call(github_request, fail)
+    middleware.wrap_tool_call(github_request, fail)
+
+    remaining = middleware._filter_tools(
+        [SimpleNamespace(name="run_skill_artifact")]
+    )
+    jira_request = SimpleNamespace(
+        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool_call={
+            "name": "run_skill_artifact",
+            "id": "jira-success",
+            "args": {"skill": "jira-cli", "query": "REQ-1"},
+        },
+    )
+    result = middleware.wrap_tool_call(
+        jira_request,
+        lambda request: ToolMessage(
+            content='{"ok":true,"issue":{}}',
+            name="run_skill_artifact",
+            tool_call_id=request.tool_call["id"],
+        ),
+    )
+
+    assert [tool.name for tool in remaining] == ["run_skill_artifact"]
+    assert json.loads(result.content)["ok"] is True
+    assert middleware.blocked_sources == set()
+    assert len(middleware.blocked_requests) == 1
+
+
+def test_success_resets_consecutive_request_failure_count():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware()
+    request = SimpleNamespace(
+        tool=SimpleNamespace(name="mcp__orders"),
+        tool_call={
+            "name": "mcp__orders",
+            "id": "orders",
+            "args": {"query": "open"},
+        },
+    )
+
+    def result(ok):
+        return lambda current: ToolMessage(
+            content=json.dumps({"ok": ok, "error": "TIMEOUT"}),
+            name="mcp__orders",
+            tool_call_id=current.tool_call["id"],
+            status="success" if ok else "error",
+        )
+
+    middleware.wrap_tool_call(request, result(False))
+    middleware.wrap_tool_call(request, result(True))
+    middleware.wrap_tool_call(request, result(False))
+
+    assert middleware.blocked_requests == set()
+    assert middleware.termination_detail == {}
+
+
+def test_success_recovers_only_its_skill_source():
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        required_capabilities=["skill"]
+    )
+
+    def request(skill, call_id):
+        return SimpleNamespace(
+            tool=SimpleNamespace(name="run_skill_artifact"),
+            tool_call={
+                "name": "run_skill_artifact",
+                "id": call_id,
+                "args": {"skill": skill, "query": call_id},
+            },
+        )
+
+    def fail(current):
+        return ToolMessage(
+            content='{"ok":false,"error":"INVALID_QUERY"}',
+            name="run_skill_artifact",
+            tool_call_id=current.tool_call["id"],
+            status="error",
+        )
+
+    github = request("github-cli", "github-invalid")
+    jira = request("jira-cli", "jira-invalid")
+    middleware.wrap_tool_call(github, fail)
+    middleware.wrap_tool_call(github, fail)
+    middleware.wrap_tool_call(jira, fail)
+    middleware.wrap_tool_call(jira, fail)
+
+    gitlab = request("gitlab-cli", "gitlab-valid")
+    middleware.wrap_tool_call(
+        gitlab,
+        lambda current: ToolMessage(
+            content='{"ok":true,"projects":[]}',
+            name="run_skill_artifact",
+            tool_call_id=current.tool_call["id"],
+        ),
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert middleware.failed_sources == {
+        "skill:github-cli",
+        "skill:jira-cli",
+    }
+    assert middleware.recovered_sources == set()
+    assert outcome == "partial"
+    assert termination_detail["reason"] == "execution_failed"
 
 
 def test_unclassified_tool_failure_allows_one_correction_attempt():
@@ -3018,7 +3256,8 @@ def test_unclassified_tool_failure_allows_one_correction_attempt():
     assert middleware.blocked_tools == set()
 
     middleware.wrap_tool_call(request, fail)
-    assert middleware.blocked_tools == {"mcp__orders"}
+    assert middleware.blocked_tools == set()
+    assert len(middleware.blocked_requests) == 1
 
 
 def test_non_idempotent_write_does_not_receive_transient_retry():
@@ -3045,7 +3284,15 @@ def test_non_idempotent_write_does_not_receive_transient_retry():
         ),
     )
 
-    assert middleware.blocked_tools == {"mcp__orders__create"}
+    assert middleware.blocked_tools == set()
+    assert len(middleware.blocked_requests) == 1
+    denied = middleware.wrap_tool_call(
+        request,
+        lambda _request: (_ for _ in ()).throw(
+            AssertionError("The non-idempotent write must not retry")
+        ),
+    )
+    assert json.loads(denied.content)["error"] == "CAPABILITY_BLOCKED"
 
 
 def test_model_supplied_idempotency_key_does_not_enable_write_retry():
@@ -3072,7 +3319,8 @@ def test_model_supplied_idempotency_key_does_not_enable_write_retry():
         ),
     )
 
-    assert middleware.blocked_tools == {"mcp__orders__create"}
+    assert middleware.blocked_tools == set()
+    assert len(middleware.blocked_requests) == 1
 
 
 def test_alternative_capability_recovery_is_counted_without_arguments():
@@ -3212,7 +3460,8 @@ def test_capability_boundary_allows_artifact_argument_correction_after_404():
     middleware.wrap_tool_call(request, not_found)
 
     middleware.wrap_tool_call(request, not_found)
-    assert middleware.blocked_tools == {"run_skill_artifact"}
+    assert middleware.blocked_tools == set()
+    assert len(middleware.blocked_requests) == 1
     assert middleware.termination_detail["error_type"] == "request"
 
 
@@ -3289,7 +3538,8 @@ def test_execution_boundary_classifies_artifact_http_500_as_transient():
     middleware.wrap_tool_call(request, fail)
     middleware.wrap_tool_call(request, fail)
 
-    assert middleware.blocked_tools == {"run_skill_artifact"}
+    assert middleware.blocked_tools == set()
+    assert len(middleware.blocked_requests) == 1
     assert middleware.termination_detail["reason"] == "execution_failed"
     assert middleware.termination_detail["error_type"] == "transient"
     assert [name for name, _detail in events] == [
@@ -3324,7 +3574,7 @@ def test_capability_boundary_counts_raw_mcp_success_as_evidence():
     evidence = middleware.successful_evidence[0]
     assert evidence["capability"] == "mcp"
     assert evidence["tool"] == "mcp__orders__lookup"
-    assert evidence["source"] == "mcp__orders__lookup"
+    assert evidence["source"] == "mcp:mcp__orders__lookup"
     assert len(evidence["request_sha256"]) == 64
     assert "HWINSTAD2025071509" not in json.dumps(evidence)
 
