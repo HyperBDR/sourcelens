@@ -1,0 +1,11 @@
+type: improvement
+audience: admin
+en: >-
+  Restructured the run trajectory timeline into independent Input, Model, and
+  Tools lanes that fill each call's full time span, highlight subagent steps,
+  and filter out noisy categories. Also made the skill artifact call limit
+  configurable via the LENSNODE_SKILL_ARTIFACT_MAX_CALLS environment variable.
+zh-CN: >-
+  将运行轨迹时间轴重构为独立的输入、模型与工具三行，每个调用完整填充其时间
+  跨度、高亮子代理步骤并过滤干扰类别；同时将技能制品调用上限改为可通过
+  LENSNODE_SKILL_ARTIFACT_MAX_CALLS 环境变量配置。
