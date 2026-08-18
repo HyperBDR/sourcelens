@@ -951,7 +951,20 @@
       "noValues": "请添加 Skill 所需的环境变量。",
       "createTitle": "新建环境配置",
       "editTitle": "编辑环境配置",
-      "deleteConfirm": "确定删除这个环境变量配置集吗？"
+      "deleteConfirm": "确定删除这个环境变量配置集吗？",
+      "searchLabel": "搜索",
+      "searchPlaceholder": "按名称、变量或引用方搜索...",
+      "filteredCount": "显示 {filtered} 条，共 {total} 条",
+      "noResults": "没有符合当前筛选条件的配置集。",
+      "moreUsages": "+{count}",
+      "deleteTitle": "删除环境变量配置集",
+      "deleteMessage": "确定删除配置集「{name}」吗？此操作无法撤销。",
+      "deleteBlocked": "该配置集仍被 {count} 个引用使用，请先解除关联。",
+      "deleteAction": "删除配置集",
+      "viewAction": "查看「{name}」的配置详情",
+      "viewTitle": "环境变量配置集详情",
+      "revealValues": "显示变量值",
+      "hideValues": "隐藏变量值"
     },
     "skillDetail": {
       "title": "Skill 详情"
@@ -1558,6 +1571,7 @@
       "environmentSetName": "配置集名称，例如 Jira - Production",
       "environmentConfigured": "已保存",
       "environmentMissing": "未配置",
+      "environmentSetValues": "配置集已配置值",
       "mcpSection": "MCP Servers",
       "mcpEnvironmentSectionHint": "这些配置仅对当前 MCP Server 生效；继续前需配置全部必填变量。",
       "mcpEnvironmentConfigurationHint": "该 MCP Server 声明了 {count} 个环境变量。请选择已有配置集，或在这里新建。",
