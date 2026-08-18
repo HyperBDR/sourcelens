@@ -20,6 +20,8 @@ permissions:
 
 env:
   REGISTRY: ${{ vars.REGISTRY }}
+  ALIYUN_REGISTRY: ${{ vars.ALIYUN_REGISTRY }}
+  ALIYUN_NAMESPACE: ${{ vars.ALIYUN_NAMESPACE }}
   SSH_HOST: ${{ vars.SOURCELENS_SSH_HOST }}
   SSH_USER: ${{ vars.SOURCELENS_SSH_USER }}
   SSH_PORT: ${{ vars.SOURCELENS_SSH_PORT }}
@@ -176,6 +178,15 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
+      # ALIYUN_REGISTRY is the Aliyun ACR registry host, ALIYUN_NAMESPACE the
+      # namespace under it (e.g. registry.cn-beijing.aliyuncs.com / oneprolabs).
+      - name: Login to Aliyun ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ALIYUN_REGISTRY }}
+          username: ${{ secrets.ALIYUN_REGISTRY_USERNAME }}
+          password: ${{ secrets.ALIYUN_REGISTRY_PASSWORD }}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -186,6 +197,8 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
             ${{ env.REGISTRY }}/${{ matrix.image_name }}:latest
+            ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
+            ${{ env.ALIYUN_REGISTRY }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.image_name }}:latest
           # Frontend args are ignored by the backend and lensnode builds.
           build-args: |
             USE_MIRROR=false
