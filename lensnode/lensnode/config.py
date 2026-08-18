@@ -26,6 +26,8 @@ class LensNodeConfig:
     summary_keep_tokens: int
     offload_tool_tokens: int
     offload_human_tokens: int | None
+    context_window_tokens: int = 128000
+    summary_trigger_ratio: float = 0.75
     token_budget_max_tokens: int = 200000
     token_budget_hard_max_tokens: int = 500000
     token_budget_final_reserve_tokens: int = 40000
@@ -37,6 +39,7 @@ class LensNodeConfig:
     mcp_enable_codegraph: bool = True
     codegraph_command: str = "codegraph"
     codegraph_init_timeout_s: int = 300
+    reasoning_effort: str | None = None
 
 
 def _optional_int(value):
@@ -110,6 +113,12 @@ def load_config():
         summary_keep_tokens=int(
             os.getenv("LENSNODE_SUMMARY_KEEP_TOKENS", "16000")
         ),
+        context_window_tokens=int(
+            os.getenv("LENSNODE_CONTEXT_WINDOW_TOKENS", "128000")
+        ),
+        summary_trigger_ratio=float(
+            os.getenv("LENSNODE_SUMMARY_TRIGGER_RATIO", "0.75")
+        ),
         token_budget_max_tokens=int(
             os.getenv("LENSNODE_TOKEN_BUDGET_MAX_TOKENS", "200000")
         ),
@@ -153,6 +162,7 @@ def load_config():
         codegraph_init_timeout_s=int(
             os.getenv("LENSNODE_CODEGRAPH_INIT_TIMEOUT_S", "300")
         ),
+        reasoning_effort=os.getenv("LENSNODE_REASONING_EFFORT") or None,
         offload_tool_tokens=int(
             os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"
         ),

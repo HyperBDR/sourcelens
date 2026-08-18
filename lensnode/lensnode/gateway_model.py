@@ -164,6 +164,20 @@ def _http_client_context(
     )
 
 
+_LENGTH_CAPPED_RETRY_PROMPT = (
+    "Your previous response hit the model's output length limit before "
+    "you produced a usable result. Do not continue long reasoning. If the "
+    "task needs data, issue the tool call now. Otherwise give a short, "
+    "direct answer. Reply concisely."
+)
+
+_LENGTH_NOTICE = (
+    "This response is incomplete because the provider reached its "
+    "output length limit. Any unfinished tool calls were suppressed."
+)
+_LENGTH_NOTICE_NORMALIZED = " ".join(_LENGTH_NOTICE.split())
+
+
 class LensGatewayChatModel(BaseChatModel):
     """LangChain chat model that delegates calls to the control plane."""
 
@@ -179,6 +193,10 @@ class LensGatewayChatModel(BaseChatModel):
     # heartbeats, done) to prove transport liveness to the run watchdog.
     # emit_output stays content-only for the user-facing stream.
     on_activity: Optional[Any] = None
+    # Called with each reasoning token as it arrives on a streaming call.
+    # Lets control calls surface a "model is thinking" pulse without
+    # leaking the reasoning text into the user-facing stream.
+    on_reasoning_delta: Optional[Any] = None
     cancel_event: Optional[Any] = None
     run_uuid: str = ""
     trace_context: dict[str, Any] = Field(default_factory=dict)
@@ -190,6 +208,7 @@ class LensGatewayChatModel(BaseChatModel):
     token_budget_warn_ratio: float = 0.8
     token_budget_wrapup_event: Optional[Any] = None
     on_runtime_state_change: Optional[Any] = None
+    reasoning_effort: Optional[str] = None
     loop_repeat_warn: int = 3
     loop_repeat_hard: int = 5
     loop_tool_warn: int = 30
@@ -466,6 +485,11 @@ class LensGatewayChatModel(BaseChatModel):
             payload["temperature"] = kwargs["temperature"]
         if kwargs.get("max_tokens") is not None:
             payload["max_tokens"] = kwargs["max_tokens"]
+        effective_reasoning_effort = (
+            kwargs.get("reasoning_effort") or self.reasoning_effort
+        )
+        if effective_reasoning_effort is not None:
+            payload["reasoning_effort"] = effective_reasoning_effort
 
         if self.emit_output is not None and not control_call:
             structured_output = bool(
@@ -482,6 +506,7 @@ class LensGatewayChatModel(BaseChatModel):
                         )
                     ),
                     suppress_output=structured_output,
+                    on_reasoning_delta=kwargs.get("on_reasoning_delta"),
                 )
             except Exception as exc:
                 self._finish_model_observation(
@@ -490,10 +515,46 @@ class LensGatewayChatModel(BaseChatModel):
                     exc,
                 )
                 raise
+            if self._should_retry_length_capped(result):
+                result = self._retry_length_capped(
+                    payload,
+                    kwargs,
+                    observation_id,
+                )
             self._finish_model_observation(observation_id, "done")
             return result
 
         payload["return_message"] = True
+        message = self._non_streaming_call(payload, observation_id)
+
+        result = ChatResult(
+            generations=[ChatGeneration(message=message)],
+            llm_output={"usage": message.response_metadata.get("usage")},
+        )
+        if self._should_retry_length_capped(result):
+            retry_payload = self._build_length_retry_payload(payload)
+            message = self._non_streaming_call(retry_payload, observation_id)
+            if not (
+                message.response_metadata or {}
+            ).get("model_length_capped"):
+                with self._usage_lock:
+                    self._stop_reason = None
+            result = ChatResult(
+                generations=[ChatGeneration(message=message)],
+                llm_output={"usage": message.response_metadata.get("usage")},
+            )
+        self._finish_model_observation(observation_id, "done")
+        return result
+
+    def _non_streaming_call(self, payload, observation_id):
+        """POST a return_message payload and build its AIMessage.
+
+        Runs the same non-streaming HTTP + message pipeline the primary
+        call does, so a capped retry inherits usage accounting, loop
+        detection, and guardrail bookkeeping. The caller owns the
+        observation start/finish lifecycle.
+        """
+
         start = time.monotonic()
         try:
             with _http_client_context(
@@ -517,7 +578,6 @@ class LensGatewayChatModel(BaseChatModel):
                 exc,
             )
             raise
-
         message = _message_from_gateway(data.get("message") or {})
         message.response_metadata["usage"] = data.get("usage") or {}
         message.response_metadata["latency_ms"] = int(
@@ -526,11 +586,7 @@ class LensGatewayChatModel(BaseChatModel):
         message = self._apply_token_budget(message, data.get("usage") or {})
         message = self._apply_loop_detection(message)
         self._notify_runtime_state_change()
-        self._finish_model_observation(observation_id, "done")
-        return ChatResult(
-            generations=[ChatGeneration(message=message)],
-            llm_output={"usage": data.get("usage") or {}},
-        )
+        return message
 
     def _model_observation_name(self, kwargs):
         """Return the bounded model transport span name for one call."""
@@ -587,6 +643,7 @@ class LensGatewayChatModel(BaseChatModel):
         *,
         publish_tokens=False,
         suppress_output=False,
+        on_reasoning_delta=None,
     ):
         """Consume a gateway stream and publish only a final answer turn."""
 
@@ -594,6 +651,7 @@ class LensGatewayChatModel(BaseChatModel):
         tool_calls = []
         usage = {}
         finish_reason = None
+        reasoning_cb = on_reasoning_delta or self.on_reasoning_delta
         # Subagent output must not reach the user-facing answer stream.
         # deepagents tags subagent runs via the langsmith tracing context;
         # when set, collect content and tool calls normally but stay silent.
@@ -645,6 +703,12 @@ class LensGatewayChatModel(BaseChatModel):
                                         and not silent
                                     ):
                                         self.emit_output(text)
+                                elif (
+                                    text
+                                    and kind == "reasoning"
+                                    and reasoning_cb is not None
+                                ):
+                                    reasoning_cb(text)
                             elif data.get("type") == "done":
                                 done_received = True
                                 usage = data.get("usage") or {}
@@ -704,6 +768,87 @@ class LensGatewayChatModel(BaseChatModel):
             generations=[ChatGeneration(message=message)],
             llm_output={"usage": usage},
         )
+
+    def _should_retry_length_capped(self, result):
+        """Return whether a capped response is worth one recovery attempt.
+
+        Retry only when the provider hit the output length limit and the
+        turn produced nothing actionable (no tool call and no real text) —
+        otherwise the capped turn still moved the conversation forward.
+        """
+
+        if not isinstance(result, ChatResult):
+            return False
+        generations = result.generations
+        if not generations:
+            return False
+        message = generations[0].message
+        metadata = getattr(message, "response_metadata", None) or {}
+        if not metadata.get("model_length_capped"):
+            return False
+        if getattr(message, "tool_calls", None):
+            return False
+        content = _message_text(message)
+        stripped = " ".join(str(content or "").split())
+        if not stripped:
+            return True
+        # A capped turn with no real content surfaces only the fixed
+        # "incomplete" notice; treat that as empty and worth a retry.
+        return stripped == _LENGTH_NOTICE_NORMALIZED
+
+    def _build_length_retry_payload(self, payload):
+        """Return a payload that steers a capped retry to act concisely."""
+
+        retry_payload = dict(payload)
+        retry_payload["messages"] = [
+            *retry_payload["messages"],
+            {"role": "user", "content": _LENGTH_CAPPED_RETRY_PROMPT},
+        ]
+        if (
+            not retry_payload.get("reasoning_effort")
+            or retry_payload["reasoning_effort"] != "low"
+        ):
+            retry_payload["reasoning_effort"] = "low"
+        return retry_payload
+
+    def _retry_length_capped(self, payload, kwargs, observation_id):
+        """Retry a capped turn once with a concise-action instruction.
+
+        The instruction is appended as a user turn so the retry shares the
+        model context of the capped attempt but steers it to act (tool call
+        or short answer) instead of reasoning past the output budget.
+        """
+
+        retry_payload = self._build_length_retry_payload(payload)
+        if self.emit_observation is not None and observation_id is not None:
+            self.emit_observation(
+                {
+                    "action": "start",
+                    "id": observation_id,
+                    "parent_observation_id": (
+                        self.trace_context or {}
+                    ).get("root_observation_id"),
+                    "name": "model.retry",
+                    "started_at": _utc_timestamp(),
+                }
+            )
+        try:
+            result = self._generate_streaming(
+                retry_payload,
+                publish_tokens=False,
+                suppress_output=bool(kwargs.get("runtime_structured_output")),
+            )
+            if result and result.generations:
+                recovered = result.generations[0].message
+                if not (
+                    recovered.response_metadata or {}
+                ).get("model_length_capped"):
+                    with self._usage_lock:
+                        self._stop_reason = None
+            return result
+        except Exception as exc:
+            self._finish_model_observation(observation_id, "failed", exc)
+            raise
 
     def _consume_runtime_warnings(self):
         """Consume pending guardrail warnings for one model request."""
@@ -1227,11 +1372,7 @@ def _message_from_gateway(payload):
                 "suppressed_tool_call_count": suppressed,
             }
         )
-        content = _append_runtime_notice(
-            content,
-            "This response is incomplete because the provider reached its "
-            "output length limit. Any unfinished tool calls were suppressed.",
-        )
+        content = _append_runtime_notice(content, _LENGTH_NOTICE)
 
     additional_kwargs = {}
     if raw_valid_calls:
@@ -1266,6 +1407,23 @@ def _append_runtime_notice(content, notice):
     if not text:
         return notice
     return f"{text}\n\n{notice}"
+
+
+def _message_text(message):
+    """Return the plain-text content of an AIMessage."""
+
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text") or ""))
+            else:
+                parts.append(str(block))
+        return " ".join(parts)
+    return str(content or "")
 
 
 def _usage_int(usage, key, fallback_key=None):

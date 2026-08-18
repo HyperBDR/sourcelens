@@ -604,7 +604,9 @@ class LensServiceTests(TransactionTestCase):
             enqueue=False,
         )
 
-        with self.assertNumQueries(1):
+        # One query walks the retry chain; the second reads the admin-tunable
+        # history budget from GlobalSetting (fixed cost, not N+1).
+        with self.assertNumQueries(2):
             history = build_run_history(current)
 
         self.assertEqual(history, [])
@@ -680,6 +682,77 @@ class LensServiceTests(TransactionTestCase):
             [item["content"] for item in history[2:]],
             [f"blocked question {index}" for index in range(4)],
         )
+
+    def test_history_budget_override_from_globalsetting(self):
+        GlobalSetting.objects.create(
+            key="lens.history_budget",
+            value={
+                "pairs": 1,
+                "message_chars": 300,
+                "total_chars": 2000,
+            },
+            description="",
+        )
+        for index in range(3):
+            prior = create_execution_run(
+                session=self.session,
+                question=f"prior question {index} " + "x" * 2000,
+                enqueue=False,
+            )
+            prior.output_message.content = f"prior answer {index}"
+            prior.output_message.save(update_fields=["content"])
+            prior.status = Run.Status.DONE
+            prior.outcome = Run.Outcome.COMPLETED
+            prior.save(update_fields=["status", "outcome"])
+        current = create_execution_run(
+            session=self.session,
+            question="follow up",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        # message_chars=300 caps the long question, pairs=1 keeps only
+        # the newest turn.
+        self.assertEqual(
+            history,
+            [
+                {
+                    "role": "user",
+                    "content": "prior question 2 " + "x" * (300 - 17),
+                },
+                {"role": "assistant", "content": "prior answer 2"},
+            ],
+        )
+
+    def test_history_budget_clamps_invalid_globalsetting(self):
+        GlobalSetting.objects.create(
+            key="lens.history_budget",
+            value={"pairs": "nope", "message_chars": -5, "total_chars": []},
+            description="",
+        )
+        prior = create_execution_run(
+            session=self.session,
+            question="x" * 4000,
+            enqueue=False,
+        )
+        prior.output_message.content = "answer"
+        prior.output_message.save(update_fields=["content"])
+        prior.status = Run.Status.DONE
+        prior.outcome = Run.Outcome.COMPLETED
+        prior.save(update_fields=["status", "outcome"])
+        current = create_execution_run(
+            session=self.session,
+            question="follow up",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        # message_chars clamps up to 200 (never a negative slice); pairs
+        # falls back to the default of 5.
+        self.assertEqual(history[0]["role"], "user")
+        self.assertEqual(len(history[0]["content"]), 200)
 
     def test_rewrite_query_passthrough_without_preprocess_model(self):
         run = create_execution_run(

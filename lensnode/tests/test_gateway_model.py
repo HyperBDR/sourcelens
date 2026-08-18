@@ -8,6 +8,9 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from lensnode.agent_runtime import _build_summarization_middleware
+from lensnode.agent_runtime.summarization import (
+    build_summarization_middleware,
+)
 from lensnode.gateway_model import (
     LensGatewayChatModel,
     RunCancelledError,
@@ -441,6 +444,37 @@ def test_runtime_control_call_is_non_streaming_and_hidden(monkeypatch):
     assert outputs == []
     assert "stream" not in captured["payload"]
     assert "tools" not in captured["payload"]
+
+
+def test_streaming_structured_output_surfaces_reasoning_delta(monkeypatch):
+    captured = {}
+    outputs = []
+    reasoning = []
+
+    def handler(request):
+        captured["payload"] = request.read()
+        return httpx.Response(200, content=SSE_BODY.encode("utf-8"))
+
+    _install_transport(monkeypatch, handler)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=outputs.append,
+    )
+
+    result = model._generate(
+        [HumanMessage(content="plan")],
+        runtime_structured_output=True,
+        on_reasoning_delta=reasoning.append,
+    )
+
+    # The gateway streamed reasoning before content; the callback saw it.
+    assert reasoning == ["thinking"]
+    # Structured output stays hidden from the user-facing stream.
+    assert outputs == []
+    # The completed content is still returned to the caller.
+    assert result.generations[0].message.content.startswith("Hello")
 
 
 def test_https_gateway_request_uses_configured_tls_context(monkeypatch):
@@ -1218,3 +1252,171 @@ def test_summarization_model_receives_gateway_client_and_tls_configuration():
         assert middleware.model.tls_ca_file == "/ignored/ca.crt"
     finally:
         shared_client.close()
+
+
+def test_summarization_window_ratio_caps_trigger_below_absolute(
+    monkeypatch,
+):
+    """When the window ratio is lower, it wins over the absolute trigger."""
+
+    config = SimpleNamespace(
+        summary_trigger_tokens=48000,
+        summary_keep_tokens=16000,
+        context_window_tokens=32000,
+        summary_trigger_ratio=0.75,
+        ai_gateway_url="https://gateway.example/ai/",
+        token="token",
+        request_timeout_s=30,
+    )
+    captured = {}
+
+    def fake_model_class(*args, **kwargs):
+        return SimpleNamespace()
+
+    middleware = build_summarization_middleware(
+        config,
+        "summary-model",
+        lambda *args: None,
+        model_class=fake_model_class,
+        middleware_class=type(
+            "SpyMiddleware",
+            (object,),
+            {
+                "trigger": ("tokens", 0),
+                "keep": ("tokens", 0),
+                "trim_tokens_to_summarize": 32000,
+                "summary_prompt": "",
+                "__init__": lambda self, **kw: captured.update(kw),
+            },
+        ),
+    )
+
+    assert middleware is not None
+    assert captured["trigger"] == ("tokens", 24000)
+    assert captured["keep"] == ("tokens", 16000)
+
+
+def test_summarization_absolute_trigger_wins_when_below_window(monkeypatch):
+    """The absolute trigger stays when it is below the window ratio."""
+
+    config = SimpleNamespace(
+        summary_trigger_tokens=48000,
+        summary_keep_tokens=16000,
+        context_window_tokens=128000,
+        summary_trigger_ratio=0.75,
+        ai_gateway_url="https://gateway.example/ai/",
+        token="token",
+        request_timeout_s=30,
+    )
+    captured = {}
+
+    def fake_model_class(*args, **kwargs):
+        return SimpleNamespace()
+
+    middleware = build_summarization_middleware(
+        config,
+        "summary-model",
+        lambda *args: None,
+        model_class=fake_model_class,
+        middleware_class=type(
+            "SpyMiddleware",
+            (object,),
+            {
+                "trigger": ("tokens", 0),
+                "keep": ("tokens", 0),
+                "trim_tokens_to_summarize": 32000,
+                "summary_prompt": "",
+                "__init__": lambda self, **kw: captured.update(kw),
+            },
+        ),
+    )
+
+    assert middleware is not None
+    assert captured["trigger"] == ("tokens", 48000)
+
+
+def _sse_stream(parts):
+    """Encode a list of gateway stream events into an SSE body."""
+
+    return "".join(
+        f"data: {json.dumps(event)}\n\n" for event in parts
+    )
+
+
+def test_empty_capped_stream_retries_once_with_directive(monkeypatch):
+    requests = []
+
+    capped_body = _sse_stream(
+        [
+            {"type": "done", "usage": {"total_tokens": 10},
+             "tool_calls": [], "finish_reason": "length"},
+        ]
+    )
+    answer_body = _sse_stream(
+        [
+            {"type": "token", "kind": "content", "content": "42"},
+            {"type": "done", "usage": {"total_tokens": 10},
+             "tool_calls": [], "finish_reason": "stop"},
+        ]
+    )
+
+    def handler(request):
+        requests.append(request)
+        body = request.read()
+        if len(requests) == 1:
+            return httpx.Response(200, content=capped_body.encode("utf-8"))
+        payload = json.loads(body)
+        assert b"output length limit" in body
+        assert payload.get("reasoning_effort") == "low"
+        return httpx.Response(200, content=answer_body.encode("utf-8"))
+
+    _install_transport(monkeypatch, handler)
+    outputs = []
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        run_uuid="00000000-0000-0000-0000-000000000010",
+        emit_output=outputs.append,
+    )
+
+    result = model._generate([HumanMessage(content="what is 6*7?")])
+
+    assert len(requests) == 2
+    message = result.generations[0].message
+    assert "42" in message.content
+    assert message.response_metadata.get("model_length_capped") is None
+    assert model.stop_reason is None
+
+
+def test_capped_stream_with_real_content_does_not_retry(monkeypatch):
+    requests = []
+
+    body = _sse_stream(
+        [
+            {"type": "token", "kind": "content", "content": "partial answer"},
+            {"type": "done", "usage": {"total_tokens": 10},
+             "tool_calls": [], "finish_reason": "length"},
+        ]
+    )
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, content=body.encode("utf-8"))
+
+    _install_transport(monkeypatch, handler)
+    outputs = []
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        run_uuid="00000000-0000-0000-0000-000000000011",
+        emit_output=outputs.append,
+    )
+
+    result = model._generate([HumanMessage(content="hi")])
+
+    assert len(requests) == 1
+    message = result.generations[0].message
+    assert "partial answer" in message.content
+    assert message.response_metadata.get("model_length_capped") is True

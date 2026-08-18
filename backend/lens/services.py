@@ -88,6 +88,48 @@ HISTORY_ARTIFACT_MAX_FILES = 3
 
 QUERY_REWRITE_HISTORY_TURNS = 3
 QUERY_REWRITE_MAX_CHARS = 400
+
+
+def get_history_budget():
+    """Return the conversation history replay budget.
+
+    Admin-tunable via the GlobalSetting key ``lens.history_budget`` holding
+    a JSON object with optional ``pairs``, ``message_chars``, and
+    ``total_chars`` keys. Missing or invalid values fall back to the module
+    defaults so a bad setting can never break history replay.
+    """
+
+    setting = GlobalSetting.objects.filter(key="lens.history_budget").first()
+    value = setting.value if setting else {}
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        "pairs": _bounded_int(value, "pairs", HISTORY_MAX_PAIRS, 1, 20),
+        "message_chars": _bounded_int(
+            value,
+            "message_chars",
+            HISTORY_MAX_MESSAGE_CHARS,
+            200,
+            20000,
+        ),
+        "total_chars": _bounded_int(
+            value,
+            "total_chars",
+            HISTORY_MAX_TOTAL_CHARS,
+            500,
+            100000,
+        ),
+    }
+
+
+def _bounded_int(mapping, key, default, minimum, maximum):
+    """Return an int setting clamped to a safe range, or the default."""
+
+    try:
+        value = int(mapping.get(key) or default)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(value, maximum))
 QUERY_REWRITE_SYSTEM = (
     "You rewrite a user's latest question into ONE concise, self-contained "
     "search query for a document and code knowledge base. Resolve pronouns "
@@ -1634,6 +1676,7 @@ def build_clarification_continuation_question(run, current_question):
 
     if not run.retry_of_run_id:
         return current_question
+    budget = get_history_budget()
     runs_by_id = {
         item.pk: item
         for item in Run.objects.filter(
@@ -1665,11 +1708,11 @@ def build_clarification_continuation_question(run, current_question):
             break
         turns.append(
             (
-                clarification_question[:HISTORY_MAX_MESSAGE_CHARS],
+                clarification_question[:budget["message_chars"]],
                 answer[:CLARIFICATION_MAX_ANSWER_CHARS],
             )
         )
-        if len(turns) > HISTORY_MAX_PAIRS:
+        if len(turns) > budget["pairs"]:
             turns.pop()
         current = parent
 
@@ -1692,7 +1735,7 @@ def build_clarification_continuation_question(run, current_question):
             answer,
         ]
         block_chars = sum(len(item) for item in block)
-        if clarification_chars + block_chars > HISTORY_MAX_TOTAL_CHARS:
+        if clarification_chars + block_chars > budget["total_chars"]:
             continue
         selected_turns.append(block)
         clarification_chars += block_chars
@@ -1705,7 +1748,7 @@ def build_clarification_continuation_question(run, current_question):
             [
                 "",
                 "Current execution prompt:",
-                current_question[:HISTORY_MAX_MESSAGE_CHARS],
+                current_question[:budget["message_chars"]],
             ]
         )
     return "\n".join(sections)[:CLARIFICATION_MAX_PROMPT_CHARS]
@@ -1786,6 +1829,7 @@ def build_run_history_manifest(run):
 def _build_run_history_data(run):
     """Build trusted history and the corresponding filter counts."""
 
+    budget = get_history_budget()
     all_prior_runs = list(
         Run.objects.filter(
             session=run.session,
@@ -1816,9 +1860,12 @@ def _build_run_history_data(run):
     limited_manifests = []
     total_chars = 0
     for prior in reversed(latest_attempts):
-        entries = _trusted_history_entries(prior)
+        entries = _trusted_history_entries(
+            prior,
+            budget["message_chars"],
+        )
         pair_chars = sum(len(item["content"]) for item in entries)
-        if total_chars + pair_chars > HISTORY_MAX_TOTAL_CHARS:
+        if total_chars + pair_chars > budget["total_chars"]:
             break
         if entries:
             limited_pairs.append(entries)
@@ -1846,7 +1893,7 @@ def _build_run_history_data(run):
                 }
             )
             total_chars += pair_chars
-        if len(limited_pairs) >= HISTORY_MAX_PAIRS:
+        if len(limited_pairs) >= budget["pairs"]:
             break
     history = [item for pair in reversed(limited_pairs) for item in pair]
     metadata = {
@@ -1906,7 +1953,7 @@ def _latest_retry_attempts(prior_runs):
     )
 
 
-def _trusted_history_entries(run):
+def _trusted_history_entries(run, message_chars=HISTORY_MAX_MESSAGE_CHARS):
     """Build one bounded Run turn, excluding untrusted assistant output."""
 
     entries = []
@@ -1915,7 +1962,7 @@ def _trusted_history_entries(run):
         entries.append(
             {
                 "role": Message.Role.USER,
-                "content": question[:HISTORY_MAX_MESSAGE_CHARS],
+                "content": question[:message_chars],
             }
         )
     if _assistant_output_is_trusted(run) and run.output_message_id:
@@ -1924,7 +1971,7 @@ def _trusted_history_entries(run):
             entries.append(
                 {
                     "role": Message.Role.ASSISTANT,
-                    "content": answer[:HISTORY_MAX_MESSAGE_CHARS],
+                    "content": answer[:message_chars],
                 }
             )
     return entries
