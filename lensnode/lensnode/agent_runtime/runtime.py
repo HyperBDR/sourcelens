@@ -148,6 +148,7 @@ def _build_summarization_middleware(
     http_client=None,
     trace_context=None,
     emit_observation=None,
+    trajectory=None,
 ):
     """Build summarization while preserving facade monkeypatches."""
 
@@ -160,6 +161,7 @@ def _build_summarization_middleware(
         http_client,
         trace_context,
         emit_observation,
+        trajectory,
         model_class=LensGatewayChatModel,
         middleware_class=LensSummarizationMiddleware,
     )
@@ -226,6 +228,7 @@ class LensDeepAgentRuntime:
                     mcp_tools=state.mcp_tools,
                     emit_agent_event=state.emit_agent_event,
                     workspace_root=self.config.workspace_path,
+                    trajectory=getattr(state, "trajectory", None),
                     context_skill_contents=getattr(
                         state.resources,
                         "context_skill_contents",
@@ -292,13 +295,25 @@ class LensDeepAgentRuntime:
             route_decision=route_decision,
             history_assistant_turns=state.history_assistant_turns,
         )
-        save_initial_checkpoint(
+        saved_checkpoint = save_initial_checkpoint(
             state.run_uuid,
             self.config.workspace_path,
             state.initial_messages,
         )
         state.checkpoint_ready = True
         state.initial_checkpoint_seeded = True
+        trajectory = getattr(state, "trajectory", None)
+        if trajectory is not None:
+            checkpoint_id = (
+                (saved_checkpoint or {})
+                .get("configurable", {})
+                .get("checkpoint_id")
+            )
+            trajectory.record(
+                "checkpoint.saved",
+                {"checkpoint_step": -1},
+                checkpoint_id=checkpoint_id,
+            )
         state.notify_checkpoint_ready()
 
     def _prepare_planned_checkpoint(self, state):
@@ -337,6 +352,24 @@ class LensDeepAgentRuntime:
                 run_uuid,
                 self.config.workspace_path,
             )
+        trajectory = command.get("_trajectory")
+        if resume_state is not None and trajectory is not None:
+            trajectory.merge_resume_state(
+                {
+                    "trace_schema_version": 1,
+                    "last_trace_seq": resume_state.last_trace_seq,
+                    "current_attempt": resume_state.current_attempt,
+                    "open_call_ids": list(resume_state.open_call_ids),
+                    "open_span_ids": list(resume_state.open_span_ids),
+                    "parent_call_map": resume_state.parent_call_map,
+                }
+            )
+            trajectory.record(
+                "checkpoint.restored",
+                {"checkpoint_step": resume_state.checkpoint_step},
+                checkpoint_id=resume_state.checkpoint_id,
+            )
+            trajectory.interrupt_open_calls("checkpoint_resume")
         scenario = _scenario_for_task(command.get("task"))
         runtime_mode = runtime_mode_for(command)
         model_ref = command.get("agent_model_ref")
@@ -372,6 +405,7 @@ class LensDeepAgentRuntime:
             on_checkpoint_ready=on_checkpoint_ready,
             config=self.config,
             http_client=self.http_client,
+            trajectory=trajectory,
         )
 
         def emit_agent_event(event, detail=None):
@@ -530,9 +564,24 @@ class LensDeepAgentRuntime:
                     if guardrail_state is not None
                     else state.model.export_runtime_state()
                 ),
+                trace_state=(
+                    state.trajectory.snapshot()
+                    if state.trajectory is not None
+                    else None
+                ),
             )
 
         state.persist_execution_state = persist_execution_state
+        if state.trajectory is not None:
+            state.trajectory.persist_state = lambda trace_state: (
+                save_runtime_state(
+                    state.run_uuid,
+                    self.config.workspace_path,
+                    trace_state=trace_state,
+                )
+                if state.checkpoint_ready
+                else None
+            )
         state.token_budget = _resolve_token_budget(
             self.config,
             state.command,
@@ -578,6 +627,7 @@ class LensDeepAgentRuntime:
                     guardrail_state=runtime_state
                 )
             ),
+            trajectory=state.trajectory,
         )
         if state.resume_state is not None:
             state.model.restore_runtime_state(
@@ -867,8 +917,9 @@ class LensDeepAgentRuntime:
             TraceObservationMiddleware(
                 state.emit_trace_observation,
                 state.root_observation_id,
+                state.trajectory,
             )
-            if state.root_observation_id
+            if state.root_observation_id or state.trajectory is not None
             else None
         )
         use_subagents = self._subagents_enabled(state)
@@ -911,6 +962,7 @@ class LensDeepAgentRuntime:
             http_client=self.http_client,
             trace_context=state.trace_context,
             emit_observation=state.emit_trace_observation,
+            trajectory=state.trajectory,
         )
         middleware = _agent_middleware(
             state.command,
@@ -1171,6 +1223,7 @@ def _run_planned_code_analysis(
     emit_agent_event,
     workspace_root,
     context_skill_contents=None,
+    trajectory=None,
 ):
     """Run Code Analysis through one plan and one compact evidence bundle."""
 
@@ -1319,6 +1372,7 @@ def _run_planned_code_analysis(
     executor = EvidenceExecutor(
         workspace_tools=workspace_adapters,
         codegraph_tools=codegraph_adapters,
+        trajectory=trajectory,
     )
     bundle = executor.execute(plan)
     sufficiency = validate_evidence_sufficiency(

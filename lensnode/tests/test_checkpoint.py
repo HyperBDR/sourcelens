@@ -168,6 +168,14 @@ def test_resume_loads_checkpoint_and_frozen_runtime_metadata(
             "run_token_usage": {"total_tokens": 42},
             "tool_call_history": ["search:one"],
         },
+        trace_state={
+            "trace_schema_version": 1,
+            "last_trace_seq": 12,
+            "current_attempt": 2,
+            "open_call_ids": ["model-1"],
+            "open_span_ids": ["tool-1"],
+            "parent_call_map": {"tool-1": "model-1"},
+        },
     )
 
     try:
@@ -190,6 +198,11 @@ def test_resume_loads_checkpoint_and_frozen_runtime_metadata(
         "run_token_usage": {"total_tokens": 42},
         "tool_call_history": ["search:one"],
     }
+    assert state.last_trace_seq == 12
+    assert state.current_attempt == 2
+    assert state.open_call_ids == ("model-1",)
+    assert state.open_span_ids == ("tool-1",)
+    assert state.parent_call_map == {"tool-1": "model-1"}
 
 
 def test_route_update_preserves_runtime_state(tmp_path, monkeypatch):

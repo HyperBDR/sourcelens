@@ -335,7 +335,7 @@
       >
         <div
           v-if="detailVisible"
-          class="fixed inset-y-0 right-0 w-full max-w-3xl bg-white shadow-xl z-50 flex flex-col"
+          class="fixed inset-y-0 right-0 z-50 flex w-full max-w-6xl flex-col bg-white shadow-xl"
           role="dialog"
           aria-modal="true"
         >
@@ -421,7 +421,7 @@
                 >
                   {{ t('lensRuns.tabTrace') }}
                   <span class="ml-1 text-xs text-gray-400">{{
-                    detail.event_count
+                    detail.trace_event_count ?? detail.event_count
                   }}</span>
                 </button>
                 <button
@@ -1097,32 +1097,10 @@
                   </div>
                 </section>
 
-                <ol v-if="timelineItems.length" class="timeline">
-                  <li
-                    v-for="(e, i) in timelineItems"
-                    :key="i"
-                    class="timeline-item"
-                  >
-                    <span class="timeline-dot" :class="e.dot" />
-                    <div class="timeline-body">
-                      <div class="timeline-row">
-                        <span class="timeline-text">{{ e.text }}</span>
-                        <span v-if="e.time" class="timeline-time">{{
-                          e.time
-                        }}</span>
-                      </div>
-                      <div v-if="e.detail" class="timeline-detail">
-                        {{ e.detail }}
-                      </div>
-                      <div v-if="e.preview" class="timeline-preview">
-                        {{ e.preview }}
-                      </div>
-                    </div>
-                  </li>
-                </ol>
-                <p v-else class="text-sm text-gray-400">
-                  {{ t('lensRuns.noTimeline') }}
-                </p>
+                <RunTrajectoryPanel
+                  :run-uuid="selectedUuid"
+                  :active="activeDetailTab === 'trace'"
+                />
               </div>
 
               <!-- Files tab -->
@@ -1236,6 +1214,7 @@ import { fetchDeliverableBlob, isPreviewable } from '@/utils/filePreview'
 import { getAdminRuns, getAdminRun, listAssistants } from '@/api/lens'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import RunDiagnosisPanel from '@/admin/pages/lens/RunDiagnosisPanel.vue'
+import RunTrajectoryPanel from '@/admin/pages/lens/RunTrajectoryPanel.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDateInput from '@/components/ui/BaseDateInput.vue'
@@ -1340,126 +1319,6 @@ const hasFailureSummary = computed(() => {
   )
 })
 
-const TIMELINE_LABELS = {
-  'llm.response': 'Model response',
-  'deepagents.runtime.start': 'Runtime started',
-  'deepagents.runtime.done': 'Runtime finished',
-  'deepagents.runtime.error': 'Runtime error',
-  'deepagents.agent.create': 'Agent created',
-  'deepagents.agent.invoke': 'Calling model',
-  'deepagents.agent.truncated': 'Reached turn limit',
-  'deepagents.summarization.enabled': 'Context compaction on',
-  'deepagents.summarization.compacted': 'Context compacted',
-  'resources.materialized': 'Runtime resources loaded'
-}
-
-function timelineDot(e) {
-  const a = e.activity || ''
-  if ((e.agent_event || '').startsWith('llm.')) return 'dot-indigo'
-  if (e.tool || a === 'running_tool') return 'dot-blue'
-  if (a === 'thinking') return 'dot-purple'
-  if (a === 'completed') return 'dot-green'
-  if (a === 'loading_resources') return 'dot-amber'
-  if ((e.agent_event || '').endsWith('.error')) return 'dot-red'
-  return 'dot-gray'
-}
-
-function parseTimelineEvent(e) {
-  let time = ''
-  let body = e.message || ''
-  const m = body.match(/^\[([\d-]+\s[\d:]+)\]\s*-\s*([\s\S]*)$/)
-  if (m) {
-    // lensnode stamps UTC; parse as UTC and format in the browser's
-    // local timezone so it matches the rest of the page.
-    const dt = new Date(m[1].replace(' ', 'T') + 'Z')
-    time = isNaN(dt.getTime()) ? m[1].split(' ')[1] : format(dt, 'HH:mm:ss')
-    body = m[2]
-  }
-  body = body.split('\n')[0].trim()
-  let text
-  if (e.tool) {
-    const action = (e.agent_event || '').split('.').pop()
-    text = action && action !== 'invoke' ? `${e.tool} (${action})` : e.tool
-  } else if ((e.agent_event || '').startsWith('tool.')) {
-    const segs = e.agent_event.split('.')
-    const action = segs[segs.length - 1]
-    const name = segs.slice(1, -1).join('.')
-    text = action && action !== 'invoke' ? `${name} (${action})` : name
-  } else if (e.agent_event && TIMELINE_LABELS[e.agent_event]) {
-    text = TIMELINE_LABELS[e.agent_event]
-  } else if (e.agent_event) {
-    text = e.agent_event
-  } else {
-    text = body
-  }
-  const detailParts = []
-  if (e.agent_event === 'llm.response') {
-    if (e.summary) detailParts.push(e.summary)
-    if (e.total_tokens != null) {
-      detailParts.push(`${e.total_tokens} tokens`)
-      if (e.prompt_tokens != null && e.completion_tokens != null) {
-        detailParts.push(`${e.prompt_tokens}↑ ${e.completion_tokens}↓`)
-      }
-    }
-    if (e.latency_ms != null) detailParts.push(msText(e.latency_ms))
-    if (e.cached_tokens) detailParts.push(`cached ${e.cached_tokens}`)
-    if (e.reasoning_tokens) detailParts.push(`reasoning ${e.reasoning_tokens}`)
-  } else if (e.agent_event === 'deepagents.summarization.compacted') {
-    if (e.before_tokens != null && e.after_tokens != null) {
-      detailParts.push(`${kText(e.before_tokens)} → ${kText(e.after_tokens)}`)
-    }
-    if (e.saved_tokens != null)
-      detailParts.push(`saved ${kText(e.saved_tokens)}`)
-  } else if (e.agent_event === 'deepagents.summarization.enabled') {
-    if (e.trigger_tokens != null) {
-      detailParts.push(
-        `trigger ${kText(e.trigger_tokens)} · keep ${kText(e.keep_tokens)}`
-      )
-    }
-  } else if (e.summary) detailParts.push(e.summary)
-  else if (e.path) detailParts.push(e.path)
-  else if (e.query) detailParts.push(`"${e.query}"`)
-  if (Array.isArray(e.args_redacted) && e.args_redacted.length) {
-    detailParts.push(e.args_redacted.join(' '))
-  }
-  if (e.input_bytes != null) detailParts.push(`input ${e.input_bytes} B`)
-  if (e.input_sha256) detailParts.push(`in#${e.input_sha256.slice(0, 12)}`)
-  if (e.stdout_bytes != null) {
-    const suffix = e.stdout_truncated ? ' → saved' : ''
-    detailParts.push(`stdout ${e.stdout_bytes} B${suffix}`)
-  }
-  if (e.output_bytes != null) {
-    const suffix = e.output_truncated ? ' → saved' : ''
-    detailParts.push(`output ${e.output_bytes} B${suffix}`)
-  }
-  if (e.output_sha256) detailParts.push(`out#${e.output_sha256.slice(0, 12)}`)
-  if (e.stdout_sha256) {
-    detailParts.push(`stdout#${e.stdout_sha256.slice(0, 12)}`)
-  }
-  if (e.call_count != null && e.max_calls != null) {
-    detailParts.push(`call ${e.call_count}/${e.max_calls}`)
-  }
-  if (e.invocation_id) detailParts.push(`#${e.invocation_id.slice(-8)}`)
-  if (e.count > 1 && !e.summary) detailParts.push(`×${e.count}`)
-  if (e.duration_ms != null) detailParts.push(msText(e.duration_ms))
-  return {
-    time,
-    text,
-    detail: detailParts.join('  ·  '),
-    preview: e.preview || '',
-    dot: timelineDot(e)
-  }
-}
-
-const timelineItems = computed(() => {
-  if (!detail.value?.steps) return []
-  const out = []
-  for (const step of detail.value.steps) {
-    for (const e of step.events || []) out.push(parseTimelineEvent(e))
-  }
-  return out
-})
-
 function formatDate(val) {
   if (!val) return '-'
   try {
@@ -1467,18 +1326,6 @@ function formatDate(val) {
   } catch {
     return String(val)
   }
-}
-
-function msText(ms) {
-  if (ms === null || ms === undefined) return ''
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(1)}s`
-}
-
-function kText(tokens) {
-  if (tokens === null || tokens === undefined) return ''
-  if (tokens < 1000) return `${tokens}`
-  return `${(tokens / 1000).toFixed(1)}K`
 }
 
 function durationText(sec) {

@@ -208,6 +208,7 @@ class LensGatewayChatModel(BaseChatModel):
     token_budget_warn_ratio: float = 0.8
     token_budget_wrapup_event: Optional[Any] = None
     on_runtime_state_change: Optional[Any] = None
+    trajectory: Optional[Any] = None
     reasoning_effort: Optional[str] = None
     loop_repeat_warn: int = 3
     loop_repeat_hard: int = 5
@@ -490,6 +491,10 @@ class LensGatewayChatModel(BaseChatModel):
         )
         if effective_reasoning_effort is not None:
             payload["reasoning_effort"] = effective_reasoning_effort
+        trajectory_call_id = self._start_trajectory_model_call(
+            observation_name,
+            payload,
+        )
 
         if self.emit_output is not None and not control_call:
             structured_output = bool(
@@ -507,6 +512,7 @@ class LensGatewayChatModel(BaseChatModel):
                     ),
                     suppress_output=structured_output,
                     on_reasoning_delta=kwargs.get("on_reasoning_delta"),
+                    trajectory_call_id=trajectory_call_id,
                 )
             except Exception as exc:
                 self._finish_model_observation(
@@ -514,18 +520,37 @@ class LensGatewayChatModel(BaseChatModel):
                     "failed",
                     exc,
                 )
+                self._finish_trajectory_model_call(
+                    trajectory_call_id,
+                    "failed",
+                    error=exc,
+                )
                 raise
             if self._should_retry_length_capped(result):
                 result = self._retry_length_capped(
                     payload,
                     kwargs,
                     observation_id,
+                    trajectory_call_id,
                 )
             self._finish_model_observation(observation_id, "done")
+            self._finish_trajectory_model_call(
+                trajectory_call_id,
+                "completed",
+                result=result,
+            )
             return result
 
         payload["return_message"] = True
-        message = self._non_streaming_call(payload, observation_id)
+        try:
+            message = self._non_streaming_call(payload, observation_id)
+        except Exception as exc:
+            self._finish_trajectory_model_call(
+                trajectory_call_id,
+                "failed",
+                error=exc,
+            )
+            raise
 
         result = ChatResult(
             generations=[ChatGeneration(message=message)],
@@ -533,18 +558,165 @@ class LensGatewayChatModel(BaseChatModel):
         )
         if self._should_retry_length_capped(result):
             retry_payload = self._build_length_retry_payload(payload)
-            message = self._non_streaming_call(retry_payload, observation_id)
+            self._record_trajectory_retry(
+                "started",
+                trajectory_call_id,
+                messages=retry_payload["messages"],
+            )
+            try:
+                message = self._non_streaming_call(
+                    retry_payload,
+                    observation_id,
+                )
+            except Exception as exc:
+                self._record_trajectory_retry(
+                    "failed",
+                    trajectory_call_id,
+                    error=exc,
+                )
+                self._finish_trajectory_model_call(
+                    trajectory_call_id,
+                    "failed",
+                    error=exc,
+                )
+                raise
             if not (
                 message.response_metadata or {}
             ).get("model_length_capped"):
                 with self._usage_lock:
                     self._stop_reason = None
+            self._record_trajectory_retry(
+                "completed",
+                trajectory_call_id,
+            )
             result = ChatResult(
                 generations=[ChatGeneration(message=message)],
                 llm_output={"usage": message.response_metadata.get("usage")},
             )
         self._finish_model_observation(observation_id, "done")
+        self._finish_trajectory_model_call(
+            trajectory_call_id,
+            "completed",
+            result=result,
+        )
         return result
+
+    def _start_trajectory_model_call(self, name, payload):
+        """Record full request messages, tool schemas, and model options."""
+
+        if self.trajectory is None:
+            return None
+        messages = payload.get("messages") or []
+        system_messages = [
+            item for item in messages if item.get("role") == "system"
+        ]
+        if system_messages:
+            self.trajectory.record(
+                "system.snapshot",
+                {"messages": system_messages},
+            )
+        tools = payload.get("tools") or []
+        if tools:
+            self.trajectory.record("tools.snapshot", {"tools": tools})
+        return self.trajectory.start_call(
+            "model",
+            name,
+            {
+                "model_ref": payload.get("model_ref"),
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": payload.get("tool_choice"),
+                "temperature": payload.get("temperature"),
+                "max_tokens": payload.get("max_tokens"),
+                "reasoning_effort": payload.get("reasoning_effort"),
+                "is_subagent": payload.get("is_subagent", False),
+            },
+        )
+
+    def _finish_trajectory_model_call(
+        self,
+        call_id,
+        status,
+        *,
+        result=None,
+        error=None,
+    ):
+        """Record full model output, reasoning, usage, and timing."""
+
+        if self.trajectory is None or call_id is None:
+            return
+        payload = {}
+        if result is not None and getattr(result, "generations", None):
+            message = result.generations[0].message
+            metadata = dict(getattr(message, "response_metadata", None) or {})
+            payload = {
+                "content": _message_text(message),
+                "reasoning": metadata.get("reasoning_content") or "",
+                "tool_calls": list(getattr(message, "tool_calls", None) or []),
+                "invalid_tool_calls": list(
+                    getattr(message, "invalid_tool_calls", None) or []
+                ),
+                "usage": metadata.get("usage") or {},
+                "duration_ms": metadata.get("latency_ms"),
+                "ttft_ms": metadata.get("ttft_ms"),
+                "finish_reason": metadata.get("finish_reason"),
+            }
+            if payload["reasoning"]:
+                self.trajectory.record(
+                    "assistant.reasoning",
+                    {"content": payload["reasoning"]},
+                    call_id=call_id,
+                )
+            if payload["content"] or payload["tool_calls"]:
+                self.trajectory.record(
+                    "assistant.message",
+                    {
+                        "content": payload["content"],
+                        "tool_calls": payload["tool_calls"],
+                        "finish_reason": payload["finish_reason"],
+                    },
+                    call_id=call_id,
+                )
+            for tool_call in payload["tool_calls"]:
+                if isinstance(tool_call, dict):
+                    self.trajectory.bind_parent(
+                        tool_call.get("id"),
+                        call_id,
+                    )
+        if error is not None:
+            payload = {
+                "error_type": type(error).__name__,
+                "error": str(error),
+            }
+        self.trajectory.finish_call(call_id, status, payload)
+
+    def _record_trajectory_retry(
+        self,
+        status,
+        call_id,
+        *,
+        messages=None,
+        error=None,
+    ):
+        """Record one model-length retry lifecycle event."""
+
+        if self.trajectory is None:
+            return
+        payload = {"reason": "model_length_capped"}
+        if messages is not None:
+            payload["messages"] = messages
+        if error is not None:
+            payload.update(
+                {
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                }
+            )
+        self.trajectory.record(
+            f"retry.{status}",
+            payload,
+            call_id=call_id,
+        )
 
     def _non_streaming_call(self, payload, observation_id):
         """POST a return_message payload and build its AIMessage.
@@ -580,9 +752,9 @@ class LensGatewayChatModel(BaseChatModel):
             raise
         message = _message_from_gateway(data.get("message") or {})
         message.response_metadata["usage"] = data.get("usage") or {}
-        message.response_metadata["latency_ms"] = int(
-            (time.monotonic() - start) * 1000
-        )
+        latency_ms = int((time.monotonic() - start) * 1000)
+        message.response_metadata["latency_ms"] = latency_ms
+        message.response_metadata["ttft_ms"] = latency_ms
         message = self._apply_token_budget(message, data.get("usage") or {})
         message = self._apply_loop_detection(message)
         self._notify_runtime_state_change()
@@ -644,6 +816,7 @@ class LensGatewayChatModel(BaseChatModel):
         publish_tokens=False,
         suppress_output=False,
         on_reasoning_delta=None,
+        trajectory_call_id=None,
     ):
         """Consume a gateway stream and publish only a final answer turn."""
 
@@ -651,6 +824,7 @@ class LensGatewayChatModel(BaseChatModel):
         tool_calls = []
         usage = {}
         finish_reason = None
+        reasoning_parts = []
         reasoning_cb = on_reasoning_delta or self.on_reasoning_delta
         # Subagent output must not reach the user-facing answer stream.
         # deepagents tags subagent runs via the langsmith tracing context;
@@ -658,6 +832,7 @@ class LensGatewayChatModel(BaseChatModel):
         silent = _in_subagent_context()
 
         start = time.monotonic()
+        first_token_at = None
         done_received = False
         with _http_client_context(
             self.http_client,
@@ -695,6 +870,23 @@ class LensGatewayChatModel(BaseChatModel):
                             if data.get("type") == "token":
                                 kind = data.get("kind") or "content"
                                 text = data.get("content") or ""
+                                if text and first_token_at is None:
+                                    first_token_at = time.monotonic()
+                                    if (
+                                        self.trajectory is not None
+                                        and trajectory_call_id is not None
+                                    ):
+                                        self.trajectory.record(
+                                            "model.first_token",
+                                            {
+                                                "kind": kind,
+                                                "ttft_ms": int(
+                                                    (first_token_at - start)
+                                                    * 1000
+                                                ),
+                                            },
+                                            call_id=trajectory_call_id,
+                                        )
                                 if text and kind == "content":
                                     content_parts.append(text)
                                     if (
@@ -703,12 +895,10 @@ class LensGatewayChatModel(BaseChatModel):
                                         and not silent
                                     ):
                                         self.emit_output(text)
-                                elif (
-                                    text
-                                    and kind == "reasoning"
-                                    and reasoning_cb is not None
-                                ):
-                                    reasoning_cb(text)
+                                elif text and kind == "reasoning":
+                                    reasoning_parts.append(text)
+                                    if reasoning_cb is not None:
+                                        reasoning_cb(text)
                             elif data.get("type") == "done":
                                 done_received = True
                                 usage = data.get("usage") or {}
@@ -761,6 +951,14 @@ class LensGatewayChatModel(BaseChatModel):
         message.response_metadata["latency_ms"] = int(
             (time.monotonic() - start) * 1000
         )
+        message.response_metadata["ttft_ms"] = (
+            int((first_token_at - start) * 1000)
+            if first_token_at is not None
+            else None
+        )
+        message.response_metadata["reasoning_content"] = "".join(
+            reasoning_parts
+        )
         message = self._apply_token_budget(message, usage)
         message = self._apply_loop_detection(message)
         self._notify_runtime_state_change()
@@ -811,7 +1009,13 @@ class LensGatewayChatModel(BaseChatModel):
             retry_payload["reasoning_effort"] = "low"
         return retry_payload
 
-    def _retry_length_capped(self, payload, kwargs, observation_id):
+    def _retry_length_capped(
+        self,
+        payload,
+        kwargs,
+        observation_id,
+        trajectory_call_id=None,
+    ):
         """Retry a capped turn once with a concise-action instruction.
 
         The instruction is appended as a user turn so the retry shares the
@@ -820,6 +1024,11 @@ class LensGatewayChatModel(BaseChatModel):
         """
 
         retry_payload = self._build_length_retry_payload(payload)
+        self._record_trajectory_retry(
+            "started",
+            trajectory_call_id,
+            messages=retry_payload["messages"],
+        )
         if self.emit_observation is not None and observation_id is not None:
             self.emit_observation(
                 {
@@ -837,6 +1046,7 @@ class LensGatewayChatModel(BaseChatModel):
                 retry_payload,
                 publish_tokens=False,
                 suppress_output=bool(kwargs.get("runtime_structured_output")),
+                trajectory_call_id=trajectory_call_id,
             )
             if result and result.generations:
                 recovered = result.generations[0].message
@@ -845,8 +1055,17 @@ class LensGatewayChatModel(BaseChatModel):
                 ).get("model_length_capped"):
                     with self._usage_lock:
                         self._stop_reason = None
+            self._record_trajectory_retry(
+                "completed",
+                trajectory_call_id,
+            )
             return result
         except Exception as exc:
+            self._record_trajectory_retry(
+                "failed",
+                trajectory_call_id,
+                error=exc,
+            )
             self._finish_model_observation(observation_id, "failed", exc)
             raise
 
@@ -1346,6 +1565,9 @@ def _message_from_gateway(payload):
     response_metadata = {}
     if finish_reason is not None:
         response_metadata["finish_reason"] = str(finish_reason)
+    reasoning_content = payload.get("reasoning_content")
+    if reasoning_content is not None:
+        response_metadata["reasoning_content"] = str(reasoning_content)
 
     content = payload.get("content") or ""
     if normalized_reason in SAFETY_FINISH_REASONS:

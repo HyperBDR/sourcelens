@@ -13,6 +13,7 @@ from lensnode.planned_evidence import (
     validate_citations,
     validate_evidence_sufficiency,
 )
+from lensnode.trajectory import RunTrajectory
 
 
 def test_code_analysis_capability_assessment_requires_one_retrieval_path():
@@ -158,6 +159,44 @@ def test_executor_runs_independent_retrievals_in_parallel_and_deduplicates():
     assert len(bundle.items) == 2
     assert bundle.metrics["retrieval_call_count"] == 2
     assert bundle.metrics["deduplicated_item_count"] == 0
+
+
+def test_executor_records_nested_subtool_arguments_and_results():
+    frames = []
+    trajectory = RunTrajectory("run-planned", frames.append)
+    plan = parse_retrieval_plan(
+        {
+            "objective": "find the symbol",
+            "codegraph_queries": [
+                {"operation": "search", "query": "RunTrajectory"}
+            ],
+        }
+    )
+    executor = EvidenceExecutor(
+        codegraph_tools={
+            "search": lambda **kwargs: {
+                "matches": [{"symbol": kwargs["query"]}]
+            }
+        },
+        trajectory=trajectory,
+    )
+
+    executor.execute(plan)
+
+    events = [frame["events"][0] for frame in frames]
+    root = events[0]
+    subtool_started = events[1]
+    subtool_completed = events[2]
+    assert root["event_type"] == "tool.started"
+    assert subtool_started["event_type"] == "subtool.started"
+    assert subtool_started["parent_call_id"] == root["call_id"]
+    assert subtool_started["payload"]["arguments"] == {
+        "query": "RunTrajectory"
+    }
+    assert subtool_completed["payload"]["result"] == {
+        "matches": [{"symbol": "RunTrajectory"}]
+    }
+    assert events[-1]["event_type"] == "tool.completed"
 
 
 def test_evidence_bundle_deduplicates_and_applies_token_budget():

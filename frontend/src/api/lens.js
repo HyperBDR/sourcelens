@@ -77,6 +77,13 @@ export async function getAdminRun(uuid) {
   return unwrapResponse(response)
 }
 
+export async function getAdminRunTrajectory(runUuid, params = {}) {
+  const response = await api.get(`/lens/admin/runs/${runUuid}/trajectory/`, {
+    params
+  })
+  return unwrapResponse(response)
+}
+
 export async function getAdminRunDiagnostics(runUuid) {
   const response = await api.get(`/lens/admin/runs/${runUuid}/diagnostics/`)
   return unwrapList(unwrapResponse(response))

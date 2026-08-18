@@ -103,6 +103,7 @@ def build_summarization_middleware(
     http_client=None,
     trace_context=None,
     emit_observation=None,
+    trajectory=None,
     *,
     model_class=LensGatewayChatModel,
     middleware_class=LensSummarizationMiddleware,
@@ -143,6 +144,7 @@ def build_summarization_middleware(
         trace_context=trace_context or {},
         emit_observation=emit_observation,
         observation_name="summarization",
+        trajectory=trajectory,
     )
     middleware = middleware_class(
         model=summary_model,

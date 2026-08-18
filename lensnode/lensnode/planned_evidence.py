@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import time
 from pathlib import Path
 
 
@@ -324,12 +325,104 @@ def parse_retrieval_plan(raw):
 class EvidenceExecutor:
     """Execute a validated plan through bounded, parallel adapters."""
 
-    def __init__(self, workspace_tools=None, codegraph_tools=None):
+    def __init__(
+        self,
+        workspace_tools=None,
+        codegraph_tools=None,
+        trajectory=None,
+    ):
         self.workspace_tools = dict(workspace_tools or {})
         self.codegraph_tools = dict(codegraph_tools or {})
+        self.trajectory = trajectory
+
+    def _start_subtool(self, name, arguments, parent_call_id):
+        if self.trajectory is None:
+            return None, time.monotonic()
+        call_id = self.trajectory.start_call(
+            "subtool",
+            name,
+            {"arguments": arguments},
+            parent_call_id=parent_call_id,
+        )
+        return call_id, time.monotonic()
+
+    def _finish_subtool(
+        self,
+        call_id,
+        started_at,
+        *,
+        result=None,
+        error=None,
+    ):
+        if self.trajectory is None or call_id is None:
+            return
+        payload = {
+            "duration_ms": int((time.monotonic() - started_at) * 1000),
+        }
+        status = "completed"
+        if error is None:
+            payload["result"] = result
+        else:
+            status = "failed"
+            payload.update(
+                {
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                }
+            )
+        self.trajectory.finish_call(call_id, status, payload)
 
     def execute(self, plan):
         """Run independent planned operations concurrently."""
+
+        parent_call_id = None
+        if self.trajectory is not None:
+            parent_call_id = self.trajectory.start_call(
+                "tool",
+                "planned_evidence",
+                {
+                    "objective": plan.objective,
+                    "codegraph_queries": [
+                        {
+                            "operation": query.operation,
+                            "arguments": query.as_args(),
+                        }
+                        for query in plan.codegraph_queries
+                    ],
+                    "literal_queries": list(plan.literal_queries),
+                    "source_windows": [
+                        {
+                            "path": window.path,
+                            "start_line": window.start_line,
+                            "end_line": window.end_line,
+                        }
+                        for window in plan.source_windows
+                    ],
+                },
+            )
+        try:
+            bundle = self._execute(plan, parent_call_id)
+        except Exception as exc:
+            if self.trajectory is not None:
+                self.trajectory.finish_call(
+                    parent_call_id,
+                    "failed",
+                    {
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+            raise
+        if self.trajectory is not None:
+            self.trajectory.finish_call(
+                parent_call_id,
+                "completed",
+                {"metrics": bundle.metrics},
+            )
+        return bundle
+
+    def _execute(self, plan, parent_call_id):
+        """Execute one plan beneath an optional trajectory parent call."""
 
         requests = []
         for query in plan.codegraph_queries:
@@ -358,19 +451,36 @@ class EvidenceExecutor:
         call_counts = {"codegraph": 0, "literal": 0, "file_read": 0}
         max_workers = max(min(len(requests), 8), 1)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(_invoke_adapter, adapter, args): (
+            futures = {}
+            for evidence_type, provenance, adapter, args in requests:
+                call_id, started_at = self._start_subtool(
+                    provenance,
+                    args,
+                    parent_call_id,
+                )
+                future = pool.submit(_invoke_adapter, adapter, args)
+                futures[future] = (
                     evidence_type,
                     provenance,
+                    call_id,
+                    started_at,
                 )
-                for evidence_type, provenance, adapter, args in requests
-            }
             for future in as_completed(futures):
-                evidence_type, provenance = futures[future]
+                (
+                    evidence_type,
+                    provenance,
+                    call_id,
+                    started_at,
+                ) = futures[future]
                 call_counts[evidence_type] += 1
                 try:
                     result = future.result()
                 except Exception as exc:
+                    self._finish_subtool(
+                        call_id,
+                        started_at,
+                        error=exc,
+                    )
                     raw_items.append(
                         {
                             "evidence_type": "retrieval_error",
@@ -379,6 +489,11 @@ class EvidenceExecutor:
                         }
                     )
                     continue
+                self._finish_subtool(
+                    call_id,
+                    started_at,
+                    result=result,
+                )
                 raw_items.extend(
                     _items_from_result(result, evidence_type, provenance)
                 )
@@ -406,24 +521,34 @@ class EvidenceExecutor:
                     limit - window.start_line + 1,
                     plan.budgets.max_source_window_lines,
                 )
-                read_requests.append(
-                    {
-                        "path": window.path,
-                        "offset": window.start_line,
-                        "limit": limit,
-                    }
+                args = {
+                    "path": window.path,
+                    "offset": window.start_line,
+                    "limit": limit,
+                }
+                call_id, started_at = self._start_subtool(
+                    "read_workspace_file",
+                    args,
+                    parent_call_id,
                 )
+                read_requests.append((args, call_id, started_at))
             with ThreadPoolExecutor(
                 max_workers=max(min(len(read_requests), 8), 1)
             ) as pool:
                 futures = [
                     pool.submit(_invoke_adapter, reader, args)
-                    for args in read_requests
+                    for args, _call_id, _started_at in read_requests
                 ]
-                for args, future in zip(read_requests, futures):
+                for request, future in zip(read_requests, futures):
+                    args, call_id, started_at = request
                     try:
                         result = future.result()
                     except Exception as exc:
+                        self._finish_subtool(
+                            call_id,
+                            started_at,
+                            error=exc,
+                        )
                         raw_items.append(
                             {
                                 "evidence_type": "retrieval_error",
@@ -433,6 +558,11 @@ class EvidenceExecutor:
                             }
                         )
                     else:
+                        self._finish_subtool(
+                            call_id,
+                            started_at,
+                            result=result,
+                        )
                         call_counts["file_read"] += 1
                         raw_items.extend(
                             _items_from_result(

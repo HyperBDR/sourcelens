@@ -844,6 +844,64 @@ class RunStep(models.Model):
         ordering = ["sequence"]
 
 
+class RunTraceEvent(models.Model):
+    """Immutable, ordered observation event for one run."""
+
+    uuid = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    run = models.ForeignKey(
+        Run,
+        on_delete=models.CASCADE,
+        related_name="trace_events",
+    )
+    event_id = models.UUIDField()
+    sequence = models.PositiveBigIntegerField()
+    attempt = models.PositiveIntegerField(default=1)
+    event_type = models.CharField(max_length=128)
+    timestamp = models.DateTimeField()
+    checkpoint_id = models.CharField(max_length=128, blank=True, default="")
+    turn = models.PositiveIntegerField(null=True, blank=True)
+    step = models.PositiveIntegerField(null=True, blank=True)
+    call_id = models.CharField(max_length=128, blank=True, default="")
+    parent_call_id = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+    )
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sequence"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run", "event_id"],
+                name="lens_trace_run_event_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["run", "sequence"],
+                name="lens_trace_run_seq_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["run", "sequence"],
+                name="lens_trace_run_seq_idx",
+            ),
+            models.Index(
+                fields=["run", "call_id"],
+                name="lens_trace_run_call_idx",
+            ),
+            models.Index(
+                fields=["run", "event_type"],
+                name="lens_trace_run_type_idx",
+            ),
+        ]
+
+
 class RunExecution(models.Model):
     """Per-run execution snapshot dispatched to a LensNode."""
 

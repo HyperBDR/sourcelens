@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from .lensnode_auth import hash_lensnode_token
 from .models import LensNode, Run
+from .run_trace import RunTraceValidationError, append_run_trace_events
 from .services import (
     acknowledge_run_admitted,
     acknowledge_run_checkpoint_ready,
@@ -80,6 +81,8 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_node_draining(content)
         elif frame_type == "run_event":
             await self._handle_run_event(content)
+        elif frame_type == "run_trace_events":
+            await self._handle_run_trace_events(content)
         elif frame_type == "run_admitted":
             await self._handle_run_admitted(content)
         elif frame_type == "run_checkpoint_ready":
@@ -297,6 +300,32 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             run_uuid,
             content.get("step_type") or "retrieval",
             content.get("status") or "running",
+        )
+
+    async def _handle_run_trace_events(self, content):
+        """Validate and append an immutable trajectory batch."""
+
+        run_uuid = self._parse_uuid(content.get("run_uuid"))
+        if run_uuid is None:
+            await self._send_bad_frame("run_uuid is invalid")
+            return
+        try:
+            result = await database_sync_to_async(append_run_trace_events)(
+                run_uuid,
+                self.lensnode.uuid,
+                content.get("events"),
+            )
+        except RunTraceValidationError as exc:
+            await self._send_bad_frame(str(exc))
+            return
+        await self.send_json(
+            {
+                "type": "run_trace_events_ack",
+                "run_uuid": str(run_uuid),
+                "inserted_count": result.inserted_count,
+                "duplicate_count": result.duplicate_count,
+                "last_sequence": result.last_sequence,
+            }
         )
 
     async def _handle_run_admitted(self, content):
