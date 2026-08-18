@@ -1196,12 +1196,13 @@ def build_general_chat_tools(
         _positive_int(artifact_stdout_setting, 8000),
         50000,
     )
-    artifact_max_calls = min(
-        _positive_int(
-            tool_policy.get("skill_artifact_max_calls"),
-            default=12,
+    artifact_max_calls = _positive_int(
+        tool_policy.get("skill_artifact_max_calls"),
+        default=(
+            config.skill_artifact_max_calls
+            if config is not None
+            else 100
         ),
-        20,
     )
     artifact_calls = {"count": 0}
     artifact_output_refs = []
