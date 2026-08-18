@@ -29,7 +29,7 @@ async function mockSettingsApis(page) {
   }
   const settings = [
     setting('public_base_url', 'https://lens.example.com'),
-    setting('lensnode.image', 'oneprocloud/lensnode:test'),
+    setting('lensnode.image', 'oneprolabs/lensnode:test'),
     setting('lensnode.defaults.timeout', 600),
     setting('retention.run_days', 90),
     setting('lensnode.health.offline_threshold_s', 120),
