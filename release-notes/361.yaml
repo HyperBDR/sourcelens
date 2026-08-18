@@ -1,0 +1,9 @@
+type: fix
+audience: user
+en: >-
+  Improved multi-step assistant runs by isolating tool recovery per source,
+  avoiding unnecessary CodeGraph startup in General Chat, and shortening the
+  initial planning phase while preserving full reasoning during execution.
+zh-CN: >-
+  改进多步骤助手运行：按来源隔离工具恢复，避免 General Chat 不必要地启动
+  CodeGraph，并缩短初始规划阶段，同时保留执行过程的完整推理能力。
