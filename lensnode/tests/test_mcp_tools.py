@@ -108,6 +108,18 @@ def test_load_mcp_tools_isolates_servers_and_disables_stdio(monkeypatch):
         event == "mcp.server.failed" and detail["server"] == "broken"
         for event, detail in events
     )
+    assert any(
+        event == "mcp.discovery.start"
+        and detail == {"server_count": 2, "timeout_s": 1.0}
+        for event, detail in events
+    )
+    assert any(
+        event == "mcp.discovery.done"
+        and detail["server_count"] == 2
+        and detail["failed_count"] == 1
+        and detail["duration_ms"] >= 0
+        for event, detail in events
+    )
 
 
 def test_mcp_tool_timeout_returns_structured_failure(monkeypatch):

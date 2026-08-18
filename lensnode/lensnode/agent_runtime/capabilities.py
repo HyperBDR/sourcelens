@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 from collections import defaultdict
 
 from langchain.agents.middleware import AgentMiddleware
@@ -29,12 +30,15 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         emit_event=None,
         required_capabilities=None,
         require_initial_plan=False,
+        planning_reasoning_effort=None,
         on_state_change=None,
     ):
         self.emit_event = emit_event
         self.required_capabilities = set(required_capabilities or [])
         self.require_initial_plan = require_initial_plan
+        self.planning_reasoning_effort = planning_reasoning_effort
         self.on_state_change = on_state_change
+        self.planning_started_at = time.monotonic()
         self.initial_plan_exists = False
         self.blocked_tools = set()
         self.blocked_capabilities = set()
@@ -664,7 +668,21 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             return
         arguments = (request.tool_call or {}).get("args") or {}
         if _normalize_plan_steps(arguments.get("todos")):
+            initial_plan_existed = self.initial_plan_exists
             self.initial_plan_exists = True
+            if not initial_plan_existed and self.emit_event is not None:
+                self.emit_event(
+                    "deepagents.plan.ready",
+                    {
+                        "duration_ms": int(
+                            (
+                                time.monotonic()
+                                - self.planning_started_at
+                            )
+                            * 1000
+                        )
+                    },
+                )
 
     def _filter_tools(self, tools):
         remaining = []
@@ -705,14 +723,30 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
     def wrap_model_call(self, request, handler):
         """Hide exhausted tools from subsequent model requests."""
 
-        request = request.override(tools=self._filter_tools(request.tools))
+        request = self._prepare_model_request(request)
         return handler(request)
 
     async def awrap_model_call(self, request, handler):
         """Hide exhausted tools from asynchronous model requests."""
 
-        request = request.override(tools=self._filter_tools(request.tools))
+        request = self._prepare_model_request(request)
         return await handler(request)
+
+    def _prepare_model_request(self, request):
+        """Use bounded reasoning for the initial planning-only turn."""
+
+        overrides = {"tools": self._filter_tools(request.tools)}
+        if (
+            self.require_initial_plan
+            and not self.initial_plan_exists
+            and self.planning_reasoning_effort
+        ):
+            model_settings = dict(request.model_settings or {})
+            model_settings["reasoning_effort"] = (
+                self.planning_reasoning_effort
+            )
+            overrides["model_settings"] = model_settings
+        return request.override(**overrides)
 
     def wrap_tool_call(self, request, handler):
         """Classify one synchronous tool result and enforce its budget."""

@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -293,8 +294,32 @@ def load_mcp_tools(
 
     if not prepared:
         return []
+    discovery_started_at = time.monotonic()
+    discovery_timeout = max(float(discovery_timeout_s), 0.001)
+    _emit(
+        emit_event,
+        "mcp.discovery.start",
+        {
+            "server_count": len(prepared),
+            "timeout_s": discovery_timeout,
+        },
+    )
     discovered_servers = asyncio.run(
         _discover_mcp_servers(prepared, discovery_timeout_s)
+    )
+    _emit(
+        emit_event,
+        "mcp.discovery.done",
+        {
+            "server_count": len(prepared),
+            "failed_count": sum(
+                error is not None
+                for _discovered, error in discovered_servers
+            ),
+            "duration_ms": int(
+                (time.monotonic() - discovery_started_at) * 1000
+            ),
+        },
     )
     tools = []
     used_tool_names = set()

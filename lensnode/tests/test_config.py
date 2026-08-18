@@ -129,6 +129,17 @@ def test_load_config_reads_mcp_runtime_limits(monkeypatch):
     assert config.mcp_defer_threshold == 8
 
 
+def test_load_config_uses_light_reasoning_for_initial_planning(monkeypatch):
+    monkeypatch.delenv(
+        "LENSNODE_PLANNING_REASONING_EFFORT",
+        raising=False,
+    )
+
+    config = load_config()
+
+    assert config.planning_reasoning_effort == "none"
+
+
 def test_load_config_allows_mcp_discovery_and_cleanup_headroom(monkeypatch):
     monkeypatch.delenv(
         "LENSNODE_MCP_DISCOVERY_TIMEOUT_S",

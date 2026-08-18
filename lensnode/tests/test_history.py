@@ -2693,6 +2693,81 @@ def test_failed_initial_plan_does_not_unlock_business_tools():
     assert json.loads(denied.content)["error"] == "INITIAL_PLAN_REQUIRED"
 
 
+def test_initial_plan_uses_light_reasoning_without_changing_execution():
+    class Request:
+        tools = []
+        model_settings = {"temperature": 0}
+
+        def override(self, **changes):
+            values = {
+                "tools": self.tools,
+                "model_settings": self.model_settings,
+            }
+            values.update(changes)
+            return SimpleNamespace(**values)
+
+    events = []
+    middleware = agent_runtime.CapabilityBoundaryMiddleware(
+        emit_event=lambda name, detail: events.append((name, detail)),
+        require_initial_plan=True,
+        planning_reasoning_effort="none",
+    )
+
+    planning_settings = middleware.wrap_model_call(
+        Request(),
+        lambda request: request.model_settings,
+    )
+
+    plan_request = SimpleNamespace(
+        tool=SimpleNamespace(name="write_todos"),
+        tool_call={
+            "name": "write_todos",
+            "id": "call-plan",
+            "args": {
+                "todos": [
+                    {
+                        "content": "Query orders",
+                        "status": "in_progress",
+                    }
+                ]
+            },
+        },
+    )
+    middleware.wrap_tool_call(
+        plan_request,
+        lambda _request: ToolMessage(
+            content='{"ok":true}',
+            name="write_todos",
+            tool_call_id="call-plan",
+        ),
+    )
+    execution_settings = middleware.wrap_model_call(
+        Request(),
+        lambda request: request.model_settings,
+    )
+    middleware.wrap_tool_call(
+        plan_request,
+        lambda _request: ToolMessage(
+            content='{"ok":true}',
+            name="write_todos",
+            tool_call_id="call-plan",
+        ),
+    )
+
+    assert planning_settings == {
+        "temperature": 0,
+        "reasoning_effort": "none",
+    }
+    assert execution_settings == {"temperature": 0}
+    plan_events = [
+        detail
+        for name, detail in events
+        if name == "deepagents.plan.ready"
+    ]
+    assert len(plan_events) == 1
+    assert plan_events[0]["duration_ms"] >= 0
+
+
 def test_validated_delivery_survives_format_warning_and_call_limit():
     events = []
     middleware = agent_runtime.CapabilityBoundaryMiddleware(
@@ -4697,13 +4772,15 @@ def test_plan_execute_route_enables_subagent_delegation(
         run_agent,
     )
 
+    events = []
     agent_runtime.LensDeepAgentRuntime(config)._answer_sync(
         {
             "run_uuid": "00000000-0000-0000-0000-000000000021",
             "task": "general_chat",
             "question": "汇总各渠道订单并生成对比报告",
             "agent_model_ref": "model-ref",
-        }
+        },
+        emit_progress=lambda _message, detail: events.append(detail),
     )
 
     assert len(captured["subagents"]) == 1
@@ -4713,6 +4790,26 @@ def test_plan_execute_route_enables_subagent_delegation(
         isinstance(item, agent_runtime._NoTaskMiddleware)
         and item.allow_task_tool
         for item in captured["middleware"]
+    )
+    capability_middleware = next(
+        item
+        for item in captured["middleware"]
+        if isinstance(
+            item,
+            agent_runtime.CapabilityBoundaryMiddleware,
+        )
+    )
+    assert capability_middleware.planning_reasoning_effort == "none"
+    stage_names = [
+        detail["stage"]
+        for detail in events
+        if detail.get("agent_event") == "deepagents.runtime.stage.done"
+    ]
+    assert stage_names == ["resources", "model_tools", "routing"]
+    assert all(
+        detail["duration_ms"] >= 0
+        for detail in events
+        if detail.get("agent_event") == "deepagents.runtime.stage.done"
     )
 
 

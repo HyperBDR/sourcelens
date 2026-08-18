@@ -427,6 +427,11 @@ class LensDeepAgentRuntime:
         )
         if runtime_mode.general_chat:
             emit_user_event("phase.changed", {"phase": "analyzing"})
+        resources_started_at = time.monotonic()
+        emit_agent_event(
+            "deepagents.runtime.stage.start",
+            {"stage": "resources"},
+        )
         state.resources = prepare_runtime_resources(
             self.config,
             command,
@@ -434,12 +439,35 @@ class LensDeepAgentRuntime:
             cancel_event=cancel_event,
             on_activity=on_activity,
         )
+        emit_agent_event(
+            "deepagents.runtime.stage.done",
+            {
+                "stage": "resources",
+                "duration_ms": int(
+                    (time.monotonic() - resources_started_at) * 1000
+                ),
+            },
+        )
+        model_tools_started_at = time.monotonic()
+        emit_agent_event(
+            "deepagents.runtime.stage.start",
+            {"stage": "model_tools"},
+        )
         try:
             self._prepare_model_and_tools(state)
         except BaseException:
             if cancel_event is None or not cancel_event.is_set():
                 cleanup_runtime_resources(state.resources)
             raise
+        emit_agent_event(
+            "deepagents.runtime.stage.done",
+            {
+                "stage": "model_tools",
+                "duration_ms": int(
+                    (time.monotonic() - model_tools_started_at) * 1000
+                ),
+            },
+        )
         return state
 
     def _prepare_model_and_tools(self, state):
@@ -645,6 +673,11 @@ class LensDeepAgentRuntime:
 
         if not state.runtime_mode.execution_gates:
             return None
+        routing_started_at = time.monotonic()
+        state.emit_agent_event(
+            "deepagents.runtime.stage.start",
+            {"stage": "routing"},
+        )
         route_was_resumed = bool(
             state.resume_state is not None
             and state.resume_state.route_decision.get("route")
@@ -679,6 +712,15 @@ class LensDeepAgentRuntime:
                     history_assistant_turns=state.history_assistant_turns,
                 )
                 state.persist_execution_state()
+        state.emit_agent_event(
+            "deepagents.runtime.stage.done",
+            {
+                "stage": "routing",
+                "duration_ms": int(
+                    (time.monotonic() - routing_started_at) * 1000
+                ),
+            },
+        )
         state.command = {
             **state.command,
             "runtime_route": state.route_decision["route"],
@@ -798,6 +840,11 @@ class LensDeepAgentRuntime:
             required_capabilities=state.required_capabilities,
             require_initial_plan=(
                 state.route_decision["route"] == "plan_execute"
+            ),
+            planning_reasoning_effort=getattr(
+                self.config,
+                "planning_reasoning_effort",
+                "none",
             ),
             on_state_change=state.persist_execution_state,
         )
