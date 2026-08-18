@@ -106,7 +106,7 @@ export function normalizeList(payload) {
   return []
 }
 
-export const DEFAULT_NODE_IMAGE = 'oneprocloud/lensnode:latest'
+export const DEFAULT_NODE_IMAGE = 'oneprolabs/lensnode:latest'
 
 const COMPOSE_PLACEHOLDER = {
   serverUrl: 'REPLACE_ME__set_the_public_base_url'

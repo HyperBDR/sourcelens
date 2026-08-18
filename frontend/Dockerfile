@@ -52,7 +52,7 @@ COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 # 0.0.0, which install.sh treats as "never skip". Kept last so a version bump
 # doesn't invalidate the COPY layers above it.
 ARG APP_VERSION=0.0.0
-LABEL com.oneprocloud.sourcelens.version=$APP_VERSION
+LABEL com.oneprolabs.sourcelens.version=$APP_VERSION
 
 # Expose port
 EXPOSE 80

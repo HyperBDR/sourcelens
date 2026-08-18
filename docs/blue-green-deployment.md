@@ -132,10 +132,10 @@ Rename these; everything else is mechanical:
 | Thing | sourcelens value | Where |
 |---|---|---|
 | Service/container names | `sourcelens-api-{blue,green}`, `sourcelens-ui-…`, `sourcelens-{worker,scheduler,nginx,postgres,redis}` | compose, scripts, nginx |
-| Image repos | `oneprocloud/sourcelens-backend`, `…-frontend` | compose, `install.sh` |
+| Image repos | `oneprolabs/sourcelens-backend`, `…-frontend` | compose, `install.sh` |
 | Git repo (asset fetch) | `HyperBDR/sourcelens` | `install.sh` `REPO=` |
 | Health endpoint | `GET /health` on `:8000` | `deploy-common.sh` `wait_for_healthy`, compose healthcheck |
-| Version LABEL | `com.oneprocloud.sourcelens.version` | Dockerfiles + `deploy-common.sh` |
+| Version LABEL | `com.oneprolabs.sourcelens.version` | Dockerfiles + `deploy-common.sh` |
 | nginx upstream var names | `$sourcelens_api_active` / `$sourcelens_ui_active` | `default.conf` + `upstream.conf` |
 | WS worker (if any) | `lensnode` (reaches API via nginx) | compose env, backend grace-period |
 

@@ -1239,7 +1239,7 @@
       "publicBaseUrlTitle": "Public Base URL",
       "publicBaseUrlDesc": "Base address used for assistant share links (e.g. your own domain). Leave empty to use the current server address.",
       "nodeImageTitle": "Node Image",
-      "nodeImageDesc": "Docker image used in the generated compose. Leave empty to use the default oneprocloud/lensnode:latest.",
+      "nodeImageDesc": "Docker image used in the generated compose. Leave empty to use the default oneprolabs/lensnode:latest.",
       "groups": {
         "deploy": "Deployment & Enrollment",
         "runtime": "Runtime & Retention",

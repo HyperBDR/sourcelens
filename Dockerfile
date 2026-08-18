@@ -189,6 +189,6 @@ RUN chmod +x /entrypoint.sh
 
 # Keep the version stamp last so version-only changes reuse expensive layers.
 ARG APP_VERSION=0.0.0
-LABEL com.oneprocloud.sourcelens.version=$APP_VERSION
+LABEL com.oneprolabs.sourcelens.version=$APP_VERSION
 
 ENTRYPOINT ["/entrypoint.sh"]
