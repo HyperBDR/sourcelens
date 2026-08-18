@@ -951,7 +951,20 @@
       "noValues": "No variables added yet.",
       "createTitle": "New environment variable set",
       "editTitle": "Edit environment variable set",
-      "deleteConfirm": "Delete this variable set? Variable sets currently in use cannot be deleted."
+      "deleteConfirm": "Delete this variable set? Variable sets currently in use cannot be deleted.",
+      "searchLabel": "Search",
+      "searchPlaceholder": "Search by name, variable, or reference...",
+      "filteredCount": "Showing {filtered} of {total}",
+      "noResults": "No variable sets match the current filters.",
+      "moreUsages": "+{count}",
+      "deleteTitle": "Delete variable set",
+      "deleteMessage": "Delete variable set \"{name}\"? This action cannot be undone.",
+      "deleteBlocked": "This variable set is still used by {count} references. Unbind them before deleting it.",
+      "deleteAction": "Delete Variable Set",
+      "viewAction": "View details of \"{name}\"",
+      "viewTitle": "Variable Set Details",
+      "revealValues": "Reveal values",
+      "hideValues": "Hide values"
     },
     "skillDetail": {
       "title": "Skill Detail"
@@ -1558,6 +1571,7 @@
       "environmentSetName": "Variable set name (for example, Jira – Production)",
       "environmentConfigured": "Saved",
       "environmentMissing": "Not set",
+      "environmentSetValues": "Variable set values",
       "mcpSection": "MCP Servers",
       "mcpEnvironmentSectionHint": "These values apply only to this MCP Server. Configure every required variable before continuing.",
       "mcpEnvironmentConfigurationHint": "This MCP Server needs {count} environment variables. Choose an existing variable set or create a new one.",

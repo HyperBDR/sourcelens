@@ -502,6 +502,14 @@
                         {{ variableSet.name }}
                       </option>
                     </BaseSelect>
+                    <EnvironmentSetValues
+                      v-if="
+                        form.skill_environment_set_uuids[skill.uuid] &&
+                        form.skill_environment_set_uuids[skill.uuid] !==
+                          '__new__'
+                      "
+                      :variable-set="selectedEnvironmentSet(skill.uuid)"
+                    />
                     <input
                       v-if="
                         form.skill_environment_set_uuids[skill.uuid] ===
@@ -656,6 +664,13 @@
                       {{ variableSet.name }}
                     </option>
                   </BaseSelect>
+                  <EnvironmentSetValues
+                    v-if="
+                      form.mcp_environment_set_uuids[mcp.uuid] &&
+                      form.mcp_environment_set_uuids[mcp.uuid] !== '__new__'
+                    "
+                    :variable-set="selectedMcpEnvironmentSet(mcp.uuid)"
+                  />
                   <input
                     v-if="
                       form.mcp_environment_set_uuids[mcp.uuid] === '__new__'
@@ -1024,6 +1039,8 @@ import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useUserStore } from '@/store/user'
+
+import EnvironmentSetValues from './components/EnvironmentSetValues.vue'
 
 import {
   EMPTY_VALUE,
