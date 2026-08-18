@@ -11,6 +11,7 @@ from .admin_run_diagnostics import (
 from .admin_runs import (
     AdminRunDetailView,
     AdminRunListView,
+    AdminRunTrajectoryView,
     _admin_run_step_counts,
 )
 from .assistants import AssistantViewSet, PublicAssistantView
@@ -48,6 +49,7 @@ __all__ = [
     "AdminGroupAccessDetailView",
     "AdminRunDetailView",
     "AdminRunListView",
+    "AdminRunTrajectoryView",
     "AdminRunDiagnosticsView",
     "AdminRunDiagnosticTurnsView",
     "AdminUserAccessDetailView",

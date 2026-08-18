@@ -1,5 +1,7 @@
 """Admin observability views and helpers for Q&A runs."""
 
+from django.db.models import Count, Max, Min, Q, TextField
+from django.db.models.functions import Cast
 from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.response import Response
@@ -13,7 +15,7 @@ from lens.document_attachments import (
     document_attachment_response,
     get_run_document_attachments,
 )
-from lens.models import Run
+from lens.models import Run, RunTraceEvent
 from lens.runtime_events import (
     sanitize_loaded_mcps,
     sanitize_loaded_skills,
@@ -491,6 +493,7 @@ def _admin_run_detail(run):
         "error": run.error or "",
         "agent_rounds": agent_rounds,
         "failure_summary": _admin_run_failure_summary(run),
+        "trace_event_count": run.trace_events.count(),
         "steps": steps,
         "execution": {
             "task": execution.task,
@@ -602,3 +605,164 @@ class AdminRunDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(_admin_run_detail(run))
+
+
+def _trace_event_response(event):
+    """Serialize one immutable trajectory row."""
+
+    return {
+        "uuid": str(event.uuid),
+        "event_id": str(event.event_id),
+        "sequence": event.sequence,
+        "attempt": event.attempt,
+        "event_type": event.event_type,
+        "timestamp": event.timestamp.isoformat(),
+        "checkpoint_id": event.checkpoint_id or None,
+        "turn": event.turn,
+        "step": event.step,
+        "call_id": event.call_id or None,
+        "parent_call_id": event.parent_call_id or None,
+        "payload": event.payload,
+        "created_at": event.created_at.isoformat(),
+    }
+
+
+def _run_trace_summary(run):
+    """Return unfiltered timing, category, call, and usage aggregates."""
+
+    events = run.trace_events.all()
+    aggregate = events.aggregate(
+        event_count=Count("uuid"),
+        first_timestamp=Min("timestamp"),
+        last_timestamp=Max("timestamp"),
+        model_calls=Count(
+            "call_id",
+            filter=(
+                Q(event_type__startswith="model.") & ~Q(call_id="")
+            ),
+            distinct=True,
+        ),
+        tool_calls=Count(
+            "call_id",
+            filter=(
+                Q(event_type__startswith="tool.")
+                | Q(event_type__startswith="subtool.")
+            )
+            & ~Q(call_id=""),
+            distinct=True,
+        ),
+        error_count=Count(
+            "uuid",
+            filter=Q(event_type__endswith=".failed"),
+        ),
+    )
+    if not aggregate["event_count"]:
+        return {
+            "event_count": 0,
+            "first_timestamp": None,
+            "last_timestamp": None,
+            "duration_ms": None,
+            "model_calls": 0,
+            "tool_calls": 0,
+            "total_tokens": 0,
+            "error_count": 0,
+            "categories": {},
+        }
+    categories = {}
+    for row in events.values("event_type").annotate(count=Count("uuid")):
+        category = row["event_type"].split(".", 1)[0]
+        categories[category] = categories.get(category, 0) + row["count"]
+    total_tokens = 0
+    token_values = events.filter(event_type="model.completed").values_list(
+        "payload__usage__total_tokens",
+        flat=True,
+    )
+    for value in token_values:
+        try:
+            total_tokens += max(int(value or 0), 0)
+        except (TypeError, ValueError):
+            pass
+    first_timestamp = aggregate["first_timestamp"]
+    last_timestamp = aggregate["last_timestamp"]
+    return {
+        "event_count": aggregate["event_count"],
+        "first_timestamp": first_timestamp.isoformat(),
+        "last_timestamp": last_timestamp.isoformat(),
+        "duration_ms": max(
+            int((last_timestamp - first_timestamp).total_seconds() * 1000),
+            0,
+        ),
+        "model_calls": aggregate["model_calls"],
+        "tool_calls": aggregate["tool_calls"],
+        "total_tokens": total_tokens,
+        "error_count": aggregate["error_count"],
+        "categories": categories,
+    }
+
+
+class AdminRunTrajectoryView(APIView):
+    """Admin-only paginated trajectory for one Q&A run."""
+
+    permission_classes = [HasRequiredFeature]
+    required_feature = "admin_console"
+
+    def get(self, request, run_uuid):
+        """Return filtered events and unfiltered run summary."""
+
+        try:
+            run = Run.objects.get(uuid=run_uuid)
+        except Run.DoesNotExist:
+            return Response(
+                {"detail": "Run not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        params = request.query_params
+        page_size = _admin_safe_int(
+            params.get("page_size"),
+            200,
+            maximum=500,
+        )
+        after_sequence = _admin_safe_int(
+            params.get("after_sequence"),
+            0,
+            minimum=0,
+        )
+        queryset = RunTraceEvent.objects.filter(
+            run=run,
+            sequence__gt=after_sequence,
+        )
+        event_type = (params.get("event_type") or "").strip()[:128]
+        if event_type:
+            queryset = queryset.filter(event_type=event_type)
+        category = (params.get("category") or "").strip().lower()[:128]
+        if category:
+            queryset = queryset.filter(event_type__startswith=f"{category}.")
+        call_id = (params.get("call_id") or "").strip()[:128]
+        if call_id:
+            queryset = queryset.filter(
+                Q(call_id=call_id) | Q(parent_call_id=call_id)
+            )
+        keyword = (params.get("q") or "").strip()[:256]
+        if keyword:
+            queryset = queryset.annotate(
+                payload_text=Cast("payload", output_field=TextField())
+            ).filter(
+                Q(event_type__icontains=keyword)
+                | Q(call_id__icontains=keyword)
+                | Q(parent_call_id__icontains=keyword)
+                | Q(payload_text__icontains=keyword)
+            )
+        total = queryset.count()
+        rows = list(queryset.order_by("sequence")[:page_size])
+        next_after_sequence = rows[-1].sequence if rows else None
+        return Response(
+            {
+                "results": [_trace_event_response(event) for event in rows],
+                "total": total,
+                "page_size": page_size,
+                "after_sequence": after_sequence,
+                "next_after_sequence": next_after_sequence,
+                "has_more": total > len(rows),
+                "summary": _run_trace_summary(run),
+            }
+        )

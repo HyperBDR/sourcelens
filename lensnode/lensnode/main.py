@@ -101,6 +101,7 @@ class LensNodeClient:
             os.getenv("LENSNODE_OUTBOX_MAX_FRAMES", "10000")
         )
         self._outbox_dropped = 0
+        self._pending_trace_frames = collections.OrderedDict()
 
     def _enqueue(self, payload):
         """Append an outbound frame to the durable outbox.
@@ -112,6 +113,18 @@ class LensNodeClient:
         awaiting, so a drop here never races the frame being sent.
         """
 
+        if payload.get("type") == "run_trace_events":
+            for event in payload.get("events") or []:
+                sequence = event.get("sequence")
+                if isinstance(sequence, int) and not isinstance(
+                    sequence,
+                    bool,
+                ):
+                    key = (str(payload.get("run_uuid") or ""), sequence)
+                    self._pending_trace_frames[key] = payload
+                    self._pending_trace_frames.move_to_end(key)
+            while len(self._pending_trace_frames) > self._outbox_max:
+                self._pending_trace_frames.popitem(last=False)
         while len(self._outbox) >= self._outbox_max:
             self._outbox.popleft()
             self._outbox_dropped += 1
@@ -362,6 +375,28 @@ class LensNodeClient:
             )
         )
         await self._send_hello()
+        self._restore_pending_trace_frames()
+
+    def _restore_pending_trace_frames(self):
+        """Requeue unacknowledged trace events once per reconnect."""
+
+        queued = {
+            (
+                str(frame.get("run_uuid") or ""),
+                event.get("sequence"),
+            )
+            for frame in self._outbox
+            if frame.get("type") == "run_trace_events"
+            for event in frame.get("events") or []
+        }
+        restored_frames = set()
+        for key, frame in self._pending_trace_frames.items():
+            frame_id = id(frame)
+            if key not in queued and frame_id not in restored_frames:
+                self._outbox.append(frame)
+                restored_frames.add(frame_id)
+        if self._outbox:
+            self._outbox_ready.set()
 
     async def _receive_loop(self, websocket):
         """Receive and dispatch control-plane messages."""
@@ -472,6 +507,20 @@ class LensNodeClient:
             if not cleanup_deferred:
                 cleanup_run_checkpoint(run_uuid, workspace_path)
                 cleanup_run_runtime_resources(workspace_path, run_uuid)
+        elif message_type == "run_trace_events_ack":
+            run_uuid = str(message.get("run_uuid") or "")
+            last_sequence = message.get("last_sequence")
+            if isinstance(last_sequence, int) and not isinstance(
+                last_sequence,
+                bool,
+            ):
+                acknowledged = [
+                    key
+                    for key in self._pending_trace_frames
+                    if key[0] == run_uuid and key[1] <= last_sequence
+                ]
+                for key in acknowledged:
+                    self._pending_trace_frames.pop(key, None)
         elif message_type == "connected":
             LOGGER.info(
                 task_log(
@@ -540,6 +589,20 @@ class LensNodeClient:
         if len(self.running_tasks) >= max_runs:
             await self._send_busy(run_uuid, "LENSNODE_BUSY")
             return
+
+        pending_sequences = [
+            sequence
+            for pending_run_uuid, sequence in self._pending_trace_frames
+            if pending_run_uuid == run_uuid
+        ]
+        if pending_sequences:
+            message = {
+                **message,
+                "trace_cursor": max(
+                    int(message.get("trace_cursor") or 0),
+                    max(pending_sequences),
+                ),
+            }
 
         LOGGER.info(
             task_log(

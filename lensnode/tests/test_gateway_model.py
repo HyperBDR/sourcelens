@@ -5,7 +5,12 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from lensnode.agent_runtime import _build_summarization_middleware
 from lensnode.agent_runtime.summarization import (
@@ -18,6 +23,7 @@ from lensnode.gateway_model import (
     _message_to_gateway,
     describe_image_result,
 )
+from lensnode.trajectory import RunTrajectory
 
 
 SSE_BODY = (
@@ -85,6 +91,58 @@ def test_streaming_touches_activity_on_every_event(monkeypatch):
     assert b'"run_uuid"' in captured["payload"]
     assert b'"is_subagent"' in captured["payload"]
     assert client_options["verify"].verify_mode == ssl.CERT_REQUIRED
+
+
+def test_streaming_trajectory_records_prompt_schema_reasoning_and_usage(
+    monkeypatch,
+):
+    _install_transport(
+        monkeypatch,
+        lambda _request: httpx.Response(
+            200,
+            content=SSE_BODY.encode("utf-8"),
+        ),
+    )
+    frames = []
+    trajectory = RunTrajectory("run-trajectory", frames.append)
+    model = LensGatewayChatModel(
+        model_ref="model-ref",
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        emit_output=lambda _content: None,
+        trajectory=trajectory,
+    )
+
+    model._generate(
+        [SystemMessage(content="full system"), HumanMessage(content="hello")],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "search",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
+    )
+
+    events = [frame["events"][0] for frame in frames]
+    types = [event["event_type"] for event in events]
+    assert types == [
+        "system.snapshot",
+        "tools.snapshot",
+        "model.started",
+        "model.first_token",
+        "assistant.reasoning",
+        "assistant.message",
+        "model.completed",
+    ]
+    assert events[-3]["payload"]["content"] == "thinking"
+    completed = events[-1]["payload"]
+    assert completed["content"].startswith("Hello")
+    assert completed["reasoning"] == "thinking"
+    assert completed["usage"] == {"total_tokens": 5}
+    assert completed["ttft_ms"] is not None
 
 
 def test_gateway_calls_reuse_injected_http_client(monkeypatch):
@@ -411,6 +469,7 @@ def test_cancelled_run_aborts_before_model_call(monkeypatch):
 def test_runtime_control_call_is_non_streaming_and_hidden(monkeypatch):
     captured = {}
     outputs = []
+    frames = []
 
     def handler(request):
         captured["payload"] = json.loads(request.read())
@@ -420,6 +479,7 @@ def test_runtime_control_call_is_non_streaming_and_hidden(monkeypatch):
                 "message": {
                     "role": "assistant",
                     "content": '{"route":"direct_answer"}',
+                    "reasoning_content": "route reasoning",
                     "finish_reason": "stop",
                 },
                 "usage": {"total_tokens": 7},
@@ -432,6 +492,7 @@ def test_runtime_control_call_is_non_streaming_and_hidden(monkeypatch):
         ai_gateway_url="http://gateway/ai/",
         token="token",
         emit_output=outputs.append,
+        trajectory=RunTrajectory("control-run", frames.append),
     )
 
     result = model._generate(
@@ -441,9 +502,18 @@ def test_runtime_control_call_is_non_streaming_and_hidden(monkeypatch):
     )
 
     assert result.generations[0].message.content.startswith("{")
+    assert (
+        result.generations[0].message.response_metadata[
+            "reasoning_content"
+        ]
+        == "route reasoning"
+    )
     assert outputs == []
     assert "stream" not in captured["payload"]
     assert "tools" not in captured["payload"]
+    assert "assistant.reasoning" in [
+        frame["events"][0]["event_type"] for frame in frames
+    ]
 
 
 def test_streaming_structured_output_surfaces_reasoning_delta(monkeypatch):

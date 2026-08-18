@@ -2154,6 +2154,12 @@ def dispatch_run_to_lensnode(
         run,
         rewritten_question,
     )
+    trace_cursor = run.trace_events.aggregate(
+        last_sequence=Max("sequence"),
+        last_attempt=Max("attempt"),
+    )
+    last_trace_sequence = int(trace_cursor["last_sequence"] or 0)
+    last_trace_attempt = int(trace_cursor["last_attempt"] or 0)
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(run.lensnode.uuid),
         {
@@ -2189,6 +2195,11 @@ def dispatch_run_to_lensnode(
                 "resume": resume,
                 "run_timeout_s": run_timeout_s,
                 "remaining_run_timeout_s": remaining_run_timeout_s,
+                "trace_cursor": last_trace_sequence,
+                "trace_attempt": max(
+                    last_trace_attempt + (1 if resume else 0),
+                    1,
+                ),
                 "trace_context": {
                     "trace_id": trace_id_for_run(run.uuid),
                     "root_observation_id": root_observation_id_for_run(

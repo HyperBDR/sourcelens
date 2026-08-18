@@ -27,7 +27,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 LOGGER = logging.getLogger("lensnode")
 
 _CHECKPOINT_FILE = "lensnode.sqlite"
-_METADATA_SCHEMA_VERSION = 1
+_METADATA_SCHEMA_VERSION = 2
+_TRACE_SCHEMA_VERSION = 1
 _saver = None
 _saver_lock = threading.Lock()
 _database_lock = threading.RLock()
@@ -47,12 +48,18 @@ class ResumeState:
     route_decision: dict
     history_assistant_turns: int
     checkpoint_step: int = -1
+    checkpoint_id: str = ""
     capability_state: dict = field(default_factory=dict)
     runtime_evidence: dict = field(default_factory=dict)
     guardrail_state: dict = field(default_factory=dict)
     pending_write_tool_call_ids: frozenset = field(
         default_factory=frozenset
     )
+    last_trace_seq: int = 0
+    current_attempt: int = 1
+    open_call_ids: tuple = ()
+    open_span_ids: tuple = ()
+    parent_call_map: dict = field(default_factory=dict)
 
 
 def checkpoint_enabled() -> bool:
@@ -271,15 +278,11 @@ def save_runtime_state(
     capability_state=None,
     runtime_evidence=None,
     guardrail_state=None,
+    trace_state=None,
 ):
     """Persist execution-gate state that must survive a process restart."""
 
     saver = get_checkpoint_saver(workspace_path)
-    payload = {
-        "capability_state": capability_state or {},
-        "runtime_evidence": runtime_evidence or {},
-        "guardrail_state": guardrail_state or {},
-    }
     with _database_lock:
         snapshot = saver.get_tuple(thread_config(run_uuid))
         if snapshot is None:
@@ -287,6 +290,28 @@ def save_runtime_state(
                 "Cannot persist runtime state without a checkpoint."
             )
         checkpoint_id = _config_checkpoint_id(snapshot.config)
+        row = saver.conn.execute(
+            """
+            SELECT runtime_state
+            FROM lensnode_run_metadata
+            WHERE run_uuid = ?
+            """,
+            (str(run_uuid),),
+        ).fetchone()
+        try:
+            payload = json.loads(row[0]) if row is not None else {}
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        for key, value in (
+            ("capability_state", capability_state),
+            ("runtime_evidence", runtime_evidence),
+            ("guardrail_state", guardrail_state),
+            ("trace_state", trace_state),
+        ):
+            if value is not None:
+                payload[key] = value
         cursor = saver.conn.execute(
             """
             UPDATE lensnode_run_metadata
@@ -373,6 +398,7 @@ def load_resume_state(run_uuid, workspace_path) -> ResumeState:
         raise CheckpointResumeError(
             "Cannot resume run because its runtime state is invalid."
         )
+    trace_state = _validated_trace_state(runtime_state.get("trace_state"))
     channel_values = snapshot.checkpoint.get("channel_values") or {}
     checkpoint_step = (snapshot.metadata or {}).get("step", -1)
     if not isinstance(checkpoint_step, int) or isinstance(
@@ -387,13 +413,77 @@ def load_resume_state(run_uuid, workspace_path) -> ResumeState:
         route_decision=route_decision,
         history_assistant_turns=max(int(row[1] or 0), 0),
         checkpoint_step=checkpoint_step,
+        checkpoint_id=str(row[3]),
         capability_state=runtime_state.get("capability_state") or {},
         runtime_evidence=runtime_state.get("runtime_evidence") or {},
         guardrail_state=runtime_state.get("guardrail_state") or {},
         pending_write_tool_call_ids=_pending_write_tool_call_ids(
             snapshot.pending_writes
         ),
+        last_trace_seq=trace_state["last_trace_seq"],
+        current_attempt=trace_state["current_attempt"],
+        open_call_ids=tuple(trace_state["open_call_ids"]),
+        open_span_ids=tuple(trace_state["open_span_ids"]),
+        parent_call_map=trace_state["parent_call_map"],
     )
+
+
+def _validated_trace_state(value):
+    """Return safe trajectory continuation metadata or fail closed."""
+
+    if value is None:
+        return {
+            "trace_schema_version": _TRACE_SCHEMA_VERSION,
+            "last_trace_seq": 0,
+            "current_attempt": 1,
+            "open_call_ids": [],
+            "open_span_ids": [],
+            "parent_call_map": {},
+        }
+    if not isinstance(value, dict):
+        raise CheckpointResumeError(
+            "Cannot resume run because its trajectory state is invalid."
+        )
+    if value.get("trace_schema_version") != _TRACE_SCHEMA_VERSION:
+        raise CheckpointResumeError(
+            "Cannot resume run because its trajectory schema is unsupported."
+        )
+    last_trace_seq = value.get("last_trace_seq")
+    current_attempt = value.get("current_attempt")
+    open_call_ids = value.get("open_call_ids")
+    open_span_ids = value.get("open_span_ids")
+    parent_call_map = value.get("parent_call_map")
+    valid_numbers = (
+        isinstance(last_trace_seq, int)
+        and not isinstance(last_trace_seq, bool)
+        and last_trace_seq >= 0
+        and isinstance(current_attempt, int)
+        and not isinstance(current_attempt, bool)
+        and current_attempt >= 1
+    )
+    valid_collections = (
+        isinstance(open_call_ids, list)
+        and all(isinstance(item, str) for item in open_call_ids)
+        and isinstance(open_span_ids, list)
+        and all(isinstance(item, str) for item in open_span_ids)
+        and isinstance(parent_call_map, dict)
+        and all(
+            isinstance(key, str) and isinstance(item, str)
+            for key, item in parent_call_map.items()
+        )
+    )
+    if not valid_numbers or not valid_collections:
+        raise CheckpointResumeError(
+            "Cannot resume run because its trajectory state is invalid."
+        )
+    return {
+        "trace_schema_version": _TRACE_SCHEMA_VERSION,
+        "last_trace_seq": last_trace_seq,
+        "current_attempt": current_attempt,
+        "open_call_ids": open_call_ids,
+        "open_span_ids": open_span_ids,
+        "parent_call_map": parent_call_map,
+    }
 
 
 def _config_checkpoint_id(config):

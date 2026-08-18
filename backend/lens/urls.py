@@ -7,6 +7,7 @@ from .views import (
     AdminRunDiagnosticsView,
     AdminRunDiagnosticTurnsView,
     AdminRunListView,
+    AdminRunTrajectoryView,
     AdminSharedQAViewSet,
     AdminUserAccessDetailView,
     AssistantViewSet,
@@ -131,6 +132,11 @@ urlpatterns = [
         "admin/runs/<uuid:uuid>/",
         AdminRunDetailView.as_view(),
         name="lens-admin-run-detail",
+    ),
+    path(
+        "admin/runs/<uuid:run_uuid>/trajectory/",
+        AdminRunTrajectoryView.as_view(),
+        name="lens-admin-run-trajectory",
     ),
     path(
         "admin/runs/<uuid:run_uuid>/diagnostics/",

@@ -8,6 +8,7 @@ from .agent_runtime import LensDeepAgentRuntime
 from .checkpoint import cleanup_run_checkpoint
 from .logging_utils import elapsed_since, format_duration, task_log, utc_now
 from .runtime_resources import cleanup_run_runtime_resources
+from .trajectory import RunTrajectory
 
 LOGGER = logging.getLogger("lensnode")
 
@@ -288,6 +289,37 @@ class LensNodeExecutor:
 
         started_at = utc_now()
         run_uuid = command["run_uuid"]
+        trajectory = RunTrajectory(
+            run_uuid,
+            emit,
+            start_sequence=command.get("trace_cursor") or 0,
+            attempt=command.get("trace_attempt") or 1,
+        )
+        command["_trajectory"] = trajectory
+        trajectory.record(
+            "request.started",
+            {
+                "task": command.get("task"),
+                "question": command.get("question") or "",
+                "history": command.get("history") or [],
+                "target_dirs": command.get("target_dirs") or [],
+                "model_ref": command.get("agent_model_ref"),
+                "settings": command.get("settings") or {},
+                "resume": bool(command.get("resume")),
+            },
+        )
+        for history_message in command.get("history") or []:
+            trajectory.record(
+                "context.message",
+                {"message": history_message},
+            )
+        trajectory.record(
+            "user.message",
+            {
+                "content": command.get("question") or "",
+                "image_count": len(command.get("image_data_urls") or []),
+            },
+        )
         task = command.get("task") or "unknown"
         step_type = _execution_step_type(command)
         target_dirs = command.get("target_dirs") or []
@@ -375,6 +407,19 @@ class LensNodeExecutor:
                 }
                 if extra_detail:
                     detail.update(extra_detail)
+                agent_event = detail.get("agent_event")
+                if agent_event:
+                    trajectory.record(
+                        _trajectory_runtime_event_type(agent_event),
+                        {
+                            "name": agent_event,
+                            **detail,
+                        },
+                        turn=detail.get("turn"),
+                        step=detail.get("step"),
+                        call_id=detail.get("call_id"),
+                        parent_call_id=detail.get("parent_call_id"),
+                    )
                 emit(
                     {
                         "type": "run_event",
@@ -552,6 +597,13 @@ class LensNodeExecutor:
                     },
                 }
             )
+            trajectory.record(
+                "assistant.message",
+                {
+                    "content": result["answer"],
+                    "citations": result.get("citations") or [],
+                },
+            )
             emit(
                 {
                     "type": "run_output",
@@ -570,6 +622,26 @@ class LensNodeExecutor:
                 )
             )
             LOGGER.info(done_message)
+            trajectory.record(
+                "request.completed",
+                {
+                    "status": result.get("status") or "done",
+                    "outcome": result.get("outcome") or "completed",
+                    "stop_reason": result.get("stop_reason"),
+                    "token_usage": result.get("token_usage") or {},
+                    "duration_ms": int(
+                        (utc_now() - started_at).total_seconds() * 1000
+                    ),
+                },
+            )
+            trajectory.record(
+                "run.completed",
+                {
+                    "status": result.get("status") or "done",
+                    "outcome": result.get("outcome") or "completed",
+                    "stop_reason": result.get("stop_reason"),
+                },
+            )
             emit(
                 {
                     "type": "run_done",
@@ -584,6 +656,20 @@ class LensNodeExecutor:
                     },
                 }
             )
+        except asyncio.CancelledError:
+            trajectory.record(
+                "cancelled",
+                {"reason": "control_plane_cancel"},
+            )
+            trajectory.record(
+                "request.completed",
+                {"status": "cancelled", "outcome": "blocked"},
+            )
+            trajectory.record(
+                "run.completed",
+                {"status": "cancelled", "outcome": "blocked"},
+            )
+            raise
         except Exception as exc:
             error_code = _failure_error_code(exc)
             failed_message = task_log(
@@ -597,6 +683,22 @@ class LensNodeExecutor:
                 ],
             )
             LOGGER.error(failed_message)
+            trajectory.record(
+                "request.failed",
+                {
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "code": error_code,
+                },
+            )
+            trajectory.record(
+                "run.completed",
+                {
+                    "status": "failed",
+                    "outcome": "blocked",
+                    "error": error_code,
+                },
+            )
             emit(
                 {
                     "type": "run_event",
@@ -638,3 +740,20 @@ class LensNodeExecutor:
                     workspace_path,
                 )
                 cleanup_run_runtime_resources(workspace_path, run_uuid)
+
+
+def _trajectory_runtime_event_type(agent_event):
+    """Project internal runtime names onto the trajectory vocabulary."""
+
+    name = str(agent_event)
+    if "summarization.compacted" in name:
+        return "compaction.completed"
+    if "summarization" in name:
+        return "compaction.event"
+    if name.endswith(".resume"):
+        return "checkpoint.restored"
+    if "retry" in name or "recovery" in name:
+        return "retry.event"
+    if ".turn." in name:
+        return "turn.event"
+    return "step.event"

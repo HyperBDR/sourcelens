@@ -111,6 +111,73 @@ def test_outbox_preserves_frame_and_order_on_send_failure():
     asyncio.run(exercise())
 
 
+def test_trace_frames_remain_pending_until_cursor_ack_and_reconnect():
+    async def exercise():
+        client = _make_client()
+        for sequence in (1, 2):
+            client._enqueue(
+                {
+                    "type": "run_trace_events",
+                    "run_uuid": "run-1",
+                    "events": [{"sequence": sequence}],
+                }
+            )
+
+        client._outbox.clear()
+        client._restore_pending_trace_frames()
+        assert [
+            frame["events"][0]["sequence"] for frame in client._outbox
+        ] == [1, 2]
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_trace_events_ack",
+                    "run_uuid": "run-1",
+                    "last_sequence": 1,
+                }
+            )
+        )
+
+        assert list(client._pending_trace_frames) == [("run-1", 2)]
+
+    asyncio.run(exercise())
+
+
+def test_resume_starts_after_unacknowledged_trace_cursor():
+    async def exercise():
+        client = _make_client()
+        captured = []
+
+        class FakeExecutor:
+            async def execute(self, command, emit):
+                del emit
+                captured.append(command)
+
+        client.executor = FakeExecutor()
+        client._enqueue(
+            {
+                "type": "run_trace_events",
+                "run_uuid": "run-1",
+                "events": [{"sequence": 7}],
+            }
+        )
+
+        await client._start_command(
+            {
+                "type": "run_start",
+                "run_uuid": "run-1",
+                "resume": True,
+                "trace_cursor": 5,
+            }
+        )
+        await client.running_tasks["run-1"]
+
+        assert captured[0]["trace_cursor"] == 7
+
+    asyncio.run(exercise())
+
+
 def test_completed_run_hands_terminal_frame_to_outbox():
     """A completed run enters the outbox before leaving running_tasks."""
 
