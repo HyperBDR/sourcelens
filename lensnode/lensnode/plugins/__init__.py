@@ -34,9 +34,15 @@ class LensNodePlugin:
 
         return True
 
-    def contribute_mcp_servers(self, config, emit_event=None):
+    def contribute_mcp_servers(
+        self,
+        config,
+        emit_event=None,
+        command=None,
+    ):
         """Return MCP server configs this plugin contributes."""
 
+        del command
         return []
 
     def contribute_agent_runtime(self, config, command, mcp_tools):
@@ -53,7 +59,12 @@ def _plugins():
     return (CodeGraphPlugin(),)
 
 
-def collect_mcp_servers(config, mcp_configs, emit_event=None):
+def collect_mcp_servers(
+    config,
+    mcp_configs,
+    emit_event=None,
+    command=None,
+):
     """Merge plugin-contributed MCP servers, deduplicating by name.
 
     Configured servers always win over plugin contributions sharing the
@@ -68,6 +79,7 @@ def collect_mcp_servers(config, mcp_configs, emit_event=None):
         for server in plugin.contribute_mcp_servers(
             config,
             emit_event=emit_event,
+            command=command,
         ):
             name = str(server.get("name") or "").lower()
             if any(

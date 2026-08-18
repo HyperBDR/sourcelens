@@ -34,6 +34,7 @@ def test_codegraph_plugin_contributes_stdio_server(monkeypatch, tmp_path):
     servers = collect_mcp_servers(
         _config(workspace_path=str(tmp_path)),
         [],
+        command={"task": "code_analysis"},
     )
 
     assert [server["name"] for server in servers] == [
@@ -47,6 +48,25 @@ def test_codegraph_plugin_contributes_stdio_server(monkeypatch, tmp_path):
         "--path",
         str(tmp_path),
     ]
+
+
+def test_codegraph_plugin_skips_general_chat_before_index_check(
+    monkeypatch,
+):
+    index_checks = []
+    monkeypatch.setattr(
+        "lensnode.plugins.codegraph._ensure_codegraph_index",
+        lambda *_args, **_kwargs: index_checks.append(True) or True,
+    )
+
+    servers = collect_mcp_servers(
+        _config(),
+        [],
+        command={"task": "general_chat"},
+    )
+
+    assert servers == []
+    assert index_checks == []
 
 
 def test_codegraph_plugin_contributes_generic_agent_runtime_behavior():
