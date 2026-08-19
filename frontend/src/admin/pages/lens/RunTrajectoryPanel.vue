@@ -1,264 +1,343 @@
 <template>
-  <section data-testid="run-trajectory-workbench" class="space-y-4">
+  <section data-testid="run-trajectory-workbench" class="run-trajectory">
     <BaseLoading v-if="loading && events.length === 0" />
 
     <template v-else>
-      <dl class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        <div class="trajectory-stat">
+      <dl class="trajectory-stats" data-testid="trajectory-summary">
+        <div class="stat">
           <dt>{{ t('lensRuns.trajectoryEvents') }}</dt>
           <dd>{{ summary.event_count || 0 }}</dd>
         </div>
-        <div class="trajectory-stat">
+        <div class="stat">
           <dt>{{ t('lensRuns.trajectoryDuration') }}</dt>
           <dd>{{ durationText(summary.duration_ms) }}</dd>
         </div>
-        <div class="trajectory-stat">
+        <div class="stat">
           <dt>{{ t('lensRuns.trajectoryModels') }}</dt>
           <dd>{{ summary.model_calls || 0 }}</dd>
         </div>
-        <div class="trajectory-stat">
+        <div class="stat">
           <dt>{{ t('lensRuns.trajectoryTools') }}</dt>
           <dd>{{ summary.tool_calls || 0 }}</dd>
         </div>
-        <div class="trajectory-stat">
+        <div class="stat">
           <dt>{{ t('lensRuns.totalTokens') }}</dt>
           <dd>{{ (summary.total_tokens || 0).toLocaleString() }}</dd>
         </div>
-        <div class="trajectory-stat trajectory-stat-error">
+        <div class="stat stat-error">
           <dt>{{ t('lensRuns.trajectoryErrors') }}</dt>
           <dd>{{ summary.error_count || 0 }}</dd>
         </div>
       </dl>
 
-      <div
-        v-if="events.length > 1"
-        data-testid="trajectory-time-overview"
-        class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3"
-      >
-        <div class="overflow-hidden rounded-md bg-white ring-1 ring-gray-200">
-          <div
-            v-for="lane in timelineLanes"
-            :key="lane.key"
-            class="flex items-center gap-2 border-b border-gray-100 px-2 py-1 last:border-b-0"
-          >
-            <span class="w-12 shrink-0 text-[11px] font-medium text-gray-500">
-              {{ laneLabel(lane.key) }}
-            </span>
-            <div class="relative h-3 flex-1">
-              <button
-                v-for="step in lane.steps"
-                :key="`overview-${lane.key}-${step.event.event_id}`"
-                type="button"
-                class="absolute top-0 h-full"
-                :class="[
-                  categoryColor(eventCategory(step.event)),
-                  step.subagent ? 'ring-1 ring-amber-400' : ''
-                ]"
-                :style="{
-                  left: `${step.left}%`,
-                  width: `${step.width}%`
-                }"
-                :title="stepTooltip(step)"
-                @click="selectedEvent = step.event"
-              />
-            </div>
-          </div>
-        </div>
-        <div class="mt-1 flex justify-between text-[11px] text-gray-400">
-          <span>{{ timeText(summary.first_timestamp) }}</span>
-          <span>{{ timeText(summary.last_timestamp) }}</span>
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-2 lg:flex-row lg:items-center">
-        <div class="relative min-w-0 flex-1">
-          <Search
-            :size="15"
-            class="pointer-events-none absolute left-2.5 top-2.5 text-gray-400"
-          />
-          <input
-            v-model="query"
-            data-testid="trajectory-search"
-            class="w-full rounded-md border border-gray-300 py-2 pl-8 pr-3 text-sm focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-400"
-            :placeholder="t('lensRuns.trajectorySearch')"
-          />
-        </div>
-        <div class="flex gap-1 overflow-x-auto pb-1 lg:pb-0">
+      <div class="trajectory-toolbar" role="toolbar">
+        <div class="toolbar-actions">
           <button
             v-for="item in categoryOptions"
             :key="item.value"
             type="button"
-            class="trajectory-filter"
-            :class="category === item.value ? 'trajectory-filter-active' : ''"
-            @click="category = item.value"
+            class="toolbar-toggle"
+            :aria-pressed="category === item.value"
+            @click="setCategory(item.value)"
           >
             {{ item.label }}
-            <span class="text-[10px] opacity-70">{{ item.count }}</span>
+            <span class="toolbar-count">{{ item.count }}</span>
           </button>
+          <span class="toolbar-separator" aria-hidden="true" />
+          <button
+            type="button"
+            class="toolbar-toggle"
+            :disabled="collapsibleCallIds.length === 0"
+            :aria-pressed="allCallsCollapsed"
+            :aria-label="
+              collapsibleCallIds.length === 0
+                ? t('lensRuns.trajectoryNoCollapsibleCalls')
+                : allCallsCollapsed
+                  ? t('lensRuns.trajectoryExpandAllCalls')
+                  : t('lensRuns.trajectoryCollapseAllCalls')
+            "
+            :title="
+              collapsibleCallIds.length === 0
+                ? t('lensRuns.trajectoryNoCollapsibleCalls')
+                : allCallsCollapsed
+                  ? t('lensRuns.trajectoryExpandAllCalls')
+                  : t('lensRuns.trajectoryCollapseAllCalls')
+            "
+            @click="toggleAllCalls"
+          >
+            <span class="toolbar-glyph" aria-hidden="true">
+              {{ allCallsCollapsed ? '⊞' : '⊟' }}
+            </span>
+            {{ t('lensRuns.trajectoryCalls') }}
+          </button>
+          <button
+            type="button"
+            class="toolbar-toggle"
+            :aria-pressed="showSnapshots"
+            :aria-label="
+              showSnapshots
+                ? t('lensRuns.trajectoryHideSnapshots')
+                : t('lensRuns.trajectoryShowSnapshots')
+            "
+            :title="
+              showSnapshots
+                ? t('lensRuns.trajectoryHideSnapshots')
+                : t('lensRuns.trajectoryShowSnapshots')
+            "
+            @click="showSnapshots = !showSnapshots"
+          >
+            <span class="toolbar-glyph" aria-hidden="true">
+              {{ showSnapshots ? '⊞' : '⊟' }}
+            </span>
+            {{ t('lensRuns.trajectorySnapshots') }}
+          </button>
+        </div>
+        <div class="toolbar-search">
+          <Search :size="11" class="search-icon" aria-hidden="true" />
+          <input
+            v-model="query"
+            data-testid="trajectory-search"
+            class="search-input"
+            type="search"
+            :placeholder="t('lensRuns.trajectorySearch')"
+          />
         </div>
       </div>
 
+      <TrajectoryTimeline
+        v-if="events.length"
+        :lanes="timelineLanes"
+        :boundaries="groupBoundaries"
+        :selected-sequence="selectedEvent ? selectedEvent.sequence : null"
+        :range="timelineRange"
+        data-testid="trajectory-time-overview"
+        @range-change="timelineRange = $event"
+        @select-event="onTimelineSelect"
+      />
+
       <div
-        v-if="filteredEvents.length"
-        class="grid min-h-[28rem] overflow-hidden rounded-lg border border-gray-200 lg:grid-cols-[minmax(0,3fr)_minmax(18rem,2fr)]"
+        v-if="groupedRows.length"
+        data-testid="trajectory-ledger"
+        class="trajectory-split"
       >
-        <ol
-          data-testid="trajectory-ledger"
-          class="max-h-[42rem] overflow-y-auto divide-y divide-gray-100 bg-white"
-        >
-          <template v-for="group in groupedRows" :key="group.key">
-            <li
-              v-if="group.rows.length > 1"
-              class="sticky top-0 z-10 flex items-center gap-2 border-y border-gray-200 bg-gray-100/95 px-3 py-1.5 backdrop-blur-sm"
-            >
-              <span
-                class="h-2 w-2 rounded-full"
-                :class="categoryColor(group.category)"
-              />
-              <span
-                class="text-[11px] font-semibold uppercase tracking-wide text-gray-600"
-              >
-                {{ group.label }}
-              </span>
-              <span class="ml-auto text-[10px] tabular-nums text-gray-400">
-                {{ group.rows.length }}
-              </span>
-            </li>
-            <li v-for="row in group.rows" :key="row.event.event_id">
-              <div
-                role="button"
-                tabindex="0"
-                class="group flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-gray-50"
-                :class="
-                  selectedEvent?.event_id === row.event.event_id
-                    ? 'bg-primary-50/70'
-                    : ''
-                "
-                :style="{ paddingLeft: `${12 + row.depth * 18}px` }"
-                @click="selectedEvent = row.event"
-                @keydown.enter="selectedEvent = row.event"
-              >
-                <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center">
-                  <button
-                    v-if="row.hasChildren"
-                    type="button"
-                    class="rounded text-gray-400 hover:bg-gray-200"
-                    :aria-label="t('lensRuns.trajectoryToggle')"
-                    @click.stop="toggleCall(row.event.call_id)"
-                  >
-                    <ChevronRight
-                      v-if="collapsed.has(row.event.call_id)"
-                      :size="15"
+        <div ref="tablePaneRef" class="table-pane sl-scrollbar">
+          <table class="trajectory-table">
+            <thead>
+              <tr>
+                <th class="event-header">Event</th>
+                <th>Content</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="group in groupedRows" :key="group.key">
+                <tr
+                  v-for="(row, index) in group.rows"
+                  :key="row.event.event_id"
+                  class="ledger-row"
+                  :class="{ 'turn-start-row': index === 0 }"
+                  :data-turn-start="index === 0 || undefined"
+                  :data-turn-end="index === group.rows.length - 1 || undefined"
+                  :data-selected="isSelected(row.event) || undefined"
+                  :data-error="isErrorEvent(row.event) || undefined"
+                  @click="selectEvent(row.event)"
+                  @keydown.enter="selectEvent(row.event)"
+                >
+                  <td class="event-cell">
+                    <span class="turn-rail" aria-hidden="true" />
+                    <span
+                      v-if="index === 0 && isRequestGroup(group.category)"
+                      class="request-dot"
+                      aria-hidden="true"
                     />
-                    <ChevronDown v-else :size="15" />
-                  </button>
-                  <span
-                    v-else
-                    class="mx-auto h-2 w-2 rounded-full"
-                    :class="categoryColor(eventCategory(row.event))"
-                  />
-                </span>
-                <span class="min-w-0 flex-1">
-                  <span class="flex items-center justify-between gap-3">
-                    <span class="truncate text-sm font-medium text-gray-800">
-                      {{ eventTitle(row.event) }}
+                    <span class="seq">#{{ row.event.sequence }}</span>
+                    <span class="kind-tag" :class="tagClass(row.event)">
+                      <span class="kind-tag-label">{{
+                        kindLabel(row.event)
+                      }}</span>
                     </span>
-                    <time
-                      class="shrink-0 text-[11px] tabular-nums text-gray-400"
+                  </td>
+                  <td class="content-cell">
+                    <button
+                      v-if="row.hasChildren"
+                      type="button"
+                      class="row-expand"
+                      :aria-label="t('lensRuns.trajectoryToggle')"
+                      @click.stop="toggleCall(row.event.call_id)"
                     >
-                      #{{ row.event.sequence }} ·
-                      {{ timeText(row.event.timestamp) }}
-                    </time>
-                  </span>
-                  <span
-                    class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500"
-                  >
-                    <span>{{ row.event.event_type }}</span>
-                    <span v-if="eventMetric(row.event)">
-                      {{ eventMetric(row.event) }}
+                      <ChevronRight
+                        v-if="collapsed.has(row.event.call_id)"
+                        :size="14"
+                      />
+                      <ChevronDown v-else :size="14" />
+                    </button>
+                    <span class="content-text">
+                      <span
+                        v-if="toolCallText(row.event)"
+                        class="content-title content-title-code"
+                      >
+                        {{ toolCallText(row.event).name }}
+                      </span>
+                      <span
+                        v-else
+                        class="content-title"
+                        :class="{
+                          'content-title-error': isErrorEvent(row.event)
+                        }"
+                      >
+                        {{ eventTitle(row.event) }}
+                      </span>
+                      <span
+                        v-if="toolCallText(row.event)?.args"
+                        class="content-args"
+                      >
+                        {{ toolCallText(row.event).args }}
+                      </span>
                     </span>
-                    <span v-if="row.event.attempt > 1">
-                      attempt {{ row.event.attempt }}
+                    <span class="content-trailing">
+                      <span
+                        class="content-metrics"
+                        :class="{
+                          'content-metrics-error': isErrorEvent(row.event)
+                        }"
+                      >
+                        {{ eventMetric(row.event) }}
+                      </span>
+                      <time class="content-time">
+                        {{ timeText(row.event.timestamp) }}
+                      </time>
                     </span>
-                  </span>
-                </span>
-              </div>
-            </li>
-          </template>
-        </ol>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
 
         <aside
+          v-if="selectedEvent"
+          class="trajectory-inspector"
           data-testid="trajectory-inspector"
-          class="max-h-[42rem] overflow-y-auto border-t border-gray-200 bg-gray-50 p-4 lg:border-l lg:border-t-0"
         >
-          <template v-if="selectedEvent">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <p
-                  class="text-xs font-medium uppercase tracking-wide text-gray-400"
-                >
-                  {{ t('lensRuns.trajectoryInspector') }}
-                </p>
-                <h3 class="mt-1 break-all text-sm font-semibold text-gray-900">
-                  {{ selectedEvent.event_type }}
-                </h3>
-              </div>
-              <span :class="statusClass(selectedEvent)">
-                {{ selectedEvent.event_type.split('.').pop() }}
-              </span>
+          <div class="inspector-header">
+            <div class="inspector-title">
+              <span class="inspector-dot" aria-hidden="true" />
+              <span class="inspector-name">{{
+                eventTitle(selectedEvent)
+              }}</span>
+              <span class="inspector-location">{{
+                selectedEvent.event_type
+              }}</span>
             </div>
-            <dl class="mt-4 grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <dt class="text-gray-400">Sequence</dt>
-                <dd class="mt-0.5 font-mono text-gray-700">
-                  {{ selectedEvent.sequence }}
-                </dd>
-              </div>
-              <div>
-                <dt class="text-gray-400">Attempt</dt>
-                <dd class="mt-0.5 font-mono text-gray-700">
-                  {{ selectedEvent.attempt }}
-                </dd>
-              </div>
-              <div class="col-span-2">
-                <dt class="text-gray-400">Call / Parent</dt>
-                <dd class="mt-0.5 break-all font-mono text-gray-700">
-                  {{ selectedEvent.call_id || '-' }}<br />
-                  {{ selectedEvent.parent_call_id || '-' }}
-                </dd>
-              </div>
-              <div class="col-span-2">
-                <dt class="text-gray-400">Timestamp</dt>
-                <dd class="mt-0.5 break-all font-mono text-gray-700">
-                  {{ selectedEvent.timestamp }}
-                </dd>
-              </div>
-            </dl>
-            <h4 class="mt-5 text-xs font-semibold text-gray-600">Payload</h4>
-            <pre class="trajectory-json">{{
-              pretty(selectedEvent.payload)
-            }}</pre>
-            <details class="mt-4">
-              <summary class="cursor-pointer text-xs font-medium text-gray-500">
-                {{ t('lensRuns.trajectoryRawEvent') }}
-              </summary>
-              <pre class="trajectory-json">{{ pretty(selectedEvent) }}</pre>
-            </details>
-          </template>
-          <p v-else class="py-16 text-center text-sm text-gray-400">
-            {{ t('lensRuns.trajectorySelectEvent') }}
-          </p>
+            <button
+              type="button"
+              class="inspector-close"
+              aria-label="Close"
+              @click="selectedEvent = null"
+            >
+              ×
+            </button>
+          </div>
+          <div class="inspector-tabs" role="tablist">
+            <button
+              v-for="tab in inspectorTabs"
+              :key="tab.id"
+              type="button"
+              role="tab"
+              class="inspector-tab"
+              :class="{ 'inspector-tab-active': inspectorTab === tab.id }"
+              @click="inspectorTab = tab.id"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+          <div class="inspector-body">
+            <template v-if="inspectorTab === 'summary'">
+              <span :class="statusClass(selectedEvent)">{{
+                statusLabel(selectedEvent)
+              }}</span>
+              <dl class="overview">
+                <div>
+                  <dt>Sequence</dt>
+                  <dd>{{ selectedEvent.sequence }}</dd>
+                </div>
+                <div>
+                  <dt>Attempt</dt>
+                  <dd>{{ selectedEvent.attempt }}</dd>
+                </div>
+                <div>
+                  <dt>Call / Parent</dt>
+                  <dd class="mono">
+                    {{ selectedEvent.call_id || '-' }}
+                    <span class="sub"
+                      >/ {{ selectedEvent.parent_call_id || '-' }}</span
+                    >
+                  </dd>
+                </div>
+                <div>
+                  <dt>Timestamp</dt>
+                  <dd class="mono">{{ selectedEvent.timestamp }}</dd>
+                </div>
+              </dl>
+              <section class="overview-section">
+                <h4 class="overview-heading">
+                  {{ t('lensRuns.trajectoryTiming') }}
+                </h4>
+                <dl class="overview">
+                  <div>
+                    <dt>Duration</dt>
+                    <dd>
+                      {{ durationText(selectedEvent.payload?.duration_ms) }}
+                    </dd>
+                  </div>
+                  <div v-if="selectedEvent.payload?.ttft_ms != null">
+                    <dt>TTFT</dt>
+                    <dd>{{ durationText(selectedEvent.payload.ttft_ms) }}</dd>
+                  </div>
+                  <div
+                    v-if="selectedEvent.payload?.usage?.total_tokens != null"
+                  >
+                    <dt>Tokens</dt>
+                    <dd>{{ selectedEvent.payload.usage.total_tokens }}</dd>
+                  </div>
+                  <div
+                    v-if="selectedEvent.payload?.usage?.input_tokens != null"
+                  >
+                    <dt class="indent">Input</dt>
+                    <dd>{{ selectedEvent.payload.usage.input_tokens }}</dd>
+                  </div>
+                  <div
+                    v-if="selectedEvent.payload?.usage?.output_tokens != null"
+                  >
+                    <dt class="indent">Output</dt>
+                    <dd>{{ selectedEvent.payload.usage.output_tokens }}</dd>
+                  </div>
+                  <div
+                    v-if="
+                      selectedEvent.payload?.usage?.reasoning_tokens != null
+                    "
+                  >
+                    <dt class="indent">Reasoning</dt>
+                    <dd>
+                      {{ selectedEvent.payload.usage.reasoning_tokens }}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            </template>
+            <JsonTree
+              v-else-if="inspectorTab === 'payload'"
+              :data="selectedEvent.payload"
+            />
+            <JsonTree v-else :data="selectedEvent" />
+          </div>
         </aside>
       </div>
 
-      <p
-        v-else
-        class="rounded-lg border border-dashed border-gray-200 py-12 text-center text-sm text-gray-400"
-      >
+      <p v-else class="trajectory-empty" data-testid="trajectory-empty">
         {{ t('lensRuns.noTimeline') }}
       </p>
 
-      <div v-if="hasMore" class="text-center">
+      <div v-if="hasMore" class="trajectory-load-more">
         <BaseButton
           variant="outline"
           size="sm"
@@ -273,7 +352,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, Search } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { getAdminRunTrajectory } from '@/api/lens'
@@ -281,6 +360,8 @@ import { useToast } from '@/composables/useToast'
 import { extractErrorMessage } from '@/utils/api'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import JsonTree from '@/components/ui/JsonTree.vue'
+import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import {
   buildTimelineLanes,
   buildTrajectoryRows,
@@ -295,6 +376,7 @@ const props = defineProps({
 
 const { t } = useI18n()
 const { showError } = useToast()
+
 const events = ref([])
 const summary = ref({})
 const loading = ref(false)
@@ -303,8 +385,44 @@ const query = ref('')
 const category = ref('all')
 const selectedEvent = ref(null)
 const collapsed = ref(new Set())
+const timelineRange = ref(null)
+const inspectorTab = ref('summary')
+const tablePaneRef = ref(null)
+const showSnapshots = ref(false)
+
 let filterTimer = null
 let requestId = 0
+
+const KIND_BY_CATEGORY = {
+  model: 'model',
+  tool: 'tool',
+  subtool: 'subtool',
+  user: 'user',
+  context: 'context',
+  request: 'context',
+  compaction: 'compacted',
+  compacted: 'compacted',
+  retry: 'retry',
+  checkpoint: 'checkpoint',
+  cancelled: 'cancelled',
+  system: 'system',
+  run: 'system',
+  step: 'step'
+}
+
+const KIND_LABEL = {
+  system: 'SYSTEM',
+  user: 'USER',
+  context: 'CONTEXT',
+  compacted: 'COMPACTED',
+  model: 'ASSISTANT',
+  tool: 'TOOL',
+  subtool: 'SUBTOOL',
+  retry: 'RETRY',
+  checkpoint: 'CHECKPOINT',
+  cancelled: 'CANCELLED',
+  step: 'STEP'
+}
 
 const categoryOptions = computed(() => {
   const counts = summary.value.categories || {}
@@ -317,15 +435,23 @@ const categoryOptions = computed(() => {
     },
     ...Object.entries(counts)
       .filter(([value]) => !hiddenCategories.has(value))
-      .map(([value, count]) => ({
-        value,
-        label: value,
-        count
-      }))
+      .map(([value, count]) => ({ value, label: value, count }))
   ]
 })
 
-const filteredEvents = computed(() => events.value)
+const SNAPSHOT_EVENT_TYPES = new Set(['system.snapshot', 'tools.snapshot'])
+
+const baseEvents = computed(() => {
+  if (showSnapshots.value) return events.value
+  return events.value.filter(
+    (event) => !SNAPSHOT_EVENT_TYPES.has(event.event_type)
+  )
+})
+
+const filteredEvents = computed(() => {
+  if (!timelineRange.value) return baseEvents.value
+  return baseEvents.value.filter((event) => !isOutsideTimelineRange(event))
+})
 
 const rows = computed(() =>
   buildTrajectoryRows(filteredEvents.value, collapsed.value)
@@ -334,67 +460,130 @@ const rows = computed(() =>
 const groupedRows = computed(() => groupTrajectoryRows(rows.value))
 
 const timelineLanes = computed(() =>
-  buildTimelineLanes(events.value, summary.value)
+  buildTimelineLanes(baseEvents.value, summary.value)
 )
 
-function laneLabel(key) {
+const timelineDomain = computed(() => {
+  const times = []
+  for (const lane of timelineLanes.value) {
+    for (const step of lane.steps) {
+      times.push(step.startMs, step.startMs + step.durationMs)
+    }
+  }
+  const start = Math.min(...times)
+  const end = Math.max(...times)
+  return { start, end, duration: Math.max(1, end - start) }
+})
+
+const groupBoundaries = computed(() => {
+  const domain = timelineDomain.value
+  if (!Number.isFinite(domain.duration)) return []
+  return groupedRows.value
+    .map((group) => {
+      const time = eventTime(group.rows[0]?.event)
+      if (!Number.isFinite(time)) return null
+      return { time }
+    })
+    .filter((boundary) => boundary !== null)
+})
+
+const collapsibleCallIds = computed(() =>
+  rows.value.filter((row) => row.hasChildren).map((row) => row.event.call_id)
+)
+
+const allCallsCollapsed = computed(
+  () =>
+    collapsibleCallIds.value.length > 0 &&
+    collapsibleCallIds.value.every((id) => collapsed.value.has(id))
+)
+
+const inspectorTabs = computed(() => {
+  const tabs = [
+    { id: 'summary', label: t('lensRuns.trajectoryInspectorSummary') }
+  ]
+  if (selectedEvent.value?.payload !== undefined) {
+    tabs.push({
+      id: 'payload',
+      label: t('lensRuns.trajectoryInspectorPayload')
+    })
+  }
+  tabs.push({ id: 'raw', label: t('lensRuns.trajectoryInspectorRaw') })
+  return tabs
+})
+
+function kindOf(event) {
+  const categoryValue = eventCategory(event)
+  return KIND_BY_CATEGORY[categoryValue] || 'system'
+}
+
+function kindLabel(event) {
+  return KIND_LABEL[kindOf(event)] || 'EVENT'
+}
+
+function tagClass(event) {
+  return `tag-${kindOf(event)}`
+}
+
+function isErrorEvent(event) {
+  const status = String(event.event_type || '')
+    .split('.')
+    .pop()
+  return ['failed', 'cancelled', 'interrupted'].includes(status)
+}
+
+function isSelected(event) {
+  return selectedEvent.value?.sequence === event.sequence
+}
+
+const eventTimeRange = computed(() => {
+  const map = new Map()
+  for (const lane of timelineLanes.value) {
+    for (const step of lane.steps) {
+      const start = step.startMs
+      const end = start + step.durationMs
+      for (const seq of step.seqs || [step.event.sequence]) {
+        const previous = map.get(seq)
+        if (previous) {
+          previous.start = Math.min(previous.start, start)
+          previous.end = Math.max(previous.end, end)
+        } else {
+          map.set(seq, { start, end })
+        }
+      }
+    }
+  }
+  return map
+})
+
+function eventTime(event) {
+  if (event._ms !== undefined && Number.isFinite(event._ms)) return event._ms
+  return new Date(event.timestamp).getTime()
+}
+
+function isOutsideTimelineRange(event) {
+  if (!timelineRange.value) return false
+  const span = eventTimeRange.value.get(event.sequence)
+  if (!span) {
+    const time = eventTime(event)
+    if (!Number.isFinite(time)) return false
+    return time < timelineRange.value.start || time > timelineRange.value.end
+  }
   return (
-    {
-      input: t('lensRuns.trajectoryLaneInput'),
-      model: t('lensRuns.trajectoryLaneModel'),
-      tools: t('lensRuns.trajectoryLaneTools')
-    }[key] || key
+    span.end < timelineRange.value.start || span.start > timelineRange.value.end
   )
 }
 
-async function fetchTrajectory(append = false) {
-  if (!props.runUuid) return
-  const currentRequestId = ++requestId
-  loading.value = true
-  try {
-    const afterSequence = append ? events.value.at(-1)?.sequence || 0 : 0
-    const data = await getAdminRunTrajectory(props.runUuid, {
-      page_size: 500,
-      after_sequence: afterSequence,
-      q: query.value.trim() || undefined,
-      category: category.value === 'all' ? undefined : category.value
-    })
-    if (currentRequestId !== requestId) return
-    events.value = append
-      ? [...events.value, ...(data.results || [])]
-      : data.results || []
-    summary.value = data.summary || {}
-    hasMore.value = Boolean(data.has_more)
-    if (!append) selectedEvent.value = events.value[0] || null
-  } catch (error) {
-    if (currentRequestId !== requestId) return
-    showError(extractErrorMessage(error, t('common.error')))
-    hasMore.value = false
-  } finally {
-    if (currentRequestId === requestId) loading.value = false
-  }
+function isRequestGroup(categoryValue) {
+  return ['model', 'tool', 'subtool'].includes(categoryValue)
 }
 
-function reset() {
-  requestId += 1
-  events.value = []
-  summary.value = {}
-  selectedEvent.value = null
-  collapsed.value = new Set()
-  query.value = ''
-  category.value = 'all'
-  hasMore.value = false
-}
-
-function loadMore() {
-  fetchTrajectory(true)
-}
-
-function toggleCall(callId) {
-  const next = new Set(collapsed.value)
-  if (next.has(callId)) next.delete(callId)
-  else next.add(callId)
-  collapsed.value = next
+function toolCallText(event) {
+  const kind = kindOf(event)
+  if (kind !== 'tool' && kind !== 'subtool') return null
+  const text = eventTitle(event)
+  const separator = text.indexOf(' · ')
+  if (separator === -1) return { name: text, args: '' }
+  return { name: text.slice(0, separator), args: text.slice(separator + 3) }
 }
 
 function eventTitle(event) {
@@ -413,49 +602,33 @@ function eventMetric(event) {
   return parts.join(' · ')
 }
 
-function categoryColor(value) {
-  return (
-    {
-      model: 'bg-indigo-500',
-      tool: 'bg-blue-500',
-      subtool: 'bg-cyan-500',
-      request: 'bg-emerald-500',
-      checkpoint: 'bg-amber-500',
-      retry: 'bg-orange-500',
-      compaction: 'bg-purple-500',
-      cancelled: 'bg-gray-500'
-    }[value] || 'bg-gray-400'
-  )
-}
-
 function statusClass(event) {
-  const status = event.event_type.split('.').pop()
-  const base = 'rounded px-2 py-0.5 text-[10px] font-semibold'
+  const base = 'status-badge'
+  const status = String(event.event_type || '')
+    .split('.')
+    .pop()
   if (['failed', 'cancelled', 'interrupted'].includes(status)) {
-    return `${base} bg-red-100 text-red-700`
+    return `${base} status-badge-error`
   }
   if (['completed', 'done'].includes(status)) {
-    return `${base} bg-green-100 text-green-700`
+    return `${base} status-badge-success`
   }
-  return `${base} bg-gray-200 text-gray-600`
+  return `${base} status-badge-neutral`
+}
+
+function statusLabel(event) {
+  const status = String(event.event_type || '')
+    .split('.')
+    .pop()
+  if (['failed', 'cancelled', 'interrupted'].includes(status)) return 'Failed'
+  if (['completed', 'done'].includes(status)) return 'Completed'
+  return status || 'Pending'
 }
 
 function durationText(value) {
   if (value === null || value === undefined) return '-'
-  if (value < 1000) return `${value}ms`
+  if (value < 1000) return `${Math.round(value)}ms`
   return `${(value / 1000).toFixed(1)}s`
-}
-
-function stepTooltip(step) {
-  const event = step.event || {}
-  const parts = [`${event.sequence ?? '?'} · ${event.event_type}`]
-  if (step.startMs != null) {
-    parts.push(timeText(new Date(step.startMs).toISOString()))
-  }
-  if (step.durationMs != null) {
-    parts.push(durationText(step.durationMs))
-  }
-  return parts.join('\n')
 }
 
 function timeText(value) {
@@ -466,8 +639,100 @@ function timeText(value) {
     : date.toLocaleTimeString([], { hour12: false })
 }
 
-function pretty(value) {
-  return JSON.stringify(value, null, 2)
+function selectEvent(event) {
+  selectedEvent.value = event
+  inspectorTab.value = 'summary'
+}
+
+async function scrollSelectedIntoView() {
+  await nextTick()
+  const row = tablePaneRef.value?.querySelector('tr[data-selected="true"]')
+  row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+}
+
+function onTimelineSelect(sequence) {
+  const event = events.value.find(
+    (candidate) => candidate.sequence === sequence
+  )
+  if (event) {
+    selectEvent(event)
+    scrollSelectedIntoView()
+  }
+}
+
+function toggleCall(callId) {
+  const next = new Set(collapsed.value)
+  if (next.has(callId)) next.delete(callId)
+  else next.add(callId)
+  collapsed.value = next
+}
+
+function toggleAllCalls() {
+  if (collapsibleCallIds.value.length === 0) return
+  const next = new Set(collapsed.value)
+  if (allCallsCollapsed.value) {
+    for (const id of collapsibleCallIds.value) next.delete(id)
+  } else {
+    for (const id of collapsibleCallIds.value) next.add(id)
+  }
+  collapsed.value = next
+}
+
+function setCategory(value) {
+  category.value = value
+}
+
+async function fetchTrajectory(append = false) {
+  if (!props.runUuid) return
+  const currentRequestId = ++requestId
+  loading.value = true
+  try {
+    const afterSequence = append ? events.value.at(-1)?.sequence || 0 : 0
+    const data = await getAdminRunTrajectory(props.runUuid, {
+      page_size: 500,
+      after_sequence: afterSequence,
+      q: query.value.trim() || undefined,
+      category: category.value === 'all' ? undefined : category.value
+    })
+    if (currentRequestId !== requestId) return
+    const normalize = (items) =>
+      (items || []).map((event) => ({
+        ...event,
+        _ms: new Date(event.timestamp).getTime()
+      }))
+    events.value = append
+      ? [...events.value, ...normalize(data.results)]
+      : normalize(data.results)
+    summary.value = data.summary || {}
+    hasMore.value = Boolean(data.has_more)
+    if (!append) {
+      selectedEvent.value = null
+      timelineRange.value = null
+      inspectorTab.value = 'summary'
+    }
+  } catch (error) {
+    if (currentRequestId !== requestId) return
+    showError(extractErrorMessage(error, t('common.error')))
+    hasMore.value = false
+  } finally {
+    if (currentRequestId === requestId) loading.value = false
+  }
+}
+
+function reset() {
+  requestId += 1
+  events.value = []
+  summary.value = {}
+  selectedEvent.value = null
+  collapsed.value = new Set()
+  query.value = ''
+  category.value = 'all'
+  hasMore.value = false
+  timelineRange.value = null
+}
+
+function loadMore() {
+  fetchTrajectory(true)
 }
 
 watch(
@@ -486,6 +751,15 @@ watch([query, category], () => {
   }, 250)
 })
 
+watch(filteredEvents, (filtered) => {
+  if (
+    selectedEvent.value &&
+    !filtered.some((event) => event.sequence === selectedEvent.value.sequence)
+  ) {
+    selectedEvent.value = null
+  }
+})
+
 watch(
   () => props.active,
   (active) => {
@@ -498,26 +772,879 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
 </script>
 
 <style scoped>
-.trajectory-stat {
-  @apply rounded-lg border border-gray-200 bg-white px-3 py-2.5;
+.run-trajectory {
+  --t-accent: #4176e6;
+  --t-bg-1: #ffffff;
+  --t-bg-2: #ffffff;
+  --t-bg-hover: rgba(0, 0, 0, 0.045);
+  --t-bg-active: rgba(0, 0, 0, 0.07);
+  --t-border-l1: rgba(0, 0, 0, 0.05);
+  --t-border-l2: rgba(0, 0, 0, 0.11);
+  --t-text-1: #0f1115;
+  --t-text-2: #61666b;
+  --t-text-3: #81858c;
+  --t-text-4: #adb2b8;
+  --t-user: #4176e6;
+  --t-user-bg: #e4edfd;
+  --t-context: #22c55e;
+  --t-context-bg: #e6faed;
+  --t-model: #886bae;
+  --t-model-bg: #efeff6;
+  --t-tool: #dd8629;
+  --t-tool-bg: #fef5e7;
+  --t-subtool: #ba864f;
+  --t-subtool-bg: #fef9f1;
+  --t-system: #61666b;
+  --t-system-bg: #f3f4f6;
+  --t-retry: #dd8629;
+  --t-retry-bg: #fef5e7;
+  --t-checkpoint: #61666b;
+  --t-checkpoint-bg: #f3f4f6;
+  --t-cancelled: #ec1313;
+  --t-cancelled-bg: #fef0f0;
+  --t-error: #ec1313;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--t-text-1);
+  background: var(--t-bg-1);
 }
-.trajectory-stat dt {
-  @apply truncate text-[11px] text-gray-500;
+
+:root[data-theme='dark'] .run-trajectory {
+  --t-accent: #679efe;
+  --t-bg-1: #232324;
+  --t-bg-2: #2c2c2e;
+  --t-bg-hover: rgba(255, 255, 255, 0.06);
+  --t-bg-active: rgba(255, 255, 255, 0.1);
+  --t-border-l1: rgba(255, 255, 255, 0.07);
+  --t-border-l2: rgba(255, 255, 255, 0.13);
+  --t-text-1: #f9fafb;
+  --t-text-2: #cfd3d6;
+  --t-text-3: #adb2b8;
+  --t-text-4: #85878b;
+  --t-user: #679efe;
+  --t-user-bg: #34415b;
+  --t-context: #22c55e;
+  --t-context-bg: #233c2c;
+  --t-model: #9474bc;
+  --t-model-bg: #2e2837;
+  --t-tool: #dd8629;
+  --t-tool-bg: #27241f;
+  --t-subtool: #cf9a56;
+  --t-subtool-bg: #2a2825;
+  --t-system: #cfd3d6;
+  --t-system-bg: #3a3a3c;
+  --t-retry: #dd8629;
+  --t-retry-bg: #27241f;
+  --t-checkpoint: #cfd3d6;
+  --t-checkpoint-bg: #3a3a3c;
+  --t-cancelled: #f25a5a;
+  --t-cancelled-bg: #3b2626;
+  --t-error: #f25a5a;
 }
-.trajectory-stat dd {
-  @apply mt-1 text-lg font-semibold tabular-nums text-gray-900;
+
+/* Stats bar */
+.trajectory-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
 }
-.trajectory-stat-error dd {
-  @apply text-red-700;
+
+.trajectory-stats .stat {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--t-border-l2);
+  border-radius: 8px;
+  background: var(--t-bg-2);
 }
-.trajectory-filter {
-  @apply inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-50;
+
+.trajectory-stats dt {
+  overflow: hidden;
+  color: var(--t-text-3);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.trajectory-filter-active {
-  @apply border-primary-200 bg-primary-50 text-primary-700;
+
+.trajectory-stats dd {
+  margin: 1px 0 0;
+  color: var(--t-text-1);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 22px;
 }
-.trajectory-json {
-  @apply mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-white p-3 text-[11px] leading-5 text-gray-700;
+
+.trajectory-stats .stat-error dd {
+  color: var(--t-error);
+}
+
+@media (min-width: 640px) {
+  .trajectory-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .trajectory-stats {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+/* Toolbar */
+.trajectory-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 0 6px;
+  gap: 8px;
+  border: 1px solid var(--t-border-l2);
+  border-radius: 8px 8px 0 0;
+  background: var(--t-bg-1);
+}
+
+.toolbar-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.toolbar-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbar-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  gap: 4px;
+  border: 0;
+  border-radius: 3px;
+  color: var(--t-text-3);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.toolbar-toggle:hover {
+  color: var(--t-text-1);
+  background: var(--t-bg-hover);
+}
+
+.toolbar-toggle[aria-pressed='true'] {
+  color: var(--t-text-1);
+  background: var(--t-bg-hover);
+}
+
+.toolbar-toggle:disabled {
+  color: var(--t-text-4);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.toolbar-toggle:focus-visible {
+  outline: 1px solid var(--t-accent);
+  outline-offset: 1px;
+}
+
+.toolbar-count {
+  color: var(--t-text-4);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar-separator {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: var(--t-border-l2);
+}
+
+.toolbar-glyph {
+  color: var(--t-text-3);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  line-height: 14px;
+}
+
+.toolbar-search {
+  display: flex;
+  flex: 0 1 200px;
+  align-items: center;
+  min-width: 84px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0 6px;
+  gap: 4px;
+  border: 1px solid var(--t-border-l2);
+  border-radius: 4px;
+  color: var(--t-text-4);
+  background: var(--t-bg-2);
+}
+
+.toolbar-search:hover {
+  border-color: var(--t-text-4);
+}
+
+.toolbar-search:focus-within {
+  border-color: var(--t-accent);
+  background: var(--t-bg-1);
+}
+
+.search-icon {
+  flex: none;
+}
+
+.search-input {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--t-text-1);
+  background: transparent;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.search-input::placeholder {
+  color: var(--t-text-4);
+}
+
+.search-input::-webkit-search-cancel-button {
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+}
+
+/* Split layout */
+.trajectory-split {
+  position: relative;
+  display: flex;
+  min-height: 28rem;
+  max-height: 42rem;
+  overflow: hidden;
+  border: 1px solid var(--t-border-l2);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: var(--t-bg-1);
+}
+
+.table-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* Ledger table */
+.trajectory-table {
+  width: 100%;
+  min-width: 560px;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: var(--t-text-1);
+  background: var(--t-bg-1);
+  font-size: 12px;
+}
+
+.trajectory-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--t-border-l2);
+  color: var(--t-text-3);
+  background: var(--t-bg-2);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  text-overflow: ellipsis;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.event-header {
+  width: 122px;
+  padding-right: 4px !important;
+  text-align: right !important;
+}
+
+.trajectory-table td {
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--t-border-l1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trajectory-table tbody tr {
+  cursor: default;
+  outline: none;
+  transition:
+    background-color 120ms ease-in-out,
+    opacity 120ms ease-in-out;
+}
+
+.trajectory-table tbody tr:hover {
+  background: var(--t-bg-hover);
+}
+
+.trajectory-table tbody tr[data-selected='true'] {
+  background: var(--t-bg-active);
+}
+
+.trajectory-table tbody tr:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--t-accent);
+}
+
+/* Turn boundary + rail */
+.turn-start-row td {
+  position: relative;
+  overflow: visible;
+}
+
+.trajectory-table tbody .turn-start-row:not(:first-child) td::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: var(--t-border-l1);
+  content: '';
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.event-cell {
+  position: relative;
+  padding-right: 4px !important;
+  padding-left: 34px !important;
+}
+
+.turn-rail {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--t-accent) 22%, var(--t-bg-1));
+  pointer-events: none;
+}
+
+.ledger-row[data-error='true'] .turn-rail {
+  background: color-mix(in srgb, var(--t-error) 22%, var(--t-bg-1));
+}
+
+.ledger-row[data-selected='true'] .turn-rail {
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--t-accent);
+}
+
+.ledger-row[data-error='true'][data-selected='true'] .turn-rail {
+  background: var(--t-error);
+}
+
+.request-dot {
+  position: absolute;
+  z-index: 6;
+  top: -8px;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
+.request-dot::before {
+  position: absolute;
+  top: 5.5px;
+  left: 5.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--t-text-4);
+  box-shadow:
+    0 0 0 2px var(--t-bg-1),
+    0 0 0 3px transparent;
+  content: '';
+}
+
+.ledger-row[data-error='true'] .request-dot::before {
+  background: var(--t-error);
+}
+
+.seq {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  color: var(--t-text-3);
+  font:
+    10px/12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.kind-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  box-sizing: border-box;
+  height: 19px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.035em;
+  line-height: 16px;
+  user-select: none;
+}
+
+.kind-tag-label {
+  display: inline-block;
+  max-width: 72px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tag-user {
+  color: var(--t-user);
+  background: var(--t-user-bg);
+}
+.tag-context {
+  color: var(--t-context);
+  background: var(--t-context-bg);
+}
+.tag-model {
+  color: var(--t-model);
+  background: var(--t-model-bg);
+}
+.tag-tool {
+  color: var(--t-tool);
+  background: var(--t-tool-bg);
+}
+.tag-subtool {
+  color: var(--t-subtool);
+  background: var(--t-subtool-bg);
+}
+.tag-system,
+.tag-compacted,
+.tag-checkpoint,
+.tag-step {
+  color: var(--t-system);
+  background: var(--t-system-bg);
+}
+.tag-retry {
+  color: var(--t-retry);
+  background: var(--t-retry-bg);
+}
+.tag-cancelled {
+  color: var(--t-cancelled);
+  background: var(--t-cancelled-bg);
+}
+
+/* Content cell */
+.content-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 8px !important;
+}
+
+.row-expand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: var(--t-text-3);
+  background: transparent;
+  cursor: pointer;
+}
+
+.row-expand:hover {
+  color: var(--t-text-1);
+  background: var(--t-bg-hover);
+}
+
+.row-expand:focus-visible {
+  outline: 1px solid var(--t-accent);
+}
+
+.content-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+}
+
+.content-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t-text-1);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-title-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 400;
+}
+
+.content-title-error {
+  color: var(--t-error);
+}
+
+.content-args {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t-text-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-trailing {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.content-metrics {
+  color: var(--t-text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.content-metrics-error {
+  color: var(--t-error);
+}
+
+.content-time {
+  flex: none;
+  color: var(--t-text-4);
+  font:
+    11px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Inspector drawer */
+.trajectory-inspector {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(320px, 38%, 440px);
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--t-border-l2);
+  background: var(--t-bg-1);
+  animation: inspector-slide-in 180ms ease-out;
+}
+
+@keyframes inspector-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.inspector-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  height: 42px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--t-border-l2);
+}
+
+.inspector-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.inspector-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--t-text-3);
+}
+
+.inspector-name {
+  flex: none;
+  max-width: 180px;
+  overflow: hidden;
+  font:
+    500 12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-location {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t-text-3);
+  font:
+    11px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--t-text-2);
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 18px;
+}
+
+.inspector-close:hover {
+  color: var(--t-text-1);
+  background: var(--t-bg-hover);
+}
+
+.inspector-close:focus-visible,
+.inspector-tab:focus-visible {
+  outline: 1px solid var(--t-accent);
+  outline-offset: -1px;
+}
+
+.inspector-tabs {
+  display: flex;
+  flex: none;
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  gap: 1px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--t-border-l2);
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.inspector-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.inspector-tab {
+  position: relative;
+  flex: none;
+  padding: 0 9px;
+  border: 0;
+  color: var(--t-text-3);
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.inspector-tab:hover {
+  color: var(--t-text-1);
+  background: var(--t-bg-hover);
+}
+
+.inspector-tab-active {
+  color: var(--t-accent);
+}
+
+.inspector-tab-active::after {
+  position: absolute;
+  right: 9px;
+  bottom: 0;
+  left: 9px;
+  height: 2px;
+  border-radius: 1px 1px 0 0;
+  background: var(--t-accent);
+  content: '';
+}
+
+.inspector-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 0 12px;
+}
+
+.status-badge {
+  display: inline-flex;
+  margin: 10px 12px 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.status-badge-error {
+  color: var(--t-cancelled);
+  background: var(--t-cancelled-bg);
+}
+.status-badge-success {
+  color: var(--t-context);
+  background: var(--t-context-bg);
+}
+.status-badge-neutral {
+  color: var(--t-text-3);
+  background: var(--t-system-bg);
+}
+
+.overview {
+  margin: 0;
+  padding: 8px 0 4px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.overview > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  min-height: 22px;
+  padding: 0 14px;
+  align-items: center;
+}
+
+.overview dt {
+  color: var(--t-text-3);
+}
+
+.overview dt.indent {
+  padding-left: 12px;
+}
+
+.overview dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--t-text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview dd.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.overview dd .sub {
+  color: var(--t-text-3);
+}
+
+.overview-section {
+  border-top: 1px solid var(--t-border-l1);
+}
+
+.overview-heading {
+  margin: 0;
+  padding: 6px 14px 2px;
+  color: var(--t-text-2);
+  font-size: 13px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.trajectory-empty {
+  margin: 0;
+  padding: 48px 20px;
+  border: 1px dashed var(--t-border-l2);
+  border-radius: 8px;
+  color: var(--t-text-4);
+  font-size: 13px;
+  text-align: center;
+}
+
+.trajectory-load-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+/* Scrollbars: only the ledger pane and JSON code blocks scroll, using the
+   app-wide thin scrollbar convention. */
+@media (max-width: 900px) {
+  .trajectory-inspector {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(92%, 420px);
+    max-width: 92%;
+    border-left-color: var(--t-border-l2);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.14);
+  }
+
+  .event-header {
+    width: 92px;
+  }
+
+  .event-cell {
+    padding-left: 30px !important;
+  }
 }
 </style>

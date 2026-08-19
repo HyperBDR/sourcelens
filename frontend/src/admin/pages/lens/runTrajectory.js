@@ -14,6 +14,11 @@ export function isSubagentEvent(category, event) {
   return String(payload.name || '') === 'task'
 }
 
+function eventTime(event) {
+  if (event._ms !== undefined && Number.isFinite(event._ms)) return event._ms
+  return new Date(event.timestamp).getTime()
+}
+
 export function buildTimelineLanes(events, summary) {
   const first = new Date(summary?.first_timestamp).getTime()
   const last = new Date(summary?.last_timestamp).getTime()
@@ -37,7 +42,7 @@ export function buildTimelineLanes(events, summary) {
 
   const stepsByLane = { input: [], model: [], tools: [] }
 
-  function pushStep(category, event, startMs, endMs, subagent) {
+  function pushStep(category, event, startMs, endMs, subagent, seqs = []) {
     const lane = timelineLane(category)
     const left = Math.max(0, Math.min(99.5, ((startMs - first) / total) * 100))
     const rawWidth = ((endMs - startMs) / total) * 100
@@ -48,16 +53,15 @@ export function buildTimelineLanes(events, summary) {
       width: Math.min(width, 100 - left),
       subagent,
       startMs,
-      durationMs: endMs - startMs
+      durationMs: endMs - startMs,
+      seqs: seqs.length > 0 ? seqs : [event.sequence]
     })
   }
 
   for (const group of byCall.values()) {
     const category = eventCategory(group[0])
     if (!['model', 'tool', 'subtool'].includes(category)) continue
-    const times = group
-      .map((event) => new Date(event.timestamp).getTime())
-      .filter(Number.isFinite)
+    const times = group.map(eventTime).filter(Number.isFinite)
     if (!times.length) continue
     const subagent = group.some((event) => isSubagentEvent(category, event))
     pushStep(
@@ -65,7 +69,8 @@ export function buildTimelineLanes(events, summary) {
       group[0],
       Math.min(...times),
       Math.max(...times),
-      subagent
+      subagent,
+      group.map((event) => event.sequence)
     )
   }
 
@@ -74,7 +79,7 @@ export function buildTimelineLanes(events, summary) {
     const inCallGroup =
       Boolean(event.call_id) && ['model', 'tool', 'subtool'].includes(category)
     if (inCallGroup) continue
-    const startMs = new Date(event.timestamp).getTime()
+    const startMs = eventTime(event)
     if (!Number.isFinite(startMs)) continue
     pushStep(category, event, startMs, startMs, false)
   }
