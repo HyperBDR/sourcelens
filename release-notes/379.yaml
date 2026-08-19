@@ -1,0 +1,9 @@
+type: fix
+audience: user
+en: >-
+  Fixed a crash ("crypto.randomUUID is not a function") that prevented
+  sending chat messages when SourceLens is accessed over plain HTTP on a
+  non-localhost host, such as a LAN IP without TLS.
+zh-CN: >-
+  修复了在通过局域网 IP 等非 HTTPS 地址访问 SourceLens 时，发送聊天消息会
+  因 "crypto.randomUUID is not a function" 而崩溃的问题。
