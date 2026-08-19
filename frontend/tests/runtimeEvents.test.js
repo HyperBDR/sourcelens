@@ -14,6 +14,7 @@ import {
   isActiveProgressAncestor,
   normalizePlanSteps,
   normalizeStages,
+  planStepDisplayStatus,
   scrollConversationToBottomAfterRender,
   selectCurrentWorkflowStage,
   selectLiveProgressText,
@@ -309,6 +310,54 @@ test('marks incomplete plan progress as terminal after the run ends', () => {
       isComplete: false,
       isTerminal: true
     }
+  )
+})
+
+test('promotes the current pending plan step while the run is active', () => {
+  const steps = [
+    { id: 'one', title: 'Inspect', status: 'completed' },
+    { id: 'two', title: 'Implement', status: 'completed' },
+    { id: 'three', title: 'Verify', status: 'pending' },
+    { id: 'four', title: 'Release', status: 'pending' }
+  ]
+  assert.equal(
+    planStepDisplayStatus(steps[0], steps, { active: true }),
+    'completed'
+  )
+  assert.equal(
+    planStepDisplayStatus(steps[2], steps, { active: true }),
+    'in_progress'
+  )
+  assert.equal(
+    planStepDisplayStatus(steps[3], steps, { active: true }),
+    'pending'
+  )
+})
+
+test('keeps the reported status when the run is not active', () => {
+  const steps = [
+    { id: 'one', status: 'completed' },
+    { id: 'two', status: 'pending' }
+  ]
+  assert.equal(planStepDisplayStatus(steps[1], steps), 'pending')
+  assert.equal(
+    planStepDisplayStatus(steps[1], steps, { active: false }),
+    'pending'
+  )
+})
+
+test('does not promote a step past an earlier in_progress step', () => {
+  const steps = [
+    { id: 'one', status: 'in_progress' },
+    { id: 'two', status: 'pending' }
+  ]
+  assert.equal(
+    planStepDisplayStatus(steps[0], steps, { active: true }),
+    'in_progress'
+  )
+  assert.equal(
+    planStepDisplayStatus(steps[1], steps, { active: true }),
+    'pending'
   )
 })
 
