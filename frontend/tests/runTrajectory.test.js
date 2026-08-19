@@ -5,6 +5,7 @@ import {
   buildTimelineLanes,
   buildTrajectoryRows,
   eventCategory,
+  groupTrajectoryRows,
   isSubagentEvent,
   timelineLane
 } from '../src/admin/pages/lens/runTrajectory.js'
@@ -56,6 +57,48 @@ test('collapsing a call hides every descendant event', () => {
     rows.map((row) => row.event.sequence),
     [1]
   )
+})
+
+test('trajectory rows group by category and step base name', () => {
+  const grouped = groupTrajectoryRows(
+    buildTrajectoryRows(
+      [
+        {
+          event_id: 'stage-start',
+          sequence: 1,
+          event_type: 'step.event',
+          payload: { name: 'deepagents.runtime.stage.start' }
+        },
+        {
+          event_id: 'stage-done',
+          sequence: 2,
+          event_type: 'step.event',
+          payload: { name: 'deepagents.runtime.stage.done' }
+        },
+        {
+          event_id: 'model-start',
+          sequence: 3,
+          event_type: 'model.started',
+          call_id: 'model-1'
+        },
+        {
+          event_id: 'resource',
+          sequence: 4,
+          event_type: 'step.event',
+          payload: { name: 'resources.materialized' }
+        }
+      ],
+      new Set()
+    )
+  )
+
+  assert.deepEqual(
+    grouped.map((group) => group.label),
+    ['deepagents.runtime.stage', 'model', 'resources.materialized']
+  )
+  assert.equal(grouped[0].rows.length, 2)
+  assert.equal(grouped[1].category, 'model')
+  assert.equal(grouped[2].rows.length, 1)
 })
 
 test('trajectory events expose their filter category', () => {
@@ -143,12 +186,16 @@ test('timeline lanes fill per-call duration and keep events on lanes', () => {
   assert.equal(modelStep.left, 10)
   assert.equal(modelStep.width, 30)
   assert.equal(modelStep.subagent, false)
+  assert.equal(modelStep.startMs, 1000)
+  assert.equal(modelStep.durationMs, 3000)
 
   const toolStep = lanes[2].steps[0]
   assert.equal(toolStep.event.event_id, 'tool-start')
   assert.equal(toolStep.left, 50)
   assert.equal(toolStep.width, 30)
   assert.equal(toolStep.subagent, true)
+  assert.equal(toolStep.startMs, 5000)
+  assert.equal(toolStep.durationMs, 3000)
 })
 
 test('timeline lanes treat single events as minimal markers', () => {

@@ -28,10 +28,41 @@ ALLOWED_CODEGRAPH_OPERATIONS = {
     "search",
     "trace",
 }
+OPERATION_ALIASES = {
+    "symbol_search": "search",
+    "code_search": "search",
+    "search_symbol": "search",
+    "search_code": "search",
+    "symbol_lookup": "node",
+    "callers_of": "callers",
+    "callees_of": "callees",
+    "dependency_graph": "impact",
+    "subgraph": "explore",
+    "code_analysis": "explore",
+}
 
 
 class PlanValidationError(ValueError):
     """Raised when a model-generated retrieval plan is not safe to run."""
+
+
+def _normalize_codegraph_operation(item):
+    """Resolve a model-supplied operation to the allowed set.
+
+    Tolerates missing or aliased operation names so a substantively good
+    plan is not discarded wholesale, while still rejecting unknown values.
+    """
+
+    raw = item.get("operation")
+    operation = raw.strip().lower() if isinstance(raw, str) else ""
+    if not operation:
+        operation = "search" if item.get("symbol") else "explore"
+    operation = OPERATION_ALIASES.get(operation, operation)
+    if operation not in ALLOWED_CODEGRAPH_OPERATIONS:
+        raise PlanValidationError(
+            f"unsupported CodeGraph operation: {operation}"
+        )
+    return operation
 
 
 @dataclass(frozen=True)
@@ -236,11 +267,7 @@ def parse_retrieval_plan(raw):
     for item in codegraph_items:
         if not isinstance(item, dict):
             raise PlanValidationError("codegraph query must be an object")
-        operation = _required_text(item.get("operation"), "operation")
-        if operation not in ALLOWED_CODEGRAPH_OPERATIONS:
-            raise PlanValidationError(
-                f"unsupported CodeGraph operation: {operation}"
-            )
+        operation = _normalize_codegraph_operation(item)
         query = _bounded_query(item.get("query"))
         symbol = _bounded_query(item.get("symbol"))
         if not query and not symbol:
@@ -427,9 +454,19 @@ class EvidenceExecutor:
         requests = []
         for query in plan.codegraph_queries:
             adapter = self.codegraph_tools.get(query.operation)
+            args = query.as_args()
+            if adapter is None:
+                # The generic explore adapter covers structural questions
+                # when a specific operation is unavailable; keep the query
+                # alive rather than silently dropping the evidence request.
+                adapter = self.codegraph_tools.get("explore")
+                if adapter is not None:
+                    args = {"query": " ".join(
+                        filter(None, (args.get("query"), args.get("symbol")))
+                    )}
             if adapter is not None:
                 requests.append(
-                    ("codegraph", query.operation, adapter, query.as_args())
+                    ("codegraph", query.operation, adapter, args)
                 )
         search = self.workspace_tools.get("search_workspace")
         if search is not None:
@@ -986,10 +1023,18 @@ def _list_value(value):
 def _unique_queries(value):
     queries = []
     for item in _list_value(value):
-        query = _bounded_query(item)
+        query = _bounded_query(_literal_query_value(item))
         if query:
             queries.append(query)
     return tuple(dict.fromkeys(queries))
+
+
+def _literal_query_value(item):
+    """Accept either a plain string or an object with a pattern field."""
+
+    if isinstance(item, dict):
+        return item.get("pattern") or item.get("query") or ""
+    return item
 
 
 def _unique_texts(value):

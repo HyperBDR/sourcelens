@@ -3418,6 +3418,45 @@ class LensApiTests(TestCase):
         self.assertIn('"type": "sync"', body)
         self.assertIn('"type": "done"', body)
 
+    def test_stream_does_not_replay_snapshot_steps_after_sync(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="Explain the event pipeline",
+            enqueue=False,
+        )
+        run.status = Run.Status.DONE
+        run.outcome = Run.Outcome.COMPLETED
+        run.termination_detail = {}
+        run.save(update_fields=["status", "outcome", "termination_detail"])
+        run.execution.status = RunExecution.Status.COMPLETED
+        run.execution.save(update_fields=["status"])
+        for sequence in (1, 2):
+            RunStep.objects.create(
+                run=run,
+                step_type=RunStep.StepType.GENERAL_CHAT,
+                status=RunStep.Status.DONE,
+                sequence=sequence,
+                detail={"events": [{"agent_event": f"step.{sequence}"}]},
+            )
+
+        stream_response = self.client.get(
+            f"/api/lens/runs/{run.uuid}/stream/",
+            HTTP_AUTHORIZATION=bearer_header(self.user),
+        )
+        self.assertEqual(stream_response.status_code, 200)
+        body = collect_stream(stream_response.streaming_content).decode()
+
+        # The sync snapshot already carries every persisted step; the loop
+        # must not replay them as duplicate standalone step events.
+        self.assertIn('"type": "sync"', body)
+        self.assertIn("step.1", body)
+        self.assertIn("step.2", body)
+        self.assertNotIn('"type": "step"', body)
+
     def test_clarification_answer_creates_one_continuation_run(self):
         session = Session.objects.create(
             assistant=self.assistant,
@@ -3978,7 +4017,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_running_run_stream_returns_sync_and_status(self):
+    def test_running_run_stream_returns_sync_without_replaying_status(self):
         session_response = self.client.post(
             "/api/lens/sessions/",
             {"assistant_uuid": str(self.assistant.uuid)},
@@ -4002,7 +4041,9 @@ class LensApiTests(TestCase):
         body = collect_stream(stream_response.streaming_content, limit=2).decode()
 
         self.assertIn('"type": "sync"', body)
-        self.assertIn('"type": "status"', body)
+        # The sync snapshot already carries the current status; a duplicate
+        # status event is only emitted when the run status actually changes.
+        self.assertNotIn('"type": "status"', body)
 
     def test_datasource_create_uses_target_path(self):
         payload = {

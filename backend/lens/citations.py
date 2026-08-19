@@ -69,6 +69,9 @@ def sanitize_planned_evidence(value):
     planner_status = value.get("planner_status")
     if planner_status in PLANNER_STATUSES:
         output["planner_status"] = planner_status
+    reason = value.get("planner_rejection_reason")
+    if isinstance(reason, str) and reason:
+        output["planner_rejection_reason"] = reason[:500]
     return output
 
 

@@ -814,7 +814,32 @@
                   <h3 class="overview-title">
                     {{ t('lensRuns.plannedEvidence') }}
                   </h3>
+                  <p
+                    v-if="plannedEvidence.planner_status === 'fallback'"
+                    data-testid="planned-evidence-fallback"
+                    class="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                  >
+                    {{ t('lensRuns.plannedEvidenceFallback') }}
+                    <span
+                      v-if="plannedEvidence.planner_rejection_reason"
+                      class="mt-0.5 block font-mono"
+                      :title="plannedEvidence.planner_rejection_reason"
+                    >
+                      {{ plannedEvidence.planner_rejection_reason }}
+                    </span>
+                  </p>
                   <dl class="overview-grid">
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidencePlannerStatus') }}
+                      </dt>
+                      <dd
+                        class="overview-value"
+                        :data-testid="`planner-status-${plannedEvidence.planner_status || 'none'}`"
+                      >
+                        {{ plannerStatusLabel }}
+                      </dd>
+                    </div>
                     <div>
                       <dt class="overview-label">
                         {{ t('lensRuns.plannedEvidenceModelCalls') }}
@@ -1270,6 +1295,14 @@ const plannedEvidence = computed(() => detail.value?.planned_evidence || {})
 const hasPlannedEvidence = computed(
   () => Object.keys(plannedEvidence.value).length > 0
 )
+const plannerStatusLabel = computed(() => {
+  const status = plannedEvidence.value.planner_status
+  if (!status) return '-'
+  const key = { valid: 'valid', repaired: 'repaired', fallback: 'fallback' }[
+    status
+  ]
+  return key ? t(`lensRuns.plannedEvidencePlannerStatus.${key}`) : status
+})
 
 const AGENT_ROUNDS_KEYS = {
   flash: 'flash',

@@ -41,6 +41,7 @@ class LensNodeConfig:
     codegraph_init_timeout_s: int = 300
     reasoning_effort: str | None = None
     planning_reasoning_effort: str | None = "none"
+    planner_repair_enabled: bool = False
 
 
 def _optional_int(value):
@@ -170,6 +171,9 @@ def load_config():
                 "none",
             )
             or None
+        ),
+        planner_repair_enabled=_env_bool(
+            "LENSNODE_PLANNER_REPAIR_ENABLED", default=False
         ),
         offload_tool_tokens=int(
             os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"

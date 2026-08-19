@@ -46,7 +46,9 @@ export function buildTimelineLanes(events, summary) {
       event,
       left,
       width: Math.min(width, 100 - left),
-      subagent
+      subagent,
+      startMs,
+      durationMs: endMs - startMs
     })
   }
 
@@ -121,4 +123,33 @@ export function buildTrajectoryRows(events, collapsed) {
       }
     ]
   })
+}
+
+const STEP_STATUS_SUFFIX = /\.(start|started|done|completed|failed|stopped)$/
+
+function stepGroupName(event) {
+  const name = String(event?.payload?.name || '')
+  if (!name) return 'step'
+  return name.replace(STEP_STATUS_SUFFIX, '')
+}
+
+export function groupTrajectoryRows(rows) {
+  const groups = []
+  const index = new Map()
+  for (const row of rows) {
+    const category = eventCategory(row.event)
+    let key = category
+    let label = category
+    if (category === 'step') {
+      key = `step:${stepGroupName(row.event)}`
+      label = stepGroupName(row.event)
+    }
+    if (!index.has(key)) {
+      const group = { key, category, label, rows: [] }
+      index.set(key, group)
+      groups.push(group)
+    }
+    index.get(key).rows.push(row)
+  }
+  return groups
 }
