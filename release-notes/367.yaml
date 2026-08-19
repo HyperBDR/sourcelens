@@ -1,0 +1,8 @@
+type: fix
+audience: user
+en: >-
+  Fixed the live execution plan looking stuck while the current subtask ran:
+  the active pending step now shows a loading indicator during the run.
+zh-CN: >-
+  修复执行计划在当前子任务运行期间看起来卡住的问题：进行中的待执行步骤现在
+  会在运行期间显示加载指示器。

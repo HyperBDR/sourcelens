@@ -572,6 +572,18 @@ export function summarizePlanProgress(steps, { terminal = false } = {}) {
   }
 }
 
+export function planStepDisplayStatus(step, steps, { active = false } = {}) {
+  if (!active) return step?.status
+  if (['completed', 'failed', 'skipped'].includes(step?.status)) {
+    return step.status
+  }
+  if (!Array.isArray(steps) || steps.length === 0) return step?.status
+  const current =
+    steps.find((item) => item.status === 'in_progress') ||
+    steps.find((item) => item.status === 'pending')
+  return current?.id === step?.id ? 'in_progress' : step?.status
+}
+
 export function summarizeStageProgress(stages, { terminal = false } = {}) {
   if (!Array.isArray(stages) || stages.length === 0) return null
   const completed = stages.filter(

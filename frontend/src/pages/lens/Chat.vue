@@ -1064,7 +1064,10 @@
                           <span
                             class="runtime-plan-status"
                             :class="[
-                              `is-${task.status}`,
+                              `is-${livePlanStatus(
+                                task,
+                                liveStructuredProgress.tasks
+                              )}`,
                               {
                                 'is-active-ancestor': isActiveProgressAncestor(
                                   task,
@@ -1074,7 +1077,14 @@
                             ]"
                             aria-hidden="true"
                           >
-                            {{ progressStatusIcon(task.status) }}
+                            {{
+                              progressStatusIcon(
+                                livePlanStatus(
+                                  task,
+                                  liveStructuredProgress.tasks
+                                )
+                              )
+                            }}
                           </span>
                           <span>{{ workflowTaskTitle(task) }}</span>
                         </div>
@@ -1180,10 +1190,20 @@
                       <div class="runtime-plan-step">
                         <span
                           class="runtime-plan-status"
-                          :class="`is-${item.status}`"
+                          :class="`is-${livePlanStatus(
+                            item,
+                            liveStructuredProgress.items
+                          )}`"
                           aria-hidden="true"
                         >
-                          {{ progressStatusIcon(item.status) }}
+                          {{
+                            progressStatusIcon(
+                              livePlanStatus(
+                                item,
+                                liveStructuredProgress.items
+                              )
+                            )
+                          }}
                         </span>
                         <span class="runtime-step-content">
                           <span>{{ item.title }}</span>
@@ -1681,6 +1701,7 @@ import {
   formatDuration,
   getMessageTimestamp,
   isActiveProgressAncestor,
+  planStepDisplayStatus,
   scrollConversationToBottomAfterRender,
   selectLiveProgressText,
   selectStructuredProgress,
@@ -2155,6 +2176,10 @@ const liveStructuredProgress = computed(() =>
   structuredProgress(runtimeState.value)
 )
 
+function livePlanStatus(item, items) {
+  return planStepDisplayStatus(item, items, { active: isRunActive.value })
+}
+
 function nodeActivities(state, nodeId) {
   return activitiesForNode(state, nodeId)
 }
@@ -2176,7 +2201,11 @@ function activityLabel(kind) {
 
 function isCurrentActivity(activity, item) {
   const latest = runtimeState.value.activities.at(-1)
-  return item.status === 'in_progress' && latest?.id === activity.id
+  const items = liveStructuredProgress.value.items
+  return (
+    livePlanStatus(item, items) === 'in_progress' &&
+    latest?.id === activity.id
+  )
 }
 
 function isCurrentStandaloneActivity(activity, items) {
