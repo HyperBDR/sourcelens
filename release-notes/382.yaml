@@ -1,0 +1,9 @@
+type: improvement
+audience: admin
+en: >-
+  Rebuilt the run trajectory view with a DSH-style event ledger and three-lane
+  timeline (drag-select filtering, zoom, pan, right-click to clear), collapsible
+  JSON details, and a toggle for system/tools snapshots.
+zh-CN: >-
+  重构运行轨迹视图：仿 DSH 的事件台账与三泳道时间轴（拖选过滤、缩放、平移、右键清空）、
+  可折叠 JSON 详情、系统/工具快照开关。
