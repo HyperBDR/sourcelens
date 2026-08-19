@@ -1,0 +1,11 @@
+type: improvement
+audience: admin
+en: >-
+  Unified Skill executable execution on a single run_skill_script tool and
+  added per-run call-count and cumulative-output budgets that stop runaway
+  loops from exhausting tokens and timing out. Package guidance now reflects
+  the unified execution model.
+zh-CN: >-
+  将 Skill 可执行文件统一到 run_skill_script 单一工具，并新增每次运行的调用
+  次数与累计输出预算，可阻止失控循环耗尽 token 并超时。打包指引已同步为统一
+  的执行模型。
