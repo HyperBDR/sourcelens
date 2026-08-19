@@ -4,7 +4,6 @@ import json
 import math
 import mimetypes
 import os
-import platform
 import re
 import shlex
 import stat
@@ -49,7 +48,6 @@ SELF_REPORTING_TOOLS = {
     "analyze_structured_output",
     "inspect_saved_output",
     "run_skill_script",
-    "run_skill_artifact",
     "run_skill_transform",
     "append_file",
 }
@@ -523,15 +521,6 @@ class _RunSkillScriptArgs(BaseModel):
     script: str = Field(
         description="Script path under the Skill's scripts directory."
     )
-    args: list[str] = Field(default_factory=list, description="Arguments.")
-    stdin: str = Field(default="", description="Optional standard input.")
-
-
-class _RunSkillArtifactArgs(BaseModel):
-    """Args schema for running a declared executable Skill Artifact."""
-
-    skill: str = Field(description="Loaded Skill slug or name.")
-    artifact: str = Field(description="Artifact name from sourcelens.json.")
     args: list[str] = Field(default_factory=list, description="Arguments.")
     stdin: str = Field(default="", description="Optional standard input.")
 
@@ -1185,30 +1174,23 @@ def build_general_chat_tools(
         _positive_int(tool_policy.get("skill_script_stderr_limit"), 8000),
         50000,
     )
-    artifact_stdout_setting = tool_policy.get(
-        "skill_artifact_stdout_limit"
+    script_max_calls = min(
+        _positive_int(tool_policy.get("skill_script_max_calls"), default=30),
+        100,
     )
-    if artifact_stdout_setting is None:
-        artifact_stdout_setting = tool_policy.get(
-            "skill_script_stdout_limit"
-        )
-    artifact_stdout_limit = min(
-        _positive_int(artifact_stdout_setting, 8000),
+    script_calls = {"count": 0}
+    script_reflowed_chars = {"count": 0}
+    script_output_limit = min(
+        _positive_int(
+            tool_policy.get("skill_script_aggregate_output_chars"),
+            default=80000,
+        ),
+        500000,
+    )
+    transform_stdout_limit = min(
+        _positive_int(tool_policy.get("skill_transform_stdout_limit"), 8000),
         50000,
     )
-    artifact_max_calls = _positive_int(
-        tool_policy.get("skill_artifact_max_calls"),
-        default=(
-            config.skill_artifact_max_calls
-            if config is not None
-            else 100
-        ),
-    )
-    artifact_calls = {"count": 0}
-    artifact_output_refs = []
-    artifact_request_counts = {}
-    artifact_progress = {}
-    artifact_state_lock = threading.Lock()
     structured_analysis_max_calls = min(
         _positive_int(
             tool_policy.get("structured_analysis_max_calls"),
@@ -1852,7 +1834,7 @@ def build_general_chat_tools(
                 invocation_id,
                 "stdout",
                 exc.stdout,
-                artifact_stdout_limit,
+                transform_stdout_limit,
             )
             stderr = _persist_large_tool_output(
                 resources.root,
@@ -1925,7 +1907,7 @@ def build_general_chat_tools(
             invocation_id,
             "stdout",
             completed.stdout,
-            artifact_stdout_limit,
+            transform_stdout_limit,
         )
         stderr = _persist_large_tool_output(
             resources.root,
@@ -1995,14 +1977,19 @@ def build_general_chat_tools(
         args: list[str] | None = None,
         stdin: str = "",
     ) -> str:
-        """Run a script bundled in a loaded Skill's scripts/ directory.
+        """Run a bundled executable file inside a loaded Skill.
 
         Use this only when the Skill instructions tell you to run a bundled
-        script. The script path must be relative to that Skill's scripts
-        directory, for example "rotate_pdf.py" or "build/report.sh".
+        script or binary. The path must be relative to that Skill's root
+        directory, for example "scripts/report.sh", "scripts/tool.py" or
+        "bin/linux-amd64/glab". Prefer one call that batches the work over
+        many per-record calls: a per-run call budget and a cumulative
+        output budget apply, and once either is exhausted further calls
+        are rejected until existing stdout_ref results are analyzed.
         """
 
         started = time.monotonic()
+        invocation_id = uuid.uuid4().hex
         args = [str(item) for item in (args or [])]
         skill_dir = _resolve_skill_dir(skills_root, skill)
         if skill_dir is None:
@@ -2022,6 +2009,58 @@ def build_general_chat_tools(
                 {"skill": skill, "script": str(script_path)},
             )
             return _json({"ok": False, "error": "SCRIPT_NOT_EXECUTABLE"})
+        script_calls["count"] += 1
+        if script_calls["count"] > script_max_calls:
+            emit(
+                "tool.run_skill_script.budget_exceeded",
+                {
+                    "skill": skill,
+                    "script": script,
+                    "call_count": script_calls["count"],
+                    "max_calls": script_max_calls,
+                },
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "SKILL_SCRIPT_CALL_LIMIT",
+                    "tool": "run_skill_script",
+                    "call_count": script_calls["count"],
+                    "max_calls": script_max_calls,
+                    "instruction": (
+                        "Stop calling run_skill_script in a loop. Batch the "
+                        "work into fewer calls or analyze the already saved "
+                        "stdout_ref results with inspect_saved_output or "
+                        "analyze_structured_output."
+                    ),
+                }
+            )
+        if script_reflowed_chars["count"] >= script_output_limit:
+            emit(
+                "tool.run_skill_script.output_budget_exceeded",
+                {
+                    "skill": skill,
+                    "script": script,
+                    "reflowed_chars": script_reflowed_chars["count"],
+                    "output_limit": script_output_limit,
+                },
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "SKILL_SCRIPT_OUTPUT_LIMIT",
+                    "tool": "run_skill_script",
+                    "reflowed_chars": script_reflowed_chars["count"],
+                    "output_limit": script_output_limit,
+                    "instruction": (
+                        "The cumulative run_skill_script output returned to "
+                        "the conversation has reached its limit. Stop "
+                        "running new scripts and analyze the stdout_ref "
+                        "results already saved with inspect_saved_output or "
+                        "analyze_structured_output."
+                    ),
+                }
+            )
         display_name = f"{skill}/{script}"
         emit(
             "tool.run_skill_script.start",
@@ -2029,6 +2068,7 @@ def build_general_chat_tools(
                 "skill": skill,
                 "script": script,
                 "arg_count": len(args),
+                "args_redacted": _redact_command_args(args),
                 "summary": display_name,
             },
         )
@@ -2039,10 +2079,9 @@ def build_general_chat_tools(
                 env=_skill_script_environment(
                     resources.skill_environments.get(skill_dir.name, {})
                 ),
-                input=stdin,
+                input=stdin.encode("utf-8"),
                 capture_output=True,
                 check=False,
-                text=True,
                 timeout=timeout_s,
             )
         except subprocess.TimeoutExpired as exc:
@@ -2054,13 +2093,30 @@ def build_general_chat_tools(
                     "timeout_s": timeout_s,
                 },
             )
+            stdout = _persist_large_tool_output(
+                resources.root,
+                uuid.uuid4().hex,
+                "stdout",
+                exc.stdout,
+                stdout_limit,
+            )
+            stderr = _persist_large_tool_output(
+                resources.root,
+                uuid.uuid4().hex,
+                "stderr",
+                exc.stderr,
+                stderr_limit,
+            )
+            script_reflowed_chars["count"] += len(
+                stdout["stdout"]
+            ) + len(stderr["stderr"])
             return _json(
                 {
                     "ok": False,
                     "error": "SCRIPT_TIMEOUT",
                     "timeout_s": timeout_s,
-                    "stdout": _truncate_output(exc.stdout, stdout_limit),
-                    "stderr": _truncate_output(exc.stderr, stderr_limit),
+                    **stdout,
+                    **stderr,
                 }
             )
         except OSError as exc:
@@ -2070,292 +2126,12 @@ def build_general_chat_tools(
             )
             return _json({"ok": False, "error": str(exc)})
         duration_ms = int((time.monotonic() - started) * 1000)
-        payload = {
-            "ok": completed.returncode == 0,
-            "returncode": completed.returncode,
-            "stdout": completed.stdout[:stdout_limit],
-            "stderr": completed.stderr[:stderr_limit],
-            "duration_ms": duration_ms,
-            "script": str(script_path.relative_to(skill_dir)),
-        }
-        emit(
-            "tool.run_skill_script.done",
-            {
-                "skill": skill,
-                "script": script,
-                "ok": payload["ok"],
-                "returncode": completed.returncode,
-                "duration_ms": duration_ms,
-                "summary": f"{display_name} · rc={completed.returncode}",
-            },
-        )
-        return _json(payload)
-
-    @tool("run_skill_artifact", args_schema=_RunSkillArtifactArgs)
-    def run_skill_artifact(
-        skill: str,
-        artifact: str,
-        args: list[str] | None = None,
-        stdin: str = "",
-    ) -> str:
-        """Run an executable Artifact declared by a loaded Skill.
-
-        Use the Artifact name from the Skill's sourcelens.json, never a file
-        path. SourceLens selects the entrypoint matching this LensNode's OS
-        and CPU architecture, verifies its SHA-256, and executes only that
-        exact regular file under the Skill's bin/ directory. Calls have a
-        bounded hard cap and stop early when requests repeat or results stop
-        changing. Use Skill references instead of probing version or help
-        commands and avoid repeating successful queries.
-        """
-
-        started = time.monotonic()
-        invocation_id = uuid.uuid4().hex
-        args = [str(item) for item in (args or [])]
-        skill_dir = _resolve_skill_dir(skills_root, skill)
-        if skill_dir is None:
-            emit(
-                "tool.run_skill_artifact.denied",
-                {"skill": skill, "invocation_id": invocation_id},
-            )
-            return _json({"ok": False, "error": "SKILL_NOT_LOADED"})
-        artifact_name = str(artifact or "").strip()
-        artifact_path, error = _resolve_skill_artifact(
-            skill_dir,
-            resources.skill_artifacts.get(skill_dir.name, {}),
-            artifact_name,
-        )
-        if artifact_path is None:
-            emit(
-                "tool.run_skill_artifact.denied",
-                {
-                    "skill": skill_dir.name,
-                    "artifact": artifact_name,
-                    "error": error,
-                    "invocation_id": invocation_id,
-                },
-            )
-            return _json({"ok": False, "error": error})
-
-        display_name = f"{skill_dir.name}/{artifact_name}"
-        request_signature = hashlib.sha256(
-            json.dumps(
-                [
-                    skill_dir.name,
-                    artifact_name,
-                    args,
-                    hashlib.sha256(stdin.encode("utf-8")).hexdigest(),
-                ],
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        command_family = []
-        for value in args:
-            if value.startswith("-"):
-                break
-            command_family.append(value.casefold())
-            if len(command_family) >= 2:
-                break
-        progress_family = (
-            skill_dir.name,
-            artifact_name,
-            tuple(command_family),
-        )
-        with artifact_state_lock:
-            artifact_calls["count"] += 1
-            call_count = artifact_calls["count"]
-            request_count = (
-                artifact_request_counts.get(request_signature, 0) + 1
-            )
-            artifact_request_counts[request_signature] = request_count
-            progress_state = artifact_progress.setdefault(
-                progress_family,
-                {
-                    "result_counts": {},
-                    "stalled": False,
-                    "in_flight": 0,
-                },
-            )
-            progress_stalled = progress_state["stalled"]
-            call_limit_exceeded = call_count > artifact_max_calls
-            request_repeated = request_count > 2
-            if not (
-                call_limit_exceeded
-                or request_repeated
-                or progress_stalled
-            ):
-                progress_state["in_flight"] += 1
-        if call_limit_exceeded:
-            detail = {
-                "skill": skill_dir.name,
-                "artifact": artifact_name,
-                "args_redacted": _redact_command_args(args),
-                "call_count": call_count,
-                "max_calls": artifact_max_calls,
-                "invocation_id": invocation_id,
-                "summary": f"{display_name} · call budget exceeded",
-            }
-            emit("tool.run_skill_artifact.budget_exceeded", detail)
-            return _json(
-                {
-                    "ok": False,
-                    "error": "ARTIFACT_CALL_LIMIT",
-                    "call_count": call_count,
-                    "max_calls": artifact_max_calls,
-                    "available_output_refs": artifact_output_refs,
-                    "instruction": (
-                        "Stop requesting more Artifact calls and synthesize "
-                        "the answer from the evidence already collected."
-                    ),
-                }
-            )
-        if request_repeated:
-            detail = {
-                "skill": skill_dir.name,
-                "artifact": artifact_name,
-                "args_redacted": _redact_command_args(args),
-                "call_count": call_count,
-                "max_calls": artifact_max_calls,
-                "request_count": request_count,
-                "invocation_id": invocation_id,
-                "summary": f"{display_name} · repeated request",
-            }
-            emit("tool.run_skill_artifact.repeated", detail)
-            return _json(
-                {
-                    "ok": False,
-                    "error": "ARTIFACT_REPEATED_CALL",
-                    "call_count": call_count,
-                    "request_count": request_count,
-                    "max_calls": artifact_max_calls,
-                    "available_output_refs": artifact_output_refs,
-                    "instruction": (
-                        "This exact Artifact request has already been run. "
-                        "Stop repeating it and synthesize the answer from "
-                        "the existing results."
-                    ),
-                }
-            )
-        if progress_stalled:
-            detail = {
-                "skill": skill_dir.name,
-                "artifact": artifact_name,
-                "args_redacted": _redact_command_args(args),
-                "call_count": call_count,
-                "max_calls": artifact_max_calls,
-                "invocation_id": invocation_id,
-                "summary": f"{display_name} · progress stalled",
-            }
-            emit("tool.run_skill_artifact.stalled", detail)
-            return _json(
-                {
-                    "ok": False,
-                    "error": "ARTIFACT_STALLED",
-                    "call_count": call_count,
-                    "max_calls": artifact_max_calls,
-                    "available_output_refs": artifact_output_refs,
-                    "instruction": (
-                        "Artifact results stopped changing for this command "
-                        "family. Stop calling it and synthesize the answer "
-                        "from existing evidence."
-                    ),
-                }
-            )
-        emit(
-            "tool.run_skill_artifact.start",
-            {
-                "skill": skill_dir.name,
-                "artifact": artifact_name,
-                "arg_count": len(args),
-                "args_redacted": _redact_command_args(args),
-                "call_count": call_count,
-                "max_calls": artifact_max_calls,
-                "invocation_id": invocation_id,
-                "summary": display_name,
-            },
-        )
-        try:
-            completed = subprocess.run(
-                [str(artifact_path), *args],
-                cwd=str(skill_dir),
-                env=_skill_script_environment(
-                    resources.skill_environments.get(skill_dir.name, {})
-                ),
-                input=stdin.encode("utf-8"),
-                capture_output=True,
-                check=False,
-                timeout=timeout_s,
-            )
-        except subprocess.TimeoutExpired as exc:
-            with artifact_state_lock:
-                artifact_progress[progress_family]["in_flight"] -= 1
-            duration_ms = int((time.monotonic() - started) * 1000)
-            stdout = _persist_large_tool_output(
-                resources.root,
-                invocation_id,
-                "stdout",
-                exc.stdout,
-                artifact_stdout_limit,
-            )
-            stderr = _persist_large_tool_output(
-                resources.root,
-                invocation_id,
-                "stderr",
-                exc.stderr,
-                stderr_limit,
-            )
-            if stdout["stdout_ref"]:
-                artifact_output_refs.append(stdout["stdout_ref"])
-            emit(
-                "tool.run_skill_artifact.timeout",
-                {
-                    "skill": skill_dir.name,
-                    "artifact": artifact_name,
-                    "duration_ms": duration_ms,
-                    "invocation_id": invocation_id,
-                    "stdout_bytes": stdout["stdout_bytes"],
-                    "stdout_ref": stdout["stdout_ref"],
-                    "stdout_truncated": stdout["stdout_truncated"],
-                    "stderr_bytes": stderr["stderr_bytes"],
-                    "stderr_ref": stderr["stderr_ref"],
-                    "stderr_truncated": stderr["stderr_truncated"],
-                    "timeout_s": timeout_s,
-                },
-            )
-            return _json(
-                {
-                    "ok": False,
-                    "error": "ARTIFACT_TIMEOUT",
-                    "duration_ms": duration_ms,
-                    "invocation_id": invocation_id,
-                    "timeout_s": timeout_s,
-                    **stdout,
-                    **stderr,
-                }
-            )
-        except OSError:
-            with artifact_state_lock:
-                artifact_progress[progress_family]["in_flight"] -= 1
-            emit(
-                "tool.run_skill_artifact.failed",
-                {
-                    "skill": skill_dir.name,
-                    "artifact": artifact_name,
-                    "invocation_id": invocation_id,
-                },
-            )
-            return _json(
-                {"ok": False, "error": "ARTIFACT_EXECUTION_FAILED"}
-            )
-
-        duration_ms = int((time.monotonic() - started) * 1000)
         stdout = _persist_large_tool_output(
             resources.root,
             invocation_id,
             "stdout",
             completed.stdout,
-            artifact_stdout_limit,
+            stdout_limit,
         )
         stderr = _persist_large_tool_output(
             resources.root,
@@ -2368,67 +2144,39 @@ def build_general_chat_tools(
             "ok": completed.returncode == 0,
             "returncode": completed.returncode,
             "duration_ms": duration_ms,
-            "artifact": artifact_name,
-            "invocation_id": invocation_id,
+            "script": str(script_path.relative_to(skill_dir)),
             **stdout,
             **stderr,
         }
-        progress_signature = (
-            completed.returncode,
-            payload["stdout_sha256"],
-            payload["stderr_sha256"],
+        script_reflowed_chars["count"] += len(payload["stdout"]) + len(
+            payload["stderr"]
         )
-        with artifact_state_lock:
-            progress_state = artifact_progress[progress_family]
-            result_counts = progress_state["result_counts"]
-            progress_streak = result_counts.get(progress_signature, 0) + 1
-            result_counts[progress_signature] = progress_streak
-            progress_state["in_flight"] -= 1
-            progress_stalled = (
-                progress_state["in_flight"] == 0
-                and len(result_counts) == 1
-                and progress_streak >= 3
-            )
-            progress_state["stalled"] = progress_stalled
-        payload["progress_streak"] = progress_streak
-        payload["progress_stalled"] = progress_stalled
         if payload["stdout_truncated"]:
-            artifact_output_refs.append(payload["stdout_ref"])
             if payload["stdout_format"] == "json":
                 payload["instruction"] = (
                     "Use analyze_structured_output on stdout_ref. Do not "
-                    "rerun the Artifact merely to change pagination or "
-                    "output format."
+                    "read_file or grep it and do not rerun the Script to "
+                    "recover its full output."
                 )
             else:
                 payload["instruction"] = (
                     "Read stdout_ref with inspect_saved_output for a "
-                    "bounded view. Do not rerun the Artifact merely to "
-                    "change pagination or output format."
+                    "bounded view. Do not read_file or grep it and do not "
+                    "rerun the Script to recover its full output."
                 )
-        if progress_stalled:
-            payload["instruction"] = (
-                "Artifact results have stopped changing for this command "
-                "family. Stop calling it and synthesize the answer from the "
-                "evidence collected."
-            )
         emit(
-            "tool.run_skill_artifact.done",
+            "tool.run_skill_script.done",
             {
-                "skill": skill_dir.name,
-                "artifact": artifact_name,
+                "skill": skill,
+                "script": script,
                 "ok": payload["ok"],
                 "returncode": completed.returncode,
                 "duration_ms": duration_ms,
-                "invocation_id": invocation_id,
                 "stdout_bytes": payload["stdout_bytes"],
                 "stdout_ref": payload["stdout_ref"],
                 "stdout_truncated": payload["stdout_truncated"],
-                "stderr_bytes": payload["stderr_bytes"],
-                "stderr_ref": payload["stderr_ref"],
-                "stderr_truncated": payload["stderr_truncated"],
-                "progress_streak": progress_streak,
-                "progress_stalled": progress_stalled,
+                "call_count": script_calls["count"],
+                "reflowed_chars": script_reflowed_chars["count"],
                 "summary": f"{display_name} · rc={completed.returncode}",
             },
         )
@@ -2451,7 +2199,6 @@ def build_general_chat_tools(
         inspect_saved_output,
         run_skill_transform,
         run_skill_script,
-        run_skill_artifact,
     ]
     if config is not None:
         tools.append(
@@ -2996,93 +2743,19 @@ def _resolve_skill_dir(skills_root, value):
 
 
 def _resolve_skill_script(skill_dir, script):
-    """Resolve a script under a Skill's scripts directory."""
+    """Resolve an executable file anywhere under a Skill root directory."""
 
     relative = _safe_relative_path(script)
     if relative is None:
         return None
-    scripts_root = (skill_dir / "scripts").resolve()
-    candidate = (scripts_root / relative).resolve()
+    candidate = (skill_dir / relative).resolve()
     try:
-        candidate.relative_to(scripts_root)
+        candidate.relative_to(skill_dir)
     except ValueError:
         return None
     if not candidate.is_file() or candidate.is_symlink():
         return None
     return candidate
-
-
-def _resolve_skill_artifact(skill_dir, artifacts, artifact_name):
-    """Resolve and verify one declared Artifact for the current platform."""
-
-    if not isinstance(artifacts, dict) or artifact_name not in artifacts:
-        return None, "ARTIFACT_NOT_DECLARED"
-    artifact = artifacts.get(artifact_name)
-    if not isinstance(artifact, dict) or artifact.get("type") != "executable":
-        return None, "ARTIFACT_DECLARATION_INVALID"
-    current_os, current_arch = _artifact_platform()
-    entrypoint = next(
-        (
-            item
-            for item in artifact.get("entrypoints") or []
-            if isinstance(item, dict)
-            and item.get("os") == current_os
-            and item.get("arch") == current_arch
-        ),
-        None,
-    )
-    if entrypoint is None:
-        return None, "ARTIFACT_PLATFORM_UNAVAILABLE"
-
-    relative = _safe_relative_path(entrypoint.get("path"))
-    if (
-        relative is None
-        or len(relative.parts) < 2
-        or relative.parts[0] != "bin"
-    ):
-        return None, "ARTIFACT_PATH_INVALID"
-    bin_root = (skill_dir / "bin").resolve()
-    candidate = skill_dir / relative
-    if _path_contains_symlink(skill_dir, candidate):
-        return None, "ARTIFACT_PATH_INVALID"
-    try:
-        resolved = candidate.resolve(strict=True)
-        resolved.relative_to(bin_root)
-    except (FileNotFoundError, OSError, ValueError):
-        return None, "ARTIFACT_PATH_INVALID"
-    try:
-        if not stat.S_ISREG(candidate.lstat().st_mode):
-            return None, "ARTIFACT_PATH_INVALID"
-        expected_hash = str(entrypoint.get("sha256") or "").lower()
-        if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
-            return None, "ARTIFACT_DECLARATION_INVALID"
-        actual_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
-    except OSError:
-        return None, "ARTIFACT_PATH_INVALID"
-    if actual_hash != expected_hash:
-        return None, "ARTIFACT_HASH_MISMATCH"
-    try:
-        candidate.chmod(0o755)
-    except OSError:
-        return None, "ARTIFACT_PERMISSION_DENIED"
-    return candidate, None
-
-
-def _artifact_platform():
-    """Return normalized OS and CPU values for Artifact selection."""
-
-    os_name = {
-        "darwin": "darwin",
-        "linux": "linux",
-        "windows": "windows",
-    }.get(platform.system().lower(), "")
-    arch = {
-        "aarch64": "arm64",
-        "arm64": "arm64",
-        "amd64": "amd64",
-        "x86_64": "amd64",
-    }.get(platform.machine().lower(), "")
-    return os_name, arch
 
 
 def _path_contains_symlink(root, path):

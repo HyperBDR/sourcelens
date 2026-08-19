@@ -39,10 +39,6 @@ const ERROR_RULES = [
   [/^Skill slug '.+' already exists\./, 'skillSlugExists'],
   [/^GitHub download failed:/, 'githubDownloadFailed'],
   [
-    /^(Skill artifacts|A Skill may declare at most 32 artifacts|Artifact names|Artifact ')/,
-    'artifactInvalid'
-  ],
-  [
     /^(Skill transforms|A Skill may declare at most 32 transforms|Transform names|Transform ')/,
     'transformInvalid'
   ],

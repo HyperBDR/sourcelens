@@ -63,7 +63,6 @@ REMOTE_DATA_TOOLS = {
     "analyze_structured_output",
     "call_skill_api",
     "inspect_saved_output",
-    "run_skill_artifact",
     "run_skill_transform",
     "tool_search",
 }
@@ -1357,17 +1356,12 @@ def _tool_result_metadata(result, tool_name):
         }
 
     error_code = _tool_error_code(result)
-    artifact_diagnostic = (
-        str(result.get("stderr") or "").upper()
-        if tool_name == "run_skill_artifact"
-        else ""
-    )
     diagnostic = " ".join(
         str(result.get(key) or "")
         for key in ("error", "code", "message", "detail", "stderr")
     ).upper()
-    artifact_request_failure = any(
-        marker in artifact_diagnostic
+    cli_request_failure = any(
+        marker in diagnostic
         for marker in (
             "404",
             "NOTFOUND",
@@ -1378,8 +1372,8 @@ def _tool_result_metadata(result, tool_name):
             "数据不存在",
         )
     )
-    artifact_server_failure = bool(
-        re.search(r"\b(?:HTTP\s*)?5\d{2}\b", artifact_diagnostic)
+    cli_server_failure = bool(
+        re.search(r"\b(?:HTTP\s*)?5\d{2}\b", diagnostic)
     )
     try:
         status_code = int(result.get("status_code") or 0)
@@ -1400,7 +1394,7 @@ def _tool_result_metadata(result, tool_name):
             "Stop retrying this tool and report the configuration or "
             "authorization requirement."
         )
-    elif artifact_server_failure or upstream_server_failure or any(
+    elif cli_server_failure or upstream_server_failure or any(
         marker in error_code
         for marker in ("HTTP_REQUEST_FAILED", "RATE_LIMIT", "TIMEOUT")
     ):
@@ -1426,7 +1420,7 @@ def _tool_result_metadata(result, tool_name):
             "Stop calling this tool and synthesize the answer from evidence "
             "already collected."
         )
-    elif upstream_request_failure or artifact_request_failure or any(
+    elif upstream_request_failure or cli_request_failure or any(
         marker in error_code
         for marker in (
             "INVALID",

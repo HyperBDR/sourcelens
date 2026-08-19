@@ -1796,7 +1796,7 @@ class LensServiceTests(TransactionTestCase):
     def test_order_query_activity_exposes_safe_real_parameters(self):
         event = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "activity": "running_tool",
                 "runtime_scope": "general_chat",
                 "invocation_id": "activity-123",
@@ -1832,12 +1832,12 @@ class LensServiceTests(TransactionTestCase):
         )
         self.assertNotIn("token", str(event).lower())
         self.assertNotIn("profile", str(event).lower())
-        self.assertNotIn("run_skill_artifact", str(event))
+        self.assertNotIn("run_skill_script", str(event))
 
     def test_completed_tool_activity_preserves_only_pairing_fields(self):
         event = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.done",
+                "agent_event": "tool.run_skill_script.done",
                 "activity": "running_tool",
                 "runtime_scope": "general_chat",
                 "invocation_id": "activity-123",
@@ -1860,7 +1860,7 @@ class LensServiceTests(TransactionTestCase):
     def test_order_detail_and_command_help_have_real_activity_kinds(self):
         detail = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "activity": "running_tool",
                 "runtime_scope": "general_chat",
                 "invocation_id": "detail-123",
@@ -1875,7 +1875,7 @@ class LensServiceTests(TransactionTestCase):
         )
         command_help = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "activity": "running_tool",
                 "runtime_scope": "general_chat",
                 "invocation_id": "help-123",
@@ -1896,7 +1896,7 @@ class LensServiceTests(TransactionTestCase):
     def test_order_list_by_code_exposes_only_safe_order_reference(self):
         event = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "activity": "running_tool",
                 "runtime_scope": "general_chat",
                 "invocation_id": "lookup-123",
@@ -1923,7 +1923,7 @@ class LensServiceTests(TransactionTestCase):
     def test_order_reference_rejects_non_identifier_arguments(self):
         event = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "activity": "running_tool",
                 "runtime_scope": "general_chat",
                 "invocation_id": "lookup-unsafe",
@@ -1963,7 +1963,7 @@ class LensServiceTests(TransactionTestCase):
     def test_non_general_chat_tool_event_keeps_original_public_shape(self):
         event = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "activity": "running_tool",
                 "invocation_id": "activity-123",
                 "args_redacted": ["order", "list"],
@@ -1973,7 +1973,7 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(
             event,
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "activity": "running_tool",
             },
         )
@@ -1994,7 +1994,7 @@ class LensServiceTests(TransactionTestCase):
     def test_order_help_is_preparation_not_a_business_query(self):
         event = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "runtime_scope": "general_chat",
                 "invocation_id": "order-list-help",
                 "args_redacted": ["order", "list", "--help"],
@@ -2014,7 +2014,7 @@ class LensServiceTests(TransactionTestCase):
     def test_order_view_is_an_order_detail_operation(self):
         event = sanitize_runtime_event(
             {
-                "agent_event": "tool.run_skill_artifact.start",
+                "agent_event": "tool.run_skill_script.start",
                 "runtime_scope": "general_chat",
                 "invocation_id": "order-view",
                 "args_redacted": [
@@ -2036,7 +2036,7 @@ class LensServiceTests(TransactionTestCase):
             {
                 "events": [
                     {
-                        "agent_event": "tool.run_skill_artifact.start",
+                        "agent_event": "tool.run_skill_script.start",
                         "runtime_scope": "general_chat",
                         "invocation_id": "order-query",
                         "args_redacted": [
@@ -2046,7 +2046,7 @@ class LensServiceTests(TransactionTestCase):
                         ],
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.done",
+                        "agent_event": "tool.run_skill_script.done",
                         "runtime_scope": "general_chat",
                         "invocation_id": "order-query",
                     },
@@ -2055,7 +2055,7 @@ class LensServiceTests(TransactionTestCase):
                         "runtime_scope": "general_chat",
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.start",
+                        "agent_event": "tool.run_skill_script.start",
                         "runtime_scope": "general_chat",
                         "invocation_id": "order-help",
                         "args_redacted": ["order", "--help"],
@@ -2077,40 +2077,40 @@ class LensServiceTests(TransactionTestCase):
             {
                 "events": [
                     {
-                        "agent_event": "tool.run_skill_artifact.start",
+                        "agent_event": "tool.run_skill_script.start",
                         "runtime_scope": "general_chat",
                         "invocation_id": "tool-version",
                         "args_redacted": ["version"],
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.done",
+                        "agent_event": "tool.run_skill_script.done",
                         "runtime_scope": "general_chat",
                         "invocation_id": "tool-version",
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.start",
+                        "agent_event": "tool.run_skill_script.start",
                         "runtime_scope": "general_chat",
                         "invocation_id": "auth-status",
                         "args_redacted": ["auth", "status"],
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.done",
+                        "agent_event": "tool.run_skill_script.done",
                         "runtime_scope": "general_chat",
                         "invocation_id": "auth-status",
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.start",
+                        "agent_event": "tool.run_skill_script.start",
                         "runtime_scope": "general_chat",
                         "invocation_id": "auth-login",
                         "args_redacted": ["auth", "login"],
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.done",
+                        "agent_event": "tool.run_skill_script.done",
                         "runtime_scope": "general_chat",
                         "invocation_id": "auth-login",
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.start",
+                        "agent_event": "tool.run_skill_script.start",
                         "runtime_scope": "general_chat",
                         "invocation_id": "order-query",
                         "args_redacted": [
@@ -2121,7 +2121,7 @@ class LensServiceTests(TransactionTestCase):
                         ],
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.done",
+                        "agent_event": "tool.run_skill_script.done",
                         "runtime_scope": "general_chat",
                         "invocation_id": "order-query",
                     },
@@ -2185,13 +2185,13 @@ class LensServiceTests(TransactionTestCase):
             {
                 "events": [
                     {
-                        "agent_event": "tool.run_skill_artifact.start",
+                        "agent_event": "tool.run_skill_script.start",
                         "runtime_scope": "general_chat",
                         "invocation_id": "ticket-query",
                         "args_redacted": ["ticket", "search", "INC-123"],
                     },
                     {
-                        "agent_event": "tool.run_skill_artifact.done",
+                        "agent_event": "tool.run_skill_script.done",
                         "runtime_scope": "general_chat",
                         "invocation_id": "ticket-query",
                     },
@@ -2242,7 +2242,7 @@ class LensServiceTests(TransactionTestCase):
             detail={
                 "events": [
                     {
-                        "agent_event": ("tool.run_skill_artifact.start"),
+                        "agent_event": ("tool.run_skill_script.start"),
                         "runtime_scope": "general_chat",
                         "invocation_id": "ticket-query",
                         "args_redacted": [
@@ -2252,7 +2252,7 @@ class LensServiceTests(TransactionTestCase):
                         ],
                     },
                     {
-                        "agent_event": ("tool.run_skill_artifact.done"),
+                        "agent_event": ("tool.run_skill_script.done"),
                         "runtime_scope": "general_chat",
                         "invocation_id": "ticket-query",
                     },

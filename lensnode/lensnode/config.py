@@ -37,7 +37,6 @@ class LensNodeConfig:
     mcp_defer_threshold: int = 12
     mcp_stdio_allowlist: tuple[str, ...] = ("codegraph",)
     mcp_enable_codegraph: bool = True
-    skill_artifact_max_calls: int = 100
     codegraph_command: str = "codegraph"
     codegraph_init_timeout_s: int = 300
     reasoning_effort: str | None = None
@@ -177,8 +176,5 @@ def load_config():
         ),
         offload_human_tokens=_optional_int(
             os.getenv("LENSNODE_OFFLOAD_HUMAN_TOKENS")
-        ),
-        skill_artifact_max_calls=int(
-            os.getenv("LENSNODE_SKILL_ARTIFACT_MAX_CALLS", "100")
         ),
     )

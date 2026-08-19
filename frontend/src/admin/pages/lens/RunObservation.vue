@@ -619,20 +619,6 @@
                         </span>
                       </dd>
                     </div>
-                    <div v-if="detail.artifact_calls">
-                      <dt class="overview-label">
-                        {{ t('lensRuns.artifactCalls') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ detail.artifact_calls }}
-                        <span
-                          v-if="detail.artifact_call_limit_hits"
-                          class="font-normal text-amber-600"
-                        >
-                          · {{ t('lensRuns.artifactCallLimitHit') }}
-                        </span>
-                      </dd>
-                    </div>
                     <div v-if="detail.structured_analysis_calls">
                       <dt class="overview-label">
                         {{ t('lensRuns.structuredAnalysisCalls') }}
@@ -1043,16 +1029,6 @@
                   <div class="mt-3 flex flex-wrap gap-2">
                     <span class="token-summary-pill">
                       {{ t('lensRuns.llmCalls', { n: detail.llm_calls }) }}
-                    </span>
-                    <span
-                      v-if="detail.artifact_calls"
-                      class="token-summary-pill"
-                    >
-                      {{
-                        t('lensRuns.artifactCallsCount', {
-                          n: detail.artifact_calls
-                        })
-                      }}
                     </span>
                     <span
                       v-if="detail.structured_analysis_calls"

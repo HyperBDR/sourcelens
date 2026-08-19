@@ -1,9 +1,6 @@
-import hashlib
 import io
 import json
-import platform
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,57 +12,29 @@ from lensnode.runtime_resources import (
 )
 
 
-def _platform_values():
-    """Return manifest platform values for the test host."""
+def _resources(root, content, path="scripts/run.sh", executable=True):
+    """Build runtime resources with one bundled executable under the
+    Skill root."""
 
-    os_name = {
-        "darwin": "darwin",
-        "linux": "linux",
-        "windows": "windows",
-    }[platform.system().lower()]
-    arch = {
-        "aarch64": "arm64",
-        "arm64": "arm64",
-        "amd64": "amd64",
-        "x86_64": "amd64",
-    }[platform.machine().lower()]
-    return os_name, arch
-
-
-def _resources(root, content, sha256=None, os_name=None, arch=None):
-    """Build runtime resources with one declared executable artifact."""
-
-    current_os, current_arch = _platform_values()
     skill_dir = Path(root) / "skills" / "income-cli"
-    artifact_path = skill_dir / "bin" / "current" / "income"
-    artifact_path.parent.mkdir(parents=True)
-    artifact_path.write_bytes(content)
-    artifact_path.chmod(0o644)
-    artifacts = {
-        "income": {
-            "type": "executable",
-            "entrypoints": [
-                {
-                    "os": os_name or current_os,
-                    "arch": arch or current_arch,
-                    "path": "bin/current/income",
-                    "sha256": sha256 or hashlib.sha256(content).hexdigest(),
-                }
-            ],
-        }
-    }
+    script_path = skill_dir / path
+    script_path.parent.mkdir(parents=True)
+    script_path.write_bytes(content)
+    if executable:
+        script_path.chmod(0o755)
+    else:
+        script_path.chmod(0o644)
     return RuntimeResources(
         root=Path(root),
         skill_paths=["skills/income-cli"],
         context_skill_contents=[],
         skill_environments={"income-cli": {"INCOME_TEST": "bound-value"}},
         mcp_config_path=Path(root) / "mcp.json",
-        skill_artifacts={"income-cli": artifacts},
     )
 
 
-def _artifact_tool(resources, command=None, emit_event=None, config=None):
-    """Return the General Chat artifact tool."""
+def _script_tool(resources, command=None, emit_event=None, config=None):
+    """Return the General Chat script tool."""
 
     tools = build_general_chat_tools(
         command or {},
@@ -73,10 +42,10 @@ def _artifact_tool(resources, command=None, emit_event=None, config=None):
         config=config,
         emit_event=emit_event,
     )
-    return next(item for item in tools if item.name == "run_skill_artifact")
+    return next(item for item in tools if item.name == "run_skill_script")
 
 
-def test_run_skill_artifact_selects_platform_and_restores_permission(tmp_path):
+def test_run_skill_script_runs_executable_under_skill_root(tmp_path):
     content = (
         b"#!/bin/sh\n"
         b"printf '%s:%s:%s' \"$INCOME_TEST\" \"$1\" \"$(cat)\"\n"
@@ -84,23 +53,46 @@ def test_run_skill_artifact_selects_platform_and_restores_permission(tmp_path):
     resources = _resources(tmp_path, content)
 
     payload = json.loads(
-        _artifact_tool(resources).invoke(
+        _script_tool(resources).invoke(
             {
                 "skill": "income-cli",
-                "artifact": "income",
+                "script": "scripts/run.sh",
                 "args": ["order-1"],
                 "stdin": "request-body",
             }
         )
     )
 
-    artifact_path = tmp_path / "skills/income-cli/bin/current/income"
     assert payload["ok"] is True
     assert payload["stdout"] == "bound-value:order-1:request-body"
-    assert artifact_path.stat().st_mode & 0o777 == 0o755
 
 
-def test_run_skill_artifact_replaces_non_utf8_output(tmp_path):
+def test_run_skill_script_runs_native_binary_under_bin(tmp_path):
+    content = (
+        b"#!/bin/sh\n"
+        b"printf '%s:%s' \"$INCOME_TEST\" \"$1\"\n"
+    )
+    resources = _resources(
+        tmp_path,
+        content,
+        path="bin/linux-amd64/income",
+    )
+
+    payload = json.loads(
+        _script_tool(resources).invoke(
+            {
+                "skill": "income-cli",
+                "script": "bin/linux-amd64/income",
+                "args": ["order-1"],
+            }
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["stdout"] == "bound-value:order-1"
+
+
+def test_run_skill_script_replaces_non_utf8_output(tmp_path):
     content = (
         b"#!/usr/bin/env python3\n"
         b"import sys\n"
@@ -109,8 +101,8 @@ def test_run_skill_artifact_replaces_non_utf8_output(tmp_path):
     resources = _resources(tmp_path, content)
 
     payload = json.loads(
-        _artifact_tool(resources).invoke(
-            {"skill": "income-cli", "artifact": "income"}
+        _script_tool(resources).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
         )
     )
 
@@ -118,7 +110,7 @@ def test_run_skill_artifact_replaces_non_utf8_output(tmp_path):
     assert payload["stdout"] == "\ufffd"
 
 
-def test_run_skill_artifact_preserves_output_whitespace(tmp_path):
+def test_run_skill_script_preserves_output_whitespace(tmp_path):
     content = (
         b"#!/bin/sh\n"
         b"printf 'row  1\\nrow  2\\n'\n"
@@ -127,8 +119,8 @@ def test_run_skill_artifact_preserves_output_whitespace(tmp_path):
     resources = _resources(tmp_path, content)
 
     payload = json.loads(
-        _artifact_tool(resources).invoke(
-            {"skill": "income-cli", "artifact": "income"}
+        _script_tool(resources).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
         )
     )
 
@@ -137,7 +129,7 @@ def test_run_skill_artifact_preserves_output_whitespace(tmp_path):
     assert payload["stderr"] == "error\nline\n"
 
 
-def test_run_skill_artifact_preserves_large_output_by_reference(tmp_path):
+def test_run_skill_script_preserves_large_output_by_reference(tmp_path):
     content = b"#!/bin/sh\nprintf 'abcdefghijklmnopqrstuvwxyz'\n"
     resources = _resources(tmp_path, content)
     command = {
@@ -146,12 +138,12 @@ def test_run_skill_artifact_preserves_large_output_by_reference(tmp_path):
     events = []
 
     payload = json.loads(
-        _artifact_tool(
+        _script_tool(
             resources,
             command,
             lambda name, detail: events.append((name, detail)),
         ).invoke(
-            {"skill": "income-cli", "artifact": "income"}
+            {"skill": "income-cli", "script": "scripts/run.sh"}
         )
     )
 
@@ -162,26 +154,25 @@ def test_run_skill_artifact_preserves_large_output_by_reference(tmp_path):
     assert "Read stdout_ref" in payload["instruction"]
     saved_output = output_path.read_text(encoding="utf-8")
     assert saved_output == "abcdefghijklmnopqrstuvwxyz"
-    assert events[0][0] == "tool.run_skill_artifact.start"
-    assert events[-1][0] == "tool.run_skill_artifact.done"
-    assert events[0][1]["invocation_id"] == events[-1][1]["invocation_id"]
+    assert events[0][0] == "tool.run_skill_script.start"
+    assert events[-1][0] == "tool.run_skill_script.done"
     assert events[-1][1]["stdout_ref"] == payload["stdout_ref"]
     assert events[-1][1]["stdout_truncated"] is True
 
 
-def test_run_skill_artifact_summarizes_large_csv_output(tmp_path):
+def test_run_skill_script_summarizes_large_csv_output(tmp_path):
     content = (
         b"#!/bin/sh\n"
         b"printf 'id,status\\n1,paid\\n2,pending\\n'\n"
     )
     resources = _resources(tmp_path, content)
     command = {
-        "settings": {"tool_policy": {"skill_artifact_stdout_limit": 8}}
+        "settings": {"tool_policy": {"skill_script_stdout_limit": 8}}
     }
 
     payload = json.loads(
-        _artifact_tool(resources, command).invoke(
-            {"skill": "income-cli", "artifact": "income"}
+        _script_tool(resources, command).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
         )
     )
 
@@ -191,267 +182,17 @@ def test_run_skill_artifact_summarizes_large_csv_output(tmp_path):
     assert "inspect_saved_output" in payload["instruction"]
 
 
-def test_run_skill_artifact_stops_after_configured_call_budget(tmp_path):
-    resources = _resources(tmp_path, b"#!/bin/sh\nprintf 'ok'\n")
-    command = {
-        "settings": {"tool_policy": {"skill_artifact_max_calls": 2}}
-    }
-    events = []
-    artifact = _artifact_tool(
-        resources,
-        command,
-        lambda name, detail: events.append((name, detail)),
-    )
-
-    first = json.loads(
-        artifact.invoke({"skill": "income-cli", "artifact": "income"})
-    )
-    second = json.loads(
-        artifact.invoke({"skill": "income-cli", "artifact": "income"})
-    )
-    third = json.loads(
-        artifact.invoke({"skill": "income-cli", "artifact": "income"})
-    )
-
-    assert first["ok"] is True
-    assert second["ok"] is True
-    assert third["ok"] is False
-    assert third["error"] == "ARTIFACT_CALL_LIMIT"
-    assert third["max_calls"] == 2
-    assert "Stop requesting" in third["instruction"]
-    assert events[-1][0] == "tool.run_skill_artifact.budget_exceeded"
-    assert events[-1][1]["call_count"] == 3
-    assert events[-1][1]["max_calls"] == 2
-
-
-def test_run_skill_artifact_uses_config_default_call_budget(tmp_path):
-    content = b"#!/bin/sh\nprintf '%s' \"$1\"\n"
-    resources = _resources(tmp_path, content)
-    config = type(
-        "Config",
-        (),
-        {"skill_artifact_max_calls": 25},
-    )()
-    events = []
-    artifact = _artifact_tool(
-        resources,
-        emit_event=lambda name, detail: events.append((name, detail)),
-        config=config,
-    )
-
-    for index in range(1, 26):
-        payload = json.loads(
-            artifact.invoke(
-                {
-                    "skill": "income-cli",
-                    "artifact": "income",
-                    "args": [str(index)],
-                }
-            )
-        )
-        assert payload["ok"] is True, payload
-
-    over_budget = json.loads(
-        artifact.invoke(
-            {
-                "skill": "income-cli",
-                "artifact": "income",
-                "args": ["26"],
-            }
-        )
-    )
-    assert over_budget["ok"] is False
-    assert over_budget["error"] == "ARTIFACT_CALL_LIMIT"
-    assert over_budget["max_calls"] == 25
-    assert events[-1][0] == "tool.run_skill_artifact.budget_exceeded"
-    assert events[-1][1]["call_count"] == 26
-    assert events[-1][1]["max_calls"] == 25
-
-
-def test_run_skill_artifact_allows_more_than_four_progressing_calls(
-    tmp_path,
-):
-    content = b"#!/bin/sh\nprintf '%s' \"$1\"\n"
-    resources = _resources(tmp_path, content)
-    artifact = _artifact_tool(resources)
-
-    payloads = [
-        json.loads(
-            artifact.invoke(
-                {
-                    "skill": "income-cli",
-                    "artifact": "income",
-                    "args": [str(index)],
-                }
-            )
-        )
-        for index in range(1, 6)
-    ]
-
-    assert all(payload["ok"] is True for payload in payloads)
-    assert [payload["stdout"] for payload in payloads] == [
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-    ]
-
-
-def test_run_skill_artifact_stops_repeated_request(tmp_path):
-    resources = _resources(tmp_path, b"#!/bin/sh\nprintf 'same'\n")
-    events = []
-    artifact = _artifact_tool(
-        resources,
-        emit_event=lambda name, detail: events.append((name, detail)),
-    )
-    request = {"skill": "income-cli", "artifact": "income"}
-
-    first = json.loads(artifact.invoke(request))
-    second = json.loads(artifact.invoke(request))
-    third = json.loads(artifact.invoke(request))
-
-    assert first["ok"] is True
-    assert second["ok"] is True
-    assert third["error"] == "ARTIFACT_REPEATED_CALL"
-    assert "synthesize" in third["instruction"]
-    assert events[-1][0] == "tool.run_skill_artifact.repeated"
-
-
-def test_run_skill_artifact_stops_after_results_stagnate(tmp_path):
-    resources = _resources(tmp_path, b"#!/bin/sh\nprintf 'same'\n")
-    artifact = _artifact_tool(resources)
-
-    results = [
-        json.loads(
-            artifact.invoke(
-                {
-                    "skill": "income-cli",
-                    "artifact": "income",
-                    "args": [
-                        "payment",
-                        "list",
-                        "--search",
-                        str(index),
-                    ],
-                }
-            )
-        )
-        for index in range(1, 5)
-    ]
-
-    assert results[2]["progress_stalled"] is True
-    assert "synthesize" in results[2]["instruction"]
-    assert results[3]["error"] == "ARTIFACT_STALLED"
-
-
-def test_identical_empty_results_from_different_families_do_not_stall(
-    tmp_path,
-):
-    resources = _resources(tmp_path, b"#!/bin/sh\nprintf '[]'\n")
-    artifact = _artifact_tool(resources)
-    commands = [
-        ["product", "list", "--search", "fabric"],
-        ["enterprise", "list", "--search", "fabric"],
-        ["order", "list", "--search", "agione-fabric"],
-        ["payment", "list", "--search", "agione-fabric"],
-    ]
-
-    results = [
-        json.loads(
-            artifact.invoke(
-                {
-                    "skill": "income-cli",
-                    "artifact": "income",
-                    "args": command,
-                }
-            )
-        )
-        for command in commands
-    ]
-
-    assert all(result["ok"] is True for result in results)
-    assert all(result["progress_stalled"] is False for result in results)
-    assert [result["progress_streak"] for result in results] == [1, 1, 1, 1]
-
-
-def test_artifact_stagnation_is_deterministic_across_parallel_completion(
-    tmp_path,
-):
-    resources = _resources(tmp_path, b"#!/bin/sh\nprintf '[]'\n")
-    artifact = _artifact_tool(resources)
-    resource_names = ["product", "enterprise", "order"]
-
-    def invoke(resource):
-        return json.loads(
-            artifact.invoke(
-                {
-                    "skill": "income-cli",
-                    "artifact": "income",
-                    "args": [
-                        resource,
-                        "list",
-                        "--search",
-                        "fabric",
-                    ],
-                }
-            )
-        )
-
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        results = list(executor.map(invoke, resource_names))
-
-    payment = invoke("payment")
-
-    assert all(result["progress_streak"] == 1 for result in results)
-    assert all(result["progress_stalled"] is False for result in results)
-    assert payment["ok"] is True
-    assert payment["progress_streak"] == 1
-
-
-def test_parallel_progress_prevents_same_family_from_stalling(tmp_path):
-    content = (
-        b"#!/bin/sh\n"
-        b"case \"$4\" in\n"
-        b"  a|b|c) printf 'same' ;;\n"
-        b"  *) printf '%s' \"$4\" ;;\n"
-        b"esac\n"
-    )
-    resources = _resources(tmp_path, content)
-    artifact = _artifact_tool(resources)
-
-    def invoke(search):
-        return json.loads(
-            artifact.invoke(
-                {
-                    "skill": "income-cli",
-                    "artifact": "income",
-                    "args": ["payment", "list", "--search", search],
-                }
-            )
-        )
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = list(executor.map(invoke, ["a", "b", "c", "different"]))
-
-    next_result = invoke("next")
-
-    assert {result["stdout"] for result in results} == {"same", "different"}
-    assert next_result["ok"] is True
-    assert next_result["stdout"] == "next"
-
-
-def test_run_skill_artifact_redacts_sensitive_args_in_history(tmp_path):
+def test_run_skill_script_redacts_sensitive_args_in_history(tmp_path):
     resources = _resources(tmp_path, b"#!/bin/sh\nexit 0\n")
     events = []
 
-    _artifact_tool(
+    _script_tool(
         resources,
         emit_event=lambda name, detail: events.append((name, detail)),
     ).invoke(
         {
             "skill": "income-cli",
-            "artifact": "income",
+            "script": "scripts/run.sh",
             "args": ["auth", "login", "--token", "secret", "--limit", "20"],
         }
     )
@@ -467,7 +208,7 @@ def test_run_skill_artifact_redacts_sensitive_args_in_history(tmp_path):
     ]
 
 
-def test_run_skill_artifact_timeout_preserves_output_whitespace(tmp_path):
+def test_run_skill_script_timeout_preserves_output_whitespace(tmp_path):
     content = b"#!/bin/sh\nprintf 'row  1\\nrow  2\\n'\nsleep 2\n"
     resources = _resources(tmp_path, content)
     command = {
@@ -475,17 +216,17 @@ def test_run_skill_artifact_timeout_preserves_output_whitespace(tmp_path):
     }
 
     payload = json.loads(
-        _artifact_tool(resources, command).invoke(
-            {"skill": "income-cli", "artifact": "income"}
+        _script_tool(resources, command).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
         )
     )
 
     assert payload["ok"] is False
-    assert payload["error"] == "ARTIFACT_TIMEOUT"
+    assert payload["error"] == "SCRIPT_TIMEOUT"
     assert payload["stdout"] == "row  1\nrow  2\n"
 
 
-def test_run_skill_artifact_timeout_preserves_large_output_by_reference(
+def test_run_skill_script_timeout_preserves_large_output_by_reference(
     tmp_path,
 ):
     content = b"#!/bin/sh\nprintf 'abcdefghij'\nsleep 5\n"
@@ -500,13 +241,13 @@ def test_run_skill_artifact_timeout_preserves_large_output_by_reference(
     }
 
     payload = json.loads(
-        _artifact_tool(resources, command).invoke(
-            {"skill": "income-cli", "artifact": "income"}
+        _script_tool(resources, command).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
         )
     )
 
     assert payload["ok"] is False
-    assert payload["error"] == "ARTIFACT_TIMEOUT"
+    assert payload["error"] == "SCRIPT_TIMEOUT"
     assert payload["stdout_ref"]
     output_path = resources.root / payload["stdout_ref"].lstrip("/")
     assert payload["stdout"] == "abcde…"
@@ -514,70 +255,57 @@ def test_run_skill_artifact_timeout_preserves_large_output_by_reference(
     assert output_path.read_text(encoding="utf-8") == "abcdefghij"
 
 
-def test_run_skill_artifact_rejects_undeclared_binary(tmp_path):
+def test_run_skill_script_rejects_path_escape(tmp_path):
     resources = _resources(tmp_path, b"#!/bin/sh\nexit 0\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_file = outside / "run.sh"
+    outside_file.write_bytes(b"#!/bin/sh\nexit 0\n")
 
     payload = json.loads(
-        _artifact_tool(resources).invoke(
-            {"skill": "income-cli", "artifact": "other"}
+        _script_tool(resources).invoke(
+            {
+                "skill": "income-cli",
+                "script": "../outside/run.sh",
+            }
         )
     )
 
-    assert payload == {"ok": False, "error": "ARTIFACT_NOT_DECLARED"}
+    assert payload == {"ok": False, "error": "SCRIPT_NOT_ALLOWED"}
 
 
-def test_run_skill_artifact_rejects_wrong_platform(tmp_path):
-    current_os, _current_arch = _platform_values()
-    unavailable_os = "windows" if current_os != "windows" else "linux"
-    resources = _resources(
-        tmp_path,
-        b"#!/bin/sh\nexit 0\n",
-        os_name=unavailable_os,
-    )
-
-    payload = json.loads(
-        _artifact_tool(resources).invoke(
-            {"skill": "income-cli", "artifact": "income"}
-        )
-    )
-
-    assert payload == {
-        "ok": False,
-        "error": "ARTIFACT_PLATFORM_UNAVAILABLE",
-    }
-
-
-def test_run_skill_artifact_rejects_hash_mismatch(tmp_path):
-    resources = _resources(
-        tmp_path,
-        b"#!/bin/sh\nexit 0\n",
-        sha256="0" * 64,
-    )
-
-    payload = json.loads(
-        _artifact_tool(resources).invoke(
-            {"skill": "income-cli", "artifact": "income"}
-        )
-    )
-
-    assert payload == {"ok": False, "error": "ARTIFACT_HASH_MISMATCH"}
-
-
-def test_run_skill_artifact_rejects_symlink(tmp_path):
+def test_run_skill_script_rejects_symlink(tmp_path):
     resources = _resources(tmp_path, b"#!/bin/sh\nexit 0\n")
-    artifact_path = tmp_path / "skills/income-cli/bin/current/income"
+    script_path = tmp_path / "skills/income-cli/scripts/run.sh"
     real_path = tmp_path / "outside"
     real_path.write_bytes(b"#!/bin/sh\nexit 0\n")
-    artifact_path.unlink()
-    artifact_path.symlink_to(real_path)
+    script_path.unlink()
+    script_path.symlink_to(real_path)
 
     payload = json.loads(
-        _artifact_tool(resources).invoke(
-            {"skill": "income-cli", "artifact": "income"}
+        _script_tool(resources).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
         )
     )
 
-    assert payload == {"ok": False, "error": "ARTIFACT_PATH_INVALID"}
+    assert payload == {"ok": False, "error": "SCRIPT_NOT_ALLOWED"}
+
+
+def test_run_skill_script_rejects_non_executable(tmp_path):
+    resources = _resources(
+        tmp_path,
+        b"not a script\n",
+        path="data.txt",
+        executable=False,
+    )
+
+    payload = json.loads(
+        _script_tool(resources).invoke(
+            {"skill": "income-cli", "script": "data.txt"}
+        )
+    )
+
+    assert payload == {"ok": False, "error": "SCRIPT_NOT_EXECUTABLE"}
 
 
 def test_runtime_zip_restores_modes_and_recursively_enables_scripts(tmp_path):
@@ -623,3 +351,107 @@ def test_materialize_skill_repairs_scripts_from_existing_cache(tmp_path):
 
     runtime_script = tmp_path / "runtime" / relative_path / "scripts/nested/run"
     assert runtime_script.stat().st_mode & 0o777 == 0o755
+
+
+def test_run_skill_script_enforces_call_budget(tmp_path):
+    content = b"#!/bin/sh\nprintf 'ok'\n"
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {"tool_policy": {"skill_script_max_calls": 1}}
+    }
+    events = []
+    tool = _script_tool(
+        resources,
+        command,
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    first = json.loads(
+        tool.invoke({"skill": "income-cli", "script": "scripts/run.sh"})
+    )
+    second = json.loads(
+        tool.invoke({"skill": "income-cli", "script": "scripts/run.sh"})
+    )
+
+    assert first["ok"] is True
+    assert second["error"] == "SKILL_SCRIPT_CALL_LIMIT"
+    assert second["call_count"] == 2
+    assert second["max_calls"] == 1
+    assert "Batch the work" in second["instruction"]
+    assert [
+        name
+        for name, _detail in events
+        if name == "tool.run_skill_script.budget_exceeded"
+    ] == ["tool.run_skill_script.budget_exceeded"]
+    assert events[-1][0] == "tool.run_skill_script.budget_exceeded"
+    assert events[-1][1]["call_count"] == 2
+
+
+def test_run_skill_script_enforces_aggregate_reflow_budget(tmp_path):
+    content = b"#!/bin/sh\nprintf 'aaaa'\n"
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {
+            "tool_policy": {
+                "skill_script_aggregate_output_chars": 4
+            }
+        }
+    }
+    events = []
+    tool = _script_tool(
+        resources,
+        command,
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    first = json.loads(
+        tool.invoke({"skill": "income-cli", "script": "scripts/run.sh"})
+    )
+    second = json.loads(
+        tool.invoke({"skill": "income-cli", "script": "scripts/run.sh"})
+    )
+
+    assert first["ok"] is True
+    assert first["stdout"] == "aaaa"
+    assert second["error"] == "SKILL_SCRIPT_OUTPUT_LIMIT"
+    assert second["reflowed_chars"] == 4
+    assert second["output_limit"] == 4
+    assert "cumulative run_skill_script output" in second["instruction"]
+    assert [
+        name
+        for name, _detail in events
+        if name == "tool.run_skill_script.output_budget_exceeded"
+    ] == ["tool.run_skill_script.output_budget_exceeded"]
+    assert events[-1][0] == "tool.run_skill_script.output_budget_exceeded"
+    assert events[-1][1]["reflowed_chars"] == 4
+
+
+def test_run_skill_script_done_reports_call_and_reflowed_counts(tmp_path):
+    content = b"#!/bin/sh\nprintf 'abc'\n"
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {"tool_policy": {"skill_script_max_calls": 3}}
+    }
+    events = []
+    tool = _script_tool(
+        resources,
+        command,
+        lambda name, detail: events.append((name, detail)),
+    )
+
+    json.loads(
+        tool.invoke({"skill": "income-cli", "script": "scripts/run.sh"})
+    )
+    json.loads(
+        tool.invoke({"skill": "income-cli", "script": "scripts/run.sh"})
+    )
+
+    done_events = [
+        detail
+        for name, detail in events
+        if name == "tool.run_skill_script.done"
+    ]
+    assert done_events[0]["call_count"] == 1
+    assert done_events[0]["reflowed_chars"] == 3
+    assert done_events[1]["call_count"] == 2
+    assert done_events[1]["reflowed_chars"] == 6

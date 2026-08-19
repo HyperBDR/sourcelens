@@ -6,7 +6,6 @@ from ..checkpoint import CheckpointResumeError
 
 _POTENTIALLY_SIDE_EFFECTING_TOOLS = {
     "call_skill_api",
-    "run_skill_artifact",
     "run_skill_script",
     "run_skill_transform",
     "save_deliverable",

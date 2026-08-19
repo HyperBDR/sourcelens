@@ -65,8 +65,6 @@ def _admin_run_step_counts(run):
         "event_count": 0,
         "subagent_count": 0,
         "subagent_denied_count": 0,
-        "artifact_calls": 0,
-        "artifact_call_limit_hits": 0,
         "structured_analysis_calls": 0,
         "structured_analysis_limit_hits": 0,
         "structured_analysis_max_calls": None,
@@ -92,12 +90,6 @@ def _admin_run_step_counts(run):
                 counts["subagent_count"] += 1
             elif agent_event == "tool.task.denied":
                 counts["subagent_denied_count"] += 1
-            elif agent_event == "tool.run_skill_artifact.start":
-                counts["artifact_calls"] += 1
-            elif agent_event == (
-                "tool.run_skill_artifact.budget_exceeded"
-            ):
-                counts["artifact_call_limit_hits"] += 1
             elif agent_event == "tool.analyze_structured_output.start":
                 if event.get("operation") == "validate_records":
                     prefix = "structured_validation"
@@ -372,10 +364,6 @@ def _admin_run_row(run):
         "event_count": counts["event_count"],
         "subagent_count": counts["subagent_count"],
         "subagent_denied_count": counts["subagent_denied_count"],
-        "artifact_calls": counts["artifact_calls"],
-        "artifact_call_limit_hits": counts[
-            "artifact_call_limit_hits"
-        ],
         "structured_analysis_calls": counts["structured_analysis_calls"],
         "structured_analysis_limit_hits": counts[
             "structured_analysis_limit_hits"

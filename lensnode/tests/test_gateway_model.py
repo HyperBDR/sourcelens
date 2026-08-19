@@ -1070,7 +1070,7 @@ def test_artifact_http_500_is_classified_as_transient_execution_failure():
             '{"ok":false,"returncode":1,'
             '"stderr":"Income API returned HTTP 500"}'
         ),
-        name="run_skill_artifact",
+        name="run_skill_script",
         tool_call_id="call_1",
         status="error",
     )
@@ -1143,7 +1143,7 @@ def test_sql_syntax_failure_is_classified_as_correctable_request():
 def test_http_client_input_failure_is_classified_as_request(content):
     message = ToolMessage(
         content=content,
-        name="run_skill_artifact",
+        name="run_skill_script",
         tool_call_id="call_1",
         status="error",
     )

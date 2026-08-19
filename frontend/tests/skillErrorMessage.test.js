@@ -47,10 +47,6 @@ test('localizes common Skill package, SKILL.md, and GitHub errors', () => {
 test('localizes Skill configuration validation error families', () => {
   const cases = [
     [
-      "Artifact 'income' SHA-256 does not match its packaged file.",
-      'artifactInvalid'
-    ],
-    [
       "Transform 'summarize' entrypoint must reference a regular file.",
       'transformInvalid'
     ],

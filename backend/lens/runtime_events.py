@@ -265,7 +265,7 @@ def _contains_command(arguments, *parts):
 def _tool_activity_kind(tool_name, item):
     """Return a safe semantic kind derived from an observed tool event."""
 
-    if tool_name == "run_skill_artifact":
+    if tool_name in {"run_skill_script", "run_skill_artifact"}:
         arguments = item.get("args_redacted")
         if _contains_command(arguments, "auth", "status"):
             return "checking_authentication"

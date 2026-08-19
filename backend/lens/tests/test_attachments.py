@@ -563,7 +563,7 @@ class AttachmentServiceTests(TestCase):
         self.assertEqual(counts["completion_tokens"], 100)
         self.assertEqual(counts["total_cost"], 0.02)
 
-    def test_admin_run_step_counts_includes_artifact_calls(self):
+    def test_admin_run_step_counts(self):
         from lens.models import RunStep
         from lens.views import _admin_run_step_counts
         from lens.views.admin_runs import _admin_run_detail
@@ -582,12 +582,12 @@ class AttachmentServiceTests(TestCase):
                 "events": [
                     {
                         "agent_event": (
-                            "tool.run_skill_artifact.start"
+                            "tool.run_skill_script.start"
                         )
                     },
                     {
                         "agent_event": (
-                            "tool.run_skill_artifact.budget_exceeded"
+                            "tool.run_skill_script.done"
                         )
                     },
                     {
@@ -634,8 +634,6 @@ class AttachmentServiceTests(TestCase):
 
         counts = _admin_run_step_counts(run)
 
-        self.assertEqual(counts["artifact_calls"], 1)
-        self.assertEqual(counts["artifact_call_limit_hits"], 1)
         self.assertEqual(counts["structured_analysis_calls"], 1)
         self.assertEqual(counts["structured_analysis_limit_hits"], 1)
         self.assertEqual(counts["structured_analysis_max_calls"], 6)
@@ -649,8 +647,6 @@ class AttachmentServiceTests(TestCase):
 
         detail = _admin_run_detail(run)
 
-        self.assertEqual(detail["artifact_calls"], 1)
-        self.assertEqual(detail["artifact_call_limit_hits"], 1)
         self.assertEqual(detail["structured_analysis_calls"], 1)
         self.assertEqual(detail["structured_analysis_limit_hits"], 1)
         self.assertEqual(detail["structured_analysis_max_calls"], 6)

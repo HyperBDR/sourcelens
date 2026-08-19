@@ -726,7 +726,7 @@ def test_capability_boundary_state_round_trips_for_resume():
     original.successful_evidence = [
         {
             "capability": "skill",
-            "tool": "run_skill_artifact",
+            "tool": "run_skill_script",
             "source": "skill:income",
             "request_sha256": "1" * 64,
         }
@@ -1125,7 +1125,7 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
 
     model = Model()
     tool = SimpleNamespace(
-        name="run_skill_artifact",
+        name="run_skill_script",
         description="Run an Artifact explicitly allowed by a bound Skill.",
     )
 
@@ -1141,7 +1141,7 @@ def test_route_selection_matches_intent_against_skill_and_tool_capabilities():
     prompt = model.messages[0].content
     assert decision["route"] == "capability_unavailable"
     assert "query existing orders only" in prompt
-    assert "run_skill_artifact" in prompt
+    assert "run_skill_script" in prompt
     assert "creating an order" in prompt
     assert model.options["temperature"] == 0
     # Route classification is a control call: light reasoning budget only.
@@ -1189,7 +1189,7 @@ def test_route_selection_recovers_missing_tool_evidence_capabilities():
         context_skill_contents=["This Skill can query Income orders."],
         available_tools=[
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             ),
             SimpleNamespace(
@@ -1223,7 +1223,7 @@ def test_route_selection_repairs_impossible_mcp_evidence_to_skill():
         ],
         available_tools=[
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             )
         ],
@@ -1255,7 +1255,7 @@ def test_route_selection_does_not_derive_an_unbound_skill_capability():
         context_skill_contents=[],
         available_tools=[
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             )
         ],
@@ -1283,7 +1283,7 @@ def test_route_selection_requires_delivery_for_artifact_evidence():
         context_skill_contents=["This Skill generates flowcharts."],
         available_tools=[
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             ),
             SimpleNamespace(
@@ -1344,7 +1344,7 @@ def test_route_selection_uses_history_to_resolve_an_action_follow_up():
         context_skill_contents=["This Skill can query Income orders."],
         available_tools=[
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             )
         ],
@@ -1438,7 +1438,7 @@ def test_long_model_only_checklist_ignores_bound_business_skill():
         ],
         available_tools=[
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             )
         ],
@@ -1812,7 +1812,7 @@ def test_successful_skill_evidence_preserves_the_final_answer(
         "build_general_chat_tools",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             )
         ],
@@ -1867,7 +1867,7 @@ def test_successful_skill_evidence_preserves_the_final_answer(
         captured["boundary"].successful_evidence = [
             {
                 "capability": "skill",
-                "tool": "run_skill_artifact",
+                "tool": "run_skill_script",
                 "source": "skill:income",
                 "request_sha256": "1" * 64,
             },
@@ -2338,9 +2338,9 @@ def test_relevant_evidence_is_partial_after_exhausted_failure():
         required_capabilities=["skill"],
     )
     request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "call-1",
             "args": {"query": "orders"},
         },
@@ -2349,7 +2349,7 @@ def test_relevant_evidence_is_partial_after_exhausted_failure():
         request,
         lambda _request: ToolMessage(
             content='{"ok":true,"orders":[]}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="call-1",
         ),
     )
@@ -2357,7 +2357,7 @@ def test_relevant_evidence_is_partial_after_exhausted_failure():
         request,
         lambda _request: ToolMessage(
             content='{"ok":false,"error":"TIMEOUT"}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="call-2",
             status="error",
         ),
@@ -2366,7 +2366,7 @@ def test_relevant_evidence_is_partial_after_exhausted_failure():
         request,
         lambda _request: ToolMessage(
             content='{"ok":false,"error":"TIMEOUT"}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="call-3",
             status="error",
         ),
@@ -2584,9 +2584,9 @@ def test_plan_execute_blocks_business_tools_until_plan_exists():
         require_initial_plan=True,
     )
     business_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "call-business",
             "args": {
                 "artifact": "income",
@@ -2635,7 +2635,7 @@ def test_plan_execute_blocks_business_tools_until_plan_exists():
         business_request,
         lambda _request: ToolMessage(
             content='{"ok":true,"orders":[]}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="call-business",
         ),
     )
@@ -2666,9 +2666,9 @@ def test_failed_initial_plan_does_not_unlock_business_tools():
         },
     )
     business_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "call-business",
             "args": {},
         },
@@ -2783,7 +2783,7 @@ def test_validated_delivery_survives_format_warning_and_call_limit():
 
     middleware.wrap_tool_call(
         request(
-            "run_skill_artifact",
+            "run_skill_script",
             "orders-json",
             {
                 "artifact": "income",
@@ -2797,13 +2797,13 @@ def test_validated_delivery_survives_format_warning_and_call_limit():
                     "stdout_ref": "/large_tool_results/orders.json",
                 }
             ),
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="orders-json",
         ),
     )
     middleware.wrap_tool_call(
         request(
-            "run_skill_artifact",
+            "run_skill_script",
             "orders-csv",
             {
                 "artifact": "income",
@@ -2827,14 +2827,14 @@ def test_validated_delivery_survives_format_warning_and_call_limit():
                     ),
                 }
             ),
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="orders-csv",
             status="error",
         ),
     )
     middleware.wrap_tool_call(
         request(
-            "run_skill_artifact",
+            "run_skill_script",
             "orders-table",
             {
                 "artifact": "income",
@@ -2849,7 +2849,7 @@ def test_validated_delivery_survives_format_warning_and_call_limit():
         ),
         lambda _request: ToolMessage(
             content='{"ok":false,"error":"ARTIFACT_CALL_LIMIT"}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="orders-table",
             status="error",
         ),
@@ -3132,7 +3132,7 @@ def test_skill_request_failures_are_isolated_by_source():
     def fail(request):
         return ToolMessage(
             content='{"ok":false,"error":"INVALID_QUERY"}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id=request.tool_call["id"],
             status="error",
         )
@@ -3141,9 +3141,9 @@ def test_skill_request_failures_are_isolated_by_source():
         ["github-cli", "github-cli", "jira-cli", "jira-cli"]
     ):
         request = SimpleNamespace(
-            tool=SimpleNamespace(name="run_skill_artifact"),
+            tool=SimpleNamespace(name="run_skill_script"),
             tool_call={
-                "name": "run_skill_artifact",
+                "name": "run_skill_script",
                 "id": f"failure-{index}",
                 "args": {
                     "skill": skill,
@@ -3154,9 +3154,9 @@ def test_skill_request_failures_are_isolated_by_source():
         middleware.wrap_tool_call(request, fail)
 
     gitlab_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "gitlab-success",
             "args": {"skill": "gitlab-cli", "query": "projects"},
         },
@@ -3165,7 +3165,7 @@ def test_skill_request_failures_are_isolated_by_source():
         gitlab_request,
         lambda request: ToolMessage(
             content='{"ok":true,"projects":[]}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id=request.tool_call["id"],
         ),
     )
@@ -3183,9 +3183,9 @@ def test_skill_request_failures_are_isolated_by_source():
 def test_repeated_skill_request_does_not_hide_other_skills():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
     github_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "github-failure",
             "args": {"skill": "github-cli", "query": "invalid"},
         },
@@ -3194,7 +3194,7 @@ def test_repeated_skill_request_does_not_hide_other_skills():
     def fail(request):
         return ToolMessage(
             content='{"ok":false,"error":"INVALID_QUERY"}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id=request.tool_call["id"],
             status="error",
         )
@@ -3203,12 +3203,12 @@ def test_repeated_skill_request_does_not_hide_other_skills():
     middleware.wrap_tool_call(github_request, fail)
 
     remaining = middleware._filter_tools(
-        [SimpleNamespace(name="run_skill_artifact")]
+        [SimpleNamespace(name="run_skill_script")]
     )
     jira_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "jira-success",
             "args": {"skill": "jira-cli", "query": "REQ-1"},
         },
@@ -3217,12 +3217,12 @@ def test_repeated_skill_request_does_not_hide_other_skills():
         jira_request,
         lambda request: ToolMessage(
             content='{"ok":true,"issue":{}}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id=request.tool_call["id"],
         ),
     )
 
-    assert [tool.name for tool in remaining] == ["run_skill_artifact"]
+    assert [tool.name for tool in remaining] == ["run_skill_script"]
     assert json.loads(result.content)["ok"] is True
     assert middleware.blocked_sources == set()
     assert len(middleware.blocked_requests) == 1
@@ -3262,9 +3262,9 @@ def test_success_recovers_only_its_skill_source():
 
     def request(skill, call_id):
         return SimpleNamespace(
-            tool=SimpleNamespace(name="run_skill_artifact"),
+            tool=SimpleNamespace(name="run_skill_script"),
             tool_call={
-                "name": "run_skill_artifact",
+                "name": "run_skill_script",
                 "id": call_id,
                 "args": {"skill": skill, "query": call_id},
             },
@@ -3273,7 +3273,7 @@ def test_success_recovers_only_its_skill_source():
     def fail(current):
         return ToolMessage(
             content='{"ok":false,"error":"INVALID_QUERY"}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id=current.tool_call["id"],
             status="error",
         )
@@ -3290,7 +3290,7 @@ def test_success_recovers_only_its_skill_source():
         gitlab,
         lambda current: ToolMessage(
             content='{"ok":true,"projects":[]}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id=current.tool_call["id"],
         ),
     )
@@ -3511,8 +3511,8 @@ def test_corrected_request_recovery_is_counted():
 def test_capability_boundary_allows_artifact_argument_correction_after_404():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
     request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
-        tool_call={"name": "run_skill_artifact", "id": "call-1"},
+        tool=SimpleNamespace(name="run_skill_script"),
+        tool_call={"name": "run_skill_script", "id": "call-1"},
     )
 
     def not_found(_request):
@@ -3527,7 +3527,7 @@ def test_capability_boundary_allows_artifact_argument_correction_after_404():
                     ),
                 }
             ),
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="call-1",
             status="error",
         )
@@ -3543,9 +3543,9 @@ def test_capability_boundary_allows_artifact_argument_correction_after_404():
 def test_capability_boundary_tracks_distinct_artifact_requests_separately():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
     get_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "call-1",
             "args": {
                 "artifact": "income",
@@ -3554,9 +3554,9 @@ def test_capability_boundary_tracks_distinct_artifact_requests_separately():
         },
     )
     list_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
+        tool=SimpleNamespace(name="run_skill_script"),
         tool_call={
-            "name": "run_skill_artifact",
+            "name": "run_skill_script",
             "id": "call-2",
             "args": {
                 "artifact": "income",
@@ -3574,7 +3574,7 @@ def test_capability_boundary_tracks_distinct_artifact_requests_separately():
                     "stderr": "Income API returned 404: NotFound",
                 }
             ),
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id=request.tool_call["id"],
             status="error",
         )
@@ -3592,8 +3592,8 @@ def test_execution_boundary_classifies_artifact_http_500_as_transient():
         emit_event=lambda name, detail: events.append((name, detail)),
     )
     request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
-        tool_call={"name": "run_skill_artifact", "id": "call-1"},
+        tool=SimpleNamespace(name="run_skill_script"),
+        tool_call={"name": "run_skill_script", "id": "call-1"},
     )
 
     def fail(_request):
@@ -3605,7 +3605,7 @@ def test_execution_boundary_classifies_artifact_http_500_as_transient():
                     "stderr": "Income API returned HTTP 500",
                 }
             ),
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="call-1",
             status="error",
         )
@@ -3754,8 +3754,8 @@ def test_capability_boundary_counts_workspace_summary_as_evidence():
 def test_capability_boundary_marks_partial_after_prior_success():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
     success_request = SimpleNamespace(
-        tool=SimpleNamespace(name="run_skill_artifact"),
-        tool_call={"name": "run_skill_artifact", "id": "call-success"},
+        tool=SimpleNamespace(name="run_skill_script"),
+        tool_call={"name": "run_skill_script", "id": "call-success"},
     )
     failed_request = SimpleNamespace(
         tool=SimpleNamespace(name="save_deliverable"),
@@ -3766,7 +3766,7 @@ def test_capability_boundary_marks_partial_after_prior_success():
         success_request,
         lambda _request: ToolMessage(
             content='{"ok":true}',
-            name="run_skill_artifact",
+            name="run_skill_script",
             tool_call_id="call-success",
         ),
     )
@@ -3797,7 +3797,7 @@ def test_capability_boundary_marks_partial_after_prior_success():
 def test_general_chat_middleware_removes_task_tool():
     class Request:
         tools = [
-            SimpleNamespace(name="run_skill_artifact"),
+            SimpleNamespace(name="run_skill_script"),
             SimpleNamespace(name="task"),
         ]
 
@@ -3810,7 +3810,7 @@ def test_general_chat_middleware_removes_task_tool():
         lambda request: [tool.name for tool in request.tools],
     )
 
-    assert result == ["run_skill_artifact"]
+    assert result == ["run_skill_script"]
 
 
 def test_general_chat_agent_stack_omits_default_subagent_guidance():
@@ -4730,7 +4730,7 @@ def test_plan_execute_route_enables_subagent_delegation(
         "build_general_chat_tools",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             )
         ],
@@ -4879,7 +4879,7 @@ def test_simple_general_chat_route_keeps_subagents_disabled(
         "build_general_chat_tools",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
-                name="run_skill_artifact",
+                name="run_skill_script",
                 description="Run a bound Skill Artifact.",
             )
         ],
