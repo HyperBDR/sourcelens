@@ -515,11 +515,14 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
 
 
 class _RunSkillScriptArgs(BaseModel):
-    """Args schema for running a script bundled with a Skill."""
+    """Args schema for running an executable bundled with a Skill."""
 
     skill: str = Field(description="Loaded Skill slug or name.")
     script: str = Field(
-        description="Script path under the Skill's scripts directory."
+        description=(
+            "Path of the executable relative to the Skill root, for example "
+            "scripts/report.sh, scripts/tool.py, or bin/linux-amd64/glab."
+        )
     )
     args: list[str] = Field(default_factory=list, description="Arguments.")
     stdin: str = Field(default="", description="Optional standard input.")

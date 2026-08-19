@@ -62,6 +62,10 @@ onMounted(async () => {
 function reset() {
   if (siteKey && widgetId !== null && window.turnstile) {
     window.turnstile.reset(widgetId)
+  } else if (!siteKey) {
+    // Bypass mode: verification always passes, so re-emit a fresh token
+    // to restore the consumer's state after a failed submit.
+    emit('verified', '')
   }
 }
 
