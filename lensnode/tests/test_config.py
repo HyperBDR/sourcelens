@@ -140,22 +140,6 @@ def test_load_config_uses_light_reasoning_for_initial_planning(monkeypatch):
     assert config.planning_reasoning_effort == "none"
 
 
-def test_load_config_reads_skill_artifact_call_limit(monkeypatch):
-    monkeypatch.setenv("LENSNODE_SKILL_ARTIFACT_MAX_CALLS", "150")
-
-    config = load_config()
-
-    assert config.skill_artifact_max_calls == 150
-
-
-def test_load_config_defaults_skill_artifact_call_limit(monkeypatch):
-    monkeypatch.delenv("LENSNODE_SKILL_ARTIFACT_MAX_CALLS", raising=False)
-
-    config = load_config()
-
-    assert config.skill_artifact_max_calls == 100
-
-
 def test_load_config_allows_mcp_discovery_and_cleanup_headroom(monkeypatch):
     monkeypatch.delenv(
         "LENSNODE_MCP_DISCOVERY_TIMEOUT_S",

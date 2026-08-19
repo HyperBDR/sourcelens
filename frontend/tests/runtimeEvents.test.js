@@ -1568,7 +1568,7 @@ test('attaches readable activity to the current progress node', () => {
     activity: 'completed'
   })
   state = applyRuntimeEvent(state, {
-    agent_event: 'tool.run_skill_artifact.start',
+    agent_event: 'tool.run_skill_script.start',
     activity: 'running_tool'
   })
 
@@ -1606,7 +1606,7 @@ test('keeps only the latest twenty progress activities', () => {
       agent_event:
         index % 2 === 0
           ? 'tool.read_file.invoke'
-          : 'tool.run_skill_artifact.start',
+          : 'tool.run_skill_script.start',
       activity: 'running_tool'
     })
   }

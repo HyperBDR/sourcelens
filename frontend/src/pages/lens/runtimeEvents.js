@@ -223,7 +223,7 @@ function activityKindForEvent(event) {
     return 'analyzingResults'
   }
   if (
-    toolName === 'run_skill_artifact' ||
+    toolName === 'run_skill_script' ||
     toolName === 'call_skill_api' ||
     toolName.startsWith('mcp__')
   ) {

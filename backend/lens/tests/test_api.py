@@ -128,7 +128,6 @@ def skill_zip_upload(
     body,
     environment=None,
     api=None,
-    artifacts=None,
     transforms=None,
     package_files=None,
 ):
@@ -148,15 +147,13 @@ def skill_zip_upload(
             archive.writestr(f"{name}/{path}", content)
         if any(
             value is not None
-            for value in (environment, api, artifacts, transforms)
+            for value in (environment, api, transforms)
         ):
             config = {}
             if environment is not None:
                 config["environment"] = environment
             if api is not None:
                 config["api"] = api
-            if artifacts is not None:
-                config["artifacts"] = artifacts
             if transforms is not None:
                 config["transforms"] = transforms
             archive.writestr(
@@ -1413,62 +1410,6 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["definition"]["api"], api)
 
-    def test_uploaded_skill_reads_and_enables_declared_artifact(self):
-        artifact_content = b"#!/bin/sh\nprintf artifact-ok\\n"
-        artifact_hash = hashlib.sha256(artifact_content).hexdigest()
-        artifacts = {
-            "income": {
-                "type": "executable",
-                "entrypoints": [
-                    {
-                        "os": "linux",
-                        "arch": "arm64",
-                        "path": "bin/linux-arm64/income",
-                        "sha256": artifact_hash,
-                    }
-                ],
-            }
-        }
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with self.settings(STORAGE_ROOT=temp_dir):
-                response = self.client.post(
-                    "/api/lens/admin/skills/upload/",
-                    {
-                        "file": skill_zip_upload(
-                            "income-cli",
-                            "Run the declared Income artifact.",
-                            artifacts=artifacts,
-                            package_files={
-                                "bin/linux-arm64/income": artifact_content,
-                            },
-                        )
-                    },
-                    format="multipart",
-                )
-
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(
-                    response.data["definition"]["artifacts"],
-                    artifacts,
-                )
-                skill = Skill.objects.get(slug="income-cli")
-                artifact_path = (
-                    Path(skill.package_path)
-                    / "bin"
-                    / "linux-arm64"
-                    / "income"
-                )
-                self.assertEqual(artifact_path.stat().st_mode & 0o777, 0o755)
-                with zipfile.ZipFile(package_zip_bytes(skill)) as archive:
-                    info = archive.getinfo(
-                        "income-cli/bin/linux-arm64/income"
-                    )
-                    self.assertEqual(
-                        (info.external_attr >> 16) & 0o777,
-                        0o755,
-                    )
-
     def test_uploaded_skill_recursively_enables_scripts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.settings(STORAGE_ROOT=temp_dir):
@@ -1651,75 +1592,6 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("ORDER_TOKEN", response.data["detail"])
-
-    def test_uploaded_skill_rejects_artifact_outside_bin(self):
-        content = b"#!/bin/sh\n"
-        artifacts = {
-            "income": {
-                "type": "executable",
-                "entrypoints": [
-                    {
-                        "os": "linux",
-                        "arch": "arm64",
-                        "path": "scripts/income",
-                        "sha256": hashlib.sha256(content).hexdigest(),
-                    }
-                ],
-            }
-        }
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with self.settings(STORAGE_ROOT=temp_dir):
-                response = self.client.post(
-                    "/api/lens/admin/skills/upload/",
-                    {
-                        "file": skill_zip_upload(
-                            "unsafe-artifact",
-                            "Run an artifact.",
-                            artifacts=artifacts,
-                            package_files={"scripts/income": content},
-                        )
-                    },
-                    format="multipart",
-                )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("bin/", response.data["detail"])
-
-    def test_uploaded_skill_rejects_artifact_hash_mismatch(self):
-        artifacts = {
-            "income": {
-                "type": "executable",
-                "entrypoints": [
-                    {
-                        "os": "linux",
-                        "arch": "arm64",
-                        "path": "bin/linux-arm64/income",
-                        "sha256": "0" * 64,
-                    }
-                ],
-            }
-        }
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with self.settings(STORAGE_ROOT=temp_dir):
-                response = self.client.post(
-                    "/api/lens/admin/skills/upload/",
-                    {
-                        "file": skill_zip_upload(
-                            "tampered-artifact",
-                            "Run an artifact.",
-                            artifacts=artifacts,
-                            package_files={
-                                "bin/linux-arm64/income": b"unexpected",
-                            },
-                        )
-                    },
-                    format="multipart",
-                )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("SHA-256", response.data["detail"])
 
     def test_manual_skill_rejects_api_route_with_path_traversal(self):
         response = self.client.post(

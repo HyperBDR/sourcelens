@@ -76,7 +76,6 @@ class RuntimeResources:
     skill_environments: dict[str, dict[str, str]]
     mcp_config_path: Path
     skill_api_policies: dict[str, dict] = field(default_factory=dict)
-    skill_artifacts: dict[str, dict] = field(default_factory=dict)
     skill_transforms: dict[str, dict] = field(default_factory=dict)
     mcp_configs: list[dict] = field(default_factory=list)
 
@@ -104,7 +103,6 @@ def prepare_runtime_resources(
     skill_paths = []
     skill_environments = {}
     skill_api_policies = {}
-    skill_artifacts = {}
     skill_transforms = {}
     context_skill_contents = []
     general_chat_mode = command.get("task") == "general_chat"
@@ -126,14 +124,6 @@ def prepare_runtime_resources(
             )
             skill_api_policies[skill_path.name] = (
                 api_policy if isinstance(api_policy, dict) else {}
-            )
-            artifacts = (
-                definition.get("artifacts")
-                if isinstance(definition, dict)
-                else None
-            )
-            skill_artifacts[skill_path.name] = (
-                artifacts if isinstance(artifacts, dict) else {}
             )
             transforms = (
                 definition.get("transforms")
@@ -222,7 +212,6 @@ def prepare_runtime_resources(
         skill_environments=skill_environments,
         mcp_config_path=mcp_config_path,
         skill_api_policies=skill_api_policies,
-        skill_artifacts=skill_artifacts,
         skill_transforms=skill_transforms,
         mcp_configs=mcp_configs,
     )
@@ -1175,11 +1164,16 @@ def _safe_package_file_mode(value):
 
 
 def _enable_skill_scripts(skill_root):
-    """Grant sanitized execute permission to files under scripts/."""
+    """Grant sanitized execute permission to files under scripts/ and to
+    other executable files anywhere under a Skill root."""
 
-    scripts_root = skill_root / "scripts"
-    if not scripts_root.is_dir() or scripts_root.is_symlink():
+    if skill_root.is_symlink():
         return
-    for path in scripts_root.rglob("*"):
-        if path.is_file() and not path.is_symlink():
+    for path in skill_root.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        under_scripts = path.resolve().relative_to(
+            skill_root
+        ).parts[0] == "scripts"
+        if under_scripts or os.access(path, os.X_OK):
             path.chmod(0o755)
