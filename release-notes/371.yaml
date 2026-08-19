@@ -1,0 +1,11 @@
+type: improvement
+audience: admin
+en: >-
+  Reduced Code Analysis latency by dropping the planner repair retry when the
+  initial retrieval plan is invalid: the run now falls back to bounded keyword
+  search immediately instead of spending a second model call on repair. The
+  legacy repair path stays available behind LENSNODE_PLANNER_REPAIR_ENABLED.
+zh-CN: >-
+  降低代码分析的延迟：当首次检索计划无效时不再进行计划修复重试，而是直接
+  降级为有界的关键词搜索，省去一次额外的模型调用。如需保留旧的修复路径，
+  可设置 LENSNODE_PLANNER_REPAIR_ENABLED。

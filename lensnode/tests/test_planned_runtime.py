@@ -471,10 +471,6 @@ def test_planned_code_analysis_uses_bounded_fallback_for_invalid_plan(
             )
         ),
         SimpleNamespace(
-            content='{"objective":"still invalid",'
-            '"codegraph_queries":["bad"]}'
-        ),
-        SimpleNamespace(
             content=json.dumps(
                 {
                     "answer": "Fallback planner answer.",
@@ -507,9 +503,12 @@ def test_planned_code_analysis_uses_bounded_fallback_for_invalid_plan(
     )
 
     assert result["planned_evidence"]["planner_status"] == "fallback"
-    assert result["planned_evidence"]["planner_retry_count"] == 1
-    assert result["planned_evidence"]["model_call_count"] == 3
-    assert len(model.calls) == 3
+    assert result["planned_evidence"]["planner_retry_count"] == 0
+    assert result["planned_evidence"]["model_call_count"] == 2
+    assert "codegraph query must be an object" in result["planned_evidence"][
+        "planner_rejection_reason"
+    ]
+    assert len(model.calls) == 2
 
 
 def test_planner_repairs_invalid_plan_once_before_fallback(tmp_path):
@@ -558,12 +557,58 @@ def test_planner_repairs_invalid_plan_once_before_fallback(tmp_path):
         mcp_tools=[],
         emit_agent_event=lambda *_args: None,
         workspace_root=tmp_path,
+        planner_repair_enabled=True,
     )
 
     assert result["planned_evidence"]["planner_status"] == "repaired"
     assert result["planned_evidence"]["planner_retry_count"] == 1
     assert result["planned_evidence"]["model_call_count"] == 3
     assert len(model.calls) == 3
+
+
+def test_planned_code_analysis_falls_back_without_repair_when_disabled(
+    tmp_path,
+):
+    responses = [
+        SimpleNamespace(
+            content='{"objective":"still invalid",'
+            '"codegraph_queries":["bad"]}'
+        ),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "No repair was attempted.",
+                    "citations": [],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return responses[len(self.calls) - 1]
+
+    model = Model()
+    result = agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": "Where is it implemented?"},
+        tools=_workspace_tools(),
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["planned_evidence"]["planner_status"] == "fallback"
+    assert result["planned_evidence"]["planner_retry_count"] == 0
+    assert len(model.calls) == 2
 
 
 def test_invalid_plan_fallback_uses_decomposed_queries():
@@ -848,7 +893,7 @@ def test_planner_fallback_keeps_question_and_workspace_guidance(tmp_path):
     planner_text = "\n".join(message.content for message in planner_messages)
     assert question in planner_text
     assert guidance in planner_text
-    assert len(model.calls) == 3
+    assert len(model.calls) == 2
 
 
 def test_citations_use_trusted_workspace_provenance(tmp_path):
@@ -941,3 +986,44 @@ def test_planned_prompts_include_bound_workspace_guidance():
         planner_prompt
     )
     assert guidance in final_prompt
+
+
+def test_planner_prompt_enumerates_allowed_operations_and_json_contract():
+    planner_prompt = agent_runtime._planned_planner_prompt(
+        {"workspace_path": "/workspace"},
+    )
+
+    assert '"callers"' in planner_prompt
+    assert '"explore"' in planner_prompt
+    assert '"search"' in planner_prompt
+    assert '"operation": "search"' in planner_prompt
+    assert "literal_queries must be an array of plain strings" in (
+        planner_prompt
+    )
+
+
+def test_planner_prompt_honors_available_codegraph_operations():
+    planner_prompt = agent_runtime._planned_planner_prompt(
+        {"workspace_path": "/workspace"},
+        codegraph_operations=["explore"],
+    )
+
+    assert '"explore"' in planner_prompt
+    assert '"callers"' not in planner_prompt
+
+    unavailable_prompt = agent_runtime._planned_planner_prompt(
+        {"workspace_path": "/workspace"},
+        codegraph_operations=[],
+    )
+    assert "CodeGraph is not available" in unavailable_prompt
+
+
+def test_repair_prompt_includes_validation_error_and_allowed_operations():
+    repair_prompt = agent_runtime._planned_planner_repair_prompt(
+        validation_error="unsupported CodeGraph operation: symbol_search",
+        codegraph_operations=["explore", "search"],
+    )
+
+    assert "unsupported CodeGraph operation: symbol_search" in repair_prompt
+    assert '"explore"' in repair_prompt
+    assert '"search"' in repair_prompt

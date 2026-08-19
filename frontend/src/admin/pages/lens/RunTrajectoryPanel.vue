@@ -49,7 +49,7 @@
                 v-for="step in lane.steps"
                 :key="`overview-${lane.key}-${step.event.event_id}`"
                 type="button"
-                class="absolute top-0 h-full rounded-sm"
+                class="absolute top-0 h-full"
                 :class="[
                   categoryColor(eventCategory(step.event)),
                   step.subagent ? 'ring-1 ring-amber-400' : ''
@@ -58,7 +58,7 @@
                   left: `${step.left}%`,
                   width: `${step.width}%`
                 }"
-                :title="`${step.event.sequence} · ${step.event.event_type}`"
+                :title="stepTooltip(step)"
                 @click="selectedEvent = step.event"
               />
             </div>
@@ -106,64 +106,85 @@
           data-testid="trajectory-ledger"
           class="max-h-[42rem] overflow-y-auto divide-y divide-gray-100 bg-white"
         >
-          <li v-for="row in rows" :key="row.event.event_id">
-            <div
-              role="button"
-              tabindex="0"
-              class="group flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-gray-50"
-              :class="
-                selectedEvent?.event_id === row.event.event_id
-                  ? 'bg-primary-50/70'
-                  : ''
-              "
-              :style="{ paddingLeft: `${12 + row.depth * 18}px` }"
-              @click="selectedEvent = row.event"
-              @keydown.enter="selectedEvent = row.event"
+          <template v-for="group in groupedRows" :key="group.key">
+            <li
+              v-if="group.rows.length > 1"
+              class="sticky top-0 z-10 flex items-center gap-2 border-y border-gray-200 bg-gray-100/95 px-3 py-1.5 backdrop-blur-sm"
             >
-              <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center">
-                <button
-                  v-if="row.hasChildren"
-                  type="button"
-                  class="rounded text-gray-400 hover:bg-gray-200"
-                  :aria-label="t('lensRuns.trajectoryToggle')"
-                  @click.stop="toggleCall(row.event.call_id)"
-                >
-                  <ChevronRight
-                    v-if="collapsed.has(row.event.call_id)"
-                    :size="15"
+              <span
+                class="h-2 w-2 rounded-full"
+                :class="categoryColor(group.category)"
+              />
+              <span
+                class="text-[11px] font-semibold uppercase tracking-wide text-gray-600"
+              >
+                {{ group.label }}
+              </span>
+              <span class="ml-auto text-[10px] tabular-nums text-gray-400">
+                {{ group.rows.length }}
+              </span>
+            </li>
+            <li v-for="row in group.rows" :key="row.event.event_id">
+              <div
+                role="button"
+                tabindex="0"
+                class="group flex w-full items-start gap-2 px-3 py-2.5 text-left hover:bg-gray-50"
+                :class="
+                  selectedEvent?.event_id === row.event.event_id
+                    ? 'bg-primary-50/70'
+                    : ''
+                "
+                :style="{ paddingLeft: `${12 + row.depth * 18}px` }"
+                @click="selectedEvent = row.event"
+                @keydown.enter="selectedEvent = row.event"
+              >
+                <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center">
+                  <button
+                    v-if="row.hasChildren"
+                    type="button"
+                    class="rounded text-gray-400 hover:bg-gray-200"
+                    :aria-label="t('lensRuns.trajectoryToggle')"
+                    @click.stop="toggleCall(row.event.call_id)"
+                  >
+                    <ChevronRight
+                      v-if="collapsed.has(row.event.call_id)"
+                      :size="15"
+                    />
+                    <ChevronDown v-else :size="15" />
+                  </button>
+                  <span
+                    v-else
+                    class="mx-auto h-2 w-2 rounded-full"
+                    :class="categoryColor(eventCategory(row.event))"
                   />
-                  <ChevronDown v-else :size="15" />
-                </button>
-                <span
-                  v-else
-                  class="mx-auto h-2 w-2 rounded-full"
-                  :class="categoryColor(eventCategory(row.event))"
-                />
-              </span>
-              <span class="min-w-0 flex-1">
-                <span class="flex items-center justify-between gap-3">
-                  <span class="truncate text-sm font-medium text-gray-800">
-                    {{ eventTitle(row.event) }}
-                  </span>
-                  <time class="shrink-0 text-[11px] tabular-nums text-gray-400">
-                    #{{ row.event.sequence }} ·
-                    {{ timeText(row.event.timestamp) }}
-                  </time>
                 </span>
-                <span
-                  class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500"
-                >
-                  <span>{{ row.event.event_type }}</span>
-                  <span v-if="eventMetric(row.event)">
-                    {{ eventMetric(row.event) }}
+                <span class="min-w-0 flex-1">
+                  <span class="flex items-center justify-between gap-3">
+                    <span class="truncate text-sm font-medium text-gray-800">
+                      {{ eventTitle(row.event) }}
+                    </span>
+                    <time
+                      class="shrink-0 text-[11px] tabular-nums text-gray-400"
+                    >
+                      #{{ row.event.sequence }} ·
+                      {{ timeText(row.event.timestamp) }}
+                    </time>
                   </span>
-                  <span v-if="row.event.attempt > 1">
-                    attempt {{ row.event.attempt }}
+                  <span
+                    class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500"
+                  >
+                    <span>{{ row.event.event_type }}</span>
+                    <span v-if="eventMetric(row.event)">
+                      {{ eventMetric(row.event) }}
+                    </span>
+                    <span v-if="row.event.attempt > 1">
+                      attempt {{ row.event.attempt }}
+                    </span>
                   </span>
                 </span>
-              </span>
-            </div>
-          </li>
+              </div>
+            </li>
+          </template>
         </ol>
 
         <aside
@@ -263,7 +284,8 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import {
   buildTimelineLanes,
   buildTrajectoryRows,
-  eventCategory
+  eventCategory,
+  groupTrajectoryRows
 } from './runTrajectory'
 
 const props = defineProps({
@@ -308,6 +330,8 @@ const filteredEvents = computed(() => events.value)
 const rows = computed(() =>
   buildTrajectoryRows(filteredEvents.value, collapsed.value)
 )
+
+const groupedRows = computed(() => groupTrajectoryRows(rows.value))
 
 const timelineLanes = computed(() =>
   buildTimelineLanes(events.value, summary.value)
@@ -420,6 +444,18 @@ function durationText(value) {
   if (value === null || value === undefined) return '-'
   if (value < 1000) return `${value}ms`
   return `${(value / 1000).toFixed(1)}s`
+}
+
+function stepTooltip(step) {
+  const event = step.event || {}
+  const parts = [`${event.sequence ?? '?'} · ${event.event_type}`]
+  if (step.startMs != null) {
+    parts.push(timeText(new Date(step.startMs).toISOString()))
+  }
+  if (step.durationMs != null) {
+    parts.push(durationText(step.durationMs))
+  }
+  return parts.join('\n')
 }
 
 function timeText(value) {

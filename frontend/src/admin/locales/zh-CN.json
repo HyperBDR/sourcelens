@@ -55,6 +55,11 @@
     "overviewTiming": "时间信息",
     "overviewResources": "运行资源",
     "plannedEvidence": "计划证据检索",
+    "plannedEvidencePlannerStatus": "计划器状态",
+    "plannedEvidencePlannerStatus.valid": "有效",
+    "plannedEvidencePlannerStatus.repaired": "已修复",
+    "plannedEvidencePlannerStatus.fallback": "已降级",
+    "plannedEvidenceFallback": "检索计划被拒绝，已降级为关键词搜索",
     "plannedEvidenceModelCalls": "模型调用",
     "plannedEvidenceRetrievalCalls": "检索调用",
     "plannedEvidenceTokens": "证据 Token",
@@ -1608,7 +1613,7 @@
       "deep": "深度",
       "deepHint": "总计 50 万 · 为最终回答预留 7.5 万",
       "unlimited": "无限制",
-      "unlimitedHint": "不设置累计 Token 预算 · 其他运行安全限制仍然生效",
+      "unlimitedHint": "不设置累计 Token 预算；其他运行安全限制仍然生效",
       "nodeLimitHint": "无限制仅关闭累计 Token 门禁；运行时间、最大轮次和其他安全限制仍然生效。"
     },
     "messages": {

@@ -140,6 +140,25 @@ def test_load_config_uses_light_reasoning_for_initial_planning(monkeypatch):
     assert config.planning_reasoning_effort == "none"
 
 
+def test_load_config_disables_planner_repair_by_default(monkeypatch):
+    monkeypatch.delenv(
+        "LENSNODE_PLANNER_REPAIR_ENABLED",
+        raising=False,
+    )
+
+    config = load_config()
+
+    assert config.planner_repair_enabled is False
+
+
+def test_load_config_can_enable_planner_repair(monkeypatch):
+    monkeypatch.setenv("LENSNODE_PLANNER_REPAIR_ENABLED", "true")
+
+    config = load_config()
+
+    assert config.planner_repair_enabled is True
+
+
 def test_load_config_allows_mcp_discovery_and_cleanup_headroom(monkeypatch):
     monkeypatch.delenv(
         "LENSNODE_MCP_DISCOVERY_TIMEOUT_S",

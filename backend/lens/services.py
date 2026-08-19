@@ -2084,20 +2084,6 @@ def dispatch_run_to_lensnode(
         raise LensNodeDispatchError(
             "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"
         )
-    image_data_urls = []
-    if run.input_message_id:
-        for attachment in run.input_message.attachments.all():
-            data_url = attachment_data_url(attachment)
-            if not data_url:
-                raise LensNodeDispatchError("ATTACHMENT_UNREADABLE")
-            image_data_urls.append(data_url)
-    agent_model_ref = (
-        model_refs.get("multimodal")
-        or str(run.session.assistant.multimodal_model_ref or "")
-        if image_data_urls
-        else model_refs.get("agent")
-        or str(run.session.assistant.agent_model_ref or "")
-    )
     channel_layer = get_channel_layer()
     if channel_layer is None:
         raise LensNodeDispatchError("LENS_CHANNEL_LAYER_UNAVAILABLE")
@@ -2138,11 +2124,12 @@ def dispatch_run_to_lensnode(
         image_attachments = run.input_message.attachments.filter(
             kind=MessageAttachment.Kind.IMAGE
         )
-    image_data_urls = [
-        data_url
-        for attachment in image_attachments.order_by("created_at", "pk")
-        if (data_url := attachment_data_url(attachment))
-    ]
+    image_data_urls = []
+    for attachment in image_attachments.order_by("created_at", "pk"):
+        data_url = attachment_data_url(attachment)
+        if not data_url:
+            raise LensNodeDispatchError("ATTACHMENT_UNREADABLE")
+        image_data_urls.append(data_url)
     agent_model_ref = (
         model_refs.get("multimodal")
         or str(run.session.assistant.multimodal_model_ref or "")
@@ -2863,12 +2850,18 @@ async def stream_run_events_async(run):
 
     run = await sync_to_async(_load_run_stream_state)(run_pk)
     yield _build_sync_event(run)
-    # the sync event already carries the current content; seed emitted_content
-    # so the loop streams only new deltas (avoids resending it on reconnect)
+    # The sync event already carries the current status, resume_by, all
+    # steps, and content. Seed the dedup cursors so the loop below emits
+    # only genuine deltas instead of replaying the snapshot.
     emitted_content = _run_content(run)
+    last_status = run.status
+    last_resume_by = run.resume_by.isoformat() if run.resume_by else None
+    emitted_steps = {
+        (step.sequence, step.status, step.updated_at)
+        for step in run.steps.all()
+    }
 
     while True:
-        run = await sync_to_async(_load_run_stream_state)(run_pk)
         content = _run_content(run)
 
         resume_by = run.resume_by.isoformat() if run.resume_by else None
@@ -2938,6 +2931,7 @@ async def stream_run_events_async(run):
             }
 
         await asyncio.sleep(STREAM_POLL_INTERVAL_SECONDS)
+        run = await sync_to_async(_load_run_stream_state)(run_pk)
 
 
 def _load_run_stream_state(run_pk):

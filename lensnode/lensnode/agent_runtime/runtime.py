@@ -38,6 +38,7 @@ from ..logging_utils import elapsed_since, task_log, utc_now
 from ..mcp_tools import build_deferred_mcp_tools, load_mcp_tools
 from ..plugins import collect_agent_runtime_contributions
 from ..planned_evidence import (
+    ALLOWED_CODEGRAPH_OPERATIONS,
     EvidenceExecutor,
     build_evidence_bundle,
     assess_code_analysis_capabilities,
@@ -233,6 +234,13 @@ class LensDeepAgentRuntime:
                         state.resources,
                         "context_skill_contents",
                         None,
+                    ),
+                    planner_repair_enabled=(
+                        getattr(
+                            self.config,
+                            "planner_repair_enabled",
+                            False,
+                        )
                     ),
                 )
             route_result = self._route_runtime(state)
@@ -1224,6 +1232,7 @@ def _run_planned_code_analysis(
     workspace_root,
     context_skill_contents=None,
     trajectory=None,
+    planner_repair_enabled=False,
 ):
     """Run Code Analysis through one plan and one compact evidence bundle."""
 
@@ -1277,6 +1286,7 @@ def _run_planned_code_analysis(
     planner_prompt = _planned_planner_prompt(
         command,
         context_skill_contents=context_skill_contents,
+        codegraph_operations=sorted(codegraph_adapters),
     )
     emit_agent_event(
         "workflow.phase.changed",
@@ -1297,34 +1307,54 @@ def _run_planned_code_analysis(
     )
     planner_status = "valid"
     planner_retry_count = 0
+    planner_rejection_reason = ""
     try:
         plan = parse_retrieval_plan(_message_content(planner_response))
-    except Exception:
-        planner_retry_count = 1
-        repair_response = model.invoke(
-            [
-                SystemMessage(content=_planned_planner_repair_prompt()),
-                HumanMessage(
-                    content=json.dumps(
-                        {
-                            "question": question,
-                            "invalid_plan": _message_content(
-                                planner_response
-                            )[:4000],
-                        },
-                        ensure_ascii=False,
-                    )
-                ),
-            ],
-            runtime_structured_output=True,
-            on_reasoning_delta=pulse_callback,
-        )
-        try:
-            plan = parse_retrieval_plan(_message_content(repair_response))
-            planner_status = "repaired"
-        except Exception:
+    except Exception as exc:
+        planner_rejection_reason = str(exc)
+        if planner_repair_enabled:
+            planner_retry_count = 1
+            repair_response = model.invoke(
+                [
+                    SystemMessage(
+                        content=_planned_planner_repair_prompt(
+                            validation_error=str(exc),
+                            codegraph_operations=sorted(codegraph_adapters),
+                        )
+                    ),
+                    HumanMessage(
+                        content=json.dumps(
+                            {
+                                "question": question,
+                                "invalid_plan": _message_content(
+                                    planner_response
+                                )[:4000],
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                ],
+                runtime_structured_output=True,
+                on_reasoning_delta=pulse_callback,
+            )
+            try:
+                plan = parse_retrieval_plan(
+                    _message_content(repair_response)
+                )
+                planner_status = "repaired"
+            except Exception as repair_exc:
+                planner_rejection_reason = (
+                    f"{planner_rejection_reason} | {repair_exc}"
+                )
+                plan = _parse_planner_response(
+                    repair_response,
+                    question,
+                    command,
+                )
+                planner_status = "fallback"
+        else:
             plan = _parse_planner_response(
-                repair_response,
+                planner_response,
                 question,
                 command,
             )
@@ -1365,6 +1395,7 @@ def _run_planned_code_analysis(
                 "model_call_count": 1 + planner_retry_count,
                 "planner_status": planner_status,
                 "planner_retry_count": planner_retry_count,
+                "planner_rejection_reason": planner_rejection_reason,
             },
             "citations": [],
         }
@@ -1428,6 +1459,7 @@ def _run_planned_code_analysis(
     )
     bundle.metrics["planner_status"] = planner_status
     bundle.metrics["planner_retry_count"] = planner_retry_count
+    bundle.metrics["planner_rejection_reason"] = planner_rejection_reason
     bundle.metrics["planned_operation_count"] = (
         len(plan.codegraph_queries) + len(plan.literal_queries)
     )
@@ -1841,9 +1873,41 @@ def _looks_like_planned_answer_envelope(content):
     return len(keys) >= 2
 
 
-def _planned_planner_prompt(command, context_skill_contents=None):
-    """Build the compact initial planner contract."""
+def _planned_planner_prompt(
+    command,
+    context_skill_contents=None,
+    codegraph_operations=None,
+):
+    """Build the compact initial planner contract.
 
+    Enumerates the allowed CodeGraph operations and shows concrete JSON so
+    the model does not invent operation names that validation rejects. When
+    only a subset is available (no dedicated adapter), the model is told
+    which ones can actually run.
+    """
+
+    if codegraph_operations is None:
+        operations = ALLOWED_CODEGRAPH_OPERATIONS
+    else:
+        operations = set(codegraph_operations)
+    if operations:
+        operation_text = ", ".join(
+            f'"{name}"' for name in sorted(operations)
+        )
+        example_operation = (
+            "search" if "search" in operations else sorted(operations)[0]
+        )
+        codegraph_contract = (
+            "Each codegraph_queries item must be an object with an "
+            f"operation from [{operation_text}] and a query or symbol; for "
+            f'example {{"operation": "{example_operation}", "symbol": '
+            '"VSSMode"}.'
+        )
+    else:
+        codegraph_contract = (
+            "CodeGraph is not available in this run; set codegraph_queries "
+            "to []."
+        )
     prompt = (
         "Return only one JSON retrieval plan. Do not inspect files or call "
         "tools. The backend will execute every bounded operation. Include "
@@ -1857,6 +1921,8 @@ def _planned_planner_prompt(command, context_skill_contents=None):
         "source_windows empty unless exact file paths and line ranges are "
         "already known; the executor derives source windows from retrieval "
         "results. "
+        f"{codegraph_contract} literal_queries must be an array of plain "
+        'strings (never objects), for example ["153301", "Sysconfig.ini"]. '
         "Use CodeGraph for structural questions and exact search for logs "
         "or traceback text. Keep max_fallback_rounds at 1 or less. The "
         "workspace is "
@@ -1865,18 +1931,52 @@ def _planned_planner_prompt(command, context_skill_contents=None):
     return prompt + _context_guidance(context_skill_contents)
 
 
-def _planned_planner_repair_prompt():
-    """Build the single repair prompt for an invalid retrieval plan."""
+def _planned_planner_repair_prompt(
+    validation_error=None,
+    codegraph_operations=None,
+):
+    """Build the repair prompt for an invalid retrieval plan.
 
-    return (
+    Passes the concrete rejection reason and the allowed operations back so
+    the model can fix the specific violation instead of guessing again.
+    """
+
+    if codegraph_operations is None:
+        operations = ALLOWED_CODEGRAPH_OPERATIONS
+    else:
+        operations = set(codegraph_operations)
+    if operations:
+        operation_text = ", ".join(
+            f'"{name}"' for name in sorted(operations)
+        )
+        example_operation = (
+            "search" if "search" in operations else sorted(operations)[0]
+        )
+        codegraph_contract = (
+            "Each CodeGraph query must be an object with an operation from "
+            f"[{operation_text}] and a query or symbol, for example "
+            f'{{"operation": "{example_operation}", "symbol": "VSSMode"}}.'
+        )
+    else:
+        codegraph_contract = (
+            "CodeGraph is not available in this run; set codegraph_queries "
+            "to []."
+        )
+    prompt = (
         "Repair the invalid retrieval plan and return only one valid JSON "
         "retrieval plan. Required fields are objective, question_type, "
         "evidence_requirements, codegraph_queries, literal_queries, "
         "source_windows, max_files, max_fallback_rounds, and budgets. "
-        "Each CodeGraph query must be an object with an allowed operation "
-        "and query or symbol. Keep all searches bounded and set "
+        f"{codegraph_contract} literal_queries must be an array of plain "
+        "strings, never objects. Keep all searches bounded and set "
         "max_fallback_rounds to 1 or less. Do not answer the question."
     )
+    if validation_error:
+        prompt += (
+            "\nThe previous plan was rejected with this reason: "
+            f"{validation_error}"
+        )
+    return prompt
 
 
 def _planned_fallback_prompt():

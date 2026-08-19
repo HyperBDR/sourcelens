@@ -84,6 +84,62 @@ def test_retrieval_plan_rejects_missing_objective_and_invalid_operation():
         )
 
 
+def test_retrieval_plan_aliases_common_codegraph_operations():
+    plan = parse_retrieval_plan(
+        {
+            "objective": "trace the exception",
+            "codegraph_queries": [
+                {"operation": "symbol_search", "symbol": "VSSMode"},
+                {"operation": "code_search", "query": "VSSMode is conflict"},
+            ],
+        }
+    )
+
+    assert [query.operation for query in plan.codegraph_queries] == [
+        "search",
+        "search",
+    ]
+    assert plan.codegraph_queries[0].symbol == "VSSMode"
+
+
+def test_retrieval_plan_infers_missing_codegraph_operation():
+    plan = parse_retrieval_plan(
+        {
+            "objective": "trace the exception",
+            "codegraph_queries": [
+                {"query": "VSSMode symbols", "reason": "structural"},
+                {"symbol": "InitializeVSS_Model"},
+            ],
+        }
+    )
+
+    assert [query.operation for query in plan.codegraph_queries] == [
+        "explore",
+        "search",
+    ]
+
+
+def test_retrieval_plan_accepts_literal_query_objects_with_pattern():
+    plan = parse_retrieval_plan(
+        {
+            "objective": "trace the exception",
+            "codegraph_queries": [],
+            "literal_queries": [
+                {"pattern": "153301", "scope": "agent", "reason": "code"},
+                {"pattern": "VSSMode is conflict"},
+                "Sysconfig.ini",
+                {"pattern": "153301", "reason": "duplicate"},
+            ],
+        }
+    )
+
+    assert plan.literal_queries == (
+        "153301",
+        "VSSMode is conflict",
+        "Sysconfig.ini",
+    )
+
+
 def test_retrieval_plan_parses_bounded_text_clarification():
     plan = parse_retrieval_plan(
         {
@@ -159,6 +215,33 @@ def test_executor_runs_independent_retrievals_in_parallel_and_deduplicates():
     assert len(bundle.items) == 2
     assert bundle.metrics["retrieval_call_count"] == 2
     assert bundle.metrics["deduplicated_item_count"] == 0
+
+
+def test_executor_falls_back_to_explore_for_missing_codegraph_operation():
+    explored = []
+
+    def graph(query, **kwargs):
+        del kwargs
+        explored.append(query)
+        return {"exploration": query}
+
+    plan = parse_retrieval_plan(
+        {
+            "objective": "trace flow",
+            "codegraph_queries": [
+                {"operation": "search", "symbol": "VSSMode"},
+                {"operation": "callers", "symbol": "InitializeVSS_Model"},
+            ],
+        }
+    )
+    executor = EvidenceExecutor(
+        codegraph_tools={"explore": graph},
+    )
+
+    bundle = executor.execute(plan)
+
+    assert set(explored) == {"VSSMode", "InitializeVSS_Model"}
+    assert bundle.metrics["retrieval_call_count"] == 2
 
 
 def test_executor_records_nested_subtool_arguments_and_results():
