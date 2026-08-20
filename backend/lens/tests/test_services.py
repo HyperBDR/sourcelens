@@ -11,6 +11,7 @@ from asgiref.sync import async_to_sync
 from channels.testing import WebsocketCommunicator
 from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
@@ -77,6 +78,7 @@ from lens.tasks import (
     datasource_lock,
     lensnode_health_task,
     register_datasource_conversion_task,
+    reconcile_orphaned_datasource_conversions,
     register_datasource_sync_task,
     release_datasource_lock,
     source_sync_task,
@@ -2667,6 +2669,90 @@ class LensServiceTests(TransactionTestCase):
         )
         self.assertEqual(datasource.last_conversion_status, "STARTED")
 
+    def test_managed_workspace_conversion_waits_for_lensnode_heavy_slot(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        register_datasource_conversion_task(
+            datasource,
+            "queued-conversion",
+            {"document": True},
+        )
+
+        with (
+            patch(
+                "lens.tasks.acquire_lensnode_heavy_work_slot",
+                return_value=None,
+            ),
+            patch("lens.tasks._schedule_queued_conversion") as schedule,
+        ):
+            datasource_conversion_task(
+                str(datasource.uuid),
+                {"document": True},
+                False,
+                "queued-conversion",
+            )
+
+        task = TaskExecution.objects.get(task_id="queued-conversion")
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "PENDING")
+        self.assertEqual(task.metadata["queue_state"], "QUEUED")
+        self.assertEqual(datasource.last_conversion_status, "PENDING")
+        schedule.assert_called_once()
+
+    def test_reconnect_reconciles_orphaned_conversion_and_releases_owners(
+        self,
+    ):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+            last_conversion_status="STARTED",
+        )
+        task = register_datasource_conversion_task(
+            datasource,
+            "orphaned-conversion",
+            {"document": True},
+        )
+        task.status = "STARTED"
+        task.metadata.update(
+            {
+                "lensnode_connection_id": "old-connection",
+                "lock_token": task.task_id,
+                "heavy_work_slot": "0",
+            }
+        )
+        task.save(update_fields=["status", "metadata"])
+        cache.set(
+            f"lens:datasource-sync:{datasource.uuid}",
+            task.task_id,
+        )
+        cache.set(
+            f"lens:heavy-work:{self.lensnode.uuid}:0",
+            task.task_id,
+        )
+
+        count = reconcile_orphaned_datasource_conversions(
+            self.lensnode.uuid,
+            "new-connection",
+        )
+
+        task.refresh_from_db()
+        datasource.refresh_from_db()
+        self.assertEqual(count, 1)
+        self.assertEqual(task.status, "FAILURE")
+        self.assertEqual(task.error, "DATASOURCE_CONVERSION_ORPHANED")
+        self.assertTrue(task.metadata["recovery_retryable"])
+        self.assertEqual(datasource.last_conversion_status, "FAILURE")
+        self.assertIsNone(cache.get(f"lens:datasource-sync:{datasource.uuid}"))
+        self.assertIsNone(
+            cache.get(f"lens:heavy-work:{self.lensnode.uuid}:0")
+        )
+
     def test_complete_managed_workspace_conversion_persists_summary(self):
         datasource = DataSource.objects.create(
             name="Managed Snapshot",
@@ -3332,6 +3418,10 @@ class LensServiceTests(TransactionTestCase):
             key="lens.datasource_sync.timeout_s",
             value="1",
         )
+        GlobalSetting.objects.create(
+            key="lens.datasource_conversion.timeout_s",
+            value="1",
+        )
         datasource = DataSource.objects.create(
             name="Managed Snapshot",
             source_type=DataSource.SourceType.MANAGED_WORKSPACE,
@@ -3363,11 +3453,11 @@ class LensServiceTests(TransactionTestCase):
 
         task.refresh_from_db()
         datasource.refresh_from_db()
-        self.assertEqual(result["failed"], 1)
-        self.assertEqual(task.status, "FAILURE")
-        self.assertEqual(task.error, "DATASOURCE_CONVERSION_TIMEOUT")
-        self.assertEqual(datasource.last_conversion_status, "FAILURE")
-        self.assertIsNotNone(datasource.last_conversion_at)
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(task.status, "CANCELLING")
+        self.assertEqual(task.error, "")
+        self.assertEqual(datasource.last_conversion_status, "CANCELLING")
+        self.assertIsNone(datasource.last_conversion_at)
         cancel.assert_called_once_with(self.lensnode, "stale-conversion")
         self.assertFalse(
             ScheduledTask.objects.filter(
@@ -3375,6 +3465,23 @@ class LensServiceTests(TransactionTestCase):
                 target_id=datasource.uuid,
             ).exists()
         )
+
+        complete_datasource_conversion_task(
+            task.task_id,
+            {
+                "status": "cancelled",
+                "error": "DATASOURCE_CONVERSION_TIMEOUT",
+                "completion_reason": "DATASOURCE_CONVERSION_TIMEOUT",
+                "stop_confirmation_source": "lensnode_callback",
+            },
+        )
+
+        task.refresh_from_db()
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "REVOKED")
+        self.assertEqual(task.error, "DATASOURCE_CONVERSION_TIMEOUT")
+        self.assertEqual(datasource.last_conversion_status, "REVOKED")
+        self.assertIsNotNone(datasource.last_conversion_at)
 
         acquire_datasource_lock(
             datasource.uuid,

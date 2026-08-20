@@ -61,7 +61,7 @@ x-sourcelens-api-common: &sourcelens-api-common
       condition: service_healthy
   command: gunicorn
   healthcheck:
-    test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+    test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health/celery"]
     interval: 30s
     timeout: 10s
     retries: 3
@@ -204,6 +204,9 @@ services:
       # Max concurrent runs per node. Each run holds a slot for the full answer
       # duration; without this it falls back to 1 and questions queue.
       LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-8}
+      LENSNODE_MEMORY_LIMIT_MB: ${LENSNODE_MEMORY_LIMIT_MB:-}
+      LENSNODE_NODE_MAX_OLD_SPACE_MB: ${LENSNODE_NODE_MAX_OLD_SPACE_MB:-}
+      LENSNODE_NODE_OPTIONS: ${LENSNODE_NODE_OPTIONS:-}
     volumes:
       - ./data/workspace:/workspace
     networks:

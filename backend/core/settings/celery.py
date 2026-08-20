@@ -1,4 +1,6 @@
 import os
+
+from django.core.exceptions import ImproperlyConfigured
 from kombu import Queue
 
 # For production environments, use Redis or RabbitMQ as result backend.
@@ -48,6 +50,23 @@ CELERY_TASK_QUEUE_NAMES = [
 ]
 if CELERY_TASK_DEFAULT_QUEUE not in CELERY_TASK_QUEUE_NAMES:
     CELERY_TASK_QUEUE_NAMES.insert(0, CELERY_TASK_DEFAULT_QUEUE)
+CELERY_REQUIRED_QUEUES = {
+    name.strip()
+    for name in os.getenv("CELERY_REQUIRED_QUEUES", "backend,lens").split(",")
+    if name.strip()
+}
+CELERY_QUEUE_DEPTH_THRESHOLD = int(
+    os.getenv("CELERY_QUEUE_DEPTH_THRESHOLD", "1000")
+)
+CELERY_BEAT_LIVENESS_SECONDS = int(
+    os.getenv("CELERY_BEAT_LIVENESS_SECONDS", "300")
+)
+missing_queues = CELERY_REQUIRED_QUEUES.difference(CELERY_TASK_QUEUE_NAMES)
+if missing_queues:
+    raise ImproperlyConfigured(
+        "CELERY_TASK_QUEUES is missing required queues: "
+        + ", ".join(sorted(missing_queues))
+    )
 CELERY_TASK_QUEUES = tuple(Queue(name) for name in CELERY_TASK_QUEUE_NAMES)
 
 # Prevent task loss in Redis

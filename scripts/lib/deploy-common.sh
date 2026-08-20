@@ -42,7 +42,7 @@ wait_for_healthy() {
     local i
     for i in $(seq 1 "$GRACE_HEALTH_RETRIES"); do
         if docker exec "$container" \
-            curl -fs http://127.0.0.1:8000/health >/dev/null 2>&1; then
+            curl -fs http://127.0.0.1:8000/health/celery >/dev/null 2>&1; then
             return 0
         fi
         sleep "$GRACE_HEALTH_INTERVAL"

@@ -198,6 +198,10 @@ services:
       LENSNODE_MCP_DEFER_THRESHOLD: ${LENSNODE_MCP_DEFER_THRESHOLD:-12}
       # Max concurrent runs per node. Increase in production based on node resources.
       LENSNODE_MAX_CONCURRENT_RUNS: ${LENSNODE_MAX_CONCURRENT_RUNS:-8}
+      LENSNODE_HEAVY_WORK_CONCURRENCY: ${LENSNODE_HEAVY_WORK_CONCURRENCY:-1}
+      LENSNODE_MEMORY_LIMIT_MB: ${LENSNODE_MEMORY_LIMIT_MB:-}
+      LENSNODE_NODE_MAX_OLD_SPACE_MB: ${LENSNODE_NODE_MAX_OLD_SPACE_MB:-}
+      LENSNODE_NODE_OPTIONS: ${LENSNODE_NODE_OPTIONS:-}
       # Proactive file-offload thresholds (issue #60). Tool default 5000:
       # large workspace reads are evicted to re-readable files so heavy-
       # retrieval runs stop thrashing the summarizer. Human unset = library

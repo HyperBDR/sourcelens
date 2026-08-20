@@ -39,9 +39,11 @@ class LensNodeConfig:
     mcp_enable_codegraph: bool = True
     codegraph_command: str = "codegraph"
     codegraph_init_timeout_s: int = 300
+    node_options: str = ""
     reasoning_effort: str | None = None
     planning_reasoning_effort: str | None = "none"
     planner_repair_enabled: bool = False
+    heavy_work_concurrency: int = 1
 
 
 def _optional_int(value):
@@ -57,6 +59,47 @@ def _env_bool(name, default=False):
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _node_options():
+    """Return bounded V8 options for Node-based child processes."""
+
+    options = os.getenv("LENSNODE_NODE_OPTIONS", "").strip()
+    try:
+        memory_limit_mb = int(os.getenv("LENSNODE_MEMORY_LIMIT_MB", "0"))
+    except (TypeError, ValueError):
+        memory_limit_mb = 0
+    if memory_limit_mb <= 0:
+        memory_limit_mb = _cgroup_memory_limit_mb()
+    try:
+        heap_mb = int(os.getenv("LENSNODE_NODE_MAX_OLD_SPACE_MB", "0"))
+    except (TypeError, ValueError):
+        heap_mb = 0
+    if heap_mb <= 0 and memory_limit_mb > 0:
+        heap_mb = max(64, memory_limit_mb // 2)
+    if heap_mb > 0 and "--max-old-space-size=" not in options:
+        options = f"{options} --max-old-space-size={heap_mb}".strip()
+    return options
+
+
+def _cgroup_memory_limit_mb():
+    """Read a finite Linux cgroup memory limit when one is available."""
+
+    for filename in [
+        "/sys/fs/cgroup/memory.max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+    ]:
+        try:
+            with open(filename, encoding="ascii") as stream:
+                raw = stream.read().strip()
+            if raw == "max":
+                continue
+            limit = int(raw)
+        except (OSError, ValueError):
+            continue
+        if limit > 0:
+            return max(1, limit // (1024 * 1024))
+    return 0
 
 
 def _derive_ws_url(server_url):
@@ -109,6 +152,10 @@ def load_config():
             os.getenv("LENSNODE_DRAIN_TIMEOUT_S", "240")
         ),
         max_concurrent_runs=int(os.getenv("LENSNODE_MAX_CONCURRENT_RUNS", "1")),
+        heavy_work_concurrency=max(
+            1,
+            int(os.getenv("LENSNODE_HEAVY_WORK_CONCURRENCY", "1")),
+        ),
         summary_trigger_tokens=int(
             os.getenv("LENSNODE_SUMMARY_TRIGGER_TOKENS", "48000")
         ),
@@ -164,6 +211,7 @@ def load_config():
         codegraph_init_timeout_s=int(
             os.getenv("LENSNODE_CODEGRAPH_INIT_TIMEOUT_S", "300")
         ),
+        node_options=_node_options(),
         reasoning_effort=os.getenv("LENSNODE_REASONING_EFFORT") or None,
         planning_reasoning_effort=(
             os.getenv(

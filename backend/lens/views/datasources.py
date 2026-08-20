@@ -26,6 +26,7 @@ from lens.services import (
     cancel_datasource_sync_on_lensnode,
 )
 from lens.tasks import (
+    DATASOURCE_CANCELLING_STATUS,
     datasource_conversion_task,
     register_datasource_conversion_task,
     register_datasource_sync_task,
@@ -461,6 +462,7 @@ class DataSourceViewSet(BaseAdminViewSet):
                 status__in=[
                     TaskStatus.PENDING,
                     *TaskStatus.get_running_statuses(),
+                    DATASOURCE_CANCELLING_STATUS,
                 ],
             )
             .order_by("-created_at")
@@ -478,16 +480,21 @@ class DataSourceViewSet(BaseAdminViewSet):
             datasource.lensnode,
             task.task_id,
         )
-        release_datasource_lock(
-            datasource.uuid,
-            token=metadata.get("lock_token") or task.task_id,
-        )
         now = timezone.now()
         metadata["manual_revoked_at"] = now.isoformat()
         metadata["manual_revoked_by"] = request.user.pk
-        task.status = TaskStatus.REVOKED
-        task.finished_at = now
-        task.error = "DATASOURCE_CONVERSION_CANCELLED"
+        queued = task.status == TaskStatus.PENDING
+        task.status = (
+            TaskStatus.REVOKED if queued else DATASOURCE_CANCELLING_STATUS
+        )
+        task.finished_at = now if queued else None
+        task.error = "DATASOURCE_CONVERSION_CANCELLED" if queued else ""
+        metadata["cancellation_state"] = (
+            "REVOKED" if queued else DATASOURCE_CANCELLING_STATUS
+        )
+        if queued:
+            metadata["completion_reason"] = "DATASOURCE_CONVERSION_CANCELLED"
+            metadata["stop_confirmation_source"] = "queued_before_dispatch"
         task.metadata = metadata
         task.save(
             update_fields=[
@@ -497,8 +504,8 @@ class DataSourceViewSet(BaseAdminViewSet):
                 "metadata",
             ]
         )
-        datasource.last_conversion_status = TaskStatus.REVOKED
-        datasource.last_conversion_at = now
+        datasource.last_conversion_status = task.status
+        datasource.last_conversion_at = now if queued else None
         datasource.save(
             update_fields=[
                 "last_conversion_status",
