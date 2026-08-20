@@ -2,6 +2,15 @@ export function eventCategory(event) {
   return String(event?.event_type || '').split('.', 1)[0] || 'other'
 }
 
+const INSPECTOR_MIN_WIDTH = 320
+const LEDGER_MIN_WIDTH = 420
+
+export function clampInspectorWidth(splitWidth, desiredWidth) {
+  const maxWidth = Math.max(0, splitWidth - LEDGER_MIN_WIDTH)
+  const minWidth = Math.min(INSPECTOR_MIN_WIDTH, maxWidth)
+  return Math.min(Math.max(desiredWidth, minWidth), maxWidth)
+}
+
 export function timelineLane(category) {
   if (category === 'model') return 'model'
   if (category === 'tool' || category === 'subtool') return 'tools'
@@ -103,16 +112,40 @@ function eventDepth(event, parentByCall) {
   return depth
 }
 
+function sequenceValue(event) {
+  const value = Number(event?.sequence)
+  return Number.isFinite(value) ? value : null
+}
+
+export function sortTrajectoryEvents(events) {
+  return events
+    .map((event, index) => ({ event, index, sequence: sequenceValue(event) }))
+    .sort((left, right) => {
+      if (left.sequence === null && right.sequence === null) {
+        return left.index - right.index
+      }
+      if (left.sequence === null) return 1
+      if (right.sequence === null) return -1
+      return left.sequence - right.sequence || left.index - right.index
+    })
+    .map(({ event }) => event)
+}
+
 export function buildTrajectoryRows(events, collapsed) {
+  const orderedEvents = sortTrajectoryEvents(events)
   const parentByCall = new Map()
   const childParents = new Set()
-  for (const event of events) {
+  const firstEventByCall = new Map()
+  for (const event of orderedEvents) {
+    if (event.call_id && !firstEventByCall.has(event.call_id)) {
+      firstEventByCall.set(event.call_id, event)
+    }
     if (event.call_id && event.parent_call_id) {
       parentByCall.set(event.call_id, event.parent_call_id)
       childParents.add(event.parent_call_id)
     }
   }
-  return events.flatMap((event) => {
+  return orderedEvents.flatMap((event) => {
     let parent = event.parent_call_id
     const seen = new Set()
     while (parent && !seen.has(parent)) {
@@ -124,7 +157,11 @@ export function buildTrajectoryRows(events, collapsed) {
       {
         event,
         depth: eventDepth(event, parentByCall),
-        hasChildren: Boolean(event.call_id && childParents.has(event.call_id))
+        hasChildren: Boolean(
+          event.call_id &&
+            childParents.has(event.call_id) &&
+            firstEventByCall.get(event.call_id) === event
+        )
       }
     ]
   })

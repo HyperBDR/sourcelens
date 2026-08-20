@@ -4,7 +4,9 @@ import test from 'node:test'
 import {
   buildMcpEnvironmentBinding,
   buildSkillEnvironmentBinding,
-  mcpRequiredEnvironmentNames
+  environmentConfigurationComplete,
+  mcpRequiredEnvironmentNames,
+  scopeEnvironmentSetValues
 } from '../src/pages/lens/assistantEnvironment.js'
 
 const skill = {
@@ -119,4 +121,42 @@ test('uses secret-safe MCP reference metadata when config is masked', () => {
   })
 
   assert.deepEqual(required, ['MCP_TOKEN'])
+})
+
+test('shows only values declared by the current Skill', () => {
+  const scoped = scopeEnvironmentSetValues(
+    [
+      { key: 'INCOME_ENDPOINT', value: 'https://income.example.com' },
+      { key: 'INCOME_USERNAME', value: 'admin' },
+      { key: 'INCOME_PASSWORD', value: 'secret' },
+      { key: 'INCOME_API_TOKEN', value: 'legacy-token' },
+      { key: 'INCOME_BASE_URL', value: 'https://legacy.example.com' }
+    ],
+    ['INCOME_ENDPOINT', 'INCOME_USERNAME', 'INCOME_PASSWORD']
+  )
+
+  assert.deepEqual(scoped, {
+    values: [
+      { key: 'INCOME_ENDPOINT', value: 'https://income.example.com' },
+      { key: 'INCOME_USERNAME', value: 'admin' },
+      { key: 'INCOME_PASSWORD', value: 'secret' }
+    ],
+    unusedCount: 2
+  })
+})
+
+test('allows a new variable set to use the backend-generated name', () => {
+  assert.equal(
+    environmentConfigurationComplete({
+      selectedUuid: '__new__',
+      requiredNames: ['INCOME_ENDPOINT', 'INCOME_USERNAME', 'INCOME_PASSWORD'],
+      draftValues: {
+        INCOME_ENDPOINT: 'https://income.example.com',
+        INCOME_USERNAME: 'admin',
+        INCOME_PASSWORD: 'secret'
+      },
+      savedKeys: []
+    }),
+    true
+  )
 })

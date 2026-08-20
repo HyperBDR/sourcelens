@@ -625,15 +625,6 @@
                       </dt>
                       <dd class="overview-value tabular-nums">
                         {{ detail.structured_analysis_calls }}
-                        <template v-if="detail.structured_analysis_max_calls">
-                          / {{ detail.structured_analysis_max_calls }}
-                        </template>
-                        <span
-                          v-if="detail.structured_analysis_limit_hits"
-                          class="font-normal text-amber-600"
-                        >
-                          · {{ t('lensRuns.callLimitHit') }}
-                        </span>
                       </dd>
                     </div>
                     <div v-if="detail.structured_validation_calls">
@@ -642,15 +633,6 @@
                       </dt>
                       <dd class="overview-value tabular-nums">
                         {{ detail.structured_validation_calls }}
-                        <template v-if="detail.structured_validation_max_calls">
-                          / {{ detail.structured_validation_max_calls }}
-                        </template>
-                        <span
-                          v-if="detail.structured_validation_limit_hits"
-                          class="font-normal text-amber-600"
-                        >
-                          · {{ t('lensRuns.callLimitHit') }}
-                        </span>
                       </dd>
                     </div>
                     <div v-if="detail.transform_calls">
@@ -659,12 +641,6 @@
                       </dt>
                       <dd class="overview-value tabular-nums">
                         {{ detail.transform_calls }}
-                        <span
-                          v-if="detail.transform_call_limit_hits"
-                          class="font-normal text-amber-600"
-                        >
-                          · {{ t('lensRuns.callLimitHit') }}
-                        </span>
                       </dd>
                     </div>
                   </dl>

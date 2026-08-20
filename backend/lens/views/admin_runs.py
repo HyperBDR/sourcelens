@@ -66,13 +66,8 @@ def _admin_run_step_counts(run):
         "subagent_count": 0,
         "subagent_denied_count": 0,
         "structured_analysis_calls": 0,
-        "structured_analysis_limit_hits": 0,
-        "structured_analysis_max_calls": None,
         "structured_validation_calls": 0,
-        "structured_validation_limit_hits": 0,
-        "structured_validation_max_calls": None,
         "transform_calls": 0,
-        "transform_call_limit_hits": 0,
         "llm_calls": 0,
         "total_tokens": 0,
         "prompt_tokens": 0,
@@ -96,32 +91,8 @@ def _admin_run_step_counts(run):
                 else:
                     prefix = "structured_analysis"
                 counts[f"{prefix}_calls"] += 1
-                try:
-                    max_calls = max(int(event.get("max_calls") or 0), 0)
-                except (TypeError, ValueError):
-                    max_calls = 0
-                if max_calls:
-                    counts[f"{prefix}_max_calls"] = max_calls
-            elif agent_event == (
-                "tool.analyze_structured_output.budget_exceeded"
-            ):
-                if event.get("operation") == "validate_records":
-                    prefix = "structured_validation"
-                else:
-                    prefix = "structured_analysis"
-                counts[f"{prefix}_limit_hits"] += 1
-                try:
-                    max_calls = max(int(event.get("max_calls") or 0), 0)
-                except (TypeError, ValueError):
-                    max_calls = 0
-                if max_calls:
-                    counts[f"{prefix}_max_calls"] = max_calls
             elif agent_event == "tool.run_skill_transform.start":
                 counts["transform_calls"] += 1
-            elif agent_event == (
-                "tool.run_skill_transform.budget_exceeded"
-            ):
-                counts["transform_call_limit_hits"] += 1
             elif agent_event == "llm.response":
                 counts["llm_calls"] += 1
                 counts["total_tokens"] += event.get("total_tokens") or 0
@@ -365,25 +336,10 @@ def _admin_run_row(run):
         "subagent_count": counts["subagent_count"],
         "subagent_denied_count": counts["subagent_denied_count"],
         "structured_analysis_calls": counts["structured_analysis_calls"],
-        "structured_analysis_limit_hits": counts[
-            "structured_analysis_limit_hits"
-        ],
-        "structured_analysis_max_calls": counts[
-            "structured_analysis_max_calls"
-        ],
         "structured_validation_calls": counts[
             "structured_validation_calls"
         ],
-        "structured_validation_limit_hits": counts[
-            "structured_validation_limit_hits"
-        ],
-        "structured_validation_max_calls": counts[
-            "structured_validation_max_calls"
-        ],
         "transform_calls": counts["transform_calls"],
-        "transform_call_limit_hits": counts[
-            "transform_call_limit_hits"
-        ],
         "llm_calls": counts["llm_calls"],
         "total_tokens": counts["total_tokens"],
         "prompt_tokens": counts["prompt_tokens"],

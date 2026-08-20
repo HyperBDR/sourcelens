@@ -4,11 +4,19 @@ import test from 'node:test'
 import {
   buildTimelineLanes,
   buildTrajectoryRows,
+  clampInspectorWidth,
   eventCategory,
   groupTrajectoryRows,
   isSubagentEvent,
+  sortTrajectoryEvents,
   timelineLane
 } from '../src/admin/pages/lens/runTrajectory.js'
+
+test('inspector resizing preserves the minimum ledger width', () => {
+  assert.equal(clampInspectorWidth(1200, 700), 700)
+  assert.equal(clampInspectorWidth(1200, 900), 780)
+  assert.equal(clampInspectorWidth(1200, 100), 320)
+})
 
 const events = [
   {
@@ -48,6 +56,30 @@ test('trajectory rows preserve chronological parent depth', () => {
     ]
   )
   assert.equal(rows[0].hasChildren, true)
+  assert.equal(rows[1].hasChildren, false)
+  assert.equal(rows[2].hasChildren, false)
+})
+
+test('trajectory rows sort events by sequence while preserving duplicate order', () => {
+  const unordered = [
+    { ...events[2] },
+    { ...events[0] },
+    { ...events[1] },
+    { event_id: 'same-sequence', sequence: 2, event_type: 'tool.note' }
+  ]
+
+  assert.deepEqual(
+    buildTrajectoryRows(unordered, new Set()).map((row) => row.event.event_id),
+    ['model-start', 'tool-start', 'same-sequence', 'tool-end']
+  )
+  assert.deepEqual(
+    sortTrajectoryEvents([
+      { event_id: 'missing' },
+      { event_id: 'three', sequence: 3 },
+      { event_id: 'one', sequence: '1' }
+    ]).map((event) => event.event_id),
+    ['one', 'three', 'missing']
+  )
 })
 
 test('collapsing a call hides every descendant event', () => {

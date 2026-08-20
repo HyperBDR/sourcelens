@@ -1,0 +1,10 @@
+type: improvement
+audience: admin
+en: >-
+  Separated Skill script context previews from raw-output resource quotas.
+  Script output now streams to bounded files, with per-call and per-run byte
+  limits, while saved results remain available through bounded analysis tools.
+zh-CN: >-
+  将 Skill 脚本的上下文预览与原始输出资源配额分离。脚本输出现在流式写入
+  有界文件，并按单次调用和单次 Run 限制字节数；已保存结果仍可通过有界
+  分析工具处理。

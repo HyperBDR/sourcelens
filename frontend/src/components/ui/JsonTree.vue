@@ -2,7 +2,7 @@
   <div class="json-tree sl-scrollbar">
     <template v-if="data !== null && typeof data === 'object'">
       <ul class="container">
-        <JsonTreeNode :value="data" :depth="0" />
+        <JsonTreeNode :value="data" :depth="0" :indent="indent" />
       </ul>
     </template>
     <p v-else class="empty">{{ data == null ? 'null' : String(data) }}</p>
@@ -16,7 +16,8 @@ defineProps({
   data: {
     type: [Object, Array, String, Number, Boolean, null],
     required: true
-  }
+  },
+  indent: { type: Number, default: 14 }
 })
 </script>
 

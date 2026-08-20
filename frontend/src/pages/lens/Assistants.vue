@@ -591,7 +591,6 @@ function defaultForm() {
     selected_dirs: [],
     agent_model_ref: '',
     agent_rounds: 'balanced',
-    token_budget_profile: 'standard',
     max_concurrency: 5,
     multimodal_model_ref: '',
     exclude_extensions_text: '.lock,.pyc,.sqlite3',
@@ -637,7 +636,6 @@ function formFromRow(row) {
     selected_dirs: selectedDirsFromValue(row.selected_dirs || []),
     agent_model_ref: row.agent_model_ref || '',
     agent_rounds: row.agent_rounds || 'balanced',
-    token_budget_profile: row.token_budget_profile || 'standard',
     max_concurrency: row.max_concurrency ?? 5,
     multimodal_model_ref: row.multimodal_model_ref || '',
     exclude_extensions_text: listToText(
@@ -744,7 +742,6 @@ function buildPayload() {
       form.value.selected_task === 'general_chat' ? [] : buildSelectedDirs(),
     agent_model_ref: form.value.agent_model_ref || null,
     agent_rounds: form.value.agent_rounds || 'balanced',
-    token_budget_profile: form.value.token_budget_profile || 'standard',
     max_concurrency: Number(form.value.max_concurrency) || 5,
     multimodal_model_ref: form.value.multimodal_model_ref || null,
     settings: buildAssistantSettings(),

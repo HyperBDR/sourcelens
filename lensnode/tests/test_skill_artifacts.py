@@ -160,6 +160,28 @@ def test_run_skill_script_preserves_large_output_by_reference(tmp_path):
     assert events[-1][1]["stdout_truncated"] is True
 
 
+def test_run_skill_script_prefers_named_preview_limit(tmp_path):
+    content = b"#!/bin/sh\nprintf 'abcdefghijklmnopqrstuvwxyz'\n"
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {
+            "tool_policy": {
+                "skill_script_stdout_preview_chars": 6,
+                "skill_script_stdout_limit": 10,
+            }
+        }
+    }
+
+    payload = json.loads(
+        _script_tool(resources, command).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
+        )
+    )
+
+    assert payload["stdout"] == "abcdef…"
+    assert payload["stdout_truncated"] is True
+
+
 def test_run_skill_script_summarizes_large_csv_output(tmp_path):
     content = (
         b"#!/bin/sh\n"
@@ -353,17 +375,16 @@ def test_materialize_skill_repairs_scripts_from_existing_cache(tmp_path):
     assert runtime_script.stat().st_mode & 0o777 == 0o755
 
 
-def test_run_skill_script_enforces_call_budget(tmp_path):
+def test_run_skill_script_ignores_legacy_fixed_call_budget(tmp_path):
     content = b"#!/bin/sh\nprintf 'ok'\n"
     resources = _resources(tmp_path, content)
     command = {
         "settings": {"tool_policy": {"skill_script_max_calls": 1}}
     }
-    events = []
     tool = _script_tool(
         resources,
         command,
-        lambda name, detail: events.append((name, detail)),
+        lambda _name, _detail: None,
     )
 
     first = json.loads(
@@ -374,35 +395,64 @@ def test_run_skill_script_enforces_call_budget(tmp_path):
     )
 
     assert first["ok"] is True
-    assert second["error"] == "SKILL_SCRIPT_CALL_LIMIT"
-    assert second["call_count"] == 2
-    assert second["max_calls"] == 1
-    assert "Batch the work" in second["instruction"]
-    assert [
-        name
-        for name, _detail in events
-        if name == "tool.run_skill_script.budget_exceeded"
-    ] == ["tool.run_skill_script.budget_exceeded"]
-    assert events[-1][0] == "tool.run_skill_script.budget_exceeded"
-    assert events[-1][1]["call_count"] == 2
+    assert second["ok"] is True
 
 
-def test_run_skill_script_enforces_aggregate_reflow_budget(tmp_path):
-    content = b"#!/bin/sh\nprintf 'aaaa'\n"
+def test_run_skill_script_enforces_per_call_output_byte_quota(tmp_path):
+    content = (
+        b"#!/bin/sh\n"
+        b"printf 'abcdefghij'\n"
+        b"sleep 1\n"
+        b"touch should-not-exist\n"
+    )
     resources = _resources(tmp_path, content)
     command = {
         "settings": {
             "tool_policy": {
-                "skill_script_aggregate_output_chars": 4
+                "skill_script_max_output_bytes_per_call": 6,
+                "skill_script_max_output_bytes_per_run": 20,
             }
         }
     }
     events = []
-    tool = _script_tool(
-        resources,
-        command,
-        lambda name, detail: events.append((name, detail)),
+
+    payload = json.loads(
+        _script_tool(
+            resources,
+            command,
+            lambda name, detail: events.append((name, detail)),
+        ).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
+        )
     )
+
+    assert payload["ok"] is False
+    assert payload["error"] == "SKILL_SCRIPT_OUTPUT_QUOTA_EXCEEDED"
+    assert payload["quota_scope"] == "per_call"
+    assert payload["output_bytes_this_call"] == 6
+    assert payload["output_bytes_this_run"] == 6
+    assert payload["stdout"] == "abcdef"
+    assert payload["stdout_ref"]
+    output_path = resources.root / payload["stdout_ref"].lstrip("/")
+    assert output_path.read_text(encoding="utf-8") == "abcdef"
+    assert not (
+        resources.root / "skills/income-cli/should-not-exist"
+    ).exists()
+    assert events[-1][0] == "tool.run_skill_script.output_quota_exceeded"
+
+
+def test_run_skill_script_enforces_per_run_output_byte_quota(tmp_path):
+    content = b"#!/bin/sh\nprintf 'abcd'\n"
+    resources = _resources(tmp_path, content)
+    command = {
+        "settings": {
+            "tool_policy": {
+                "skill_script_max_output_bytes_per_call": 10,
+                "skill_script_max_output_bytes_per_run": 6,
+            }
+        }
+    }
+    tool = _script_tool(resources, command)
 
     first = json.loads(
         tool.invoke({"skill": "income-cli", "script": "scripts/run.sh"})
@@ -412,21 +462,16 @@ def test_run_skill_script_enforces_aggregate_reflow_budget(tmp_path):
     )
 
     assert first["ok"] is True
-    assert first["stdout"] == "aaaa"
-    assert second["error"] == "SKILL_SCRIPT_OUTPUT_LIMIT"
-    assert second["reflowed_chars"] == 4
-    assert second["output_limit"] == 4
-    assert "cumulative run_skill_script output" in second["instruction"]
-    assert [
-        name
-        for name, _detail in events
-        if name == "tool.run_skill_script.output_budget_exceeded"
-    ] == ["tool.run_skill_script.output_budget_exceeded"]
-    assert events[-1][0] == "tool.run_skill_script.output_budget_exceeded"
-    assert events[-1][1]["reflowed_chars"] == 4
+    assert first["stdout"] == "abcd"
+    assert second["ok"] is False
+    assert second["error"] == "SKILL_SCRIPT_OUTPUT_QUOTA_EXCEEDED"
+    assert second["quota_scope"] == "per_run"
+    assert second["output_bytes_this_call"] == 2
+    assert second["output_bytes_this_run"] == 6
+    assert second["stdout"] == "ab"
 
 
-def test_run_skill_script_done_reports_call_and_reflowed_counts(tmp_path):
+def test_run_skill_script_done_reports_call_counts(tmp_path):
     content = b"#!/bin/sh\nprintf 'abc'\n"
     resources = _resources(tmp_path, content)
     command = {
@@ -452,6 +497,4 @@ def test_run_skill_script_done_reports_call_and_reflowed_counts(tmp_path):
         if name == "tool.run_skill_script.done"
     ]
     assert done_events[0]["call_count"] == 1
-    assert done_events[0]["reflowed_chars"] == 3
     assert done_events[1]["call_count"] == 2
-    assert done_events[1]["reflowed_chars"] == 6

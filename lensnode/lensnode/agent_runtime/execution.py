@@ -41,7 +41,7 @@ def _run_agent_with_turn_limit(
     stream_recovery_attempts=0,
     on_stream_recovery=None,
 ):
-    """Stream agent events and stop after max_turns NEW AI turns.
+    """Stream agent events and optionally stop after NEW AI turns.
 
     `messages` may be prefixed with prior conversation turns. Historical
     assistant turns are excluded from both the turn count and event
@@ -161,7 +161,7 @@ def _run_agent_with_turn_limit(
             if emit_event is not None:
                 emit_event("deepagents.agent.token_budget", {})
             break
-        if ai_turns >= max_turns:
+        if max_turns and max_turns > 0 and ai_turns >= max_turns:
             truncated = True
             truncation_reason = "turn_limit"
             break
@@ -211,11 +211,11 @@ def _run_agent_with_turn_limit(
             )
         else:
             answer += _pick_text(
-                "\n\n---\n*已达到当前分析深度上限，本次调查未完全完成。"
-                "如需更完整的结果，请调高分析档位后重试。*",
-                "\n\n---\n*Reached the current analysis-depth limit before "
-                "the investigation fully completed. Raise the analysis "
-                "tier for a more complete result.*",
+                "\n\n---\n*已达到当前执行安全边界，本次调查未完全完成。"
+                "可从已保存的检查点继续执行。*",
+                "\n\n---\n*Reached the current execution safety boundary before "
+                "the investigation fully completed. Retry to continue "
+                "from the saved checkpoint.*",
                 answer_language,
             )
     termination_reason = truncation_reason

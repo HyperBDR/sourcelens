@@ -117,65 +117,11 @@ class NoTaskMiddleware(AgentMiddleware):
             or getattr(request.tool, "name", None) == "task"
         )
 
-    @classmethod
-    def _is_large_result_access(cls, request):
-        tool_call = request.tool_call or {}
-        tool_name = str(
-            tool_call.get("name")
-            or getattr(request.tool, "name", None)
-            or ""
-        )
-        if tool_name not in {"read_file", "grep"}:
-            return False
-        arguments = tool_call.get("args") or {}
-        if not isinstance(arguments, dict):
-            return False
-        for key in ("file_path", "path"):
-            value = str(arguments.get(key) or "").replace("\\", "/")
-            if value == "/large_tool_results" or value.startswith(
-                "/large_tool_results/"
-            ):
-                return True
-        return False
-
-    def _deny_large_result_access(self, request):
-        tool_call = request.tool_call or {}
-        tool_name = str(
-            tool_call.get("name")
-            or getattr(request.tool, "name", None)
-            or "tool"
-        )
-        if self.emit_event is not None:
-            self.emit_event(
-                f"tool.{tool_name}.denied",
-                {
-                    "tool_call_id": tool_call.get("id"),
-                    "summary": "Direct large-result access denied",
-                },
-            )
-        return ToolMessage(
-            content=json.dumps(
-                {
-                    "ok": False,
-                    "error": "LARGE_RESULT_DIRECT_ACCESS_DENIED",
-                    "instruction": (
-                        "Use validate_records first, then bounded "
-                        "structured analysis tools for this result."
-                    ),
-                }
-            ),
-            name=tool_name,
-            status="error",
-            tool_call_id=tool_call.get("id") or "large-result-denied",
-        )
-
     def wrap_tool_call(self, request, handler):
         """Block synchronous task execution for General Chat."""
 
         if self._is_task_call(request) and not self.allow_task_tool:
             return self._deny_task_call(request)
-        if self._is_large_result_access(request):
-            return self._deny_large_result_access(request)
         return handler(request)
 
     async def awrap_tool_call(self, request, handler):
@@ -183,6 +129,4 @@ class NoTaskMiddleware(AgentMiddleware):
 
         if self._is_task_call(request) and not self.allow_task_tool:
             return self._deny_task_call(request)
-        if self._is_large_result_access(request):
-            return self._deny_large_result_access(request)
         return await handler(request)

@@ -5,6 +5,7 @@ import math
 import mimetypes
 import os
 import re
+import signal
 import shlex
 import stat
 import subprocess
@@ -55,6 +56,9 @@ SELF_REPORTING_TOOLS = {
 _STRUCTURED_INPUT_MAX_BYTES = 50 * 1024 * 1024
 _STRUCTURED_GROUP_MAX_ITEMS = 1000
 _STRUCTURED_VALIDATION_MAX_ITEMS = 1_000_000
+_SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_CALL = 50 * 1024 * 1024
+_SKILL_SCRIPT_DEFAULT_MAX_OUTPUT_BYTES_PER_RUN = 200 * 1024 * 1024
+_SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_RUN = 2 * 1024 * 1024 * 1024
 _APPEND_FILE_CHUNK_MAX_BYTES = 24 * 1024
 _APPEND_FILE_CHUNK_ID_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
@@ -111,12 +115,6 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
     target_dirs = command.get("target_dirs") or []
     settings = command.get("settings") or {}
     retrieval_policy = settings.get("retrieval_policy") or {}
-    tool_policy = settings.get("tool_policy") or {}
-    git_diff_max_calls = _positive_int(
-        tool_policy.get("git_diff_max_calls"),
-        default=8,
-    )
-    git_diff_calls = {"count": 0}
 
     def emit(name, detail=None):
         if emit_event is not None:
@@ -398,27 +396,6 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
                 )
             emit("tool.git_diff.denied", {"path": path})
             return _json({"error": "PATH_NOT_ALLOWED", "path": path})
-        git_diff_calls["count"] += 1
-        if git_diff_calls["count"] > git_diff_max_calls:
-            emit(
-                "tool.git_diff.budget_exceeded",
-                {
-                    "path": str(root),
-                    "ref": ref,
-                    "max_calls": git_diff_max_calls,
-                },
-            )
-            return _json(
-                {
-                    "error": "TOOL_BUDGET_EXCEEDED",
-                    "tool": "git_diff",
-                    "max_calls": git_diff_max_calls,
-                    "instruction": (
-                        "Stop requesting more git_diff calls. Summarize the "
-                        "available git_log and git_diff evidence now."
-                    ),
-                }
-            )
         emit("tool.git_diff.start", {"path": str(root), "ref": ref})
         result = _run_git(root, ["diff", "--stat", ref])
         if result["ok"]:
@@ -1169,44 +1146,43 @@ def build_general_chat_tools(
         ),
         300,
     )
+    stdout_preview_chars = tool_policy.get(
+        "skill_script_stdout_preview_chars"
+    )
+    if stdout_preview_chars is None:
+        stdout_preview_chars = tool_policy.get("skill_script_stdout_limit")
     stdout_limit = min(
-        _positive_int(tool_policy.get("skill_script_stdout_limit"), 20000),
+        _positive_int(stdout_preview_chars, 12000),
         100000,
     )
+    stderr_preview_chars = tool_policy.get(
+        "skill_script_stderr_preview_chars"
+    )
+    if stderr_preview_chars is None:
+        stderr_preview_chars = tool_policy.get("skill_script_stderr_limit")
     stderr_limit = min(
-        _positive_int(tool_policy.get("skill_script_stderr_limit"), 8000),
+        _positive_int(stderr_preview_chars, 8000),
         50000,
     )
-    script_max_calls = min(
-        _positive_int(tool_policy.get("skill_script_max_calls"), default=30),
-        100,
-    )
     script_calls = {"count": 0}
-    script_reflowed_chars = {"count": 0}
-    script_output_limit = min(
+    script_output_bytes = {"count": 0}
+    script_max_output_bytes_per_call = min(
         _positive_int(
-            tool_policy.get("skill_script_aggregate_output_chars"),
-            default=80000,
+            tool_policy.get("skill_script_max_output_bytes_per_call"),
+            default=_SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_CALL,
         ),
-        500000,
+        _SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_CALL,
+    )
+    script_max_output_bytes_per_run = min(
+        _positive_int(
+            tool_policy.get("skill_script_max_output_bytes_per_run"),
+            default=_SKILL_SCRIPT_DEFAULT_MAX_OUTPUT_BYTES_PER_RUN,
+        ),
+        _SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_RUN,
     )
     transform_stdout_limit = min(
         _positive_int(tool_policy.get("skill_transform_stdout_limit"), 8000),
         50000,
-    )
-    structured_analysis_max_calls = min(
-        _positive_int(
-            tool_policy.get("structured_analysis_max_calls"),
-            default=6,
-        ),
-        20,
-    )
-    structured_validation_max_calls = min(
-        _positive_int(
-            tool_policy.get("structured_validation_max_calls"),
-            default=1,
-        ),
-        3,
     )
     structured_analysis_output_limit = min(
         _positive_int(
@@ -1217,32 +1193,8 @@ def build_general_chat_tools(
     )
     structured_analysis_calls = {"count": 0}
     structured_validation_calls = {"count": 0}
-    structured_limit_results = {
-        "analysis": None,
-        "validation": None,
-    }
-    structured_budget_instruction = (
-        "The structured analysis budget is exhausted. Do not call this "
-        "tool again. Use existing bounded results and finish the final "
-        "answer."
-    )
-    saved_output_inspection_max_calls = min(
-        _positive_int(
-            tool_policy.get("saved_output_inspection_max_calls"),
-            default=8,
-        ),
-        20,
-    )
     saved_output_inspection_calls = {"count": 0}
-    transform_max_calls = min(
-        _positive_int(
-            tool_policy.get("skill_transform_max_calls"),
-            default=4,
-        ),
-        20,
-    )
     transform_calls = {"count": 0}
-    transform_output_refs = []
     skills_root = resources.root / "skills"
 
     def emit(name, detail=None):
@@ -1279,50 +1231,13 @@ def build_general_chat_tools(
         invocation_id = uuid.uuid4().hex
         normalized_operation = str(operation or "").strip().lower()
         is_validation = normalized_operation == "validate_records"
-        limit_key = "validation" if is_validation else "analysis"
-        prior_limit_result = structured_limit_results[limit_key]
-        if prior_limit_result is not None:
-            return _json(prior_limit_result)
         call_counter = (
             structured_validation_calls
             if is_validation
             else structured_analysis_calls
         )
-        max_calls = (
-            structured_validation_max_calls
-            if is_validation
-            else structured_analysis_max_calls
-        )
-        limit_error = (
-            "STRUCTURED_VALIDATION_CALL_LIMIT"
-            if is_validation
-            else "STRUCTURED_ANALYSIS_CALL_LIMIT"
-        )
         call_counter["count"] += 1
         call_count = call_counter["count"]
-        if call_count > max_calls:
-            detail = {
-                "invocation_id": invocation_id,
-                "input_ref": str(ref or "")[:512],
-                "operation": normalized_operation,
-                "call_count": call_count,
-                "max_calls": max_calls,
-                "summary": "structured analysis · call budget exceeded",
-            }
-            emit(
-                "tool.analyze_structured_output.budget_exceeded",
-                detail,
-            )
-            limit_result = {
-                "ok": False,
-                "error": limit_error,
-                "invocation_id": invocation_id,
-                "call_count": call_count,
-                "max_calls": max_calls,
-                "instruction": structured_budget_instruction,
-            }
-            structured_limit_results[limit_key] = limit_result
-            return _json(limit_result)
 
         request_detail = {
             "invocation_id": invocation_id,
@@ -1338,7 +1253,6 @@ def build_general_chat_tools(
             "limit": limit,
             "descending": bool(descending),
             "call_count": call_count,
-            "max_calls": max_calls,
             "summary": f"{normalized_operation} · {_basename(ref)}",
         }
         emit("tool.analyze_structured_output.start", request_detail)
@@ -1424,7 +1338,6 @@ def build_general_chat_tools(
             structured_analysis_output_limit,
         )
         result_count = len(result) if isinstance(result, (dict, list)) else 1
-        call_budget_exhausted = call_count >= max_calls
         input_sha256 = hashlib.sha256(raw).hexdigest()
         detail = {
             "invocation_id": invocation_id,
@@ -1439,8 +1352,6 @@ def build_general_chat_tools(
             "output_truncated": output["output_truncated"],
             "output_ref": output["output_ref"],
             "call_count": call_count,
-            "max_calls": max_calls,
-            "call_budget_exhausted": call_budget_exhausted,
             "summary": (
                 f"{normalized_operation} · {result_count} result"
                 f"{'s' if result_count != 1 else ''} · {duration_ms}ms"
@@ -1457,13 +1368,7 @@ def build_general_chat_tools(
                 "input_sha256": input_sha256,
                 "duration_ms": duration_ms,
                 "result_count": result_count,
-                "call_budget_exhausted": call_budget_exhausted,
                 **output,
-                **(
-                    {"instruction": structured_budget_instruction}
-                    if call_budget_exhausted
-                    else {}
-                ),
             }
         )
 
@@ -1480,8 +1385,9 @@ def build_general_chat_tools(
         Call this immediately after a bulk Artifact returns a JSON
         ``stdout_ref``. It checks total count, duplicate or missing unique
         keys, and required fields in one bounded pass. For a common
-        ``{total, items}`` result, leave ``path`` and ``expected_count``
-        empty so they are derived automatically.
+        ``{total, items}`` result, leave ``path`` empty to validate
+        ``items``. Pass ``expected_count`` only when ``items`` is known to
+        contain the complete result rather than one page.
         """
 
         return analyze_structured_output.invoke(
@@ -1513,29 +1419,6 @@ def build_general_chat_tools(
         invocation_id = uuid.uuid4().hex
         saved_output_inspection_calls["count"] += 1
         call_count = saved_output_inspection_calls["count"]
-        if call_count > saved_output_inspection_max_calls:
-            emit(
-                "tool.inspect_saved_output.budget_exceeded",
-                {
-                    "invocation_id": invocation_id,
-                    "input_ref": str(ref or "")[:512],
-                    "call_count": call_count,
-                    "max_calls": saved_output_inspection_max_calls,
-                    "summary": "saved output · call budget exceeded",
-                },
-            )
-            return _json(
-                {
-                    "ok": False,
-                    "error": "SAVED_OUTPUT_INSPECTION_CALL_LIMIT",
-                    "call_count": call_count,
-                    "max_calls": saved_output_inspection_max_calls,
-                    "instruction": (
-                        "Stop inspecting this output and synthesize the "
-                        "answer from the bounded windows already returned."
-                    ),
-                }
-            )
 
         emit(
             "tool.inspect_saved_output.start",
@@ -1545,7 +1428,6 @@ def build_general_chat_tools(
                 "offset": offset,
                 "limit": limit,
                 "call_count": call_count,
-                "max_calls": saved_output_inspection_max_calls,
                 "summary": f"inspect · {_basename(ref)}",
             },
         )
@@ -1707,32 +1589,6 @@ def build_general_chat_tools(
 
         transform_calls["count"] += 1
         call_count = transform_calls["count"]
-        if call_count > transform_max_calls:
-            detail = {
-                "skill": skill_dir.name,
-                "transform": transform_name,
-                "entrypoint": definition["entrypoint"],
-                "args_redacted": _redact_command_args(args),
-                "input_ref": str(stdin_ref or "")[:512],
-                "call_count": call_count,
-                "max_calls": transform_max_calls,
-                "invocation_id": invocation_id,
-                "summary": (
-                    f"{skill_dir.name}/{transform_name} · "
-                    "call budget exceeded"
-                ),
-            }
-            emit("tool.run_skill_transform.budget_exceeded", detail)
-            return _json(
-                {
-                    "ok": False,
-                    "error": "TRANSFORM_CALL_LIMIT",
-                    "invocation_id": invocation_id,
-                    "call_count": call_count,
-                    "max_calls": transform_max_calls,
-                    "available_output_refs": transform_output_refs,
-                }
-            )
 
         input_path = _resolve_large_tool_result_ref(
             resources.root,
@@ -1815,7 +1671,6 @@ def build_general_chat_tools(
                 "input_sha256": input_sha256,
                 "environment_names": sorted(selected_environment),
                 "call_count": call_count,
-                "max_calls": transform_max_calls,
                 "invocation_id": invocation_id,
                 "summary": display_name,
             },
@@ -1846,8 +1701,6 @@ def build_general_chat_tools(
                 exc.stderr,
                 stderr_limit,
             )
-            if stdout["stdout_ref"]:
-                transform_output_refs.append(stdout["stdout_ref"])
             emit(
                 "tool.run_skill_transform.timeout",
                 {
@@ -1919,8 +1772,6 @@ def build_general_chat_tools(
             completed.stderr,
             stderr_limit,
         )
-        if stdout["stdout_ref"]:
-            transform_output_refs.append(stdout["stdout_ref"])
         detail = {
             "skill": skill_dir.name,
             "transform": transform_name,
@@ -1941,7 +1792,6 @@ def build_general_chat_tools(
             "stderr_ref": stderr["stderr_ref"],
             "stderr_truncated": stderr["stderr_truncated"],
             "call_count": call_count,
-            "max_calls": transform_max_calls,
             "summary": f"{display_name} · rc={completed.returncode}",
         }
         emit("tool.run_skill_transform.done", detail)
@@ -1986,9 +1836,9 @@ def build_general_chat_tools(
         script or binary. The path must be relative to that Skill's root
         directory, for example "scripts/report.sh", "scripts/tool.py" or
         "bin/linux-amd64/glab". Prefer one call that batches the work over
-        many per-record calls: a per-run call budget and a cumulative
-        output budget apply, and once either is exhausted further calls
-        are rejected until existing stdout_ref results are analyzed.
+        many per-record calls. Per-run call and raw-output byte budgets
+        apply. Analyze saved stdout_ref results instead of rerunning a
+        script whose output was externalized.
         """
 
         started = time.monotonic()
@@ -2013,54 +1863,32 @@ def build_general_chat_tools(
             )
             return _json({"ok": False, "error": "SCRIPT_NOT_EXECUTABLE"})
         script_calls["count"] += 1
-        if script_calls["count"] > script_max_calls:
-            emit(
-                "tool.run_skill_script.budget_exceeded",
-                {
-                    "skill": skill,
-                    "script": script,
-                    "call_count": script_calls["count"],
-                    "max_calls": script_max_calls,
-                },
-            )
+        remaining_run_output_bytes = (
+            script_max_output_bytes_per_run - script_output_bytes["count"]
+        )
+        if remaining_run_output_bytes <= 0:
+            detail = {
+                "skill": skill,
+                "script": script,
+                "quota_scope": "per_run",
+                "output_bytes_this_call": 0,
+                "output_bytes_this_run": script_output_bytes["count"],
+                "max_output_bytes_per_call": (
+                    script_max_output_bytes_per_call
+                ),
+                "max_output_bytes_per_run": script_max_output_bytes_per_run,
+            }
+            emit("tool.run_skill_script.output_quota_exceeded", detail)
             return _json(
                 {
                     "ok": False,
-                    "error": "SKILL_SCRIPT_CALL_LIMIT",
+                    "error": "SKILL_SCRIPT_OUTPUT_QUOTA_EXCEEDED",
                     "tool": "run_skill_script",
-                    "call_count": script_calls["count"],
-                    "max_calls": script_max_calls,
+                    **detail,
                     "instruction": (
-                        "Stop calling run_skill_script in a loop. Batch the "
-                        "work into fewer calls or analyze the already saved "
-                        "stdout_ref results with inspect_saved_output or "
-                        "analyze_structured_output."
-                    ),
-                }
-            )
-        if script_reflowed_chars["count"] >= script_output_limit:
-            emit(
-                "tool.run_skill_script.output_budget_exceeded",
-                {
-                    "skill": skill,
-                    "script": script,
-                    "reflowed_chars": script_reflowed_chars["count"],
-                    "output_limit": script_output_limit,
-                },
-            )
-            return _json(
-                {
-                    "ok": False,
-                    "error": "SKILL_SCRIPT_OUTPUT_LIMIT",
-                    "tool": "run_skill_script",
-                    "reflowed_chars": script_reflowed_chars["count"],
-                    "output_limit": script_output_limit,
-                    "instruction": (
-                        "The cumulative run_skill_script output returned to "
-                        "the conversation has reached its limit. Stop "
-                        "running new scripts and analyze the stdout_ref "
-                        "results already saved with inspect_saved_output or "
-                        "analyze_structured_output."
+                        "The raw script output byte quota is exhausted. "
+                        "Stop running scripts and analyze the stdout_ref "
+                        "results already saved."
                     ),
                 }
             )
@@ -2075,52 +1903,28 @@ def build_general_chat_tools(
                 "summary": display_name,
             },
         )
+        output_quota_scope = (
+            "per_call"
+            if script_max_output_bytes_per_call
+            <= remaining_run_output_bytes
+            else "per_run"
+        )
+        output_byte_limit = min(
+            script_max_output_bytes_per_call,
+            remaining_run_output_bytes,
+        )
         try:
-            completed = subprocess.run(
+            completed = _run_bounded_skill_script(
                 [*command_args, *args],
                 cwd=str(skill_dir),
                 env=_skill_script_environment(
                     resources.skill_environments.get(skill_dir.name, {})
                 ),
-                input=stdin.encode("utf-8"),
-                capture_output=True,
-                check=False,
-                timeout=timeout_s,
-            )
-        except subprocess.TimeoutExpired as exc:
-            emit(
-                "tool.run_skill_script.timeout",
-                {
-                    "skill": skill,
-                    "script": script,
-                    "timeout_s": timeout_s,
-                },
-            )
-            stdout = _persist_large_tool_output(
-                resources.root,
-                uuid.uuid4().hex,
-                "stdout",
-                exc.stdout,
-                stdout_limit,
-            )
-            stderr = _persist_large_tool_output(
-                resources.root,
-                uuid.uuid4().hex,
-                "stderr",
-                exc.stderr,
-                stderr_limit,
-            )
-            script_reflowed_chars["count"] += len(
-                stdout["stdout"]
-            ) + len(stderr["stderr"])
-            return _json(
-                {
-                    "ok": False,
-                    "error": "SCRIPT_TIMEOUT",
-                    "timeout_s": timeout_s,
-                    **stdout,
-                    **stderr,
-                }
+                stdin=stdin.encode("utf-8"),
+                timeout_s=timeout_s,
+                max_output_bytes=output_byte_limit,
+                output_root=resources.root,
+                invocation_id=invocation_id,
             )
         except OSError as exc:
             emit(
@@ -2129,31 +1933,84 @@ def build_general_chat_tools(
             )
             return _json({"ok": False, "error": str(exc)})
         duration_ms = int((time.monotonic() - started) * 1000)
+        script_output_bytes["count"] += completed["output_bytes"]
         stdout = _persist_large_tool_output(
             resources.root,
             invocation_id,
             "stdout",
-            completed.stdout,
+            completed["stdout"],
             stdout_limit,
+            persisted_path=completed["stdout_path"],
+            force_ref=completed["output_quota_exceeded"],
         )
         stderr = _persist_large_tool_output(
             resources.root,
             invocation_id,
             "stderr",
-            completed.stderr,
+            completed["stderr"],
             stderr_limit,
+            persisted_path=completed["stderr_path"],
+            force_ref=completed["output_quota_exceeded"],
         )
+        if completed["output_quota_exceeded"]:
+            detail = {
+                "skill": skill,
+                "script": script,
+                "quota_scope": output_quota_scope,
+                "output_bytes_this_call": completed["output_bytes"],
+                "output_bytes_this_run": script_output_bytes["count"],
+                "max_output_bytes_per_call": (
+                    script_max_output_bytes_per_call
+                ),
+                "max_output_bytes_per_run": script_max_output_bytes_per_run,
+            }
+            emit("tool.run_skill_script.output_quota_exceeded", detail)
+            return _json(
+                {
+                    "ok": False,
+                    "error": "SKILL_SCRIPT_OUTPUT_QUOTA_EXCEEDED",
+                    "tool": "run_skill_script",
+                    "duration_ms": duration_ms,
+                    **detail,
+                    **stdout,
+                    **stderr,
+                    "instruction": (
+                        "The script was stopped after reaching its raw "
+                        "output byte quota. Analyze the captured stdout_ref "
+                        "or stderr_ref instead of rerunning it."
+                    ),
+                }
+            )
+        if completed["timed_out"]:
+            emit(
+                "tool.run_skill_script.timeout",
+                {
+                    "skill": skill,
+                    "script": script,
+                    "timeout_s": timeout_s,
+                },
+            )
+            return _json(
+                {
+                    "ok": False,
+                    "error": "SCRIPT_TIMEOUT",
+                    "timeout_s": timeout_s,
+                    "output_bytes_this_call": completed["output_bytes"],
+                    "output_bytes_this_run": script_output_bytes["count"],
+                    **stdout,
+                    **stderr,
+                }
+            )
         payload = {
-            "ok": completed.returncode == 0,
-            "returncode": completed.returncode,
+            "ok": completed["returncode"] == 0,
+            "returncode": completed["returncode"],
             "duration_ms": duration_ms,
             "script": str(script_path.relative_to(skill_dir)),
+            "output_bytes_this_call": completed["output_bytes"],
+            "output_bytes_this_run": script_output_bytes["count"],
             **stdout,
             **stderr,
         }
-        script_reflowed_chars["count"] += len(payload["stdout"]) + len(
-            payload["stderr"]
-        )
         if payload["stdout_truncated"]:
             if payload["stdout_format"] == "json":
                 payload["instruction"] = (
@@ -2173,14 +2030,16 @@ def build_general_chat_tools(
                 "skill": skill,
                 "script": script,
                 "ok": payload["ok"],
-                "returncode": completed.returncode,
+                "returncode": completed["returncode"],
                 "duration_ms": duration_ms,
                 "stdout_bytes": payload["stdout_bytes"],
                 "stdout_ref": payload["stdout_ref"],
                 "stdout_truncated": payload["stdout_truncated"],
                 "call_count": script_calls["count"],
-                "reflowed_chars": script_reflowed_chars["count"],
-                "summary": f"{display_name} · rc={completed.returncode}",
+                "output_bytes_this_run": script_output_bytes["count"],
+                "summary": (
+                    f"{display_name} · rc={completed['returncode']}"
+                ),
             },
         )
         return _json(payload)
@@ -2475,12 +2334,6 @@ def _apply_structured_operation(
         if isinstance(payload, dict):
             if not path and isinstance(payload.get("items"), list):
                 target = payload["items"]
-            if (
-                expected_count is None
-                and isinstance(payload.get("total"), int)
-                and not isinstance(payload.get("total"), bool)
-            ):
-                expected_count = payload["total"]
         return _validate_structured_records(
             target,
             expected_count=expected_count,
@@ -2840,21 +2693,211 @@ def _truncate_output(value, limit):
     return text[:limit] + "…" if len(text) > limit else text
 
 
-def _persist_large_tool_output(root, invocation_id, stream, value, limit):
+def _terminate_skill_process(process):
+    """Terminate a script process and its process group when available."""
+
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=0.2)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+        process.wait()
+        return
+
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=0.2)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+    process.wait()
+
+
+def _run_bounded_skill_script(
+    command,
+    *,
+    cwd,
+    env,
+    stdin,
+    timeout_s,
+    max_output_bytes,
+    output_root,
+    invocation_id,
+):
+    """Run a Skill executable with streaming, byte-bounded output capture."""
+
+    output_dir = Path(output_root) / "large_tool_results"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = output_dir / f"artifact_{invocation_id}.stdout.txt"
+    stderr_path = output_dir / f"artifact_{invocation_id}.stderr.txt"
+    process = None
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=os.name == "posix",
+        )
+        captured = {"bytes": 0}
+        captured_lock = threading.Lock()
+        capture_failed = threading.Event()
+        capture_errors = []
+        output_quota_exceeded = threading.Event()
+
+        def drain(source, target):
+            try:
+                while True:
+                    chunk = source.read1(64 * 1024)
+                    if not chunk:
+                        return
+                    with captured_lock:
+                        remaining = max_output_bytes - captured["bytes"]
+                        kept = chunk[: max(0, remaining)]
+                        captured["bytes"] += len(kept)
+                        if len(kept) < len(chunk):
+                            output_quota_exceeded.set()
+                    if kept:
+                        target.write(kept)
+            except OSError as exc:
+                with captured_lock:
+                    capture_errors.append(exc)
+                capture_failed.set()
+
+        def feed_stdin():
+            try:
+                if stdin:
+                    process.stdin.write(stdin)
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+
+        with stdout_path.open("wb") as stdout_file, stderr_path.open(
+            "wb"
+        ) as stderr_file:
+            stdout_thread = threading.Thread(
+                target=drain,
+                args=(process.stdout, stdout_file),
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=drain,
+                args=(process.stderr, stderr_file),
+                daemon=True,
+            )
+            stdin_thread = threading.Thread(target=feed_stdin, daemon=True)
+            stdout_thread.start()
+            stderr_thread.start()
+            stdin_thread.start()
+
+            deadline = time.monotonic() + timeout_s
+            termination_reason = None
+            while True:
+                if capture_failed.is_set():
+                    termination_reason = "capture_error"
+                    _terminate_skill_process(process)
+                    break
+                if output_quota_exceeded.is_set():
+                    termination_reason = "output_quota"
+                    _terminate_skill_process(process)
+                    break
+                if time.monotonic() >= deadline:
+                    termination_reason = "timeout"
+                    _terminate_skill_process(process)
+                    break
+                if (
+                    process.poll() is not None
+                    and not stdout_thread.is_alive()
+                    and not stderr_thread.is_alive()
+                    and not stdin_thread.is_alive()
+                ):
+                    break
+                output_quota_exceeded.wait(0.01)
+
+            stdout_thread.join()
+            stderr_thread.join()
+            stdin_thread.join()
+            if capture_errors:
+                raise capture_errors[0]
+            if (
+                termination_reason is None
+                and output_quota_exceeded.is_set()
+            ):
+                termination_reason = "output_quota"
+
+        return {
+            "returncode": process.returncode,
+            "stdout": stdout_path.read_bytes(),
+            "stderr": stderr_path.read_bytes(),
+            "stdout_path": stdout_path,
+            "stderr_path": stderr_path,
+            "output_bytes": captured["bytes"],
+            "output_quota_exceeded": (
+                termination_reason == "output_quota"
+            ),
+            "timed_out": termination_reason == "timeout",
+        }
+    except OSError:
+        if process is not None:
+            _terminate_skill_process(process)
+        stdout_path.unlink(missing_ok=True)
+        stderr_path.unlink(missing_ok=True)
+        raise
+
+
+def _persist_large_tool_output(
+    root,
+    invocation_id,
+    stream,
+    value,
+    limit,
+    *,
+    persisted_path=None,
+    force_ref=False,
+):
     """Return bounded output metadata and preserve a complete large value."""
 
     text = _decode_output(value)
     raw = value if isinstance(value, bytes) else text.encode("utf-8")
     output_format, synopsis = _saved_output_synopsis(raw, text)
-    truncated = len(text) > limit
+    truncated = len(text) > limit or (force_ref and bool(raw))
     output_ref = None
     if truncated:
-        output_dir = Path(root) / "large_tool_results"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"artifact_{invocation_id}.{stream}.txt"
-        output_path = output_dir / filename
+        output_path = Path(persisted_path) if persisted_path else None
+        if output_path is None:
+            output_dir = Path(root) / "large_tool_results"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"artifact_{invocation_id}.{stream}.txt"
+            output_path = output_dir / filename
         output_path.write_text(text, encoding="utf-8")
-        output_ref = f"/large_tool_results/{filename}"
+        output_ref = f"/large_tool_results/{output_path.name}"
+    elif persisted_path:
+        Path(persisted_path).unlink(missing_ok=True)
     return {
         stream: _truncate_output(text, limit),
         f"{stream}_bytes": len(raw),

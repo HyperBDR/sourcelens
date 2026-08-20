@@ -2418,6 +2418,18 @@ function mapRunError(code) {
   if (c.includes('DISCONNECT') || c.includes('ORPHAN')) {
     return t('lens.chat.errorNodeLost')
   }
+  if (c.includes('GENERAL_CHAT_SKILL_REQUIRED')) {
+    return t('lens.chat.errorSkillRequired')
+  }
+  if (c.includes('LENSNODE_OFFLINE')) {
+    return t('lens.chat.errorNodeOffline')
+  }
+  if (c.includes('LENSNODE_NOT_APPROVED')) {
+    return t('lens.chat.errorNodeNotApproved')
+  }
+  if (c.includes('LENSNODE_TASK_UNAVAILABLE')) {
+    return t('lens.chat.errorTaskUnavailable')
+  }
   return t('lens.chat.emptyAnswerHint')
 }
 
