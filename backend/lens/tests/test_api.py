@@ -1219,13 +1219,16 @@ class LensApiTests(TestCase):
             self.assistant.name,
         )
 
-        delete_response = self.client.post(
-            f"/api/lens/admin/skills/{self.skill.uuid}/force-delete/",
-            {"confirmation_name": self.skill.name},
-            format="json",
-        )
+        with patch("lens.views.skills.invalidate_skill_cache") as invalidate:
+            with self.captureOnCommitCallbacks(execute=True):
+                delete_response = self.client.post(
+                    f"/api/lens/admin/skills/{self.skill.uuid}/force-delete/",
+                    {"confirmation_name": self.skill.name},
+                    format="json",
+                )
 
         self.assertEqual(delete_response.status_code, 204)
+        invalidate.assert_called_once_with(self.skill.uuid)
         self.assertFalse(Skill.objects.filter(pk=self.skill.pk).exists())
         self.assertFalse(
             AssistantSkill.objects.filter(assistant=self.assistant).exists()

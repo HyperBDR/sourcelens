@@ -187,6 +187,42 @@ def lensnode_group_name(lensnode_uuid):
     return f"lens.lensnode.{lensnode_uuid}"
 
 
+def invalidate_skill_cache(skill_uuid):
+    """Ask every online LensNode to remove one Skill cache directory."""
+
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        logger.warning(
+            "Cannot invalidate Skill cache %s without a channel layer.",
+            skill_uuid,
+        )
+        return
+
+    nodes = LensNode.objects.filter(
+        status=LensNode.Status.ONLINE,
+        enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+        token_revoked=False,
+    ).values_list("uuid", flat=True)
+    for lensnode_uuid in nodes:
+        try:
+            async_to_sync(channel_layer.group_send)(
+                lensnode_group_name(lensnode_uuid),
+                {
+                    "type": "lensnode.command",
+                    "payload": {
+                        "type": "skill_cache_invalidate",
+                        "skill_uuid": str(skill_uuid),
+                    },
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to invalidate Skill cache %s on LensNode %s.",
+                skill_uuid,
+                lensnode_uuid,
+            )
+
+
 LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT = 180
 
 

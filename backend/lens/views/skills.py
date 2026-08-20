@@ -26,6 +26,7 @@ from lens.skill_packages import (
     update_skill_from_github,
     update_skill_zip,
 )
+from lens.services import invalidate_skill_cache
 from .base import BaseAdminViewSet
 
 
@@ -48,9 +49,10 @@ class SkillViewSet(BaseAdminViewSet):
         """Delete an unbound Skill and remove its package files."""
 
         package_path = instance.package_path
+        skill_uuid = instance.uuid
         instance.delete()
         transaction.on_commit(
-            lambda: self._remove_skill_package_path(package_path)
+            lambda: self._cleanup_deleted_skill(package_path, skill_uuid)
         )
 
     @action(detail=True, methods=["get"], url_path="delete-impact")
@@ -83,11 +85,15 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         package_path = skill.package_path
+        skill_uuid = skill.uuid
         with transaction.atomic():
             AssistantSkill.objects.filter(skill=skill).delete()
             skill.delete()
             transaction.on_commit(
-                lambda: self._remove_skill_package_path(package_path)
+                lambda: self._cleanup_deleted_skill(
+                    package_path,
+                    skill_uuid,
+                )
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -169,6 +175,12 @@ class SkillViewSet(BaseAdminViewSet):
             return
 
         shutil.rmtree(package_path, ignore_errors=True)
+
+    def _cleanup_deleted_skill(self, package_path, skill_uuid):
+        """Remove control-plane files and notify LensNodes after commit."""
+
+        self._remove_skill_package_path(package_path)
+        invalidate_skill_cache(skill_uuid)
 
     @action(
         detail=False,
