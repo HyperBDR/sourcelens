@@ -401,40 +401,48 @@ def test_analyze_structured_output_rejects_unsafe_or_invalid_input(tmp_path):
     assert malformed["error"] == "INVALID_JSON"
 
 
-def test_analyze_structured_output_enforces_call_budget(tmp_path):
+def test_structured_analysis_ignores_legacy_fixed_call_budget(tmp_path):
     resources = _resources(tmp_path)
     ref, _path = _write_result(resources, [1, 2, 3])
     command = {
         "settings": {"tool_policy": {"structured_analysis_max_calls": 1}}
     }
-    events = []
-    tool = _tool(
+    tool = _tool(resources, "analyze_structured_output", command=command)
+
+    results = [
+        json.loads(tool.invoke({"ref": ref, "operation": "count"}))
+        for _index in range(3)
+    ]
+
+    assert [result["result"] for result in results] == [3, 3, 3]
+    assert all(result["ok"] is True for result in results)
+    assert all("call_budget_exhausted" not in result for result in results)
+
+
+def test_record_validation_does_not_treat_wrapper_total_as_page_count(
+    tmp_path,
+):
+    resources = _resources(tmp_path)
+    ref, _path = _write_result(
         resources,
-        "analyze_structured_output",
-        command=command,
-        events=events,
+        {
+            "total": 44,
+            "items": [{"code": f"ORDER-{index}"} for index in range(20)],
+        },
     )
+    tool = _tool(resources, "validate_records")
 
-    first = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
-    second = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
-    third = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
+    result = json.loads(
+        tool.invoke({"ref": ref, "unique_by": ["code"]})
+    )["result"]
 
-    assert first["ok"] is True
-    assert first["call_budget_exhausted"] is True
-    assert "finish the final answer" in first["instruction"]
-    assert second["error"] == "STRUCTURED_ANALYSIS_CALL_LIMIT"
-    assert second["call_count"] == 2
-    assert second["max_calls"] == 1
-    assert "finish the final answer" in second["instruction"]
-    assert third == second
-    assert [
-        name
-        for name, _detail in events
-        if name == "tool.analyze_structured_output.budget_exceeded"
-    ] == ["tool.analyze_structured_output.budget_exceeded"]
+    assert result["valid"] is True
+    assert result["total_count"] == 20
+    assert result["expected_count"] is None
+    assert result["count_matches"] is None
 
 
-def test_record_validation_has_reserved_budget_and_understands_wrapper(
+def test_record_validation_can_repeat_with_an_explicit_complete_count(
     tmp_path,
 ):
     resources = _resources(tmp_path)
@@ -456,16 +464,14 @@ def test_record_validation_has_reserved_budget_and_understands_wrapper(
             }
         }
     }
-    events = []
     tool = _tool(
         resources,
         "analyze_structured_output",
         command=command,
-        events=events,
     )
 
     first = json.loads(tool.invoke({"ref": ref, "operation": "count"}))
-    exhausted = json.loads(
+    second = json.loads(
         tool.invoke({"ref": ref, "operation": "count"})
     )
     validated = json.loads(
@@ -473,6 +479,7 @@ def test_record_validation_has_reserved_budget_and_understands_wrapper(
             {
                 "ref": ref,
                 "operation": "validate_records",
+                "expected_count": 2,
                 "unique_by": ["code"],
                 "fields": ["code", "status"],
             }
@@ -483,13 +490,14 @@ def test_record_validation_has_reserved_budget_and_understands_wrapper(
             {
                 "ref": ref,
                 "operation": "validate_records",
+                "expected_count": 2,
                 "unique_by": ["code"],
             }
         )
     )
 
     assert first["ok"] is True
-    assert exhausted["error"] == "STRUCTURED_ANALYSIS_CALL_LIMIT"
+    assert second["ok"] is True
     assert validated["result"] == {
         "valid": True,
         "total_count": 2,
@@ -500,15 +508,7 @@ def test_record_validation_has_reserved_budget_and_understands_wrapper(
         "missing_unique_key_count": 0,
         "missing_required": {"code": 0, "status": 0},
     }
-    assert repeated["error"] == "STRUCTURED_VALIDATION_CALL_LIMIT"
-    completed = [
-        detail
-        for name, detail in events
-        if name == "tool.analyze_structured_output.done"
-        and detail["operation"] == "validate_records"
-    ]
-    assert completed[-1]["call_count"] == 1
-    assert completed[-1]["max_calls"] == 1
+    assert repeated["ok"] is True
 
 
 def test_inspect_saved_output_summarizes_csv_and_reads_bounded_window(
@@ -698,7 +698,7 @@ def test_run_skill_transform_rejects_undeclared_and_invalid_json(tmp_path):
     assert malformed["error"] == "INVALID_JSON"
 
 
-def test_run_skill_transform_enforces_call_budget(tmp_path):
+def test_skill_transform_ignores_legacy_fixed_call_budget(tmp_path):
     transforms = {
         "summarize-orders": {
             "entrypoint": "scripts/summarize_orders.py",
@@ -719,29 +719,20 @@ def test_run_skill_transform_enforces_call_budget(tmp_path):
     }
     tool = _tool(resources, "run_skill_transform", command=command)
 
-    first = json.loads(
-        tool.invoke(
-            {
-                "skill": "orders",
-                "transform": "summarize-orders",
-                "stdin_ref": ref,
-            }
+    results = [
+        json.loads(
+            tool.invoke(
+                {
+                    "skill": "orders",
+                    "transform": "summarize-orders",
+                    "stdin_ref": ref,
+                }
+            )
         )
-    )
-    second = json.loads(
-        tool.invoke(
-            {
-                "skill": "orders",
-                "transform": "summarize-orders",
-                "stdin_ref": ref,
-            }
-        )
-    )
+        for _index in range(2)
+    ]
 
-    assert first["ok"] is True
-    assert second["error"] == "TRANSFORM_CALL_LIMIT"
-    assert second["call_count"] == 2
-    assert second["max_calls"] == 1
+    assert [result["ok"] for result in results] == [True, True]
 
 
 def test_run_skill_transform_rejects_entrypoint_hash_mismatch(tmp_path):

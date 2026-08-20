@@ -1529,13 +1529,7 @@ TOKEN_BUDGET_PROFILES = {
     },
 }
 
-RUN_TIMEOUT_SECONDS_BY_ROUNDS = {
-    Assistant.AgentRounds.FLASH: 300,
-    Assistant.AgentRounds.FAST: 600,
-    Assistant.AgentRounds.BALANCED: 900,
-    Assistant.AgentRounds.DEEP: 1800,
-    Assistant.AgentRounds.MAX: 3600,
-}
+RUN_TIMEOUT_SECONDS = 3600
 
 
 def token_budget_for_profile(profile):
@@ -1549,12 +1543,10 @@ def token_budget_for_profile(profile):
 
 
 def run_timeout_for_rounds(agent_rounds):
-    """Return the Run timeout for one Assistant analysis level."""
+    """Return the system wall-clock safety boundary for a Run."""
 
-    return RUN_TIMEOUT_SECONDS_BY_ROUNDS.get(
-        agent_rounds,
-        RUN_TIMEOUT_SECONDS_BY_ROUNDS[Assistant.AgentRounds.BALANCED],
-    )
+    del agent_rounds
+    return RUN_TIMEOUT_SECONDS
 
 
 @transaction.atomic
@@ -1653,15 +1645,6 @@ def _canonical_hash(value):
         sort_keys=True,
     )
     return hashlib.sha256(serialized.encode()).hexdigest()
-
-
-AGENT_TURNS_BY_ROUNDS = {
-    "flash": 5,
-    "fast": 13,
-    "balanced": 26,
-    "deep": 50,
-    "max": 100,
-}
 
 
 def build_run_history(run):
@@ -2177,7 +2160,6 @@ def dispatch_run_to_lensnode(
                 "agent_model_ref": (
                     agent_model_ref
                 ),
-                "max_agent_turns": AGENT_TURNS_BY_ROUNDS.get(agent_rounds, 26),
                 "agent_rounds": agent_rounds,
                 "resume": resume,
                 "run_timeout_s": run_timeout_s,
@@ -2191,13 +2173,6 @@ def dispatch_run_to_lensnode(
                     "trace_id": trace_id_for_run(run.uuid),
                     "root_observation_id": root_observation_id_for_run(
                         run.uuid
-                    ),
-                },
-                "token_budget": {
-                    "profile": execution.token_budget_profile,
-                    "max_tokens": execution.token_budget_max_tokens,
-                    "final_reserve_tokens": (
-                        execution.token_budget_final_reserve_tokens
                     ),
                 },
                 "settings": runtime_settings,

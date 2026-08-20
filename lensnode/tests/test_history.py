@@ -712,7 +712,7 @@ def test_historical_assistant_content_is_not_current_tool_evidence():
 
     assert messages[0]["role"] == "assistant"
     assert middleware.successful_capabilities == set()
-    assert outcome == "blocked"
+    assert outcome == "partial"
     assert termination_detail["reason"] == "evidence_unavailable"
 
 
@@ -1152,8 +1152,8 @@ def test_route_selection_includes_current_images_in_classifier_input():
     class Model:
         def invoke(self, messages, **_kwargs):
             current = messages[-1]
-            assert current.content[0]["type"] == "text"
-            assert current.content[1]["type"] == "image_url"
+            assert current["content"][0]["type"] == "text"
+            assert current["content"][1]["type"] == "image_url"
             return SimpleNamespace(
                 content=(
                     '{"intent":"informational","complexity":"simple",'
@@ -2150,7 +2150,7 @@ def test_advisory_missing_capability_does_not_override_skill_success():
     assert termination_detail == {}
 
 
-def test_advisory_missing_capability_blocks_unverified_answer():
+def test_advisory_missing_capability_marks_answer_partial():
     middleware = SimpleNamespace(
         success_count=0,
         outcome="completed",
@@ -2164,11 +2164,11 @@ def test_advisory_missing_capability_blocks_unverified_answer():
         stop_reason=None,
     )
 
-    assert outcome == "blocked"
+    assert outcome == "partial"
     assert termination_detail["reason"] == "evidence_unavailable"
 
 
-def test_missing_required_capability_fails_closed_despite_global_success():
+def test_missing_required_capability_marks_unverified_global_success_partial():
     middleware = SimpleNamespace(
         success_count=1,
         successful_capabilities={"mcp"},
@@ -2184,7 +2184,7 @@ def test_missing_required_capability_fails_closed_despite_global_success():
         stop_reason=None,
     )
 
-    assert outcome == "blocked"
+    assert outcome == "partial"
     assert termination_detail["reason"] == "evidence_unavailable"
 
 
@@ -2204,9 +2204,29 @@ def test_unrelated_success_does_not_satisfy_required_skill_evidence():
         stop_reason=None,
     )
 
-    assert outcome == "blocked"
+    assert outcome == "partial"
     assert termination_detail["reason"] == "evidence_unavailable"
     assert termination_detail["capability"] == "skill"
+
+
+def test_missing_required_evidence_marks_partial_without_blocking_answer():
+    middleware = SimpleNamespace(
+        success_count=0,
+        successful_capabilities=set(),
+        outcome="completed",
+        termination_detail={},
+    )
+
+    outcome, termination_detail = _finalize_runtime_outcome(
+        capability_middleware=middleware,
+        evidence_requirement="tool_result",
+        required_capabilities=["skill"],
+        truncated=False,
+        stop_reason=None,
+    )
+
+    assert outcome == "partial"
+    assert termination_detail["reason"] == "evidence_unavailable"
 
 
 def test_alternative_required_capability_can_complete_after_failure():
@@ -2292,7 +2312,7 @@ def test_artifact_requirement_completes_after_actual_delivery():
     assert termination_detail == {}
 
 
-def test_blocked_evidence_is_not_downgraded_to_partial_when_truncated():
+def test_missing_evidence_remains_partial_when_truncated():
     middleware = SimpleNamespace(
         success_count=0,
         successful_capabilities=set(),
@@ -2308,7 +2328,7 @@ def test_blocked_evidence_is_not_downgraded_to_partial_when_truncated():
         stop_reason="soft_deadline",
     )
 
-    assert outcome == "blocked"
+    assert outcome == "partial"
     assert termination_detail["reason"] == "evidence_unavailable"
     assert termination_detail["trigger"] == "soft_deadline"
 
@@ -2973,83 +2993,6 @@ def test_capability_boundary_blocks_only_repeated_transient_request():
     assert middleware.termination_detail["capability"] == "mcp"
 
 
-def test_structured_analysis_limit_blocks_only_the_exhausted_tool():
-    middleware = agent_runtime.CapabilityBoundaryMiddleware()
-    request = SimpleNamespace(
-        tool=SimpleNamespace(name="analyze_structured_output"),
-        tool_call={
-            "name": "analyze_structured_output",
-            "id": "call-1",
-        },
-    )
-
-    result = middleware.wrap_tool_call(
-        request,
-        lambda _request: ToolMessage(
-            content=json.dumps(
-                {
-                    "ok": False,
-                    "error": "STRUCTURED_ANALYSIS_CALL_LIMIT",
-                    "instruction": (
-                        "Use existing bounded results and finish the answer."
-                    ),
-                }
-            ),
-            name="analyze_structured_output",
-            tool_call_id="call-1",
-            status="error",
-        ),
-    )
-
-    assert json.loads(result.content)["error"] == (
-        "STRUCTURED_ANALYSIS_CALL_LIMIT"
-    )
-    assert middleware.blocked_tools == {"analyze_structured_output"}
-    assert middleware.termination_detail == {}
-    assert middleware.failed_capabilities == set()
-
-    denied = middleware.wrap_tool_call(
-        request,
-        lambda _request: (_ for _ in ()).throw(
-            AssertionError("The blocked tool must not execute again")
-        ),
-    )
-
-    assert json.loads(denied.content)["error"] == "CAPABILITY_BLOCKED"
-
-
-def test_last_structured_analysis_call_prevents_an_over_limit_attempt():
-    middleware = agent_runtime.CapabilityBoundaryMiddleware()
-    request = SimpleNamespace(
-        tool=SimpleNamespace(name="analyze_structured_output"),
-        tool_call={
-            "name": "analyze_structured_output",
-            "id": "call-1",
-        },
-    )
-
-    result = middleware.wrap_tool_call(
-        request,
-        lambda _request: ToolMessage(
-            content=json.dumps(
-                {
-                    "ok": True,
-                    "call_budget_exhausted": True,
-                    "instruction": (
-                        "Use existing bounded results and finish the answer."
-                    ),
-                }
-            ),
-            name="analyze_structured_output",
-            tool_call_id="call-1",
-        ),
-    )
-
-    assert json.loads(result.content)["ok"] is True
-    assert middleware.blocked_tools == {"analyze_structured_output"}
-    assert middleware.termination_detail == {}
-
-
 def test_request_failures_are_isolated_by_normalized_arguments():
     middleware = agent_runtime.CapabilityBoundaryMiddleware()
 
@@ -3120,7 +3063,7 @@ def test_request_corrections_have_a_separate_source_failure_cap():
         )
 
     assert middleware.blocked_capabilities == set()
-    assert middleware.blocked_sources == {"mcp:mcp__orders"}
+    assert middleware.blocked_sources == set()
     assert middleware.capability_failure_counts["mcp"] == 4
 
 
@@ -3668,7 +3611,7 @@ def test_finalization_ignores_success_without_invocation_provenance():
         stop_reason=None,
     )
 
-    assert outcome == "blocked"
+    assert outcome == "partial"
     assert termination_detail["reason"] == "evidence_unavailable"
 
 
@@ -3944,7 +3887,7 @@ def test_general_chat_middleware_denies_task_execution():
     assert events[0][0] == "tool.task.denied"
 
 
-def test_general_chat_middleware_denies_direct_large_result_access():
+def test_general_chat_middleware_allows_bounded_large_result_access():
     events = []
     handler_calls = []
     middleware = agent_runtime._NoTaskMiddleware(
@@ -3979,16 +3922,9 @@ def test_general_chat_middleware_denies_direct_large_result_access():
         for request in requests
     ]
 
-    assert handler_calls == []
-    assert all(result.status == "error" for result in results)
-    assert all(
-        "LARGE_RESULT_DIRECT_ACCESS_DENIED" in result.content
-        for result in results
-    )
-    assert [name for name, _detail in events] == [
-        "tool.read_file.denied",
-        "tool.grep.denied",
-    ]
+    assert handler_calls == [True, True]
+    assert results == [None, None]
+    assert events == []
 
 
 def test_general_chat_middleware_allows_skill_reference_reads():
@@ -4031,7 +3967,7 @@ def test_general_chat_prompt_prefers_bounded_large_result_tools():
     assert "analyze_structured_output" in prompt
     assert "inspect_saved_output" in prompt
     assert "run_skill_transform" in prompt
-    assert "Never use read_file or grep" in prompt
+    assert "bounded" in prompt.lower()
     assert "/large_tool_results/" in prompt
 
 
@@ -4560,8 +4496,24 @@ def test_truncated_run_falls_back_to_wrapup_when_no_answer_text():
     assert truncated is True
     assert termination_reason == "turn_limit"
     assert "best-effort synthesis" in answer
-    assert "Reached the current analysis-depth limit" in answer
+    assert "Reached the current execution safety boundary" in answer
     assert model.invoked_with is not None
+
+
+def test_run_without_turn_limit_completes_naturally():
+    messages = [{"role": "user", "content": "q"}]
+    prefix = [_Msg("human", "q")]
+    agent = _FakeStreamAgent(prefix, new_ai_turns=30)
+
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=None,
+    )
+
+    assert answer == "answer 30"
+    assert truncated is False
+    assert termination_reason is None
 
 
 def test_soft_deadline_forces_wrapup_from_current_evidence():

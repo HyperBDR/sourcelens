@@ -1,5 +1,5 @@
 <template>
-  <li class="row" :style="{ paddingLeft: `${depth * 14}px` }">
+  <li class="row" :style="{ paddingLeft: `${depth * indent}px` }">
     <button
       v-if="expandable"
       type="button"
@@ -26,6 +26,7 @@
           :key-name="array ? undefined : childKey"
           :value="childValue"
           :depth="depth + 1"
+          :indent="indent"
         />
       </ul>
       <span v-if="open" class="punctuation">{{ closeBracket }}</span>
@@ -55,7 +56,8 @@ const props = defineProps({
     type: [Object, Array, String, Number, Boolean, null],
     required: true
   },
-  depth: { type: Number, default: 0 }
+  depth: { type: Number, default: 0 },
+  indent: { type: Number, default: 14 }
 })
 
 const open = ref(true)

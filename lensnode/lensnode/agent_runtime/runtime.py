@@ -1035,12 +1035,14 @@ class LensDeepAgentRuntime:
                         "Failed to enable agent run checkpoints"
                     )
         state.agent = create_deep_agent(**state.kwargs)
-        state.max_turns = state.command.get("max_agent_turns", 26)
+        state.max_turns = state.command.get("max_agent_turns")
 
     def _execute_agent(self, state):
         """Run the prepared Deep Agents graph and finalize its outcome."""
 
-        invoke_detail = {"max_agent_turns": state.max_turns}
+        invoke_detail = {}
+        if state.max_turns and state.max_turns > 0:
+            invoke_detail["max_agent_turns"] = state.max_turns
         if state.runtime_mode.execution_gates:
             invoke_detail.update(
                 {
@@ -1113,10 +1115,10 @@ class LensDeepAgentRuntime:
             ),
         )
         if truncated:
-            state.emit_agent_event(
-                "deepagents.agent.truncated",
-                {"max_agent_turns": state.max_turns},
-            )
+            detail = {}
+            if state.max_turns and state.max_turns > 0:
+                detail["max_agent_turns"] = state.max_turns
+            state.emit_agent_event("deepagents.agent.truncated", detail)
         state.emit_agent_event(
             "deepagents.runtime.done",
             {

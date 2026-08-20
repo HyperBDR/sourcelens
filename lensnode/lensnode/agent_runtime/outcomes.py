@@ -166,7 +166,7 @@ def _finalize_runtime_outcome(
             )
         if truncated and stop_reason:
             termination_detail["trigger"] = stop_reason
-        return "blocked", termination_detail
+        return "partial", termination_detail
 
     if evidence_requirement == "tool_result" and unrecovered_failures:
         if not termination_detail:
@@ -190,10 +190,7 @@ def _finalize_runtime_outcome(
             )
         if truncated and stop_reason:
             termination_detail["trigger"] = stop_reason
-        return (
-            "partial" if useful_evidence else "blocked",
-            termination_detail,
-        )
+        return "partial", termination_detail
 
     delivered_artifact_wrapup = (
         truncated

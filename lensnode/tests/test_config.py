@@ -59,7 +59,7 @@ def test_load_config_reads_run_token_budget(monkeypatch):
     assert config.token_budget_warn_ratio == 0.75
 
 
-def test_resolve_token_budget_uses_profile_and_clamps_to_node_ceiling():
+def test_resolve_token_budget_uses_only_the_node_safety_ceiling():
     config = type(
         "Config",
         (),
@@ -82,13 +82,13 @@ def test_resolve_token_budget_uses_profile_and_clamps_to_node_ceiling():
     )
 
     assert budget == {
-        "profile": "deep",
+        "profile": "system",
         "max_tokens": 500000,
-        "final_reserve_tokens": 75000,
+        "final_reserve_tokens": 40000,
     }
 
 
-def test_resolve_token_budget_disables_cap_for_unlimited_profile():
+def test_legacy_unlimited_profile_cannot_disable_node_safety_ceiling():
     config = type(
         "Config",
         (),
@@ -111,9 +111,9 @@ def test_resolve_token_budget_disables_cap_for_unlimited_profile():
     )
 
     assert budget == {
-        "profile": "unlimited",
-        "max_tokens": 0,
-        "final_reserve_tokens": 0,
+        "profile": "system",
+        "max_tokens": 500000,
+        "final_reserve_tokens": 40000,
     }
 
 

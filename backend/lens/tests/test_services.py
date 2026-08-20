@@ -139,20 +139,12 @@ class LensServiceTests(TransactionTestCase):
             title="",
         )
 
-    def test_run_timeout_for_rounds_maps_all_analysis_levels(self):
-        expected = {
-            "flash": 300,
-            "fast": 600,
-            "balanced": 900,
-            "deep": 1800,
-            "max": 3600,
-        }
-
-        for agent_rounds, timeout_s in expected.items():
+    def test_run_timeout_is_independent_of_execution_strategy(self):
+        for agent_rounds in ("flash", "fast", "balanced", "deep", "max"):
             with self.subTest(agent_rounds=agent_rounds):
                 self.assertEqual(
                     run_timeout_for_rounds(agent_rounds),
-                    timeout_s,
+                    3600,
                 )
 
     def test_explicit_language_request_overrides_profile_language(self):
@@ -1259,7 +1251,7 @@ class LensServiceTests(TransactionTestCase):
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")
-    def test_dispatch_uses_token_budget_execution_snapshot(
+    def test_dispatch_omits_legacy_per_run_token_budget(
         self,
         get_channel_layer,
         mock_async_to_sync,
@@ -1279,14 +1271,7 @@ class LensServiceTests(TransactionTestCase):
         dispatch_run_to_lensnode(run, "Analyze everything")
 
         payload = sender.call_args.args[1]["payload"]
-        self.assertEqual(
-            payload["token_budget"],
-            {
-                "profile": "deep",
-                "max_tokens": 500000,
-                "final_reserve_tokens": 75000,
-            },
-        )
+        self.assertNotIn("token_budget", payload)
         self.assertEqual(execution.token_budget_profile, "deep")
         self.assertEqual(payload["trace_context"]["trace_id"], run.uuid.hex)
         self.assertEqual(
@@ -1296,7 +1281,7 @@ class LensServiceTests(TransactionTestCase):
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")
-    def test_dispatch_disables_token_cap_for_unlimited_profile(
+    def test_dispatch_ignores_legacy_unlimited_token_profile(
         self,
         get_channel_layer,
         mock_async_to_sync,
@@ -1313,14 +1298,7 @@ class LensServiceTests(TransactionTestCase):
         dispatch_run_to_lensnode(run, "Analyze without a token cap")
 
         payload = sender.call_args.args[1]["payload"]
-        self.assertEqual(
-            payload["token_budget"],
-            {
-                "profile": "unlimited",
-                "max_tokens": 0,
-                "final_reserve_tokens": 0,
-            },
-        )
+        self.assertNotIn("token_budget", payload)
         self.assertEqual(run.execution.token_budget_profile, "unlimited")
 
     @patch("lens.services.async_to_sync")
@@ -1352,7 +1330,7 @@ class LensServiceTests(TransactionTestCase):
 
         payload = sender.call_args.args[1]["payload"]
         self.assertEqual(payload["agent_rounds"], "max")
-        self.assertEqual(payload["max_agent_turns"], 100)
+        self.assertNotIn("max_agent_turns", payload)
         self.assertEqual(payload["run_timeout_s"], 3600)
         self.assertEqual(payload["remaining_run_timeout_s"], 3300)
         self.assertEqual(execution.agent_rounds, "max")

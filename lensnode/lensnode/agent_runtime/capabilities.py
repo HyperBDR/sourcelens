@@ -14,17 +14,6 @@ from .messages import normalize_plan_steps as _normalize_plan_steps
 class CapabilityBoundaryMiddleware(AgentMiddleware):
     """Apply bounded recovery without stopping the whole agent run."""
 
-    CAPABILITY_CORRECTION_LIMIT = 4
-    TOOL_BUDGET_ERRORS = {
-        "ARTIFACT_CALL_LIMIT",
-        "ARTIFACT_REPEATED_CALL",
-        "ARTIFACT_STALLED",
-        "SAVED_OUTPUT_INSPECTION_CALL_LIMIT",
-        "STRUCTURED_ANALYSIS_CALL_LIMIT",
-        "STRUCTURED_VALIDATION_CALL_LIMIT",
-        "TRANSFORM_CALL_LIMIT",
-    }
-
     def __init__(
         self,
         emit_event=None,
@@ -490,25 +479,6 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
             payload = {"ok": False, "error": "MCP_TOOL_FAILED"}
         if payload.get("ok") is True:
             self._record_success(capability, tool_name, request)
-            if payload.get("call_budget_exhausted") is True:
-                self.blocked_tools.add(tool_name)
-            return result
-        if str(payload.get("error") or "") in self.TOOL_BUDGET_ERRORS:
-            self.blocked_tools.add(tool_name)
-            key = (
-                tool_name,
-                "policy",
-                request_sha256,
-            )
-            source = self._source_scope(capability, tool_name, request)
-            self._record_warning(
-                key,
-                capability,
-                "policy",
-                tool_name,
-                source,
-                request_sha256,
-            )
             return result
         if capability is None:
             return result
@@ -535,11 +505,6 @@ class CapabilityBoundaryMiddleware(AgentMiddleware):
         source_failures = self.source_failure_counts[source]
         source_corrections = self.source_correction_counts[source]
         block_source = error_type in {"configuration", "policy"}
-        if error_type in {"request", "tool"}:
-            block_source = block_source or (
-                source_corrections
-                >= self.CAPABILITY_CORRECTION_LIMIT
-            )
         block_request = exact_failures >= self._failure_budget(
             request,
             error_type,

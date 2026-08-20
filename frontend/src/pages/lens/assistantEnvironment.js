@@ -55,6 +55,37 @@ export function mcpRequiredEnvironmentNames(mcp) {
     .map((item) => item.name)
 }
 
+export function scopeEnvironmentSetValues(values, declaredNames) {
+  if (!Array.isArray(declaredNames)) {
+    return { values: values || [], unusedCount: 0 }
+  }
+  const declared = new Set(declaredNames)
+  const scopedValues = (values || []).filter((item) => declared.has(item.key))
+  return {
+    values: scopedValues,
+    unusedCount: (values || []).length - scopedValues.length
+  }
+}
+
+export function environmentConfigurationComplete({
+  selectedUuid,
+  requiredNames,
+  draftValues,
+  savedKeys
+}) {
+  const enteredValues = draftValues || {}
+  const required = requiredNames || []
+  const hasEnteredValue = Object.values(enteredValues).some((value) =>
+    String(value ?? '').trim()
+  )
+  if (!selectedUuid && (required.length || hasEnteredValue)) return false
+
+  const saved = new Set(savedKeys || [])
+  return required.every(
+    (name) => String(enteredValues[name] ?? '').trim() || saved.has(name)
+  )
+}
+
 function environmentReferences(value) {
   if (Array.isArray(value)) {
     return value.reduce((references, item) => {

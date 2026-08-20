@@ -15,13 +15,7 @@ LOGGER = logging.getLogger("lensnode")
 # How often the inactivity watchdog checks for stalled output.
 WATCHDOG_INTERVAL_S = 5
 
-RUN_TIMEOUT_SECONDS_BY_ROUNDS = {
-    "flash": 300,
-    "fast": 600,
-    "balanced": 900,
-    "deep": 1800,
-    "max": 3600,
-}
+RUN_TIMEOUT_SECONDS = 3600
 
 
 def _run_timeout_seconds(command):
@@ -35,11 +29,7 @@ def _run_timeout_seconds(command):
         and value > 0
     ):
         return value
-    agent_rounds = str(command.get("agent_rounds") or "").lower()
-    return RUN_TIMEOUT_SECONDS_BY_ROUNDS.get(
-        agent_rounds,
-        RUN_TIMEOUT_SECONDS_BY_ROUNDS["balanced"],
-    )
+    return RUN_TIMEOUT_SECONDS
 
 
 def _remaining_run_timeout_seconds(command, now=None):

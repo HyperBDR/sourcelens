@@ -155,40 +155,12 @@
               type="radio"
               :value="tier.value"
               v-model="form.agent_rounds"
-              class="sr-only"
+              class="sr-only execution-tier-radio"
             />
             <span class="text-sm font-medium">{{ tier.label }}</span>
             <span class="mt-0.5 text-xs opacity-60">{{ tier.hint }}</span>
           </label>
         </div>
-      </FormRow>
-      <FormRow :label="t('lensAdmin.fields.tokenBudget')">
-        <div class="grid gap-3 sm:grid-cols-3">
-          <label
-            v-for="profile in tokenBudgetProfiles"
-            :key="profile.value"
-            class="cursor-pointer rounded-lg border-2 p-3 transition-colors"
-            :class="
-              form.token_budget_profile === profile.value
-                ? 'border-brand-600 bg-brand-50 text-brand-700'
-                : 'border-line bg-surface text-ink-600 hover:border-brand-300'
-            "
-          >
-            <input
-              v-model="form.token_budget_profile"
-              class="sr-only"
-              type="radio"
-              :value="profile.value"
-            />
-            <span class="block text-sm font-medium">{{ profile.label }}</span>
-            <span class="mt-1 block text-xs opacity-70">{{
-              profile.hint
-            }}</span>
-          </label>
-        </div>
-        <p class="mt-1 text-xs text-ink-500">
-          {{ t('lensAdmin.tokenBudget.nodeLimitHint') }}
-        </p>
       </FormRow>
     </div>
 
@@ -509,21 +481,46 @@
                           '__new__'
                       "
                       :variable-set="selectedEnvironmentSet(skill.uuid)"
+                      :allowed-keys="
+                        skillEnvironment(skill).map((item) => item.name)
+                      "
                     />
-                    <input
+                    <p
+                      v-if="!form.skill_environment_set_uuids[skill.uuid]"
+                      class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-[11px] leading-4 text-primary-700"
+                      role="status"
+                    >
+                      {{ t('lensAdmin.wizard.environmentSetRequiredHint') }}
+                    </p>
+                    <div
                       v-if="
                         form.skill_environment_set_uuids[skill.uuid] ===
                         '__new__'
                       "
-                      v-model="environmentDraft(skill.uuid).name"
-                      class="form-input skill-environment-input"
-                      type="text"
-                      :placeholder="t('lensAdmin.wizard.environmentSetName')"
-                      :aria-label="t('lensAdmin.wizard.environmentSetName')"
-                      maxlength="160"
-                      autocomplete="off"
-                    />
-                    <div class="space-y-2.5 rounded-md bg-surface-sunken p-2.5">
+                      class="space-y-1"
+                    >
+                      <label class="text-[11px] font-medium text-ink-700">
+                        {{ t('lensAdmin.wizard.environmentSetNameLabel') }}
+                      </label>
+                      <input
+                        v-model="environmentDraft(skill.uuid).name"
+                        class="form-input skill-environment-input"
+                        type="text"
+                        :placeholder="t('lensAdmin.wizard.environmentSetName')"
+                        :aria-label="
+                          t('lensAdmin.wizard.environmentSetNameLabel')
+                        "
+                        maxlength="160"
+                        autocomplete="off"
+                      />
+                      <p class="text-[11px] leading-4 text-ink-500">
+                        {{ t('lensAdmin.wizard.environmentSetNameHint') }}
+                      </p>
+                    </div>
+                    <div
+                      v-if="form.skill_environment_set_uuids[skill.uuid]"
+                      class="space-y-2.5 rounded-md bg-surface-sunken p-2.5"
+                    >
                       <div
                         v-for="item in skillEnvironment(skill)"
                         :key="item.name"
@@ -670,20 +667,43 @@
                       form.mcp_environment_set_uuids[mcp.uuid] !== '__new__'
                     "
                     :variable-set="selectedMcpEnvironmentSet(mcp.uuid)"
+                    :allowed-keys="mcpEnvironment(mcp).map((item) => item.name)"
                   />
-                  <input
+                  <p
+                    v-if="!form.mcp_environment_set_uuids[mcp.uuid]"
+                    class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-[11px] leading-4 text-primary-700"
+                    role="status"
+                  >
+                    {{ t('lensAdmin.wizard.environmentSetRequiredHint') }}
+                  </p>
+                  <div
                     v-if="
                       form.mcp_environment_set_uuids[mcp.uuid] === '__new__'
                     "
-                    v-model="mcpEnvironmentDraft(mcp.uuid).name"
-                    class="form-input skill-environment-input"
-                    type="text"
-                    :placeholder="t('lensAdmin.wizard.environmentSetName')"
-                    :aria-label="t('lensAdmin.wizard.environmentSetName')"
-                    maxlength="160"
-                    autocomplete="off"
-                  />
-                  <div class="space-y-2.5 rounded-md bg-surface-sunken p-2.5">
+                    class="space-y-1"
+                  >
+                    <label class="text-[11px] font-medium text-ink-700">
+                      {{ t('lensAdmin.wizard.environmentSetNameLabel') }}
+                    </label>
+                    <input
+                      v-model="mcpEnvironmentDraft(mcp.uuid).name"
+                      class="form-input skill-environment-input"
+                      type="text"
+                      :placeholder="t('lensAdmin.wizard.environmentSetName')"
+                      :aria-label="
+                        t('lensAdmin.wizard.environmentSetNameLabel')
+                      "
+                      maxlength="160"
+                      autocomplete="off"
+                    />
+                    <p class="text-[11px] leading-4 text-ink-500">
+                      {{ t('lensAdmin.wizard.environmentSetNameHint') }}
+                    </p>
+                  </div>
+                  <div
+                    v-if="form.mcp_environment_set_uuids[mcp.uuid]"
+                    class="space-y-2.5 rounded-md bg-surface-sunken p-2.5"
+                  >
                     <div
                       v-for="item in mcpEnvironment(mcp)"
                       :key="item.name"
@@ -1052,7 +1072,10 @@ import {
   assignmentFirstOptions,
   createLatestRequestRunner
 } from './assistantAccessSelectors'
-import { mcpRequiredEnvironmentNames } from './assistantEnvironment'
+import {
+  environmentConfigurationComplete,
+  mcpRequiredEnvironmentNames
+} from './assistantEnvironment'
 import { filterSelectableSkills, skillDescription } from './assistantSkills'
 
 const props = defineProps({
@@ -1263,24 +1286,6 @@ const agentRoundsTiers = computed(() => [
     value: 'max',
     label: t('lensAdmin.agentRounds.max'),
     hint: t('lensAdmin.agentRounds.maxHint')
-  }
-])
-
-const tokenBudgetProfiles = computed(() => [
-  {
-    value: 'standard',
-    label: t('lensAdmin.tokenBudget.standard'),
-    hint: t('lensAdmin.tokenBudget.standardHint')
-  },
-  {
-    value: 'deep',
-    label: t('lensAdmin.tokenBudget.deep'),
-    hint: t('lensAdmin.tokenBudget.deepHint')
-  },
-  {
-    value: 'unlimited',
-    label: t('lensAdmin.tokenBudget.unlimited'),
-    hint: t('lensAdmin.tokenBudget.unlimitedHint')
   }
 ])
 
@@ -1596,11 +1601,6 @@ function selectedEnvironmentSet(skillUuid) {
   )
 }
 
-function environmentItemConfigured(skill, item) {
-  const draftValue = environmentDraft(skill.uuid).values[item.name]
-  return !!String(draftValue || '').trim() || environmentItemSaved(skill, item)
-}
-
 function environmentItemSaved(skill, item) {
   return (selectedEnvironmentSet(skill.uuid)?.keys || []).includes(item.name)
 }
@@ -1613,19 +1613,14 @@ function selectedSkillEnvironmentsConfigured() {
   return (props.form.skill_uuids || []).every((skillUuid) => {
     const skill = props.skills.find((item) => item.uuid === skillUuid)
     if (!skill) return true
-    const required = skillEnvironment(skill).filter((item) => item.required)
-    const selectedUuid =
-      props.form.skill_environment_set_uuids?.[skillUuid] || ''
-    const draft = environmentDraft(skillUuid)
-    const hasEnteredValue = Object.values(draft.values || {}).some((value) =>
-      String(value ?? '').trim()
-    )
-    if (!selectedUuid && (required.length || hasEnteredValue)) return false
-    if (selectedUuid === '__new__' && !String(draft.name || '').trim()) {
-      return false
-    }
-    if (!required.length) return true
-    return required.every((item) => environmentItemConfigured(skill, item))
+    return environmentConfigurationComplete({
+      selectedUuid: props.form.skill_environment_set_uuids?.[skillUuid] || '',
+      requiredNames: skillEnvironment(skill)
+        .filter((item) => item.required)
+        .map((item) => item.name),
+      draftValues: environmentDraft(skillUuid).values,
+      savedKeys: selectedEnvironmentSet(skillUuid)?.keys
+    })
   })
 }
 
@@ -1665,30 +1660,16 @@ function mcpEnvironmentItemSaved(mcp, item) {
   return (selectedMcpEnvironmentSet(mcp.uuid)?.keys || []).includes(item.name)
 }
 
-function mcpEnvironmentItemConfigured(mcp, item) {
-  const draftValue = mcpEnvironmentDraft(mcp.uuid).values[item.name]
-  return !!String(draftValue || '').trim() || mcpEnvironmentItemSaved(mcp, item)
-}
-
 function selectedMcpEnvironmentsConfigured() {
   return (props.form.mcp_uuids || []).every((mcpUuid) => {
     const mcp = props.mcps.find((item) => item.uuid === mcpUuid)
     if (!mcp) return true
-    const requiredNames = new Set(mcpRequiredEnvironmentNames(mcp))
-    const required = mcpEnvironment(mcp).filter((item) =>
-      requiredNames.has(item.name)
-    )
-    const selectedUuid = props.form.mcp_environment_set_uuids?.[mcpUuid] || ''
-    const draft = mcpEnvironmentDraft(mcpUuid)
-    const hasEnteredValue = Object.values(draft.values || {}).some((value) =>
-      String(value ?? '').trim()
-    )
-    if (!selectedUuid && (required.length || hasEnteredValue)) return false
-    if (selectedUuid === '__new__' && !String(draft.name || '').trim()) {
-      return false
-    }
-    if (!required.length) return true
-    return required.every((item) => mcpEnvironmentItemConfigured(mcp, item))
+    return environmentConfigurationComplete({
+      selectedUuid: props.form.mcp_environment_set_uuids?.[mcpUuid] || '',
+      requiredNames: mcpRequiredEnvironmentNames(mcp),
+      draftValues: mcpEnvironmentDraft(mcpUuid).values,
+      savedKeys: selectedMcpEnvironmentSet(mcpUuid)?.keys
+    })
   })
 }
 
@@ -1768,5 +1749,17 @@ function ensureSelectedTask() {
 
 .skill-environment-input {
   @apply py-1.5 text-xs;
+}
+
+.execution-tier-radio {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
 }
 </style>

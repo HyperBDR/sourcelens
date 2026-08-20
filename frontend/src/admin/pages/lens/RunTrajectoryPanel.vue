@@ -116,9 +116,11 @@
       />
 
       <div
-        v-if="groupedRows.length"
+        v-if="rows.length"
         data-testid="trajectory-ledger"
         class="trajectory-split"
+        :class="{ 'trajectory-split-resizing': resizeActive }"
+        ref="splitRef"
       >
         <div ref="tablePaneRef" class="table-pane sl-scrollbar">
           <table class="trajectory-table">
@@ -129,23 +131,23 @@
               </tr>
             </thead>
             <tbody>
-              <template v-for="group in groupedRows" :key="group.key">
-                <tr
-                  v-for="(row, index) in group.rows"
-                  :key="row.event.event_id"
-                  class="ledger-row"
-                  :class="{ 'turn-start-row': index === 0 }"
-                  :data-turn-start="index === 0 || undefined"
-                  :data-turn-end="index === group.rows.length - 1 || undefined"
-                  :data-selected="isSelected(row.event) || undefined"
-                  :data-error="isErrorEvent(row.event) || undefined"
-                  @click="selectEvent(row.event)"
-                  @keydown.enter="selectEvent(row.event)"
-                >
+              <tr
+                v-for="(row, index) in rows"
+                :key="row.event.event_id"
+                class="ledger-row"
+                :class="{ 'turn-start-row': index === 0 }"
+                :data-turn-start="index === 0 || undefined"
+                :data-turn-end="index === rows.length - 1 || undefined"
+                :data-selected="isSelected(row.event) || undefined"
+                :data-error="isErrorEvent(row.event) || undefined"
+                :style="rowIndentStyle(row)"
+                @click="selectEvent(row.event)"
+                @keydown.enter="selectEvent(row.event)"
+              >
                   <td class="event-cell">
                     <span class="turn-rail" aria-hidden="true" />
                     <span
-                      v-if="index === 0 && isRequestGroup(group.category)"
+                      v-if="index === 0"
                       class="request-dot"
                       aria-hidden="true"
                     />
@@ -207,16 +209,30 @@
                       </time>
                     </span>
                   </td>
-                </tr>
-              </template>
+              </tr>
             </tbody>
           </table>
         </div>
 
+        <div
+          v-if="selectedEvent"
+          class="trajectory-resize-handle"
+          role="separator"
+          aria-label="Resize inspector"
+          aria-orientation="vertical"
+          tabindex="0"
+          @pointerdown="startInspectorResize"
+          @pointermove="resizeInspector"
+          @lostpointercapture="finishInspectorResize"
+          @keydown="resizeInspectorWithKeyboard"
+        />
+
         <aside
           v-if="selectedEvent"
+          ref="inspectorRef"
           class="trajectory-inspector"
           data-testid="trajectory-inspector"
+          :style="inspectorStyle"
         >
           <div class="inspector-header">
             <div class="inspector-title">
@@ -227,6 +243,12 @@
               <span class="inspector-location">{{
                 selectedEvent.event_type
               }}</span>
+            </div>
+            <div class="inspector-header-meta">
+              <span class="inspector-sequence">#{{ selectedEvent.sequence }}</span>
+              <span class="kind-tag" :class="tagClass(selectedEvent)">
+                {{ kindLabel(selectedEvent) }}
+              </span>
             </div>
             <button
               type="button"
@@ -252,32 +274,60 @@
           </div>
           <div class="inspector-body">
             <template v-if="inspectorTab === 'summary'">
-              <span :class="statusClass(selectedEvent)">{{
-                statusLabel(selectedEvent)
-              }}</span>
+              <div class="inspector-event-card">
+                <div class="inspector-event-card-title">
+                  {{ eventTitle(selectedEvent) }}
+                </div>
+                <div class="inspector-event-card-type">
+                  {{ selectedEvent.event_type }}
+                </div>
+                <div class="inspector-event-chips">
+                  <span :class="statusClass(selectedEvent)">{{
+                    statusLabel(selectedEvent)
+                  }}</span>
+                  <span class="inspector-chip">Sequence {{ selectedEvent.sequence }}</span>
+                  <span v-if="selectedEvent.attempt != null" class="inspector-chip">
+                    Attempt {{ selectedEvent.attempt }}
+                  </span>
+                </div>
+              </div>
               <dl class="overview">
                 <div>
-                  <dt>Sequence</dt>
-                  <dd>{{ selectedEvent.sequence }}</dd>
-                </div>
-                <div>
-                  <dt>Attempt</dt>
-                  <dd>{{ selectedEvent.attempt }}</dd>
-                </div>
-                <div>
-                  <dt>Call / Parent</dt>
-                  <dd class="mono">
-                    {{ selectedEvent.call_id || '-' }}
-                    <span class="sub"
-                      >/ {{ selectedEvent.parent_call_id || '-' }}</span
-                    >
+                  <dt>Hierarchy</dt>
+                  <dd class="mono hierarchy-value">
+                    <span v-if="selectedEvent.call_id">Call {{ selectedEvent.call_id }}</span>
+                    <span v-if="selectedEvent.parent_call_id">Parent {{ selectedEvent.parent_call_id }}</span>
+                    <span v-if="!selectedEvent.call_id && !selectedEvent.parent_call_id">-</span>
                   </dd>
                 </div>
                 <div>
                   <dt>Timestamp</dt>
-                  <dd class="mono">{{ selectedEvent.timestamp }}</dd>
+                  <dd class="mono wrap-value">{{ selectedEvent.timestamp }}</dd>
                 </div>
               </dl>
+              <section
+                v-if="
+                  inspectorInput(selectedEvent) !== undefined ||
+                  inspectorOutput(selectedEvent) !== undefined
+                "
+                class="overview-section inspector-io-section"
+              >
+                <h4 class="overview-heading">输入 / 输出</h4>
+                <div
+                  v-if="inspectorInput(selectedEvent) !== undefined"
+                  class="inspector-data-block"
+                >
+                  <span class="inspector-data-label">Input</span>
+                  <pre>{{ inspectorValue(inspectorInput(selectedEvent)) }}</pre>
+                </div>
+                <div
+                  v-if="inspectorOutput(selectedEvent) !== undefined"
+                  class="inspector-data-block"
+                >
+                  <span class="inspector-data-label">Output</span>
+                  <pre>{{ inspectorValue(inspectorOutput(selectedEvent)) }}</pre>
+                </div>
+              </section>
               <section class="overview-section">
                 <h4 class="overview-heading">
                   {{ t('lensRuns.trajectoryTiming') }}
@@ -327,8 +377,9 @@
             <JsonTree
               v-else-if="inspectorTab === 'payload'"
               :data="selectedEvent.payload"
+              :indent="8"
             />
-            <JsonTree v-else :data="selectedEvent" />
+            <JsonTree v-else :data="selectedEvent" :indent="8" />
           </div>
         </aside>
       </div>
@@ -365,6 +416,7 @@ import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import {
   buildTimelineLanes,
   buildTrajectoryRows,
+  clampInspectorWidth,
   eventCategory,
   groupTrajectoryRows
 } from './runTrajectory'
@@ -388,10 +440,24 @@ const collapsed = ref(new Set())
 const timelineRange = ref(null)
 const inspectorTab = ref('summary')
 const tablePaneRef = ref(null)
+const splitRef = ref(null)
+const inspectorRef = ref(null)
+const inspectorWidth = ref(null)
+const resizeActive = ref(false)
 const showSnapshots = ref(false)
 
 let filterTimer = null
 let requestId = 0
+let resizeOriginX = 0
+let resizeOriginWidth = 0
+
+const inspectorStyle = computed(() =>
+  inspectorWidth.value === null
+    ? undefined
+    : {
+        '--trajectory-inspector-width': `${inspectorWidth.value}px`
+      }
+)
 
 const KIND_BY_CATEGORY = {
   model: 'model',
@@ -497,19 +563,11 @@ const allCallsCollapsed = computed(
     collapsibleCallIds.value.every((id) => collapsed.value.has(id))
 )
 
-const inspectorTabs = computed(() => {
-  const tabs = [
-    { id: 'summary', label: t('lensRuns.trajectoryInspectorSummary') }
-  ]
-  if (selectedEvent.value?.payload !== undefined) {
-    tabs.push({
-      id: 'payload',
-      label: t('lensRuns.trajectoryInspectorPayload')
-    })
-  }
-  tabs.push({ id: 'raw', label: t('lensRuns.trajectoryInspectorRaw') })
-  return tabs
-})
+const inspectorTabs = computed(() => [
+  { id: 'summary', label: t('lensRuns.trajectoryInspectorSummary') },
+  { id: 'payload', label: t('lensRuns.trajectoryInspectorPayload') },
+  { id: 'raw', label: t('lensRuns.trajectoryInspectorRaw') }
+])
 
 function kindOf(event) {
   const categoryValue = eventCategory(event)
@@ -573,8 +631,11 @@ function isOutsideTimelineRange(event) {
   )
 }
 
-function isRequestGroup(categoryValue) {
-  return ['model', 'tool', 'subtool'].includes(categoryValue)
+function latestSequence(items) {
+  return items.reduce((latest, event) => {
+    const sequence = Number(event?.sequence)
+    return Number.isFinite(sequence) ? Math.max(latest, sequence) : latest
+  }, 0)
 }
 
 function toolCallText(event) {
@@ -600,6 +661,30 @@ function eventMetric(event) {
     parts.push(`${payload.usage.total_tokens} tokens`)
   }
   return parts.join(' · ')
+}
+
+function inspectorInput(event) {
+  const payload = event?.payload || {}
+  return (
+    payload.arguments ??
+    payload.input ??
+    payload.params ??
+    payload.request
+  )
+}
+
+function inspectorOutput(event) {
+  const payload = event?.payload || {}
+  return payload.result ?? payload.output ?? payload.response
+}
+
+function inspectorValue(value) {
+  if (typeof value === 'string') return value.slice(0, 2400)
+  try {
+    return JSON.stringify(value, null, 2).slice(0, 2400)
+  } catch {
+    return String(value)
+  }
 }
 
 function statusClass(event) {
@@ -641,7 +726,46 @@ function timeText(value) {
 
 function selectEvent(event) {
   selectedEvent.value = event
-  inspectorTab.value = 'summary'
+}
+
+function rowIndentStyle(row) {
+  const depth = Math.min(Math.max(Number(row.depth) || 0, 0), 8)
+  return { '--trajectory-indent': `${depth * 18}px` }
+}
+
+function setInspectorWidth(width) {
+  const splitWidth = splitRef.value?.clientWidth
+  if (!splitWidth) return
+  inspectorWidth.value = clampInspectorWidth(splitWidth, width)
+}
+
+function startInspectorResize(event) {
+  if (event.button !== 0) return
+  event.preventDefault()
+  resizeOriginX = event.clientX
+  resizeOriginWidth = inspectorRef.value?.getBoundingClientRect().width || 0
+  resizeActive.value = true
+  event.currentTarget.setPointerCapture(event.pointerId)
+}
+
+function resizeInspector(event) {
+  if (!resizeActive.value) return
+  setInspectorWidth(resizeOriginWidth - (event.clientX - resizeOriginX))
+}
+
+function finishInspectorResize() {
+  resizeActive.value = false
+}
+
+function resizeInspectorWithKeyboard(event) {
+  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+  event.preventDefault()
+  const currentWidth =
+    inspectorWidth.value ||
+    inspectorRef.value?.getBoundingClientRect().width ||
+    0
+  const delta = event.key === 'ArrowLeft' ? 32 : -32
+  setInspectorWidth(currentWidth + delta)
 }
 
 async function scrollSelectedIntoView() {
@@ -687,7 +811,7 @@ async function fetchTrajectory(append = false) {
   const currentRequestId = ++requestId
   loading.value = true
   try {
-    const afterSequence = append ? events.value.at(-1)?.sequence || 0 : 0
+    const afterSequence = append ? latestSequence(events.value) : 0
     const data = await getAdminRunTrajectory(props.runUuid, {
       page_size: 500,
       after_sequence: afterSequence,
@@ -700,9 +824,10 @@ async function fetchTrajectory(append = false) {
         ...event,
         _ms: new Date(event.timestamp).getTime()
       }))
+    const nextEvents = normalize(data.results)
     events.value = append
-      ? [...events.value, ...normalize(data.results)]
-      : normalize(data.results)
+      ? [...events.value, ...nextEvents]
+      : nextEvents
     summary.value = data.summary || {}
     hasMore.value = Boolean(data.has_more)
     if (!append) {
@@ -1044,9 +1169,14 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
   background: var(--t-bg-1);
 }
 
+.trajectory-split-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .table-pane {
   flex: 1;
-  min-width: 0;
+  min-width: 420px;
   overflow: auto;
 }
 
@@ -1138,7 +1268,7 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
 .event-cell {
   position: relative;
   padding-right: 4px !important;
-  padding-left: 34px !important;
+  padding-left: calc(34px + var(--trajectory-indent, 0px)) !important;
 }
 
 .turn-rail {
@@ -1275,6 +1405,7 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
   align-items: center;
   gap: 12px;
   padding-right: 8px !important;
+  padding-left: calc(8px + var(--trajectory-indent, 0px)) !important;
 }
 
 .row-expand {
@@ -1370,11 +1501,39 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
 }
 
 /* Inspector drawer */
+.trajectory-resize-handle {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 8px;
+  width: 8px;
+  margin: 0 -4px;
+  outline: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.trajectory-resize-handle::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: '';
+}
+
+.trajectory-resize-handle:hover::after,
+.trajectory-resize-handle:focus-visible::after,
+.trajectory-split-resizing .trajectory-resize-handle::after {
+  background: var(--t-accent);
+}
+
 .trajectory-inspector {
   display: flex;
   flex: none;
   flex-direction: column;
-  width: clamp(320px, 38%, 440px);
+  width: var(--trajectory-inspector-width, clamp(320px, 42%, 520px));
+  max-width: calc(100% - 420px);
   min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--t-border-l2);
@@ -1409,6 +1568,29 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
   align-items: center;
   min-width: 0;
   gap: 8px;
+}
+
+.inspector-header-meta {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+}
+
+.inspector-sequence {
+  color: var(--t-text-3);
+  font:
+    10px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.inspector-header-meta .kind-tag {
+  height: 18px;
+  padding: 0 5px;
+  font-size: 9px;
 }
 
 .inspector-dot {
@@ -1527,8 +1709,62 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   padding: 0 0 12px;
+}
+
+.inspector-event-card {
+  margin: 10px 12px 2px;
+  padding: 10px 11px;
+  border: 1px solid var(--t-border-l1);
+  border-radius: 7px;
+  background: var(--t-bg-2);
+}
+
+.inspector-event-card-title {
+  overflow: hidden;
+  color: var(--t-text-1);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-event-card-type {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  color: var(--t-text-3);
+  font:
+    11px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+
+.inspector-event-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.inspector-event-chips .status-badge {
+  margin: 0;
+}
+
+.inspector-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--t-border-l1);
+  border-radius: 999px;
+  color: var(--t-text-2);
+  background: var(--t-bg-1);
+  font-size: 10px;
+  line-height: 16px;
 }
 
 .status-badge {
@@ -1563,13 +1799,14 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
 
 .overview > div {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 82px minmax(0, 1fr);
   min-height: 22px;
   padding: 0 14px;
-  align-items: center;
+  align-items: start;
 }
 
 .overview dt {
+  padding-top: 1px;
   color: var(--t-text-3);
 }
 
@@ -1589,6 +1826,57 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
 .overview dd.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
+}
+
+.overview dd.wrap-value {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.hierarchy-value {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 17px;
+}
+
+.hierarchy-value span {
+  overflow-wrap: anywhere;
+}
+
+.inspector-io-section {
+  padding-bottom: 6px;
+}
+
+.inspector-data-block {
+  margin: 5px 12px 8px;
+}
+
+.inspector-data-label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--t-text-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.inspector-data-block pre {
+  max-height: 160px;
+  margin: 0;
+  padding: 8px 9px;
+  overflow: auto;
+  border: 1px solid var(--t-border-l1);
+  border-radius: 5px;
+  color: var(--t-text-1);
+  background: var(--t-bg-2);
+  font:
+    11px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .overview dd .sub {
@@ -1627,6 +1915,14 @@ onBeforeUnmount(() => clearTimeout(filterTimer))
 /* Scrollbars: only the ledger pane and JSON code blocks scroll, using the
    app-wide thin scrollbar convention. */
 @media (max-width: 900px) {
+  .table-pane {
+    min-width: 0;
+  }
+
+  .trajectory-resize-handle {
+    display: none;
+  }
+
   .trajectory-inspector {
     position: absolute;
     z-index: 5;

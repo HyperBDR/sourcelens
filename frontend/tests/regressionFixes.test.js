@@ -145,18 +145,18 @@ test('drawer skips visual transitions in a hidden document', async () => {
   assert.equal(animationCount, 0)
 })
 
-test('assistant token budget offers an unlimited profile', async () => {
+test('assistant exposes one execution strategy without a token budget picker', async () => {
   const [drawer, english, chinese] = await Promise.all([
     source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
     source('admin/locales/en.json').then(JSON.parse),
     source('admin/locales/zh-CN.json').then(JSON.parse)
   ])
 
-  assert.match(drawer, /value: 'unlimited'/)
-  assert.equal(english.lensAdmin.tokenBudget.unlimited, 'Unlimited')
-  assert.equal(chinese.lensAdmin.tokenBudget.unlimited, '无限制')
-  assert.match(english.lensAdmin.tokenBudget.unlimitedHint, /token cap/i)
-  assert.match(chinese.lensAdmin.tokenBudget.unlimitedHint, /Token 预算/)
+  assert.equal(english.lensAdmin.fields.agentRounds, 'Execution strategy')
+  assert.equal(chinese.lensAdmin.fields.agentRounds, '执行策略')
+  assert.doesNotMatch(drawer, /tokenBudgetProfiles/)
+  assert.doesNotMatch(drawer, /v-model="form\.token_budget_profile"/)
+  assert.doesNotMatch(drawer, /token_budget_profile:/)
 })
 
 test('assistant Skill picker supports search and environment configuration', async () => {
@@ -191,6 +191,22 @@ test('assistant Skill picker supports search and environment configuration', asy
   assert.equal(chinese.lensAdmin.wizard.environmentSection, '环境变量')
   assert.match(english.lensAdmin.wizard.environmentSectionHint, /this Skill/i)
   assert.match(chinese.lensAdmin.wizard.environmentSectionHint, /当前 Skill/)
+})
+
+test('chat exposes actionable messages for dispatch configuration failures', async () => {
+  const [chat, english, chinese] = await Promise.all([
+    source('pages/lens/Chat.vue'),
+    source('locales/en.json').then(JSON.parse),
+    source('locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(chat, /GENERAL_CHAT_SKILL_REQUIRED/)
+  assert.match(chat, /LENSNODE_OFFLINE/)
+  assert.equal(
+    english.lens.chat.errorSkillRequired,
+    'This assistant has no executable Skill bound for the request. Ask an administrator to bind the required Skill.'
+  )
+  assert.match(chinese.lens.chat.errorSkillRequired, /未绑定.*Skill/)
 })
 
 test('MCP config masks credential values while preserving edit feedback', async () => {
