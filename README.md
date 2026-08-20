@@ -89,10 +89,16 @@ git submodule update --init --recursive
 
 ### 2. Docker dev
 
+> **Prerequisite:** Docker Compose **V2** (`docker compose`) is required. The dev
+> stack relies on Compose V2 features — the top-level `name` field (dev/prod
+> project isolation), `pull_policy`, and `depends_on.condition` health gating —
+> that legacy Docker Compose v1 (`docker-compose`, e.g. 1.29.x) rejects with a
+> schema error on `up -d`. Verify your version with `docker compose version`.
+
 ```bash
 cp env.sample .env.dev
 # Edit .env.dev — database, AI service keys, etc.
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 ```
 
 ### 3. Services

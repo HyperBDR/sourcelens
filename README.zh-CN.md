@@ -89,10 +89,16 @@ git submodule update --init --recursive
 
 ### 2. Docker 本地开发
 
+> **前置要求**：必须使用 Docker Compose **V2**（`docker compose`）。开发栈依赖
+> Compose V2 特性——顶层 `name` 字段（dev/prod 项目隔离）、`pull_policy` 和
+> `depends_on.condition` 健康门控——旧版 Docker Compose v1（`docker-compose`，
+> 如 1.29.x）会在 `up -d` 时因 schema 校验报错而拒绝。可用
+> `docker compose version` 确认版本。
+
 ```bash
 cp env.sample .env.dev
 # 按需编辑 .env.dev，配置数据库、AI 服务密钥等
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 ```
 
 ### 3. 访问服务
