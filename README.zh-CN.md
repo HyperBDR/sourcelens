@@ -158,13 +158,69 @@ done
 
 ## 生产部署
 
-```bash
-cp env.sample .env
-# 配置 SECRET_KEY、DJANGO_DEBUG=false、ALLOWED_HOSTS、数据库等
-docker-compose up -d
-```
+SourceLens 有两种生产形态——每台主机**只选一种**（两者共享 `sourcelens` compose 项目名）：
+
+- **Standalone 单实例**（一个 backend-api、一个 frontend，无蓝绿切换）。
+  一键安装器：从 tag 拉取 release 配置文件、生成带随机密钥的 `.env`、拉取镜像、
+  启动栈并做健康检查。GitHub 不可达时用 `-c cn`，镜像改从阿里云 ACR 拉取、
+  配置文件从 Gitee 下载。
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
+      -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
+  ```
+
+- **零停机蓝绿**（docker-compose.yml）：`scripts/install.sh <tag>`。
 
 默认端口：HTTP 10080, HTTPS 10443（可通过 `NGINX_HTTP_PORT`、`NGINX_HTTPS_PORT` 调整）。
+
+### 自动化部署（standalone 安装器）
+
+standalone 栈可用一条命令完成安装与升级：从仓库 tag 下载 release 配置文件
+（`docker-compose.standalone.yml`、nginx/postgres 配置、`env.sample`），生成带
+随机密钥的生产 `.env`，拉取容器镜像，启动栈并做健康检查。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
+    -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
+```
+
+- **前置要求**：Docker + Docker Compose **V2**（`docker compose`）。旧版
+  Compose v1 会被拒绝——compose 文件使用了 V2 专属特性。
+- **幂等升级**：用更新的 tag 重跑同一条命令即可原地升级。已有 `.env` 绝不
+  覆盖，只会把已知的不安全占位值（`change-me`、`postgres`、`adminpassword`、
+  `change-me-lensnode-token`）替换为随机密钥。初始管理员用户名/密码会在结束
+  时打印并保存在 `install-info.env`。
+- **通道**：默认 release 文件来自 GitHub、应用镜像来自 Docker Hub
+  （`oneprolabs/*`）。GitHub 不可达时加 `-c cn`，release 文件改从 Gitee 下载、
+  应用镜像改从阿里云 ACR（`registry.cn-beijing.aliyuncs.com/oneprolabs`）拉取。
+  基础设施镜像（postgres/redis/nginx）始终来自 Docker Hub。
+- **端口**：HTTP 默认 10080、HTTPS 默认 10443。检测到端口被占用时会自动
+  使用下一个空闲端口。
+
+常用选项：
+
+| 选项 | 说明 |
+|---|---|
+| `-d, --dir DIR` | 安装目录（默认 `/opt/sourcelens`） |
+| `-p, --port PORT` | HTTP 端口（默认 10080） |
+| `-v, --version VER` | 发布版本（默认：最新 tag） |
+| `-c, --channel github\|cn` | 分发通道（默认：自动探测） |
+| `--download-source github\|gitee` | release 文件来源；同时决定镜像仓库 |
+| `--source DIR` | 使用本地仓库代码而非下载（测试/离线） |
+| `--domain HOST` | 公网主机名/IP（默认：自动探测） |
+| `-y, --yes` | 非交互：接受默认值，不提问 |
+
+完整选项及环境变量覆盖（`SOURCELENS_INSTALL_DIR`、`SOURCELENS_HTTP_PORT`、
+`SOURCELENS_HTTPS_PORT`、`SOURCELENS_VERSION`、`SOURCELENS_REGISTRY`、
+`SOURCELENS_DOMAIN` 等）见 `install.sh --help`。
+
+> **Cloudflare Turnstile**：`env.sample` 保持 `TURNSTILE_ENABLED=true`，生产
+> 环境要求配置真实的 `TURNSTILE_SECRET_KEY`——否则后端拒绝启动（这是刻意的
+> fail-fast 守卫）。一键安装器无法生成真实密钥，因此在全新安装时会把
+> `TURNSTILE_ENABLED` 设为 `false`，让登录在无验证组件下可用。之后要启用
+> Turnstile，请在 `.env` 中配置真实密钥（及前端 site key），再把
+> `TURNSTILE_ENABLED` 翻回 `true`。
 
 ### 容量与并发调优
 

@@ -158,13 +158,76 @@ done
 
 ## Production
 
-```bash
-cp env.sample .env
-# Configure SECRET_KEY, DJANGO_DEBUG=false, ALLOWED_HOSTS, database, etc.
-docker-compose up -d
-```
+SourceLens has two production shapes — pick **ONE** per host (both share the
+`sourcelens` compose project):
+
+- **Standalone single instance** (one backend-api, one frontend, no blue/green).
+  One-command installer: fetches the release config files from the tag,
+  generates a `.env` with random secrets, pulls images, starts the stack and
+  health-checks it. GitHub unreachable? `-c cn` pulls images from Aliyun ACR and
+  release files from Gitee.
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
+      -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
+  ```
+
+- **Zero-downtime blue/green** (docker-compose.yml): `scripts/install.sh <tag>`.
 
 Default ports: HTTP 10080, HTTPS 10443 (configurable via `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`).
+
+### Automated Deployment (standalone installer)
+
+The standalone stack installs and upgrades with a single command: it downloads
+the release config files (`docker-compose.standalone.yml`, nginx/postgres
+config, `env.sample`) from the repository tag, generates a production `.env`
+with random secrets, pulls the container images, starts the stack and
+health-checks it.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
+    -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
+```
+
+- **Requirements**: Docker + Docker Compose V2 (`docker compose`). Legacy
+  Compose v1 is rejected — the compose files use V2-only features.
+- **Idempotent upgrades**: re-running the same command with a newer tag upgrades
+  in place. An existing `.env` is never overwritten; only known insecure
+  placeholder values (`change-me`, `postgres`, `adminpassword`,
+  `change-me-lensnode-token`) are replaced with random secrets. The initial
+  admin username/password are printed at the end and stored in
+  `install-info.env`.
+- **Channels**: release files come from GitHub and application images from
+  Docker Hub (`oneprolabs/*`) by default. When GitHub is unreachable, pass
+  `-c cn` to fetch release files from Gitee and pull application images from
+  Aliyun ACR (`registry.cn-beijing.aliyuncs.com/oneprolabs`). Infrastructure
+  images (postgres/redis/nginx) always come from Docker Hub.
+- **Ports**: HTTP port defaults to 10080, HTTPS to 10443. Busy ports are
+  detected and the next free port is used automatically.
+
+Common options:
+
+| Option | Description |
+|---|---|
+| `-d, --dir DIR` | Install directory (default `/opt/sourcelens`) |
+| `-p, --port PORT` | HTTP port (default 10080) |
+| `-v, --version VER` | Release version (default: latest tag) |
+| `-c, --channel github\|cn` | Distribution channel (default: auto-detect) |
+| `--download-source github\|gitee` | Release-file source; also selects the image registry |
+| `--source DIR` | Use a local repository checkout instead of downloading (testing/offline) |
+| `--domain HOST` | Public hostname/IP (default: auto-detect) |
+| `-y, --yes` | Non-interactive: accept defaults, no prompts |
+
+Run `install.sh --help` for the full list, including environment overrides
+(`SOURCELENS_INSTALL_DIR`, `SOURCELENS_HTTP_PORT`, `SOURCELENS_HTTPS_PORT`,
+`SOURCELENS_VERSION`, `SOURCELENS_REGISTRY`, `SOURCELENS_DOMAIN`, ...).
+
+> **Cloudflare Turnstile**: `env.sample` keeps `TURNSTILE_ENABLED=true` and
+> requires a real `TURNSTILE_SECRET_KEY` in production — the backend refuses to
+> start without one (a deliberate fail-fast guard). The one-command installer
+> cannot mint real keys, so it sets `TURNSTILE_ENABLED=false` on a fresh install
+> so login works without the widget. To enable Turnstile later, set a real
+> secret (and frontend site key), then flip `TURNSTILE_ENABLED=true` in `.env`.
 
 ### Capacity & Concurrency Tuning
 
