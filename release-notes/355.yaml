@@ -1,0 +1,9 @@
+type: fix
+audience: admin
+en: >-
+  Fixed managed workspace conversions becoming orphaned after LensNode memory
+  pressure, disconnects, timeouts, or cancellation; conversion progress,
+  recovery, and resource cleanup are now tracked reliably.
+zh-CN: >-
+  修复托管工作区转换在 LensNode 内存压力、断连、超时或取消后变成孤儿任务的问题；
+  现在可以可靠跟踪转换进度、恢复状态并清理占用的资源。
