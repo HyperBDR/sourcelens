@@ -1,0 +1,11 @@
+type: feature
+audience: admin
+en: >-
+  Added a one-command installer (install.sh) for the standalone single-instance
+  deployment: it downloads the release config files, generates a production
+  .env with random secrets, pulls images, and health-checks the stack. Supports
+  GitHub/Gitee release sources and Docker Hub / Aliyun ACR image registries.
+zh-CN: >-
+  新增 standalone 单实例部署的一键安装器（install.sh）：自动下载发布配置、生成带随机密钥的
+  生产 .env、拉取镜像并启动栈做健康检查。支持 GitHub/Gitee 发布源与
+  Docker Hub / 阿里云 ACR 镜像仓库。
