@@ -13,6 +13,7 @@ from django.utils.dateparse import parse_datetime
 from .datasource_services import (
     dispatch_datasource_conversion_async,
     dispatch_datasource_sync_async,
+    get_datasource_conversion_timeout_s,
     get_datasource_sync_timeout_s,
 )
 from .models import (
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 ANSWER_RUN_DOCUMENT_COUNT_HEADER = "sourcelens_expected_document_count"
 SESSION_TITLE_TASK_EXPIRY_SECONDS = 900
 SESSION_TITLE_TASK_NAME = "lens.generate_session_title.v2"
+DATASOURCE_CANCELLING_STATUS = "CANCELLING"
+HEAVY_WORK_SLOT_SETTING = "lensnode.heavy_work_slots"
+HEAVY_WORK_RETRY_SECONDS = 5
 
 
 @shared_task(name="lens.execute_run_diagnostic", queue="lens")
@@ -296,6 +300,7 @@ def register_datasource_conversion_task(
         "force": bool(force),
         "steps": [],
         "logs": [],
+        "lensnode_connection_id": lensnode.connection_id if lensnode else "",
     }
     task_metadata.update(metadata or {})
     return TaskTracker.register_task(
@@ -328,6 +333,89 @@ def _datasource_conversion_task_name(datasource):
     if not name:
         return "datasource_convert"
     return f"datasource_convert:{name}"
+
+
+def _datasource_active_statuses(task_status):
+    """Return statuses that still own datasource work."""
+
+    return [
+        task_status.PENDING,
+        *task_status.get_running_statuses(),
+        DATASOURCE_CANCELLING_STATUS,
+    ]
+
+
+def _heavy_work_slot_count():
+    """Return the configured number of heavy-work slots per LensNode."""
+
+    setting = GlobalSetting.objects.filter(key=HEAVY_WORK_SLOT_SETTING).first()
+    try:
+        value = int(setting.value if setting else 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(value, 32))
+
+
+def acquire_lensnode_heavy_work_slot(lensnode_uuid, task_id):
+    """Atomically reserve one heavy-work slot for a LensNode task."""
+
+    ttl_s = max(
+        get_datasource_sync_timeout_s(),
+        get_datasource_conversion_timeout_s(),
+        60,
+    )
+    for slot in range(_heavy_work_slot_count()):
+        key = f"lens:heavy-work:{lensnode_uuid}:{slot}"
+        if cache.add(key, task_id, timeout=ttl_s):
+            return str(slot)
+    return None
+
+
+def release_lensnode_heavy_work_slot(lensnode_uuid, task_id, slot=None):
+    """Release a heavy-work slot only when this task owns it."""
+
+    if not lensnode_uuid or not task_id:
+        return False
+    slots = [str(slot)] if slot is not None else [
+        str(index) for index in range(_heavy_work_slot_count())
+    ]
+    released = False
+    for slot_id in slots:
+        key = f"lens:heavy-work:{lensnode_uuid}:{slot_id}"
+        if cache.get(key) == task_id:
+            cache.delete(key)
+            released = True
+    return released
+
+
+def refresh_lensnode_heavy_work_slot(lensnode_uuid, task_id, slot):
+    """Extend a heavy-work lease when the executor reports progress."""
+
+    if not lensnode_uuid or not task_id or slot is None:
+        return False
+    key = f"lens:heavy-work:{lensnode_uuid}:{slot}"
+    if cache.get(key) != task_id:
+        return False
+    cache.set(
+        key,
+        task_id,
+        timeout=max(
+            get_datasource_sync_timeout_s(),
+            get_datasource_conversion_timeout_s(),
+            60,
+        ),
+    )
+    return True
+
+
+def _schedule_queued_conversion(datasource, conversion, force, task_id):
+    """Retry a queued conversion without creating another task record."""
+
+    datasource_conversion_task.apply_async(
+        args=[str(datasource.uuid), dict(conversion or {}), bool(force)],
+        kwargs={"task_id": task_id},
+        countdown=HEAVY_WORK_RETRY_SECONDS,
+    )
 
 
 def _is_global_task_enabled(task_type, default=True):
@@ -498,7 +586,33 @@ def datasource_conversion_task(
         )
         return 0
 
-    TaskTracker.update_task_status(task_id, TaskStatus.STARTED)
+    slot = acquire_lensnode_heavy_work_slot(
+        datasource.lensnode.uuid,
+        task_id,
+    )
+    if slot is None:
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.PENDING,
+            metadata={
+                "queue_state": "QUEUED",
+                "queue_reason": "LENSNODE_HEAVY_WORK_BUSY",
+            },
+        )
+        datasource.last_conversion_status = TaskStatus.PENDING
+        datasource.save(update_fields=["last_conversion_status", "updated_at"])
+        _schedule_queued_conversion(datasource, conversion, force, task_id)
+        return 0
+
+    slot_metadata = {
+        "heavy_work_slot": slot,
+        "lensnode_connection_id": datasource.lensnode.connection_id,
+    }
+    TaskTracker.update_task_status(
+        task_id,
+        TaskStatus.STARTED,
+        metadata=slot_metadata,
+    )
     datasource.last_conversion_status = TaskStatus.STARTED
     datasource.save(update_fields=["last_conversion_status", "updated_at"])
     _append_datasource_task_step(
@@ -546,6 +660,11 @@ def datasource_conversion_task(
                 )
         if terminal_status:
             release_datasource_lock(datasource.uuid, token=task_id)
+            release_lensnode_heavy_work_slot(
+                datasource.lensnode.uuid,
+                task_id,
+                slot,
+            )
             if terminal_status == TaskStatus.REVOKED:
                 from .services import (
                     cancel_datasource_conversion_on_lensnode,
@@ -557,7 +676,12 @@ def datasource_conversion_task(
                 )
             return 0
     except SourceSyncBusy as exc:
-        datasource.last_conversion_status = TaskStatus.REVOKED
+        release_lensnode_heavy_work_slot(
+            datasource.lensnode.uuid,
+            task_id,
+            slot,
+        )
+        datasource.last_conversion_status = TaskStatus.PENDING
         datasource.last_conversion_at = timezone.now()
         datasource.save(
             update_fields=[
@@ -568,17 +692,23 @@ def datasource_conversion_task(
         )
         TaskTracker.update_task_status(
             task_id,
-            TaskStatus.REVOKED,
+            TaskStatus.PENDING,
             error=str(exc),
             metadata=_datasource_step_metadata(
                 task_id,
                 "lock",
-                "skipped",
+                "queued",
                 str(exc),
             ),
         )
+        _schedule_queued_conversion(datasource, conversion, force, task_id)
         return 0
     except Exception:
+        release_lensnode_heavy_work_slot(
+            datasource.lensnode.uuid,
+            task_id,
+            slot,
+        )
         release_datasource_lock(datasource.uuid, token=task_id)
         datasource.last_conversion_status = TaskStatus.FAILURE
         datasource.last_conversion_at = timezone.now()
@@ -604,7 +734,11 @@ def datasource_conversion_task(
     return 0
 
 
-def complete_datasource_conversion_task(task_id, result):
+def complete_datasource_conversion_task(
+    task_id,
+    result,
+    connection_id=None,
+):
     """Complete managed workspace conversion from LensNode callback."""
 
     from agentcore_task.adapters.django import TaskTracker
@@ -615,6 +749,14 @@ def complete_datasource_conversion_task(task_id, result):
     if task is None:
         return None
     metadata = task.metadata or {}
+    owner_connection_id = metadata.get("lensnode_connection_id") or ""
+    if (
+        connection_id
+        and owner_connection_id
+        and owner_connection_id != connection_id
+        and task.status not in TaskStatus.get_completed_statuses()
+    ):
+        return task
     datasource_uuid = metadata.get("datasource_uuid")
     datasource = DataSource.objects.filter(uuid=datasource_uuid).first()
     status_value = str(result.get("status") or "failed").lower()
@@ -636,6 +778,11 @@ def complete_datasource_conversion_task(task_id, result):
         status_map["failed"],
     )
     error = str(result.get("error") or default_error)
+    completion_reason = str(
+        result.get("completion_reason")
+        or error
+        or status_value
+    )
     conversion_summary = result.get("conversion_summary") or {}
     if task.status in TaskStatus.get_completed_statuses():
         if datasource_uuid:
@@ -643,6 +790,11 @@ def complete_datasource_conversion_task(task_id, result):
                 datasource_uuid,
                 token=metadata.get("lock_token") or task_id,
             )
+        release_lensnode_heavy_work_slot(
+            metadata.get("lensnode_uuid"),
+            task_id,
+            metadata.get("heavy_work_slot"),
+        )
         return TaskTracker.update_task_status(
             task_id,
             task.status,
@@ -665,6 +817,11 @@ def complete_datasource_conversion_task(task_id, result):
     lock_token = metadata.get("lock_token") or task_id
     if datasource_uuid:
         release_datasource_lock(datasource_uuid, token=lock_token)
+    release_lensnode_heavy_work_slot(
+        metadata.get("lensnode_uuid"),
+        task_id,
+        metadata.get("heavy_work_slot"),
+    )
     step_status = "done" if task_status == TaskStatus.SUCCESS else "failed"
     completion_metadata = _datasource_step_metadata(
         task_id,
@@ -678,6 +835,12 @@ def complete_datasource_conversion_task(task_id, result):
         progress_percent=100,
     )
     completion_metadata["conversion_summary"] = conversion_summary
+    completion_metadata["completion_reason"] = completion_reason
+    if task_status == TaskStatus.REVOKED:
+        completion_metadata["stop_confirmation_source"] = str(
+            result.get("stop_confirmation_source")
+            or "lensnode_callback"
+        )
     return TaskTracker.update_task_status(
         task_id,
         task_status,
@@ -903,7 +1066,7 @@ def _release_orphaned_datasource_lock(datasource_uuid):
     if not lock_token:
         return True
 
-    running_statuses = [TaskStatus.PENDING, *TaskStatus.get_running_statuses()]
+    running_statuses = _datasource_active_statuses(TaskStatus)
     owner_exists = TaskExecution.objects.filter(
         module__in=["lens_datasource", "lens_datasource_conversion"],
         status__in=running_statuses,
@@ -926,6 +1089,63 @@ def release_datasource_lock(datasource_uuid, token=None):
     return False
 
 
+def reconcile_orphaned_datasource_conversions(lensnode_uuid, connection_id):
+    """Fail conversions owned by a dead LensNode connection generation."""
+
+    from agentcore_task.adapters.django.models import TaskExecution
+    from agentcore_task.constants import TaskStatus
+
+    now = timezone.now()
+    active_statuses = _datasource_active_statuses(TaskStatus)
+    orphaned = TaskExecution.objects.filter(
+        module="lens_datasource_conversion",
+        status__in=active_statuses,
+        metadata__lensnode_uuid=str(lensnode_uuid),
+    ).exclude(
+        metadata__lensnode_connection_id=str(connection_id),
+    )
+    count = 0
+    for task in orphaned:
+        metadata = dict(task.metadata or {})
+        datasource_uuid = metadata.get("datasource_uuid")
+        datasource = DataSource.objects.filter(uuid=datasource_uuid).first()
+        if datasource is not None:
+            datasource.last_conversion_status = TaskStatus.FAILURE
+            datasource.last_conversion_at = now
+            datasource.save(
+                update_fields=[
+                    "last_conversion_status",
+                    "last_conversion_at",
+                    "updated_at",
+                ]
+            )
+        release_datasource_lock(
+            datasource_uuid,
+            token=metadata.get("lock_token") or task.task_id,
+        )
+        release_lensnode_heavy_work_slot(
+            lensnode_uuid,
+            task.task_id,
+            metadata.get("heavy_work_slot"),
+        )
+        metadata.update(
+            {
+                "recovery_reason": "LENSNODE_CONNECTION_GENERATION_EXPIRED",
+                "recovery_retryable": True,
+                "reconciled_at": now.isoformat(),
+                "completion_reason": "DATASOURCE_CONVERSION_ORPHANED",
+                "stop_confirmation_source": "connection_generation_expired",
+            }
+        )
+        task.status = TaskStatus.FAILURE
+        task.finished_at = now
+        task.error = "DATASOURCE_CONVERSION_ORPHANED"
+        task.metadata = metadata
+        task.save(update_fields=["status", "finished_at", "error", "metadata"])
+        count += 1
+    return count
+
+
 def cleanup_stale_datasource_sync_tasks(startup=False):
     """Cancel timed-out datasource work and release orphaned locks.
 
@@ -943,17 +1163,44 @@ def cleanup_stale_datasource_sync_tasks(startup=False):
     )
 
     now = timezone.now()
+    orphaned_count = 0
+    for lensnode in LensNode.objects.all():
+        orphaned_count += reconcile_orphaned_datasource_conversions(
+            lensnode.uuid,
+            lensnode.connection_id,
+        )
     timeout_s = get_datasource_sync_timeout_s()
+    conversion_cutoff = now - timedelta(
+        seconds=get_datasource_conversion_timeout_s()
+    )
     cutoff = now - timedelta(seconds=timeout_s)
-    running_statuses = [TaskStatus.PENDING, *TaskStatus.get_running_statuses()]
+    running_statuses = _datasource_active_statuses(TaskStatus)
+    executing_statuses = [
+        status
+        for status in running_statuses
+        if status != TaskStatus.PENDING
+    ]
 
     stale = TaskExecution.objects.filter(
         module__in=["lens_datasource", "lens_datasource_conversion"],
-        status__in=running_statuses,
         metadata__datasource_uuid__isnull=False,
     ).filter(
-        Q(started_at__lt=cutoff)
-        | Q(started_at__isnull=True, created_at__lt=cutoff)
+        Q(status__in=executing_statuses, started_at__lt=cutoff)
+        & ~Q(module="lens_datasource_conversion")
+        | Q(
+            status__in=executing_statuses,
+            started_at__isnull=True,
+            created_at__lt=cutoff,
+        )
+        | Q(
+            module="lens_datasource_conversion",
+            status__in=executing_statuses,
+            started_at__lt=conversion_cutoff,
+        )
+        | Q(
+            status=TaskStatus.PENDING,
+            created_at__lt=cutoff,
+        )
     )
 
     failed_count = 0
@@ -967,41 +1214,52 @@ def cleanup_stale_datasource_sync_tasks(startup=False):
             if is_conversion
             else "LENS_SOURCE_SYNC_TIMEOUT"
         )
-        if datasource is not None:
-            if is_conversion:
-                cancel_datasource_conversion_on_lensnode(
-                    datasource.lensnode,
-                    task.task_id,
+        if is_conversion and task.status != DATASOURCE_CANCELLING_STATUS:
+            if datasource is not None:
+                datasource.last_conversion_status = (
+                    DATASOURCE_CANCELLING_STATUS
                 )
-                datasource.last_conversion_status = TaskStatus.FAILURE
-                datasource.last_conversion_at = now
                 datasource.save(
-                    update_fields=[
-                        "last_conversion_status",
-                        "last_conversion_at",
-                        "updated_at",
-                    ]
+                    update_fields=["last_conversion_status", "updated_at"]
                 )
-            else:
-                cancel_datasource_sync_on_lensnode(
-                    datasource.lensnode,
-                    task.task_id,
-                )
-                record = _get_or_create_source_sync_record(datasource)
-                record.last_status = ScheduledTask.Status.FAILED
-                record.last_error = error
-                record.last_run_at = now
-                record.save(
-                    update_fields=[
-                        "last_status",
-                        "last_error",
-                        "last_run_at",
-                    ]
-                )
+            metadata["timeout_cancel_requested_at"] = now.isoformat()
+            metadata["cancellation_state"] = DATASOURCE_CANCELLING_STATUS
+            task.status = DATASOURCE_CANCELLING_STATUS
+            task.error = ""
+            task.metadata = metadata
+            task.save(update_fields=["status", "error", "metadata"])
+            cancel_datasource_conversion_on_lensnode(
+                datasource.lensnode if datasource is not None else None,
+                task.task_id,
+            )
+            continue
+        if is_conversion:
+            continue
+        if datasource is not None:
+            cancel_datasource_sync_on_lensnode(
+                datasource.lensnode,
+                task.task_id,
+            )
+            record = _get_or_create_source_sync_record(datasource)
+            record.last_status = ScheduledTask.Status.FAILED
+            record.last_error = error
+            record.last_run_at = now
+            record.save(
+                update_fields=[
+                    "last_status",
+                    "last_error",
+                    "last_run_at",
+                ]
+            )
 
         release_datasource_lock(
             datasource_uuid,
             token=metadata.get("lock_token") or task.task_id,
+        )
+        release_lensnode_heavy_work_slot(
+            metadata.get("lensnode_uuid"),
+            task.task_id,
+            metadata.get("heavy_work_slot"),
         )
         metadata["timeout_cancelled_at"] = now.isoformat()
         task.status = TaskStatus.FAILURE
@@ -1050,6 +1308,7 @@ def cleanup_stale_datasource_sync_tasks(startup=False):
     return {
         "failed": failed_count,
         "locks_released": released_count,
+        "orphaned": orphaned_count,
         "timeout_s": timeout_s,
         "startup": startup,
     }

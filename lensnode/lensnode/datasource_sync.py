@@ -10,7 +10,9 @@ from urllib import error, parse, request
 from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
 from . import datasource_manifest as manifest_store
+from .document_convert import empty_cost_stats
 from .document_convert import is_convertible, post_process_documents
+from .document_convert import merge_cost_stats
 from .path_rules import is_excluded_path
 from .path_rules import normalize_excluded_roots
 from .path_rules import relative_path
@@ -22,6 +24,8 @@ from .path_rules import unique_child_path
 WORKSPACE_ROOT = "/workspace"
 GIT_SHALLOW_DEPTH = "1"
 DETAIL_ITEMS_LIMIT = 200
+DEFAULT_CONVERSION_BATCH_SIZE = 16
+DEFAULT_CONVERSION_MAX_FILES = 100000
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
 FEISHU_EXPORT_SUCCESS_STATUS = 0
@@ -250,53 +254,83 @@ def convert_managed_workspace(
         raise DataSourceSyncError("MANAGED_WORKSPACE_DIRECTORY_REQUIRED")
 
     context = _sync_context(command, target)
-    items = _managed_workspace_conversion_items(
+    conversion = context["conversion"]
+    total, supported_total, unsupported_total, unsupported = (
+        _scan_managed_workspace_conversion(
+            target,
+            context["excluded_datasource_roots"],
+            conversion,
+        )
+    )
+    max_files = _conversion_resource_limit(
+        conversion,
+        "max_files",
+        DEFAULT_CONVERSION_MAX_FILES,
+    )
+    if total > max_files:
+        raise DataSourceSyncError("RESOURCE_LIMIT_EXCEEDED")
+    max_bytes = _conversion_resource_limit(conversion, "max_bytes", 0)
+    if max_bytes and _managed_workspace_size(
         target,
         context["excluded_datasource_roots"],
-    )
-    supported = [
-        item
-        for item in items
-        if is_convertible(target / item.local_path, context["conversion"])
-    ]
-    unsupported = [
-        item
-        for item in items
-        if not is_convertible(
-            target / item.local_path,
-            context["conversion"],
-        )
-    ]
+    ) > max_bytes:
+        raise DataSourceSyncError("RESOURCE_LIMIT_EXCEEDED")
 
-    def emit_progress(event):
-        if emit is None:
-            return
-        payload = dict(event)
-        current = int(payload.get("progress_current") or 0)
-        payload["summary"] = _managed_conversion_summary(
-            payload.get("summary") or {},
+    summary = None
+    processed = 0
+    batch = []
+    batch_size = _conversion_resource_limit(
+        conversion,
+        "batch_size",
+        DEFAULT_CONVERSION_BATCH_SIZE,
+    )
+    for item in _managed_workspace_conversion_items(
+        target,
+        context["excluded_datasource_roots"],
+    ):
+        if not is_convertible(target / item.local_path, conversion):
+            continue
+        batch.append(item)
+        if len(batch) < batch_size:
+            continue
+        batch_summary = post_process_documents(
+            context,
+            manifest_store.SyncResult(items=batch),
+        )
+        summary = _merge_managed_conversion_summaries(summary, batch_summary)
+        processed += len(batch)
+        _emit_managed_conversion_progress(
+            emit,
+            summary,
+            total,
             unsupported,
-            len(supported),
-            current,
+            unsupported_total,
+            processed,
         )
-        payload["progress_total"] = len(items)
-        payload["progress_current"] = len(unsupported) + current
-        payload["progress_percent"] = _conversion_percent(
-            payload["progress_current"],
-            len(items),
+        batch = []
+    if batch:
+        batch_summary = post_process_documents(
+            context,
+            manifest_store.SyncResult(items=batch),
         )
-        emit(payload)
-
-    summary = post_process_documents(
-        context,
-        manifest_store.SyncResult(items=supported),
-        emit_progress,
-    )
+        summary = _merge_managed_conversion_summaries(summary, batch_summary)
+        processed += len(batch)
+        _emit_managed_conversion_progress(
+            emit,
+            summary,
+            total,
+            unsupported,
+            unsupported_total,
+            processed,
+        )
+    if summary is None:
+        summary = _empty_managed_conversion_summary()
     summary = _managed_conversion_summary(
         summary,
         unsupported,
-        len(supported),
-        len(supported),
+        supported_total,
+        supported_total,
+        unsupported_total=unsupported_total,
     )
     if summary["failed"]:
         summary["warnings"] = list(
@@ -313,8 +347,8 @@ def convert_managed_workspace(
         "done",
         "Managed workspace conversion completed.",
         category="conversion",
-        progress_total=len(items),
-        progress_current=len(items),
+        progress_total=total,
+        progress_current=total,
         progress_percent=100,
         summary=summary,
         conversion_summary=summary,
@@ -328,10 +362,9 @@ def convert_managed_workspace(
 
 
 def _managed_workspace_conversion_items(target, excluded_roots):
-    """Return files found under a managed workspace conversion root."""
+    """Yield files found under a managed workspace conversion root."""
 
-    items = []
-    for path in sorted(target.rglob("*")):
+    for path in target.rglob("*"):
         if not path.is_file() or _is_generated_datasource_path(target, path):
             continue
         if is_excluded_path(path, excluded_roots):
@@ -340,20 +373,183 @@ def _managed_workspace_conversion_items(target, excluded_roots):
             local_path = relative_path(target, path)
         except ValueError:
             continue
-        items.append(
-            manifest_store.SyncItem(
-                source_id=f"managed_workspace:{local_path}",
-                source_type="managed_workspace",
-                source_path=local_path,
-                local_path=local_path,
-                name=path.name,
-                kind="file",
-                extension=path.suffix.lower().lstrip("."),
-                status="cataloged",
-                metadata={"size": str(path.stat().st_size)},
-            )
+        yield manifest_store.SyncItem(
+            source_id=f"managed_workspace:{local_path}",
+            source_type="managed_workspace",
+            source_path=local_path,
+            local_path=local_path,
+            name=path.name,
+            kind="file",
+            extension=path.suffix.lower().lstrip("."),
+            status="cataloged",
+            metadata={"size": str(path.stat().st_size)},
         )
-    return items
+
+
+def _scan_managed_workspace_conversion(
+    target,
+    excluded_roots,
+    conversion,
+):
+    """Scan workspace metadata without retaining the complete file list."""
+
+    total = 0
+    supported_total = 0
+    unsupported_total = 0
+    unsupported = []
+    for item in _managed_workspace_conversion_items(target, excluded_roots):
+        total += 1
+        if is_convertible(target / item.local_path, conversion):
+            supported_total += 1
+            continue
+        unsupported_total += 1
+        if len(unsupported) < DETAIL_ITEMS_LIMIT:
+            unsupported.append(item)
+    return total, supported_total, unsupported_total, unsupported
+
+
+def _managed_workspace_size(target, excluded_roots):
+    """Return workspace bytes without retaining directory entries."""
+
+    total = 0
+    for item in _managed_workspace_conversion_items(target, excluded_roots):
+        total += int(item.metadata.get("size") or 0)
+    return total
+
+
+def _conversion_resource_limit(conversion, key, default):
+    """Return a bounded conversion resource setting."""
+
+    try:
+        value = int((conversion or {}).get(key) or default)
+    except (TypeError, ValueError):
+        value = default
+    if key == "batch_size":
+        return max(1, min(value, 128))
+    return max(1, value) if value else 0
+
+
+def _empty_managed_conversion_summary():
+    """Return the fixed-shape summary used by conversion batches."""
+
+    return {
+        "candidates": 0,
+        "converted": 0,
+        "success": 0,
+        "skipped": 0,
+        "failed": 0,
+        "markdown": 0,
+        "deleted_sidecars": 0,
+        "chars": 0,
+        "estimated_tokens": 0,
+        "images_recognized": 0,
+        "images_skipped": 0,
+        "images_blank": 0,
+        "images_duplicate": 0,
+        "images_compressed": 0,
+        "embedded_images_total": 0,
+        "embedded_images_recognized": 0,
+        "embedded_images_skipped": 0,
+        "embedded_images_duplicate": 0,
+        "embedded_images_blank": 0,
+        "pdf_pages": 0,
+        "pdf_pages_processed": 0,
+        "pdf_pages_with_text": 0,
+        "pdf_scanned_pages": 0,
+        "pdf_images_total": 0,
+        "pdf_images_recognized": 0,
+        "pdf_images_skipped": 0,
+        "pdf_rendered_pages": 0,
+        "xlsx_files": 0,
+        "sheets": 0,
+        "rows": 0,
+        "truncated_files": 0,
+        "cost": empty_cost_stats(),
+        "warnings": [],
+        "items": [],
+        "items_truncated": 0,
+        "details": {},
+        "details_truncated": {},
+    }
+
+
+def _merge_managed_conversion_summaries(current, incoming):
+    """Merge one bounded conversion batch into the aggregate summary."""
+
+    if current is None:
+        current = _empty_managed_conversion_summary()
+    for key, value in incoming.items():
+        if key in {
+            "cost",
+            "items",
+            "details",
+            "details_truncated",
+            "warnings",
+        }:
+            continue
+        if isinstance(value, (int, float)):
+            current[key] = int(current.get(key) or 0) + int(value or 0)
+    merge_cost_stats(current["cost"], incoming.get("cost") or {})
+    current["warnings"] = list(
+        dict.fromkeys(
+            [
+                *(current.get("warnings") or []),
+                *(incoming.get("warnings") or []),
+            ]
+        )
+    )
+    for item in incoming.get("items") or []:
+        if len(current["items"]) < DETAIL_ITEMS_LIMIT:
+            current["items"].append(item)
+        else:
+            current["items_truncated"] += 1
+    for group, details in (incoming.get("details") or {}).items():
+        bucket = current["details"].setdefault(group, [])
+        available = max(DETAIL_ITEMS_LIMIT - len(bucket), 0)
+        bucket.extend(details[:available])
+        current["details_truncated"][group] = (
+            int(current["details_truncated"].get(group) or 0)
+            + int((incoming.get("details_truncated") or {}).get(group) or 0)
+            + max(len(details) - available, 0)
+        )
+    return current
+
+
+def _emit_managed_conversion_progress(
+    emit,
+    summary,
+    total,
+    unsupported,
+    unsupported_total,
+    processed,
+):
+    """Emit one bounded aggregate progress update after each batch."""
+
+    if emit is None:
+        return
+    payload = _managed_conversion_summary(
+        summary,
+        unsupported,
+        processed,
+        processed,
+        unsupported_total=unsupported_total,
+    )
+    payload["progress_total"] = total
+    payload["progress_current"] = min(total, unsupported_total + processed)
+    payload["progress_percent"] = _conversion_percent(
+        payload["progress_current"],
+        total,
+    )
+    progress_summary = dict(payload)
+    _emit(
+        emit,
+        "conversion_progress",
+        "running",
+        f"Converted {processed}/{max(processed, 1)} datasource files.",
+        category="conversion",
+        summary=progress_summary,
+        **payload,
+    )
 
 
 def _managed_conversion_summary(
@@ -361,6 +557,7 @@ def _managed_conversion_summary(
     unsupported,
     supported_total,
     supported_current,
+    unsupported_total=None,
 ):
     """Add standalone conversion lifecycle counters and outcomes."""
 
@@ -388,13 +585,16 @@ def _managed_conversion_summary(
     completed = min(max(supported_current, 0), supported_total)
     remaining = max(supported_total - completed, 0)
     active = 1 if remaining else 0
+    unsupported_count = (
+        len(unsupported) if unsupported_total is None else unsupported_total
+    )
     result.update(
         {
-            "total": supported_total + len(unsupported),
+            "total": supported_total + unsupported_count,
             "waiting": max(remaining - active, 0),
             "active": active,
             "succeeded": int(result.get("success") or 0),
-            "unsupported": len(unsupported),
+            "unsupported": unsupported_count,
             "items": items,
             "items_truncated": int(result.get("items_truncated") or 0)
             + max(len(new_items) - available, 0),

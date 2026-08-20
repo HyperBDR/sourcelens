@@ -12,6 +12,7 @@ from .services import lensnode_group_name
 
 WORKSPACE_ROOT = "/workspace"
 DATASOURCE_SYNC_TIMEOUT_SETTING = "lens.datasource_sync.timeout_s"
+DATASOURCE_CONVERSION_TIMEOUT_SETTING = "lens.datasource_conversion.timeout_s"
 DATASOURCE_SYNC_WORKERS_SETTING = "lens.datasource_sync.workers"
 DATASOURCE_CONVERSION_VISION_MODEL_SETTING = (
     "lens.datasource_conversion.vision_model_ref"
@@ -20,6 +21,7 @@ DATASOURCE_CONVERSION_DOCUMENT_MODEL_SETTING = (
     "lens.datasource_conversion.document_model_ref"
 )
 DEFAULT_DATASOURCE_SYNC_TIMEOUT_S = 21600
+DEFAULT_DATASOURCE_CONVERSION_TIMEOUT_S = 86400
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 DATASOURCE_RESULT_POLL_S = 0.5
 
@@ -133,6 +135,19 @@ def get_datasource_sync_max_workers():
     except (TypeError, ValueError):
         value = 0
     return value if value > 0 else DEFAULT_DATASOURCE_SYNC_WORKERS
+
+
+def get_datasource_conversion_timeout_s():
+    """Return the long-running managed conversion lease timeout."""
+
+    setting = GlobalSetting.objects.filter(
+        key=DATASOURCE_CONVERSION_TIMEOUT_SETTING
+    ).first()
+    try:
+        value = int(setting.value) if setting is not None else 0
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else DEFAULT_DATASOURCE_CONVERSION_TIMEOUT_S
 
 
 def check_datasource_path(lensnode, target_path, source_type, config=None):

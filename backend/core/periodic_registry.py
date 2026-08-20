@@ -100,13 +100,14 @@ class TaskRegistry:
         }
 
     def _apply_one(self, name, entry):
+        from django.conf import settings
         from django_celery_beat.models import PeriodicTask, PeriodicTasks
 
         task_name = entry["task"]
         schedule = entry["schedule"]
         args = entry["args"]
         kwargs = entry["kwargs"]
-        queue = entry["queue"]
+        queue = entry["queue"] or settings.CELERY_TASK_DEFAULT_QUEUE
         enabled = entry["enabled"]
 
         if _is_crontab_schedule(schedule):
@@ -143,6 +144,15 @@ class TaskRegistry:
             name=name, defaults=create_defaults
         )
         if not created:
+            stale_queues = {
+                "",
+                "sourcelens",
+                settings.CELERY_TASK_DEFAULT_QUEUE,
+            }
+            if obj.queue in stale_queues and obj.queue != queue:
+                obj.queue = queue
+                obj.save(update_fields=["queue"])
+                PeriodicTasks.update_changed()
             logger.debug(
                 "Periodic task already exists, skipping update: %s",
                 name,
@@ -177,4 +187,3 @@ TASK_REGISTRY = TaskRegistry()
 def apply_registry():
     """Apply the global TASK_REGISTRY to django_celery_beat."""
     TASK_REGISTRY.apply()
-

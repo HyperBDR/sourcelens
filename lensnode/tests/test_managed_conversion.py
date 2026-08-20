@@ -4,6 +4,7 @@ import types
 
 import pytest
 
+from lensnode.datasource_sync import DataSourceSyncError
 from lensnode.datasource_sync import convert_managed_workspace
 from lensnode.gateway_model import RunCancelledError
 
@@ -213,3 +214,41 @@ def test_managed_conversion_enforces_pdf_page_limit(tmp_path, monkeypatch):
     summary = result["conversion_summary"]
     assert summary["skipped"] == 1
     assert summary["items"][0]["reason"] == "PAGE_LIMIT_EXCEEDED"
+
+
+def test_managed_conversion_batches_files_and_bounds_manifest_details(
+    tmp_path,
+    monkeypatch,
+):
+    """Large manifests are processed in bounded batches."""
+
+    install_fake_markitdown(monkeypatch)
+    for index in range(5):
+        (tmp_path / f"document-{index}.docx").write_bytes(b"document")
+    command = conversion_command(tmp_path)
+    command["conversion"]["batch_size"] = 2
+
+    result = convert_managed_workspace(
+        command,
+        workspace_path=tmp_path.parent,
+    )
+
+    summary = result["conversion_summary"]
+    assert summary["candidates"] == 5
+    assert summary["success"] == 5
+    assert len(summary["items"]) <= 200
+
+
+def test_managed_conversion_rejects_overlarge_workspace_manifest(tmp_path):
+    """A configured workspace file budget fails before conversion starts."""
+
+    (tmp_path / "document-a.docx").write_bytes(b"document")
+    (tmp_path / "document-b.docx").write_bytes(b"document")
+    command = conversion_command(tmp_path)
+    command["conversion"]["max_files"] = 1
+
+    with pytest.raises(DataSourceSyncError, match="RESOURCE_LIMIT_EXCEEDED"):
+        convert_managed_workspace(
+            command,
+            workspace_path=tmp_path.parent,
+        )

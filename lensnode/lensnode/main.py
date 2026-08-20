@@ -49,6 +49,8 @@ class LensNodeClient:
 
     def __init__(self, config):
         self.config = config
+        if getattr(config, "node_options", ""):
+            os.environ["NODE_OPTIONS"] = config.node_options
         workspace_path = getattr(config, "workspace_path", None)
         if workspace_path:
             cleanup_stale_runtime_resources(
@@ -80,6 +82,9 @@ class LensNodeClient:
         self.heartbeat_count = 0
         self.last_report_signature = None
         self.running_tasks = {}
+        self.heavy_work_semaphore = asyncio.Semaphore(
+            max(1, int(getattr(config, "heavy_work_concurrency", 1)))
+        )
         self.datasource_conversion_cancels = {}
         self.running_commands = {}
         self._checkpoint_resume_ready = None
@@ -586,7 +591,11 @@ class LensNodeClient:
             await self._send_busy(run_uuid, "LENSNODE_RUN_ACTIVE")
             return
         max_runs = max(1, int(getattr(self.config, "max_concurrent_runs", 1)))
-        if len(self.running_tasks) >= max_runs:
+        active_run_count = sum(
+            not key.startswith(("datasource:", "datasource-convert:"))
+            for key in self.running_tasks
+        )
+        if active_run_count >= max_runs:
             await self._send_busy(run_uuid, "LENSNODE_BUSY")
             return
 
@@ -750,12 +759,16 @@ class LensNodeClient:
                 ),
                 "tls_ca_file": getattr(self.config, "tls_ca_file", None),
             }
-            result = await asyncio.to_thread(
-                sync_datasource,
-                command,
-                self.config.workspace_path,
-                emit,
-            )
+            await self.heavy_work_semaphore.acquire()
+            try:
+                result = await asyncio.to_thread(
+                    sync_datasource,
+                    command,
+                    self.config.workspace_path,
+                    emit,
+                )
+            finally:
+                self.heavy_work_semaphore.release()
             self._enqueue(
                 {
                     "type": "datasource_sync_done",
@@ -842,12 +855,16 @@ class LensNodeClient:
                     None,
                 ),
             }
-            result = await asyncio.to_thread(
-                convert_managed_workspace,
-                command,
-                self.config.workspace_path,
-                emit,
-            )
+            await self._acquire_heavy_work(message.get("cancel_event"))
+            try:
+                result = await asyncio.to_thread(
+                    convert_managed_workspace,
+                    command,
+                    self.config.workspace_path,
+                    emit,
+                )
+            finally:
+                self.heavy_work_semaphore.release()
             self._enqueue(
                 {
                     "type": "datasource_convert_done",
@@ -864,6 +881,23 @@ class LensNodeClient:
                     "task_id": task_id,
                     "status": "cancelled",
                     "error": "DATASOURCE_CONVERSION_CANCELLED",
+                    "completion_reason": "DATASOURCE_CONVERSION_CANCELLED",
+                    "stop_confirmation_source": "lensnode_callback",
+                }
+            )
+        except DataSourceSyncError as exc:
+            LOGGER.warning(
+                "Managed datasource conversion rejected task_id=%s: %s",
+                task_id,
+                exc,
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_convert_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "error": str(exc) or "DATASOURCE_CONVERSION_FAILED",
                 }
             )
         except Exception:
@@ -883,6 +917,23 @@ class LensNodeClient:
         finally:
             self.datasource_conversion_cancels.pop(task_id, None)
             self.running_tasks.pop(task_key, None)
+
+    async def _acquire_heavy_work(self, cancel_event=None):
+        """Wait for heavy-work capacity while honoring cancellation."""
+
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise RunCancelledError(
+                    "Managed datasource conversion was cancelled while queued."
+                )
+            try:
+                await asyncio.wait_for(
+                    self.heavy_work_semaphore.acquire(),
+                    timeout=0.5,
+                )
+                return
+            except asyncio.TimeoutError:
+                continue
 
     async def _send_busy(self, run_uuid, reason):
         """Report a run that cannot start because local capacity is full."""
@@ -923,7 +974,31 @@ class LensNodeClient:
             loop.call_soon_threadsafe(self._enqueue, payload)
 
         completed = False
+        slot_acquired = False
         try:
+            self._enqueue(
+                {
+                    "type": "run_event",
+                    "run_uuid": run_uuid,
+                    "step_type": "retrieval",
+                    "status": "running",
+                    "detail": {
+                        "queue_state": "QUEUED",
+                        "message": "Waiting for LensNode heavy-work capacity.",
+                    },
+                }
+            )
+            await self.heavy_work_semaphore.acquire()
+            slot_acquired = True
+            self._enqueue(
+                {
+                    "type": "run_event",
+                    "run_uuid": run_uuid,
+                    "step_type": "retrieval",
+                    "status": "running",
+                    "detail": {"queue_state": "STARTED"},
+                }
+            )
             await self.executor.execute(message, emit)
             completed = True
         finally:
@@ -933,7 +1008,11 @@ class LensNodeClient:
                     # being reported as active. A cancelled run has no terminal
                     # frame and must leave running_tasks immediately.
                     await asyncio.sleep(0)
+                else:
+                    await self.executor.drain_pending_workers()
             finally:
+                if slot_acquired:
+                    self.heavy_work_semaphore.release()
                 self.running_tasks.pop(run_uuid, None)
                 self.running_commands.pop(run_uuid, None)
 
