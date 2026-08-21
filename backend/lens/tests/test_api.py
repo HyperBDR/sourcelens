@@ -73,7 +73,11 @@ from lens.services import (
 )
 
 from lens.skill_packages import package_zip_bytes
-from lens.tasks import acquire_datasource_lock, release_datasource_lock
+from lens.tasks import (
+    SourceSyncBusy,
+    acquire_datasource_lock,
+    release_datasource_lock,
+)
 
 User = get_user_model()
 
@@ -4754,19 +4758,16 @@ class LensApiTests(TestCase):
         cancel.assert_called_once_with(self.lensnode, "running-conversion")
         task.refresh_from_db()
         datasource.refresh_from_db()
-        self.assertEqual(task.status, "REVOKED")
-        self.assertEqual(datasource.last_conversion_status, "REVOKED")
-        self.assertIsNotNone(datasource.last_conversion_at)
+        self.assertEqual(task.status, "CANCELLING")
+        self.assertEqual(datasource.last_conversion_status, "CANCELLING")
+        self.assertIsNone(datasource.last_conversion_at)
 
-        acquire_datasource_lock(
-            datasource.uuid,
-            token="new-conversion",
-            ttl_s=60,
-        )
-        release_datasource_lock(
-            datasource.uuid,
-            token="new-conversion",
-        )
+        with self.assertRaises(SourceSyncBusy):
+            acquire_datasource_lock(
+                datasource.uuid,
+                token="new-conversion",
+                ttl_s=60,
+            )
 
     @patch("lens.views.datasources.check_datasource_path")
     def test_managed_workspace_refresh_updates_availability(self, check_path):
