@@ -183,6 +183,9 @@ class LensNodeSerializer(serializers.ModelSerializer):
     """LensNode serializer."""
 
     has_token = serializers.SerializerMethodField()
+    active_run_count = serializers.IntegerField(read_only=True, default=0)
+    queued_run_count = serializers.IntegerField(read_only=True, default=0)
+    awaiting_resume_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = LensNode
@@ -203,6 +206,9 @@ class LensNodeSerializer(serializers.ModelSerializer):
             "has_token",
             "last_authenticated_at",
             "last_heartbeat_at",
+            "active_run_count",
+            "queued_run_count",
+            "awaiting_resume_count",
             "registered_at",
             "created_at",
             "updated_at",

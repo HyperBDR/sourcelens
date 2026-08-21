@@ -1223,13 +1223,16 @@ class LensApiTests(TestCase):
             self.assistant.name,
         )
 
-        delete_response = self.client.post(
-            f"/api/lens/admin/skills/{self.skill.uuid}/force-delete/",
-            {"confirmation_name": self.skill.name},
-            format="json",
-        )
+        with patch("lens.views.skills.invalidate_skill_cache") as invalidate:
+            with self.captureOnCommitCallbacks(execute=True):
+                delete_response = self.client.post(
+                    f"/api/lens/admin/skills/{self.skill.uuid}/force-delete/",
+                    {"confirmation_name": self.skill.name},
+                    format="json",
+                )
 
         self.assertEqual(delete_response.status_code, 204)
+        invalidate.assert_called_once_with(self.skill.uuid)
         self.assertFalse(Skill.objects.filter(pk=self.skill.pk).exists())
         self.assertFalse(
             AssistantSkill.objects.filter(assistant=self.assistant).exists()
@@ -3241,6 +3244,276 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["agent_rounds"], "max")
+
+    def test_admin_run_list_exposes_operational_metrics_and_filters(self):
+        from lens.models import RunTraceEvent
+
+        model_ref = uuid.uuid4()
+        self.assistant.agent_model_ref = model_ref
+        self.assistant.token_budget_profile = "deep"
+        self.assistant.save(
+            update_fields=["agent_model_ref", "token_budget_profile"]
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        failed = create_execution_run(
+            session=session,
+            question="Investigate failed checkout",
+            enqueue=False,
+        )
+        failed.status = Run.Status.FAILED
+        failed.citations = [
+            {
+                "id": "citation-1",
+                "project": "SourceLens",
+                "repository": "sourcelens",
+                "revision": "working-tree",
+                "path": "backend/lens/services.py",
+                "symbol": "create_execution_run",
+                "start_line": 1,
+                "end_line": 1,
+                "supports": "The run is created from the source session.",
+                "source": "def create_execution_run(...):",
+            }
+        ]
+        failed.save(update_fields=["status", "citations"])
+        second_failed = create_execution_run(
+            session=session,
+            question="Investigate another failed checkout",
+            enqueue=False,
+        )
+        second_failed.status = Run.Status.FAILED
+        second_failed.save(update_fields=["status"])
+        RunTraceEvent.objects.create(
+            run=failed,
+            event_id=uuid.uuid4(),
+            sequence=1,
+            event_type="tool.started",
+            timestamp=timezone.now(),
+            call_id="tool-call-1",
+        )
+        retry = create_execution_run(
+            session=session,
+            question="Retry checkout investigation",
+            retry_of_run=failed,
+            enqueue=False,
+        )
+
+        response = self.client.get(
+            "/api/lens/admin/runs/",
+            {
+                "lensnode": str(self.lensnode.uuid),
+                "model": str(model_ref),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["summary"]["total"], 3)
+        self.assertEqual(response.data["summary"]["failed"], 2)
+        failed_row = next(
+            item
+            for item in response.data["results"]
+            if item["uuid"] == str(failed.uuid)
+        )
+        self.assertEqual(failed_row["model_ref"], str(model_ref))
+        self.assertEqual(failed_row["tool_call_count"], 1)
+        self.assertEqual(failed_row["retry_count"], 1)
+        self.assertEqual(failed_row["token_budget_profile"], "deep")
+        self.assertEqual(failed_row["token_budget_max_tokens"], 500000)
+        detail_response = self.client.get(
+            f"/api/lens/admin/runs/{failed.uuid}/"
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data["tool_call_count"], 1)
+        self.assertEqual(detail_response.data["retry_count"], 1)
+        self.assertEqual(
+            detail_response.data["citations"][0]["path"],
+            "backend/lens/services.py",
+        )
+        self.assertNotIn("source", detail_response.data["citations"][0])
+        self.assertEqual(retry.retry_of_run, failed)
+
+        active = create_execution_run(
+            session=session,
+            question="Active checkout investigation",
+            enqueue=False,
+        )
+        active.status = Run.Status.RUNNING
+        active.save(update_fields=["status"])
+        active_response = self.client.get(
+            "/api/lens/admin/runs/",
+            {"status": "active"},
+        )
+        self.assertEqual(active_response.status_code, 200)
+        self.assertEqual(active_response.data["total"], 1)
+        self.assertEqual(
+            active_response.data["results"][0]["uuid"],
+            str(active.uuid),
+        )
+
+    def test_lensnode_list_exposes_run_workload(self):
+        LensNode.objects.create(
+            name="Draining LensNode",
+            status=LensNode.Status.DRAINING,
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        queued = create_execution_run(
+            session=session,
+            question="Queued work",
+            enqueue=False,
+        )
+        running = create_execution_run(
+            session=session,
+            question="Running work",
+            enqueue=False,
+        )
+        running.status = Run.Status.RUNNING
+        running.resume_by = timezone.now() + timedelta(minutes=2)
+        running.save(update_fields=["status", "resume_by"])
+        expired = create_execution_run(
+            session=session,
+            question="Expired resume window",
+            enqueue=False,
+        )
+        expired.status = Run.Status.RUNNING
+        expired.resume_by = timezone.now() - timedelta(minutes=2)
+        expired.save(update_fields=["status", "resume_by"])
+
+        response = self.client.get("/api/lens/admin/lensnodes/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        row = next(
+            item
+            for item in response.data["results"]
+            if item["uuid"] == str(self.lensnode.uuid)
+        )
+        self.assertEqual(row["active_run_count"], 2)
+        self.assertEqual(row["queued_run_count"], 1)
+        self.assertEqual(row["awaiting_resume_count"], 1)
+        self.assertEqual(response.data["fleet_summary"]["active_runs"], 2)
+        self.assertEqual(response.data["fleet_summary"]["queued_runs"], 1)
+        self.assertEqual(response.data["fleet_summary"]["draining"], 1)
+        self.assertEqual(
+            response.data["fleet_summary"]["awaiting_resume"],
+            1,
+        )
+        self.assertEqual(queued.status, Run.Status.QUEUED)
+
+    @patch("lens.views.admin_runs.cancel_run_on_lensnode")
+    def test_admin_can_cancel_another_users_active_run(self, cancel):
+        owner = User.objects.create_user(
+            username="run-owner",
+            email="run-owner@example.com",
+            password="pass12345",
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=owner,
+        )
+        run = create_execution_run(
+            session=session,
+            question="Long running task",
+            enqueue=False,
+        )
+        run.status = Run.Status.RUNNING
+        run.execution.status = RunExecution.Status.RUNNING
+        run.save(update_fields=["status"])
+        run.execution.save(update_fields=["status"])
+
+        response = self.client.post(
+            f"/api/lens/admin/runs/{run.uuid}/cancel/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.CANCELLED)
+        cancel.assert_called_once_with(run)
+
+    def test_admin_retry_is_idempotent_and_audits_the_actor(self):
+        owner = User.objects.create_user(
+            username="retry-owner",
+            email="retry-owner@example.com",
+            password="pass12345",
+        )
+        AssistantAccess.objects.create(
+            assistant=self.assistant,
+            user=owner,
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=owner,
+        )
+        run = create_execution_run(
+            session=session,
+            question="Retry this failed task",
+            enqueue=False,
+        )
+        run.status = Run.Status.FAILED
+        run.save(update_fields=["status"])
+        payload = {"idempotency_key": "admin-retry-request-1"}
+
+        first = self.client.post(
+            f"/api/lens/admin/runs/{run.uuid}/retry/",
+            payload,
+            format="json",
+        )
+        second = self.client.post(
+            f"/api/lens/admin/runs/{run.uuid}/retry/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertEqual(first.data["uuid"], second.data["uuid"])
+        retry = Run.objects.get(uuid=first.data["uuid"])
+        self.assertEqual(retry.retry_of_run, run)
+        self.assertEqual(retry.session.user, owner)
+        self.assertEqual(
+            retry.execution.runtime_snapshot["admin_action"],
+            {
+                "action": "retry",
+                "actor_user_id": self.user.pk,
+                "source_run_uuid": str(run.uuid),
+            },
+        )
+
+    @patch("lens.views.admin_runs.resume_awaiting_run")
+    def test_admin_resume_requires_an_awaiting_run(self, resume):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(
+            session=session,
+            question="Resume from checkpoint",
+            enqueue=False,
+        )
+        run.status = Run.Status.RUNNING
+        run.resume_by = timezone.now() + timedelta(minutes=2)
+        run.save(update_fields=["status", "resume_by"])
+        resume.return_value = True
+
+        detail = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
+        self.assertTrue(detail.data["available_actions"]["resume"])
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.save(update_fields=["status"])
+        detail = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
+        self.assertFalse(detail.data["available_actions"]["resume"])
+        self.lensnode.status = LensNode.Status.ONLINE
+        self.lensnode.save(update_fields=["status"])
+
+        response = self.client.post(
+            f"/api/lens/admin/runs/{run.uuid}/resume/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        resume.assert_called_once_with(run.pk)
 
     def test_admin_run_detail_separates_executor_and_business_outcomes(self):
         session = Session.objects.create(
