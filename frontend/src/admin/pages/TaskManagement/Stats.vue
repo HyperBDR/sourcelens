@@ -178,7 +178,42 @@
           </p>
         </div>
 
-        <template v-else-if="stats">
+        <div
+          v-else-if="!loading && stats && !hasStatsData"
+          data-testid="task-stats-empty"
+          role="status"
+          class="rounded-xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm"
+        >
+          <div
+            class="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-500"
+          >
+            <svg
+              class="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2m-4 0a2 2 0 002 2h2a2 2 0 002-2m-4 0a2 2 0 012-2h2a2 2 0 012 2"
+              />
+            </svg>
+          </div>
+          <h2 class="mt-3 text-sm font-semibold text-gray-900">
+            {{ t('taskManagement.stats.emptyTitle') }}
+          </h2>
+          <p class="mx-auto mt-1 max-w-md text-sm text-gray-500">
+            {{ t('taskManagement.stats.emptyDescription') }}
+          </p>
+          <BaseButton class="mt-5" size="sm" @click="goToTaskList">
+            {{ t('taskManagement.stats.emptyAction') }}
+          </BaseButton>
+        </div>
+
+        <template v-else-if="hasStatsData">
           <div
             class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
           >
@@ -668,6 +703,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+import { hasStatisticsData } from '@/admin/utils/statisticsState'
 import { useToast } from '@/composables/useToast'
 import { extractResponseData, extractErrorMessage } from '@/utils/api'
 import {
@@ -703,6 +740,7 @@ ChartJS.register(
 )
 
 const { t } = useI18n()
+const router = useRouter()
 const { showError } = useToast()
 
 function formatNum(value) {
@@ -713,6 +751,7 @@ function formatNum(value) {
 
 const loading = ref(false)
 const stats = ref(null)
+const hasStatsData = computed(() => hasStatisticsData(stats.value?.total))
 const granularity = ref('day')
 const userScope = ref('')
 const userOptions = ref([])
@@ -995,6 +1034,10 @@ const byTaskNameChartOptions = computed(() => ({
     y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.06)' } }
   }
 }))
+
+function goToTaskList() {
+  router.push({ name: 'TaskManagementList' })
+}
 
 async function fetchStats() {
   if (!startDate.value || !endDate.value) {
