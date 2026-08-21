@@ -50,7 +50,7 @@
           >
             <dt class="text-xs font-medium text-ink-500">{{ item.label }}</dt>
             <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink-900">
-              {{ item.value }}
+              {{ formatOperationMetric(item.value) }}
             </dd>
           </div>
         </dl>
@@ -155,14 +155,21 @@
                       @click="openRuns(row)"
                     >
                       <div class="font-medium tabular-nums text-ink-800">
-                        {{ row.active_run_count }} / {{ row.queued_run_count }}
+                        {{ formatOperationMetric(row.active_run_count) }} /
+                        {{ formatOperationMetric(row.queued_run_count) }}
                       </div>
-                      <div class="mt-1 text-xs text-ink-500">
+                      <div
+                        v-if="hasOperationMetric(row.awaiting_resume_count)"
+                        class="mt-1 text-xs text-ink-500"
+                      >
                         {{
                           t('lensAdmin.fleet.awaitingResumeCount', {
                             count: row.awaiting_resume_count
                           })
                         }}
+                      </div>
+                      <div v-else class="mt-1 text-xs text-ink-400">
+                        {{ t('lensAdmin.fleet.workloadUnavailable') }}
                       </div>
                     </button>
                   </td>
@@ -308,6 +315,11 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
+import {
+  formatOperationMetric,
+  hasOperationMetric,
+  resolveFleetSummary
+} from '@/admin/utils/operationsSummary'
 import { extractErrorMessage } from '@/utils/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
@@ -380,27 +392,27 @@ const columns = computed(() =>
 const fleetSummary = computed(() => [
   {
     label: t('lensAdmin.fleet.online'),
-    value: fleetSummaryData.value.online || 0
+    value: fleetSummaryData.value.online
   },
   {
     label: t('lensAdmin.fleet.offline'),
-    value: fleetSummaryData.value.offline || 0
+    value: fleetSummaryData.value.offline
   },
   {
     label: t('lensAdmin.fleet.draining'),
-    value: fleetSummaryData.value.draining || 0
+    value: fleetSummaryData.value.draining
   },
   {
     label: t('lensAdmin.fleet.activeRuns'),
-    value: fleetSummaryData.value.active_runs || 0
+    value: fleetSummaryData.value.active_runs
   },
   {
     label: t('lensAdmin.fleet.queuedRuns'),
-    value: fleetSummaryData.value.queued_runs || 0
+    value: fleetSummaryData.value.queued_runs
   },
   {
     label: t('lensAdmin.fleet.awaitingResume'),
-    value: fleetSummaryData.value.awaiting_resume || 0
+    value: fleetSummaryData.value.awaiting_resume
   }
 ])
 
@@ -456,7 +468,7 @@ async function load() {
     lensnodes.value = normalizeList(lensnodeRows)
     const total = lensnodeRows?.count ?? lensnodes.value.length
     totalLensNodes.value = Number(total)
-    fleetSummaryData.value = lensnodeRows?.fleet_summary ?? {}
+    fleetSummaryData.value = resolveFleetSummary(lensnodeRows)
     globalSettings.value = normalizeList(settingRows)
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))

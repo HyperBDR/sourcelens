@@ -857,7 +857,8 @@
       "activeRuns": "Active runs",
       "queuedRuns": "Queued runs",
       "awaitingResume": "Awaiting resume",
-      "awaitingResumeCount": "{count} awaiting resume"
+      "awaitingResumeCount": "{count} awaiting resume",
+      "workloadUnavailable": "Workload data unavailable"
     },
     "pages": {
       "assistants": {

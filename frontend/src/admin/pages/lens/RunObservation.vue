@@ -30,7 +30,7 @@
         >
           <p class="text-xs font-medium text-gray-500">{{ item.label }}</p>
           <p class="mt-1 text-2xl font-semibold tabular-nums text-gray-900">
-            {{ item.count }}
+            {{ formatOperationMetric(item.count) }}
           </p>
         </button>
       </div>
@@ -1483,6 +1483,10 @@ import {
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import RunDiagnosisPanel from '@/admin/pages/lens/RunDiagnosisPanel.vue'
 import RunTrajectoryPanel from '@/admin/pages/lens/RunTrajectoryPanel.vue'
+import {
+  formatOperationMetric,
+  resolveRunSummary
+} from '@/admin/utils/operationsSummary'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDateInput from '@/components/ui/BaseDateInput.vue'
@@ -1556,22 +1560,25 @@ const statusSummaryCards = computed(() => [
     status: 'active',
     label: t('lensRuns.statusRunning'),
     count:
-      (statusSummary.value.running || 0) + (statusSummary.value.streaming || 0)
+      statusSummary.value.running === null ||
+      statusSummary.value.streaming === null
+        ? null
+        : statusSummary.value.running + statusSummary.value.streaming
   },
   {
     status: 'queued',
     label: t('lensRuns.statusQueued'),
-    count: statusSummary.value.queued || 0
+    count: statusSummary.value.queued
   },
   {
     status: 'failed',
     label: t('lensRuns.statusFailed'),
-    count: statusSummary.value.failed || 0
+    count: statusSummary.value.failed
   },
   {
     status: 'done',
     label: t('lensRuns.statusDone'),
-    count: statusSummary.value.done || 0
+    count: statusSummary.value.done
   }
 ])
 
@@ -1864,7 +1871,7 @@ async function fetchRuns() {
     const data = await getAdminRuns(params)
     runs.value = data?.results ?? []
     total.value = data?.total ?? 0
-    statusSummary.value = data?.summary ?? {}
+    statusSummary.value = resolveRunSummary(data)
   } catch (e) {
     showError(extractErrorMessage(e, t('common.error')))
     runs.value = []

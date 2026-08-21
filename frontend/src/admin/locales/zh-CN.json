@@ -857,7 +857,8 @@
       "activeRuns": "运行中 Run",
       "queuedRuns": "排队中 Run",
       "awaitingResume": "等待恢复",
-      "awaitingResumeCount": "{count} 个等待恢复"
+      "awaitingResumeCount": "{count} 个等待恢复",
+      "workloadUnavailable": "负载数据不可用"
     },
     "pages": {
       "assistants": {
