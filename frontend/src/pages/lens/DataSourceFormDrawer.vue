@@ -507,15 +507,17 @@
                 <button
                   class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-40"
                   type="button"
-                  :disabled="refreshingDirs"
-                  :title="t('common.refresh')"
+                  :disabled="refreshingDirectories || !form.lensnode_uuid"
+                  :title="t('lensAdmin.datasourceWizard.refreshDirectories')"
                   @click="$emit('refresh-dirs')"
                 >
                   <RefreshCwIcon
                     class="h-4 w-4"
-                    :class="{ 'animate-spin': refreshingDirs }"
+                    :class="{ 'animate-spin': refreshingDirectories }"
                   />
-                  <span class="sr-only">{{ t('common.refresh') }}</span>
+                  <span class="sr-only">
+                    {{ t('lensAdmin.datasourceWizard.refreshDirectories') }}
+                  </span>
                 </button>
                 <button
                   v-if="!isManagedWorkspace"
@@ -1216,7 +1218,7 @@ const props = defineProps({
   checkingPath: Boolean,
   testingConnection: Boolean,
   refreshingCredentials: Boolean,
-  refreshingDirs: Boolean,
+  refreshingDirectories: Boolean,
   saving: Boolean,
   formError: { type: String, default: '' }
 })
