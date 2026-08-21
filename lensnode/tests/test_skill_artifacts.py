@@ -498,3 +498,47 @@ def test_run_skill_script_done_reports_call_counts(tmp_path):
     ]
     assert done_events[0]["call_count"] == 1
     assert done_events[1]["call_count"] == 2
+
+
+def test_run_skill_script_refs_medium_json_output(tmp_path):
+    content = (
+        b"#!/bin/sh\n"
+        b"printf '%s' \"[{\\\"key\\\": \\\"$(printf 'x%.0s' "
+        b"$(seq 1 900))\\\"}]\"\n"
+    )
+    resources = _resources(tmp_path, content)
+
+    payload = json.loads(
+        _script_tool(resources).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["stdout_truncated"] is True
+    assert payload["stdout_format"] == "json"
+    assert payload["stdout_ref"]
+    assert "analyze_structured_output" in payload["instruction"]
+    output_path = resources.root / payload["stdout_ref"].lstrip("/")
+    saved = output_path.read_text(encoding="utf-8")
+    assert saved.startswith('[{"key": "xx')
+    assert len(saved) > 900
+
+
+def test_run_skill_script_keeps_small_json_output_inline(tmp_path):
+    content = (
+        b"#!/bin/sh\n"
+        b"printf '%s' '[{\"key\": \"value\"}]'\n"
+    )
+    resources = _resources(tmp_path, content)
+
+    payload = json.loads(
+        _script_tool(resources).invoke(
+            {"skill": "income-cli", "script": "scripts/run.sh"}
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["stdout_format"] == "json"
+    assert payload["stdout_truncated"] is False
+    assert payload["stdout_ref"] is None

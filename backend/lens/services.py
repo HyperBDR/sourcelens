@@ -2164,6 +2164,13 @@ def dispatch_run_to_lensnode(
                 "resume": resume,
                 "run_timeout_s": run_timeout_s,
                 "remaining_run_timeout_s": remaining_run_timeout_s,
+                "token_budget": {
+                    "profile": execution.token_budget_profile,
+                    "max_tokens": execution.token_budget_max_tokens,
+                    "final_reserve_tokens": (
+                        execution.token_budget_final_reserve_tokens
+                    ),
+                },
                 "trace_cursor": last_trace_sequence,
                 "trace_attempt": max(
                     last_trace_attempt + (1 if resume else 0),

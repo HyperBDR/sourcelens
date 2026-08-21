@@ -1,0 +1,7 @@
+type: improvement
+audience: admin
+en: Honor the Assistant token-budget profile on LensNode runs, keep large
+  Skill output out of the model context, and deepen planning reasoning for
+  multi-step runs.
+zh-CN: LensNode 运行遵循助手的 token 预算配置，大体积 Skill 输出不再
+  进入模型上下文，并为多步骤运行提升规划推理深度。
