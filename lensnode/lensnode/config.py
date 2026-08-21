@@ -41,7 +41,7 @@ class LensNodeConfig:
     codegraph_init_timeout_s: int = 300
     node_options: str = ""
     reasoning_effort: str | None = None
-    planning_reasoning_effort: str | None = "none"
+    planning_reasoning_effort: str | None = "medium"
     planner_repair_enabled: bool = False
     heavy_work_concurrency: int = 1
 
@@ -216,7 +216,7 @@ def load_config():
         planning_reasoning_effort=(
             os.getenv(
                 "LENSNODE_PLANNING_REASONING_EFFORT",
-                "none",
+                "medium",
             )
             or None
         ),

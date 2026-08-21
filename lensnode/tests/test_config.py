@@ -59,7 +59,7 @@ def test_load_config_reads_run_token_budget(monkeypatch):
     assert config.token_budget_warn_ratio == 0.75
 
 
-def test_resolve_token_budget_uses_only_the_node_safety_ceiling():
+def test_resolve_token_budget_prefers_run_sent_budget():
     config = type(
         "Config",
         (),
@@ -82,13 +82,13 @@ def test_resolve_token_budget_uses_only_the_node_safety_ceiling():
     )
 
     assert budget == {
-        "profile": "system",
-        "max_tokens": 500000,
-        "final_reserve_tokens": 40000,
+        "profile": "deep",
+        "max_tokens": 900000,
+        "final_reserve_tokens": 75000,
     }
 
 
-def test_legacy_unlimited_profile_cannot_disable_node_safety_ceiling():
+def test_unlimited_profile_applies_no_ceiling():
     config = type(
         "Config",
         (),
@@ -104,15 +104,35 @@ def test_legacy_unlimited_profile_cannot_disable_node_safety_ceiling():
         {
             "token_budget": {
                 "profile": "unlimited",
-                "max_tokens": 500000,
-                "final_reserve_tokens": 75000,
+                "max_tokens": 0,
+                "final_reserve_tokens": 0,
             }
         },
     )
 
     assert budget == {
+        "profile": "unlimited",
+        "max_tokens": 0,
+        "final_reserve_tokens": 0,
+    }
+
+
+def test_resolve_token_budget_falls_back_to_config_without_run_budget():
+    config = type(
+        "Config",
+        (),
+        {
+            "token_budget_max_tokens": 200000,
+            "token_budget_hard_max_tokens": 500000,
+            "token_budget_final_reserve_tokens": 40000,
+        },
+    )()
+
+    budget = _resolve_token_budget(config, {})
+
+    assert budget == {
         "profile": "system",
-        "max_tokens": 500000,
+        "max_tokens": 200000,
         "final_reserve_tokens": 40000,
     }
 
@@ -129,7 +149,9 @@ def test_load_config_reads_mcp_runtime_limits(monkeypatch):
     assert config.mcp_defer_threshold == 8
 
 
-def test_load_config_uses_light_reasoning_for_initial_planning(monkeypatch):
+def test_load_config_uses_medium_reasoning_for_initial_planning(
+    monkeypatch,
+):
     monkeypatch.delenv(
         "LENSNODE_PLANNING_REASONING_EFFORT",
         raising=False,
@@ -137,7 +159,7 @@ def test_load_config_uses_light_reasoning_for_initial_planning(monkeypatch):
 
     config = load_config()
 
-    assert config.planning_reasoning_effort == "none"
+    assert config.planning_reasoning_effort == "medium"
 
 
 def test_load_config_disables_planner_repair_by_default(monkeypatch):

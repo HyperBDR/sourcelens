@@ -56,6 +56,7 @@ SELF_REPORTING_TOOLS = {
 _STRUCTURED_INPUT_MAX_BYTES = 50 * 1024 * 1024
 _STRUCTURED_GROUP_MAX_ITEMS = 1000
 _STRUCTURED_VALIDATION_MAX_ITEMS = 1_000_000
+_STRUCTURED_REF_MIN_CHARS = 800
 _SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_CALL = 50 * 1024 * 1024
 _SKILL_SCRIPT_DEFAULT_MAX_OUTPUT_BYTES_PER_RUN = 200 * 1024 * 1024
 _SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_RUN = 2 * 1024 * 1024 * 1024
@@ -1152,7 +1153,7 @@ def build_general_chat_tools(
     if stdout_preview_chars is None:
         stdout_preview_chars = tool_policy.get("skill_script_stdout_limit")
     stdout_limit = min(
-        _positive_int(stdout_preview_chars, 12000),
+        _positive_int(stdout_preview_chars, 4000),
         100000,
     )
     stderr_preview_chars = tool_policy.get(
@@ -1161,7 +1162,7 @@ def build_general_chat_tools(
     if stderr_preview_chars is None:
         stderr_preview_chars = tool_policy.get("skill_script_stderr_limit")
     stderr_limit = min(
-        _positive_int(stderr_preview_chars, 8000),
+        _positive_int(stderr_preview_chars, 4000),
         50000,
     )
     script_calls = {"count": 0}
@@ -2885,7 +2886,15 @@ def _persist_large_tool_output(
     text = _decode_output(value)
     raw = value if isinstance(value, bytes) else text.encode("utf-8")
     output_format, synopsis = _saved_output_synopsis(raw, text)
-    truncated = len(text) > limit or (force_ref and bool(raw))
+    structured_ref = (
+        output_format in ("json", "csv")
+        and len(text) > _STRUCTURED_REF_MIN_CHARS
+    )
+    truncated = (
+        len(text) > limit
+        or (force_ref and bool(raw))
+        or structured_ref
+    )
     output_ref = None
     if truncated:
         output_path = Path(persisted_path) if persisted_path else None
