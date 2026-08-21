@@ -1,10 +1,12 @@
 {
   "lensRuns": {
-    "menu": "历史记录",
-    "title": "问答历史记录",
-    "subtitle": "追踪所有用户的每一次提问与回答的完整执行过程。",
+    "menu": "Run 运维",
+    "title": "Run 运维中心",
+    "subtitle": "跨用户与 LensNode 监控、检查并安全操作 Agent Run。",
     "filterKeyword": "搜索问题…",
     "filterUsername": "用户名",
+    "filterLensNode": "LensNode 名称或 ID",
+    "filterModel": "模型引用",
     "assistantAll": "全部助手",
     "statusAll": "全部状态",
     "statusDone": "完成",
@@ -17,6 +19,7 @@
     "colTime": "时间",
     "colUser": "用户",
     "colAssistant": "助手",
+    "colExecutor": "助手 / LensNode",
     "colQuestion": "问题",
     "colStatus": "状态",
     "executorStatus": "执行器状态",
@@ -31,6 +34,11 @@
     "feedbackUnhelpful": "没有帮助",
     "colDuration": "耗时",
     "colSteps": "步骤",
+    "colOperations": "运维指标",
+    "toolCallsShort": "{n} 次工具",
+    "retriesShort": "{n} 次重试",
+    "budgetUsed": "预算 {value}%",
+    "summaryTotal": "全部 Run",
     "subagents": "{n} 个子代理",
     "subagentsDenied": "拒绝 {n} 次子代理调用",
     "detailTitle": "Run 完整追踪",
@@ -46,9 +54,18 @@
     "execution": "执行快照",
     "lensnode": "LensNode",
     "tabOverview": "基本情况",
+    "tabLiveProgress": "实时进度",
     "tabDiagnosis": "诊断",
-    "tabTrace": "任务详情",
-    "tabFiles": "生成文件",
+    "tabTrace": "执行轨迹",
+    "tabEvidence": "证据与引用",
+    "tabFiles": "输出产物",
+    "tabUsage": "用量与成本",
+    "liveProgressTitle": "当前执行状态",
+    "resumeDeadline": "恢复截止时间",
+    "evidenceTitle": "证据边界",
+    "evidenceBoundary": "引用与已收集证据属于当前 Run 的不可变快照；诊断结论在独立页签中展示。",
+    "verifiedCitations": "已验证引用",
+    "noVerifiedCitations": "当前 Run 未捕获到已验证引用。",
     "overviewSummary": "运行概览",
     "overviewExecution": "执行配置",
     "modelsUsed": "执行模型",
@@ -125,6 +142,32 @@
     "targetDirs": "工作区目录",
     "resources": "加载资源",
     "generateDiagnosis": "生成诊断",
+    "cancelAction": "取消",
+    "retryAction": "重试",
+    "resumeAction": "恢复",
+    "exportAction": "导出 JSON",
+    "actionFailed": "Run 操作失败",
+    "exportSuccess": "Run 导出已下载",
+    "exportFailed": "Run 导出失败",
+    "actionSuccess": {
+      "cancel": "Run 已取消",
+      "retry": "已创建重试 Run",
+      "resume": "已请求恢复 Run"
+    },
+    "confirm": {
+      "cancel": {
+        "title": "取消此 Run？",
+        "message": "当前执行将停止，已捕获的证据仍会保留。"
+      },
+      "retry": {
+        "title": "重试此 Run？",
+        "message": "系统会基于原始输入和附件创建一个带审计信息的新 Run。"
+      },
+      "resume": {
+        "title": "恢复此 Run？",
+        "message": "SourceLens 将向分配的 LensNode 请求从检查点恢复执行。"
+      }
+    },
     "closeDetail": "关闭 Run 详情",
     "retryDiagnosis": "重新诊断",
     "diagnosisEmptyTitle": "尚未生成诊断",
@@ -807,6 +850,15 @@
       "mcp": "MCP Servers",
       "settings": "全局配置"
     },
+    "fleet": {
+      "online": "在线节点",
+      "offline": "离线节点",
+      "draining": "排空中节点",
+      "activeRuns": "运行中 Run",
+      "queuedRuns": "排队中 Run",
+      "awaitingResume": "等待恢复",
+      "awaitingResumeCount": "{count} 个等待恢复"
+    },
     "pages": {
       "assistants": {
         "title": "助手",
@@ -1016,6 +1068,8 @@
       "runtimeStatus": "运行状态",
       "enrollment": "接入状态",
       "dirsAndTasks": "目录 / 任务",
+      "workload": "运行中 / 排队",
+      "version": "Agent / 协议版本",
       "heartbeat": "心跳",
       "value": "值",
       "datasource": "数据源",

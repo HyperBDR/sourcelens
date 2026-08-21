@@ -2,6 +2,8 @@
 
 from pathlib import PurePosixPath
 
+from django.db.models import Count, Q
+from django.db.models.functions import Now
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -14,7 +16,7 @@ from lens.datasource_services import (
     test_datasource_connection,
 )
 from lens.lensnode_auth import issue_lensnode_token
-from lens.models import DataSource, LensNode
+from lens.models import DataSource, LensNode, Run
 from lens.serializers import LensNodeSerializer
 from .base import BaseAdminViewSet
 
@@ -22,8 +24,74 @@ from .base import BaseAdminViewSet
 class LensNodeViewSet(BaseAdminViewSet):
     """CRUD and enrollment actions for LensNode workers."""
 
-    queryset = LensNode.objects.all()
+    queryset = LensNode.objects.annotate(
+        active_run_count=Count(
+            "runs",
+            filter=Q(
+                runs__status__in=[
+                    Run.Status.RUNNING,
+                    Run.Status.STREAMING,
+                ]
+            ),
+            distinct=True,
+        ),
+        queued_run_count=Count(
+            "runs",
+            filter=Q(runs__status=Run.Status.QUEUED),
+            distinct=True,
+        ),
+        awaiting_resume_count=Count(
+            "runs",
+            filter=Q(
+                runs__status__in=[
+                    Run.Status.RUNNING,
+                    Run.Status.STREAMING,
+                ],
+                runs__resume_by__gt=Now(),
+            ),
+            distinct=True,
+        ),
+    ).order_by("name")
     serializer_class = LensNodeSerializer
+
+    def list(self, request, *args, **kwargs):
+        """Return paginated nodes with fleet-wide health and workload."""
+
+        response = super().list(request, *args, **kwargs)
+        node_summary = LensNode.objects.aggregate(
+            total=Count("pk"),
+            online=Count("pk", filter=Q(status=LensNode.Status.ONLINE)),
+            offline=Count("pk", filter=Q(status=LensNode.Status.OFFLINE)),
+            draining=Count("pk", filter=Q(status=LensNode.Status.DRAINING)),
+        )
+        run_summary = Run.objects.filter(lensnode__isnull=False).aggregate(
+            active_runs=Count(
+                "pk",
+                filter=Q(
+                    status__in=[
+                        Run.Status.RUNNING,
+                        Run.Status.STREAMING,
+                    ]
+                ),
+            ),
+            queued_runs=Count(
+                "pk",
+                filter=Q(status=Run.Status.QUEUED),
+            ),
+            awaiting_resume=Count(
+                "pk",
+                filter=Q(
+                    status__in=[Run.Status.RUNNING, Run.Status.STREAMING],
+                    resume_by__gt=Now(),
+                ),
+            ),
+        )
+        if isinstance(response.data, dict):
+            response.data["fleet_summary"] = {
+                **node_summary,
+                **run_summary,
+            }
+        return response
 
     def create(self, request, *args, **kwargs):
         """Onboard a node: create record, auto-approve, issue token once.

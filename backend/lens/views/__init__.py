@@ -9,8 +9,11 @@ from .admin_run_diagnostics import (
     AdminRunDiagnosticTurnsView,
 )
 from .admin_runs import (
+    AdminRunCancelView,
     AdminRunDetailView,
     AdminRunListView,
+    AdminRunResumeView,
+    AdminRunRetryView,
     AdminRunTrajectoryView,
     _admin_run_step_counts,
 )
@@ -47,8 +50,11 @@ from .skills import MCPServerViewSet, SkillViewSet
 
 __all__ = [
     "AdminGroupAccessDetailView",
+    "AdminRunCancelView",
     "AdminRunDetailView",
     "AdminRunListView",
+    "AdminRunResumeView",
+    "AdminRunRetryView",
     "AdminRunTrajectoryView",
     "AdminRunDiagnosticsView",
     "AdminRunDiagnosticTurnsView",

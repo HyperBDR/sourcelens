@@ -39,6 +39,22 @@
           </div>
         </div>
 
+        <dl
+          data-testid="lensnode-fleet-summary"
+          class="grid grid-cols-2 gap-3 border-b border-line bg-surface-sunken/50 px-5 py-4 lg:grid-cols-6"
+        >
+          <div
+            v-for="item in fleetSummary"
+            :key="item.label"
+            class="fleet-stat"
+          >
+            <dt class="text-xs font-medium text-ink-500">{{ item.label }}</dt>
+            <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink-900">
+              {{ item.value }}
+            </dd>
+          </div>
+        </dl>
+
         <div class="px-5 py-4">
           <BaseLoading v-if="loading && lensnodes.length === 0" />
 
@@ -131,6 +147,30 @@
                         tasks: row.tasks?.length || 0
                       })
                     }}
+                  </td>
+                  <td class="table-cell">
+                    <button
+                      type="button"
+                      class="text-left transition-colors hover:text-primary-600"
+                      @click="openRuns(row)"
+                    >
+                      <div class="font-medium tabular-nums text-ink-800">
+                        {{ row.active_run_count }} / {{ row.queued_run_count }}
+                      </div>
+                      <div class="mt-1 text-xs text-ink-500">
+                        {{
+                          t('lensAdmin.fleet.awaitingResumeCount', {
+                            count: row.awaiting_resume_count
+                          })
+                        }}
+                      </div>
+                    </button>
+                  </td>
+                  <td class="table-cell text-ink-600">
+                    <div>{{ row.agent_version || EMPTY_VALUE }}</div>
+                    <div class="mt-1 text-xs text-ink-400">
+                      {{ row.protocol_version || EMPTY_VALUE }}
+                    </div>
                   </td>
                   <td class="table-cell text-ink-600">
                     {{ formatDateTime(row.last_heartbeat_at) }}
@@ -266,6 +306,7 @@
 import { MoreVertical } from '@lucide/vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import { extractErrorMessage } from '@/utils/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
@@ -299,11 +340,13 @@ import {
 import { useShortDateTime } from './useShortDateTime'
 
 const { t } = useI18n()
+const router = useRouter()
 const { showSuccess, showError } = useToast()
 const formatDateTime = useShortDateTime()
 
 const lensnodes = ref([])
 const totalLensNodes = ref(0)
+const fleetSummaryData = ref({})
 const currentPage = ref(1)
 const pageSize = ref(20)
 const globalSettings = ref([])
@@ -327,10 +370,39 @@ const columns = computed(() =>
     'enrollment',
     'workspace',
     'dirsAndTasks',
+    'workload',
+    'version',
     'heartbeat',
     'actions'
   ].map((column) => t(`lensAdmin.columns.${column}`))
 )
+
+const fleetSummary = computed(() => [
+  {
+    label: t('lensAdmin.fleet.online'),
+    value: fleetSummaryData.value.online || 0
+  },
+  {
+    label: t('lensAdmin.fleet.offline'),
+    value: fleetSummaryData.value.offline || 0
+  },
+  {
+    label: t('lensAdmin.fleet.draining'),
+    value: fleetSummaryData.value.draining || 0
+  },
+  {
+    label: t('lensAdmin.fleet.activeRuns'),
+    value: fleetSummaryData.value.active_runs || 0
+  },
+  {
+    label: t('lensAdmin.fleet.queuedRuns'),
+    value: fleetSummaryData.value.queued_runs || 0
+  },
+  {
+    label: t('lensAdmin.fleet.awaitingResume'),
+    value: fleetSummaryData.value.awaiting_resume || 0
+  }
+])
 
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(totalLensNodes.value / pageSize.value))
@@ -384,6 +456,7 @@ async function load() {
     lensnodes.value = normalizeList(lensnodeRows)
     const total = lensnodeRows?.count ?? lensnodes.value.length
     totalLensNodes.value = Number(total)
+    fleetSummaryData.value = lensnodeRows?.fleet_summary ?? {}
     globalSettings.value = normalizeList(settingRows)
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
@@ -412,6 +485,13 @@ function closeLensNodeDrawer() {
 function openDetail(row) {
   detailNode.value = row
   showDetailDrawer.value = true
+}
+
+function openRuns(row) {
+  router.push({
+    name: 'LensRunObservation',
+    query: { lensnode: row.uuid }
+  })
 }
 
 function closeDetail() {
@@ -529,5 +609,9 @@ onUnmounted(closeMenu)
 
 .table-cell {
   @apply px-4 py-4 text-sm text-ink-700;
+}
+
+.fleet-stat {
+  @apply rounded-lg border border-line bg-surface px-4 py-3 shadow-sm;
 }
 </style>
