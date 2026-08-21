@@ -1,21 +1,18 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
+    <div class="admin-stats-page">
       <div class="mb-4">
-        <h1 class="text-lg font-semibold text-gray-900">
+        <h1 class="admin-page-title">
           {{ t('llm.stats.title') }}
         </h1>
-        <p class="mt-1 text-sm text-gray-500">
+        <p class="admin-page-subtitle">
           {{ t('llm.stats.subtitle') }}
         </p>
       </div>
 
-      <section
-        class="mb-6 flex w-full flex-col items-stretch gap-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-5"
-        aria-label="Filters"
-      >
+      <section class="admin-filter-toolbar" aria-label="Filters">
         <div
-          class="flex w-full flex-none flex-wrap items-end gap-6 sm:w-auto sm:min-w-0 sm:flex-1"
+          class="flex w-full flex-none flex-wrap items-end gap-4 sm:w-auto sm:min-w-0 sm:flex-1"
         >
           <div class="stats-user-filter flex flex-col gap-1.5">
             <label

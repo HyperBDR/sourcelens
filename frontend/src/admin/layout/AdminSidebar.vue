@@ -17,13 +17,13 @@
   <aside
     id="admin-sidebar"
     :class="[
-      'layout-admin-sidebar flex h-full w-64 flex-shrink-0 flex-col border-r border-ink-700 bg-ink-900 transition-transform duration-300 ease-in-out',
+      'layout-admin-sidebar flex h-full w-60 flex-shrink-0 flex-col border-r border-ink-700 bg-ink-900 transition-transform duration-300 ease-in-out',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
   >
     <div
-      class="flex h-16 items-center justify-between border-b border-ink-800 px-4"
+      class="flex h-14 items-center justify-between border-b border-ink-800 px-4"
     >
       <router-link
         to="/management"
@@ -33,7 +33,7 @@
         <BrandLogo
           variant="wordmark"
           tone="dark"
-          wrapperClass="-ml-[27px] mix-blend-screen [&_img]:!w-52"
+          wrapperClass="-ml-[25px] mix-blend-screen [&_img]:!w-48"
         />
       </router-link>
       <button
@@ -1271,7 +1271,7 @@ const preloadRoute = (path) => {
 }
 
 .admin-nav-item {
-  @apply flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
+  @apply flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
 }
 
 .admin-nav-item-active {
@@ -1291,7 +1291,7 @@ const preloadRoute = (path) => {
 }
 
 .admin-nav-item-child {
-  @apply relative pl-10 py-2 text-sm font-normal text-ink-400;
+  @apply relative pl-10 py-2 text-[13px] font-normal text-ink-400;
   margin-left: 0.75rem;
   border-radius: 0.375rem;
 }

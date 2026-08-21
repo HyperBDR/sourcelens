@@ -1,13 +1,13 @@
 <template>
   <AdminLayout>
     <div
-      class="flex h-auto min-h-0 w-full max-w-full flex-col p-0 md:h-full md:p-6"
+      class="flex h-auto min-h-0 w-full max-w-full flex-col p-0 md:h-full md:p-4 lg:p-5"
     >
       <div class="mb-4 flex-shrink-0">
-        <h1 class="text-xl font-semibold text-gray-900">
+        <h1 class="admin-page-title">
           {{ t('lensRuns.title') }}
         </h1>
-        <p class="mt-1 text-sm text-gray-500">
+        <p class="admin-page-subtitle">
           {{ t('lensRuns.subtitle') }}
         </p>
       </div>
@@ -20,7 +20,7 @@
           v-for="item in statusSummaryCards"
           :key="item.status"
           type="button"
-          class="rounded-lg border bg-white px-4 py-3 text-left shadow-sm transition-colors hover:border-primary-300"
+          class="admin-metric-card hover:border-primary-300"
           :class="
             filters.status === item.status
               ? 'border-primary-400 ring-1 ring-primary-200'
@@ -29,7 +29,7 @@
           @click="setStatusFilter(item.status)"
         >
           <p class="text-xs font-medium text-gray-500">{{ item.label }}</p>
-          <p class="mt-1 text-2xl font-semibold tabular-nums text-gray-900">
+          <p class="admin-metric-value mt-1">
             {{ formatOperationMetric(item.count) }}
           </p>
         </button>
@@ -40,7 +40,7 @@
       >
         <div class="flex min-h-0 flex-col p-0 md:p-6">
           <div
-            class="mb-4 flex flex-shrink-0 flex-col items-stretch gap-3 rounded-lg border border-gray-200 bg-white p-3 md:mb-6 md:flex-row md:flex-nowrap md:items-center md:justify-between md:border-0 md:p-0"
+            class="admin-filter-toolbar mb-4 flex-shrink-0 md:flex-nowrap md:items-center md:border-0 md:bg-transparent md:p-0 md:shadow-none"
           >
             <div
               class="flex w-full min-w-0 flex-col items-stretch gap-3 md:flex-1 md:flex-row md:flex-nowrap md:items-center"
@@ -1229,9 +1229,7 @@
                       <h3 class="text-xs font-medium text-indigo-700">
                         {{ t('lensRuns.totalTokens') }}
                       </h3>
-                      <p
-                        class="mt-1 text-2xl font-semibold tracking-tight text-gray-900 tabular-nums"
-                      >
+                      <p class="admin-metric-value mt-1">
                         {{ (detail.total_tokens || 0).toLocaleString() }}
                       </p>
                     </div>

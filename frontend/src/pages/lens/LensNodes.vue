@@ -1,15 +1,13 @@
 <template>
   <AdminLayout>
     <div class="flex max-w-full flex-col gap-4 py-4">
-      <section
-        class="overflow-hidden rounded-lg border border-line bg-surface shadow-sm"
-      >
+      <section class="admin-data-panel overflow-hidden">
         <div
           class="flex flex-col gap-4 border-b border-line px-5 py-4 lg:flex-row lg:items-start lg:justify-between"
         >
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <h1 class="text-xl font-semibold text-ink-900">
+              <h1 class="admin-page-title">
                 {{ t('lensAdmin.pages.lensnodes.title') }}
               </h1>
               <span
@@ -49,7 +47,7 @@
             class="fleet-stat"
           >
             <dt class="text-xs font-medium text-ink-500">{{ item.label }}</dt>
-            <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink-900">
+            <dd class="admin-metric-value mt-1">
               {{ formatOperationMetric(item.value) }}
             </dd>
           </div>
@@ -624,6 +622,7 @@ onUnmounted(closeMenu)
 }
 
 .fleet-stat {
-  @apply rounded-lg border border-line bg-surface px-4 py-3 shadow-sm;
+  @apply rounded-lg border border-line bg-surface px-4 py-3;
+  box-shadow: 0 1px 2px rgb(17 24 39 / 0.035);
 }
 </style>
