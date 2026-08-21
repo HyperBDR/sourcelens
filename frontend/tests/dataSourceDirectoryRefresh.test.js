@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import {
+  directoryRefreshPaths,
+  mergeRefreshedDirectories
+} from '../src/pages/lens/directoryRefresh.js'
+
 const source = (path) =>
   readFile(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
@@ -41,7 +46,11 @@ test('data source parent refreshes directories for the selected LensNode', async
     contents,
     /const workspacePath = lensnode\.workspace_path \|\| '\/workspace'/
   )
-  assert.match(contents, /scanLensNodeDirs\(lensnodeUuid, \[workspacePath\]\)/)
+  assert.match(
+    contents,
+    /scanLensNodeDirs\(\s*lensnodeUuid,\s*directoryRefreshPaths\(lensnode\)\s*\)/
+  )
+  assert.match(contents, /mergeRefreshedDirectories\(/)
   assert.match(contents, /available_dirs: directories/)
   assert.match(contents, /refreshingDirectories\.value = true/)
   assert.match(
@@ -54,10 +63,11 @@ test('data source parent refreshes directories for the selected LensNode', async
 test('directory refresh normalizes supported list-dirs response shapes', async () => {
   const contents = await source('pages/lens/DataSources.vue')
 
-  assert.match(contents, /const dirs = result\?\.dirs \?\? result/)
-  assert.match(contents, /if \(Array\.isArray\(dirs\)\) return dirs/)
-  assert.match(contents, /const workspaceDirs = dirs\[workspacePath\]/)
-  assert.match(contents, /return Object\.values\(dirs\)\.flatMap\(/)
+  const helper = await source('pages/lens/directoryRefresh.js')
+
+  assert.match(helper, /const dirs = result\?\.dirs \?\? result/)
+  assert.match(helper, /if \(Array\.isArray\(dirs\)/)
+  assert.match(helper, /const rootDirs = dirs\[workspacePath\]/)
 })
 
 test('LensNode directory refresh uses the list-dirs endpoint', async () => {
@@ -68,4 +78,62 @@ test('LensNode directory refresh uses the list-dirs endpoint', async () => {
     /api\.post\(`\/lens\/admin\/lensnodes\/\$\{uuid\}\/list-dirs\/`, \{/
   )
   assert.match(contents, /paths\s+\}\)/)
+})
+
+test('directory refresh scans the workspace and known top-level directories', () => {
+  const paths = directoryRefreshPaths({
+    workspace_path: '/workspace',
+    available_dirs: [
+      { path: '/workspace/project', name: 'project' },
+      { path: '/workspace/archive', name: 'archive' }
+    ]
+  })
+
+  assert.deepEqual(paths, [
+    '/workspace',
+    '/workspace/project',
+    '/workspace/archive'
+  ])
+})
+
+test('directory refresh preserves and updates nested directory entries', () => {
+  const directories = mergeRefreshedDirectories(
+    [
+      {
+        path: '/workspace/project',
+        name: 'project',
+        children: [
+          { path: '/workspace/project/old', name: 'old' }
+        ]
+      }
+    ],
+    {
+      dirs: {
+        '/workspace': [
+          { path: '/workspace/project', name: 'project' },
+          { path: '/workspace/new', name: 'new' }
+        ],
+        '/workspace/project': [
+          { path: '/workspace/project/new-child', name: 'new-child' }
+        ],
+        '/workspace/new': []
+      }
+    },
+    '/workspace'
+  )
+
+  assert.deepEqual(directories, [
+    {
+      path: '/workspace/project',
+      name: 'project',
+      children: [
+        { path: '/workspace/project/new-child', name: 'new-child' }
+      ]
+    },
+    {
+      path: '/workspace/new',
+      name: 'new',
+      children: []
+    }
+  ])
 })
