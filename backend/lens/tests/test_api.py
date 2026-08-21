@@ -1316,13 +1316,13 @@ class LensApiTests(TestCase):
                     format="multipart",
                 )
 
-        self.assertEqual(response.status_code, 200)
-        skill = Skill.objects.get(slug="winrar-skill")
-        self.assertTrue(
-            Path(skill.package_path)
-            .joinpath("scripts", "run.sh")
-            .is_file()
-        )
+                self.assertEqual(response.status_code, 200)
+                skill = Skill.objects.get(slug="winrar-skill")
+                self.assertTrue(
+                    Path(skill.package_path)
+                    .joinpath("scripts", "run.sh")
+                    .is_file()
+                )
 
     def test_uploaded_skill_rejects_package_file_over_fifty_megabytes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4527,10 +4527,14 @@ class LensApiTests(TestCase):
         cancel.assert_called_once_with(self.lensnode, "running-conversion")
         task.refresh_from_db()
         datasource.refresh_from_db()
-        self.assertEqual(task.status, "REVOKED")
-        self.assertEqual(datasource.last_conversion_status, "REVOKED")
-        self.assertIsNotNone(datasource.last_conversion_at)
+        self.assertEqual(task.status, "CANCELLING")
+        self.assertEqual(datasource.last_conversion_status, "CANCELLING")
+        self.assertIsNone(datasource.last_conversion_at)
 
+        release_datasource_lock(
+            datasource.uuid,
+            token="running-conversion",
+        )
         acquire_datasource_lock(
             datasource.uuid,
             token="new-conversion",
