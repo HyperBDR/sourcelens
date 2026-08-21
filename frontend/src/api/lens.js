@@ -407,6 +407,17 @@ export async function refreshDataSourceAvailability(uuid) {
   return unwrapResponse(response)
 }
 
+export async function uploadDataSourceFile(uuid, file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await api.post(
+    `/lens/admin/datasources/${uuid}/upload/`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  )
+  return unwrapResponse(response)
+}
+
 export async function cancelDataSourceSync(uuid) {
   const response = await api.post(
     `/lens/admin/datasources/${uuid}/cancel-sync/`

@@ -1,3 +1,4 @@
+import base64
 import time
 import uuid
 from pathlib import PurePosixPath
@@ -24,6 +25,23 @@ DEFAULT_DATASOURCE_SYNC_TIMEOUT_S = 21600
 DEFAULT_DATASOURCE_CONVERSION_TIMEOUT_S = 86400
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 DATASOURCE_RESULT_POLL_S = 0.5
+DATASOURCE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+DATASOURCE_UPLOAD_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".xlsx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".tgz",
+}
 
 
 class DataSourcePathError(ValueError):
@@ -303,6 +321,50 @@ def dispatch_datasource_conversion_async(
         f"lens:datasource_conversion_request:{request_id}",
         task_id,
         timeout=get_datasource_sync_timeout_s(),
+    )
+    return request_id
+
+
+def dispatch_datasource_upload_async(
+    datasource,
+    task_id,
+    filename,
+    content,
+    conversion=None,
+):
+    """Dispatch one managed workspace upload to its LensNode."""
+
+    datasource = DataSource.objects.select_related("lensnode").get(
+        pk=datasource.pk
+    )
+    if datasource.source_type != DataSource.SourceType.MANAGED_WORKSPACE:
+        raise DataSourceDispatchError("DATASOURCE_UPLOAD_NOT_SUPPORTED")
+    validate_datasource_lensnode(datasource.lensnode)
+    if len(content) > DATASOURCE_UPLOAD_MAX_BYTES:
+        raise DataSourceDispatchError("DATASOURCE_UPLOAD_TOO_LARGE")
+    request_id = uuid.uuid4().hex
+    _send_lensnode_command(
+        datasource.lensnode,
+        {
+            "type": "datasource_upload",
+            "request_id": request_id,
+            "task_id": task_id,
+            "datasource_uuid": str(datasource.uuid),
+            "target_path": datasource.target_path,
+            "filename": filename,
+            "content_base64": base64.b64encode(content).decode("ascii"),
+            "conversion": dict(
+                conversion or {"document": True, "image": True}
+            ),
+            "excluded_datasource_roots": excluded_datasource_roots(
+                datasource
+            ),
+        },
+    )
+    cache.set(
+        f"lens:datasource_upload_request:{request_id}",
+        task_id,
+        timeout=get_datasource_conversion_timeout_s(),
     )
     return request_id
 

@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.core.cache import cache
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -312,6 +313,42 @@ def register_datasource_conversion_task(
             "conversion": dict(conversion or {}),
             "force": bool(force),
         },
+        created_by=created_by,
+        metadata=task_metadata,
+    )
+
+
+def register_datasource_upload_task(
+    datasource,
+    task_id,
+    filename,
+    created_by=None,
+    metadata=None,
+):
+    """Register a managed workspace upload execution."""
+
+    from agentcore_task.adapters.django import TaskTracker
+
+    lensnode = datasource.lensnode
+    task_metadata = {
+        "type": "datasource_upload",
+        "datasource_uuid": str(datasource.uuid),
+        "datasource_name": datasource.name,
+        "source_type": datasource.source_type,
+        "lensnode_uuid": str(lensnode.uuid) if lensnode else "",
+        "lensnode_name": lensnode.name if lensnode else "",
+        "target_path": datasource.target_path,
+        "filename": filename,
+        "steps": [],
+        "lensnode_connection_id": lensnode.connection_id if lensnode else "",
+    }
+    task_metadata.update(metadata or {})
+    return TaskTracker.register_task(
+        task_id=task_id,
+        task_name=f"datasource_upload:{datasource.name}",
+        module="lens_datasource_upload",
+        task_args=[str(datasource.uuid)],
+        task_kwargs={"filename": filename},
         created_by=created_by,
         metadata=task_metadata,
     )
@@ -734,6 +771,64 @@ def datasource_conversion_task(
     return 0
 
 
+@shared_task(bind=True, name="lens.datasource_upload", queue="lens")
+def datasource_upload_task(
+    self,
+    datasource_uuid,
+    storage_name,
+    filename,
+    task_id=None,
+):
+    """Send one stored Managed Workspace upload to its LensNode."""
+
+    from agentcore_task.adapters.django import TaskTracker
+    from agentcore_task.constants import TaskStatus
+    from .datasource_services import dispatch_datasource_upload_async
+
+    del self
+    task_id = task_id or uuid.uuid4().hex
+    datasource = DataSource.objects.select_related("lensnode").get(
+        uuid=datasource_uuid
+    )
+    task = register_datasource_upload_task(
+        datasource,
+        task_id,
+        filename,
+    )
+    if task.status in TaskStatus.get_completed_statuses():
+        return 0
+    try:
+        with default_storage.open(storage_name, "rb") as stream:
+            content = stream.read()
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.STARTED,
+            metadata={"progress_message": "Uploading file to LensNode."},
+        )
+        request_id = dispatch_datasource_upload_async(
+            datasource,
+            task_id,
+            filename,
+            content,
+        )
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.STARTED,
+            metadata={"datasource_upload_request_id": request_id},
+        )
+    except Exception as exc:
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.FAILURE,
+            error=str(exc) or "DATASOURCE_UPLOAD_FAILED",
+        )
+        raise
+    finally:
+        if default_storage.exists(storage_name):
+            default_storage.delete(storage_name)
+    return 0
+
+
 def complete_datasource_conversion_task(
     task_id,
     result,
@@ -867,6 +962,24 @@ def resolve_datasource_conversion_task_id(request_id, content):
     task = TaskExecution.objects.filter(
         module="lens_datasource_conversion",
         metadata__datasource_conversion_request_id=request_id,
+    ).first()
+    return task.task_id if task else ""
+
+
+def resolve_datasource_upload_task_id(request_id, content):
+    """Resolve an upload task from a LensNode callback."""
+
+    task_id = content.get("task_id") or ""
+    if task_id:
+        return task_id
+    cached_task_id = cache.get(f"lens:datasource_upload_request:{request_id}")
+    if cached_task_id:
+        return cached_task_id
+    from agentcore_task.adapters.django.models import TaskExecution
+
+    task = TaskExecution.objects.filter(
+        module="lens_datasource_upload",
+        metadata__datasource_upload_request_id=request_id,
     ).first()
     return task.task_id if task else ""
 

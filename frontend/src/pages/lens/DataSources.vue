@@ -350,6 +350,14 @@
                         {{ t('lensAdmin.actions.refreshAvailability') }}
                       </BaseButton>
                       <BaseButton
+                        v-if="row.source_type === 'managed_workspace'"
+                        size="sm"
+                        variant="outline"
+                        @click="openUpload(row)"
+                      >
+                        {{ t('lensAdmin.actions.uploadFile') }}
+                      </BaseButton>
+                      <BaseButton
                         size="sm"
                         :variant="
                           isDataSourceEnabled(row) ? 'outline' : 'primary'
@@ -427,6 +435,13 @@
         :lensnodes="lensnodes"
         @close="closeDataSourceDetail"
       />
+      <input
+        ref="uploadInput"
+        class="hidden"
+        type="file"
+        :accept="uploadAccept"
+        @change="uploadFile"
+      />
     </div>
   </AdminLayout>
 </template>
@@ -449,6 +464,7 @@ import {
   listDataSources,
   listLensNodes,
   refreshDataSourceAvailability,
+  uploadDataSourceFile,
   setDataSourceEnabled,
   syncDataSource,
   testLensNodeDataSourceConnection,
@@ -506,6 +522,24 @@ const lensnodes = ref([])
 const credentials = ref([])
 const llmConfigOptions = ref([])
 const selectedDataSource = ref(null)
+const uploadInput = ref(null)
+const uploadDataSource = ref(null)
+const uploadAccept = [
+  '.pdf',
+  '.docx',
+  '.pptx',
+  '.xlsx',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.zip',
+  '.tar',
+  '.gz',
+  '.tgz'
+].join(',')
 
 const datasourceConfig = ref({})
 const datasourcePathResult = ref(null)
@@ -1720,6 +1754,31 @@ async function refreshAvailability(row) {
     await load()
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.saveFailed')))
+  }
+}
+
+function openUpload(row) {
+  uploadDataSource.value = row
+  uploadInput.value?.click()
+}
+
+async function uploadFile(event) {
+  const file = event.target.files?.[0]
+  const row = uploadDataSource.value
+  event.target.value = ''
+  if (!file || !row) return
+  try {
+    const result = await uploadDataSourceFile(row.uuid, file)
+    showSuccess(
+      `${t('lensAdmin.messages.uploadStarted')} (${result.task_id || ''})`
+    )
+    await load()
+  } catch (error) {
+    showError(
+      extractErrorMessage(error, t('lensAdmin.messages.uploadFailed'))
+    )
+  } finally {
+    uploadDataSource.value = null
   }
 }
 

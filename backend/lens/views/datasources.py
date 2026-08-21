@@ -1,18 +1,23 @@
 """Datasource CRUD, search, and synchronization views."""
 
 import json
+import os
 import uuid as uuid_mod
 
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from lens.datasource_services import (
     DataSourceDispatchError,
     DataSourcePathError,
+    DATASOURCE_UPLOAD_EXTENSIONS,
     check_datasource_path,
 )
 from lens.models import DataSource, ScheduledTask
@@ -32,6 +37,8 @@ from lens.tasks import (
     register_datasource_sync_task,
     release_datasource_lock,
     source_sync_task,
+    register_datasource_upload_task,
+    datasource_upload_task,
 )
 from .base import BaseAdminViewSet
 
@@ -41,6 +48,7 @@ class DataSourceViewSet(BaseAdminViewSet):
 
     queryset = DataSource.objects.all()
     serializer_class = DataSourceSerializer
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
         """Return datasources filtered by optional search query."""
@@ -276,6 +284,73 @@ class DataSourceViewSet(BaseAdminViewSet):
                 "task_id": task_id,
                 "task_execution_id": task_execution.id,
                 "status": task_execution.status,
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="upload")
+    def upload(self, request, uuid=None):
+        """Queue one file upload into a Managed Workspace."""
+
+        datasource = self.get_object()
+        if datasource.source_type != DataSource.SourceType.MANAGED_WORKSPACE:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_NOT_SUPPORTED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if datasource.status == DataSource.Status.DISABLED:
+            return Response(
+                {"detail": "DATASOURCE_DISABLED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_FILE_REQUIRED"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if uploaded.size > 25 * 1024 * 1024:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_TOO_LARGE"},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        filename = os.path.basename(str(uploaded.name or "")).strip()
+        if not filename or filename in {".", ".."}:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_FILENAME_INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        lowered_filename = filename.lower()
+        if not any(
+            lowered_filename.endswith(extension)
+            for extension in DATASOURCE_UPLOAD_EXTENSIONS
+        ):
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_FILE_TYPE_UNSUPPORTED"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        task_id = uuid_mod.uuid4().hex
+        storage_name = default_storage.save(
+            f"datasource-uploads/{datasource.uuid}/{task_id}/{filename}",
+            ContentFile(uploaded.read()),
+        )
+        register_datasource_upload_task(
+            datasource,
+            task_id,
+            filename,
+            created_by=request.user,
+            metadata={"storage_name": storage_name},
+        )
+        datasource_upload_task.apply_async(
+            args=[str(datasource.uuid), storage_name, filename, task_id],
+            task_id=uuid_mod.uuid4().hex,
+        )
+        return Response(
+            {
+                "uuid": str(datasource.uuid),
+                "task_id": task_id,
+                "filename": filename,
+                "status": "PENDING",
             },
             status=status.HTTP_202_ACCEPTED,
         )

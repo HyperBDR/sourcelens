@@ -1,4 +1,7 @@
+import base64
+import io
 import json
+import zipfile
 from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
 
 import pytest
@@ -26,6 +29,7 @@ from lensnode.datasource_sync import (
     _sync_git,
     _sync_git_submodules,
     _sync_feishu_folder,
+    upload_managed_workspace,
 )
 from lensnode.path_rules import source_sha256
 from lensnode.path_rules import stable_suffix
@@ -95,6 +99,65 @@ def test_managed_workspace_rejects_symlink_outside_workspace(tmp_path):
             },
             workspace_path=tmp_path,
         )
+
+
+def test_managed_workspace_upload_extracts_archive_and_converts(
+    tmp_path,
+    monkeypatch,
+):
+    """Managed uploads safely extract archives before conversion."""
+
+    target = tmp_path / "documents"
+    target.mkdir()
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("nested/guide.pdf", b"pdf")
+    monkeypatch.setattr(
+        "lensnode.datasource_sync.convert_managed_workspace",
+        lambda command, workspace_path: {
+            "status": "success",
+            "conversion_summary": {"converted": 1},
+        },
+    )
+
+    result = upload_managed_workspace(
+        {
+            "target_path": str(target),
+            "filename": "package.zip",
+            "content_base64": base64.b64encode(archive.getvalue()).decode(),
+        },
+        workspace_path=tmp_path,
+    )
+
+    assert result["uploaded"] == "package.zip"
+    assert (target / "package.zip").exists()
+    assert (target / "nested" / "guide.pdf").read_bytes() == b"pdf"
+
+
+def test_managed_workspace_upload_rejects_archive_path_traversal(tmp_path):
+    """Managed uploads reject archive members escaping the workspace."""
+
+    target = tmp_path / "documents"
+    target.mkdir()
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("../outside.txt", b"unsafe")
+
+    with pytest.raises(
+        DataSourceSyncError,
+        match="DATASOURCE_UPLOAD_ARCHIVE_PATH_INVALID",
+    ):
+        upload_managed_workspace(
+            {
+                "target_path": str(target),
+                "filename": "package.zip",
+                "content_base64": base64.b64encode(
+                    archive.getvalue()
+                ).decode(),
+            },
+            workspace_path=tmp_path,
+        )
+    assert not (tmp_path / "outside.txt").exists()
 
 
 def test_git_auth_url_uses_inline_access_token():

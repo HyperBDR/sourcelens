@@ -1,7 +1,11 @@
+import base64
 import json
 import re
+import shutil
 import subprocess
+import tarfile
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +30,8 @@ GIT_SHALLOW_DEPTH = "1"
 DETAIL_ITEMS_LIMIT = 200
 DEFAULT_CONVERSION_BATCH_SIZE = 16
 DEFAULT_CONVERSION_MAX_FILES = 100000
+UPLOAD_MAX_EXTRACTED_BYTES = 250 * 1024 * 1024
+UPLOAD_MAX_EXTRACTED_FILES = 10000
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 FEISHU_EXPORT_PENDING_STATUSES = {1, 2}
 FEISHU_EXPORT_SUCCESS_STATUS = 0
@@ -359,6 +365,129 @@ def convert_managed_workspace(
         "conversion_summary": summary,
         "warnings": summary.get("warnings") or [],
     }
+
+
+def upload_managed_workspace(command, workspace_path=WORKSPACE_ROOT):
+    """Write one upload into a managed workspace and convert its contents."""
+
+    if command.get("source_type", "managed_workspace") != "managed_workspace":
+        raise DataSourceSyncError("DATASOURCE_UPLOAD_NOT_SUPPORTED")
+    target = normalize_target_path(command.get("target_path"), workspace_path)
+    if not target.is_dir():
+        raise DataSourceSyncError("MANAGED_WORKSPACE_DIRECTORY_REQUIRED")
+    filename = safe_filename(command.get("filename"))
+    if not filename:
+        raise DataSourceSyncError("DATASOURCE_UPLOAD_FILENAME_INVALID")
+    try:
+        content = base64.b64decode(
+            str(command.get("content_base64") or ""),
+            validate=True,
+        )
+    except (ValueError, TypeError) as exc:
+        raise DataSourceSyncError("DATASOURCE_UPLOAD_CONTENT_INVALID") from exc
+    archive_path = target / filename
+    if archive_path.exists():
+        raise DataSourceSyncError("DATASOURCE_UPLOAD_FILE_EXISTS")
+    archive_path.write_bytes(content)
+    extracted = []
+    try:
+        if filename.lower().endswith(".zip"):
+            extracted = _extract_zip_archive(archive_path, target)
+        elif filename.lower().endswith((".tar", ".tar.gz", ".tgz")):
+            extracted = _extract_tar_archive(archive_path, target)
+        result = convert_managed_workspace(
+            {
+                **command,
+                "target_path": str(target),
+                "source_type": "managed_workspace",
+                "conversion": command.get("conversion")
+                or {"document": True, "image": True},
+            },
+            workspace_path=workspace_path,
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        for path in reversed(extracted):
+            path.unlink(missing_ok=True)
+        raise
+    result["uploaded"] = filename
+    result["extracted_files"] = [str(path) for path in extracted]
+    return result
+
+
+def _archive_member_path(root, name):
+    """Return a safe archive member path under root."""
+
+    normalized = str(name or "").replace("\\", "/")
+    member = Path(normalized)
+    if member.is_absolute() or any(
+        part in {"", ".", ".."} for part in member.parts
+    ):
+        raise DataSourceSyncError("DATASOURCE_UPLOAD_ARCHIVE_PATH_INVALID")
+    path = (root / member).resolve()
+    try:
+        path.relative_to(root.resolve())
+    except ValueError as exc:
+        raise DataSourceSyncError(
+            "DATASOURCE_UPLOAD_ARCHIVE_PATH_INVALID"
+        ) from exc
+    return path
+
+
+def _extract_zip_archive(archive_path, root):
+    """Extract a ZIP archive without permitting unsafe members."""
+
+    extracted = []
+    extracted_bytes = 0
+    with zipfile.ZipFile(archive_path) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            if len(extracted) >= UPLOAD_MAX_EXTRACTED_FILES:
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_FILE_LIMIT")
+            extracted_bytes += info.file_size
+            if extracted_bytes > UPLOAD_MAX_EXTRACTED_BYTES:
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_SIZE_LIMIT")
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_LINK_INVALID")
+            path = _archive_member_path(root, info.filename)
+            if path.exists():
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_FILE_EXISTS")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as source, path.open("wb") as target:
+                shutil.copyfileobj(source, target, length=1024 * 1024)
+            extracted.append(path)
+    return extracted
+
+
+def _extract_tar_archive(archive_path, root):
+    """Extract a tar archive without permitting unsafe members."""
+
+    extracted = []
+    extracted_bytes = 0
+    with tarfile.open(archive_path, "r:*") as archive:
+        for member in archive.getmembers():
+            if member.issym() or member.islnk():
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_LINK_INVALID")
+            if not member.isfile():
+                continue
+            if len(extracted) >= UPLOAD_MAX_EXTRACTED_FILES:
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_FILE_LIMIT")
+            extracted_bytes += member.size
+            if extracted_bytes > UPLOAD_MAX_EXTRACTED_BYTES:
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_SIZE_LIMIT")
+            path = _archive_member_path(root, member.name)
+            if path.exists():
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_FILE_EXISTS")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            source = archive.extractfile(member)
+            if source is None:
+                raise DataSourceSyncError("DATASOURCE_UPLOAD_ARCHIVE_INVALID")
+            with source, path.open("wb") as target:
+                shutil.copyfileobj(source, target, length=1024 * 1024)
+            extracted.append(path)
+    return extracted
 
 
 def _managed_workspace_conversion_items(target, excluded_roots):

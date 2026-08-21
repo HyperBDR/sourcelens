@@ -109,6 +109,8 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             await self._handle_datasource_sync_event(content)
         elif frame_type == "datasource_convert_done":
             await self._handle_datasource_conversion_done(content)
+        elif frame_type == "datasource_upload_done":
+            await self._handle_datasource_upload_done(content)
         else:
             await self.send_json(
                 {
@@ -842,6 +844,34 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         await database_sync_to_async(
             self._complete_datasource_conversion_done
         )(request_id, content, self.channel_name)
+
+    async def _handle_datasource_upload_done(self, content):
+        """Complete a Managed Workspace upload from LensNode."""
+
+        request_id = content.get("request_id") or ""
+        task_id = content.get("task_id") or ""
+        if not request_id and not task_id:
+            return
+        await database_sync_to_async(self._complete_datasource_upload_done)(
+            request_id,
+            content,
+            self.channel_name,
+        )
+
+    @staticmethod
+    def _complete_datasource_upload_done(request_id, content, connection_id):
+        from .tasks import (
+            complete_datasource_conversion_task,
+            resolve_datasource_upload_task_id,
+        )
+
+        task_id = resolve_datasource_upload_task_id(request_id, content)
+        if task_id:
+            complete_datasource_conversion_task(
+                task_id,
+                content,
+                connection_id=connection_id,
+            )
 
     @staticmethod
     def _complete_datasource_conversion_done(
