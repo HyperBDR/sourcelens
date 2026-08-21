@@ -410,6 +410,7 @@
         :checking-path="checkingDatasourcePath"
         :testing-connection="testingDatasourceConnection"
         :refreshing-credentials="refreshingCredentials"
+        :refreshing-dirs="refreshingDirs"
         :saving="saving"
         :form-error="formError"
         @close="closeDrawer"
@@ -419,6 +420,7 @@
         @test-connection="testDatasourceConnection"
         @connection-change="resetDatasourceConnectionResult"
         @refresh-credentials="refreshCredentials"
+        @refresh-dirs="refreshDirs"
       />
 
       <DataSourceDetailDrawer
@@ -515,6 +517,7 @@ const datasourceConnectionBaseSignature = ref('')
 const checkingDatasourcePath = ref(false)
 const testingDatasourceConnection = ref(false)
 const refreshingCredentials = ref(false)
+const refreshingDirs = ref(false)
 const syncIntervalSeconds = ref(3600)
 const syncPolicyMode = ref('interval')
 const syncCron = ref('0 2 * * *')
@@ -1469,6 +1472,18 @@ async function refreshCredentials() {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
     refreshingCredentials.value = false
+  }
+}
+
+async function refreshDirs() {
+  if (!form.value.lensnode_uuid) return
+  refreshingDirs.value = true
+  try {
+    lensnodes.value = normalizeList(await listLensNodes())
+  } catch (error) {
+    showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
+  } finally {
+    refreshingDirs.value = false
   }
 }
 
