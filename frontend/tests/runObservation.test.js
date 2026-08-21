@@ -70,19 +70,25 @@ test('run overview separates executor status from business outcome', async () =>
   assert.match(contents, /lensRuns\.businessOutcome/)
 })
 
-test('run detail exposes diagnosis tab before trace and files', async () => {
+test('run detail exposes the stable operations tabs in order', async () => {
   const contents = await source()
   const overviewIndex = contents.indexOf("activeDetailTab = 'overview'")
-  const diagnosisIndex = contents.indexOf("activeDetailTab = 'diagnosis'")
+  const progressIndex = contents.indexOf("activeDetailTab = 'progress'")
   const traceIndex = contents.indexOf("activeDetailTab = 'trace'")
+  const evidenceIndex = contents.indexOf("activeDetailTab = 'evidence'")
   const filesIndex = contents.indexOf("activeDetailTab = 'files'")
+  const usageIndex = contents.indexOf("activeDetailTab = 'usage'")
+  const diagnosisIndex = contents.indexOf("activeDetailTab = 'diagnosis'")
 
   assert.match(contents, /data-testid="close-run-detail"/)
   assert.match(contents, /data-testid="run-diagnosis-tab"/)
   assert.ok(overviewIndex >= 0)
-  assert.ok(diagnosisIndex > overviewIndex)
-  assert.ok(traceIndex > diagnosisIndex)
-  assert.ok(filesIndex > traceIndex)
+  assert.ok(progressIndex > overviewIndex)
+  assert.ok(traceIndex > progressIndex)
+  assert.ok(evidenceIndex > traceIndex)
+  assert.ok(filesIndex > evidenceIndex)
+  assert.ok(usageIndex > filesIndex)
+  assert.ok(diagnosisIndex > usageIndex)
   assert.match(contents, /RunDiagnosisPanel/)
 })
 
@@ -93,4 +99,39 @@ test('diagnosis panel is activated by the diagnosis tab', async () => {
   assert.match(contents, /activeDetailTab === 'diagnosis'/)
   assert.match(contents, /:active="activeDetailTab === 'diagnosis'"/)
   assert.match(contents, /@navigate="navigateFromEvidence"/)
+})
+
+test('operations center shows summary, node and model filters, and metrics', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-status-summary"/)
+  assert.match(contents, /filters\.lensnode/)
+  assert.match(contents, /filters\.model/)
+  assert.match(contents, /r\.tool_call_count/)
+  assert.match(contents, /r\.retry_count/)
+  assert.match(contents, /r\.budget_consumption/)
+})
+
+test('run actions use server-provided availability and confirmations', async () => {
+  const contents = await source()
+
+  assert.match(contents, /r\.available_actions\?\.cancel/)
+  assert.match(contents, /r\.available_actions\?\.retry/)
+  assert.match(contents, /detail\.available_actions\?\.resume/)
+  assert.match(contents, /data-testid="run-action-confirm"/)
+  assert.match(contents, /cancelAdminRun/)
+  assert.match(contents, /retryAdminRun/)
+  assert.match(contents, /resumeAdminRun/)
+})
+
+test('detail keeps evidence, artifacts, usage, and diagnostics separate', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-evidence-tab"/)
+  assert.match(contents, /data-testid="run-files-tab"/)
+  assert.match(contents, /data-testid="run-usage-tab"/)
+  assert.match(contents, /data-testid="run-diagnosis-tab"/)
+  assert.match(contents, /data-testid="run-live-progress"/)
+  assert.match(contents, /detail\.citations/)
+  assert.match(contents, /citation\.supports/)
 })
