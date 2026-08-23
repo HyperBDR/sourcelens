@@ -10,6 +10,7 @@ import shutil
 import stat
 import tempfile
 import time
+import uuid
 import zipfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
@@ -668,6 +669,33 @@ def cleanup_run_runtime_resources(workspace_path, run_uuid):
         return False
     shutil.rmtree(runtime_root, ignore_errors=True)
     return not runtime_root.exists()
+
+
+def delete_skill_cache(workspace_path, skill_uuid):
+    """Remove one validated Skill cache directory from a workspace."""
+
+    if not workspace_path or not skill_uuid:
+        return False
+    try:
+        skill_identifier = str(uuid.UUID(str(skill_uuid)))
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+    cache_root = (
+        Path(workspace_path) / ".sourcelens" / "cache" / "skills"
+    ).resolve()
+    skill_root = cache_root / skill_identifier
+    if skill_root.is_symlink():
+        skill_root.unlink(missing_ok=True)
+        return True
+    try:
+        skill_root.resolve().relative_to(cache_root)
+    except ValueError:
+        return False
+    if not skill_root.exists():
+        return True
+    shutil.rmtree(skill_root, ignore_errors=True)
+    return not skill_root.exists()
 
 
 def _run_runtime_path(workspace_path, run_uuid):

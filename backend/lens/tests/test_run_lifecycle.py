@@ -24,6 +24,7 @@ from lens.services import (
     mark_active_runs_awaiting_resume,
     reconcile_lensnode_active_runs,
     record_lensnode_run_event,
+    resume_awaiting_run,
     resume_awaiting_runs_for_lensnode,
     touch_run_activity,
 )
@@ -642,6 +643,53 @@ class RunLifecycleTests(TransactionTestCase):
         self.assertEqual(kwargs["resume"], True)
         self.assertEqual(run.status, Run.Status.STREAMING)
         self.assertIsNotNone(run.resume_by)
+
+    def test_manual_resume_redispatches_only_the_selected_run(self):
+        selected = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        selected.resume_by = timezone.now() + timedelta(hours=1)
+        selected.save(update_fields=["resume_by"])
+        self._mark_execution_running(selected)
+        other = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        other.resume_by = timezone.now() + timedelta(hours=1)
+        other.save(update_fields=["resume_by"])
+        self._mark_execution_running(other)
+
+        with patch("lens.services.dispatch_run_to_lensnode") as dispatch:
+            resumed = resume_awaiting_run(selected.pk)
+
+        selected.refresh_from_db()
+        other.refresh_from_db()
+        self.assertTrue(resumed)
+        self.assertEqual(selected.status, Run.Status.STREAMING)
+        self.assertEqual(other.status, Run.Status.RUNNING)
+        dispatch.assert_called_once()
+        self.assertEqual(dispatch.call_args.args[0].pk, selected.pk)
+
+    def test_manual_resume_rejects_an_offline_node(self):
+        run = self._run(
+            Run.Status.RUNNING,
+            timedelta(minutes=5),
+            timedelta(minutes=5),
+        )
+        run.resume_by = timezone.now() + timedelta(hours=1)
+        run.save(update_fields=["resume_by"])
+        self._mark_execution_running(run)
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.save(update_fields=["status"])
+
+        with patch("lens.services.dispatch_run_to_lensnode") as dispatch:
+            resumed = resume_awaiting_run(run.pk)
+
+        self.assertFalse(resumed)
+        dispatch.assert_not_called()
 
     def test_never_admitted_run_is_requeued_through_normal_dispatch_once(self):
         run = self._run(

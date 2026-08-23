@@ -44,6 +44,7 @@ class LensNodeConfig:
     planning_reasoning_effort: str | None = "medium"
     planner_repair_enabled: bool = False
     heavy_work_concurrency: int = 1
+    execution_backend: str = "trusted_container"
 
 
 def _optional_int(value):
@@ -223,6 +224,9 @@ def load_config():
         planner_repair_enabled=_env_bool(
             "LENSNODE_PLANNER_REPAIR_ENABLED", default=False
         ),
+        execution_backend=os.getenv(
+            "LENSNODE_EXECUTION_BACKEND", "trusted_container"
+        ).strip().lower(),
         offload_tool_tokens=int(
             os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"
         ),

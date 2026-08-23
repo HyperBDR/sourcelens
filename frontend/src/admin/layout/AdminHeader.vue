@@ -3,7 +3,7 @@
     class="layout-admin-header z-30 flex-shrink-0 border-b border-ink-800 bg-ink-900/95 shadow-sm backdrop-blur"
   >
     <div class="px-2 sm:px-6 lg:px-8">
-      <div class="flex justify-between items-center h-16">
+      <div class="flex h-14 items-center justify-between">
         <div class="flex min-w-0 flex-1 items-center gap-1 sm:gap-3">
           <button
             type="button"
