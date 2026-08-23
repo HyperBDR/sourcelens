@@ -1,4 +1,5 @@
 import base64
+import os
 import time
 import uuid
 from pathlib import PurePosixPath
@@ -14,6 +15,7 @@ from .services import lensnode_group_name
 WORKSPACE_ROOT = "/workspace"
 DATASOURCE_SYNC_TIMEOUT_SETTING = "lens.datasource_sync.timeout_s"
 DATASOURCE_CONVERSION_TIMEOUT_SETTING = "lens.datasource_conversion.timeout_s"
+DATASOURCE_UPLOAD_TIMEOUT_SETTING = "lens.datasource_upload.timeout_s"
 DATASOURCE_SYNC_WORKERS_SETTING = "lens.datasource_sync.workers"
 DATASOURCE_CONVERSION_VISION_MODEL_SETTING = (
     "lens.datasource_conversion.vision_model_ref"
@@ -23,6 +25,7 @@ DATASOURCE_CONVERSION_DOCUMENT_MODEL_SETTING = (
 )
 DEFAULT_DATASOURCE_SYNC_TIMEOUT_S = 21600
 DEFAULT_DATASOURCE_CONVERSION_TIMEOUT_S = 86400
+DEFAULT_DATASOURCE_UPLOAD_TIMEOUT_S = 600
 DEFAULT_DATASOURCE_SYNC_WORKERS = 4
 DATASOURCE_RESULT_POLL_S = 0.5
 DATASOURCE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
@@ -103,13 +106,26 @@ def _send_lensnode_command(lensnode, payload):
     if channel_layer is None:
         raise DataSourceDispatchError("LENS_CHANNEL_LAYER_UNAVAILABLE")
 
+    message = {
+        "type": "lensnode.command",
+        "payload": payload,
+    }
+    if lensnode.connection_id:
+        async_to_sync(channel_layer.send)(lensnode.connection_id, message)
+        return
     async_to_sync(channel_layer.group_send)(
         lensnode_group_name(lensnode.uuid),
-        {
-            "type": "lensnode.command",
-            "payload": payload,
-        },
+        message,
     )
+
+
+def _lensnode_gateway_config():
+    """Return the credentials LensNode needs for AI Gateway calls."""
+
+    return {
+        "ai_gateway_url": os.getenv("LENSNODE_AI_GATEWAY_URL", ""),
+        "lensnode_token": os.getenv("LENSNODE_TOKEN", ""),
+    }
 
 
 def _wait_cache_result(cache_key, timeout_s):
@@ -166,6 +182,19 @@ def get_datasource_conversion_timeout_s():
     except (TypeError, ValueError):
         value = 0
     return value if value > 0 else DEFAULT_DATASOURCE_CONVERSION_TIMEOUT_S
+
+
+def get_datasource_upload_timeout_s():
+    """Return the managed workspace upload timeout in seconds."""
+
+    setting = GlobalSetting.objects.filter(
+        key=DATASOURCE_UPLOAD_TIMEOUT_SETTING
+    ).first()
+    try:
+        value = int(setting.value) if setting is not None else 0
+    except (TypeError, ValueError):
+        value = 0
+    return value if value > 0 else DEFAULT_DATASOURCE_UPLOAD_TIMEOUT_S
 
 
 def check_datasource_path(lensnode, target_path, source_type, config=None):
@@ -263,6 +292,7 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
             "name": datasource.name,
             "config": config,
             "conversion": conversion,
+            **_lensnode_gateway_config(),
             "sync_policy": sync_policy,
             "target_path": datasource.target_path,
             "trigger": trigger,
@@ -309,6 +339,7 @@ def dispatch_datasource_conversion_async(
             "source_type": datasource.source_type,
             "name": datasource.name,
             "conversion": conversion,
+            **_lensnode_gateway_config(),
             "target_path": datasource.target_path,
             "force": bool(force),
             "max_workers": get_datasource_sync_max_workers(),
@@ -342,6 +373,11 @@ def dispatch_datasource_upload_async(
     validate_datasource_lensnode(datasource.lensnode)
     if len(content) > DATASOURCE_UPLOAD_MAX_BYTES:
         raise DataSourceDispatchError("DATASOURCE_UPLOAD_TOO_LARGE")
+    upload_conversion = {"document": True, "image": True}
+    upload_conversion.update(
+        datasource_conversion_policy(datasource.sync_policy)
+    )
+    upload_conversion.update(conversion or {})
     request_id = uuid.uuid4().hex
     _send_lensnode_command(
         datasource.lensnode,
@@ -350,12 +386,12 @@ def dispatch_datasource_upload_async(
             "request_id": request_id,
             "task_id": task_id,
             "datasource_uuid": str(datasource.uuid),
+            "source_type": datasource.source_type,
             "target_path": datasource.target_path,
             "filename": filename,
             "content_base64": base64.b64encode(content).decode("ascii"),
-            "conversion": dict(
-                conversion or {"document": True, "image": True}
-            ),
+            "conversion": upload_conversion,
+            **_lensnode_gateway_config(),
             "excluded_datasource_roots": excluded_datasource_roots(
                 datasource
             ),

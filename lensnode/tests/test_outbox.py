@@ -207,6 +207,23 @@ def test_completed_run_hands_terminal_frame_to_outbox():
         assert run_uuid not in client.running_tasks
         assert list(client._outbox) == [
             {
+                "type": "run_event",
+                "run_uuid": run_uuid,
+                "step_type": "retrieval",
+                "status": "running",
+                "detail": {
+                    "queue_state": "QUEUED",
+                    "message": "Waiting for LensNode heavy-work capacity.",
+                },
+            },
+            {
+                "type": "run_event",
+                "run_uuid": run_uuid,
+                "step_type": "retrieval",
+                "status": "running",
+                "detail": {"queue_state": "STARTED"},
+            },
+            {
                 "type": "run_done",
                 "run_uuid": run_uuid,
                 "status": "done",

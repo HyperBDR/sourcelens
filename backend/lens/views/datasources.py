@@ -10,7 +10,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -48,7 +48,7 @@ class DataSourceViewSet(BaseAdminViewSet):
 
     queryset = DataSource.objects.all()
     serializer_class = DataSourceSerializer
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
         """Return datasources filtered by optional search query."""

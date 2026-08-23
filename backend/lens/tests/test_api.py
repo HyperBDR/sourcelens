@@ -73,7 +73,11 @@ from lens.services import (
 )
 
 from lens.skill_packages import package_zip_bytes
-from lens.tasks import acquire_datasource_lock, release_datasource_lock
+from lens.tasks import (
+    SourceSyncBusy,
+    acquire_datasource_lock,
+    release_datasource_lock,
+)
 
 User = get_user_model()
 
@@ -4323,6 +4327,102 @@ class LensApiTests(TestCase):
         )
         apply_async.assert_not_called()
 
+    def test_managed_workspace_upload_registers_and_queues_task(self):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        uploaded = SimpleUploadedFile(
+            "requirements.pdf",
+            b"pdf-content",
+            content_type="application/pdf",
+        )
+
+        with (
+            patch(
+                "lens.views.datasources.default_storage.save",
+                return_value="datasource-uploads/requirements.pdf",
+            ) as save,
+            patch(
+                "lens.views.datasources.datasource_upload_task.apply_async"
+            ) as apply_async,
+        ):
+            response = self.client.post(
+                f"/api/lens/admin/datasources/{datasource.uuid}/upload/",
+                {"file": uploaded},
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 202, response.data)
+        task_id = response.data["task_id"]
+        self.assertEqual(response.data["filename"], "requirements.pdf")
+        save.assert_called_once()
+        apply_async.assert_called_once_with(
+            args=[
+                str(datasource.uuid),
+                "datasource-uploads/requirements.pdf",
+                "requirements.pdf",
+                task_id,
+            ],
+            task_id=ANY,
+        )
+        task = TaskExecution.objects.get(task_id=task_id)
+        self.assertEqual(task.module, "lens_datasource_upload")
+        self.assertEqual(task.status, "PENDING")
+        self.assertEqual(task.created_by, self.user)
+        self.assertEqual(task.metadata["filename"], "requirements.pdf")
+
+    def test_datasource_upload_rejects_unsupported_source_and_file(self):
+        unsupported = SimpleUploadedFile(
+            "notes.txt",
+            b"not supported",
+            content_type="text/plain",
+        )
+
+        response = self.client.post(
+            f"/api/lens/admin/datasources/{self.datasource.uuid}/upload/",
+            {"file": unsupported},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "DATASOURCE_UPLOAD_NOT_SUPPORTED",
+        )
+
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+        )
+        response = self.client.post(
+            f"/api/lens/admin/datasources/{datasource.uuid}/upload/",
+            {"file": unsupported},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "DATASOURCE_UPLOAD_FILE_TYPE_UNSUPPORTED",
+        )
+
+        response = self.client.post(
+            f"/api/lens/admin/datasources/{datasource.uuid}/upload/",
+            {},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "DATASOURCE_UPLOAD_FILE_REQUIRED",
+        )
+
     def test_managed_workspace_conversion_registers_trackable_task(self):
         datasource = DataSource.objects.create(
             name="Managed Snapshot",
@@ -4437,7 +4537,7 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_cancel_managed_workspace_conversion_releases_lock(self):
+    def test_cancel_managed_workspace_conversion_waits_for_callback(self):
         datasource = DataSource.objects.create(
             name="Managed Snapshot",
             source_type=DataSource.SourceType.MANAGED_WORKSPACE,
@@ -4481,18 +4581,19 @@ class LensApiTests(TestCase):
         cancel.assert_called_once_with(self.lensnode, "running-conversion")
         task.refresh_from_db()
         datasource.refresh_from_db()
-        self.assertEqual(task.status, "REVOKED")
-        self.assertEqual(datasource.last_conversion_status, "REVOKED")
-        self.assertIsNotNone(datasource.last_conversion_at)
+        self.assertEqual(task.status, "CANCELLING")
+        self.assertEqual(datasource.last_conversion_status, "CANCELLING")
+        self.assertIsNone(datasource.last_conversion_at)
 
-        acquire_datasource_lock(
-            datasource.uuid,
-            token="new-conversion",
-            ttl_s=60,
-        )
+        with self.assertRaises(SourceSyncBusy):
+            acquire_datasource_lock(
+                datasource.uuid,
+                token="new-conversion",
+                ttl_s=60,
+            )
         release_datasource_lock(
             datasource.uuid,
-            token="new-conversion",
+            token="running-conversion",
         )
 
     @patch("lens.views.datasources.check_datasource_path")

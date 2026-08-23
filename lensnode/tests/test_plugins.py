@@ -27,6 +27,10 @@ def _config(**overrides):
 def test_codegraph_plugin_contributes_stdio_server(monkeypatch, tmp_path):
     (tmp_path / "app.py").write_text("print('hi')")
     monkeypatch.setattr(
+        "lensnode.plugins.codegraph.shutil.which",
+        lambda command: command,
+    )
+    monkeypatch.setattr(
         "lensnode.plugins.codegraph._ensure_codegraph_index",
         lambda *_args, **_kwargs: True,
     )
