@@ -1,0 +1,4 @@
+type: improvement
+audience: user
+en: Improved DOCX styling and pagination, and fixed PPTX fullscreen rendering and keyboard slide navigation.
+zh-CN: 优化 DOCX 字体、颜色和分页样式，并修复 PPTX 全屏渲染及键盘翻页问题。
