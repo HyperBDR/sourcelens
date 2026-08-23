@@ -5,7 +5,7 @@ import { Download, Maximize2, Minimize2, X } from '@lucide/vue'
 
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import { fetchDeliverableBlob, previewKind } from '@/utils/filePreview'
-import { escapeHtml, sanitizeHtml } from '@/utils/sanitize'
+import { escapeHtml } from '@/utils/sanitize'
 
 const props = defineProps({
   // The delivered file to preview, or null when the modal is closed.
@@ -19,7 +19,7 @@ const { t } = useI18n()
 const kind = ref('')
 const objectUrl = ref('')
 const textContent = ref('')
-const docxContent = ref('')
+const docxHost = ref(null)
 const workbook = ref(null)
 const sheetNames = ref([])
 const selectedSheet = ref('')
@@ -31,6 +31,46 @@ const failed = ref(false)
 let currentUrl = ''
 let loadSeq = 0
 let pptxPreviewer = null
+let pptxBuffer = null
+
+function getPptxPreviewSize() {
+  if (!isFullscreen.value || !previewPanel.value) {
+    return { width: 900, height: 620 }
+  }
+
+  const header = previewPanel.value.querySelector('.preview-header')
+  return {
+    width: previewPanel.value.clientWidth,
+    height: Math.max(
+      previewPanel.value.clientHeight - (header?.offsetHeight || 0),
+      1
+    )
+  }
+}
+
+function waitForPptxLayout() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve))
+  })
+}
+
+async function renderPptx(buffer, seq) {
+  await nextTick()
+  await waitForPptxLayout()
+  if (seq !== loadSeq || !pptxHost.value) {
+    return
+  }
+  if (pptxPreviewer) {
+    pptxPreviewer.destroy()
+  }
+  pptxHost.value.innerHTML = ''
+  const { init: initPptxPreview } = await import('pptx-preview')
+  pptxPreviewer = initPptxPreview(pptxHost.value, {
+    ...getPptxPreviewSize(),
+    mode: 'slide'
+  })
+  await pptxPreviewer.preview(buffer)
+}
 
 function renderSheet(name) {
   if (!workbook.value || !name) return ''
@@ -61,7 +101,7 @@ function cleanup() {
   }
   objectUrl.value = ''
   textContent.value = ''
-  docxContent.value = ''
+  pptxBuffer = null
   workbook.value = null
   sheetNames.value = []
   selectedSheet.value = ''
@@ -71,6 +111,9 @@ function cleanup() {
   }
   if (pptxHost.value) {
     pptxHost.value.innerHTML = ''
+  }
+  if (docxHost.value) {
+    docxHost.value.innerHTML = ''
   }
 }
 
@@ -97,25 +140,25 @@ async function load(file) {
       return
     }
     if (kind.value === 'pptx') {
-      const { init: initPptxPreview } = await import('pptx-preview')
-      const buffer = await blob.arrayBuffer()
+      pptxBuffer = await blob.arrayBuffer()
+      await renderPptx(pptxBuffer, seq)
+    } else if (kind.value === 'docx') {
+      const { renderAsync } = await import('docx-preview')
       await nextTick()
-      if (seq !== loadSeq || !pptxHost.value) {
+      if (seq !== loadSeq || !docxHost.value) {
         return
       }
-      pptxPreviewer = initPptxPreview(pptxHost.value, {
-        width: 900,
-        height: 620,
-        mode: 'list'
+      await renderAsync(blob, docxHost.value, docxHost.value, {
+        breakPages: true,
+        ignoreHeight: false,
+        ignoreWidth: false,
+        inWrapper: true,
+        renderComments: false,
+        renderEndnotes: true,
+        renderFooters: true,
+        renderFootnotes: true,
+        renderHeaders: true
       })
-      await pptxPreviewer.preview(buffer)
-    } else if (kind.value === 'docx') {
-      const { default: mammoth } = await import('mammoth')
-      const result = await mammoth.convertToHtml({
-        arrayBuffer: await blob.arrayBuffer()
-      })
-      if (seq !== loadSeq) return
-      docxContent.value = sanitizeHtml(result.value)
     } else if (kind.value === 'xlsx') {
       const XLSX = await import('xlsx')
       const parsed = XLSX.read(await blob.arrayBuffer(), {
@@ -171,13 +214,19 @@ async function enterFullscreen() {
       // Keep the CSS fallback when the browser denies fullscreen access.
     }
   }
+  if (kind.value === 'pptx' && pptxBuffer) {
+    await renderPptx(pptxBuffer, loadSeq)
+  }
 }
 
-function exitFullscreen() {
+async function exitFullscreen() {
   if (document.fullscreenElement && document.exitFullscreen) {
-    document.exitFullscreen().catch(() => {})
+    await document.exitFullscreen().catch(() => {})
   }
   isFullscreen.value = false
+  if (kind.value === 'pptx' && pptxBuffer) {
+    await renderPptx(pptxBuffer, loadSeq)
+  }
 }
 
 function toggleFullscreen() {
@@ -190,11 +239,25 @@ function toggleFullscreen() {
 
 function onFullscreenChange() {
   isFullscreen.value = Boolean(document.fullscreenElement)
+  if (kind.value === 'pptx' && pptxBuffer) {
+    renderPptx(pptxBuffer, loadSeq)
+  }
 }
 
 function onDownload() {
   if (props.file) {
     emit('download', props.file)
+  }
+}
+
+function turnPptxPage(direction) {
+  if (!pptxPreviewer || kind.value !== 'pptx') {
+    return
+  }
+  if (direction > 0 && pptxPreviewer.renderNextSlide) {
+    pptxPreviewer.renderNextSlide()
+  } else if (direction < 0 && pptxPreviewer.renderPreSlide) {
+    pptxPreviewer.renderPreSlide()
   }
 }
 
@@ -205,6 +268,15 @@ function onKeydown(event) {
       return
     }
     close()
+    return
+  }
+  if (
+    kind.value === 'pptx' &&
+    [' ', 'ArrowRight', 'ArrowLeft'].includes(event.key)
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    turnPptxPage(event.key === 'ArrowLeft' ? -1 : 1)
   }
 }
 
@@ -309,6 +381,9 @@ onUnmounted(() => {
         </header>
 
         <div class="preview-body">
+          <div v-if="kind === 'pptx'" ref="pptxHost" class="preview-pptx"></div>
+          <div v-if="kind === 'docx'" ref="docxHost" class="preview-docx"></div>
+
           <div v-if="loading" class="preview-status">
             {{ t('lens.chat.previewLoading') }}
           </div>
@@ -337,18 +412,6 @@ onUnmounted(() => {
             class="preview-frame"
             sandbox=""
           ></iframe>
-
-          <div
-            v-else-if="kind === 'pptx'"
-            ref="pptxHost"
-            class="preview-pptx"
-          ></div>
-
-          <article
-            v-else-if="kind === 'docx'"
-            class="preview-docx"
-            v-html="docxContent"
-          ></article>
 
           <div v-else-if="kind === 'xlsx'" class="preview-xlsx">
             <div class="preview-sheet-tabs" role="tablist">
@@ -506,6 +569,86 @@ onUnmounted(() => {
 }
 .preview-docx :deep(img) {
   max-width: 100%;
+}
+.preview-docx :deep(h1),
+.preview-docx :deep(h2),
+.preview-docx :deep(h3),
+.preview-docx :deep(h4),
+.preview-docx :deep(h5),
+.preview-docx :deep(h6) {
+  margin: 1.4em 0 0.6em;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--sl-text-primary);
+}
+.preview-docx :deep(h1) {
+  margin-top: 0;
+  font-size: 1.8rem;
+}
+.preview-docx :deep(h2) {
+  font-size: 1.45rem;
+}
+.preview-docx :deep(h3) {
+  font-size: 1.2rem;
+}
+.preview-docx :deep(p) {
+  margin: 0 0 0.9em;
+  line-height: 1.75;
+}
+.preview-docx :deep(ul),
+.preview-docx :deep(ol) {
+  padding-left: 1.6em;
+  margin: 0 0 1em;
+  line-height: 1.7;
+}
+.preview-docx :deep(li) {
+  padding-left: 0.25em;
+  margin: 0.2em 0;
+}
+.preview-docx :deep(blockquote) {
+  padding: 0.7em 1em;
+  margin: 1em 0;
+  color: var(--sl-text-secondary);
+  background: var(--sl-bg-canvas);
+  border-left: 3px solid var(--sl-border-strong);
+}
+.preview-docx :deep(table) {
+  width: 100%;
+  margin: 1.2em 0;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+.preview-docx :deep(th),
+.preview-docx :deep(td) {
+  padding: 0.55em 0.7em;
+  text-align: left;
+  vertical-align: top;
+  border: 1px solid var(--sl-border-default);
+}
+.preview-docx :deep(th) {
+  font-weight: 600;
+  background: var(--sl-bg-canvas);
+}
+.preview-docx :deep(a) {
+  color: var(--sl-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.preview-docx :deep(hr) {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid var(--sl-border-default);
+}
+.preview-docx :deep(pre) {
+  padding: 12px 14px;
+  margin: 1em 0;
+  overflow-x: auto;
+  color: var(--sl-code-text);
+  background: var(--sl-code-bg);
+  border-radius: 6px;
+}
+.preview-docx :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .preview-xlsx {
   min-width: max-content;
