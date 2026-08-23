@@ -14,6 +14,7 @@ from deepagents import (
     register_harness_profile,
 )
 from deepagents.backends.filesystem import FilesystemBackend
+from deepagents.backends.local_shell import LocalShellBackend
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -123,6 +124,8 @@ LOGGER = logging.getLogger("lensnode")
 
 _PLANNED_CODE_ANALYSIS_ROUTE = {"route": "planned_code_analysis"}
 _MAX_PRESENTED_CITATIONS = 5
+_EXECUTION_BACKEND_TRUSTED_CONTAINER = "trusted_container"
+_EXECUTION_BACKEND_FILESYSTEM = "filesystem"
 
 register_harness_profile(
     "lensgatewaychatmodel",
@@ -132,6 +135,38 @@ register_harness_profile(
         ),
     ),
 )
+
+
+def _build_execution_backend(config, root_dir):
+    """Build the configured file and command execution backend.
+
+    ``trusted_container`` deliberately delegates command execution to the
+    current LensNode process. The deployment boundary is the LensNode
+    container; this backend does not provide an additional sandbox.
+    """
+
+    backend_name = getattr(
+        config,
+        "execution_backend",
+        _EXECUTION_BACKEND_TRUSTED_CONTAINER,
+    )
+    if backend_name == _EXECUTION_BACKEND_TRUSTED_CONTAINER:
+        return LocalShellBackend(
+            root_dir=str(root_dir),
+            virtual_mode=True,
+            inherit_env=True,
+        )
+    if backend_name == _EXECUTION_BACKEND_FILESYSTEM:
+        return FilesystemBackend(
+            root_dir=str(root_dir),
+            virtual_mode=True,
+        )
+    raise ValueError(
+        "Unsupported LENSNODE_EXECUTION_BACKEND: "
+        f"{backend_name!r}. Expected "
+        f"{_EXECUTION_BACKEND_TRUSTED_CONTAINER!r} or "
+        f"{_EXECUTION_BACKEND_FILESYSTEM!r}."
+    )
 
 
 
@@ -931,6 +966,10 @@ class LensDeepAgentRuntime:
             else None
         )
         use_subagents = self._subagents_enabled(state)
+        backend = _build_execution_backend(
+            self.config,
+            state.resources.root,
+        )
         state.kwargs = {
             "model": state.model,
             "tools": state.tools,
@@ -941,10 +980,7 @@ class LensDeepAgentRuntime:
                 mcp_deferred=state.mcp_middleware is not None,
                 runtime_guidance=state.runtime_guidance,
             ),
-            "backend": FilesystemBackend(
-                root_dir=str(state.resources.root),
-                virtual_mode=True,
-            ),
+            "backend": backend,
             "subagents": (
                 [
                     _fast_subagent(
