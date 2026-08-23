@@ -16,6 +16,7 @@ from lensnode.agent_runtime import (
 from lensnode.agent_runtime.scenarios import SCENARIOS
 from lensnode.gateway_model import RunCancelledError
 from lensnode.runtime_resources import (
+    delete_skill_cache,
     cleanup_run_runtime_resources,
     cleanup_runtime_resources,
     cleanup_stale_runtime_resources,
@@ -517,6 +518,25 @@ def test_cleanup_run_runtime_resources_removes_safe_run_directory(tmp_path):
 
     assert removed is True
     assert not run_root.exists()
+
+
+def test_delete_skill_cache_removes_only_the_requested_skill(tmp_path):
+    skill_uuid = "00000000-0000-0000-0000-000000000013"
+    cache_root = tmp_path / ".sourcelens" / "cache" / "skills"
+    target = cache_root / skill_uuid / "hash"
+    other = cache_root / "00000000-0000-0000-0000-000000000014" / "hash"
+    target.mkdir(parents=True)
+    other.mkdir(parents=True)
+    (target / "SKILL.md").write_text("remove", encoding="utf-8")
+    (other / "SKILL.md").write_text("keep", encoding="utf-8")
+
+    assert delete_skill_cache(tmp_path, skill_uuid) is True
+    assert not target.exists()
+    assert (other / "SKILL.md").exists()
+
+
+def test_delete_skill_cache_rejects_invalid_skill_uuid(tmp_path):
+    assert delete_skill_cache(tmp_path, "../../outside") is False
 
 
 def test_knowledge_prompt_separates_subject_from_reference_material():

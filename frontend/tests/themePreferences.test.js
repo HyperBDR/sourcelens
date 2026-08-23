@@ -824,7 +824,7 @@ test('chat composer gradient uses semantic surface opacity tokens', () => {
 
 test('administration keeps its existing explicit logo treatment', () => {
   assert.match(adminSidebarSource, /tone="dark"/)
-  assert.match(adminSidebarSource, /\[&_img\]:!w-52/)
+  assert.match(adminSidebarSource, /\[&_img\]:!w-48/)
   assert.match(adminSidebarSource, /mix-blend-screen/)
 })
 

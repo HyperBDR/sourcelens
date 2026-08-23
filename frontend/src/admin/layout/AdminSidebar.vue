@@ -17,13 +17,13 @@
   <aside
     id="admin-sidebar"
     :class="[
-      'layout-admin-sidebar flex h-full w-64 flex-shrink-0 flex-col border-r border-ink-700 bg-ink-900 transition-transform duration-300 ease-in-out',
+      'layout-admin-sidebar flex h-full w-60 flex-shrink-0 flex-col border-r border-ink-700 bg-ink-900 transition-transform duration-300 ease-in-out',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
   >
     <div
-      class="flex h-16 items-center justify-between border-b border-ink-800 px-4"
+      class="flex h-14 items-center justify-between border-b border-ink-800 px-4"
     >
       <router-link
         to="/management"
@@ -33,7 +33,7 @@
         <BrandLogo
           variant="wordmark"
           tone="dark"
-          wrapperClass="-ml-[27px] mix-blend-screen [&_img]:!w-52"
+          wrapperClass="-ml-[25px] mix-blend-screen [&_img]:!w-48"
         />
       </router-link>
       <button
@@ -74,7 +74,12 @@
         >
           <button
             @click="toggleLensMenu"
-            class="admin-nav-item admin-nav-item-parent w-full"
+            :aria-expanded="lensMenuOpen"
+            aria-controls="admin-sidebar-lens-menu"
+            :class="[
+              'admin-nav-item admin-nav-item-parent w-full',
+              parentActiveClass('lens')
+            ]"
           >
             <svg
               class="w-5 h-5"
@@ -114,7 +119,11 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="lensMenuOpen" class="submenu">
+            <div
+              v-if="lensMenuOpen"
+              id="admin-sidebar-lens-menu"
+              class="submenu"
+            >
               <router-link
                 to="/management/lens/assistants"
                 class="admin-nav-item admin-nav-item-child"
@@ -255,7 +264,12 @@
         >
           <button
             @click="toggleDataManagementMenu"
-            class="admin-nav-item admin-nav-item-parent w-full"
+            :aria-expanded="dataManagementMenuOpen"
+            aria-controls="admin-sidebar-data-menu"
+            :class="[
+              'admin-nav-item admin-nav-item-parent w-full',
+              parentActiveClass('data')
+            ]"
           >
             <svg
               class="w-5 h-5"
@@ -297,7 +311,11 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="dataManagementMenuOpen" class="submenu">
+            <div
+              v-if="dataManagementMenuOpen"
+              id="admin-sidebar-data-menu"
+              class="submenu"
+            >
               <router-link
                 to="/management/lens/datasources"
                 class="admin-nav-item admin-nav-item-child"
@@ -480,7 +498,12 @@
         >
           <button
             @click="toggleUserManagementMenu"
-            class="admin-nav-item admin-nav-item-parent w-full"
+            :aria-expanded="userManagementMenuOpen"
+            aria-controls="admin-sidebar-users-menu"
+            :class="[
+              'admin-nav-item admin-nav-item-parent w-full',
+              parentActiveClass('users')
+            ]"
           >
             <svg
               class="w-5 h-5"
@@ -522,7 +545,11 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="userManagementMenuOpen" class="submenu">
+            <div
+              v-if="userManagementMenuOpen"
+              id="admin-sidebar-users-menu"
+              class="submenu"
+            >
               <router-link
                 to="/management/users"
                 class="admin-nav-item admin-nav-item-child"
@@ -581,7 +608,12 @@
         >
           <button
             @click="toggleLLMMenu"
-            class="admin-nav-item admin-nav-item-parent w-full"
+            :aria-expanded="llmMenuOpen"
+            aria-controls="admin-sidebar-llm"
+            :class="[
+              'admin-nav-item admin-nav-item-parent w-full',
+              parentActiveClass('llm')
+            ]"
           >
             <svg
               class="w-5 h-5"
@@ -621,7 +653,7 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="llmMenuOpen" class="submenu">
+            <div v-if="llmMenuOpen" id="admin-sidebar-llm" class="submenu">
               <router-link
                 to="/management/llm/stats"
                 class="admin-nav-item admin-nav-item-child"
@@ -736,7 +768,12 @@
         >
           <button
             @click="toggleTaskManagementMenu"
-            class="admin-nav-item admin-nav-item-parent w-full"
+            :aria-expanded="taskManagementMenuOpen"
+            aria-controls="admin-sidebar-tasks-menu"
+            :class="[
+              'admin-nav-item admin-nav-item-parent w-full',
+              parentActiveClass('tasks')
+            ]"
           >
             <svg
               class="w-5 h-5"
@@ -778,7 +815,11 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="taskManagementMenuOpen" class="submenu">
+            <div
+              v-if="taskManagementMenuOpen"
+              id="admin-sidebar-tasks-menu"
+              class="submenu"
+            >
               <router-link
                 to="/management/task-management/stats"
                 class="admin-nav-item admin-nav-item-child"
@@ -869,7 +910,12 @@
         >
           <button
             @click="toggleNotificationManagementMenu"
-            class="admin-nav-item admin-nav-item-parent w-full"
+            :aria-expanded="notificationManagementMenuOpen"
+            aria-controls="admin-sidebar-notifications-menu"
+            :class="[
+              'admin-nav-item admin-nav-item-parent w-full',
+              parentActiveClass('notifications')
+            ]"
           >
             <svg
               class="w-5 h-5"
@@ -911,7 +957,11 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="notificationManagementMenuOpen" class="submenu">
+            <div
+              v-if="notificationManagementMenuOpen"
+              id="admin-sidebar-notifications-menu"
+              class="submenu"
+            >
               <router-link
                 to="/management/notifier/stats"
                 class="admin-nav-item admin-nav-item-child"
@@ -1059,9 +1109,13 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import {
+  getAdminSidebarMenu,
+  toggleAdminSidebarMenu
+} from '@/admin/layout/adminSidebarState'
 import BrandLogo from '@/components/layout/BrandLogo.vue'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { useUiStore } from '@/store/ui'
@@ -1093,12 +1147,16 @@ const clearAssistantReturnPath = () => {
 }
 
 const navigation = ref(null)
-const userManagementMenuOpen = ref(true)
-const lensMenuOpen = ref(true)
-const dataManagementMenuOpen = ref(true)
-const llmMenuOpen = ref(true)
-const taskManagementMenuOpen = ref(true)
-const notificationManagementMenuOpen = ref(true)
+const activeMenu = computed(() => getAdminSidebarMenu(route.path))
+const openMenu = ref(activeMenu.value)
+const userManagementMenuOpen = computed(() => openMenu.value === 'users')
+const lensMenuOpen = computed(() => openMenu.value === 'lens')
+const dataManagementMenuOpen = computed(() => openMenu.value === 'data')
+const llmMenuOpen = computed(() => openMenu.value === 'llm')
+const taskManagementMenuOpen = computed(() => openMenu.value === 'tasks')
+const notificationManagementMenuOpen = computed(
+  () => openMenu.value === 'notifications'
+)
 
 const { isMobile } = useIsMobile()
 
@@ -1145,49 +1203,28 @@ const isActive = (path) => {
   return route.path === path || route.path.startsWith(path + '/')
 }
 
-const toggleUserManagementMenu = () => {
-  userManagementMenuOpen.value = !userManagementMenuOpen.value
+const parentActiveClass = (menu) => {
+  return activeMenu.value === menu && openMenu.value !== menu
+    ? 'admin-nav-item-parent-active'
+    : ''
 }
 
-const toggleLensMenu = () => {
-  lensMenuOpen.value = !lensMenuOpen.value
+const toggleMenu = (menu) => {
+  openMenu.value = toggleAdminSidebarMenu(openMenu.value, menu)
 }
 
-const toggleDataManagementMenu = () => {
-  dataManagementMenuOpen.value = !dataManagementMenuOpen.value
-}
-
-const toggleLLMMenu = () => {
-  llmMenuOpen.value = !llmMenuOpen.value
-}
-
-const toggleTaskManagementMenu = () => {
-  taskManagementMenuOpen.value = !taskManagementMenuOpen.value
-}
-
-const toggleNotificationManagementMenu = () => {
-  notificationManagementMenuOpen.value = !notificationManagementMenuOpen.value
-}
+const toggleUserManagementMenu = () => toggleMenu('users')
+const toggleLensMenu = () => toggleMenu('lens')
+const toggleDataManagementMenu = () => toggleMenu('data')
+const toggleLLMMenu = () => toggleMenu('llm')
+const toggleTaskManagementMenu = () => toggleMenu('tasks')
+const toggleNotificationManagementMenu = () => toggleMenu('notifications')
 
 watch(
   () => route.path,
   async (newPath) => {
-    if (
-      newPath.startsWith('/management/users') ||
-      newPath.startsWith('/management/groups')
-    )
-      userManagementMenuOpen.value = true
-    if (newPath.startsWith('/management/lens')) lensMenuOpen.value = true
-    if (
-      newPath.startsWith('/management/lens/datasources') ||
-      newPath.startsWith('/management/lens/resources')
-    )
-      dataManagementMenuOpen.value = true
-    if (newPath.startsWith('/management/llm')) llmMenuOpen.value = true
-    if (newPath.startsWith('/management/task-management'))
-      taskManagementMenuOpen.value = true
-    if (newPath.startsWith('/management/notifier'))
-      notificationManagementMenuOpen.value = true
+    const routeMenu = getAdminSidebarMenu(newPath)
+    if (routeMenu) openMenu.value = routeMenu
 
     if (navigation.value) {
       await nextTick()
@@ -1234,7 +1271,7 @@ const preloadRoute = (path) => {
 }
 
 .admin-nav-item {
-  @apply flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
+  @apply flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-ink-300 transition-colors hover:bg-white/10 hover:text-white;
 }
 
 .admin-nav-item-active {
@@ -1249,8 +1286,12 @@ const preloadRoute = (path) => {
   @apply bg-white/10 text-white;
 }
 
+.admin-nav-item-parent-active {
+  @apply bg-brand-500/20 text-brand-100;
+}
+
 .admin-nav-item-child {
-  @apply relative pl-10 py-2 text-sm font-normal text-ink-400;
+  @apply relative pl-10 py-2 text-[13px] font-normal text-ink-400;
   margin-left: 0.75rem;
   border-radius: 0.375rem;
 }

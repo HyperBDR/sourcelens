@@ -1,0 +1,8 @@
+type: fix
+audience: admin
+en: >-
+  Fixed deleted Skills remaining in the persistent cache of connected LensNodes.
+  Removing a Skill now also invalidates its corresponding LensNode cache.
+zh-CN: >-
+  修复了删除 Skill 后，已连接 LensNode 的持久化缓存中仍保留该 Skill 的问题。
+  删除 Skill 现在也会同步使对应的 LensNode 缓存失效。

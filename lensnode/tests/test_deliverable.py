@@ -118,6 +118,34 @@ def test_save_deliverable_rejects_escape(monkeypatch, tmp_path):
     assert payload["error"] == "PATH_NOT_ALLOWED"
 
 
+def test_save_deliverable_accepts_external_tool_tmp_output(
+    monkeypatch, tmp_path
+):
+    output = Path("/tmp") / f"sourcelens-test-{tmp_path.name}.pptx"
+    output.write_bytes(b"pptx")
+    captured = {}
+
+    def handler(request):
+        captured["body"] = request.read()
+        return httpx.Response(201, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_save_deliverable_tool(
+        {"run_uuid": "run-123"},
+        _resources(tmp_path),
+        _config(),
+        None,
+    )
+
+    try:
+        payload = json.loads(tool.invoke({"path": str(output)}))
+    finally:
+        output.unlink(missing_ok=True)
+
+    assert payload["ok"] is True
+    assert b"pptx" in captured["body"]
+
+
 def test_save_deliverable_rejects_oversized(monkeypatch, tmp_path):
     (tmp_path / "big.html").write_text("x" * 100, encoding="utf-8")
 

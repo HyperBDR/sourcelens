@@ -305,6 +305,8 @@
       "download": "Download",
       "previewLoading": "Loading preview…",
       "previewFailed": "Preview failed, please download instead.",
+      "enterFullscreen": "Enter fullscreen",
+      "exitFullscreen": "Exit fullscreen",
       "runInline": "Run inline",
       "cancelRun": "Cancel",
       "stop": "Stop",

@@ -694,10 +694,23 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
 
         emit("tool.save_deliverable.start", {"path": path, "summary": path})
         root = resources.root.resolve()
-        resolved = (resources.root / path.lstrip("/")).resolve()
+        requested_path = Path(path)
+        resolved = (
+            requested_path
+            if requested_path.is_absolute()
+            else resources.root / requested_path
+        ).resolve()
+        scratch_root = Path("/tmp").resolve()
         try:
             resolved.relative_to(root)
+            allowed = True
         except ValueError:
+            try:
+                resolved.relative_to(scratch_root)
+                allowed = True
+            except ValueError:
+                allowed = False
+        if not allowed:
             emit("tool.save_deliverable.denied", {"path": path})
             return _json({"ok": False, "error": "PATH_NOT_ALLOWED"})
         if not resolved.is_file():

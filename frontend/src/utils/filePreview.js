@@ -6,6 +6,9 @@ import api from '@/api'
 export const PREVIEW_MAX_BYTES = 5 * 1024 * 1024
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']
+const PPTX_EXTS = ['pptx']
+const DOCX_EXTS = ['docx']
+const XLSX_EXTS = ['xlsx']
 const MARKDOWN_EXTS = ['md', 'markdown']
 const TEXT_EXTS = [
   'txt',
@@ -56,9 +59,8 @@ export async function fetchDeliverableBlob(file) {
 /**
  * Resolve how a file should be previewed.
  *
- * Returns one of 'image' | 'pdf' | 'html' | 'markdown' | 'text', or an
- * empty string when the file has no in-browser preview. Decides by
- * content_type first, then falls back to the filename extension.
+ * Returns a supported preview kind or an empty string when the file has no
+ * in-browser preview. Decides by content_type first, then filename extension.
  */
 export function previewKind(file) {
   const type = (file?.content_type || '').toLowerCase()
@@ -68,6 +70,27 @@ export function previewKind(file) {
   }
   if (type === 'application/pdf' || ext === 'pdf') {
     return 'pdf'
+  }
+  if (
+    type ===
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+    PPTX_EXTS.includes(ext)
+  ) {
+    return 'pptx'
+  }
+  if (
+    type ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    DOCX_EXTS.includes(ext)
+  ) {
+    return 'docx'
+  }
+  if (
+    type ===
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    XLSX_EXTS.includes(ext)
+  ) {
+    return 'xlsx'
   }
   if (type === 'text/html' || ext === 'html' || ext === 'htm') {
     return 'html'

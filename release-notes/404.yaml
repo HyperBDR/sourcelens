@@ -1,0 +1,9 @@
+type: feature
+audience: admin
+en: >-
+  Added a Run Operations Center with fleet health, unified run details,
+  safe controls, explainable usage metrics, and a modernized responsive
+  admin console.
+zh-CN: >-
+  新增运行运营中心，统一展示节点健康、运行详情、安全操作和可解释的
+  用量指标，并升级为更现代的响应式管理台界面。

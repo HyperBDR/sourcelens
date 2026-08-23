@@ -41,3 +41,53 @@ test('preview text chrome follows theme foreground tokens', () => {
   assert.match(status, /color:\s*var\(--sl-text-muted\)/)
   assert.match(text, /color:\s*var\(--sl-text-primary\)/)
 })
+
+test('PPTX host mounts while the preview is loading', () => {
+  const modalSource = readFileSync(
+    new URL('../src/components/lens/FilePreviewModal.vue', import.meta.url),
+    'utf8'
+  )
+  const pptxHostIndex = modalSource.indexOf('ref="pptxHost"')
+  const loadingIndex = modalSource.indexOf('class="preview-status"')
+
+  assert.ok(pptxHostIndex > -1, 'PPTX preview host must exist')
+  assert.ok(loadingIndex > -1, 'preview loading state must exist')
+  assert.ok(
+    pptxHostIndex < loadingIndex,
+    'PPTX host must be declared before the loading branch'
+  )
+  assert.match(
+    modalSource.slice(pptxHostIndex - 120, pptxHostIndex + 80),
+    /v-if="kind === 'pptx'"/
+  )
+})
+
+test('PPTX preview recalculates its viewport after fullscreen changes', () => {
+  assert.match(modalSource, /function getPptxPreviewSize\(\)/)
+  assert.match(modalSource, /previewPanel\.value\.clientWidth/)
+  assert.match(modalSource, /pptxHost\.value\.innerHTML = ''/)
+  assert.match(modalSource, /function waitForPptxLayout\(\)/)
+  assert.match(modalSource, /await renderPptx\(pptxBuffer, loadSeq\)/)
+  assert.match(modalSource, /renderPptx\(pptxBuffer, loadSeq\)/)
+})
+
+test('PPTX keyboard navigation keeps Space from closing the preview', () => {
+  assert.match(modalSource, /mode: 'slide'/)
+  assert.match(modalSource, /event\.preventDefault\(\)/)
+  assert.match(modalSource, /event\.key === 'ArrowLeft' \? -1 : 1/)
+  assert.match(modalSource, /turnPptxPage\(direction\)/)
+})
+
+test('DOCX preview restores document typography and table layout', () => {
+  assert.match(styleSource, /\.preview-docx :deep\(h1\)/)
+  assert.match(styleSource, /\.preview-docx :deep\(p\)/)
+  assert.match(styleSource, /\.preview-docx :deep\(table\)/)
+  assert.match(styleSource, /\.preview-docx :deep\(li\)/)
+})
+
+test('DOCX preview uses the browser renderer for document styles', () => {
+  assert.match(modalSource, /import\('docx-preview'\)/)
+  assert.match(modalSource, /renderAsync\(blob, docxHost\.value/)
+  assert.match(modalSource, /ref="docxHost"/)
+  assert.doesNotMatch(modalSource, /mammoth\.convertToHtml/)
+})

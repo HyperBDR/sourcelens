@@ -84,6 +84,45 @@ export async function getAdminRunTrajectory(runUuid, params = {}) {
   return unwrapResponse(response)
 }
 
+export async function getAdminRunTrajectoryExport(runUuid) {
+  const events = []
+  let afterSequence = 0
+  let summary = null
+  let hasMore = true
+
+  while (hasMore) {
+    const payload = await getAdminRunTrajectory(runUuid, {
+      after_sequence: afterSequence,
+      page_size: 500
+    })
+    const rows = unwrapList(payload)
+    events.push(...rows)
+    summary ||= payload?.summary ?? null
+    hasMore = Boolean(payload?.has_more) && rows.length > 0
+    if (!hasMore) break
+    afterSequence = payload.next_after_sequence
+  }
+
+  return { summary, events }
+}
+
+export async function cancelAdminRun(runUuid) {
+  const response = await api.post(`/lens/admin/runs/${runUuid}/cancel/`)
+  return unwrapResponse(response)
+}
+
+export async function retryAdminRun(runUuid, idempotencyKey) {
+  const response = await api.post(`/lens/admin/runs/${runUuid}/retry/`, {
+    idempotency_key: idempotencyKey
+  })
+  return unwrapResponse(response)
+}
+
+export async function resumeAdminRun(runUuid) {
+  const response = await api.post(`/lens/admin/runs/${runUuid}/resume/`)
+  return unwrapResponse(response)
+}
+
 export async function getAdminRunDiagnostics(runUuid) {
   const response = await api.get(`/lens/admin/runs/${runUuid}/diagnostics/`)
   return unwrapList(unwrapResponse(response))

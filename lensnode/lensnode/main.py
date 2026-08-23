@@ -34,6 +34,7 @@ from .logging_utils import (
     utc_now,
 )
 from .runtime_resources import (
+    delete_skill_cache,
     cleanup_run_runtime_resources,
     cleanup_stale_runtime_resources,
 )
@@ -432,6 +433,12 @@ class LensNodeClient:
         message_type = message.get("type")
         if message_type == "run_start":
             await self._start_command(message)
+        elif message_type == "skill_cache_invalidate":
+            await asyncio.to_thread(
+                delete_skill_cache,
+                getattr(self.config, "workspace_path", None),
+                message.get("skill_uuid"),
+            )
         elif message_type == "list_dirs":
             await self._handle_list_dirs(message)
         elif message_type == "datasource_check_path":
