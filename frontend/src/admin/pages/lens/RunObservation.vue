@@ -40,67 +40,120 @@
       >
         <div class="flex min-h-0 flex-col p-0 md:p-6">
           <div
-            class="admin-filter-toolbar mb-4 flex-shrink-0 md:flex-nowrap md:items-center md:border-0 md:bg-transparent md:p-0 md:shadow-none"
+            class="admin-filter-toolbar mb-4 flex-shrink-0 flex-col md:items-stretch md:border-0 md:bg-transparent md:p-0 md:shadow-none"
           >
             <div
-              class="flex w-full min-w-0 flex-col items-stretch gap-3 md:flex-1 md:flex-row md:flex-nowrap md:items-center"
+              class="flex w-full min-w-0 flex-col items-stretch gap-3 md:flex-row md:items-center"
             >
-              <input
-                v-model="filters.q"
-                type="text"
-                :placeholder="t('lensRuns.filterKeyword')"
-                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-40"
-                @input="onFiltersChanged"
-              />
-              <input
-                v-model="filters.username"
-                type="text"
-                :placeholder="t('lensRuns.filterUsername')"
-                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-28"
-                @input="onUsernameChanged"
-              />
-              <BaseSelect
-                v-model="filters.assistant"
-                class="md:w-48"
-                mobile-touch
-                @change="onFiltersChanged"
+              <div
+                class="flex min-w-0 flex-1 flex-col items-stretch gap-3 md:flex-row md:flex-nowrap md:items-center"
               >
-                <option value="">{{ t('lensRuns.assistantAll') }}</option>
-                <option v-for="a in assistants" :key="a.slug" :value="a.slug">
-                  {{ a.name }}
-                </option>
-              </BaseSelect>
+                <input
+                  v-model="filters.q"
+                  type="text"
+                  :placeholder="t('lensRuns.filterKeyword')"
+                  class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-48"
+                  @input="onFiltersChanged"
+                />
+                <input
+                  v-model="filters.username"
+                  type="text"
+                  :placeholder="t('lensRuns.filterUsername')"
+                  class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-32"
+                  @input="onUsernameChanged"
+                />
+                <BaseSelect
+                  v-model="filters.assistant"
+                  class="md:w-48"
+                  mobile-touch
+                  @change="onFiltersChanged"
+                >
+                  <option value="">{{ t('lensRuns.assistantAll') }}</option>
+                  <option v-for="a in assistants" :key="a.slug" :value="a.slug">
+                    {{ a.name }}
+                  </option>
+                </BaseSelect>
+                <BaseSelect
+                  v-model="filters.status"
+                  class="md:w-32"
+                  mobile-touch
+                  @change="onFiltersChanged"
+                >
+                  <option value="">{{ t('lensRuns.statusAll') }}</option>
+                  <option value="done">{{ t('lensRuns.statusDone') }}</option>
+                  <option value="failed">
+                    {{ t('lensRuns.statusFailed') }}
+                  </option>
+                  <option value="active">
+                    {{ t('lensRuns.statusRunning') }}
+                  </option>
+                  <option value="queued">
+                    {{ t('lensRuns.statusQueued') }}
+                  </option>
+                  <option value="cancelled">
+                    {{ t('lensRuns.statusCancelled') }}
+                  </option>
+                </BaseSelect>
+              </div>
+              <div class="flex w-full shrink-0 items-center gap-2 md:w-auto">
+                <BaseButton
+                  data-testid="toggle-run-advanced-filters"
+                  variant="outline"
+                  size="sm"
+                  class="flex-1 md:flex-none"
+                  :aria-expanded="advancedFiltersOpen"
+                  aria-controls="run-advanced-filters"
+                  @click="advancedFiltersOpen = !advancedFiltersOpen"
+                >
+                  {{ t('lensRuns.moreFilters') }}
+                  <span
+                    v-if="advancedFilterCount"
+                    class="rounded-full bg-primary-100 px-1.5 text-xs text-primary-700"
+                  >
+                    {{ advancedFilterCount }}
+                  </span>
+                </BaseButton>
+                <BaseButton
+                  variant="outline"
+                  size="sm"
+                  :loading="loading"
+                  :title="t('common.refresh')"
+                  class="flex-1 md:flex-none"
+                  @click="fetchRuns"
+                >
+                  {{ t('common.refresh') }}
+                </BaseButton>
+                <BaseButton
+                  variant="outline"
+                  size="sm"
+                  class="flex-1 md:flex-none"
+                  @click="resetFilters"
+                >
+                  {{ t('lensRuns.resetFilters') }}
+                </BaseButton>
+              </div>
+            </div>
+
+            <div
+              v-if="advancedFiltersOpen"
+              id="run-advanced-filters"
+              data-testid="run-advanced-filters"
+              class="mt-3 grid gap-3 border-t border-gray-200 pt-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center"
+            >
               <input
                 v-model="filters.lensnode"
                 type="text"
                 :placeholder="t('lensRuns.filterLensNode')"
-                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-36"
+                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0"
                 @input="onFiltersChanged"
               />
               <input
                 v-model="filters.model"
                 type="text"
                 :placeholder="t('lensRuns.filterModel')"
-                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0 md:w-36"
+                class="min-h-11 w-full min-w-0 rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-500 md:min-h-0"
                 @input="onFiltersChanged"
               />
-              <BaseSelect
-                v-model="filters.status"
-                class="md:w-28"
-                mobile-touch
-                @change="onFiltersChanged"
-              >
-                <option value="">{{ t('lensRuns.statusAll') }}</option>
-                <option value="done">{{ t('lensRuns.statusDone') }}</option>
-                <option value="failed">{{ t('lensRuns.statusFailed') }}</option>
-                <option value="active">
-                  {{ t('lensRuns.statusRunning') }}
-                </option>
-                <option value="queued">{{ t('lensRuns.statusQueued') }}</option>
-                <option value="cancelled">
-                  {{ t('lensRuns.statusCancelled') }}
-                </option>
-              </BaseSelect>
               <div class="flex w-full shrink-0 items-center gap-2 md:w-auto">
                 <BaseDateInput
                   v-model="filters.start_date"
@@ -116,26 +169,6 @@
                   @change="onFiltersChanged"
                 />
               </div>
-            </div>
-            <div class="flex w-full shrink-0 items-center gap-2 md:w-auto">
-              <BaseButton
-                variant="outline"
-                size="sm"
-                :loading="loading"
-                :title="t('common.refresh')"
-                class="flex-1 md:flex-none"
-                @click="fetchRuns"
-              >
-                {{ t('common.refresh') }}
-              </BaseButton>
-              <BaseButton
-                variant="outline"
-                size="sm"
-                class="flex-1 md:flex-none"
-                @click="resetFilters"
-              >
-                {{ t('lensRuns.resetFilters') }}
-              </BaseButton>
             </div>
           </div>
 
@@ -174,7 +207,9 @@
                       {{ formatDate(r.created_at) }}
                     </p>
                   </div>
-                  <span :class="statusClass(r.status)">{{ r.status }}</span>
+                  <span :class="statusClass(r.status)">
+                    {{ statusText(r.status) }}
+                  </span>
                 </div>
 
                 <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
@@ -302,7 +337,9 @@
                       {{ r.question || '-' }}
                     </td>
                     <td class="td whitespace-nowrap">
-                      <span :class="statusClass(r.status)">{{ r.status }}</span>
+                      <span :class="statusClass(r.status)">
+                        {{ statusText(r.status) }}
+                      </span>
                     </td>
                     <td class="td whitespace-nowrap">
                       <span
@@ -503,15 +540,6 @@
                 <button
                   class="detail-tab"
                   :class="
-                    activeDetailTab === 'progress' ? 'detail-tab-active' : ''
-                  "
-                  @click="activeDetailTab = 'progress'"
-                >
-                  {{ t('lensRuns.tabLiveProgress') }}
-                </button>
-                <button
-                  class="detail-tab"
-                  :class="
                     activeDetailTab === 'trace' ? 'detail-tab-active' : ''
                   "
                   @click="activeDetailTab = 'trace'"
@@ -523,24 +551,15 @@
                 </button>
                 <button
                   class="detail-tab"
-                  data-testid="run-evidence-tab"
+                  data-testid="run-results-tab"
                   :class="
-                    activeDetailTab === 'evidence' ? 'detail-tab-active' : ''
+                    activeDetailTab === 'results' ? 'detail-tab-active' : ''
                   "
-                  @click="activeDetailTab = 'evidence'"
+                  @click="activeDetailTab = 'results'"
                 >
-                  {{ t('lensRuns.tabEvidence') }}
-                </button>
-                <button
-                  class="detail-tab"
-                  data-testid="run-files-tab"
-                  :class="
-                    activeDetailTab === 'files' ? 'detail-tab-active' : ''
-                  "
-                  @click="activeDetailTab = 'files'"
-                >
-                  {{ t('lensRuns.tabFiles') }}
+                  {{ t('lensRuns.tabResults') }}
                   <span class="ml-1 text-xs text-gray-400">{{
+                    (detail.citations || []).length +
                     (detail.output_files || []).length
                   }}</span>
                 </button>
@@ -554,144 +573,6 @@
                 >
                   {{ t('lensRuns.tabUsage') }}
                 </button>
-                <button
-                  class="detail-tab"
-                  data-testid="run-diagnosis-tab"
-                  :class="
-                    activeDetailTab === 'diagnosis' ? 'detail-tab-active' : ''
-                  "
-                  @click="activeDetailTab = 'diagnosis'"
-                >
-                  {{ t('lensRuns.tabDiagnosis') }}
-                </button>
-              </div>
-
-              <div
-                v-show="activeDetailTab === 'progress'"
-                data-testid="run-live-progress"
-                class="space-y-4 px-6 py-5"
-              >
-                <section class="overview-section">
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.liveProgressTitle') }}
-                  </h3>
-                  <dl class="overview-grid">
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.executorStatus') }}
-                      </dt>
-                      <dd class="mt-1">
-                        <span :class="statusClass(detail.executor_status)">
-                          {{ detail.executor_status || detail.status }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.lensnode') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{ detail.lensnode_name || '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.colOperations') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{
-                          t('lensRuns.toolCallsShort', {
-                            n: detail.tool_call_count || 0
-                          })
-                        }}
-                        ·
-                        {{
-                          t('lensRuns.retriesShort', {
-                            n: detail.retry_count || 0
-                          })
-                        }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.resumeDeadline') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ formatDateTime(detail.resume_by) }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-              </div>
-
-              <div
-                v-show="activeDetailTab === 'evidence'"
-                class="space-y-4 px-6 py-5"
-              >
-                <section class="overview-section">
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.evidenceTitle') }}
-                  </h3>
-                  <dl class="overview-grid">
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.plannedEvidenceCitations') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ plannedEvidence.citation_count ?? 0 }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.plannedEvidenceRetrievalCalls') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ plannedEvidence.retrieval_call_count ?? 0 }}
-                      </dd>
-                    </div>
-                  </dl>
-                  <p class="mt-3 text-sm text-gray-600">
-                    {{ t('lensRuns.evidenceBoundary') }}
-                  </p>
-                </section>
-                <section class="overview-section">
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.verifiedCitations') }}
-                  </h3>
-                  <div v-if="detail.citations?.length" class="mt-3 space-y-3">
-                    <article
-                      v-for="citation in detail.citations"
-                      :key="citation.id"
-                      class="rounded-md border border-gray-200 bg-white p-3"
-                    >
-                      <p class="break-all font-mono text-xs text-gray-700">
-                        {{ citation.path }}:{{ citation.start_line }}-{{
-                          citation.end_line
-                        }}
-                      </p>
-                      <p
-                        v-if="citation.symbol"
-                        class="mt-1 text-xs text-gray-500"
-                      >
-                        {{ citation.symbol }}
-                      </p>
-                      <p class="mt-2 text-sm text-gray-700">
-                        {{ citation.supports }}
-                      </p>
-                    </article>
-                  </div>
-                  <p v-else class="mt-3 text-sm text-gray-500">
-                    {{ t('lensRuns.noVerifiedCitations') }}
-                  </p>
-                </section>
-                <section v-if="detail.answer" class="overview-section">
-                  <h3 class="overview-title">{{ t('lensRuns.answer') }}</h3>
-                  <div
-                    class="mt-3 rounded-md border border-gray-200 bg-white p-3"
-                  >
-                    <MarkdownRenderer :content="detail.answer" />
-                  </div>
-                </section>
               </div>
 
               <!-- Overview tab -->
@@ -712,9 +593,11 @@
                         {{ t('lensRuns.executorStatus') }}
                       </dt>
                       <dd class="mt-1">
-                        <span :class="statusClass(detail.executor_status)">{{
-                          detail.executor_status || detail.status
-                        }}</span>
+                        <span :class="statusClass(detail.executor_status)">
+                          {{
+                            statusText(detail.executor_status || detail.status)
+                          }}
+                        </span>
                       </dd>
                     </div>
                     <div>
@@ -723,7 +606,7 @@
                       </dt>
                       <dd class="mt-1">
                         <span :class="statusClass(detail.outcome)">
-                          {{ detail.outcome || '-' }}
+                          {{ statusText(detail.outcome) }}
                         </span>
                       </dd>
                     </div>
@@ -902,6 +785,64 @@
                 </section>
 
                 <section
+                  v-if="showLiveProgress"
+                  data-testid="run-live-progress"
+                  class="overview-section border-blue-200 bg-blue-50/60"
+                >
+                  <h3 class="overview-title">
+                    {{ t('lensRuns.liveProgressTitle') }}
+                  </h3>
+                  <dl class="overview-grid">
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.executorStatus') }}
+                      </dt>
+                      <dd class="mt-1">
+                        <span :class="statusClass(detail.executor_status)">
+                          {{
+                            statusText(detail.executor_status || detail.status)
+                          }}
+                        </span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.lensnode') }}
+                      </dt>
+                      <dd class="overview-value">
+                        {{ detail.lensnode_name || '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.colOperations') }}
+                      </dt>
+                      <dd class="overview-value">
+                        {{
+                          t('lensRuns.toolCallsShort', {
+                            n: detail.tool_call_count || 0
+                          })
+                        }}
+                        ·
+                        {{
+                          t('lensRuns.retriesShort', {
+                            n: detail.retry_count || 0
+                          })
+                        }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.resumeDeadline') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ formatDateTime(detail.resume_by) }}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section
                   data-testid="run-overview-execution"
                   class="overview-section"
                 >
@@ -1037,75 +978,6 @@
                   </dl>
                 </section>
 
-                <section
-                  v-if="hasPlannedEvidence"
-                  data-testid="run-planned-evidence"
-                  class="overview-section"
-                >
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.plannedEvidence') }}
-                  </h3>
-                  <p
-                    v-if="plannedEvidence.planner_status === 'fallback'"
-                    data-testid="planned-evidence-fallback"
-                    class="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
-                  >
-                    {{ t('lensRuns.plannedEvidenceFallback') }}
-                    <span
-                      v-if="plannedEvidence.planner_rejection_reason"
-                      class="mt-0.5 block font-mono"
-                      :title="plannedEvidence.planner_rejection_reason"
-                    >
-                      {{ plannedEvidence.planner_rejection_reason }}
-                    </span>
-                  </p>
-                  <dl class="overview-grid">
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.plannedEvidencePlannerStatus') }}
-                      </dt>
-                      <dd
-                        class="overview-value"
-                        :data-testid="`planner-status-${plannedEvidence.planner_status || 'none'}`"
-                      >
-                        {{ plannerStatusLabel }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.plannedEvidenceModelCalls') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ plannedEvidence.model_call_count ?? '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.plannedEvidenceRetrievalCalls') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ plannedEvidence.retrieval_call_count ?? '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.plannedEvidenceTokens') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ plannedEvidence.evidence_tokens ?? '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.plannedEvidenceCitations') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ plannedEvidence.citation_count ?? '-' }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-
                 <section>
                   <h3 class="text-sm font-semibold text-gray-700 mb-2">
                     {{ t('lensRuns.question') }}
@@ -1181,15 +1053,6 @@
                   </p>
                 </section>
 
-                <section v-if="detail.answer">
-                  <h3 class="text-sm font-semibold text-gray-700 mb-2">
-                    {{ t('lensRuns.answer') }}
-                  </h3>
-                  <div class="rounded-md border border-gray-200 p-3">
-                    <MarkdownRenderer :content="detail.answer" />
-                  </div>
-                </section>
-
                 <section v-if="detail.error">
                   <h3 class="text-sm font-semibold text-red-600 mb-2">
                     {{ t('lensRuns.error') }}
@@ -1200,16 +1063,53 @@
                     {{ detail.error }}</pre
                   >
                 </section>
-              </div>
 
-              <!-- Diagnosis tab -->
-              <RunDiagnosisPanel
-                v-show="activeDetailTab === 'diagnosis'"
-                ref="diagnosisPanel"
-                :run-uuid="selectedUuid"
-                :active="activeDetailTab === 'diagnosis'"
-                @navigate="navigateFromEvidence"
-              />
+                <section
+                  v-if="canDiagnoseRun"
+                  data-testid="run-overview-diagnosis"
+                  class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/70"
+                >
+                  <div
+                    class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <h3 class="overview-title">
+                        {{ t('lensRuns.tabDiagnosis') }}
+                      </h3>
+                      <p class="mt-1 text-sm text-gray-500">
+                        {{ t('lensRuns.diagnosisEmptyDescription') }}
+                      </p>
+                    </div>
+                    <BaseButton
+                      variant="outline"
+                      size="sm"
+                      :aria-expanded="diagnosisExpanded"
+                      aria-controls="run-diagnosis-panel"
+                      @click="diagnosisExpanded = !diagnosisExpanded"
+                    >
+                      {{
+                        diagnosisExpanded
+                          ? t('lensRuns.collapseDiagnosis')
+                          : t('lensRuns.viewDiagnosis')
+                      }}
+                    </BaseButton>
+                  </div>
+                  <div
+                    v-if="diagnosisExpanded"
+                    id="run-diagnosis-panel"
+                    class="border-t border-gray-200"
+                  >
+                    <RunDiagnosisPanel
+                      ref="diagnosisPanel"
+                      :run-uuid="selectedUuid"
+                      :active="
+                        activeDetailTab === 'overview' && diagnosisExpanded
+                      "
+                      @navigate="navigateFromEvidence"
+                    />
+                  </div>
+                </section>
+              </div>
 
               <!-- Trace tab -->
               <div
@@ -1337,90 +1237,235 @@
                 />
               </div>
 
-              <!-- Files tab -->
-              <div v-show="activeDetailTab === 'files'" class="px-6 py-5">
-                <div
-                  v-if="detail.output_files && detail.output_files.length"
-                  class="space-y-3"
-                >
+              <!-- Results and evidence tab -->
+              <div
+                v-show="activeDetailTab === 'results'"
+                data-testid="run-results-content"
+                class="space-y-4 px-6 py-5"
+              >
+                <section v-if="detail.answer" class="overview-section">
+                  <h3 class="overview-title">{{ t('lensRuns.answer') }}</h3>
                   <div
-                    v-for="file in detail.output_files"
-                    :key="file.uuid"
-                    class="rounded-lg border border-gray-200 bg-white p-4"
+                    class="mt-3 rounded-md border border-gray-200 bg-white p-3"
                   >
-                    <div class="flex items-start gap-3">
-                      <span
-                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-500"
+                    <MarkdownRenderer :content="detail.answer" />
+                  </div>
+                </section>
+
+                <section class="overview-section">
+                  <h3 class="overview-title">
+                    {{ t('lensRuns.evidenceTitle') }}
+                  </h3>
+                  <dl class="overview-grid">
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceCitations') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.citation_count ?? 0 }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceRetrievalCalls') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.retrieval_call_count ?? 0 }}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p class="mt-3 text-sm text-gray-600">
+                    {{ t('lensRuns.evidenceBoundary') }}
+                  </p>
+                </section>
+
+                <section
+                  v-if="hasPlannedEvidence"
+                  data-testid="run-planned-evidence"
+                  class="overview-section"
+                >
+                  <h3 class="overview-title">
+                    {{ t('lensRuns.plannedEvidence') }}
+                  </h3>
+                  <p
+                    v-if="plannedEvidence.planner_status === 'fallback'"
+                    data-testid="planned-evidence-fallback"
+                    class="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                  >
+                    {{ t('lensRuns.plannedEvidenceFallback') }}
+                    <span
+                      v-if="plannedEvidence.planner_rejection_reason"
+                      class="mt-0.5 block font-mono"
+                      :title="plannedEvidence.planner_rejection_reason"
+                    >
+                      {{ plannedEvidence.planner_rejection_reason }}
+                    </span>
+                  </p>
+                  <dl class="overview-grid">
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidencePlannerStatus') }}
+                      </dt>
+                      <dd
+                        class="overview-value"
+                        :data-testid="`planner-status-${plannedEvidence.planner_status || 'none'}`"
                       >
-                        <FileText :size="20" aria-hidden="true" />
-                      </span>
-                      <div class="min-w-0 flex-1">
-                        <p
-                          class="truncate text-sm font-medium text-gray-900"
-                          :title="file.filename"
+                        {{ plannerStatusLabel }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceModelCalls') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.model_call_count ?? '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceRetrievalCalls') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.retrieval_call_count ?? '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceTokens') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.evidence_tokens ?? '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="overview-label">
+                        {{ t('lensRuns.plannedEvidenceCitations') }}
+                      </dt>
+                      <dd class="overview-value tabular-nums">
+                        {{ plannedEvidence.citation_count ?? '-' }}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section class="overview-section">
+                  <h3 class="overview-title">
+                    {{ t('lensRuns.verifiedCitations') }}
+                  </h3>
+                  <div v-if="detail.citations?.length" class="mt-3 space-y-3">
+                    <article
+                      v-for="citation in detail.citations"
+                      :key="citation.id"
+                      class="rounded-md border border-gray-200 bg-white p-3"
+                    >
+                      <p class="break-all font-mono text-xs text-gray-700">
+                        {{ citation.path }}:{{ citation.start_line }}-{{
+                          citation.end_line
+                        }}
+                      </p>
+                      <p
+                        v-if="citation.symbol"
+                        class="mt-1 text-xs text-gray-500"
+                      >
+                        {{ citation.symbol }}
+                      </p>
+                      <p class="mt-2 text-sm text-gray-700">
+                        {{ citation.supports }}
+                      </p>
+                    </article>
+                  </div>
+                  <p v-else class="mt-3 text-sm text-gray-500">
+                    {{ t('lensRuns.noVerifiedCitations') }}
+                  </p>
+                </section>
+
+                <section class="overview-section">
+                  <h3 class="overview-title">{{ t('lensRuns.tabFiles') }}</h3>
+                  <div
+                    v-if="detail.output_files && detail.output_files.length"
+                    class="mt-3 space-y-3"
+                  >
+                    <div
+                      v-for="file in detail.output_files"
+                      :key="file.uuid"
+                      class="rounded-lg border border-gray-200 bg-white p-4"
+                    >
+                      <div class="flex items-start gap-3">
+                        <span
+                          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-500"
                         >
-                          {{ file.filename }}
-                        </p>
-                        <dl
-                          class="mt-2 grid gap-x-4 gap-y-1 text-xs text-gray-500 sm:grid-cols-3"
-                        >
-                          <div>
-                            <dt class="sr-only">
-                              {{ t('lensRuns.fileType') }}
-                            </dt>
-                            <dd>{{ file.content_type || '-' }}</dd>
-                          </div>
-                          <div>
-                            <dt class="sr-only">
-                              {{ t('lensRuns.fileSize') }}
-                            </dt>
-                            <dd>{{ formatBytes(file.byte_size) }}</dd>
-                          </div>
-                          <div>
-                            <dt class="sr-only">
-                              {{ t('lensRuns.fileCreated') }}
-                            </dt>
-                            <dd data-testid="output-file-created">
-                              {{ formatDateTime(file.created_at) }}
-                            </dd>
-                          </div>
-                        </dl>
-                      </div>
-                      <div class="flex shrink-0 items-center gap-1">
-                        <button
-                          v-if="isPreviewable(file)"
-                          type="button"
-                          data-testid="preview-output-file"
-                          class="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600"
-                          :aria-label="
-                            t('lensRuns.previewFile', { name: file.filename })
-                          "
-                          @click="openPreview(file)"
-                        >
-                          <Eye :size="18" aria-hidden="true" />
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="download-output-file"
-                          class="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600"
-                          :aria-label="
-                            t('lensRuns.downloadFile', { name: file.filename })
-                          "
-                          @click="downloadOutputFile(file)"
-                        >
-                          <Download :size="18" aria-hidden="true" />
-                        </button>
+                          <FileText :size="20" aria-hidden="true" />
+                        </span>
+                        <div class="min-w-0 flex-1">
+                          <p
+                            class="truncate text-sm font-medium text-gray-900"
+                            :title="file.filename"
+                          >
+                            {{ file.filename }}
+                          </p>
+                          <dl
+                            class="mt-2 grid gap-x-4 gap-y-1 text-xs text-gray-500 sm:grid-cols-3"
+                          >
+                            <div>
+                              <dt class="sr-only">
+                                {{ t('lensRuns.fileType') }}
+                              </dt>
+                              <dd>{{ file.content_type || '-' }}</dd>
+                            </div>
+                            <div>
+                              <dt class="sr-only">
+                                {{ t('lensRuns.fileSize') }}
+                              </dt>
+                              <dd>{{ formatBytes(file.byte_size) }}</dd>
+                            </div>
+                            <div>
+                              <dt class="sr-only">
+                                {{ t('lensRuns.fileCreated') }}
+                              </dt>
+                              <dd data-testid="output-file-created">
+                                {{ formatDateTime(file.created_at) }}
+                              </dd>
+                            </div>
+                          </dl>
+                        </div>
+                        <div class="flex shrink-0 items-center gap-1">
+                          <button
+                            v-if="isPreviewable(file)"
+                            type="button"
+                            data-testid="preview-output-file"
+                            class="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600"
+                            :aria-label="
+                              t('lensRuns.previewFile', { name: file.filename })
+                            "
+                            @click="openPreview(file)"
+                          >
+                            <Eye :size="18" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="download-output-file"
+                            class="rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600"
+                            :aria-label="
+                              t('lensRuns.downloadFile', {
+                                name: file.filename
+                              })
+                            "
+                            @click="downloadOutputFile(file)"
+                          >
+                            <Download :size="18" aria-hidden="true" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-                <p
-                  v-else
-                  class="py-12 text-center text-sm text-gray-400"
-                  data-testid="run-files-empty"
-                >
-                  {{ t('lensRuns.noFiles') }}
-                </p>
+                  <p
+                    v-else
+                    class="py-8 text-center text-sm text-gray-400"
+                    data-testid="run-files-empty"
+                  >
+                    {{ t('lensRuns.noFiles') }}
+                  </p>
+                </section>
               </div>
             </div>
           </div>
@@ -1515,6 +1560,8 @@ const detailLoading = ref(false)
 const detail = ref(null)
 const selectedUuid = ref(null)
 const activeDetailTab = ref('overview')
+const diagnosisExpanded = ref(false)
+const advancedFiltersOpen = ref(false)
 const previewFile = ref(null)
 const diagnosisPanel = ref(null)
 const pendingAction = ref(null)
@@ -1547,6 +1594,13 @@ const filters = ref({
   start_date: '',
   end_date: ''
 })
+
+const advancedFilterCount = computed(
+  () =>
+    ['lensnode', 'model', 'start_date', 'end_date'].filter(
+      (key) => filters.value[key]
+    ).length
+)
 
 const statusSummaryCards = computed(() => [
   {
@@ -1635,6 +1689,19 @@ const hasFailureSummary = computed(() => {
   )
 })
 
+const showLiveProgress = computed(() => {
+  const status = (
+    detail.value?.executor_status ||
+    detail.value?.status ||
+    ''
+  ).toLowerCase()
+  return (
+    ['running', 'streaming', 'queued', 'awaiting_user_input'].includes(
+      status
+    ) || Boolean(detail.value?.resume_by)
+  )
+})
+
 function formatDate(val) {
   if (!val) return '-'
   try {
@@ -1671,6 +1738,23 @@ function statusClass(status) {
   if (['running', 'streaming', 'queued'].includes(s))
     return `${base} bg-blue-100 text-blue-800`
   return `${base} bg-gray-100 text-gray-600`
+}
+
+function statusText(status) {
+  const value = (status || '').toLowerCase()
+  if (['completed', 'done'].includes(value)) return t('lensRuns.statusDone')
+  if (value === 'failed') return t('lensRuns.statusFailed')
+  if (['running', 'streaming'].includes(value)) {
+    return t('lensRuns.statusRunning')
+  }
+  if (value === 'queued') return t('lensRuns.statusQueued')
+  if (value === 'cancelled') return t('lensRuns.statusCancelled')
+  if (value === 'blocked') return t('lensRuns.statusBlocked')
+  if (value === 'partial') return t('lensRuns.statusPartial')
+  if (value === 'awaiting_user_input') {
+    return t('lensRuns.statusAwaitingInput')
+  }
+  return status || '-'
 }
 
 function formatDateTime(val) {
@@ -1753,6 +1837,7 @@ function resetFilters() {
     start_date: '',
     end_date: ''
   }
+  advancedFiltersOpen.value = false
   page.value = 1
   router.replace({ path: route.path })
   fetchRuns()
@@ -1832,6 +1917,7 @@ function openDetail(uuid) {
   detailVisible.value = true
   detail.value = null
   activeDetailTab.value = 'overview'
+  diagnosisExpanded.value = false
   previewFile.value = null
 }
 
@@ -1839,19 +1925,21 @@ function closeDetail() {
   detailVisible.value = false
   selectedUuid.value = null
   detail.value = null
+  diagnosisExpanded.value = false
   previewFile.value = null
 }
 
 async function generateDiagnosis() {
   if (!canGenerateDiagnosis.value) return
-  activeDetailTab.value = 'diagnosis'
+  activeDetailTab.value = 'overview'
+  diagnosisExpanded.value = true
   await nextTick()
   diagnosisPanel.value?.generate()
 }
 
 function navigateFromEvidence(evidenceRef) {
   if (String(evidenceRef).startsWith('E-FILE-')) {
-    activeDetailTab.value = 'files'
+    activeDetailTab.value = 'results'
   } else if (evidenceRef === 'E-RUN') {
     activeDetailTab.value = 'overview'
   } else {
@@ -1901,6 +1989,7 @@ onMounted(async () => {
   filters.value.assistant = String(route.query.assistant || '')
   filters.value.lensnode = String(route.query.lensnode || '')
   filters.value.model = String(route.query.model || '')
+  advancedFiltersOpen.value = advancedFilterCount.value > 0
   try {
     assistants.value = await listAssistants()
   } catch {
@@ -1989,7 +2078,7 @@ watch(detailVisible, (visible) => {
 }
 
 .detail-tab {
-  @apply py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 transition-colors;
+  @apply shrink-0 whitespace-nowrap py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 transition-colors;
 }
 .detail-tab:hover {
   @apply text-gray-700;

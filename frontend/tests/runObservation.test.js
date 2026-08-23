@@ -73,31 +73,43 @@ test('run overview separates executor status from business outcome', async () =>
 test('run detail exposes the stable operations tabs in order', async () => {
   const contents = await source()
   const overviewIndex = contents.indexOf("activeDetailTab = 'overview'")
-  const progressIndex = contents.indexOf("activeDetailTab = 'progress'")
   const traceIndex = contents.indexOf("activeDetailTab = 'trace'")
-  const evidenceIndex = contents.indexOf("activeDetailTab = 'evidence'")
-  const filesIndex = contents.indexOf("activeDetailTab = 'files'")
+  const resultsIndex = contents.indexOf("activeDetailTab = 'results'")
   const usageIndex = contents.indexOf("activeDetailTab = 'usage'")
-  const diagnosisIndex = contents.indexOf("activeDetailTab = 'diagnosis'")
 
   assert.match(contents, /data-testid="close-run-detail"/)
-  assert.match(contents, /data-testid="run-diagnosis-tab"/)
+  assert.match(contents, /data-testid="run-results-tab"/)
+  assert.match(contents, /data-testid="run-usage-tab"/)
   assert.ok(overviewIndex >= 0)
-  assert.ok(progressIndex > overviewIndex)
-  assert.ok(traceIndex > progressIndex)
-  assert.ok(evidenceIndex > traceIndex)
-  assert.ok(filesIndex > evidenceIndex)
-  assert.ok(usageIndex > filesIndex)
-  assert.ok(diagnosisIndex > usageIndex)
+  assert.ok(traceIndex > overviewIndex)
+  assert.ok(resultsIndex > traceIndex)
+  assert.ok(usageIndex > resultsIndex)
+  assert.doesNotMatch(contents, /activeDetailTab = 'progress'/)
+  assert.doesNotMatch(contents, /activeDetailTab = 'evidence'/)
+  assert.doesNotMatch(contents, /activeDetailTab = 'files'/)
+  assert.doesNotMatch(contents, /activeDetailTab = 'diagnosis'/)
   assert.match(contents, /RunDiagnosisPanel/)
 })
 
-test('diagnosis panel is activated by the diagnosis tab', async () => {
+test('run detail tabs stay single-line and scroll on narrow screens', async () => {
   const contents = await source()
 
-  assert.match(contents, /data-testid="run-diagnosis-tab"/)
-  assert.match(contents, /activeDetailTab === 'diagnosis'/)
-  assert.match(contents, /:active="activeDetailTab === 'diagnosis'"/)
+  assert.match(
+    contents,
+    /\.detail-tab\s*\{[^}]*shrink-0[^}]*whitespace-nowrap[^}]*\}/s
+  )
+})
+
+test('diagnosis is expanded inside the overview instead of using a tab', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-overview-diagnosis"/)
+  assert.match(contents, /diagnosisExpanded/)
+  assert.match(
+    contents,
+    /:active="\s*activeDetailTab === 'overview' && diagnosisExpanded\s*"/
+  )
+  assert.doesNotMatch(contents, /data-testid="run-diagnosis-tab"/)
   assert.match(contents, /@navigate="navigateFromEvidence"/)
 })
 
@@ -124,14 +136,44 @@ test('run actions use server-provided availability and confirmations', async () 
   assert.match(contents, /resumeAdminRun/)
 })
 
-test('detail keeps evidence, artifacts, usage, and diagnostics separate', async () => {
+test('detail groups progress, evidence, artifacts, and diagnostics by task', async () => {
   const contents = await source()
 
-  assert.match(contents, /data-testid="run-evidence-tab"/)
-  assert.match(contents, /data-testid="run-files-tab"/)
+  assert.match(contents, /data-testid="run-results-tab"/)
+  assert.match(contents, /data-testid="run-results-content"/)
   assert.match(contents, /data-testid="run-usage-tab"/)
-  assert.match(contents, /data-testid="run-diagnosis-tab"/)
   assert.match(contents, /data-testid="run-live-progress"/)
+  assert.match(contents, /data-testid="run-overview-diagnosis"/)
+  assert.doesNotMatch(contents, /data-testid="run-evidence-tab"/)
+  assert.doesNotMatch(contents, /data-testid="run-files-tab"/)
   assert.match(contents, /detail\.citations/)
+  assert.match(contents, /detail\.output_files/)
+  assert.match(
+    contents,
+    /\(detail\.citations \|\| \[\]\)\.length\s*\+\s*\(detail\.output_files \|\| \[\]\)\.length/
+  )
   assert.match(contents, /citation\.supports/)
+})
+
+test('secondary run filters are disclosed on demand', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="toggle-run-advanced-filters"/)
+  assert.match(contents, /data-testid="run-advanced-filters"/)
+  assert.match(contents, /advancedFiltersOpen/)
+  assert.match(contents, /advancedFilterCount/)
+  assert.match(contents, /filters\.lensnode/)
+  assert.match(contents, /filters\.model/)
+  assert.match(contents, /filters\.start_date/)
+  assert.match(contents, /filters\.end_date/)
+})
+
+test('run statuses are localized consistently across list and detail', async () => {
+  const contents = await source()
+
+  assert.match(contents, /statusText\(r\.status\)/)
+  assert.match(
+    contents,
+    /statusText\(detail\.executor_status \|\| detail\.status\)/
+  )
 })
