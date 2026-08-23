@@ -61,8 +61,6 @@ test('data source parent refreshes directories for the selected LensNode', async
 })
 
 test('directory refresh normalizes supported list-dirs response shapes', async () => {
-  const contents = await source('pages/lens/DataSources.vue')
-
   const helper = await source('pages/lens/directoryRefresh.js')
 
   assert.match(helper, /const dirs = result\?\.dirs \?\? result/)
