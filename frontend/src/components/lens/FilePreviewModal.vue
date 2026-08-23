@@ -1,10 +1,11 @@
 <script setup>
-import { onUnmounted, ref, watch } from 'vue'
+import { nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Download, X } from '@lucide/vue'
+import { Download, Maximize2, Minimize2, X } from '@lucide/vue'
 
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import { fetchDeliverableBlob, previewKind } from '@/utils/filePreview'
+import { escapeHtml, sanitizeHtml } from '@/utils/sanitize'
 
 const props = defineProps({
   // The delivered file to preview, or null when the modal is closed.
@@ -18,10 +19,40 @@ const { t } = useI18n()
 const kind = ref('')
 const objectUrl = ref('')
 const textContent = ref('')
+const docxContent = ref('')
+const workbook = ref(null)
+const sheetNames = ref([])
+const selectedSheet = ref('')
+const pptxHost = ref(null)
+const previewPanel = ref(null)
+const isFullscreen = ref(false)
 const loading = ref(false)
 const failed = ref(false)
 let currentUrl = ''
 let loadSeq = 0
+let pptxPreviewer = null
+
+function renderSheet(name) {
+  if (!workbook.value || !name) return ''
+  const XLSX = workbook.value.XLSX
+  const rows = XLSX.utils.sheet_to_json(workbook.value.sheetMap[name], {
+    header: 1,
+    defval: '',
+    raw: false
+  })
+  return `<table class="preview-spreadsheet-table"><tbody>${rows
+    .map(
+      (row) =>
+        `<tr>${row
+          .map((cell) => `<td>${escapeHtml(String(cell))}</td>`)
+          .join('')}</tr>`
+    )
+    .join('')}</tbody></table>`
+}
+
+function updateSheet(name) {
+  selectedSheet.value = name
+}
 
 function cleanup() {
   if (currentUrl) {
@@ -30,6 +61,17 @@ function cleanup() {
   }
   objectUrl.value = ''
   textContent.value = ''
+  docxContent.value = ''
+  workbook.value = null
+  sheetNames.value = []
+  selectedSheet.value = ''
+  if (pptxPreviewer) {
+    pptxPreviewer.destroy()
+    pptxPreviewer = null
+  }
+  if (pptxHost.value) {
+    pptxHost.value.innerHTML = ''
+  }
 }
 
 async function load(file) {
@@ -54,7 +96,42 @@ async function load(file) {
     if (seq !== loadSeq) {
       return
     }
-    if (kind.value === 'text' || kind.value === 'markdown') {
+    if (kind.value === 'pptx') {
+      const { init: initPptxPreview } = await import('pptx-preview')
+      const buffer = await blob.arrayBuffer()
+      await nextTick()
+      if (seq !== loadSeq || !pptxHost.value) {
+        return
+      }
+      pptxPreviewer = initPptxPreview(pptxHost.value, {
+        width: 900,
+        height: 620,
+        mode: 'list'
+      })
+      await pptxPreviewer.preview(buffer)
+    } else if (kind.value === 'docx') {
+      const { default: mammoth } = await import('mammoth')
+      const result = await mammoth.convertToHtml({
+        arrayBuffer: await blob.arrayBuffer()
+      })
+      if (seq !== loadSeq) return
+      docxContent.value = sanitizeHtml(result.value)
+    } else if (kind.value === 'xlsx') {
+      const XLSX = await import('xlsx')
+      const parsed = XLSX.read(await blob.arrayBuffer(), {
+        type: 'array',
+        cellText: true,
+        cellDates: true
+      })
+      if (seq !== loadSeq) return
+      const names = parsed.SheetNames || []
+      workbook.value = {
+        XLSX,
+        sheetMap: parsed.Sheets
+      }
+      sheetNames.value = names
+      selectedSheet.value = names[0] || ''
+    } else if (kind.value === 'text' || kind.value === 'markdown') {
       const text = await blob.text()
       if (seq !== loadSeq) {
         return
@@ -81,7 +158,38 @@ async function load(file) {
 }
 
 function close() {
+  exitFullscreen()
   emit('close')
+}
+
+async function enterFullscreen() {
+  isFullscreen.value = true
+  if (previewPanel.value?.requestFullscreen) {
+    try {
+      await previewPanel.value.requestFullscreen()
+    } catch {
+      // Keep the CSS fallback when the browser denies fullscreen access.
+    }
+  }
+}
+
+function exitFullscreen() {
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {})
+  }
+  isFullscreen.value = false
+}
+
+function toggleFullscreen() {
+  if (isFullscreen.value) {
+    exitFullscreen()
+  } else {
+    enterFullscreen()
+  }
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = Boolean(document.fullscreenElement)
 }
 
 function onDownload() {
@@ -92,6 +200,10 @@ function onDownload() {
 
 function onKeydown(event) {
   if (event.key === 'Escape') {
+    if (isFullscreen.value) {
+      exitFullscreen()
+      return
+    }
     close()
   }
 }
@@ -120,9 +232,12 @@ watch(
     load(file)
     if (file) {
       document.addEventListener('keydown', onKeydown)
+      document.addEventListener('fullscreenchange', onFullscreenChange)
       lockScroll()
     } else {
       document.removeEventListener('keydown', onKeydown)
+      document.removeEventListener('fullscreenchange', onFullscreenChange)
+      exitFullscreen()
       unlockScroll()
     }
   },
@@ -132,6 +247,8 @@ watch(
 onUnmounted(() => {
   cleanup()
   document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  exitFullscreen()
   unlockScroll()
 })
 </script>
@@ -139,12 +256,39 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <div v-if="file" class="preview-backdrop" @click="close">
-      <div class="preview-panel" @click.stop>
+      <div
+        ref="previewPanel"
+        class="preview-panel"
+        :class="{ 'preview-panel--fullscreen': isFullscreen }"
+        @click.stop
+      >
         <header class="preview-header">
           <span class="preview-title" :title="file.filename">
             {{ file.filename }}
           </span>
           <div class="preview-tools">
+            <button
+              type="button"
+              class="preview-tool"
+              :title="
+                t(
+                  isFullscreen
+                    ? 'lens.chat.exitFullscreen'
+                    : 'lens.chat.enterFullscreen'
+                )
+              "
+              :aria-label="
+                t(
+                  isFullscreen
+                    ? 'lens.chat.exitFullscreen'
+                    : 'lens.chat.enterFullscreen'
+                )
+              "
+              @click="toggleFullscreen"
+            >
+              <Minimize2 v-if="isFullscreen" :size="18" />
+              <Maximize2 v-else :size="18" />
+            </button>
             <button
               type="button"
               class="preview-tool"
@@ -194,6 +338,39 @@ onUnmounted(() => {
             sandbox=""
           ></iframe>
 
+          <div
+            v-else-if="kind === 'pptx'"
+            ref="pptxHost"
+            class="preview-pptx"
+          ></div>
+
+          <article
+            v-else-if="kind === 'docx'"
+            class="preview-docx"
+            v-html="docxContent"
+          ></article>
+
+          <div v-else-if="kind === 'xlsx'" class="preview-xlsx">
+            <div class="preview-sheet-tabs" role="tablist">
+              <button
+                v-for="name in sheetNames"
+                :key="name"
+                type="button"
+                class="preview-sheet-tab"
+                :class="{ 'preview-sheet-tab--active': name === selectedSheet }"
+                role="tab"
+                :aria-selected="name === selectedSheet"
+                @click="updateSheet(name)"
+              >
+                {{ name }}
+              </button>
+            </div>
+            <div
+              class="preview-sheet-content"
+              v-html="renderSheet(selectedSheet)"
+            ></div>
+          </div>
+
           <MarkdownRenderer
             v-else-if="kind === 'markdown'"
             :content="textContent"
@@ -231,6 +408,14 @@ onUnmounted(() => {
   background: var(--sl-bg-surface);
   border-radius: 12px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
+}
+.preview-panel--fullscreen,
+.preview-panel:fullscreen {
+  width: 100vw;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  border-radius: 0;
 }
 .preview-header {
   display: flex;
@@ -292,6 +477,11 @@ onUnmounted(() => {
   background: var(--sl-bg-surface);
   border: 0;
 }
+.preview-pptx {
+  min-height: 620px;
+  overflow: auto;
+  background: #202124;
+}
 .preview-markdown {
   padding: 20px 24px;
 }
@@ -305,5 +495,52 @@ onUnmounted(() => {
   color: var(--sl-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.preview-docx {
+  max-width: 860px;
+  min-height: 100%;
+  padding: 32px 40px;
+  margin: 0 auto;
+  color: var(--sl-text-primary);
+  background: var(--sl-bg-surface);
+}
+.preview-docx :deep(img) {
+  max-width: 100%;
+}
+.preview-xlsx {
+  min-width: max-content;
+  min-height: 100%;
+  padding: 12px;
+}
+.preview-sheet-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.preview-sheet-tab {
+  padding: 7px 12px;
+  color: var(--sl-text-muted);
+  border-radius: 6px;
+}
+.preview-sheet-tab--active,
+.preview-sheet-tab:hover {
+  color: var(--sl-text-primary);
+  background: var(--sl-bg-surface);
+}
+.preview-sheet-content {
+  overflow: auto;
+  background: var(--sl-bg-surface);
+}
+.preview-sheet-content :deep(table) {
+  border-collapse: collapse;
+}
+.preview-sheet-content :deep(td) {
+  min-width: 96px;
+  max-width: 360px;
+  padding: 7px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--sl-border-default);
 }
 </style>
