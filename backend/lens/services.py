@@ -187,6 +187,42 @@ def lensnode_group_name(lensnode_uuid):
     return f"lens.lensnode.{lensnode_uuid}"
 
 
+def invalidate_skill_cache(skill_uuid):
+    """Ask every online LensNode to remove one Skill cache directory."""
+
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        logger.warning(
+            "Cannot invalidate Skill cache %s without a channel layer.",
+            skill_uuid,
+        )
+        return
+
+    nodes = LensNode.objects.filter(
+        status=LensNode.Status.ONLINE,
+        enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+        token_revoked=False,
+    ).values_list("uuid", flat=True)
+    for lensnode_uuid in nodes:
+        try:
+            async_to_sync(channel_layer.group_send)(
+                lensnode_group_name(lensnode_uuid),
+                {
+                    "type": "lensnode.command",
+                    "payload": {
+                        "type": "skill_cache_invalidate",
+                        "skill_uuid": str(skill_uuid),
+                    },
+                },
+            )
+        except Exception:
+            logger.exception(
+                "Failed to invalidate Skill cache %s on LensNode %s.",
+                skill_uuid,
+                lensnode_uuid,
+            )
+
+
 LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT = 180
 
 
@@ -415,6 +451,97 @@ def mark_active_runs_awaiting_resume(lensnode_uuid):
     for run_uuid, resume_by in scheduled_expirations:
         schedule_awaiting_run_expiration(run_uuid, resume_by)
     return len(updated_ids)
+
+
+def resume_awaiting_run(run_id):
+    """Resume one parked Run when its LensNode is online and compatible."""
+
+    with transaction.atomic():
+        run = (
+            Run.objects.select_related(
+                "execution",
+                "input_message",
+                "lensnode",
+            )
+            .select_for_update(of=("self",))
+            .filter(id=run_id)
+            .first()
+        )
+        if (
+            run is None
+            or run.lensnode is None
+            or run.lensnode.status != LensNode.Status.ONLINE
+            or run.status not in [Run.Status.RUNNING, Run.Status.STREAMING]
+            or run.resume_by is None
+            or run.resume_by <= timezone.now()
+        ):
+            return False
+        execution = RunExecution.objects.select_for_update().get(run=run)
+        now = timezone.now()
+        if execution.status in [
+            RunExecution.Status.QUEUED,
+            RunExecution.Status.DISPATCHED,
+        ]:
+            run.status = Run.Status.QUEUED
+            run.resume_by = None
+            run.last_activity_at = now
+            run.error = ""
+            run.outcome = ""
+            run.termination_detail = {}
+            run.save(
+                update_fields=[
+                    "status",
+                    "resume_by",
+                    "last_activity_at",
+                    "error",
+                    "outcome",
+                    "termination_detail",
+                    "updated_at",
+                ]
+            )
+            execution.status = RunExecution.Status.QUEUED
+            execution.dispatch_id = None
+            execution.admitted_at = None
+            execution.checkpoint_ready_at = None
+            execution.save(
+                update_fields=[
+                    "status",
+                    "dispatch_id",
+                    "admitted_at",
+                    "checkpoint_ready_at",
+                ]
+            )
+            expected_count = get_run_document_expectation(run.uuid)
+            transaction.on_commit(
+                lambda run_uuid=run.uuid, count=(
+                    expected_count if expected_count is not None else -1
+                ): _enqueue_answer_run(run_uuid, count)
+            )
+            return True
+        if execution.status != RunExecution.Status.RUNNING:
+            return False
+        if not supports_run_checkpoint_resume(run.lensnode):
+            return False
+        if (
+            supports_run_admission_checkpoint(run.lensnode)
+            and execution.checkpoint_ready_at is None
+        ):
+            return False
+        run.status = Run.Status.STREAMING
+        run.last_activity_at = now
+        run.save(update_fields=["status", "last_activity_at", "updated_at"])
+        execution.dispatch_id = uuid.uuid4()
+        execution.save(update_fields=["dispatch_id"])
+        dispatch_id = execution.dispatch_id
+        transaction.on_commit(
+            lambda: dispatch_run_to_lensnode(
+                run,
+                run.input_message.content,
+                resume=True,
+                dispatch_id=dispatch_id,
+            )
+        )
+    return True
 
 
 def resume_awaiting_runs_for_lensnode(

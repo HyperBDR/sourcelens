@@ -181,6 +181,22 @@ def test_load_config_can_enable_planner_repair(monkeypatch):
     assert config.planner_repair_enabled is True
 
 
+def test_load_config_uses_trusted_container_execution_by_default(monkeypatch):
+    monkeypatch.delenv("LENSNODE_EXECUTION_BACKEND", raising=False)
+
+    config = load_config()
+
+    assert config.execution_backend == "trusted_container"
+
+
+def test_load_config_reads_execution_backend(monkeypatch):
+    monkeypatch.setenv("LENSNODE_EXECUTION_BACKEND", "filesystem")
+
+    config = load_config()
+
+    assert config.execution_backend == "filesystem"
+
+
 def test_load_config_allows_mcp_discovery_and_cleanup_headroom(monkeypatch):
     monkeypatch.delenv(
         "LENSNODE_MCP_DISCOVERY_TIMEOUT_S",

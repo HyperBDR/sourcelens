@@ -1,0 +1,4 @@
+type: feature
+audience: user
+en: Added in-browser previews for DOCX, XLSX, and PPTX files, with fullscreen viewing for all supported preview formats.
+zh-CN: 新增 DOCX、XLSX 和 PPTX 文件的在线预览，并为所有支持预览的文件提供全屏查看。

@@ -1,21 +1,18 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
+    <div class="admin-stats-page">
       <div class="mb-4">
-        <h1 class="text-lg font-semibold text-gray-900">
+        <h1 class="admin-page-title">
           {{ t('notificationManagement.stats.title') }}
         </h1>
-        <p class="mt-1 text-sm text-gray-500">
+        <p class="admin-page-subtitle">
           {{ t('notificationManagement.stats.subtitle') }}
         </p>
       </div>
 
-      <section
-        class="mb-6 flex w-full flex-col items-stretch gap-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-5"
-        aria-label="Filters"
-      >
+      <section class="admin-filter-toolbar" aria-label="Filters">
         <div
-          class="flex w-full flex-none flex-wrap items-end gap-6 sm:w-auto sm:min-w-0 sm:flex-1"
+          class="flex w-full flex-none flex-wrap items-end gap-4 sm:w-auto sm:min-w-0 sm:flex-1"
         >
           <div class="flex flex-col gap-1.5">
             <label
@@ -176,7 +173,42 @@
           </p>
         </div>
 
-        <template v-else-if="statsData">
+        <div
+          v-else-if="!loading && statsData && !hasStatsData"
+          data-testid="notification-stats-empty"
+          role="status"
+          class="rounded-xl border border-gray-200 bg-white px-6 py-12 text-center shadow-sm"
+        >
+          <div
+            class="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gray-100 text-gray-500"
+          >
+            <svg
+              class="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0a3 3 0 11-6 0m6 0H9"
+              />
+            </svg>
+          </div>
+          <h2 class="mt-3 text-sm font-semibold text-gray-900">
+            {{ t('notificationManagement.stats.emptyTitle') }}
+          </h2>
+          <p class="mx-auto mt-1 max-w-md text-sm text-gray-500">
+            {{ t('notificationManagement.stats.emptyDescription') }}
+          </p>
+          <BaseButton class="mt-5" size="sm" @click="goToChannels">
+            {{ t('notificationManagement.stats.emptyAction') }}
+          </BaseButton>
+        </div>
+
+        <template v-else-if="hasStatsData">
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <div
               class="rounded-2xl bg-white border border-gray-200 shadow-sm p-5"
@@ -409,6 +441,7 @@ import {
 } from 'chart.js'
 import { notificationsAdminApi, llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
+import { hasStatisticsData } from '@/admin/utils/statisticsState'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDateInput from '@/components/ui/BaseDateInput.vue'
@@ -436,6 +469,9 @@ function formatNum(value) {
 }
 
 const statsData = ref(null)
+const hasStatsData = computed(() =>
+  hasStatisticsData(statsData.value?.summary?.total)
+)
 const loading = ref(false)
 const granularity = ref('day')
 const userScope = ref('')
@@ -778,6 +814,10 @@ async function fetchStats() {
 
 function goToRecords() {
   router.push({ name: 'AdminNotificationsRecords' })
+}
+
+function goToChannels() {
+  router.push({ name: 'AdminNotificationsChannels' })
 }
 
 onMounted(() => {

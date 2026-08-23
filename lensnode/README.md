@@ -4,6 +4,16 @@ LensNode is the standalone execution worker for SourceLens. It connects to the
 control plane over WebSocket, reports workspace directories and available tasks,
 then executes dispatched runs inside its local workspace.
 
+## Command execution
+
+The default `LENSNODE_EXECUTION_BACKEND=trusted_container` enables the
+DeepAgents `execute` tool. Commands run directly inside the LensNode container,
+with the container's environment and the current Run workspace as the working
+directory.
+There is no command blacklist and this mode is not an additional sandbox; do
+not expose the container to untrusted users. Set the backend to `filesystem`
+to roll back to file operations only while a sandbox provider is prepared.
+
 ## Development
 
 ```bash

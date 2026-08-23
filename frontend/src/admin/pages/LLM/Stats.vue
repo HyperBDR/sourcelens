@@ -1,21 +1,18 @@
 <template>
   <AdminLayout>
-    <div class="w-full max-w-full p-6">
+    <div class="admin-stats-page">
       <div class="mb-4">
-        <h1 class="text-lg font-semibold text-gray-900">
+        <h1 class="admin-page-title">
           {{ t('llm.stats.title') }}
         </h1>
-        <p class="mt-1 text-sm text-gray-500">
+        <p class="admin-page-subtitle">
           {{ t('llm.stats.subtitle') }}
         </p>
       </div>
 
-      <section
-        class="mb-6 flex w-full flex-col items-stretch gap-6 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:p-5"
-        aria-label="Filters"
-      >
+      <section class="admin-filter-toolbar" aria-label="Filters">
         <div
-          class="flex w-full flex-none flex-wrap items-end gap-6 sm:w-auto sm:min-w-0 sm:flex-1"
+          class="flex w-full flex-none flex-wrap items-end gap-4 sm:w-auto sm:min-w-0 sm:flex-1"
         >
           <div class="stats-user-filter flex flex-col gap-1.5">
             <label
@@ -248,15 +245,16 @@
                 >
               </div>
               <div class="text-2xl font-semibold text-amber-600">
-                {{
-                  formatCost(
-                    statsData.summary?.total_cost,
-                    statsData.summary?.total_cost_currency
-                  )
-                }}
+                {{ costDisplayText(statsData.summary) }}
               </div>
               <div class="text-sm text-gray-500 mt-0.5">
                 {{ t('llm.stats.totalCostUsd') }}
+              </div>
+              <div
+                v-if="costCoverageNote(statsData.summary)"
+                class="mt-1 text-xs text-amber-700"
+              >
+                {{ costCoverageNote(statsData.summary) }}
               </div>
             </div>
             <div
@@ -403,9 +401,13 @@
                       <td
                         class="px-4 py-3 whitespace-nowrap text-sm text-amber-600 font-medium"
                       >
-                        {{
-                          formatCost(row.total_cost, row.total_cost_currency)
-                        }}
+                        <div>{{ costDisplayText(row) }}</div>
+                        <div
+                          v-if="costCoverageNote(row)"
+                          class="mt-0.5 text-xs font-normal text-amber-700"
+                        >
+                          {{ costCoverageNote(row) }}
+                        </div>
                       </td>
                       <td
                         class="px-4 py-3 whitespace-nowrap text-sm text-gray-500"
@@ -510,6 +512,7 @@ import { Line } from 'vue-chartjs'
 import { formatNumLocale, formatCostLocale } from '@/utils/formatting'
 import { llmAdminApi } from '@/admin/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
+import { resolveCostPresentation } from '@/admin/utils/llmCostPresentation'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDateInput from '@/components/ui/BaseDateInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -537,7 +540,40 @@ function formatCost(value, currency = 'USD') {
   return formatCostLocale(value, currency, locale.value)
 }
 
+function costDisplayText(record) {
+  const presentation = resolveCostPresentation(record)
+  if (presentation.status === 'unavailable') {
+    return t('llm.stats.costUnavailable')
+  }
+  if (!presentation.showAmount) {
+    return t('llm.stats.costUnknown')
+  }
+  return formatCost(
+    record?.total_cost ?? record?.cost,
+    record?.total_cost_currency
+  )
+}
+
+function costCoverageNote(record) {
+  const presentation = resolveCostPresentation(record)
+  if (
+    ['unavailable', 'partial'].includes(presentation.status) &&
+    presentation.unpricedCalls !== null
+  ) {
+    return t('llm.stats.costUnpricedCalls', {
+      count: presentation.unpricedCalls
+    })
+  }
+  if (presentation.status === 'unknown') {
+    return t('llm.stats.costCoverageUnknown')
+  }
+  return ''
+}
+
 const statsData = ref(null)
+const summaryCostPresentation = computed(() =>
+  resolveCostPresentation(statsData.value?.summary)
+)
 const loading = ref(false)
 const userOptions = ref([])
 const selectedUserId = ref('')
@@ -710,7 +746,9 @@ const seriesByModelTokensChartData = computed(() =>
   buildSeriesByModelChartData('total_tokens')
 )
 const seriesByModelCostChartData = computed(() =>
-  buildSeriesByModelChartData('total_cost')
+  summaryCostPresentation.value.status === 'priced'
+    ? buildSeriesByModelChartData('total_cost')
+    : null
 )
 const seriesByModelE2eChartData = computed(() =>
   buildSeriesByModelChartData('avg_e2e_latency_sec', { fill: false })

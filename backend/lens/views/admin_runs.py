@@ -1,7 +1,11 @@
 """Admin observability views and helpers for Q&A runs."""
 
+import uuid as uuid_lib
+
+from django.db import transaction
 from django.db.models import Count, Max, Min, Q, TextField
 from django.db.models.functions import Cast
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.response import Response
@@ -11,11 +15,12 @@ from agentcore_metering.adapters.django.models import LLMUsage
 
 from accounts.permissions import HasRequiredFeature
 from lens.attachments import get_session_image_attachments
+from lens.citations import public_run_citations
 from lens.document_attachments import (
     document_attachment_response,
     get_run_document_attachments,
 )
-from lens.models import Run, RunTraceEvent
+from lens.models import LensNode, Run, RunExecution, RunTraceEvent
 from lens.runtime_events import (
     sanitize_loaded_mcps,
     sanitize_loaded_skills,
@@ -24,6 +29,13 @@ from lens.runtime_events import (
 from lens.serializers import (
     MessageAttachmentSerializer,
     RunOutputFileSerializer,
+)
+from lens.services import (
+    cancel_run_on_lensnode,
+    create_execution_run,
+    resume_awaiting_run,
+    supports_run_admission_checkpoint,
+    supports_run_checkpoint_resume,
 )
 
 
@@ -308,6 +320,50 @@ def _admin_run_row(run):
     question = (run.input_message.content if run.input_message else "") or ""
     counts = _admin_run_step_counts(run)
     execution = run.execution if hasattr(run, "execution") else None
+    runtime_snapshot = execution.runtime_snapshot if execution else {}
+    model_refs = runtime_snapshot.get("model_refs") or {}
+    max_tokens = execution.token_budget_max_tokens if execution else None
+    budget_consumption = None
+    if max_tokens:
+        budget_consumption = round(counts["total_tokens"] / max_tokens, 4)
+    resume_window_active = bool(
+        run.resume_by
+        and run.resume_by > timezone.now()
+        and run.status in [Run.Status.RUNNING, Run.Status.STREAMING]
+        and run.lensnode
+        and run.lensnode.status == LensNode.Status.ONLINE
+    )
+    can_resume = False
+    if resume_window_active and execution:
+        can_resume = execution.status in [
+            RunExecution.Status.QUEUED,
+            RunExecution.Status.DISPATCHED,
+        ] or (
+            execution.status == RunExecution.Status.RUNNING
+            and supports_run_checkpoint_resume(run.lensnode)
+            and (
+                not supports_run_admission_checkpoint(run.lensnode)
+                or execution.checkpoint_ready_at is not None
+            )
+        )
+    if hasattr(run, "tool_call_count"):
+        tool_call_count = run.tool_call_count
+    else:
+        tool_call_count = (
+            run.trace_events.filter(
+                Q(event_type__startswith="tool.")
+                | Q(event_type__startswith="subtool.")
+            )
+            .exclude(call_id="")
+            .values("call_id")
+            .distinct()
+            .count()
+        )
+    retry_count = (
+        run.retry_count
+        if hasattr(run, "retry_count")
+        else run.retry_runs.count()
+    )
     return {
         "uuid": str(run.uuid),
         "status": run.status,
@@ -332,7 +388,14 @@ def _admin_run_row(run):
         ),
         "duration_seconds": _admin_run_duration(run),
         "lensnode_name": run.lensnode.name if run.lensnode else None,
+        "lensnode_uuid": str(run.lensnode.uuid) if run.lensnode else None,
+        "model_ref": model_refs.get("agent") or None,
         "event_count": counts["event_count"],
+        "tool_call_count": tool_call_count,
+        "retry_count": retry_count,
+        "retry_of_run_uuid": (
+            str(run.retry_of_run.uuid) if run.retry_of_run else None
+        ),
         "subagent_count": counts["subagent_count"],
         "subagent_denied_count": counts["subagent_denied_count"],
         "structured_analysis_calls": counts["structured_analysis_calls"],
@@ -345,6 +408,24 @@ def _admin_run_row(run):
         "prompt_tokens": counts["prompt_tokens"],
         "completion_tokens": counts["completion_tokens"],
         "total_cost": counts["total_cost"],
+        "token_budget_profile": (
+            execution.token_budget_profile if execution else None
+        ),
+        "token_budget_max_tokens": max_tokens,
+        "token_budget_final_reserve_tokens": (
+            execution.token_budget_final_reserve_tokens
+            if execution
+            else None
+        ),
+        "budget_consumption": budget_consumption,
+        "resume_by": run.resume_by.isoformat() if run.resume_by else None,
+        "available_actions": {
+            "cancel": run.status
+            in [Run.Status.QUEUED, Run.Status.RUNNING, Run.Status.STREAMING],
+            "retry": run.status in [Run.Status.FAILED, Run.Status.CANCELLED],
+            "resume": can_resume,
+            "export": True,
+        },
         "planned_evidence": counts["planned_evidence"],
         "created_at": run.created_at.isoformat() if run.created_at else None,
     }
@@ -433,6 +514,7 @@ def _admin_run_detail(run):
         ) or "",
         "attachments": attachments,
         "answer": (out.content if out else "") or "",
+        "citations": public_run_citations(run.citations),
         "output_files": output_files,
         "error": run.error or "",
         "agent_rounds": agent_rounds,
@@ -481,6 +563,7 @@ class AdminRunListView(APIView):
                 "input_message",
                 "lensnode",
                 "execution",
+                "retry_of_run",
             )
             .prefetch_related("steps")
             .order_by("-created_at")
@@ -497,9 +580,20 @@ class AdminRunListView(APIView):
         assistant = (params.get("assistant") or "").strip()
         if assistant:
             qs = qs.filter(session__assistant__slug=assistant)
+        lensnode = (params.get("lensnode") or "").strip()
+        if lensnode:
+            try:
+                lensnode_uuid = uuid_lib.UUID(lensnode)
+            except ValueError:
+                qs = qs.filter(lensnode__name__icontains=lensnode)
+            else:
+                qs = qs.filter(lensnode__uuid=lensnode_uuid)
+        model = (params.get("model") or "").strip()
+        if model:
+            qs = qs.filter(
+                execution__runtime_snapshot__model_refs__agent=model
+            )
         run_status = (params.get("status") or "").strip()
-        if run_status:
-            qs = qs.filter(status=run_status)
         keyword = (params.get("q") or "").strip()
         if keyword:
             qs = qs.filter(input_message__content__icontains=keyword)
@@ -509,6 +603,39 @@ class AdminRunListView(APIView):
         end_date = parse_date((params.get("end_date") or "").strip())
         if end_date:
             qs = qs.filter(created_at__date__lte=end_date)
+        summary_rows = qs.order_by().values("status").annotate(
+            count=Count("pk")
+        )
+        status_counts = {
+            item["status"]: item["count"] for item in summary_rows
+        }
+        summary = {
+            "total": sum(status_counts.values()),
+            **{
+                status_value: status_counts.get(status_value, 0)
+                for status_value, _label in Run.Status.choices
+            },
+        }
+        if run_status:
+            if run_status == "active":
+                qs = qs.filter(
+                    status__in=[Run.Status.RUNNING, Run.Status.STREAMING]
+                )
+            else:
+                qs = qs.filter(status=run_status)
+
+        qs = qs.annotate(
+            tool_call_count=Count(
+                "trace_events__call_id",
+                filter=(
+                    Q(trace_events__event_type__startswith="tool.")
+                    | Q(trace_events__event_type__startswith="subtool.")
+                )
+                & ~Q(trace_events__call_id=""),
+                distinct=True,
+            ),
+            retry_count=Count("retry_runs", distinct=True),
+        )
 
         total = qs.count()
         start = (page - 1) * page_size
@@ -518,6 +645,7 @@ class AdminRunListView(APIView):
             "total": total,
             "page": page,
             "page_size": page_size,
+            "summary": summary,
         })
 
 
@@ -539,6 +667,7 @@ class AdminRunDetailView(APIView):
                     "output_message",
                     "lensnode",
                     "execution",
+                    "retry_of_run",
                 )
                 .prefetch_related("output_files", "steps")
                 .get(uuid=uuid)
@@ -549,6 +678,160 @@ class AdminRunDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         return Response(_admin_run_detail(run))
+
+
+def _admin_run_for_action(run_uuid, *, lock=False):
+    """Return one fully-related Run for a server-authorized admin action."""
+
+    queryset = Run.objects.select_related(
+        "session__user",
+        "session__assistant",
+        "input_message",
+        "lensnode",
+        "execution",
+        "retry_of_run",
+    )
+    if lock:
+        queryset = queryset.select_for_update(of=("self",))
+    return queryset.filter(uuid=run_uuid).first()
+
+
+class AdminRunCancelView(APIView):
+    """Cancel one active Run across users from the operations console."""
+
+    permission_classes = [HasRequiredFeature]
+    required_feature = "admin_console"
+
+    def post(self, request, uuid):
+        """Cancel a queued or active Run idempotently."""
+
+        with transaction.atomic():
+            run = _admin_run_for_action(uuid, lock=True)
+            if run is None:
+                return Response(
+                    {"detail": "Run not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if run.status not in [
+                Run.Status.QUEUED,
+                Run.Status.RUNNING,
+                Run.Status.STREAMING,
+            ]:
+                return Response(_admin_run_row(run))
+            now = timezone.now()
+            run.status = Run.Status.CANCELLED
+            run.resume_by = None
+            run.finished_at = now
+            run.save(
+                update_fields=[
+                    "status",
+                    "resume_by",
+                    "finished_at",
+                    "updated_at",
+                ]
+            )
+            if hasattr(run, "execution"):
+                run.execution.status = RunExecution.Status.CANCELLED
+                run.execution.finished_at = now
+                run.execution.save(
+                    update_fields=["status", "finished_at"]
+                )
+        cancel_run_on_lensnode(run)
+        return Response(_admin_run_row(run))
+
+
+class AdminRunRetryView(APIView):
+    """Create an audited retry for a failed or cancelled Run."""
+
+    permission_classes = [HasRequiredFeature]
+    required_feature = "admin_console"
+
+    def post(self, request, uuid):
+        """Retry one terminal Run with a caller-provided idempotency key."""
+
+        request_key = str(request.data.get("idempotency_key") or "").strip()
+        if not request_key or len(request_key) > 64:
+            return Response(
+                {"detail": "A valid idempotency_key is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        idempotency_key = f"admin-retry:{uuid}:{request_key}"[:128]
+        with transaction.atomic():
+            run = _admin_run_for_action(uuid, lock=True)
+            if run is None:
+                return Response(
+                    {"detail": "Run not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if run.status not in [Run.Status.FAILED, Run.Status.CANCELLED]:
+                return Response(
+                    {"detail": "RUN_NOT_RETRYABLE"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            existing = Run.objects.filter(
+                retry_of_run=run,
+                idempotency_key=idempotency_key,
+            ).first()
+            if existing is not None:
+                existing = _admin_run_for_action(existing.uuid)
+                return Response(_admin_run_row(existing))
+            attachment_uuids = list(
+                run.input_message.attachments.values_list("uuid", flat=True)
+            )
+            attachment_uuids.extend(
+                item["uuid"] for item in get_run_document_attachments(run.uuid)
+            )
+            retry = create_execution_run(
+                session=run.session,
+                question=run.input_message.content,
+                idempotency_key=idempotency_key,
+                retry_of_run=run,
+                enqueue=True,
+                attachment_uuids=attachment_uuids,
+                user=run.session.user,
+            )
+            snapshot = dict(retry.execution.runtime_snapshot or {})
+            snapshot["admin_action"] = {
+                "action": "retry",
+                "actor_user_id": request.user.pk,
+                "source_run_uuid": str(run.uuid),
+            }
+            retry.execution.runtime_snapshot = snapshot
+            retry.execution.save(update_fields=["runtime_snapshot"])
+        retry = _admin_run_for_action(retry.uuid)
+        return Response(_admin_run_row(retry), status=status.HTTP_201_CREATED)
+
+
+class AdminRunResumeView(APIView):
+    """Resume one checkpoint-ready Run parked after a node disconnect."""
+
+    permission_classes = [HasRequiredFeature]
+    required_feature = "admin_console"
+
+    def post(self, request, uuid):
+        """Request an immediate, state-validated resume attempt."""
+
+        run = _admin_run_for_action(uuid)
+        if run is None:
+            return Response(
+                {"detail": "Run not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not run.resume_by or run.status not in [
+            Run.Status.RUNNING,
+            Run.Status.STREAMING,
+        ]:
+            return Response(
+                {"detail": "RUN_NOT_AWAITING_RESUME"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not resume_awaiting_run(run.pk):
+            return Response(
+                {"detail": "RUN_RESUME_UNAVAILABLE"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        refreshed = _admin_run_for_action(uuid)
+        return Response(_admin_run_row(refreshed))
 
 
 def _trace_event_response(event):

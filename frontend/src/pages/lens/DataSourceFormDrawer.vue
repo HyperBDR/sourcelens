@@ -503,15 +503,32 @@
               <div class="text-sm font-medium text-ink-900">
                 {{ workspaceRoot }}
               </div>
-              <button
-                v-if="!isManagedWorkspace"
-                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
-                type="button"
-                :title="t('lensAdmin.datasourceWizard.createAtWorkspace')"
-                @click="startCreateTargetDirectory('')"
-              >
-                <PlusIcon class="h-4 w-4" />
-              </button>
+              <div class="flex items-center gap-1">
+                <button
+                  class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-40"
+                  type="button"
+                  :disabled="refreshingDirectories || !form.lensnode_uuid"
+                  :title="t('lensAdmin.datasourceWizard.refreshDirectories')"
+                  @click="$emit('refresh-dirs')"
+                >
+                  <RefreshCwIcon
+                    class="h-4 w-4"
+                    :class="{ 'animate-spin': refreshingDirectories }"
+                  />
+                  <span class="sr-only">
+                    {{ t('lensAdmin.datasourceWizard.refreshDirectories') }}
+                  </span>
+                </button>
+                <button
+                  v-if="!isManagedWorkspace"
+                  class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-surface-sunken hover:text-ink-900"
+                  type="button"
+                  :title="t('lensAdmin.datasourceWizard.createAtWorkspace')"
+                  @click="startCreateTargetDirectory('')"
+                >
+                  <PlusIcon class="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div class="max-h-64 overflow-y-auto p-2">
               <div
@@ -1201,6 +1218,7 @@ const props = defineProps({
   checkingPath: Boolean,
   testingConnection: Boolean,
   refreshingCredentials: Boolean,
+  refreshingDirectories: Boolean,
   saving: Boolean,
   formError: { type: String, default: '' }
 })
@@ -1213,6 +1231,7 @@ const emit = defineEmits([
   'test-connection',
   'connection-change',
   'refresh-credentials',
+  'refresh-dirs',
   'update:syncIntervalSeconds',
   'update:syncPolicyMode',
   'update:syncCron',

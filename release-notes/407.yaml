@@ -1,0 +1,9 @@
+type: improvement
+audience: admin
+en: >-
+  Enabled the DeepAgents execute tool inside LensNode containers for trusted
+  command execution, with a filesystem-only fallback while sandbox isolation
+  is being prepared.
+zh-CN: >-
+  在 LensNode 容器中启用 DeepAgents execute 工具，支持受信任的命令执行；
+  在准备 sandbox 隔离方案期间，保留仅文件系统操作的回退模式。
