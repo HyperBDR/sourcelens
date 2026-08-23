@@ -400,7 +400,7 @@ def dispatch_datasource_upload_async(
     cache.set(
         f"lens:datasource_upload_request:{request_id}",
         task_id,
-        timeout=get_datasource_conversion_timeout_s(),
+        timeout=get_datasource_upload_timeout_s(),
     )
     return request_id
 
