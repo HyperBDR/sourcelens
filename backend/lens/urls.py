@@ -3,10 +3,13 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AdminGroupAccessDetailView,
+    AdminRunCancelView,
     AdminRunDetailView,
     AdminRunDiagnosticsView,
     AdminRunDiagnosticTurnsView,
     AdminRunListView,
+    AdminRunResumeView,
+    AdminRunRetryView,
     AdminRunTrajectoryView,
     AdminSharedQAViewSet,
     AdminUserAccessDetailView,
@@ -132,6 +135,21 @@ urlpatterns = [
         "admin/runs/<uuid:uuid>/",
         AdminRunDetailView.as_view(),
         name="lens-admin-run-detail",
+    ),
+    path(
+        "admin/runs/<uuid:uuid>/cancel/",
+        AdminRunCancelView.as_view(),
+        name="lens-admin-run-cancel",
+    ),
+    path(
+        "admin/runs/<uuid:uuid>/retry/",
+        AdminRunRetryView.as_view(),
+        name="lens-admin-run-retry",
+    ),
+    path(
+        "admin/runs/<uuid:uuid>/resume/",
+        AdminRunResumeView.as_view(),
+        name="lens-admin-run-resume",
     ),
     path(
         "admin/runs/<uuid:run_uuid>/trajectory/",

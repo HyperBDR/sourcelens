@@ -1,0 +1,9 @@
+type: improvement
+audience: admin
+en: >-
+  Refined Run Operations detail into four task-oriented tabs, with contextual
+  progress and diagnostics, grouped evidence and artifacts, and responsive
+  filtering for narrow screens.
+zh-CN: >-
+  将运行运营中心详情页优化为四个面向任务的页签，并将进度与诊断按需并入
+  概览、合并证据与产物，同时优化窄屏筛选和页签展示。

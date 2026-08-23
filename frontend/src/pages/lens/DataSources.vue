@@ -480,6 +480,10 @@ import {
   isDataSourceSyncing,
   syncTagClass
 } from './datasourceHelpers'
+import {
+  directoryRefreshPaths,
+  mergeRefreshedDirectories
+} from './directoryRefresh'
 import { useShortDateTime } from './useShortDateTime'
 
 const { t } = useI18n()
@@ -1486,8 +1490,15 @@ async function refreshDirectories() {
   refreshingDirectories.value = true
   try {
     const workspacePath = lensnode.workspace_path || '/workspace'
-    const result = await scanLensNodeDirs(lensnodeUuid, [workspacePath])
-    const directories = refreshedDirectories(result, workspacePath)
+    const result = await scanLensNodeDirs(
+      lensnodeUuid,
+      directoryRefreshPaths(lensnode)
+    )
+    const directories = mergeRefreshedDirectories(
+      lensnode.available_dirs,
+      result,
+      workspacePath
+    )
     lensnodes.value = lensnodes.value.map((item) =>
       item.uuid === lensnodeUuid
         ? { ...item, available_dirs: directories }
@@ -1498,19 +1509,6 @@ async function refreshDirectories() {
   } finally {
     refreshingDirectories.value = false
   }
-}
-
-function refreshedDirectories(result, workspacePath) {
-  const dirs = result?.dirs ?? result
-  if (Array.isArray(dirs)) return dirs
-  if (!dirs || typeof dirs !== 'object') return []
-
-  const workspaceDirs = dirs[workspacePath]
-  if (Array.isArray(workspaceDirs)) return workspaceDirs
-
-  return Object.values(dirs).flatMap((value) =>
-    Array.isArray(value) ? value : []
-  )
 }
 
 function applyDatasourceConnectionResult(result) {

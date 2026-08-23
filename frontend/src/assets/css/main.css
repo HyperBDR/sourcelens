@@ -268,6 +268,73 @@
 }
 
 @layer components {
+  .admin-page-title {
+    @apply text-xl font-semibold tracking-tight text-ink-900;
+  }
+
+  .admin-page-subtitle {
+    @apply mt-1 text-[13px] leading-5 text-ink-500;
+  }
+
+  .admin-stats-page {
+    @apply w-full max-w-full px-0 py-2 sm:px-2 sm:py-3 lg:px-3;
+  }
+
+  .admin-filter-toolbar {
+    @apply mb-4 flex w-full flex-col items-stretch gap-4 rounded-lg border
+      border-line bg-surface p-4 sm:flex-row sm:flex-wrap sm:items-end
+      sm:justify-between;
+    box-shadow: 0 1px 2px rgb(17 24 39 / 0.035);
+  }
+
+  .admin-metric-card {
+    @apply rounded-lg border border-line bg-surface p-4 text-left transition-colors;
+    box-shadow: 0 1px 2px rgb(17 24 39 / 0.035);
+  }
+
+  .admin-metric-value {
+    @apply text-xl font-semibold tracking-tight text-ink-900 tabular-nums;
+  }
+
+  .admin-data-panel {
+    @apply rounded-lg border border-line bg-surface;
+    box-shadow: 0 1px 2px rgb(17 24 39 / 0.035);
+  }
+
+  .admin-stats-page .rounded-2xl {
+    border-radius: 0.75rem;
+  }
+
+  .admin-stats-page .text-2xl {
+    font-size: 1.25rem;
+    line-height: 1.5rem;
+    letter-spacing: -0.015em;
+  }
+
+  .admin-stats-page .p-5 {
+    padding: 1rem;
+  }
+
+  .admin-stats-page .shadow-sm {
+    box-shadow: 0 1px 2px rgb(17 24 39 / 0.035);
+  }
+
+  .admin-stats-page .text-base {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .admin-stats-page .w-9.h-9.rounded-full {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+  }
+
+  .admin-stats-page .w-9.h-9.rounded-full > svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
   .card-body {
     @apply px-5 py-5;
   }
