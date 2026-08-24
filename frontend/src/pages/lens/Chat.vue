@@ -1678,8 +1678,10 @@ import {
   DOCUMENT_EXTENSIONS,
   IMAGE_MIME,
   attachmentUploadError,
+  createOversizedTextFile,
   hasAttachmentErrorCode,
   MAX_ATTACHMENTS,
+  MAX_DIRECT_MESSAGE_CHARS,
   readImageDimensions,
   validateImageDimensions,
   validateAttachment
@@ -3107,7 +3109,7 @@ async function addAttachment(file) {
         max: MAX_ATTACHMENTS
       })
     )
-    return
+    return null
   }
   if (validation.kind === 'image') {
     try {
@@ -3115,15 +3117,15 @@ async function addAttachment(file) {
       const dimensionError = validateImageDimensions(width, height)
       if (dimensionError) {
         showError(t(`lens.chat.${dimensionError}`))
-        return
+        return null
       }
     } catch {
       showError(t('lens.chat.attachmentUploadFailed'))
-      return
+      return null
     }
   }
   const sessionUuid = selectedSessionUuid.value
-  if (!sessionUuid) return
+  if (!sessionUuid) return null
   const item = {
     key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     uuid: '',
@@ -3146,13 +3148,15 @@ async function addAttachment(file) {
       !attachments.value.includes(item)
     ) {
       removeAttachment(item)
-      return
+      return null
     }
     item.status = 'done'
     attachments.value = [...attachments.value]
+    return item
   } catch (error) {
     removeAttachment(item)
     showError(t(`lens.chat.${attachmentUploadError(error)}`))
+    return null
   }
 }
 
@@ -3476,25 +3480,52 @@ async function submit() {
   if (!canSubmit.value) {
     return
   }
+  const draftTextAtSubmit = question.value
+  const trimmedDraft = draftTextAtSubmit.replace(/^\s*\n+|\n+\s*$/g, '')
+  const oversizedFile = createOversizedTextFile(trimmedDraft)
+  if (oversizedFile && !acceptsDocuments.value) {
+    showError(
+      t('lens.chat.oversizedTextUnavailable', {
+        max: MAX_DIRECT_MESSAGE_CHARS
+      })
+    )
+    return
+  }
+  if (oversizedFile && attachments.value.length >= MAX_ATTACHMENTS) {
+    showError(t('lens.chat.attachmentTooMany', { max: MAX_ATTACHMENTS }))
+    return
+  }
   loading.value.run = true
   if (!selectedSessionUuid.value) {
-    const draftBeforeSessionCreation = question.value
     const session = await createNewSession(false)
     if (!session) {
-      question.value = draftBeforeSessionCreation
+      question.value = draftTextAtSubmit
       loading.value.run = false
       return
     }
-    question.value = draftBeforeSessionCreation
+    question.value = draftTextAtSubmit
   }
   // Bind this submit to the session it started in. If the user switches
   // assistant/session mid-flight, the stream is aborted on purpose — that is
   // not a failure, so we must not restore the draft, alarm the user, or write
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
+  let submissionText = trimmedDraft
+  let oversizedAttachment = null
+  if (oversizedFile) {
+    const uploaded = await addAttachment(oversizedFile)
+    if (!uploaded || selectedSessionUuid.value !== sessionAtSubmit) {
+      loading.value.run = false
+      return
+    }
+    oversizedAttachment = uploaded
+    submissionText = t('lens.chat.oversizedTextAttached', {
+      name: uploaded.name
+    })
+  }
   const isFirstMessage = messages.value.length === 0
   resetStreamState()
-  const optimisticText = question.value.replace(/^\s*\n+|\n+\s*$/g, '')
+  const optimisticText = submissionText
   question.value = ''
   // Snapshot ready attachments, clear the composer strip, and keep the object
   // URLs alive for the optimistic bubble until the server reload replaces it.
@@ -3544,10 +3575,10 @@ async function submit() {
   )
   if (
     isFirstMessage &&
-    optimisticText &&
+    trimmedDraft &&
     !(sessionAtSubmitObj?.title || '').trim()
   ) {
-    const autoTitle = deriveSessionTitle(optimisticText)
+    const autoTitle = deriveSessionTitle(trimmedDraft)
     if (autoTitle) {
       setSessionTitle(sessionAtSubmit, autoTitle)
     }
@@ -3608,7 +3639,7 @@ async function submit() {
       }
     }
     messages.value = messages.value.filter((m) => m.uuid !== '__optimistic__')
-    question.value = optimisticText
+    question.value = draftTextAtSubmit
     retryDraft.value = retryDraftAtSubmit
     // Only a 4xx response proves that the Run transaction rejected the
     // request. Network and server failures are ambiguous: the attachments may
@@ -3619,9 +3650,15 @@ async function submit() {
       err,
       'ATTACHMENT_NOT_FOUND'
     )
-    if (pendingAttachments.length && requestRejected && !attachmentMissing) {
-      attachments.value = [...attachments.value, ...pendingAttachments]
+    const retryableAttachments = pendingAttachments.filter(
+      (item) => item !== oversizedAttachment
+    )
+    if (retryableAttachments.length && requestRejected && !attachmentMissing) {
+      attachments.value = [...attachments.value, ...retryableAttachments]
       keepAttachments = true
+    }
+    if (oversizedAttachment && requestRejected && !attachmentMissing) {
+      deleteAttachment(oversizedAttachment.uuid).catch(() => {})
     }
     showError(t('lens.chat.submitFailed'))
   } finally {
