@@ -1110,10 +1110,7 @@ const wizardStep = ref(1)
 const visionModelOptions = computed(() => {
   const selected = props.form.multimodal_model_ref
   const eligible = props.llmConfigOptions.filter(
-    (config) =>
-      config.is_active !== false &&
-      (config.vision_capability === 'supported' ||
-        config.capabilities?.includes?.('vision'))
+    (config) => isVisionModelEligible(config)
   )
   const historical = props.llmConfigOptions.find(
     (config) => config.uuid === selected
