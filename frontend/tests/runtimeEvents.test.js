@@ -24,6 +24,48 @@ import {
   terminalSyncEvent,
   workflowProgressSource
 } from '../src/pages/lens/runtimeEvents.js'
+import { createStreamTextBuffer } from '../src/pages/lens/streamBuffer.js'
+
+test('batches streamed answer deltas into one render frame', () => {
+  const frames = []
+  const chunks = []
+  const buffer = createStreamTextBuffer({
+    onFlush: (chunk) => chunks.push(chunk),
+    schedule: (callback) => {
+      frames.push(callback)
+      return frames.length
+    },
+    cancel: () => {}
+  })
+
+  buffer.push('Hel')
+  buffer.push('lo')
+
+  assert.equal(frames.length, 1)
+  assert.deepEqual(chunks, [])
+
+  frames.shift()()
+  assert.deepEqual(chunks, ['Hello'])
+})
+
+test('flushes pending stream text synchronously before completion', () => {
+  const frames = []
+  const chunks = []
+  const buffer = createStreamTextBuffer({
+    onFlush: (chunk) => chunks.push(chunk),
+    schedule: (callback) => {
+      frames.push(callback)
+      return frames.length
+    },
+    cancel: () => {}
+  })
+
+  buffer.push('done')
+  buffer.flush()
+
+  assert.deepEqual(chunks, ['done'])
+  assert.equal(frames.length, 1)
+})
 
 test('coalesces streamed answer scrolling and pauses after manual scroll', async () => {
   const element = {
