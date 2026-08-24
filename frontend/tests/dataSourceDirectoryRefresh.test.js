@@ -15,6 +15,14 @@ test('data source wizard renders an icon-only directory refresh control', async 
 
   assert.match(
     contents,
+    /<BaseSelect v-model="syncPolicyMode" class="min-w-0 flex-1">[\s\S]*<BaseButton[\s\S]*RefreshCwIcon/
+  )
+  assert.match(
+    contents,
+    /:aria-label="t\('lensAdmin\.datasourceWizard\.refreshDirectories'\)"/
+  )
+  assert.match(
+    contents,
     /workspaceRoot[\s\S]*refreshingDirectories[\s\S]*RefreshCwIcon/
   )
   assert.match(
@@ -27,6 +35,7 @@ test('data source wizard renders an icon-only directory refresh control', async 
   )
   assert.match(contents, /:class="\{ 'animate-spin': refreshingDirectories \}"/)
   assert.match(contents, /@click="\$emit\('refresh-dirs'\)"/)
+  assert.match(contents, /@click="emit\('refresh-dirs'\)"/)
   assert.doesNotMatch(
     contents,
     /t\('lensAdmin\.datasourceWizard\.refreshDirectories'\)\s*<\//
