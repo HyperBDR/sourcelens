@@ -692,7 +692,7 @@ def _admin_run_for_action(run_uuid, *, lock=False):
         "retry_of_run",
     )
     if lock:
-        queryset = queryset.select_for_update()
+        queryset = queryset.select_for_update(of=("self",))
     return queryset.filter(uuid=run_uuid).first()
 
 

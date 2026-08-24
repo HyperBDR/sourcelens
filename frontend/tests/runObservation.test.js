@@ -78,7 +78,9 @@ test('run detail exposes the stable operations tabs in order', async () => {
   const usageIndex = contents.indexOf("activeDetailTab = 'usage'")
 
   assert.match(contents, /data-testid="close-run-detail"/)
+  assert.match(contents, /data-testid="run-diagnosis-tab"/)
   assert.match(contents, /data-testid="run-results-tab"/)
+  assert.match(contents, /data-testid="run-files-tab"/)
   assert.match(contents, /data-testid="run-usage-tab"/)
   assert.ok(overviewIndex >= 0)
   assert.ok(traceIndex > overviewIndex)
@@ -86,8 +88,8 @@ test('run detail exposes the stable operations tabs in order', async () => {
   assert.ok(usageIndex > resultsIndex)
   assert.doesNotMatch(contents, /activeDetailTab = 'progress'/)
   assert.doesNotMatch(contents, /activeDetailTab = 'evidence'/)
-  assert.doesNotMatch(contents, /activeDetailTab = 'files'/)
-  assert.doesNotMatch(contents, /activeDetailTab = 'diagnosis'/)
+  assert.match(contents, /activeDetailTab = 'files'/)
+  assert.match(contents, /activeDetailTab = 'diagnosis'/)
   assert.match(contents, /RunDiagnosisPanel/)
 })
 
@@ -100,16 +102,11 @@ test('run detail tabs stay single-line and scroll on narrow screens', async () =
   )
 })
 
-test('diagnosis is expanded inside the overview instead of using a tab', async () => {
+test('diagnosis is available as a dedicated tab', async () => {
   const contents = await source()
 
-  assert.match(contents, /data-testid="run-overview-diagnosis"/)
-  assert.match(contents, /diagnosisExpanded/)
-  assert.match(
-    contents,
-    /:active="\s*activeDetailTab === 'overview' && diagnosisExpanded\s*"/
-  )
-  assert.doesNotMatch(contents, /data-testid="run-diagnosis-tab"/)
+  assert.match(contents, /data-testid="run-diagnosis-tab"/)
+  assert.match(contents, /:active="activeDetailTab === 'diagnosis'"/)
   assert.match(contents, /@navigate="navigateFromEvidence"/)
 })
 
@@ -143,9 +140,9 @@ test('detail groups progress, evidence, artifacts, and diagnostics by task', asy
   assert.match(contents, /data-testid="run-results-content"/)
   assert.match(contents, /data-testid="run-usage-tab"/)
   assert.match(contents, /data-testid="run-live-progress"/)
-  assert.match(contents, /data-testid="run-overview-diagnosis"/)
+  assert.match(contents, /data-testid="run-diagnosis-tab"/)
   assert.doesNotMatch(contents, /data-testid="run-evidence-tab"/)
-  assert.doesNotMatch(contents, /data-testid="run-files-tab"/)
+  assert.match(contents, /data-testid="run-files-tab"/)
   assert.match(contents, /detail\.citations/)
   assert.match(contents, /detail\.output_files/)
   assert.match(

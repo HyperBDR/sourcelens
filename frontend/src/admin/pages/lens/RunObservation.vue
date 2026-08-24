@@ -539,6 +539,16 @@
                 </button>
                 <button
                   class="detail-tab"
+                  data-testid="run-diagnosis-tab"
+                  :class="
+                    activeDetailTab === 'diagnosis' ? 'detail-tab-active' : ''
+                  "
+                  @click="activeDetailTab = 'diagnosis'"
+                >
+                  {{ t('lensRuns.tabDiagnosis') }}
+                </button>
+                <button
+                  class="detail-tab"
                   :class="
                     activeDetailTab === 'trace' ? 'detail-tab-active' : ''
                   "
@@ -562,6 +572,19 @@
                     (detail.citations || []).length +
                     (detail.output_files || []).length
                   }}</span>
+                </button>
+                <button
+                  class="detail-tab"
+                  data-testid="run-files-tab"
+                  :class="
+                    activeDetailTab === 'files' ? 'detail-tab-active' : ''
+                  "
+                  @click="activeDetailTab = 'files'"
+                >
+                  {{ t('lensRuns.tabFiles') }}
+                  <span class="ml-1 text-xs text-gray-400">
+                    {{ (detail.output_files || []).length }}
+                  </span>
                 </button>
                 <button
                   class="detail-tab"
@@ -1063,53 +1086,16 @@
                     {{ detail.error }}</pre
                   >
                 </section>
-
-                <section
-                  v-if="canDiagnoseRun"
-                  data-testid="run-overview-diagnosis"
-                  class="overflow-hidden rounded-lg border border-gray-200 bg-gray-50/70"
-                >
-                  <div
-                    class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <h3 class="overview-title">
-                        {{ t('lensRuns.tabDiagnosis') }}
-                      </h3>
-                      <p class="mt-1 text-sm text-gray-500">
-                        {{ t('lensRuns.diagnosisEmptyDescription') }}
-                      </p>
-                    </div>
-                    <BaseButton
-                      variant="outline"
-                      size="sm"
-                      :aria-expanded="diagnosisExpanded"
-                      aria-controls="run-diagnosis-panel"
-                      @click="diagnosisExpanded = !diagnosisExpanded"
-                    >
-                      {{
-                        diagnosisExpanded
-                          ? t('lensRuns.collapseDiagnosis')
-                          : t('lensRuns.viewDiagnosis')
-                      }}
-                    </BaseButton>
-                  </div>
-                  <div
-                    v-if="diagnosisExpanded"
-                    id="run-diagnosis-panel"
-                    class="border-t border-gray-200"
-                  >
-                    <RunDiagnosisPanel
-                      ref="diagnosisPanel"
-                      :run-uuid="selectedUuid"
-                      :active="
-                        activeDetailTab === 'overview' && diagnosisExpanded
-                      "
-                      @navigate="navigateFromEvidence"
-                    />
-                  </div>
-                </section>
               </div>
+
+              <!-- Diagnosis tab -->
+              <RunDiagnosisPanel
+                v-show="activeDetailTab === 'diagnosis'"
+                ref="diagnosisPanel"
+                :run-uuid="selectedUuid"
+                :active="activeDetailTab === 'diagnosis'"
+                @navigate="navigateFromEvidence"
+              />
 
               <!-- Trace tab -->
               <div
@@ -1239,11 +1225,17 @@
 
               <!-- Results and evidence tab -->
               <div
-                v-show="activeDetailTab === 'results'"
+                v-show="
+                  activeDetailTab === 'results' || activeDetailTab === 'files'
+                "
                 data-testid="run-results-content"
                 class="space-y-4 px-6 py-5"
               >
-                <section v-if="detail.answer" class="overview-section">
+                <section
+                  v-if="detail.answer"
+                  v-show="activeDetailTab === 'results'"
+                  class="overview-section"
+                >
                   <h3 class="overview-title">{{ t('lensRuns.answer') }}</h3>
                   <div
                     class="mt-3 rounded-md border border-gray-200 bg-white p-3"
@@ -1252,7 +1244,10 @@
                   </div>
                 </section>
 
-                <section class="overview-section">
+                <section
+                  v-show="activeDetailTab === 'results'"
+                  class="overview-section"
+                >
                   <h3 class="overview-title">
                     {{ t('lensRuns.evidenceTitle') }}
                   </h3>
@@ -1281,6 +1276,7 @@
 
                 <section
                   v-if="hasPlannedEvidence"
+                  v-show="activeDetailTab === 'results'"
                   data-testid="run-planned-evidence"
                   class="overview-section"
                 >
@@ -1348,7 +1344,10 @@
                   </dl>
                 </section>
 
-                <section class="overview-section">
+                <section
+                  v-show="activeDetailTab === 'results'"
+                  class="overview-section"
+                >
                   <h3 class="overview-title">
                     {{ t('lensRuns.verifiedCitations') }}
                   </h3>
@@ -1560,7 +1559,6 @@ const detailLoading = ref(false)
 const detail = ref(null)
 const selectedUuid = ref(null)
 const activeDetailTab = ref('overview')
-const diagnosisExpanded = ref(false)
 const advancedFiltersOpen = ref(false)
 const previewFile = ref(null)
 const diagnosisPanel = ref(null)
@@ -1917,7 +1915,6 @@ function openDetail(uuid) {
   detailVisible.value = true
   detail.value = null
   activeDetailTab.value = 'overview'
-  diagnosisExpanded.value = false
   previewFile.value = null
 }
 
@@ -1925,21 +1922,19 @@ function closeDetail() {
   detailVisible.value = false
   selectedUuid.value = null
   detail.value = null
-  diagnosisExpanded.value = false
   previewFile.value = null
 }
 
 async function generateDiagnosis() {
   if (!canGenerateDiagnosis.value) return
-  activeDetailTab.value = 'overview'
-  diagnosisExpanded.value = true
+  activeDetailTab.value = 'diagnosis'
   await nextTick()
   diagnosisPanel.value?.generate()
 }
 
 function navigateFromEvidence(evidenceRef) {
   if (String(evidenceRef).startsWith('E-FILE-')) {
-    activeDetailTab.value = 'results'
+    activeDetailTab.value = 'files'
   } else if (evidenceRef === 'E-RUN') {
     activeDetailTab.value = 'overview'
   } else {
