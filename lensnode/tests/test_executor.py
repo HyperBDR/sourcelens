@@ -4,12 +4,14 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from lensnode.agent_runtime import _system_prompt
 from lensnode.agent_runtime.runtime import (
+    LensDeepAgentRuntime,
     _normalize_code_analysis_paths,
     _resolve_agent_turn_limit,
     _vague_code_analysis_question,
@@ -1114,6 +1116,8 @@ def test_code_analysis_prompt_forces_workspace_fallback_after_graph_failure():
     assert "do not infer a project-wide analysis" in prompt
     assert "do not answer from general or training knowledge" in prompt
     assert "只解释概念" in prompt
+    assert "at most two distinct CodeGraph queries" in prompt
+    assert "stop after two independent searches" in prompt
 
 
 def test_code_analysis_paths_are_relative_to_resource_directories():
@@ -1132,10 +1136,48 @@ def test_code_analysis_paths_are_relative_to_resource_directories():
     )
 
 
+def test_workspace_paths_are_relative_for_non_code_analysis_tasks():
+    answer = _normalize_code_analysis_paths(
+        "The workspace is /workspace/sourcelens and the file is "
+        "/workspace/sourcelens/lensnode/lensnode/runtime.py.",
+        {
+            "task": "knowledge_qa",
+            "workspace_path": "/workspace/sourcelens",
+        },
+    )
+
+    assert answer == (
+        "The workspace is . and the file is "
+        "lensnode/lensnode/runtime.py."
+    )
+
+
 def test_code_analysis_has_bounded_default_agent_turns():
     assert _resolve_agent_turn_limit(
         {"task": "code_analysis"},
-    ) == 16
+    ) == 10
+
+
+@pytest.mark.parametrize(
+    ("agent_rounds", "expected"),
+    [
+        ("flash", 5),
+        ("fast", 13),
+        ("balanced", 26),
+        ("deep", 50),
+        ("max", 100),
+    ],
+)
+def test_agent_rounds_resolve_to_model_turn_limits(agent_rounds, expected):
+    assert _resolve_agent_turn_limit(
+        {"task": "code_analysis", "agent_rounds": agent_rounds},
+    ) == expected
+
+
+def test_unknown_agent_rounds_keep_code_analysis_default():
+    assert _resolve_agent_turn_limit(
+        {"task": "code_analysis", "agent_rounds": "unknown"},
+    ) == 10
 
 
 def test_explicit_agent_turn_limit_overrides_code_analysis_default():
@@ -1146,6 +1188,16 @@ def test_explicit_agent_turn_limit_overrides_code_analysis_default():
 
 def test_other_tasks_keep_unset_agent_turn_limit():
     assert _resolve_agent_turn_limit({"task": "knowledge_qa"}) is None
+
+
+def test_code_analysis_does_not_enable_subagents():
+    runtime = LensDeepAgentRuntime.__new__(LensDeepAgentRuntime)
+    state = SimpleNamespace(
+        runtime_mode=SimpleNamespace(general_chat=False),
+        command={"task": "code_analysis"},
+    )
+
+    assert runtime._subagents_enabled(state) is False
 
 
 def test_vague_code_analysis_questions_are_detected_without_target():

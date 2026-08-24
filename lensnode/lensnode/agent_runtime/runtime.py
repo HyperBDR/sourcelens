@@ -125,7 +125,14 @@ from ..runtime_resources import (
 LOGGER = logging.getLogger("lensnode")
 
 _MAX_PRESENTED_CITATIONS = 5
-_DEFAULT_CODE_ANALYSIS_MAX_TURNS = 16
+_DEFAULT_CODE_ANALYSIS_MAX_TURNS = 10
+_AGENT_TURNS_BY_ROUNDS = {
+    "flash": 5,
+    "fast": 13,
+    "balanced": 26,
+    "deep": 50,
+    "max": 100,
+}
 _EXECUTION_BACKEND_TRUSTED_CONTAINER = "trusted_container"
 _EXECUTION_BACKEND_FILESYSTEM = "filesystem"
 
@@ -149,6 +156,9 @@ def _resolve_agent_turn_limit(command):
         configured = None
     if configured is not None and configured > 0:
         return configured
+    agent_rounds = (command or {}).get("agent_rounds")
+    if agent_rounds in _AGENT_TURNS_BY_ROUNDS:
+        return _AGENT_TURNS_BY_ROUNDS[agent_rounds]
     if (command or {}).get("task") == "code_analysis":
         return _DEFAULT_CODE_ANALYSIS_MAX_TURNS
     return configured
@@ -336,7 +346,7 @@ class LensDeepAgentRuntime:
         """
 
         if not state.runtime_mode.general_chat:
-            return True
+            return state.command.get("task") != "code_analysis"
         route_decision = getattr(state, "route_decision", None) or {}
         return route_decision.get("route") == "plan_execute"
 
@@ -1258,7 +1268,7 @@ def _scenario_for_task(task):
 def _normalize_code_analysis_paths(answer, command):
     """Present code paths relative to the selected resource directories."""
 
-    if command.get("task") != "code_analysis":
+    if command.get("task") == "general_chat":
         return answer
 
     normalized = str(answer or "")
@@ -1271,10 +1281,20 @@ def _normalize_code_analysis_paths(answer, command):
         key=len,
         reverse=True,
     )
+    workspace_path = command.get("workspace_path")
+    if workspace_path:
+        roots.append(Path(workspace_path).resolve().as_posix().rstrip("/"))
+    roots = sorted(set(roots or ["/workspace"]), key=len, reverse=True)
     for root in roots:
         normalized = re.sub(
-            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}(?P<separator>/|$)",
-            lambda match: "" if match.group("separator") == "/" else ".",
+            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}/",
+            "",
+            normalized,
+        )
+        normalized = re.sub(
+            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}"
+            r"(?=$|[\s\"'`.,:;!?])",
+            ".",
             normalized,
         )
     return normalized

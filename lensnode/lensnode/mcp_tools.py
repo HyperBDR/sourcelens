@@ -25,6 +25,7 @@ MCP_MAX_SERVERS = 20
 MCP_MAX_TOOLS = 100
 MCP_STDIO_MAX_ARGS = 32
 MCP_STDIO_MAX_ENV = 32
+MCP_RESULT_MAX_CHARS = 8000
 
 
 class MCPToolFirstMiddleware(AgentMiddleware):
@@ -613,14 +614,35 @@ def _wrap_mcp_tool(
         raw_name = raw_name[len(adapter_prefix) :]
     base_name = f"{MCP_TOOL_PREFIX}{server_name}__{_identifier(raw_name)}"
     name = _unique_tool_name(base_name, used_names)
+    seen_queries = set()
+    dedupe_queries = server_name == "codegraph"
 
     async def call_async(**kwargs):
+        query_key = json.dumps(
+            kwargs,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        if dedupe_queries and query_key in seen_queries:
+            return _result_json(
+                True,
+                cached=True,
+                message="Duplicate MCP query; use the previous result.",
+            )
         try:
             result = await asyncio.wait_for(
                 raw_tool.ainvoke(kwargs),
                 timeout=max(float(timeout_s), 0.001),
             )
-            return _result_json(True, result=result)
+            bounded, truncated = _bound_mcp_result(result)
+            if dedupe_queries:
+                seen_queries.add(query_key)
+            return _result_json(
+                True,
+                result=bounded,
+                **({"truncated": True} if truncated else {}),
+            )
         except TimeoutError:
             return _result_json(
                 False,
@@ -675,6 +697,57 @@ def _result_json(ok, **payload):
         ensure_ascii=False,
         default=str,
     )
+
+
+def _bound_mcp_result(value, limit=MCP_RESULT_MAX_CHARS):
+    """Bound remote MCP content before it enters the agent context."""
+
+    limit = max(int(limit), 0)
+    encoded = json.dumps(value, ensure_ascii=False, default=str)
+    if len(encoded) <= limit:
+        return value, False
+    if isinstance(value, str):
+        return value[: max(limit - 2, 0)], True
+    if isinstance(value, list):
+        bounded = []
+        for item in value:
+            remaining = limit - _json_size(bounded) - 2
+            if bounded:
+                remaining -= 1
+            if remaining <= 0:
+                break
+            candidate, _ = _bound_mcp_result(item, remaining)
+            if _json_size(bounded + [candidate]) > limit:
+                break
+            bounded.append(candidate)
+        return bounded, True
+    if isinstance(value, dict):
+        bounded = {}
+        for key, item in value.items():
+            key_size = len(json.dumps(str(key), ensure_ascii=False)) + 2
+            remaining = limit - _json_size(bounded) - key_size
+            if bounded:
+                remaining -= 1
+            if remaining <= 0:
+                break
+            candidate, _ = _bound_mcp_result(item, remaining)
+            if _json_size({**bounded, key: candidate}) > limit:
+                if not isinstance(item, str):
+                    break
+                empty_size = _json_size({**bounded, key: ""})
+                candidate = item[: max(limit - empty_size - 2, 0)]
+                if _json_size({**bounded, key: candidate}) > limit:
+                    break
+            bounded[key] = candidate
+        return bounded, True
+    bounded = str(value)[:limit]
+    return bounded, True
+
+
+def _json_size(value):
+    """Return the serialized size used for MCP result budgeting."""
+
+    return len(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _unique_identifier(value, used):

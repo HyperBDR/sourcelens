@@ -1673,6 +1673,7 @@ import {
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
 import { resolveChatViewport } from '@/pages/lens/chatViewport'
+import { createStreamTextBuffer } from '@/pages/lens/streamBuffer'
 import { compactFilename } from '@/pages/lens/filenameDisplay'
 import {
   DOCUMENT_EXTENSIONS,
@@ -1799,6 +1800,12 @@ const answerAutoScroller = createConversationAutoScroller({
   waitForRender: nextTick,
   schedule: (callback) => window.setTimeout(callback, 100),
   cancel: (timerId) => window.clearTimeout(timerId)
+})
+const streamTextBuffer = createStreamTextBuffer({
+  onFlush: (chunk) => {
+    partialAnswer.value += chunk
+    answerAutoScroller.request()
+  }
 })
 
 const publicAssistant = ref(null)
@@ -2459,6 +2466,7 @@ function authHeaders() {
 
 function resetStreamState() {
   streamController.value?.abort()
+  streamTextBuffer.clear()
   partialAnswer.value = ''
   streamError.value = ''
   failedRunError.value = null
@@ -2623,8 +2631,7 @@ function pushAgentActivity(item) {
 }
 
 function appendAnswerDelta(content) {
-  partialAnswer.value += content
-  answerAutoScroller.request()
+  streamTextBuffer.push(content)
 }
 
 function handleThreadScroll() {
@@ -3348,6 +3355,7 @@ async function readSse(runUuid) {
       }
     }
   }
+  streamTextBuffer.flush()
 }
 
 function handleEvent(event) {
@@ -3375,12 +3383,14 @@ function handleEvent(event) {
     queuePosition.value = event.position
   }
   if (event.type === 'sync' && event.content) {
+    streamTextBuffer.flush()
     partialAnswer.value = event.content
   }
   if (event.type === 'step') {
     handleStepEvent(event, event.ts)
   }
   if (event.type === 'token_reset') {
+    streamTextBuffer.clear()
     partialAnswer.value = ''
   }
   if (event.type === 'token') {
@@ -4070,6 +4080,7 @@ onBeforeUnmount(() => {
   window.visualViewport?.removeEventListener('scroll', syncMobileViewport)
   document.removeEventListener('visibilitychange', handleCompletionVisibility)
   streamController.value?.abort()
+  streamTextBuffer.clear()
   answerAutoScroller.dispose()
   clearInterval(elapsedTimer)
 })
