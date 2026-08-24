@@ -3391,6 +3391,11 @@ function handleEvent(event) {
       ? mapRunError(event.error.code)
       : event.error?.message || event.error || t('lens.chat.events.error')
   }
+
+  // Runtime activity and progress cards can grow without producing answer
+  // tokens. Keep the conversation viewport following those updates too.
+  // The auto-scroller stops when the user intentionally scrolls upward.
+  answerAutoScroller.request()
 }
 
 function handleStepEvent(event) {

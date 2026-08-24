@@ -57,7 +57,7 @@ class DocumentQAMode(RuntimeMode):
 
 
 class CodeAnalysisMode(RuntimeMode):
-    """Preserve the existing code-analysis runtime behavior."""
+    """Run code analysis through the model-driven retrieval loop."""
 
     def __init__(self):
         super().__init__(name="code_analysis")

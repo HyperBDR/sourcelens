@@ -67,6 +67,19 @@ test('guards restored run state with the current session load', async () => {
   )
 })
 
+test('keeps the conversation viewport aligned with runtime events', async () => {
+  const source = await chatSource()
+  const handleEvent = source.indexOf('function handleEvent(event)')
+  const nextHandler = source.indexOf(
+    'function handleStepEvent(event)',
+    handleEvent
+  )
+  const handlerSource = source.slice(handleEvent, nextHandler)
+
+  assert.notEqual(handleEvent, -1)
+  assert.match(handlerSource, /answerAutoScroller\.request\(\)/)
+})
+
 test('selects a conversation when its route query changes', async () => {
   const source = await chatSource()
   const queryWatcher = source.indexOf('() => route.query.session')

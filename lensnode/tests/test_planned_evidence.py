@@ -106,7 +106,12 @@ def test_retrieval_plan_accepts_detailed_bounded_objective():
 
     assert len(objective) > 500
 
-    plan = parse_retrieval_plan({"objective": objective})
+    plan = parse_retrieval_plan(
+        {
+            "objective": objective,
+            "literal_queries": ["NewBlockDeviceSyncer"],
+        }
+    )
 
     assert plan.objective == objective
 
@@ -114,6 +119,11 @@ def test_retrieval_plan_accepts_detailed_bounded_objective():
 def test_retrieval_plan_rejects_objective_over_its_dedicated_limit():
     with pytest.raises(PlanValidationError):
         parse_retrieval_plan({"objective": "x" * 2001})
+
+
+def test_retrieval_plan_rejects_empty_retrieval_plan():
+    with pytest.raises(PlanValidationError, match="retrieval request"):
+        parse_retrieval_plan({"objective": "find the implementation"})
 
 
 def test_retrieval_plan_rejects_missing_objective_and_invalid_operation():
@@ -289,6 +299,177 @@ def test_executor_falls_back_to_explore_for_missing_codegraph_operation():
 
     assert set(explored) == {"VSSMode", "InitializeVSS_Model"}
     assert bundle.metrics["retrieval_call_count"] == 2
+
+
+def test_executor_falls_back_to_workspace_search_and_reads_source():
+    searches = []
+    reads = []
+
+    def graph(**_kwargs):
+        return {"matches": []}
+
+    def search(**kwargs):
+        searches.append(kwargs)
+        return json.dumps(
+            {
+                "matches": [
+                    {
+                        "path": "app.py",
+                        "line": 10,
+                        "text": "def load():",
+                    }
+                ]
+            }
+        )
+
+    def read(**kwargs):
+        reads.append(kwargs)
+        return json.dumps(
+            {
+                "path": kwargs["path"],
+                "start_line": kwargs["offset"],
+                "end_line": kwargs["offset"] + kwargs["limit"] - 1,
+                "content": "def load():\n    return 1",
+            }
+        )
+
+    plan = parse_retrieval_plan(
+        {
+            "objective": "find the load implementation",
+            "evidence_requirements": ["source lines"],
+            "codegraph_queries": [
+                {"operation": "search", "symbol": "load"},
+            ],
+        }
+    )
+    bundle = EvidenceExecutor(
+        workspace_tools={
+            "search_workspace": search,
+            "read_workspace_file": read,
+        },
+        codegraph_tools={"search": graph},
+    ).execute(plan)
+
+    assert any(item["query"] == "load" for item in searches)
+    assert reads == [{"path": "app.py", "offset": 10, "limit": 1}]
+    assert any(item.evidence_type == "source" for item in bundle.items)
+    assert bundle.metrics["fallback_keyword_search_count"] >= 1
+    assert bundle.metrics["file_read_call_count"] == 1
+
+
+def test_executor_prioritizes_fallback_hits_for_source_reads():
+    reads = []
+
+    def search(**kwargs):
+        path = (
+            "relevant.py"
+            if kwargs["query"] == "specific"
+            else "irrelevant.py"
+        )
+        return json.dumps(
+            {
+                "matches": [
+                    {
+                        "path": path,
+                        "line": 1,
+                        "text": kwargs["query"],
+                    }
+                ]
+            }
+        )
+
+    def read(**kwargs):
+        reads.append(kwargs["path"])
+        return json.dumps(
+            {
+                "path": kwargs["path"],
+                "start_line": 1,
+                "end_line": 1,
+                "content": "value = 1",
+            }
+        )
+
+    plan = parse_retrieval_plan(
+        {
+            "objective": "specific workflow",
+            "evidence_requirements": ["source lines"],
+            "literal_queries": ["generic"],
+            "max_files": 1,
+        }
+    )
+    EvidenceExecutor(
+        workspace_tools={
+            "search_workspace": search,
+            "read_workspace_file": read,
+        }
+    ).execute(plan)
+
+    assert reads == ["relevant.py"]
+
+
+def test_executor_adds_caller_keyword_search_when_codegraph_fails():
+    searches = []
+
+    def graph(**_kwargs):
+        raise RuntimeError("CODEGRAPH_UNAVAILABLE")
+
+    def search(**kwargs):
+        searches.append(kwargs)
+        return json.dumps(
+            {
+                "matches": [
+                    {
+                        "path": "app.py",
+                        "line": 10,
+                        "text": "return load()",
+                    }
+                ]
+            }
+        )
+
+    plan = parse_retrieval_plan(
+        {
+            "objective": "trace callers of load",
+            "evidence_requirements": ["caller context"],
+            "codegraph_queries": [
+                {"operation": "callers", "symbol": "load"},
+            ],
+        }
+    )
+    bundle = EvidenceExecutor(
+        workspace_tools={"search_workspace": search},
+        codegraph_tools={"callers": graph},
+    ).execute(plan)
+
+    assert any(
+        item.get("regex") and "load" in item["query"]
+        for item in searches
+    )
+    result = validate_evidence_sufficiency(bundle, ["caller context"])
+    assert result.sufficient is True
+
+
+def test_executor_uses_workspace_search_when_codegraph_is_unavailable():
+    searches = []
+
+    def search(**kwargs):
+        searches.append(kwargs)
+        return json.dumps({"matches": []})
+
+    plan = parse_retrieval_plan(
+        {
+            "objective": "find SyncManager.StartSync",
+            "codegraph_queries": [
+                {"operation": "search", "symbol": "SyncManager"},
+            ],
+        }
+    )
+    EvidenceExecutor(
+        workspace_tools={"search_workspace": search},
+        codegraph_tools={},
+    ).execute(plan)
+
+    assert any(item["query"] == "SyncManager" for item in searches)
 
 
 def test_executor_records_nested_subtool_arguments_and_results():

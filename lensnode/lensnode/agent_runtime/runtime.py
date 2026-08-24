@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from pathlib import Path
 import re
 import threading
 import time
@@ -123,8 +124,8 @@ from ..runtime_resources import (
 
 LOGGER = logging.getLogger("lensnode")
 
-_PLANNED_CODE_ANALYSIS_ROUTE = {"route": "planned_code_analysis"}
 _MAX_PRESENTED_CITATIONS = 5
+_DEFAULT_CODE_ANALYSIS_MAX_TURNS = 16
 _EXECUTION_BACKEND_TRUSTED_CONTAINER = "trusted_container"
 _EXECUTION_BACKEND_FILESYSTEM = "filesystem"
 
@@ -136,6 +137,39 @@ register_harness_profile(
         ),
     ),
 )
+
+
+def _resolve_agent_turn_limit(command):
+    """Return the bounded model-turn budget for a run."""
+
+    configured = (command or {}).get("max_agent_turns")
+    try:
+        configured = int(configured) if configured is not None else None
+    except (TypeError, ValueError):
+        configured = None
+    if configured is not None and configured > 0:
+        return configured
+    if (command or {}).get("task") == "code_analysis":
+        return _DEFAULT_CODE_ANALYSIS_MAX_TURNS
+    return configured
+
+
+def _vague_code_analysis_question(question):
+    """Return whether a Code Analysis question has no analysis target."""
+
+    text = re.sub(r"[\s，。！？、,.!?：:；;]+", "", str(question or ""))
+    for prefix in ("请", "麻烦", "帮我", "能否", "可以"):
+        text = text.removeprefix(prefix)
+    generic = (
+        "分析一下",
+        "分析下",
+        "帮我分析",
+        "描述一下",
+        "介绍一下",
+        "解释一下",
+        "看看怎么回事",
+    )
+    return not text or text in generic
 
 
 def _build_execution_backend(config, root_dir):
@@ -256,29 +290,33 @@ class LensDeepAgentRuntime:
             on_checkpoint_ready,
         )
         try:
-            if self._uses_planned_code_analysis(state):
-                self._prepare_planned_checkpoint(state)
-                return _run_planned_code_analysis(
-                    model=state.model,
-                    command=state.command,
-                    tools=state.tools,
-                    mcp_tools=state.mcp_tools,
-                    emit_agent_event=state.emit_agent_event,
-                    workspace_root=self.config.workspace_path,
-                    trajectory=getattr(state, "trajectory", None),
-                    context_skill_contents=getattr(
-                        state.resources,
-                        "context_skill_contents",
-                        None,
-                    ),
-                    planner_repair_enabled=(
-                        getattr(
-                            self.config,
-                            "planner_repair_enabled",
-                            False,
-                        )
-                    ),
+            if (
+                getattr(getattr(state, "runtime_mode", None), "name", None)
+                == "code_analysis"
+                and _vague_code_analysis_question(
+                    getattr(state, "question", command.get("question", ""))
                 )
+            ):
+                answer = (
+                    "请补充具体的分析对象，例如文件路径、类或函数名、"
+                    "错误堆栈，或希望追踪的调用链。"
+                )
+                emit_user_event = getattr(state, "emit_user_event", None)
+                if emit_user_event is not None:
+                    emit_user_event(
+                        "phase.changed",
+                        {"phase": "completed"},
+                    )
+                return {
+                    "answer": answer,
+                    "samples": [],
+                    "stop_reason": state.model.stop_reason,
+                    "token_usage": state.model.token_usage,
+                    "outcome": "awaiting_user_input",
+                    "termination_detail": {
+                        "reason": "clarification_required",
+                    },
+                }
             route_result = self._route_runtime(state)
             if route_result is not None:
                 return route_result
@@ -287,18 +325,6 @@ class LensDeepAgentRuntime:
         finally:
             if cancel_event is None or not cancel_event.is_set():
                 cleanup_runtime_resources(state.resources)
-
-    def _uses_planned_code_analysis(self, state):
-        """Return whether this run belongs to the planned evidence path."""
-
-        runtime_mode = getattr(state, "runtime_mode", None)
-        if getattr(runtime_mode, "name", None) != "code_analysis":
-            return False
-        if state.resume_state is None:
-            return True
-        return (
-            state.resume_state.route_decision == _PLANNED_CODE_ANALYSIS_ROUTE
-        )
 
     def _subagents_enabled(self, state):
         """Return whether this run may delegate work to a subagent.
@@ -361,7 +387,7 @@ class LensDeepAgentRuntime:
         state.notify_checkpoint_ready()
 
     def _prepare_planned_checkpoint(self, state):
-        """Seed durable state before the planned pipeline invokes a model."""
+        """Seed durable state for a legacy planned run."""
 
         if state.resume_state is not None or not checkpoint_enabled():
             return
@@ -1072,7 +1098,7 @@ class LensDeepAgentRuntime:
                         "Failed to enable agent run checkpoints"
                     )
         state.agent = create_deep_agent(**state.kwargs)
-        state.max_turns = state.command.get("max_agent_turns")
+        state.max_turns = _resolve_agent_turn_limit(state.command)
 
     def _execute_agent(self, state):
         """Run the prepared Deep Agents graph and finalize its outcome."""
@@ -1214,7 +1240,7 @@ class LensDeepAgentRuntime:
                 {"phase": "completed"},
             )
         return {
-            "answer": answer,
+            "answer": _normalize_code_analysis_paths(answer, state.command),
             "samples": [],
             "stop_reason": state.model.stop_reason,
             "token_usage": state.model.token_usage,
@@ -1227,6 +1253,31 @@ def _scenario_for_task(task):
     """Return scenario metadata for a LensNode task name."""
 
     return SCENARIOS.get(task or "", SCENARIOS["knowledge_qa"])
+
+
+def _normalize_code_analysis_paths(answer, command):
+    """Present code paths relative to the selected resource directories."""
+
+    if command.get("task") != "code_analysis":
+        return answer
+
+    normalized = str(answer or "")
+    roots = sorted(
+        {
+            Path(item.get("path", "")).resolve().as_posix().rstrip("/")
+            for item in command.get("target_dirs") or []
+            if item.get("path")
+        },
+        key=len,
+        reverse=True,
+    )
+    for root in roots:
+        normalized = re.sub(
+            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}(?P<separator>/|$)",
+            lambda match: "" if match.group("separator") == "/" else ".",
+            normalized,
+        )
+    return normalized
 
 
 def _planned_reasoning_pulse(
@@ -1593,7 +1644,7 @@ def _run_planned_code_analysis(
             _command_answer_language(command),
         )
     return {
-        "answer": answer,
+        "answer": _normalize_code_analysis_paths(answer, command),
         "samples": [],
         "stop_reason": model.stop_reason,
         "token_usage": model.token_usage,
@@ -1656,7 +1707,6 @@ def _parse_planner_response(response, question, command, fallback=False):
                 "question_type": "mixed",
                 "evidence_requirements": [
                     "source lines",
-                    "caller context" if fallback else "structural flow",
                 ],
                 "codegraph_queries": [
                     {"operation": "explore", "query": query_terms[0]}
@@ -1676,6 +1726,10 @@ def _fallback_query_terms(question):
         return ("workspace",)
 
     stop_phrases = (
+        "描述一下",
+        "分析一下",
+        "解释一下",
+        "介绍一下",
         "为什么",
         "是否",
         "需要",
@@ -1856,7 +1910,12 @@ def _valid_planned_answer_payload(payload):
     unsupported = payload["unsupported_claims"]
     return (
         isinstance(citations, list)
-        and all(isinstance(item, dict) for item in citations)
+        and all(
+            isinstance(item, dict)
+            and str(item.get("evidence_id") or "").strip()
+            and str(item.get("supports") or "").strip()
+            for item in citations
+        )
         and isinstance(unsupported, list)
         and all(isinstance(item, str) for item in unsupported)
     )
@@ -2046,8 +2105,10 @@ def _planned_final_prompt(compact=False, context_skill_contents=None):
         "answer under 800 words. Do not include an evidence inventory or "
         "citation appendix inside answer. Return at most five citations, "
         "using only the strongest non-duplicated source evidence when source "
-        "evidence is available. Copy evidence_id exactly from a source "
-        "evidence item when citing source lines. Structural or literal "
+        "evidence is available. Each citation must contain exactly two "
+        "non-empty string fields: evidence_id and supports. Copy evidence_id "
+        "exactly from a source evidence item, and summarize the supported "
+        "claim in supports. Structural or literal "
         "evidence may support an answer without a source citation. The "
         "backend maps source citations to the trusted path, symbol, line "
         "range, and revision. If the evidence bundle does not support a "

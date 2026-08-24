@@ -170,6 +170,7 @@ def _run_agent_with_turn_limit(
     force_wrapup = truncation_reason in {
         "soft_deadline",
         "token_budget_wrapup",
+        "turn_limit",
     }
     needs_wrapup = force_wrapup or not answer.strip()
     if truncated and model is not None and needs_wrapup:

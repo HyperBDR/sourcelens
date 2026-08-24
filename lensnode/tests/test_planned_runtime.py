@@ -18,13 +18,18 @@ def _workspace_tools():
 def _runtime_state(tmp_path, resume_state=None):
     ready_events = []
     state = SimpleNamespace(
-        runtime_mode=SimpleNamespace(name="code_analysis"),
+        runtime_mode=SimpleNamespace(
+            name="code_analysis",
+            execution_gates=False,
+            general_chat=False,
+        ),
         resume_state=resume_state,
         run_uuid="planned-run",
         model=SimpleNamespace(),
         command={
             "run_uuid": "planned-run",
             "task": "code_analysis",
+            "question": "Analyze the runtime entry point.",
         },
         tools=[],
         mcp_tools=[],
@@ -39,12 +44,18 @@ def _runtime_state(tmp_path, resume_state=None):
     return state, ready_events
 
 
-def test_planned_code_analysis_seeds_checkpoint_before_execution(
+def test_resumed_code_analysis_uses_deep_agent_loop(
     monkeypatch,
     tmp_path,
 ):
-    actions = []
-    state, ready_events = _runtime_state(tmp_path)
+    calls = []
+    resume_state = ResumeState(
+        messages=(),
+        route_decision={"route": "planned_code_analysis"},
+        history_assistant_turns=0,
+        checkpoint_step=-1,
+    )
+    state, ready_events = _runtime_state(tmp_path, resume_state)
     runtime = agent_runtime.LensDeepAgentRuntime(
         SimpleNamespace(workspace_path=str(tmp_path))
     )
@@ -54,26 +65,15 @@ def test_planned_code_analysis_seeds_checkpoint_before_execution(
         "_prepare_runtime",
         lambda *_args, **_kwargs: state,
     )
-    monkeypatch.setattr(agent_runtime, "checkpoint_enabled", lambda: True)
     monkeypatch.setattr(
-        agent_runtime,
-        "get_checkpoint_saver",
-        lambda _workspace: actions.append("saver") or object(),
+        runtime,
+        "_build_agent",
+        lambda _state: calls.append("deep-agent"),
     )
     monkeypatch.setattr(
-        agent_runtime,
-        "save_resume_metadata",
-        lambda *_args, **kwargs: actions.append(("metadata", kwargs["route_decision"])),
-    )
-    monkeypatch.setattr(
-        agent_runtime,
-        "save_initial_checkpoint",
-        lambda *_args, **_kwargs: actions.append("checkpoint"),
-    )
-    monkeypatch.setattr(
-        agent_runtime,
-        "_run_planned_code_analysis",
-        lambda **_kwargs: actions.append("planned") or {"answer": "done"},
+        runtime,
+        "_execute_agent",
+        lambda _state: calls.append("execute") or {"answer": "done"},
     )
     monkeypatch.setattr(
         agent_runtime,
@@ -84,18 +84,45 @@ def test_planned_code_analysis_seeds_checkpoint_before_execution(
     result = runtime._answer_sync(state.command)
 
     assert result == {"answer": "done"}
-    assert actions == [
-        "saver",
-        (
-            "metadata",
-            {"route": "planned_code_analysis"},
-        ),
-        "checkpoint",
-        "planned",
-    ]
-    assert ready_events == ["ready"]
-    assert state.checkpoint_ready is True
-    assert state.initial_checkpoint_seeded is True
+    assert calls == ["deep-agent", "execute"]
+    assert ready_events == []
+
+
+def test_new_code_analysis_uses_deep_agent_loop_without_planner(
+    monkeypatch,
+    tmp_path,
+):
+    state, _ready_events = _runtime_state(tmp_path)
+    runtime = agent_runtime.LensDeepAgentRuntime(
+        SimpleNamespace(workspace_path=str(tmp_path))
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        runtime,
+        "_prepare_runtime",
+        lambda *_args, **_kwargs: state,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_build_agent",
+        lambda _state: calls.append("deep-agent"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_execute_agent",
+        lambda _state: calls.append("execute") or {"answer": "done"},
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _resources: None,
+    )
+
+    result = runtime._answer_sync(state.command)
+
+    assert result == {"answer": "done"}
+    assert calls == ["deep-agent", "execute"]
 
 
 def test_planned_code_analysis_blocks_before_model_when_capabilities_missing(
@@ -243,7 +270,7 @@ def test_planned_reasoning_pulse_throttles_phase_events(tmp_path):
     assert detail["payload"] == {"phase": "planning"}
 
 
-def test_planned_code_analysis_resume_replays_planned_pipeline(
+def test_code_analysis_resume_does_not_enter_planner_pipeline(
     monkeypatch,
     tmp_path,
 ):
@@ -270,9 +297,9 @@ def test_planned_code_analysis_resume_replays_planned_pipeline(
         lambda _state: calls.append("deep-agent"),
     )
     monkeypatch.setattr(
-        agent_runtime,
-        "_run_planned_code_analysis",
-        lambda **_kwargs: calls.append("planned") or {"answer": "recovered"},
+        runtime,
+        "_execute_agent",
+        lambda _state: calls.append("execute") or {"answer": "recovered"},
     )
     monkeypatch.setattr(
         agent_runtime,
@@ -283,7 +310,7 @@ def test_planned_code_analysis_resume_replays_planned_pipeline(
     result = runtime._answer_sync({**state.command, "resume": True})
 
     assert result == {"answer": "recovered"}
-    assert calls == ["planned"]
+    assert calls == ["deep-agent", "execute"]
 
 
 def test_planned_answer_extracts_json_after_explanatory_prefix(tmp_path):
@@ -456,6 +483,93 @@ def test_planned_code_analysis_retries_truncated_final_concisely(tmp_path):
     assert len(model.calls) == 3
     assert model.calls[1][1]["runtime_structured_output"] is True
     assert model.calls[2][1]["runtime_structured_output"] is True
+
+
+def test_planned_code_analysis_retries_citation_missing_supports(tmp_path):
+    source = tmp_path / "app.py"
+    source.write_text("def load():\n    return 1\n", encoding="utf-8")
+    source_payload = {
+        "evidence_type": "source",
+        "path": "app.py",
+        "symbol": "load",
+        "start_line": 1,
+        "end_line": 2,
+        "content": "def load():\n    return 1",
+    }
+    evidence_id = build_evidence_bundle(
+        [source_payload],
+        max_tokens=100,
+    ).items[0].evidence_id
+    plan = {
+        "objective": "Explain load",
+        "question_type": "implementation",
+        "evidence_requirements": ["source lines"],
+        "codegraph_queries": [],
+        "literal_queries": [],
+        "source_windows": [
+            {"path": "app.py", "start_line": 1, "end_line": 2}
+        ],
+        "max_fallback_rounds": 0,
+    }
+    responses = [
+        SimpleNamespace(content=json.dumps(plan)),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "load returns one.",
+                    "citations": [{"evidence_id": evidence_id}],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+        SimpleNamespace(
+            content=json.dumps(
+                {
+                    "answer": "load returns one.",
+                    "citations": [
+                        {
+                            "evidence_id": evidence_id,
+                            "supports": "load returns one",
+                        }
+                    ],
+                    "unsupported_claims": [],
+                }
+            )
+        ),
+    ]
+
+    class Model:
+        stop_reason = "stop"
+        token_usage = {}
+
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, messages, **kwargs):
+            self.calls.append((messages, kwargs))
+            return responses[len(self.calls) - 1]
+
+    class Reader:
+        name = "read_workspace_file"
+
+        def invoke(self, _args):
+            return json.dumps(source_payload)
+
+    model = Model()
+    result = agent_runtime._run_planned_code_analysis(
+        model=model,
+        command={"question": "What does load return?"},
+        tools=[Reader()],
+        mcp_tools=[],
+        emit_agent_event=lambda *_args: None,
+        workspace_root=tmp_path,
+    )
+
+    assert result["answer"] == "load returns one."
+    assert result["outcome"] == "completed"
+    assert result["planned_evidence"]["final_retry_count"] == 1
+    assert result["planned_evidence"]["citation_count"] == 1
+    assert len(model.calls) == 3
 
 
 def test_planned_code_analysis_uses_bounded_fallback_for_invalid_plan(
@@ -732,7 +846,8 @@ def test_unsupported_claims_prevent_completed_outcome(tmp_path):
     assert result["termination_detail"] == {
         "reason": "evidence_insufficient"
     }
-    assert result["planned_evidence"]["sufficient"] is True
+    assert result["planned_evidence"]["sufficient"] is False
+    assert result["planned_evidence"]["gap_categories"] == ["source"]
     assert "reliable conclusion" in result["answer"]
 
 
@@ -894,6 +1009,12 @@ def test_planner_fallback_keeps_question_and_workspace_guidance(tmp_path):
     assert question in planner_text
     assert guidance in planner_text
     assert len(model.calls) == 2
+
+
+def test_fallback_query_terms_remove_conversational_chinese():
+    assert agent_runtime._fallback_query_terms(
+        "描述一下 代码分析的工作原理"
+    ) == ("代码分析", "工作原理")
 
 
 def test_citations_use_trusted_workspace_provenance(tmp_path):
