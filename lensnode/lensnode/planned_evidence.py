@@ -14,6 +14,7 @@ from pathlib import Path
 MAX_FILES = 15
 MAX_SOURCE_WINDOW_LINES = 250
 MAX_EVIDENCE_TOKENS = 20000
+MAX_OBJECTIVE_CHARS = 2000
 MAX_QUERY_CHARS = 500
 MAX_CODEGRAPH_QUERIES = 16
 MAX_LITERAL_QUERIES = 32
@@ -259,7 +260,11 @@ def parse_retrieval_plan(raw):
     if not isinstance(raw, dict):
         raise PlanValidationError("retrieval plan must be an object")
 
-    objective = _required_text(raw.get("objective"), "objective")
+    objective = _required_text(
+        raw.get("objective"),
+        "objective",
+        max_chars=MAX_OBJECTIVE_CHARS,
+    )
     codegraph_queries = []
     codegraph_items = _list_value(raw.get("codegraph_queries"))[
         :MAX_CODEGRAPH_QUERIES
@@ -978,9 +983,9 @@ def _requirement_category(requirement):
     return "structural"
 
 
-def _required_text(value, label):
+def _required_text(value, label, max_chars=MAX_QUERY_CHARS):
     text = str(value or "").strip()
-    if not text or len(text) > MAX_QUERY_CHARS:
+    if not text or len(text) > max_chars:
         raise PlanValidationError(f"{label} is missing or too long")
     return text
 
