@@ -1,0 +1,4 @@
+type: feature
+audience: user
+en: Added managed workspace document uploads with automatic conversion and task progress tracking.
+zh-CN: 新增自建工作区文档上传、自动转换及任务进度跟踪能力。

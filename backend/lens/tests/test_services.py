@@ -2,8 +2,9 @@ from contextlib import contextmanager
 from datetime import timedelta
 import hashlib
 from importlib import import_module
+import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from agentcore_task.adapters.django.models import TaskExecution
@@ -27,6 +28,7 @@ from lens.datasource_services import (
     DataSourceDispatchError,
     dispatch_datasource_conversion_async,
     dispatch_datasource_sync_async,
+    dispatch_datasource_upload_async,
 )
 from lens.execution import execute_answer_run
 from lens.lensnode_auth import issue_lensnode_token
@@ -2628,6 +2630,76 @@ class LensServiceTests(TransactionTestCase):
         self.assertNotIn("config", payload)
         self.assertNotIn("sync_policy", payload)
 
+    def test_managed_workspace_upload_dispatches_file_and_conversion_policy(
+        self,
+    ):
+        datasource = DataSource.objects.create(
+            name="Managed Snapshot",
+            source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+            lensnode=self.lensnode,
+            target_path="/workspace/restores/finance",
+            sync_policy={
+                "conversion": {
+                    "vision_model_ref": "qwen-vision-ref",
+                }
+            },
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "LENSNODE_AI_GATEWAY_URL": "http://gateway.test",
+                "LENSNODE_TOKEN": "lensnode-token",
+            },
+        ), patch("lens.datasource_services._send_lensnode_command") as send:
+            request_id = dispatch_datasource_upload_async(
+                datasource,
+                task_id="managed-upload",
+                filename="package.zip",
+                content=b"archive-content",
+            )
+
+        self.assertTrue(request_id)
+        payload = send.call_args.args[1]
+        self.assertEqual(payload["type"], "datasource_upload")
+        self.assertEqual(payload["source_type"], "managed_workspace")
+        self.assertEqual(payload["filename"], "package.zip")
+        self.assertEqual(payload["content_base64"], "YXJjaGl2ZS1jb250ZW50")
+        self.assertEqual(
+            payload["conversion"],
+            {
+                "document": True,
+                "image": True,
+                "vision_model_ref": "qwen-vision-ref",
+            },
+        )
+        self.assertEqual(payload["ai_gateway_url"], "http://gateway.test")
+        self.assertEqual(payload["lensnode_token"], "lensnode-token")
+        self.assertEqual(payload["target_path"], "/workspace/restores/finance")
+
+    def test_datasource_command_targets_current_lensnode_connection(self):
+        from lens.datasource_services import _send_lensnode_command
+
+        self.lensnode.connection_id = "specific.connection!channel"
+        with patch(
+            "lens.datasource_services.get_channel_layer"
+        ) as get_layer:
+            channel_layer = get_layer.return_value
+            channel_layer.send = AsyncMock()
+            _send_lensnode_command(
+                self.lensnode,
+                {"type": "datasource_upload"},
+            )
+
+        channel_layer.send.assert_called_once_with(
+            self.lensnode.connection_id,
+            {
+                "type": "lensnode.command",
+                "payload": {"type": "datasource_upload"},
+            },
+        )
+        channel_layer.group_send.assert_not_called()
+
     def test_managed_workspace_conversion_task_is_callback_completed(self):
         datasource = DataSource.objects.create(
             name="Managed Snapshot",
@@ -3406,6 +3478,45 @@ class LensServiceTests(TransactionTestCase):
             ttl_s=60,
         )
         release_datasource_lock(self.datasource.uuid, token="new-sync")
+
+    def test_cleanup_stale_datasource_upload_marks_failure(self):
+        GlobalSetting.objects.create(
+            key="lens.datasource_upload.timeout_s",
+            value="1",
+        )
+        task = TaskExecution.objects.create(
+            task_id="stale-upload",
+            task_name="datasource_upload:Managed Workspace",
+            module="lens_datasource_upload",
+            status="STARTED",
+            started_at=timezone.now() - timedelta(seconds=2),
+            metadata={
+                "datasource_uuid": str(self.datasource.uuid),
+                "lock_token": "stale-upload",
+            },
+        )
+        acquire_datasource_lock(
+            self.datasource.uuid,
+            token="stale-upload",
+            ttl_s=60,
+        )
+
+        with patch(
+            "lens.services.cancel_datasource_upload_on_lensnode"
+        ) as cancel:
+            result = cleanup_stale_datasource_sync_tasks()
+
+        task.refresh_from_db()
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(task.status, "FAILURE")
+        self.assertEqual(task.error, "DATASOURCE_UPLOAD_TIMEOUT")
+        cancel.assert_called_once_with(self.lensnode, "stale-upload")
+        self.assertFalse(
+            release_datasource_lock(
+                self.datasource.uuid,
+                token="stale-upload",
+            )
+        )
 
     def test_cleanup_stale_datasource_conversion_releases_lock(self):
         GlobalSetting.objects.create(

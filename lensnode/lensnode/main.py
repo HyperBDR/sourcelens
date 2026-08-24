@@ -23,6 +23,7 @@ from .datasource_sync import DataSourceSyncError
 from .datasource_sync import convert_managed_workspace
 from .datasource_sync import inspect_datasource_path, sync_datasource
 from .datasource_sync import test_datasource_connection
+from .datasource_sync import upload_managed_workspace
 from .executor import TASKS, LensNodeExecutor
 from .gateway_model import RunCancelledError
 from .logging_utils import (
@@ -448,6 +449,8 @@ class LensNodeClient:
             await self._start_datasource_sync(message)
         elif message_type == "datasource_convert":
             await self._start_datasource_conversion(message)
+        elif message_type == "datasource_upload":
+            await self._start_datasource_upload(message)
         elif message_type == "datasource_convert_cancel":
             task_id = str(message.get("task_id") or "")
             cancel_event = self.datasource_conversion_cancels.get(task_id)
@@ -923,6 +926,66 @@ class LensNodeClient:
             )
         finally:
             self.datasource_conversion_cancels.pop(task_id, None)
+            self.running_tasks.pop(task_key, None)
+
+    async def _start_datasource_upload(self, message):
+        """Start one managed workspace upload in a worker thread."""
+
+        request_id = str(message.get("request_id") or "")
+        task_id = str(message.get("task_id") or request_id)
+        if not task_id:
+            return
+        task_key = f"datasource-upload:{task_id}"
+        if task_key in self.running_tasks:
+            return
+        task = asyncio.create_task(self._execute_datasource_upload(message))
+        self.running_tasks[task_key] = task
+        task.add_done_callback(lambda item: self._consume_task_exception(item))
+
+    async def _execute_datasource_upload(self, message):
+        """Execute an upload and emit its conversion result."""
+
+        request_id = str(message.get("request_id") or "")
+        task_id = str(message.get("task_id") or request_id)
+        task_key = f"datasource-upload:{task_id}"
+        try:
+            result = await asyncio.to_thread(
+                upload_managed_workspace,
+                message,
+                self.config.workspace_path,
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_upload_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    **result,
+                }
+            )
+        except DataSourceSyncError as exc:
+            self._enqueue(
+                {
+                    "type": "datasource_upload_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            )
+        except Exception:
+            LOGGER.exception(
+                "Managed workspace upload failed task_id=%s", task_id
+            )
+            self._enqueue(
+                {
+                    "type": "datasource_upload_done",
+                    "request_id": request_id,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "error": "DATASOURCE_UPLOAD_FAILED",
+                }
+            )
+        finally:
             self.running_tasks.pop(task_key, None)
 
     async def _acquire_heavy_work(self, cancel_event=None):

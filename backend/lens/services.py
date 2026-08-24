@@ -2363,6 +2363,12 @@ def cancel_datasource_sync_on_lensnode(lensnode, task_id):
     return None
 
 
+def cancel_datasource_upload_on_lensnode(lensnode, task_id):
+    """Request cancellation of a managed workspace upload."""
+
+    return cancel_datasource_sync_on_lensnode(lensnode, task_id)
+
+
 def cancel_datasource_conversion_on_lensnode(lensnode, task_id):
     """Request safe cancellation of a managed workspace conversion."""
 

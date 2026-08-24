@@ -1,16 +1,16 @@
 """Datasource CRUD, search, and synchronization views."""
 
 import json
+import os
 import uuid as uuid_mod
 
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework import status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-
 from lens.datasource_services import (
+    DATASOURCE_UPLOAD_EXTENSIONS,
     DataSourceDispatchError,
     DataSourcePathError,
     check_datasource_path,
@@ -28,11 +28,18 @@ from lens.services import (
 from lens.tasks import (
     DATASOURCE_CANCELLING_STATUS,
     datasource_conversion_task,
+    datasource_upload_task,
     register_datasource_conversion_task,
     register_datasource_sync_task,
+    register_datasource_upload_task,
     release_datasource_lock,
     source_sync_task,
 )
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.response import Response
+
 from .base import BaseAdminViewSet
 
 
@@ -41,13 +48,18 @@ class DataSourceViewSet(BaseAdminViewSet):
 
     queryset = DataSource.objects.all()
     serializer_class = DataSourceSerializer
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
         """Return datasources filtered by optional search query."""
 
-        queryset = super().get_queryset().select_related(
-            "lensnode",
-            "credential",
+        queryset = (
+            super()
+            .get_queryset()
+            .select_related(
+                "lensnode",
+                "credential",
+            )
         )
         filters = self._datasource_search_filters(
             self.request.query_params.get("filters")
@@ -64,12 +76,8 @@ class DataSourceViewSet(BaseAdminViewSet):
         search = str(self.request.query_params.get("search") or "").strip()
         if not search:
             return queryset
-        search_key = str(
-            self.request.query_params.get("search_key") or ""
-        ).strip()
-        return queryset.filter(
-            self._datasource_search_query(search, search_key)
-        )
+        search_key = str(self.request.query_params.get("search_key") or "").strip()
+        return queryset.filter(self._datasource_search_query(search, search_key))
 
     @staticmethod
     def _datasource_search_filters(value):
@@ -280,6 +288,73 @@ class DataSourceViewSet(BaseAdminViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @action(detail=True, methods=["post"], url_path="upload")
+    def upload(self, request, uuid=None):
+        """Queue one file upload into a Managed Workspace."""
+
+        datasource = self.get_object()
+        if datasource.source_type != DataSource.SourceType.MANAGED_WORKSPACE:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_NOT_SUPPORTED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if datasource.status == DataSource.Status.DISABLED:
+            return Response(
+                {"detail": "DATASOURCE_DISABLED"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_FILE_REQUIRED"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if uploaded.size > 25 * 1024 * 1024:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_TOO_LARGE"},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        filename = os.path.basename(str(uploaded.name or "")).strip()
+        if not filename or filename in {".", ".."}:
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_FILENAME_INVALID"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        lowered_filename = filename.lower()
+        if not any(
+            lowered_filename.endswith(extension)
+            for extension in DATASOURCE_UPLOAD_EXTENSIONS
+        ):
+            return Response(
+                {"detail": "DATASOURCE_UPLOAD_FILE_TYPE_UNSUPPORTED"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        task_id = uuid_mod.uuid4().hex
+        storage_name = default_storage.save(
+            f"datasource-uploads/{datasource.uuid}/{task_id}/{filename}",
+            ContentFile(uploaded.read()),
+        )
+        register_datasource_upload_task(
+            datasource,
+            task_id,
+            filename,
+            created_by=request.user,
+            metadata={"storage_name": storage_name},
+        )
+        datasource_upload_task.apply_async(
+            args=[str(datasource.uuid), storage_name, filename],
+            task_id=task_id,
+        )
+        return Response(
+            {
+                "uuid": str(datasource.uuid),
+                "task_id": task_id,
+                "filename": filename,
+                "status": "PENDING",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
     @action(detail=True, methods=["post"], url_path="set-enabled")
     def set_enabled(self, request, uuid=None):
         """Enable or disable a datasource and sync its schedule."""
@@ -293,9 +368,7 @@ class DataSourceViewSet(BaseAdminViewSet):
 
         datasource = self.get_object()
         next_status = (
-            DataSource.Status.ACTIVE
-            if enabled
-            else DataSource.Status.DISABLED
+            DataSource.Status.ACTIVE if enabled else DataSource.Status.DISABLED
         )
         if datasource.status != next_status:
             datasource.status = next_status
@@ -320,22 +393,16 @@ class DataSourceViewSet(BaseAdminViewSet):
                 datasource.source_type,
             )
         except (DataSourcePathError, DataSourceDispatchError) as exc:
-            datasource.availability_status = (
-                DataSource.AvailabilityStatus.ERROR
-            )
+            datasource.availability_status = DataSource.AvailabilityStatus.ERROR
             datasource.availability_message = str(exc)
         else:
-            is_available = bool(
-                result.get("exists") and result.get("is_directory")
-            )
+            is_available = bool(result.get("exists") and result.get("is_directory"))
             datasource.availability_status = (
                 DataSource.AvailabilityStatus.AVAILABLE
                 if is_available
                 else DataSource.AvailabilityStatus.UNAVAILABLE
             )
-            datasource.availability_message = str(
-                result.get("message") or ""
-            )
+            datasource.availability_message = str(result.get("message") or "")
         datasource.availability_checked_at = timezone.now()
         datasource.save(
             update_fields=[
@@ -484,9 +551,7 @@ class DataSourceViewSet(BaseAdminViewSet):
         metadata["manual_revoked_at"] = now.isoformat()
         metadata["manual_revoked_by"] = request.user.pk
         queued = task.status == TaskStatus.PENDING
-        task.status = (
-            TaskStatus.REVOKED if queued else DATASOURCE_CANCELLING_STATUS
-        )
+        task.status = TaskStatus.REVOKED if queued else DATASOURCE_CANCELLING_STATUS
         task.finished_at = now if queued else None
         task.error = "DATASOURCE_CONVERSION_CANCELLED" if queued else ""
         metadata["cancellation_state"] = (

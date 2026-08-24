@@ -125,9 +125,7 @@ def test_trace_frames_remain_pending_until_cursor_ack_and_reconnect():
 
         client._outbox.clear()
         client._restore_pending_trace_frames()
-        assert [
-            frame["events"][0]["sequence"] for frame in client._outbox
-        ] == [1, 2]
+        assert [frame["events"][0]["sequence"] for frame in client._outbox] == [1, 2]
 
         await client._handle_message(
             json.dumps(
@@ -207,10 +205,27 @@ def test_completed_run_hands_terminal_frame_to_outbox():
         assert run_uuid not in client.running_tasks
         assert list(client._outbox) == [
             {
+                "type": "run_event",
+                "run_uuid": run_uuid,
+                "step_type": "retrieval",
+                "status": "running",
+                "detail": {
+                    "queue_state": "QUEUED",
+                    "message": "Waiting for LensNode heavy-work capacity.",
+                },
+            },
+            {
+                "type": "run_event",
+                "run_uuid": run_uuid,
+                "step_type": "retrieval",
+                "status": "running",
+                "detail": {"queue_state": "STARTED"},
+            },
+            {
                 "type": "run_done",
                 "run_uuid": run_uuid,
                 "status": "done",
-            }
+            },
         ]
 
     asyncio.run(exercise())
@@ -264,9 +279,7 @@ def test_reconnect_hello_claims_buffered_terminal_run_before_flush():
         ]
         assert frames[0]["labels"]["run_document_attachments"] is True
         assert frames[0]["labels"]["run_checkpoint_resume"] is True
-        assert (
-            frames[0]["labels"]["run_admission_checkpoint_v1"] is True
-        )
+        assert frames[0]["labels"]["run_admission_checkpoint_v1"] is True
         assert [frame["type"] for frame in frames[1:]] == [
             "run_output",
             "run_output",
@@ -323,9 +336,7 @@ def test_run_done_ack_cleans_checkpoint_and_runtime_resources():
 
     with (
         patch("lensnode.main.cleanup_run_checkpoint") as checkpoint_cleanup,
-        patch(
-            "lensnode.main.cleanup_run_runtime_resources"
-        ) as runtime_cleanup,
+        patch("lensnode.main.cleanup_run_runtime_resources") as runtime_cleanup,
     ):
         asyncio.run(exercise())
 
@@ -366,9 +377,7 @@ def test_run_done_ack_waits_for_timed_out_worker_before_cleanup():
 
     with (
         patch("lensnode.main.cleanup_run_checkpoint") as checkpoint_cleanup,
-        patch(
-            "lensnode.main.cleanup_run_runtime_resources"
-        ) as runtime_cleanup,
+        patch("lensnode.main.cleanup_run_runtime_resources") as runtime_cleanup,
         patch(
             "lensnode.executor.cleanup_run_checkpoint",
             checkpoint_cleanup,

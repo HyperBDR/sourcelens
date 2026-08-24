@@ -2,18 +2,13 @@
 
 import uuid as uuid_lib
 
+from accounts.permissions import HasRequiredFeature
+from agentcore_metering.adapters.django.models import LLMUsage
 from django.db import transaction
 from django.db.models import Count, Max, Min, Q, TextField
 from django.db.models.functions import Cast
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from agentcore_metering.adapters.django.models import LLMUsage
-
-from accounts.permissions import HasRequiredFeature
 from lens.attachments import get_session_image_attachments
 from lens.citations import public_run_citations
 from lens.document_attachments import (
@@ -37,6 +32,9 @@ from lens.services import (
     supports_run_admission_checkpoint,
     supports_run_checkpoint_resume,
 )
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 
 def _admin_safe_int(value, default, *, minimum=1, maximum=None):
@@ -109,9 +107,7 @@ def _admin_run_step_counts(run):
                 counts["llm_calls"] += 1
                 counts["total_tokens"] += event.get("total_tokens") or 0
                 counts["prompt_tokens"] += event.get("prompt_tokens") or 0
-                counts["completion_tokens"] += (
-                    event.get("completion_tokens") or 0
-                )
+                counts["completion_tokens"] += event.get("completion_tokens") or 0
                 cost = event.get("cost")
                 if cost:
                     total_cost += cost
@@ -184,54 +180,48 @@ def _admin_run_model_usage(run):
         if usage.cost is not None:
             total_cost += float(usage.cost)
             has_cost = True
-        calls.append({
-            "uuid": str(usage.id),
-            "model": usage.model,
-            "prompt_tokens": usage.prompt_tokens,
-            "completion_tokens": usage.completion_tokens,
-            "total_tokens": usage.total_tokens,
-            "cached_tokens": usage.cached_tokens,
-            "reasoning_tokens": usage.reasoning_tokens,
-            "cost": float(usage.cost) if usage.cost is not None else None,
-            "cost_currency": usage.cost_currency,
-            "success": usage.success,
-            "is_streaming": usage.is_streaming,
-            "is_subagent": bool(metadata.get("is_subagent")),
-            "source_type": metadata.get("source_type"),
-            "started_at": (
-                usage.started_at.isoformat() if usage.started_at else None
-            ),
-            "finished_at": usage.created_at.isoformat(),
-            "duration_ms": _duration_ms(
-                usage.started_at,
-                usage.created_at,
-            ),
-            "ttft_ms": _duration_ms(
-                usage.started_at,
-                usage.first_chunk_at,
-            ),
-        })
+        calls.append(
+            {
+                "uuid": str(usage.id),
+                "model": usage.model,
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+                "cached_tokens": usage.cached_tokens,
+                "reasoning_tokens": usage.reasoning_tokens,
+                "cost": float(usage.cost) if usage.cost is not None else None,
+                "cost_currency": usage.cost_currency,
+                "success": usage.success,
+                "is_streaming": usage.is_streaming,
+                "is_subagent": bool(metadata.get("is_subagent")),
+                "source_type": metadata.get("source_type"),
+                "started_at": (
+                    usage.started_at.isoformat() if usage.started_at else None
+                ),
+                "finished_at": usage.created_at.isoformat(),
+                "duration_ms": _duration_ms(
+                    usage.started_at,
+                    usage.created_at,
+                ),
+                "ttft_ms": _duration_ms(
+                    usage.started_at,
+                    usage.first_chunk_at,
+                ),
+            }
+        )
     if not calls:
         return None
     return {
         "llm_calls": len(calls),
         "models_used": list(
-            dict.fromkeys(
-                item["model"] for item in calls if item["model"]
-            )
+            dict.fromkeys(item["model"] for item in calls if item["model"])
         ),
-        "subagent_model_calls": sum(
-            1 for item in calls if item["is_subagent"]
-        ),
+        "subagent_model_calls": sum(1 for item in calls if item["is_subagent"]),
         "total_tokens": sum(item["total_tokens"] for item in calls),
         "prompt_tokens": sum(item["prompt_tokens"] for item in calls),
-        "completion_tokens": sum(
-            item["completion_tokens"] for item in calls
-        ),
+        "completion_tokens": sum(item["completion_tokens"] for item in calls),
         "cached_tokens": sum(item["cached_tokens"] for item in calls),
-        "reasoning_tokens": sum(
-            item["reasoning_tokens"] for item in calls
-        ),
+        "reasoning_tokens": sum(item["reasoning_tokens"] for item in calls),
         "total_cost": round(total_cost, 6) if has_cost else None,
         "model_calls": calls,
     }
@@ -298,15 +288,17 @@ def _admin_run_failure_summary(run):
             or scope not in allowed_scopes
         ):
             continue
-        failures.append({
-            "capability": capability,
-            "error_type": error_type,
-            "scope": scope,
-            "required": item.get("required") is True,
-            "affects_required_evidence": (
-                item.get("affects_required_evidence") is True
-            ),
-        })
+        failures.append(
+            {
+                "capability": capability,
+                "error_type": error_type,
+                "scope": scope,
+                "required": item.get("required") is True,
+                "affects_required_evidence": (
+                    item.get("affects_required_evidence") is True
+                ),
+            }
+        )
     summary["failures"] = failures
     return summary
 
@@ -351,8 +343,7 @@ def _admin_run_row(run):
     else:
         tool_call_count = (
             run.trace_events.filter(
-                Q(event_type__startswith="tool.")
-                | Q(event_type__startswith="subtool.")
+                Q(event_type__startswith="tool.") | Q(event_type__startswith="subtool.")
             )
             .exclude(call_id="")
             .values("call_id")
@@ -360,32 +351,24 @@ def _admin_run_row(run):
             .count()
         )
     retry_count = (
-        run.retry_count
-        if hasattr(run, "retry_count")
-        else run.retry_runs.count()
+        run.retry_count if hasattr(run, "retry_count") else run.retry_runs.count()
     )
     return {
         "uuid": str(run.uuid),
         "status": run.status,
         "executor_status": execution.status if execution else run.status,
         "outcome": run.outcome,
-        "termination_detail": sanitize_termination_detail(
-            run.termination_detail
-        ),
+        "termination_detail": sanitize_termination_detail(run.termination_detail),
         "username": user.username if user else None,
         "assistant_name": assistant.name if assistant else None,
         "assistant_slug": assistant.slug if assistant else None,
         "question": question[:160],
         "feedback": run.feedback,
         "feedback_updated_at": (
-            run.feedback_updated_at.isoformat()
-            if run.feedback_updated_at
-            else None
+            run.feedback_updated_at.isoformat() if run.feedback_updated_at else None
         ),
         "started_at": run.started_at.isoformat() if run.started_at else None,
-        "finished_at": (
-            run.finished_at.isoformat() if run.finished_at else None
-        ),
+        "finished_at": (run.finished_at.isoformat() if run.finished_at else None),
         "duration_seconds": _admin_run_duration(run),
         "lensnode_name": run.lensnode.name if run.lensnode else None,
         "lensnode_uuid": str(run.lensnode.uuid) if run.lensnode else None,
@@ -393,29 +376,21 @@ def _admin_run_row(run):
         "event_count": counts["event_count"],
         "tool_call_count": tool_call_count,
         "retry_count": retry_count,
-        "retry_of_run_uuid": (
-            str(run.retry_of_run.uuid) if run.retry_of_run else None
-        ),
+        "retry_of_run_uuid": (str(run.retry_of_run.uuid) if run.retry_of_run else None),
         "subagent_count": counts["subagent_count"],
         "subagent_denied_count": counts["subagent_denied_count"],
         "structured_analysis_calls": counts["structured_analysis_calls"],
-        "structured_validation_calls": counts[
-            "structured_validation_calls"
-        ],
+        "structured_validation_calls": counts["structured_validation_calls"],
         "transform_calls": counts["transform_calls"],
         "llm_calls": counts["llm_calls"],
         "total_tokens": counts["total_tokens"],
         "prompt_tokens": counts["prompt_tokens"],
         "completion_tokens": counts["completion_tokens"],
         "total_cost": counts["total_cost"],
-        "token_budget_profile": (
-            execution.token_budget_profile if execution else None
-        ),
+        "token_budget_profile": (execution.token_budget_profile if execution else None),
         "token_budget_max_tokens": max_tokens,
         "token_budget_final_reserve_tokens": (
-            execution.token_budget_final_reserve_tokens
-            if execution
-            else None
+            execution.token_budget_final_reserve_tokens if execution else None
         ),
         "budget_consumption": budget_consumption,
         "resume_by": run.resume_by.isoformat() if run.resume_by else None,
@@ -451,9 +426,7 @@ def _admin_run_detail(run):
             "sequence": step.sequence,
             "events": events,
             "usage": detail.get("usage"),
-            "updated_at": (
-                step.updated_at.isoformat() if step.updated_at else None
-            ),
+            "updated_at": (step.updated_at.isoformat() if step.updated_at else None),
         }
         if step.step_type == "multimodal":
             reason = detail.get("reason")
@@ -471,13 +444,11 @@ def _admin_run_detail(run):
     if run.input_message:
         direct_attachment_uuids = {
             str(value)
-            for value in run.input_message.attachments.values_list(
-                "uuid", flat=True
-            )
+            for value in run.input_message.attachments.values_list("uuid", flat=True)
         }
-        selected = (
-            run.execution.runtime_snapshot or {}
-        ).get("session_attachment_uuids", [])
+        selected = (run.execution.runtime_snapshot or {}).get(
+            "session_attachment_uuids", []
+        )
         selected_images = get_session_image_attachments(
             run.session,
             selected,
@@ -505,42 +476,44 @@ def _admin_run_detail(run):
             if str(attachment.get("uuid")) in direct_attachment_uuids
             else "inherited"
         )
-    output_files = RunOutputFileSerializer(
-        run.output_files.all(), many=True
-    ).data
-    row.update({
-        "question": (
-            run.input_message.content if run.input_message else ""
-        ) or "",
-        "attachments": attachments,
-        "answer": (out.content if out else "") or "",
-        "citations": public_run_citations(run.citations),
-        "output_files": output_files,
-        "error": run.error or "",
-        "agent_rounds": agent_rounds,
-        "failure_summary": _admin_run_failure_summary(run),
-        "trace_event_count": run.trace_events.count(),
-        "steps": steps,
-        "execution": {
-            "task": execution.task,
-            "status": execution.status,
-            "target_dirs": execution.target_dirs,
-            "loaded_skills": sanitize_loaded_skills(
-                execution.loaded_skills
+    output_files = RunOutputFileSerializer(run.output_files.all(), many=True).data
+    row.update(
+        {
+            "question": (run.input_message.content if run.input_message else "") or "",
+            "attachments": attachments,
+            "answer": (out.content if out else "") or "",
+            "citations": public_run_citations(run.citations),
+            "output_files": output_files,
+            "error": run.error or "",
+            "agent_rounds": agent_rounds,
+            "failure_summary": _admin_run_failure_summary(run),
+            "trace_event_count": run.trace_events.count(),
+            "steps": steps,
+            "execution": (
+                {
+                    "task": execution.task,
+                    "status": execution.status,
+                    "target_dirs": execution.target_dirs,
+                    "loaded_skills": sanitize_loaded_skills(execution.loaded_skills),
+                    "loaded_mcps": sanitize_loaded_mcps(execution.loaded_mcps),
+                }
+                if execution
+                else None
             ),
-            "loaded_mcps": sanitize_loaded_mcps(execution.loaded_mcps),
-        } if execution else None,
-    })
+        }
+    )
     if model_usage:
         row.update(model_usage)
     else:
-        row.update({
-            "cached_tokens": 0,
-            "reasoning_tokens": 0,
-            "subagent_model_calls": 0,
-            "models_used": [],
-            "model_calls": [],
-        })
+        row.update(
+            {
+                "cached_tokens": 0,
+                "reasoning_tokens": 0,
+                "subagent_model_calls": 0,
+                "models_used": [],
+                "model_calls": [],
+            }
+        )
     return row
 
 
@@ -590,9 +563,7 @@ class AdminRunListView(APIView):
                 qs = qs.filter(lensnode__uuid=lensnode_uuid)
         model = (params.get("model") or "").strip()
         if model:
-            qs = qs.filter(
-                execution__runtime_snapshot__model_refs__agent=model
-            )
+            qs = qs.filter(execution__runtime_snapshot__model_refs__agent=model)
         run_status = (params.get("status") or "").strip()
         keyword = (params.get("q") or "").strip()
         if keyword:
@@ -603,12 +574,8 @@ class AdminRunListView(APIView):
         end_date = parse_date((params.get("end_date") or "").strip())
         if end_date:
             qs = qs.filter(created_at__date__lte=end_date)
-        summary_rows = qs.order_by().values("status").annotate(
-            count=Count("pk")
-        )
-        status_counts = {
-            item["status"]: item["count"] for item in summary_rows
-        }
+        summary_rows = qs.order_by().values("status").annotate(count=Count("pk"))
+        status_counts = {item["status"]: item["count"] for item in summary_rows}
         summary = {
             "total": sum(status_counts.values()),
             **{
@@ -618,9 +585,7 @@ class AdminRunListView(APIView):
         }
         if run_status:
             if run_status == "active":
-                qs = qs.filter(
-                    status__in=[Run.Status.RUNNING, Run.Status.STREAMING]
-                )
+                qs = qs.filter(status__in=[Run.Status.RUNNING, Run.Status.STREAMING])
             else:
                 qs = qs.filter(status=run_status)
 
@@ -639,14 +604,16 @@ class AdminRunListView(APIView):
 
         total = qs.count()
         start = (page - 1) * page_size
-        rows = [_admin_run_row(run) for run in qs[start:start + page_size]]
-        return Response({
-            "results": rows,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "summary": summary,
-        })
+        rows = [_admin_run_row(run) for run in qs[start : start + page_size]]
+        return Response(
+            {
+                "results": rows,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "summary": summary,
+            }
+        )
 
 
 class AdminRunDetailView(APIView):
@@ -733,9 +700,7 @@ class AdminRunCancelView(APIView):
             if hasattr(run, "execution"):
                 run.execution.status = RunExecution.Status.CANCELLED
                 run.execution.finished_at = now
-                run.execution.save(
-                    update_fields=["status", "finished_at"]
-                )
+                run.execution.save(update_fields=["status", "finished_at"])
         cancel_run_on_lensnode(run)
         return Response(_admin_run_row(run))
 
@@ -864,16 +829,13 @@ def _run_trace_summary(run):
         last_timestamp=Max("timestamp"),
         model_calls=Count(
             "call_id",
-            filter=(
-                Q(event_type__startswith="model.") & ~Q(call_id="")
-            ),
+            filter=(Q(event_type__startswith="model.") & ~Q(call_id="")),
             distinct=True,
         ),
         tool_calls=Count(
             "call_id",
             filter=(
-                Q(event_type__startswith="tool.")
-                | Q(event_type__startswith="subtool.")
+                Q(event_type__startswith="tool.") | Q(event_type__startswith="subtool.")
             )
             & ~Q(call_id=""),
             distinct=True,
@@ -966,9 +928,7 @@ class AdminRunTrajectoryView(APIView):
             queryset = queryset.filter(event_type__startswith=f"{category}.")
         call_id = (params.get("call_id") or "").strip()[:128]
         if call_id:
-            queryset = queryset.filter(
-                Q(call_id=call_id) | Q(parent_call_id=call_id)
-            )
+            queryset = queryset.filter(Q(call_id=call_id) | Q(parent_call_id=call_id))
         keyword = (params.get("q") or "").strip()[:256]
         if keyword:
             queryset = queryset.annotate(

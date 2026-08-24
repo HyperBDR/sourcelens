@@ -1,5 +1,5 @@
-from lensnode.agent_runtime.messages import build_initial_messages
 from lensnode.agent_runtime.direct_answer import _answer_general_chat_directly
+from lensnode.agent_runtime.messages import build_initial_messages
 
 
 def test_build_initial_messages_includes_current_images():
@@ -45,7 +45,7 @@ def test_build_initial_messages_does_not_replay_history_for_images():
 def test_direct_answer_includes_current_images():
     class Model:
         def invoke(self, messages, runtime_control_call=False):
-            assert messages[-1].content[1]["type"] == "image_url"
+            assert messages[-1]["content"][1]["type"] == "image_url"
             return type("Response", (), {"content": "Image described."})()
 
     answer = _answer_general_chat_directly(

@@ -60,6 +60,9 @@ services:
       - ./.env.dev
     environment:
       WORKSPACE_ROOT: /opt/backend
+      LENSNODE_TOKEN: ${LENSNODE_TOKEN:-dev-lensnode-token}
+      LENSNODE_AI_GATEWAY_URL: >-
+        http://backend-api:8000/api/lens/lensnode/ai-gateway/
       # Development login must not depend on the external Turnstile service.
       TURNSTILE_ENABLED: "false"
       TURNSTILE_SECRET_KEY: ""

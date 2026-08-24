@@ -111,4 +111,8 @@ const onChange = (event) => {
 .base-date-input.is-empty {
   color: transparent;
 }
+
+.base-date-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+}
 </style>

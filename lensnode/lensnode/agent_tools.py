@@ -5,8 +5,8 @@ import math
 import mimetypes
 import os
 import re
-import signal
 import shlex
+import signal
 import stat
 import subprocess
 import sys
@@ -29,10 +29,11 @@ from .workspace import (
     is_path_excluded,
     read_workspace_window,
     retrieval_path,
-    search_workspace as search_workspace_files,
+)
+from .workspace import search_workspace as search_workspace_files
+from .workspace import (
     target_scope,
 )
-
 
 # Tools that emit their own tool.<name>.start/.done events. The generic
 # tool.<name>.invoke event is suppressed for these to avoid duplicate trace
@@ -61,9 +62,7 @@ _SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_CALL = 50 * 1024 * 1024
 _SKILL_SCRIPT_DEFAULT_MAX_OUTPUT_BYTES_PER_RUN = 200 * 1024 * 1024
 _SKILL_SCRIPT_MAX_OUTPUT_BYTES_PER_RUN = 2 * 1024 * 1024 * 1024
 _APPEND_FILE_CHUNK_MAX_BYTES = 24 * 1024
-_APPEND_FILE_CHUNK_ID_PATTERN = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-)
+_APPEND_FILE_CHUNK_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _APPEND_FILE_MANIFEST = ".sourcelens-append-chunks.json"
 _SAVED_OUTPUT_LINE_MAX_CHARS = 500
 _STRUCTURED_OPERATIONS = {
@@ -181,9 +180,7 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
                 "mode": result.get("mode"),
                 "count": len(matches) or len(files) or len(counts),
                 "paths": paths[:8],
-                "summary": _search_done_summary(
-                    result, matches, files, counts, paths
-                ),
+                "summary": _search_done_summary(result, matches, files, counts, paths),
                 "preview": _clip(matches[0]["text"], 140) if matches else "",
                 "duration_ms": int((time.monotonic() - started) * 1000),
             },
@@ -485,9 +482,7 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
     if resources is not None and config is not None:
         tools.append(_build_append_file_tool(resources, emit_event))
         tools.append(
-            _build_save_deliverable_tool(
-                command, resources, config, emit_event
-            )
+            _build_save_deliverable_tool(command, resources, config, emit_event)
         )
     return tools
 
@@ -570,17 +565,13 @@ class _ValidateRecordsArgs(BaseModel):
     path: str = Field(
         default="",
         max_length=512,
-        description=(
-            "Optional record-list path. Leave empty for {total, items}."
-        ),
+        description=("Optional record-list path. Leave empty for {total, items}."),
     )
     expected_count: int | None = Field(
         default=None,
         ge=0,
         le=1000000,
-        description=(
-            "Expected record count. Leave empty to use wrapper total."
-        ),
+        description=("Expected record count. Leave empty to use wrapper total."),
     )
     unique_by: list[str] = Field(
         default_factory=list,
@@ -621,9 +612,7 @@ class _RunSkillTransformArgs(BaseModel):
     """Args schema for running a declared Skill Transform."""
 
     skill: str = Field(description="Loaded Skill slug or name.")
-    transform: str = Field(
-        description="Transform name declared in sourcelens.json."
-    )
+    transform: str = Field(description="Transform name declared in sourcelens.json.")
     stdin_ref: str = Field(
         min_length=1,
         max_length=512,
@@ -647,9 +636,7 @@ class _CallSkillApiArgs(BaseModel):
     path: str = Field(default="", description="Path relative to the base URL.")
     headers: dict[str, str] = Field(
         default_factory=dict,
-        description=(
-            "Headers with {{ENV_NAME}} or {{session.name}} references."
-        ),
+        description=("Headers with {{ENV_NAME}} or {{session.name}} references."),
     )
     query: dict[str, object] = Field(
         default_factory=dict,
@@ -694,7 +681,12 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
 
         emit("tool.save_deliverable.start", {"path": path, "summary": path})
         root = resources.root.resolve()
-        resolved = (resources.root / path.lstrip("/")).resolve()
+        requested_path = Path(path)
+        resolved = (
+            requested_path
+            if requested_path.is_absolute()
+            else resources.root / requested_path
+        ).resolve()
         scratch_root = Path("/tmp").resolve()
         try:
             resolved.relative_to(root)
@@ -702,7 +694,7 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
         except ValueError:
             try:
                 resolved.relative_to(scratch_root)
-                allowed = True
+                allowed = requested_path.is_absolute()
             except ValueError:
                 allowed = False
         if not allowed:
@@ -741,9 +733,7 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
             )
         data = resolved.read_bytes()
         filename = resolved.name
-        content_type = (
-            mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        )
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         try:
             with httpx.Client(
                 timeout=config.request_timeout_s,
@@ -765,9 +755,7 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
                 "tool.save_deliverable.failed",
                 {"path": path, "error": str(exc)},
             )
-            return _json(
-                {"ok": False, "error": "DELIVERY_FAILED", "message": str(exc)}
-            )
+            return _json({"ok": False, "error": "DELIVERY_FAILED", "message": str(exc)})
         emit(
             "tool.save_deliverable.done",
             {
@@ -793,9 +781,7 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
                 "ok": True,
                 "filename": filename,
                 "byte_size": len(data),
-                "message": (
-                    f"Delivered '{filename}' to the user for download."
-                ),
+                "message": (f"Delivered '{filename}' to the user for download."),
             }
         )
 
@@ -902,15 +888,11 @@ def _build_append_file_tool(resources, emit_event):
                 if existing.get("state") == "completed":
                     return _json({"ok": True, "duplicate": True})
                 if existing.get("state") != "pending":
-                    return _json(
-                        {"ok": False, "error": "CHUNK_STATE_INVALID"}
-                    )
+                    return _json({"ok": False, "error": "CHUNK_STATE_INVALID"})
                 offset = existing.get("offset")
                 byte_size = existing.get("byte_size")
                 if not isinstance(offset, int) or byte_size != content_bytes:
-                    return _json(
-                        {"ok": False, "error": "CHUNK_STATE_INVALID"}
-                    )
+                    return _json({"ok": False, "error": "CHUNK_STATE_INVALID"})
                 try:
                     if resolved.exists():
                         with resolved.open("rb") as output:
@@ -922,9 +904,7 @@ def _build_append_file_tool(resources, emit_event):
                         existing["state"] = "completed"
                         save_manifest(chunks)
                         return _json({"ok": True, "duplicate": True})
-                    current_size = (
-                        resolved.stat().st_size if resolved.exists() else 0
-                    )
+                    current_size = resolved.stat().st_size if resolved.exists() else 0
                     if current_size != offset:
                         return _json(
                             {
@@ -939,11 +919,7 @@ def _build_append_file_tool(resources, emit_event):
                 if existing is None:
                     chunks[manifest_key] = {
                         "byte_size": content_bytes,
-                        "offset": (
-                            resolved.stat().st_size
-                            if resolved.exists()
-                            else 0
-                        ),
+                        "offset": (resolved.stat().st_size if resolved.exists() else 0),
                         "sha256": content_sha256,
                         "state": "pending",
                     }
@@ -1084,12 +1060,8 @@ def _build_skill_api_tool(resources, timeout_s=60, emit_event=None):
             captured_names = []
             for name, response_path in (capture or {}).items():
                 normalized_name = str(name or "").strip()
-                if not re.fullmatch(
-                    r"[A-Za-z][A-Za-z0-9_]{0,63}", normalized_name
-                ):
-                    return _json(
-                        {"ok": False, "error": "INVALID_CAPTURE_NAME"}
-                    )
+                if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", normalized_name):
+                    return _json({"ok": False, "error": "INVALID_CAPTURE_NAME"})
                 captured_value = _json_path_value(payload, response_path)
                 if captured_value in (None, ""):
                     return _json(
@@ -1155,18 +1127,14 @@ def build_general_chat_tools(
         ),
         300,
     )
-    stdout_preview_chars = tool_policy.get(
-        "skill_script_stdout_preview_chars"
-    )
+    stdout_preview_chars = tool_policy.get("skill_script_stdout_preview_chars")
     if stdout_preview_chars is None:
         stdout_preview_chars = tool_policy.get("skill_script_stdout_limit")
     stdout_limit = min(
         _positive_int(stdout_preview_chars, 4000),
         100000,
     )
-    stderr_preview_chars = tool_policy.get(
-        "skill_script_stderr_preview_chars"
-    )
+    stderr_preview_chars = tool_policy.get("skill_script_stderr_preview_chars")
     if stderr_preview_chars is None:
         stderr_preview_chars = tool_policy.get("skill_script_stderr_limit")
     stderr_limit = min(
@@ -1241,9 +1209,7 @@ def build_general_chat_tools(
         normalized_operation = str(operation or "").strip().lower()
         is_validation = normalized_operation == "validate_records"
         call_counter = (
-            structured_validation_calls
-            if is_validation
-            else structured_analysis_calls
+            structured_validation_calls if is_validation else structured_analysis_calls
         )
         call_counter["count"] += 1
         call_count = call_counter["count"]
@@ -1592,9 +1558,7 @@ def build_general_chat_tools(
                     "invocation_id": invocation_id,
                 },
             )
-            return _json(
-                {"ok": False, "error": "TRANSFORM_ARGUMENTS_TOO_LARGE"}
-            )
+            return _json({"ok": False, "error": "TRANSFORM_ARGUMENTS_TOO_LARGE"})
 
         transform_calls["count"] += 1
         call_count = transform_calls["count"]
@@ -1762,9 +1726,7 @@ def build_general_chat_tools(
                     "summary": f"{display_name} · failed",
                 },
             )
-            return _json(
-                {"ok": False, "error": "TRANSFORM_EXECUTION_FAILED"}
-            )
+            return _json({"ok": False, "error": "TRANSFORM_EXECUTION_FAILED"})
 
         duration_ms = int((time.monotonic() - started) * 1000)
         stdout = _persist_large_tool_output(
@@ -1882,9 +1844,7 @@ def build_general_chat_tools(
                 "quota_scope": "per_run",
                 "output_bytes_this_call": 0,
                 "output_bytes_this_run": script_output_bytes["count"],
-                "max_output_bytes_per_call": (
-                    script_max_output_bytes_per_call
-                ),
+                "max_output_bytes_per_call": (script_max_output_bytes_per_call),
                 "max_output_bytes_per_run": script_max_output_bytes_per_run,
             }
             emit("tool.run_skill_script.output_quota_exceeded", detail)
@@ -1914,8 +1874,7 @@ def build_general_chat_tools(
         )
         output_quota_scope = (
             "per_call"
-            if script_max_output_bytes_per_call
-            <= remaining_run_output_bytes
+            if script_max_output_bytes_per_call <= remaining_run_output_bytes
             else "per_run"
         )
         output_byte_limit = min(
@@ -1968,9 +1927,7 @@ def build_general_chat_tools(
                 "quota_scope": output_quota_scope,
                 "output_bytes_this_call": completed["output_bytes"],
                 "output_bytes_this_run": script_output_bytes["count"],
-                "max_output_bytes_per_call": (
-                    script_max_output_bytes_per_call
-                ),
+                "max_output_bytes_per_call": (script_max_output_bytes_per_call),
                 "max_output_bytes_per_run": script_max_output_bytes_per_run,
             }
             emit("tool.run_skill_script.output_quota_exceeded", detail)
@@ -2046,9 +2003,7 @@ def build_general_chat_tools(
                 "stdout_truncated": payload["stdout_truncated"],
                 "call_count": script_calls["count"],
                 "output_bytes_this_run": script_output_bytes["count"],
-                "summary": (
-                    f"{display_name} · rc={completed['returncode']}"
-                ),
+                "summary": (f"{display_name} · rc={completed['returncode']}"),
             },
         )
         return _json(payload)
@@ -2073,9 +2028,7 @@ def build_general_chat_tools(
     ]
     if config is not None:
         tools.append(
-            _build_save_deliverable_tool(
-                command, resources, config, emit_event
-            )
+            _build_save_deliverable_tool(command, resources, config, emit_event)
         )
     return tools
 
@@ -2147,12 +2100,8 @@ def _structured_analysis_failure(
     }
     if raw is not None:
         input_sha256 = hashlib.sha256(raw).hexdigest()
-        detail.update(
-            {"input_bytes": len(raw), "input_sha256": input_sha256}
-        )
-        payload.update(
-            {"input_bytes": len(raw), "input_sha256": input_sha256}
-        )
+        detail.update({"input_bytes": len(raw), "input_sha256": input_sha256})
+        payload.update({"input_bytes": len(raw), "input_sha256": input_sha256})
     emit("tool.analyze_structured_output.failed", detail)
     return _json(payload)
 
@@ -2245,9 +2194,8 @@ def _validate_structured_records(
     if len(target) > _STRUCTURED_VALIDATION_MAX_ITEMS:
         raise ValueError("VALIDATION_ITEM_LIMIT_EXCEEDED")
     for names in (unique_by, required_fields):
-        if (
-            any(not str(item).strip() for item in names)
-            or len(set(names)) != len(names)
+        if any(not str(item).strip() for item in names) or len(set(names)) != len(
+            names
         ):
             raise ValueError("OPERATION_INPUT_INVALID")
 
@@ -2261,9 +2209,7 @@ def _validate_structured_records(
                 value = _structured_record_value(item, item_field)
             except ValueError:
                 value = None
-            if value is None or (
-                isinstance(value, str) and not value.strip()
-            ):
+            if value is None or (isinstance(value, str) and not value.strip()):
                 missing_required[item_field] += 1
 
         if not unique_by:
@@ -2274,9 +2220,7 @@ def _validate_structured_records(
                 value = _structured_record_value(item, item_field)
             except ValueError:
                 value = None
-            if value is None or (
-                isinstance(value, str) and not value.strip()
-            ):
+            if value is None or (isinstance(value, str) and not value.strip()):
                 key_values = []
                 break
             key_values.append(value)
@@ -2295,9 +2239,7 @@ def _validate_structured_records(
             seen_keys.add(key)
 
     total_count = len(target)
-    count_matches = (
-        None if expected_count is None else total_count == expected_count
-    )
+    count_matches = None if expected_count is None else total_count == expected_count
     valid = (
         count_matches is not False
         and duplicate_count == 0
@@ -2350,10 +2292,7 @@ def _apply_structured_operation(
             required_fields=fields,
         )
     if operation == "project":
-        if (
-            not isinstance(target, list)
-            or not fields
-        ):
+        if not isinstance(target, list) or not fields:
             raise ValueError("OPERATION_INPUT_INVALID")
         return _project_structured_items(
             target[offset : offset + limit],
@@ -2372,9 +2311,7 @@ def _apply_structured_operation(
             values = []
             for item_field in group_by:
                 try:
-                    values.append(
-                        _structured_record_value(item, item_field)
-                    )
+                    values.append(_structured_record_value(item, item_field))
                 except ValueError as exc:
                     raise ValueError("FIELD_NOT_FOUND") from exc
             try:
@@ -2441,9 +2378,7 @@ def _apply_structured_operation(
     if len(items) <= limit:
         sampled = items
     else:
-        sampled = [
-            items[index * len(items) // limit] for index in range(limit)
-        ]
+        sampled = [items[index * len(items) // limit] for index in range(limit)]
     return _project_structured_items(sampled, fields)
 
 
@@ -2452,10 +2387,7 @@ def _project_structured_items(items, fields):
 
     if not fields:
         return items
-    if (
-        any(not str(item).strip() for item in fields)
-        or len(set(fields)) != len(fields)
-    ):
+    if any(not str(item).strip() for item in fields) or len(set(fields)) != len(fields):
         raise ValueError("OPERATION_INPUT_INVALID")
     projected = []
     for item in items:
@@ -2806,9 +2738,10 @@ def _run_bounded_skill_script(
                 except OSError:
                     pass
 
-        with stdout_path.open("wb") as stdout_file, stderr_path.open(
-            "wb"
-        ) as stderr_file:
+        with (
+            stdout_path.open("wb") as stdout_file,
+            stderr_path.open("wb") as stderr_file,
+        ):
             stdout_thread = threading.Thread(
                 target=drain,
                 args=(process.stdout, stdout_file),
@@ -2853,10 +2786,7 @@ def _run_bounded_skill_script(
             stdin_thread.join()
             if capture_errors:
                 raise capture_errors[0]
-            if (
-                termination_reason is None
-                and output_quota_exceeded.is_set()
-            ):
+            if termination_reason is None and output_quota_exceeded.is_set():
                 termination_reason = "output_quota"
 
         return {
@@ -2866,9 +2796,7 @@ def _run_bounded_skill_script(
             "stdout_path": stdout_path,
             "stderr_path": stderr_path,
             "output_bytes": captured["bytes"],
-            "output_quota_exceeded": (
-                termination_reason == "output_quota"
-            ),
+            "output_quota_exceeded": (termination_reason == "output_quota"),
             "timed_out": termination_reason == "timeout",
         }
     except OSError:
@@ -2895,14 +2823,9 @@ def _persist_large_tool_output(
     raw = value if isinstance(value, bytes) else text.encode("utf-8")
     output_format, synopsis = _saved_output_synopsis(raw, text)
     structured_ref = (
-        output_format in ("json", "csv")
-        and len(text) > _STRUCTURED_REF_MIN_CHARS
+        output_format in ("json", "csv") and len(text) > _STRUCTURED_REF_MIN_CHARS
     )
-    truncated = (
-        len(text) > limit
-        or (force_ref and bool(raw))
-        or structured_ref
-    )
+    truncated = len(text) > limit or (force_ref and bool(raw)) or structured_ref
     output_ref = None
     if truncated:
         output_path = Path(persisted_path) if persisted_path else None
@@ -3074,9 +2997,7 @@ def _redact_command_args(args):
             continue
         key, separator, _argument_value = value.partition("=")
         normalized = key.lstrip("-").lower().replace("_", "-")
-        sensitive = any(
-            fragment in normalized for fragment in sensitive_fragments
-        )
+        sensitive = any(fragment in normalized for fragment in sensitive_fragments)
         if value.startswith("-") and sensitive:
             if separator:
                 output.append(f"{key}=[REDACTED]")
@@ -3157,10 +3078,7 @@ def _resolve_repo_path(path, target_dirs):
     candidates = []
     if path:
         candidates.append(Path(path).resolve())
-    candidates.extend(
-        Path(item.get("path", "")).resolve()
-        for item in target_dirs
-    )
+    candidates.extend(Path(item.get("path", "")).resolve() for item in target_dirs)
     for candidate in candidates:
         for root_item in target_dirs:
             root = Path(root_item.get("path", "")).resolve()
@@ -3355,8 +3273,7 @@ def _resolve_skill_api_references(value, environment, session):
         }
     if isinstance(value, list):
         return [
-            _resolve_skill_api_references(item, environment, session)
-            for item in value
+            _resolve_skill_api_references(item, environment, session) for item in value
         ]
     if not isinstance(value, str):
         return value
@@ -3394,10 +3311,7 @@ def _skill_api_response_payload(response):
 
     content_length = response.headers.get("content-length")
     try:
-        if (
-            content_length
-            and int(content_length) > _SKILL_API_MAX_RESPONSE_BYTES
-        ):
+        if content_length and int(content_length) > _SKILL_API_MAX_RESPONSE_BYTES:
             return {"detail": "Response body exceeded the 100 KB limit."}
     except ValueError:
         pass
@@ -3450,8 +3364,7 @@ def _skill_api_request_allowed(
         methods = {
             str(method).upper()
             for method in route.get("methods") or []
-            if str(method).upper()
-            in {"GET", "POST", "PUT", "PATCH", "DELETE"}
+            if str(method).upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}
         }
         if request_method not in methods:
             continue
@@ -3460,8 +3373,10 @@ def _skill_api_request_allowed(
             return True
         prefix = route.get("path_prefix")
         normalized_prefix = _normalized_skill_api_path(prefix)
-        if prefix and normalized_prefix and request_path.startswith(
-            normalized_prefix.rstrip("/") + "/"
+        if (
+            prefix
+            and normalized_prefix
+            and request_path.startswith(normalized_prefix.rstrip("/") + "/")
         ):
             return True
     return False
@@ -3492,16 +3407,12 @@ def _json_path_value(payload, path):
 def _redact_skill_api_payload(payload, secret_values=()):
     """Redact credentials and tokens from an external API response."""
 
-    secrets = [
-        str(value) for value in secret_values if value not in (None, "")
-    ]
+    secrets = [str(value) for value in secret_values if value not in (None, "")]
     if isinstance(payload, dict):
         return {
             key: (
                 "***"
-                if _SENSITIVE_RESPONSE_KEY_RE.search(
-                    _normalized_sensitive_key(key)
-                )
+                if _SENSITIVE_RESPONSE_KEY_RE.search(_normalized_sensitive_key(key))
                 else _redact_skill_api_payload(value, secrets)
             )
             for key, value in payload.items()
@@ -3585,9 +3496,7 @@ def _search_done_summary(result, matches, files, counts, paths):
     if mode == "count":
         return f"{len(counts)} files"
     if matches:
-        return (
-            f"{len(matches)} matches in {len(paths)} files · {_names(paths)}"
-        )
+        return f"{len(matches)} matches in {len(paths)} files · {_names(paths)}"
     if files:
         return f"no matches · listing {len(files)} files"
     return "no matches"
