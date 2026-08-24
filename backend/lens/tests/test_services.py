@@ -168,6 +168,10 @@ class LensServiceTests(TransactionTestCase):
                     max_turns,
                 )
 
+    def test_max_agent_turns_falls_back_to_balanced(self):
+        self.assertEqual(max_agent_turns_for_rounds("unknown"), 26)
+        self.assertEqual(max_agent_turns_for_rounds(None), 26)
+
     def test_explicit_language_request_overrides_profile_language(self):
         self.user.profile.language = "en-US"
         self.user.profile.save(update_fields=["language"])
