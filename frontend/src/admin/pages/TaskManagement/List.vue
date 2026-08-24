@@ -16,9 +16,11 @@
         <div class="flex min-h-0 flex-col p-6">
           <!-- Toolbar -->
           <div
-            class="mb-6 flex flex-shrink-0 flex-col items-start justify-between gap-4 sm:flex-row sm:items-center"
+            class="mb-6 flex flex-shrink-0 flex-col items-start justify-between gap-3 sm:flex-row sm:flex-nowrap sm:items-center"
           >
-            <div class="flex items-center gap-3 flex-wrap">
+            <div
+              class="flex min-w-0 flex-1 flex-nowrap items-center gap-2"
+            >
               <label
                 class="text-sm font-medium text-gray-700 whitespace-nowrap"
               >
@@ -26,7 +28,7 @@
               </label>
               <BaseSelect
                 v-model="filterModule"
-                class="min-w-[10rem]"
+                class="min-w-[6rem]"
                 :full-width="false"
                 @change="onFilterChange"
               >
@@ -50,7 +52,7 @@
               </label>
               <BaseSelect
                 v-model="filterUserId"
-                class="min-w-[10rem]"
+                class="min-w-[6rem]"
                 :full-width="false"
                 @change="onFilterChange"
               >
@@ -61,31 +63,39 @@
                   {{ u.label }}
                 </option>
               </BaseSelect>
-              <span class="text-sm text-gray-600 whitespace-nowrap">{{
-                t('taskManagement.list.dateRange')
-              }}</span>
-              <BaseDateInput
-                v-model="filterStartDate"
-                compact
-                :max="filterEndDate || undefined"
-                :mobile-touch="false"
-                @change="onFilterChange"
-              />
-              <span class="text-gray-400">–</span>
-              <BaseDateInput
-                v-model="filterEndDate"
-                compact
-                :min="filterStartDate || undefined"
-                :mobile-touch="false"
-                @change="onFilterChange"
-              />
+              <div class="flex shrink-0 items-center gap-3">
+                <span class="text-sm text-gray-600 whitespace-nowrap">{{
+                  t('taskManagement.list.dateRange')
+                }}</span>
+                <BaseDateInput
+                  v-model="filterStartDate"
+                  compact
+                  class="!w-28"
+                  input-class="text-xs"
+                  :max="filterEndDate || undefined"
+                  :mobile-touch="false"
+                  @change="onFilterChange"
+                />
+                <span class="text-gray-400">–</span>
+                <BaseDateInput
+                  v-model="filterEndDate"
+                  compact
+                  class="!w-28"
+                  input-class="text-xs"
+                  :min="filterStartDate || undefined"
+                  :mobile-touch="false"
+                  @change="onFilterChange"
+                />
+              </div>
             </div>
 
-            <div class="flex items-center gap-3 w-full sm:w-auto">
+            <div
+              class="flex min-w-0 shrink-0 items-center gap-3 w-full sm:w-auto"
+            >
               <BaseInput
                 v-model="searchQuery"
                 :placeholder="t('taskManagement.list.searchPlaceholder')"
-                class="flex-1 sm:w-64"
+                class="min-w-0 flex-1 sm:w-[17rem]"
                 @update:modelValue="debouncedLoad"
               >
                 <template #icon>
