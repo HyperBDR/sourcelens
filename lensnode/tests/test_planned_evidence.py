@@ -92,6 +92,30 @@ def test_retrieval_plan_accepts_planner_source_window_field_names():
     assert plan.source_windows[0].end_line == 195
 
 
+def test_retrieval_plan_accepts_detailed_bounded_objective():
+    objective = (
+        "Investigate the agent-syncer invalid block number failure and "
+        "trace the call path from SyncManager.StartSync through "
+        "Syncer.Start into NewBlockDeviceSyncer. Identify the exact "
+        "validation logic, determine how the device size and block count "
+        "are derived, distinguish device-mapper behavior from ordinary "
+        "block devices, and find related error handling, retries, tests, "
+        "or fixes. "
+        + "Preserve this relevant retrieval detail. " * 8
+    ).strip()
+
+    assert len(objective) > 500
+
+    plan = parse_retrieval_plan({"objective": objective})
+
+    assert plan.objective == objective
+
+
+def test_retrieval_plan_rejects_objective_over_its_dedicated_limit():
+    with pytest.raises(PlanValidationError):
+        parse_retrieval_plan({"objective": "x" * 2001})
+
+
 def test_retrieval_plan_rejects_missing_objective_and_invalid_operation():
     with pytest.raises(PlanValidationError):
         parse_retrieval_plan({"literal_queries": ["error"]})

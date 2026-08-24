@@ -41,6 +41,7 @@ from ..plugins import collect_agent_runtime_contributions
 from ..planned_evidence import (
     ALLOWED_CODEGRAPH_OPERATIONS,
     EvidenceExecutor,
+    MAX_OBJECTIVE_CHARS,
     build_evidence_bundle,
     assess_code_analysis_capabilities,
     parse_retrieval_plan,
@@ -1951,7 +1952,8 @@ def _planned_planner_prompt(
         "tools. The backend will execute every bounded operation. Include "
         "objective, project, repository, revision, question_type, "
         "evidence_requirements, codegraph_queries, literal_queries, "
-        "clarification, max_files, max_fallback_rounds, and budgets. If a "
+        "clarification, max_files, max_fallback_rounds, and budgets. Keep "
+        f"objective under {MAX_OBJECTIVE_CHARS} characters. If a "
         "critical input is missing or the target is materially ambiguous, "
         "set clarification to an object with a plain-text question, reason, "
         "and answer_type=text; do not guess or retrieve until the answer "
@@ -2006,6 +2008,7 @@ def _planned_planner_repair_prompt(
         "retrieval plan. Required fields are objective, question_type, "
         "evidence_requirements, codegraph_queries, literal_queries, "
         "source_windows, max_files, max_fallback_rounds, and budgets. "
+        f"Keep objective under {MAX_OBJECTIVE_CHARS} characters. "
         "Use path, start_line, and end_line for source window fields. "
         f"{codegraph_contract} literal_queries must be an array of plain "
         "strings, never objects. Keep all searches bounded and set "

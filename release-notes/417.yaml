@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed detailed Code Analysis plans falling back to unrelated searches when
+  their objective description exceeded the search-query length limit.
+zh-CN: >-
+  修复代码分析的详细规划目标超过检索词长度限制时，错误降级为无关搜索的问题。
