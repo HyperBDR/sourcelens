@@ -1658,6 +1658,14 @@ TOKEN_BUDGET_PROFILES = {
 
 RUN_TIMEOUT_SECONDS = 3600
 
+AGENT_TURNS_BY_ROUNDS = {
+    Assistant.AgentRounds.FLASH: 5,
+    Assistant.AgentRounds.FAST: 13,
+    Assistant.AgentRounds.BALANCED: 26,
+    Assistant.AgentRounds.DEEP: 50,
+    Assistant.AgentRounds.MAX: 100,
+}
+
 
 def token_budget_for_profile(profile):
     """Return the bounded token budget for an Assistant profile."""
@@ -1674,6 +1682,15 @@ def run_timeout_for_rounds(agent_rounds):
 
     del agent_rounds
     return RUN_TIMEOUT_SECONDS
+
+
+def max_agent_turns_for_rounds(agent_rounds):
+    """Return the model-turn budget for one Assistant analysis level."""
+
+    return AGENT_TURNS_BY_ROUNDS.get(
+        agent_rounds,
+        AGENT_TURNS_BY_ROUNDS[Assistant.AgentRounds.BALANCED],
+    )
 
 
 @transaction.atomic
@@ -2288,6 +2305,7 @@ def dispatch_run_to_lensnode(
                     agent_model_ref
                 ),
                 "agent_rounds": agent_rounds,
+                "max_agent_turns": max_agent_turns_for_rounds(agent_rounds),
                 "resume": resume,
                 "run_timeout_s": run_timeout_s,
                 "remaining_run_timeout_s": remaining_run_timeout_s,

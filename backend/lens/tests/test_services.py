@@ -68,6 +68,7 @@ from lens.services import (
     create_run_execution_snapshot,
     dispatch_run_to_lensnode,
     finish_lensnode_run,
+    max_agent_turns_for_rounds,
     rewrite_query,
     run_timeout_for_rounds,
 )
@@ -149,6 +150,22 @@ class LensServiceTests(TransactionTestCase):
                 self.assertEqual(
                     run_timeout_for_rounds(agent_rounds),
                     3600,
+                )
+
+    def test_max_agent_turns_follow_execution_strategy(self):
+        expected = {
+            "flash": 5,
+            "fast": 13,
+            "balanced": 26,
+            "deep": 50,
+            "max": 100,
+        }
+
+        for agent_rounds, max_turns in expected.items():
+            with self.subTest(agent_rounds=agent_rounds):
+                self.assertEqual(
+                    max_agent_turns_for_rounds(agent_rounds),
+                    max_turns,
                 )
 
     def test_explicit_language_request_overrides_profile_language(self):
@@ -1350,7 +1367,7 @@ class LensServiceTests(TransactionTestCase):
 
         payload = sender.call_args.args[1]["payload"]
         self.assertEqual(payload["agent_rounds"], "max")
-        self.assertNotIn("max_agent_turns", payload)
+        self.assertEqual(payload["max_agent_turns"], 100)
         self.assertEqual(payload["run_timeout_s"], 3600)
         self.assertEqual(payload["remaining_run_timeout_s"], 3300)
         self.assertEqual(execution.agent_rounds, "max")
