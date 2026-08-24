@@ -1958,7 +1958,8 @@ def _planned_planner_prompt(
         "arrives. Otherwise set clarification to null. Leave "
         "source_windows empty unless exact file paths and line ranges are "
         "already known; the executor derives source windows from retrieval "
-        "results. "
+        "results. If source_windows are provided, use path, start_line, and "
+        "end_line as the field names. "
         f"{codegraph_contract} literal_queries must be an array of plain "
         'strings (never objects), for example ["153301", "Sysconfig.ini"]. '
         "Use CodeGraph for structural questions and exact search for logs "
@@ -2005,6 +2006,7 @@ def _planned_planner_repair_prompt(
         "retrieval plan. Required fields are objective, question_type, "
         "evidence_requirements, codegraph_queries, literal_queries, "
         "source_windows, max_files, max_fallback_rounds, and budgets. "
+        "Use path, start_line, and end_line for source window fields. "
         f"{codegraph_contract} literal_queries must be an array of plain "
         "strings, never objects. Keep all searches bounded and set "
         "max_fallback_rounds to 1 or less. Do not answer the question."
