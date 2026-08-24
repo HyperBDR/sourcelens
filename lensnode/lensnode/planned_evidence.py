@@ -280,9 +280,17 @@ def parse_retrieval_plan(raw):
     for item in _list_value(raw.get("source_windows"))[:MAX_SOURCE_WINDOWS]:
         if not isinstance(item, dict):
             raise PlanValidationError("source window must be an object")
-        path = _required_text(item.get("path"), "source window path")
-        start = _positive_int(item.get("start_line"), 1)
+        path = _required_text(
+            item.get("path") or item.get("file_path"),
+            "source window path",
+        )
+        start = _positive_int(
+            item.get("start_line") or item.get("line_start"),
+            1,
+        )
         end = item.get("end_line")
+        if end is None:
+            end = item.get("line_end")
         if end is not None:
             end = _positive_int(end, start)
             if end < start:

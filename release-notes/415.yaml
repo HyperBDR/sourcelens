@@ -1,0 +1,7 @@
+type: fix
+audience: user
+en: >-
+  Fixed Code Analysis source-window plans falling back to broad searches when
+  the planner used compatible alternate field names.
+zh-CN: >-
+  修复代码分析规划器使用兼容字段名时，源码窗口计划错误降级为宽泛检索的问题。

@@ -69,6 +69,29 @@ def test_retrieval_plan_normalizes_bounded_limits():
     assert plan.literal_queries == ("raise None",)
 
 
+def test_retrieval_plan_accepts_planner_source_window_field_names():
+    plan = parse_retrieval_plan(
+        {
+            "objective": "inspect the failing block device path",
+            "source_windows": [
+                {
+                    "repository": "linux-agent-syncer",
+                    "file_path": "internal/service/block_device_syncer.go",
+                    "line_start": 160,
+                    "line_end": 195,
+                }
+            ],
+        }
+    )
+
+    assert len(plan.source_windows) == 1
+    assert plan.source_windows[0].path == (
+        "internal/service/block_device_syncer.go"
+    )
+    assert plan.source_windows[0].start_line == 160
+    assert plan.source_windows[0].end_line == 195
+
+
 def test_retrieval_plan_rejects_missing_objective_and_invalid_operation():
     with pytest.raises(PlanValidationError):
         parse_retrieval_plan({"literal_queries": ["error"]})
