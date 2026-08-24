@@ -1,0 +1,9 @@
+type: fix
+audience: user
+en: >-
+  Improved Code Analysis fallback and convergence: vague requests now ask for
+  a concrete target, unrelated questions stay workspace-grounded, and long
+  repeated retrieval loops are bounded with evidence-based wrap-up answers.
+zh-CN: >-
+  改进代码分析的回退与收敛：模糊请求现在会要求补充具体对象，无关问题保持
+  基于工作区回答，并通过执行轮次上限和证据综合终稿避免重复检索。
