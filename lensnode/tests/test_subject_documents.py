@@ -159,6 +159,35 @@ def test_prepare_materializes_converts_and_scopes_subject_document(
     assert not resources.root.exists()
 
 
+def test_prepare_materializes_utf8_text_subject_document(
+    inline_document_conversion,
+    monkeypatch,
+    tmp_path,
+):
+    content = "# Incident\n\nInvalid block number 0x000000".encode("utf-8")
+    command = _command(content)
+    command["subject_documents"][0].update(
+        {
+            "original_name": "incident.md",
+            "mime_type": "text/markdown",
+        }
+    )
+    monkeypatch.setattr(
+        "lensnode.runtime_resources._download_run_attachment",
+        lambda config, run_uuid, document, **kwargs: content,
+    )
+
+    resources = prepare_runtime_resources(_config(tmp_path), command)
+
+    source = resources.root / "subject-documents" / (
+        "attachment-123-incident.md"
+    )
+    converted = Path(f"{source}.sourcelens/content.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Invalid block number 0x000000" in converted
+
+
 def test_prepare_emits_replayable_document_progress(monkeypatch, tmp_path):
     content = b"%PDF-1.7\nsubject"
     command = _command(content)

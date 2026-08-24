@@ -15,7 +15,9 @@ from .path_rules import safe_filename
 from .path_rules import sidecar_path
 from .path_rules import source_sha256
 
-DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
+OFFICE_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx"}
+PLAIN_TEXT_EXTENSIONS = {".txt", ".md"}
+DOCUMENT_EXTENSIONS = OFFICE_DOCUMENT_EXTENSIONS | PLAIN_TEXT_EXTENSIONS
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 EMBEDDED_IMAGE_PREFIXES = {
     ".docx": "word/media/",
@@ -108,11 +110,30 @@ class BaseConverter:
         return {"name": self.name, "version": ""}
 
 
+class PlainTextDocumentConverter(BaseConverter):
+    """Read UTF-8 text and Markdown without an external converter."""
+
+    name = "plain_text"
+    extensions = PLAIN_TEXT_EXTENSIONS
+
+    def convert(self, path, context):
+        """Return the original UTF-8 content as searchable text."""
+
+        _check_runtime_cancelled(context)
+        _touch_runtime_activity(context)
+        text = path.read_text(encoding="utf-8")
+        return ConversionOutput(
+            text=text,
+            stats=document_stats(path),
+            cost=empty_cost_stats(),
+        )
+
+
 class MarkItDownDocumentConverter(BaseConverter):
     """Document converter backed by MarkItDown."""
 
     name = "markitdown"
-    extensions = DOCUMENT_EXTENSIONS
+    extensions = OFFICE_DOCUMENT_EXTENSIONS
 
     def convert(self, path, context):
         """Convert a document file into Markdown text."""
@@ -222,6 +243,7 @@ class ConverterRegistry:
 
 
 CONVERTERS = ConverterRegistry()
+CONVERTERS.register(PlainTextDocumentConverter())
 CONVERTERS.register(MarkItDownDocumentConverter())
 CONVERTERS.register(GatewayImageConverter())
 

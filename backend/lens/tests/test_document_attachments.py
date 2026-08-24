@@ -118,6 +118,20 @@ def _docx_upload(name="requirements.docx"):
     )
 
 
+def _text_upload(
+    name="notes.txt",
+    content="Production incident details",
+):
+    """Return one UTF-8 plain-text or Markdown upload."""
+
+    content_type = "text/markdown" if name.endswith(".md") else "text/plain"
+    return SimpleUploadedFile(
+        name,
+        content.encode("utf-8"),
+        content_type=content_type,
+    )
+
+
 def _compressed_docx_upload(name="compressed.docx"):
     """Return an OOXML archive with an unsafe expansion ratio."""
 
@@ -191,6 +205,44 @@ class DocumentAttachmentTests(TestCase):
         self.assertTrue(document_storage.exists(cached["storage_name"]))
         self.assertFalse(default_storage.exists(cached["storage_name"]))
         self.assertEqual(MessageAttachment.objects.count(), 0)
+
+    def test_upload_accepts_utf8_text_and_markdown_documents(self):
+        self.client.force_authenticate(self.user)
+
+        for name, expected_mime in (
+            ("incident.txt", "text/plain"),
+            ("analysis.md", "text/markdown"),
+        ):
+            with self.subTest(name=name):
+                response = self.client.post(
+                    (
+                        f"/api/lens/sessions/{self.session.uuid}/"
+                        "attachments/"
+                    ),
+                    {"file": _text_upload(name)},
+                    format="multipart",
+                )
+
+                self.assertEqual(response.status_code, 201, response.content)
+                self.assertEqual(response.data["kind"], "document")
+                self.assertEqual(response.data["mime_type"], expected_mime)
+
+    def test_upload_rejects_non_utf8_text_document(self):
+        self.client.force_authenticate(self.user)
+        upload = SimpleUploadedFile(
+            "binary.txt",
+            b"\xff\xfe\x00\x01",
+            content_type="text/plain",
+        )
+
+        response = self.client.post(
+            f"/api/lens/sessions/{self.session.uuid}/attachments/",
+            {"file": upload},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ATTACHMENT_UNSUPPORTED_TYPE", str(response.data))
 
     def test_store_validates_document_before_locking_assistant(self):
         events = []

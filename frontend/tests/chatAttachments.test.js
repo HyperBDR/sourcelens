@@ -5,7 +5,9 @@ import test from 'node:test'
 import {
   attachmentUploadError,
   classifyAttachment,
+  createOversizedTextFile,
   hasAttachmentErrorCode,
+  MAX_DIRECT_MESSAGE_CHARS,
   MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_PIXELS,
   readImageDimensions,
@@ -13,7 +15,7 @@ import {
   validateAttachment
 } from '../src/pages/lens/chatAttachments.js'
 
-test('classifies supported images and office documents', () => {
+test('classifies supported images, office documents and text files', () => {
   assert.equal(
     classifyAttachment({ name: 'screen.png', type: 'image/png' }),
     'image'
@@ -28,8 +30,42 @@ test('classifies supported images and office documents', () => {
   )
   assert.equal(
     classifyAttachment({ name: 'notes.txt', type: 'text/plain' }),
-    ''
+    'document'
   )
+  assert.equal(
+    classifyAttachment({ name: 'investigation.MD', type: 'text/markdown' }),
+    'document'
+  )
+})
+
+test('converts oversized composer text into a UTF-8 text file', async () => {
+  const text = `incident\n${'证据'.repeat(MAX_DIRECT_MESSAGE_CHARS)}`
+
+  const file = createOversizedTextFile(text, new Date('2026-08-24T05:30:45Z'))
+
+  assert.equal(file.name, 'long-input-20260824-053045.txt')
+  assert.equal(file.type, 'text/plain')
+  assert.equal(await file.text(), text)
+  assert.equal(createOversizedTextFile('short input'), null)
+})
+
+test('uploads oversized composer text before submitting the Run', async () => {
+  const source = await readFile(
+    new URL('../src/pages/lens/Chat.vue', import.meta.url),
+    'utf8'
+  )
+  const submitStart = source.indexOf('async function submit()')
+  const submitEnd = source.indexOf('async function cancel()', submitStart)
+  const submitFlow = source.slice(submitStart, submitEnd)
+  const createFile = submitFlow.indexOf('createOversizedTextFile(')
+  const uploadFile = submitFlow.indexOf('await addAttachment(oversizedFile)')
+  const createRun = submitFlow.indexOf('await createRun(')
+
+  assert.ok(createFile >= 0)
+  assert.ok(createFile < uploadFile)
+  assert.ok(uploadFile < createRun)
+  assert.match(submitFlow, /question\.value = draftTextAtSubmit/)
+  assert.match(submitFlow, /oversizedTextAttached/)
 })
 
 test('enforces type, capability, size and shared count limits', () => {
@@ -218,7 +254,9 @@ test('does not restore missing or expired attachments', async () => {
   assert.match(recovery, /hasAttachmentErrorCode/)
   assert.match(recovery, /'ATTACHMENT_NOT_FOUND'/)
   assert.match(recovery, /!attachmentMissing/)
-  assert.match(recovery, /pendingAttachments\.length\s+&&\s+requestRejected/)
+  assert.match(recovery, /retryableAttachments\.length\s+&&\s+requestRejected/)
+  assert.match(recovery, /item !== oversizedAttachment/)
+  assert.match(recovery, /deleteAttachment\(oversizedAttachment\.uuid\)/)
 })
 
 test('deletes a document removed while its upload is in flight', async () => {

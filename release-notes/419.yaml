@@ -1,0 +1,7 @@
+type: feature
+audience: user
+en: >-
+  Added TXT and Markdown chat attachments, with automatic text-file uploads
+  when a message exceeds the direct input limit.
+zh-CN: >-
+  新增 TXT、Markdown 对话附件，并在消息超过直接输入限制时自动转为文本文件上传。
