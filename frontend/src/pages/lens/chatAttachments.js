@@ -3,8 +3,16 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 export const MAX_IMAGE_PIXELS = 5_000_000
 export const MAX_IMAGE_ASPECT_RATIO = 3
 export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+export const MAX_DIRECT_MESSAGE_CHARS = 8000
 export const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-export const DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.xlsx']
+export const DOCUMENT_EXTENSIONS = [
+  '.pdf',
+  '.docx',
+  '.pptx',
+  '.xlsx',
+  '.txt',
+  '.md'
+]
 export const ATTACHMENT_ACCEPT = [...IMAGE_MIME, ...DOCUMENT_EXTENSIONS].join(
   ','
 )
@@ -18,6 +26,17 @@ export function classifyAttachment(file) {
     return 'document'
   }
   return ''
+}
+
+export function createOversizedTextFile(text, now = new Date()) {
+  const content = String(text || '')
+  if (content.length <= MAX_DIRECT_MESSAGE_CHARS) return null
+  const iso = now.toISOString()
+  const date = iso.slice(0, 10).replaceAll('-', '')
+  const time = iso.slice(11, 19).replaceAll(':', '')
+  return new File([content], `long-input-${date}-${time}.txt`, {
+    type: 'text/plain'
+  })
 }
 
 export function validateAttachment(file, options) {

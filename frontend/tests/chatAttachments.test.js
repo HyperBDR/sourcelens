@@ -5,7 +5,9 @@ import test from 'node:test'
 import {
   attachmentUploadError,
   classifyAttachment,
+  createOversizedTextFile,
   hasAttachmentErrorCode,
+  MAX_DIRECT_MESSAGE_CHARS,
   MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_PIXELS,
   readImageDimensions,
@@ -13,7 +15,7 @@ import {
   validateAttachment
 } from '../src/pages/lens/chatAttachments.js'
 
-test('classifies supported images and office documents', () => {
+test('classifies supported images, office documents and text files', () => {
   assert.equal(
     classifyAttachment({ name: 'screen.png', type: 'image/png' }),
     'image'
@@ -28,8 +30,26 @@ test('classifies supported images and office documents', () => {
   )
   assert.equal(
     classifyAttachment({ name: 'notes.txt', type: 'text/plain' }),
-    ''
+    'document'
   )
+  assert.equal(
+    classifyAttachment({ name: 'investigation.MD', type: 'text/markdown' }),
+    'document'
+  )
+})
+
+test('converts oversized composer text into a UTF-8 text file', async () => {
+  const text = `incident\n${'证据'.repeat(MAX_DIRECT_MESSAGE_CHARS)}`
+
+  const file = createOversizedTextFile(
+    text,
+    new Date('2026-08-24T05:30:45Z')
+  )
+
+  assert.equal(file.name, 'long-input-20260824-053045.txt')
+  assert.equal(file.type, 'text/plain')
+  assert.equal(await file.text(), text)
+  assert.equal(createOversizedTextFile('short input'), null)
 })
 
 test('enforces type, capability, size and shared count limits', () => {

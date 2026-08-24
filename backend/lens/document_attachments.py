@@ -34,7 +34,10 @@ DOCUMENT_ARCHIVE_RATIO_MIN_BYTES = 1024 * 1024
 DOCUMENT_PDF_MAX_OBJECTS = 10_000
 DOCUMENT_PDF_MAX_PAGES = 500
 DOCUMENT_ATTACHMENT_STORAGE_PREFIX = "lens/document-attachments"
+_TEXT_EXTENSIONS = {".txt", ".md"}
 _DOCUMENT_FORMATS = {
+    ".txt": ("text/plain", None),
+    ".md": ("text/markdown", None),
     ".pdf": ("application/pdf", None),
     ".docx": (
         "application/vnd.openxmlformats-officedocument."
@@ -496,6 +499,12 @@ def _safe_original_name(value):
 
 
 def _valid_document_bytes(data, extension, package_part):
+    if extension in _TEXT_EXTENSIONS:
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        return bool(text.strip()) and "\x00" not in text
     if extension == ".pdf":
         return _valid_pdf_bytes(data)
     try:
