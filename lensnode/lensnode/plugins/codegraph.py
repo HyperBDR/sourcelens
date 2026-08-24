@@ -109,7 +109,11 @@ class CodeGraphPlugin(LensNodePlugin):
                 "workspace search or file-reading tool. Use workspace "
                 "search only for literal text such as exact traceback "
                 "lines, comments, log messages, or regex patterns, and "
-                "after CodeGraph has identified the relevant files."
+                "after CodeGraph has identified the relevant files. If a "
+                "CodeGraph call is empty, unavailable, or fails, immediately "
+                "fall back to search_workspace with keywords from the "
+                "question, symbol names, and the failed query, then read "
+                "the relevant source with read_workspace_file."
             ),
             middleware=(middleware,),
             subagent_middleware=(middleware,),

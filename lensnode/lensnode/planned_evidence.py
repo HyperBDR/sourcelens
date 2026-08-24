@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import re
 import time
 from pathlib import Path
 
@@ -332,6 +333,16 @@ def parse_retrieval_plan(raw):
         ),
     )
     clarification = _parse_clarification(raw.get("clarification"))
+    literal_queries = _unique_queries(raw.get("literal_queries"))[
+        :MAX_LITERAL_QUERIES
+    ]
+    file_scopes = _unique_queries(raw.get("file_scopes"))[
+        :MAX_LITERAL_QUERIES
+    ]
+    if clarification is None and not (
+        codegraph_queries or literal_queries or windows
+    ):
+        raise PlanValidationError("retrieval request is required")
     return RetrievalPlan(
         objective=objective,
         project=_bounded_query(raw.get("project")),
@@ -342,12 +353,8 @@ def parse_retrieval_plan(raw):
             raw.get("evidence_requirements")
         )[:MAX_LITERAL_QUERIES],
         codegraph_queries=tuple(codegraph_queries),
-        literal_queries=_unique_queries(raw.get("literal_queries"))[
-            :MAX_LITERAL_QUERIES
-        ],
-        file_scopes=_unique_queries(raw.get("file_scopes"))[
-            :MAX_LITERAL_QUERIES
-        ],
+        literal_queries=literal_queries,
+        file_scopes=file_scopes,
         source_windows=tuple(windows),
         clarification=clarification,
         max_files=min(
@@ -498,55 +505,132 @@ class EvidenceExecutor:
                 )
 
         raw_items = []
-        call_counts = {"codegraph": 0, "literal": 0, "file_read": 0}
-        max_workers = max(min(len(requests), 8), 1)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {}
-            for evidence_type, provenance, adapter, args in requests:
-                call_id, started_at = self._start_subtool(
-                    provenance,
-                    args,
-                    parent_call_id,
-                )
-                future = pool.submit(_invoke_adapter, adapter, args)
-                futures[future] = (
-                    evidence_type,
-                    provenance,
-                    call_id,
-                    started_at,
-                )
-            for future in as_completed(futures):
-                (
-                    evidence_type,
-                    provenance,
-                    call_id,
-                    started_at,
-                ) = futures[future]
-                call_counts[evidence_type] += 1
-                try:
-                    result = future.result()
-                except Exception as exc:
+        call_counts = {
+            "codegraph": 0,
+            "literal": 0,
+            "file_read": 0,
+        }
+
+        def run_requests(pending):
+            """Run a bounded batch and append normalized evidence."""
+
+            if not pending:
+                return
+            max_workers = max(min(len(pending), 8), 1)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {}
+                for evidence_type, provenance, adapter, args in pending:
+                    call_id, started_at = self._start_subtool(
+                        provenance,
+                        args,
+                        parent_call_id,
+                    )
+                    future = pool.submit(_invoke_adapter, adapter, args)
+                    futures[future] = (
+                        evidence_type,
+                        provenance,
+                        call_id,
+                        started_at,
+                    )
+                for future in as_completed(futures):
+                    (
+                        evidence_type,
+                        provenance,
+                        call_id,
+                        started_at,
+                    ) = futures[future]
+                    count_type = (
+                        "literal"
+                        if evidence_type == "structural_search"
+                        else evidence_type
+                    )
+                    call_counts[count_type] += 1
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        self._finish_subtool(
+                            call_id,
+                            started_at,
+                            error=exc,
+                        )
+                        raw_items.append(
+                            {
+                                "evidence_type": "retrieval_error",
+                                "content": type(exc).__name__,
+                                "provenance": provenance,
+                            }
+                        )
+                        continue
                     self._finish_subtool(
                         call_id,
                         started_at,
-                        error=exc,
+                        result=result,
                     )
-                    raw_items.append(
-                        {
-                            "evidence_type": "retrieval_error",
-                            "content": type(exc).__name__,
-                            "provenance": provenance,
-                        }
+                    normalized_type = (
+                        "structural"
+                        if evidence_type == "structural_search"
+                        else evidence_type
                     )
+                    raw_items.extend(
+                        _items_from_result(
+                            result,
+                            normalized_type,
+                            provenance,
+                        )
+                    )
+
+        run_requests(requests)
+
+        fallback_requests = []
+        codegraph_succeeded = any(
+            item.get("evidence_type") == "structural"
+            and str(item.get("content") or "").strip()
+            for item in raw_items
+        )
+        initial_bundle = build_evidence_bundle(
+            raw_items,
+            max_tokens=plan.budgets.max_evidence_tokens,
+        )
+        initial_sufficiency = validate_evidence_sufficiency(
+            initial_bundle,
+            plan.evidence_requirements,
+        )
+        needs_fallback = (
+            bool(plan.codegraph_queries) and not codegraph_succeeded
+        ) or not initial_sufficiency.sufficient
+        if search is not None and needs_fallback:
+            planned_queries = set(plan.literal_queries)
+            for query in _fallback_keyword_queries(plan):
+                if query in planned_queries:
                     continue
-                self._finish_subtool(
-                    call_id,
-                    started_at,
-                    result=result,
+                fallback_requests.append(
+                    (
+                        "literal",
+                        "search_workspace.fallback",
+                        search,
+                        {
+                            "query": query,
+                            "max_results": plan.max_files * 4,
+                            "output_mode": "content",
+                        },
+                    )
                 )
-                raw_items.extend(
-                    _items_from_result(result, evidence_type, provenance)
-                )
+            if _requires_caller_context(plan):
+                for symbol in _caller_symbols(plan):
+                    fallback_requests.append(
+                        (
+                            "structural_search",
+                            "search_workspace.caller_context",
+                            search,
+                            {
+                                "query": _caller_search_pattern(symbol),
+                                "regex": True,
+                                "max_results": plan.max_files * 4,
+                                "output_mode": "content",
+                            },
+                        )
+                    )
+            run_requests(fallback_requests)
 
         reader = self.workspace_tools.get("read_workspace_file")
         if reader is not None:
@@ -633,6 +717,11 @@ class EvidenceExecutor:
                 "literal_search_call_count": call_counts["literal"],
                 "file_read_call_count": call_counts["file_read"],
                 "fallback_rounds": 0,
+                "fallback_keyword_search_count": sum(
+                    1
+                    for item in fallback_requests
+                    if item[0] in {"literal", "structural_search"}
+                ),
             }
         )
         return bundle
@@ -908,8 +997,8 @@ def _coalesce_source_windows(windows, max_lines):
 def _source_windows_from_items(items):
     """Derive exact source windows from retrieved file locations."""
 
-    windows = []
-    for item in items:
+    candidates = []
+    for index, item in enumerate(items):
         if not isinstance(item, dict):
             continue
         if item.get("evidence_type") not in {"structural", "literal"}:
@@ -921,8 +1010,129 @@ def _source_windows_from_items(items):
             continue
         if end < start:
             end = start
-        windows.append(SourceWindow(path, start, end))
-    return tuple(windows)
+        provenance = str(item.get("provenance") or "")
+        default_priority = (
+            2 if item.get("evidence_type") == "structural" else 3
+        )
+        priority = {
+            "search_workspace.caller_context": 0,
+            "search_workspace.fallback": 1,
+        }.get(provenance, default_priority)
+        candidates.append((priority, index, SourceWindow(path, start, end)))
+
+    primary = []
+    secondary = []
+    seen_paths = set()
+    seen_windows = set()
+    for _priority, _index, window in sorted(candidates):
+        key = (window.path, window.start_line, window.end_line)
+        if key in seen_windows:
+            continue
+        seen_windows.add(key)
+        if window.path in seen_paths:
+            secondary.append(window)
+            continue
+        seen_paths.add(window.path)
+        primary.append(window)
+    return tuple((*primary, *secondary))
+
+
+_FALLBACK_STOPWORDS = {
+    "about",
+    "after",
+    "analyze",
+    "analysis",
+    "and",
+    "code",
+    "find",
+    "for",
+    "from",
+    "implementation",
+    "inspect",
+    "into",
+    "issue",
+    "look",
+    "the",
+    "this",
+    "trace",
+    "where",
+    "with",
+}
+
+
+def _fallback_keyword_queries(plan):
+    """Derive bounded fixed-string queries when structural retrieval fails."""
+
+    candidates = list(plan.literal_queries)
+    for query in plan.codegraph_queries:
+        candidates.extend((query.symbol, query.query))
+    candidates.append(plan.objective)
+
+    queries = []
+    seen = set()
+    for value in candidates:
+        terms = re.findall(
+            r"[A-Za-z_][A-Za-z0-9_./:-]{2,}|[0-9]{3,}|[\u4e00-\u9fff]{2,}",
+            value,
+        )
+        for term in terms:
+            normalized = term.strip("./:-")
+            if (
+                not normalized
+                or normalized.lower() in _FALLBACK_STOPWORDS
+                or normalized.lower() in seen
+            ):
+                continue
+            seen.add(normalized.lower())
+            queries.append(normalized)
+            if len(queries) >= 8:
+                return tuple(queries)
+    return tuple(queries)
+
+
+def _requires_caller_context(plan):
+    """Return whether the plan asks for a call relationship."""
+
+    values = (
+        plan.question_type,
+        plan.objective,
+        *plan.evidence_requirements,
+    )
+    text = " ".join(str(value).lower() for value in values)
+    return any(
+        term in text
+        for term in ("caller", "callee", "call chain", "call path", "invoke")
+    )
+
+
+def _caller_symbols(plan):
+    """Extract likely symbols for definition and call-site searches."""
+
+    values = [query.symbol for query in plan.codegraph_queries]
+    values.extend(query.query for query in plan.codegraph_queries)
+    symbols = []
+    seen = set()
+    for value in values:
+        for symbol in re.findall(
+            r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?",
+            value,
+        ):
+            if symbol.lower() in _FALLBACK_STOPWORDS:
+                continue
+            if symbol.lower() in seen:
+                continue
+            seen.add(symbol.lower())
+            symbols.append(symbol)
+            if len(symbols) >= 4:
+                return tuple(symbols)
+    return tuple(symbols)
+
+
+def _caller_search_pattern(symbol):
+    """Build a bounded regex for definitions and call sites."""
+
+    escaped = re.escape(symbol)
+    return rf"(?:\b(?:def|class|function)\s+{escaped}\b|\b{escaped}\s*\()"
 
 
 def _evidence_item(item):
@@ -964,9 +1174,17 @@ def _has_category(items, category):
         return any(item.evidence_type == "structural" for item in items)
     return any(
         item.evidence_type == "structural"
-        and any(
-            term in item.content.lower()
-            for term in ("caller", "call", "invoke")
+        and (
+            item.provenance in {
+                "callers",
+                "callees",
+                "trace",
+                "search_workspace.caller_context",
+            }
+            or any(
+                term in item.content.lower()
+                for term in ("caller", "call", "invoke")
+            )
         )
         for item in items
     )

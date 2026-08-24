@@ -4344,6 +4344,26 @@ def test_turn_limit_no_history_runs_to_completion():
     assert "answer 2" in answer
 
 
+def test_turn_limit_always_wraps_up_existing_partial_answer():
+    messages = [{"role": "user", "content": "q"}]
+    prefix = [_Msg("human", "q")]
+    agent = _FakeStreamAgent(prefix, new_ai_turns=3)
+    model = _FakeWrapupModel("final synthesis")
+
+    answer, truncated, termination_reason = _run_agent_with_turn_limit(
+        agent,
+        messages,
+        max_turns=3,
+        model=model,
+        answer_language="English",
+    )
+
+    assert truncated is True
+    assert termination_reason == "turn_limit"
+    assert "final synthesis" in answer
+    assert model.call_count == 1
+
+
 def test_provider_loop_gate_is_preserved_after_natural_agent_finish():
     messages = [{"role": "user", "content": "q"}]
     prefix = [_Msg("human", "q")]

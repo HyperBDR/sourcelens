@@ -9,6 +9,11 @@ from unittest.mock import patch
 import pytest
 
 from lensnode.agent_runtime import _system_prompt
+from lensnode.agent_runtime.runtime import (
+    _normalize_code_analysis_paths,
+    _resolve_agent_turn_limit,
+    _vague_code_analysis_question,
+)
 from lensnode.agent_tools import _skill_script_environment, build_agent_tools
 from lensnode.executor import LensNodeExecutor, _remaining_run_timeout_seconds
 from lensnode.gateway_model import RunCancelledError
@@ -1085,6 +1090,70 @@ def test_system_prompt_prioritizes_codegraph_over_workspace_search():
     search_position = prompt.index("FIRST workspace action")
 
     assert codegraph_position < search_position
+
+
+def test_code_analysis_prompt_forces_workspace_fallback_after_graph_failure():
+    prompt = _system_prompt(
+        {"prompt": "Analyze code."},
+        {
+            "task": "code_analysis",
+            "target_dirs": [{"path": "/workspace/product"}],
+        },
+    )
+
+    assert "CodeGraph is optional" in prompt
+    assert "empty, unavailable, or fails" in prompt
+    assert "search_workspace" in prompt
+    assert "read_workspace_file" in prompt
+    assert "relative to the selected resource directory" in prompt
+    assert "Never expose the LensNode mount prefix" in prompt
+    assert "current entry point and branch conditions" in prompt
+    assert "Do not inspect planner or planned-evidence helpers" in prompt
+    assert "Do not repeat an equivalent query" in prompt
+    assert "Once entry routing, implementation, and caller context" in prompt
+    assert "do not infer a project-wide analysis" in prompt
+    assert "do not answer from general or training knowledge" in prompt
+    assert "只解释概念" in prompt
+
+
+def test_code_analysis_paths_are_relative_to_resource_directories():
+    answer = _normalize_code_analysis_paths(
+        "See /workspace/product/backend/lens/views.py and "
+        "/workspace/product/frontend/src/pages/lens/Chat.vue.",
+        {
+            "task": "code_analysis",
+            "target_dirs": [{"path": "/workspace/product"}],
+        },
+    )
+
+    assert answer == (
+        "See backend/lens/views.py and "
+        "frontend/src/pages/lens/Chat.vue."
+    )
+
+
+def test_code_analysis_has_bounded_default_agent_turns():
+    assert _resolve_agent_turn_limit(
+        {"task": "code_analysis"},
+    ) == 16
+
+
+def test_explicit_agent_turn_limit_overrides_code_analysis_default():
+    assert _resolve_agent_turn_limit(
+        {"task": "code_analysis", "max_agent_turns": 7},
+    ) == 7
+
+
+def test_other_tasks_keep_unset_agent_turn_limit():
+    assert _resolve_agent_turn_limit({"task": "knowledge_qa"}) is None
+
+
+def test_vague_code_analysis_questions_are_detected_without_target():
+    assert _vague_code_analysis_question("帮我分析一下") is True
+    assert _vague_code_analysis_question("请描述一下") is True
+    assert _vague_code_analysis_question(
+        "分析 runtime.py 的 _build_agent"
+    ) is False
 
 
 def test_git_log_accepts_non_integer_max_count(tmp_path):

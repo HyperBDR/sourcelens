@@ -80,6 +80,8 @@ def test_codegraph_plugin_contributes_generic_agent_runtime_behavior():
     )
 
     assert contribution.prompt_guidance.startswith("CodeGraph is available")
+    assert "empty, unavailable, or fails" in contribution.prompt_guidance
+    assert "search_workspace" in contribution.prompt_guidance
     assert contribution.middleware == contribution.subagent_middleware
     assert contribution.always_visible_tool_prefixes == ("mcp__codegraph__",)
     assert (
