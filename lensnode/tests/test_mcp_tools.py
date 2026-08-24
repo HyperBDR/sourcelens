@@ -8,6 +8,7 @@ from langchain_core.tools import StructuredTool
 from lensnode.mcp_tools import (
     DeferredMCPToolMiddleware,
     MCPToolFirstMiddleware,
+    _wrap_mcp_tool,
     build_deferred_mcp_tools,
     load_mcp_tools,
 )
@@ -120,6 +121,60 @@ def test_load_mcp_tools_isolates_servers_and_disables_stdio(monkeypatch):
         and detail["duration_ms"] >= 0
         for event, detail in events
     )
+
+
+def test_mcp_tool_bounds_large_codegraph_results():
+    async def explore(**_kwargs):
+        return [{"type": "text", "text": "x" * 50000}]
+
+    tool = _wrap_mcp_tool(
+        StructuredTool.from_function(
+            coroutine=explore,
+            name="codegraph_explore",
+            description="Explore code.",
+        ),
+        "codegraph",
+        "codegraph",
+        1,
+        set(),
+    )
+
+    result = json.loads(tool.invoke({"query": "symbol"}))
+
+    assert result["ok"] is True
+    assert result["truncated"] is True
+    assert len(result["result"][0]["text"]) <= 8000
+
+
+def test_mcp_tool_returns_short_result_for_duplicate_arguments():
+    calls = []
+
+    async def explore(query: str):
+        calls.append({"query": query})
+        return [{"type": "text", "text": "large result"}]
+
+    tool = _wrap_mcp_tool(
+        StructuredTool.from_function(
+            coroutine=explore,
+            name="codegraph_explore",
+            description="Explore code.",
+        ),
+        "codegraph",
+        "codegraph",
+        1,
+        set(),
+    )
+
+    first = json.loads(tool.invoke({"query": "symbol"}))
+    duplicate = json.loads(tool.invoke({"query": "symbol"}))
+
+    assert first["ok"] is True
+    assert duplicate == {
+        "ok": True,
+        "cached": True,
+        "message": "Duplicate MCP query; use the previous result.",
+    }
+    assert calls == [{"query": "symbol"}]
 
 
 def test_mcp_tool_timeout_returns_structured_failure(monkeypatch):

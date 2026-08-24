@@ -125,7 +125,7 @@ from ..runtime_resources import (
 LOGGER = logging.getLogger("lensnode")
 
 _MAX_PRESENTED_CITATIONS = 5
-_DEFAULT_CODE_ANALYSIS_MAX_TURNS = 16
+_DEFAULT_CODE_ANALYSIS_MAX_TURNS = 10
 _EXECUTION_BACKEND_TRUSTED_CONTAINER = "trusted_container"
 _EXECUTION_BACKEND_FILESYSTEM = "filesystem"
 
@@ -336,7 +336,7 @@ class LensDeepAgentRuntime:
         """
 
         if not state.runtime_mode.general_chat:
-            return True
+            return state.command.get("task") != "code_analysis"
         route_decision = getattr(state, "route_decision", None) or {}
         return route_decision.get("route") == "plan_execute"
 
