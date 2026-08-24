@@ -1,5 +1,5 @@
-from lensnode.agent_runtime.messages import build_initial_messages
 from lensnode.agent_runtime.direct_answer import _answer_general_chat_directly
+from lensnode.agent_runtime.messages import build_initial_messages
 
 
 def test_build_initial_messages_includes_current_images():

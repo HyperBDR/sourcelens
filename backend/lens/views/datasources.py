@@ -9,15 +9,10 @@ from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework import status
-from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.decorators import action
-from rest_framework.response import Response
-
 from lens.datasource_services import (
+    DATASOURCE_UPLOAD_EXTENSIONS,
     DataSourceDispatchError,
     DataSourcePathError,
-    DATASOURCE_UPLOAD_EXTENSIONS,
     check_datasource_path,
 )
 from lens.models import DataSource, ScheduledTask
@@ -33,13 +28,18 @@ from lens.services import (
 from lens.tasks import (
     DATASOURCE_CANCELLING_STATUS,
     datasource_conversion_task,
+    datasource_upload_task,
     register_datasource_conversion_task,
     register_datasource_sync_task,
+    register_datasource_upload_task,
     release_datasource_lock,
     source_sync_task,
-    register_datasource_upload_task,
-    datasource_upload_task,
 )
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.response import Response
+
 from .base import BaseAdminViewSet
 
 
@@ -53,9 +53,13 @@ class DataSourceViewSet(BaseAdminViewSet):
     def get_queryset(self):
         """Return datasources filtered by optional search query."""
 
-        queryset = super().get_queryset().select_related(
-            "lensnode",
-            "credential",
+        queryset = (
+            super()
+            .get_queryset()
+            .select_related(
+                "lensnode",
+                "credential",
+            )
         )
         filters = self._datasource_search_filters(
             self.request.query_params.get("filters")
@@ -72,12 +76,8 @@ class DataSourceViewSet(BaseAdminViewSet):
         search = str(self.request.query_params.get("search") or "").strip()
         if not search:
             return queryset
-        search_key = str(
-            self.request.query_params.get("search_key") or ""
-        ).strip()
-        return queryset.filter(
-            self._datasource_search_query(search, search_key)
-        )
+        search_key = str(self.request.query_params.get("search_key") or "").strip()
+        return queryset.filter(self._datasource_search_query(search, search_key))
 
     @staticmethod
     def _datasource_search_filters(value):
@@ -342,8 +342,8 @@ class DataSourceViewSet(BaseAdminViewSet):
             metadata={"storage_name": storage_name},
         )
         datasource_upload_task.apply_async(
-            args=[str(datasource.uuid), storage_name, filename, task_id],
-            task_id=uuid_mod.uuid4().hex,
+            args=[str(datasource.uuid), storage_name, filename],
+            task_id=task_id,
         )
         return Response(
             {
@@ -368,9 +368,7 @@ class DataSourceViewSet(BaseAdminViewSet):
 
         datasource = self.get_object()
         next_status = (
-            DataSource.Status.ACTIVE
-            if enabled
-            else DataSource.Status.DISABLED
+            DataSource.Status.ACTIVE if enabled else DataSource.Status.DISABLED
         )
         if datasource.status != next_status:
             datasource.status = next_status
@@ -395,22 +393,16 @@ class DataSourceViewSet(BaseAdminViewSet):
                 datasource.source_type,
             )
         except (DataSourcePathError, DataSourceDispatchError) as exc:
-            datasource.availability_status = (
-                DataSource.AvailabilityStatus.ERROR
-            )
+            datasource.availability_status = DataSource.AvailabilityStatus.ERROR
             datasource.availability_message = str(exc)
         else:
-            is_available = bool(
-                result.get("exists") and result.get("is_directory")
-            )
+            is_available = bool(result.get("exists") and result.get("is_directory"))
             datasource.availability_status = (
                 DataSource.AvailabilityStatus.AVAILABLE
                 if is_available
                 else DataSource.AvailabilityStatus.UNAVAILABLE
             )
-            datasource.availability_message = str(
-                result.get("message") or ""
-            )
+            datasource.availability_message = str(result.get("message") or "")
         datasource.availability_checked_at = timezone.now()
         datasource.save(
             update_fields=[
@@ -559,9 +551,7 @@ class DataSourceViewSet(BaseAdminViewSet):
         metadata["manual_revoked_at"] = now.isoformat()
         metadata["manual_revoked_by"] = request.user.pk
         queued = task.status == TaskStatus.PENDING
-        task.status = (
-            TaskStatus.REVOKED if queued else DATASOURCE_CANCELLING_STATUS
-        )
+        task.status = TaskStatus.REVOKED if queued else DATASOURCE_CANCELLING_STATUS
         task.finished_at = now if queued else None
         task.error = "DATASOURCE_CONVERSION_CANCELLED" if queued else ""
         metadata["cancellation_state"] = (

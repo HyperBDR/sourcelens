@@ -10,6 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
+from accounts.models import Role
+from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
+from agentcore_task.adapters.django.models import TaskExecution
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -23,16 +26,10 @@ from django.test import (
 )
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
-from rest_framework.test import APIClient
-from rest_framework_simplejwt.tokens import AccessToken
-
-from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
-from agentcore_task.adapters.django.models import TaskExecution
-
-from accounts.models import Role
 from lens.datasource_services import (
     DataSourceDispatchError,
+)
+from lens.datasource_services import (
     test_datasource_connection as run_datasource_connection_test,
 )
 from lens.lensnode_auth import hash_lensnode_token
@@ -71,13 +68,15 @@ from lens.services import (
     resolve_loaded_skill_environment,
     validate_run_dispatch,
 )
-
 from lens.skill_packages import package_zip_bytes
 from lens.tasks import (
     SourceSyncBusy,
     acquire_datasource_lock,
     release_datasource_lock,
 )
+from rest_framework.exceptions import ValidationError
+from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import AccessToken
 
 User = get_user_model()
 
@@ -149,10 +148,7 @@ def skill_zip_upload(
         archive.writestr(f"{name}/SKILL.md", skill_md)
         for path, content in (package_files or {}).items():
             archive.writestr(f"{name}/{path}", content)
-        if any(
-            value is not None
-            for value in (environment, api, transforms)
-        ):
+        if any(value is not None for value in (environment, api, transforms)):
             config = {}
             if environment is not None:
                 config["environment"] = environment
@@ -221,8 +217,7 @@ class RetrievalPolicyValidationTests(SimpleTestCase):
             with self.subTest(policy_value=value):
                 with self.assertRaisesRegex(
                     ValidationError,
-                    "settings.retrieval_policy.include_hidden must be "
-                    "a boolean",
+                    "settings.retrieval_policy.include_hidden must be " "a boolean",
                 ):
                     validate_retrieval_policy({"include_hidden": value})
 
@@ -297,9 +292,7 @@ class LensApiTests(TestCase):
         }
         self.mcp.save(update_fields=["config"])
 
-        response = self.client.get(
-            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["config"]["api_key"], "********")
@@ -349,9 +342,7 @@ class LensApiTests(TestCase):
         }
         self.mcp.save(update_fields=["config"])
 
-        response = self.client.get(
-            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/")
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["config"]["github_token"], "********")
@@ -397,13 +388,11 @@ class LensApiTests(TestCase):
             "profiles": [
                 {"name": "production", "token": "production-secret"},
                 {"name": "staging", "token": "staging-secret"},
-            ]
+            ],
         }
         self.mcp.save(update_fields=["config"])
 
-        detail = self.client.get(
-            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
-        )
+        detail = self.client.get(f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/")
         unchanged = detail.data["config"]
         unchanged["region"] = "eu-west-1"
         response = self.client.patch(
@@ -477,14 +466,10 @@ class LensApiTests(TestCase):
         )
 
     def test_mcp_api_preserves_masked_secrets_in_nested_lists(self):
-        self.mcp.config = {
-            "groups": [[{"name": "production", "token": "secret"}]]
-        }
+        self.mcp.config = {"groups": [[{"name": "production", "token": "secret"}]]}
         self.mcp.save(update_fields=["config"])
 
-        detail = self.client.get(
-            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
-        )
+        detail = self.client.get(f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/")
         response = self.client.patch(
             f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/",
             {"config": detail.data["config"]},
@@ -616,9 +601,7 @@ class LensApiTests(TestCase):
         self.assertEqual(len(self.mcp.environment), 1)
 
     def test_mcp_api_exposes_secret_safe_environment_references(self):
-        self.mcp.config = {
-            "headers": {"Authorization": "Bearer ${MCP_TOKEN}"}
-        }
+        self.mcp.config = {"headers": {"Authorization": "Bearer ${MCP_TOKEN}"}}
         self.mcp.environment = [
             {
                 "name": "MCP_TOKEN",
@@ -628,9 +611,7 @@ class LensApiTests(TestCase):
         ]
         self.mcp.save(update_fields=["config", "environment"])
 
-        response = self.client.get(
-            f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/mcp-servers/{self.mcp.uuid}/")
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(
@@ -643,9 +624,7 @@ class LensApiTests(TestCase):
         )
 
     def test_assistant_mcp_resolves_environment_without_leaking(self):
-        self.mcp.config = {
-            "headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}
-        }
+        self.mcp.config = {"headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}}
         self.mcp.environment = [
             {
                 "name": "GITHUB_TOKEN",
@@ -698,9 +677,7 @@ class LensApiTests(TestCase):
         self.assertTrue(runtime[0]["environment_resolved"])
 
     def test_dispatch_preserves_references_inside_mcp_environment_values(self):
-        self.mcp.config = {
-            "headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}
-        }
+        self.mcp.config = {"headers": {"Authorization": "Bearer ${GITHUB_TOKEN}"}}
         self.mcp.environment = [
             {
                 "name": "GITHUB_TOKEN",
@@ -712,9 +689,7 @@ class LensApiTests(TestCase):
         variable_set = EnvironmentVariableSet.objects.create(
             name="GitHub token with literal reference"
         )
-        variable_set.set_values(
-            {"GITHUB_TOKEN": "runtime-${HOME}-secret"}
-        )
+        variable_set.set_values({"GITHUB_TOKEN": "runtime-${HOME}-secret"})
         variable_set.save(update_fields=["encrypted_values"])
         AssistantMCP.objects.create(
             assistant=self.assistant,
@@ -772,9 +747,7 @@ class LensApiTests(TestCase):
             environment_variable_set=variable_set,
         )
 
-        response = self.client.get(
-            "/api/lens/admin/environment-variable-sets/"
-        )
+        response = self.client.get("/api/lens/admin/environment-variable-sets/")
 
         self.assertEqual(response.status_code, 200, response.data)
         row = next(
@@ -938,8 +911,7 @@ class LensApiTests(TestCase):
             {"archived": "true"},
         )
         archived_slugs = [
-            assistant["slug"]
-            for assistant in archived_response.data["results"]
+            assistant["slug"] for assistant in archived_response.data["results"]
         ]
         self.assertIn(self.assistant.slug, archived_slugs)
 
@@ -957,9 +929,7 @@ class LensApiTests(TestCase):
         self.assertEqual(self.assistant.status, "active")
         active_slugs = [
             assistant["slug"]
-            for assistant in self.client.get(
-                "/api/lens/assistants/"
-            ).data["results"]
+            for assistant in self.client.get("/api/lens/assistants/").data["results"]
         ]
         self.assertIn(self.assistant.slug, active_slugs)
 
@@ -980,9 +950,7 @@ class LensApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 405)
-        self.assertTrue(
-            Assistant.objects.filter(uuid=self.assistant.uuid).exists()
-        )
+        self.assertTrue(Assistant.objects.filter(uuid=self.assistant.uuid).exists())
 
     def test_assistant_create_saves_workspace_guide_skill(self):
         payload = {
@@ -1376,9 +1344,7 @@ class LensApiTests(TestCase):
             response.data["detail"],
             "Environment variables must be valid JSON.",
         )
-        self.assertFalse(
-            Skill.objects.filter(slug="jira-connector").exists()
-        )
+        self.assertFalse(Skill.objects.filter(slug="jira-connector").exists())
 
     def test_uploaded_skill_reads_api_access_policy(self):
         environment = [
@@ -1439,13 +1405,11 @@ class LensApiTests(TestCase):
                 skill = Skill.objects.get(slug="script-permissions")
                 package_root = Path(skill.package_path)
                 self.assertEqual(
-                    (package_root / "scripts/nested/run").stat().st_mode
-                    & 0o777,
+                    (package_root / "scripts/nested/run").stat().st_mode & 0o777,
                     0o755,
                 )
                 self.assertEqual(
-                    (package_root / "scripts/helper.py").stat().st_mode
-                    & 0o777,
+                    (package_root / "scripts/helper.py").stat().st_mode & 0o777,
                     0o755,
                 )
 
@@ -1468,9 +1432,7 @@ class LensApiTests(TestCase):
                             "Summarize an order result reference.",
                             transforms=transforms,
                             package_files={
-                                "scripts/summarize_orders.py": (
-                                    b"import json, sys\n"
-                                ),
+                                "scripts/summarize_orders.py": (b"import json, sys\n"),
                             },
                         )
                     },
@@ -1478,9 +1440,9 @@ class LensApiTests(TestCase):
                 )
 
                 self.assertEqual(response.status_code, 200)
-                saved_transform = response.data["definition"][
-                    "transforms"
-                ]["summarize-orders"]
+                saved_transform = response.data["definition"]["transforms"][
+                    "summarize-orders"
+                ]
                 self.assertEqual(
                     saved_transform["entrypoint"],
                     "scripts/summarize_orders.py",
@@ -1494,9 +1456,7 @@ class LensApiTests(TestCase):
                 skill = Skill.objects.get(slug="order-transform")
                 with zipfile.ZipFile(package_zip_bytes(skill)) as archive:
                     config = json.loads(
-                        archive.read(
-                            "order-transform/sourcelens.json"
-                        ).decode("utf-8")
+                        archive.read("order-transform/sourcelens.json").decode("utf-8")
                     )
                 self.assertEqual(config["transforms"], transforms)
 
@@ -1548,9 +1508,7 @@ class LensApiTests(TestCase):
                             "Run a transform.",
                             transforms=transforms,
                             package_files={
-                                "scripts/summarize_orders.py": (
-                                    b"print('no')\n"
-                                ),
+                                "scripts/summarize_orders.py": (b"print('no')\n"),
                             },
                         )
                     },
@@ -1587,9 +1545,7 @@ class LensApiTests(TestCase):
                             environment=environment,
                             transforms=transforms,
                             package_files={
-                                "scripts/summarize_orders.py": (
-                                    b"print('ok')\n"
-                                ),
+                                "scripts/summarize_orders.py": (b"print('ok')\n"),
                             },
                         ),
                         "environment": json.dumps([]),
@@ -1835,9 +1791,7 @@ class LensApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        variable_set = EnvironmentVariableSet.objects.get(
-            name="Jira - Production"
-        )
+        variable_set = EnvironmentVariableSet.objects.get(name="Jira - Production")
         self.assertNotIn("secret-token", variable_set.encrypted_values)
         self.assertEqual(
             variable_set.get_values()["JIRA_API_TOKEN"],
@@ -1967,9 +1921,7 @@ class LensApiTests(TestCase):
             with self.assertRaises(RuntimeError):
                 serializer.save()
 
-        self.assertFalse(
-            Assistant.objects.filter(slug="rollback-assistant").exists()
-        )
+        self.assertFalse(Assistant.objects.filter(slug="rollback-assistant").exists())
         self.assertFalse(
             EnvironmentVariableSet.objects.filter(name="Rollback Set").exists()
         )
@@ -1985,9 +1937,7 @@ class LensApiTests(TestCase):
             ]
         }
         self.skill.save(update_fields=["definition"])
-        variable_set = EnvironmentVariableSet.objects.create(
-            name="Jira - Shared"
-        )
+        variable_set = EnvironmentVariableSet.objects.create(name="Jira - Shared")
         variable_set.set_values({"JIRA_API_TOKEN": "shared-token"})
         variable_set.save(update_fields=["encrypted_values"])
         AssistantSkill.objects.create(
@@ -2014,9 +1964,7 @@ class LensApiTests(TestCase):
                 "skill_bindings": [
                     {
                         "skill_uuid": str(self.skill.uuid),
-                        "environment_variable_set_uuid": str(
-                            variable_set.uuid
-                        ),
+                        "environment_variable_set_uuid": str(variable_set.uuid),
                         "environment_values": [
                             {
                                 "key": "JIRA_API_TOKEN",
@@ -2061,9 +2009,7 @@ class LensApiTests(TestCase):
             ]
         }
         self.skill.save(update_fields=["definition"])
-        variable_set = EnvironmentVariableSet.objects.create(
-            name="Jira - Exclusive"
-        )
+        variable_set = EnvironmentVariableSet.objects.create(name="Jira - Exclusive")
         variable_set.set_values({"JIRA_API_TOKEN": "old-token"})
         variable_set.save(update_fields=["encrypted_values"])
         AssistantSkill.objects.create(
@@ -2078,9 +2024,7 @@ class LensApiTests(TestCase):
                 "skill_bindings": [
                     {
                         "skill_uuid": str(self.skill.uuid),
-                        "environment_variable_set_uuid": str(
-                            variable_set.uuid
-                        ),
+                        "environment_variable_set_uuid": str(variable_set.uuid),
                         "environment_values": [
                             {
                                 "key": "JIRA_API_TOKEN",
@@ -2113,9 +2057,7 @@ class LensApiTests(TestCase):
             ]
         }
         self.skill.save(update_fields=["definition"])
-        variable_set = EnvironmentVariableSet.objects.create(
-            name="Jira - Locked"
-        )
+        variable_set = EnvironmentVariableSet.objects.create(name="Jira - Locked")
         variable_set.set_values({"JIRA_API_TOKEN": "old-token"})
         variable_set.save(update_fields=["encrypted_values"])
         AssistantSkill.objects.create(
@@ -2131,9 +2073,7 @@ class LensApiTests(TestCase):
                     "skill_bindings": [
                         {
                             "skill_uuid": str(self.skill.uuid),
-                            "environment_variable_set_uuid": str(
-                                variable_set.uuid
-                            ),
+                            "environment_variable_set_uuid": str(variable_set.uuid),
                             "environment_values": [
                                 {
                                     "key": "JIRA_API_TOKEN",
@@ -2221,9 +2161,7 @@ class LensApiTests(TestCase):
             str(context.exception),
             "SKILL_ENVIRONMENT_REQUIRED",
         )
-        runtime = resolve_loaded_skill_environment(
-            build_loaded_skills(self.assistant)
-        )
+        runtime = resolve_loaded_skill_environment(build_loaded_skills(self.assistant))
         self.assertEqual(runtime[0]["environment"], {})
 
     def test_dispatch_rejects_missing_mcp_environment(self):
@@ -2291,9 +2229,7 @@ class LensApiTests(TestCase):
         run = create_execution_run(session, "Question", enqueue=False)
         self.assistant.status = Assistant.Status.ARCHIVED
         self.assistant.save(update_fields=["status"])
-        run = run.__class__.objects.select_related(
-            "session__assistant"
-        ).get(pk=run.pk)
+        run = run.__class__.objects.select_related("session__assistant").get(pk=run.pk)
 
         with self.assertRaises(LensNodeDispatchError) as context:
             validate_run_dispatch(run)
@@ -2308,9 +2244,7 @@ class LensApiTests(TestCase):
         run = create_execution_run(session, "Question", enqueue=False)
         self.assistant.selected_task = "general_chat"
         self.assistant.selected_dirs = []
-        self.assistant.save(
-            update_fields=["selected_task", "selected_dirs"]
-        )
+        self.assistant.save(update_fields=["selected_task", "selected_dirs"])
         run = run.__class__.objects.select_related(
             "execution",
             "session__assistant",
@@ -2321,9 +2255,7 @@ class LensApiTests(TestCase):
     def test_dispatch_rejects_invalid_frozen_snapshot_after_assistant_edit(self):
         self.assistant.selected_task = "general_chat"
         self.assistant.selected_dirs = []
-        self.assistant.save(
-            update_fields=["selected_task", "selected_dirs"]
-        )
+        self.assistant.save(update_fields=["selected_task", "selected_dirs"])
         session = Session.objects.create(
             assistant=self.assistant,
             user=self.user,
@@ -2331,9 +2263,7 @@ class LensApiTests(TestCase):
         run = create_execution_run(session, "Question", enqueue=False)
         self.assistant.selected_task = "knowledge_qa"
         self.assistant.selected_dirs = [{"path": "/workspace/repo"}]
-        self.assistant.save(
-            update_fields=["selected_task", "selected_dirs"]
-        )
+        self.assistant.save(update_fields=["selected_task", "selected_dirs"])
         run = run.__class__.objects.select_related(
             "execution",
             "session__assistant",
@@ -2359,9 +2289,7 @@ class LensApiTests(TestCase):
             ]
         }
         self.skill.save(update_fields=["definition"])
-        variable_set = EnvironmentVariableSet.objects.create(
-            name="Jira - Production"
-        )
+        variable_set = EnvironmentVariableSet.objects.create(name="Jira - Production")
         variable_set.set_values(
             {"JIRA_API_TOKEN": "secret-token", "UNDECLARED": "hidden"}
         )
@@ -2460,7 +2388,7 @@ class LensApiTests(TestCase):
                     "type": "function",
                     "function": {
                         "name": "search_workspace",
-                        "arguments": "{\"query\":\"test\"}",
+                        "arguments": '{"query":"test"}',
                     },
                 }
             ],
@@ -2596,9 +2524,7 @@ class LensApiTests(TestCase):
     def test_lensnode_ai_gateway_rejects_invalid_trace_context(self):
         token = "dev-lensnode-token"
         self.lensnode.auth_token_hash = hash_lensnode_token(token)
-        self.lensnode.save(
-            update_fields=["auth_token_hash", "updated_at"]
-        )
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
         client = APIClient()
 
         with patch(
@@ -2686,10 +2612,7 @@ class LensApiTests(TestCase):
         self.assertEqual(len(usages), 2)
         self.assertTrue(all(item.user_id == chat_user.id for item in usages))
         self.assertTrue(
-            all(
-                item.metadata["run_uuid"] == str(run.uuid)
-                for item in usages
-            )
+            all(item.metadata["run_uuid"] == str(run.uuid) for item in usages)
         )
 
     def test_lensnode_ai_gateway_rejects_run_from_another_lensnode(self):
@@ -2763,12 +2686,8 @@ class LensApiTests(TestCase):
         token = "dev-lensnode-token"
         self.lensnode.auth_token_hash = hash_lensnode_token(token)
         self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
-        session = Session.objects.create(
-            assistant=self.assistant, user=self.user
-        )
-        run = create_execution_run(
-            session=session, question="q", enqueue=False
-        )
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
 
         client = APIClient()
         upload = SimpleUploadedFile(
@@ -2800,12 +2719,8 @@ class LensApiTests(TestCase):
         from lens.models import Session
         from lens.services import create_execution_run
 
-        session = Session.objects.create(
-            assistant=self.assistant, user=self.user
-        )
-        run = create_execution_run(
-            session=session, question="q", enqueue=False
-        )
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
         response = APIClient().post(
             "/api/lens/lensnode/deliverables/",
             {
@@ -2826,12 +2741,8 @@ class LensApiTests(TestCase):
         token = "dev-lensnode-token"
         self.lensnode.auth_token_hash = hash_lensnode_token(token)
         self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
-        session = Session.objects.create(
-            assistant=self.assistant, user=self.user
-        )
-        run = create_execution_run(
-            session=session, question="q", enqueue=False
-        )
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
         response = APIClient().post(
             "/api/lens/lensnode/deliverables/",
             {
@@ -2852,12 +2763,8 @@ class LensApiTests(TestCase):
         token = "dev-lensnode-token"
         self.lensnode.auth_token_hash = hash_lensnode_token(token)
         self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
-        session = Session.objects.create(
-            assistant=self.assistant, user=self.user
-        )
-        run = create_execution_run(
-            session=session, question="q", enqueue=False
-        )
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
         response = APIClient().post(
             "/api/lens/lensnode/deliverables/",
             {
@@ -2873,8 +2780,7 @@ class LensApiTests(TestCase):
         self.assertEqual(output.filename, "passwd")
         self.assertNotIn("..", output.file.name)
         self.assertTrue(
-            output.file.name.endswith("passwd")
-            or "passwd" in output.file.name
+            output.file.name.endswith("passwd") or "passwd" in output.file.name
         )
         output.file.delete(save=False)
 
@@ -2888,9 +2794,7 @@ class LensApiTests(TestCase):
         session = Session.objects.create(
             assistant=self.assistant, user=user or self.user
         )
-        run = create_execution_run(
-            session=session, question="q", enqueue=False
-        )
+        run = create_execution_run(session=session, question="q", enqueue=False)
         output = RunOutputFile(
             run=run,
             message=run.output_message,
@@ -2901,9 +2805,7 @@ class LensApiTests(TestCase):
             byte_size=18,
             content_hash=hashlib.sha256(b"<html>brief</html>").hexdigest(),
         )
-        output.file.save(
-            "brief.html", ContentFile(b"<html>brief</html>"), save=False
-        )
+        output.file.save("brief.html", ContentFile(b"<html>brief</html>"), save=False)
         output.save()
         return session, run, output
 
@@ -2935,9 +2837,7 @@ class LensApiTests(TestCase):
                     "end_line": 42,
                     "supports": "This function handles the run.",
                     "source": (
-                        "def run_handler():\n"
-                        "    execute_run()\n"
-                        "    return True"
+                        "def run_handler():\n" "    execute_run()\n" "    return True"
                     ),
                 },
                 {
@@ -2965,14 +2865,10 @@ class LensApiTests(TestCase):
     def test_session_messages_expose_safe_citation_metadata(self):
         session, run = self._make_cited_run()
 
-        response = self.client.get(
-            f"/api/lens/sessions/{session.uuid}/messages/"
-        )
+        response = self.client.get(f"/api/lens/sessions/{session.uuid}/messages/")
 
         self.assertEqual(response.status_code, 200)
-        answer = next(
-            item for item in response.data if item["role"] == "assistant"
-        )
+        answer = next(item for item in response.data if item["role"] == "assistant")
         self.assertEqual(len(answer["citations"]), 1)
         citation = answer["citations"][0]
         self.assertEqual(citation["id"], "evidence-handler")
@@ -2994,9 +2890,7 @@ class LensApiTests(TestCase):
         client = APIClient()
         client.force_authenticate(owner)
 
-        response = client.get(
-            f"/api/lens/runs/{run.uuid}/citations/evidence-handler/"
-        )
+        response = client.get(f"/api/lens/runs/{run.uuid}/citations/evidence-handler/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["path"], "backend/lens/run.py")
@@ -3028,9 +2922,7 @@ class LensApiTests(TestCase):
         client = APIClient()
         client.force_authenticate(other)
 
-        response = client.get(
-            f"/api/lens/runs/{run.uuid}/citations/evidence-handler/"
-        )
+        response = client.get(f"/api/lens/runs/{run.uuid}/citations/evidence-handler/")
 
         self.assertEqual(response.status_code, 404)
 
@@ -3121,16 +3013,12 @@ class LensApiTests(TestCase):
     def test_output_file_download_returns_attachment_to_owner(self):
         session, run, output = self._make_output_file()
 
-        response = self.client.get(
-            f"/api/lens/output-files/{output.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/output-files/{output.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment", response["Content-Disposition"])
         self.assertIn("brief.html", response["Content-Disposition"])
-        self.assertEqual(
-            b"".join(response.streaming_content), b"<html>brief</html>"
-        )
+        self.assertEqual(b"".join(response.streaming_content), b"<html>brief</html>")
         output.file.delete(save=False)
 
     def test_output_file_download_forbidden_for_other_user(self):
@@ -3143,9 +3031,7 @@ class LensApiTests(TestCase):
         client = APIClient()
         client.force_authenticate(other)
 
-        response = client.get(
-            f"/api/lens/output-files/{output.uuid}/"
-        )
+        response = client.get(f"/api/lens/output-files/{output.uuid}/")
 
         self.assertEqual(response.status_code, 403)
         output.file.delete(save=False)
@@ -3158,9 +3044,7 @@ class LensApiTests(TestCase):
         )
         session, run, output = self._make_output_file(owner)
 
-        response = self.client.get(
-            f"/api/lens/output-files/{output.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/output-files/{output.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment", response["Content-Disposition"])
@@ -3169,28 +3053,20 @@ class LensApiTests(TestCase):
     def test_session_messages_include_output_files(self):
         session, run, output = self._make_output_file()
 
-        response = self.client.get(
-            f"/api/lens/sessions/{session.uuid}/messages/"
-        )
+        response = self.client.get(f"/api/lens/sessions/{session.uuid}/messages/")
 
         self.assertEqual(response.status_code, 200)
-        answer = next(
-            m for m in response.data if m["role"] == "assistant"
-        )
+        answer = next(m for m in response.data if m["role"] == "assistant")
         self.assertEqual(len(answer["output_files"]), 1)
         chip = answer["output_files"][0]
         self.assertEqual(chip["filename"], "brief.html")
-        self.assertIn(
-            f"/api/lens/output-files/{output.uuid}/", chip["url"]
-        )
+        self.assertIn(f"/api/lens/output-files/{output.uuid}/", chip["url"])
         output.file.delete(save=False)
 
     def test_admin_run_detail_includes_output_files(self):
         session, run, output = self._make_output_file()
 
-        response = self.client.get(
-            f"/api/lens/admin/runs/{run.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data["output_files"]), 1)
@@ -3200,25 +3076,17 @@ class LensApiTests(TestCase):
         self.assertEqual(item["content_type"], "text/html")
         self.assertEqual(item["byte_size"], 18)
         self.assertIsNotNone(item["created_at"])
-        self.assertIn(
-            f"/api/lens/output-files/{output.uuid}/", item["url"]
-        )
+        self.assertIn(f"/api/lens/output-files/{output.uuid}/", item["url"])
         output.file.delete(save=False)
 
     def test_admin_run_detail_has_empty_output_files(self):
         from lens.models import Session
         from lens.services import create_execution_run
 
-        session = Session.objects.create(
-            assistant=self.assistant, user=self.user
-        )
-        run = create_execution_run(
-            session=session, question="q", enqueue=False
-        )
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
 
-        response = self.client.get(
-            f"/api/lens/admin/runs/{run.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_files"], [])
@@ -3229,18 +3097,12 @@ class LensApiTests(TestCase):
 
         self.assistant.agent_rounds = "max"
         self.assistant.save(update_fields=["agent_rounds"])
-        session = Session.objects.create(
-            assistant=self.assistant, user=self.user
-        )
-        run = create_execution_run(
-            session=session, question="q", enqueue=False
-        )
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
         self.assistant.agent_rounds = "flash"
         self.assistant.save(update_fields=["agent_rounds"])
 
-        response = self.client.get(
-            f"/api/lens/admin/runs/{run.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["agent_rounds"], "max")
@@ -3251,9 +3113,7 @@ class LensApiTests(TestCase):
         model_ref = uuid.uuid4()
         self.assistant.agent_model_ref = model_ref
         self.assistant.token_budget_profile = "deep"
-        self.assistant.save(
-            update_fields=["agent_model_ref", "token_budget_profile"]
-        )
+        self.assistant.save(update_fields=["agent_model_ref", "token_budget_profile"])
         session = Session.objects.create(
             assistant=self.assistant,
             user=self.user,
@@ -3322,9 +3182,7 @@ class LensApiTests(TestCase):
         self.assertEqual(failed_row["retry_count"], 1)
         self.assertEqual(failed_row["token_budget_profile"], "deep")
         self.assertEqual(failed_row["token_budget_max_tokens"], 500000)
-        detail_response = self.client.get(
-            f"/api/lens/admin/runs/{failed.uuid}/"
-        )
+        detail_response = self.client.get(f"/api/lens/admin/runs/{failed.uuid}/")
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.data["tool_call_count"], 1)
         self.assertEqual(detail_response.data["retry_count"], 1)
@@ -3425,9 +3283,7 @@ class LensApiTests(TestCase):
         run.save(update_fields=["status"])
         run.execution.save(update_fields=["status"])
 
-        response = self.client.post(
-            f"/api/lens/admin/runs/{run.uuid}/cancel/"
-        )
+        response = self.client.post(f"/api/lens/admin/runs/{run.uuid}/cancel/")
 
         self.assertEqual(response.status_code, 200, response.data)
         run.refresh_from_db()
@@ -3508,9 +3364,7 @@ class LensApiTests(TestCase):
         self.lensnode.status = LensNode.Status.ONLINE
         self.lensnode.save(update_fields=["status"])
 
-        response = self.client.post(
-            f"/api/lens/admin/runs/{run.uuid}/resume/"
-        )
+        response = self.client.post(f"/api/lens/admin/runs/{run.uuid}/resume/")
 
         self.assertEqual(response.status_code, 200, response.data)
         resume.assert_called_once_with(run.pk)
@@ -3552,19 +3406,15 @@ class LensApiTests(TestCase):
                                 "scope": "warning",
                                 "required": True,
                                 "affects_required_evidence": False,
-                                "arguments": {
-                                    "authorization": "must-not-leak"
-                                },
+                                "arguments": {"authorization": "must-not-leak"},
                             }
                         ],
-                    }
+                    },
                 ]
             },
         )
 
-        response = self.client.get(
-            f"/api/lens/admin/runs/{run.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], "done")
@@ -3607,9 +3457,7 @@ class LensApiTests(TestCase):
             },
         )
 
-        response = self.client.get(
-            f"/api/lens/admin/runs/{run.uuid}/"
-        )
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -3627,15 +3475,11 @@ class LensApiTests(TestCase):
         run.finished_at = finished_at
         run.save(update_fields=["finished_at"])
 
-        response = self.client.get(
-            f"/api/lens/sessions/{session.uuid}/messages/"
-        )
+        response = self.client.get(f"/api/lens/sessions/{session.uuid}/messages/")
 
         self.assertEqual(response.status_code, 200)
         question = next(m for m in response.data if m["role"] == "user")
-        answer = next(
-            m for m in response.data if m["role"] == "assistant"
-        )
+        answer = next(m for m in response.data if m["role"] == "assistant")
         self.assertIsNone(question["completed_at"])
         self.assertEqual(
             answer["completed_at"],
@@ -3649,9 +3493,7 @@ class LensApiTests(TestCase):
         name = output.file.name
         self.assertTrue(storage.exists(name))
 
-        response = self.client.delete(
-            f"/api/lens/sessions/{session.uuid}/"
-        )
+        response = self.client.delete(f"/api/lens/sessions/{session.uuid}/")
 
         self.assertIn(response.status_code, (200, 204))
         self.assertFalse(storage.exists(name))
@@ -3829,9 +3671,7 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         continuation = Run.objects.get(uuid=response.data["uuid"])
         self.assertEqual(
-            continuation.execution.runtime_snapshot[
-                "session_attachment_uuids"
-            ],
+            continuation.execution.runtime_snapshot["session_attachment_uuids"],
             [str(attachment.uuid)],
         )
 
@@ -4111,9 +3951,7 @@ class LensApiTests(TestCase):
         )
 
         self.assertEqual(stream_response.status_code, 200)
-        self.assertTrue(
-            stream_response["Content-Type"].startswith("text/event-stream")
-        )
+        self.assertTrue(stream_response["Content-Type"].startswith("text/event-stream"))
 
     def test_run_detail_is_scoped_to_session_owner(self):
         session_response = self.client.post(
@@ -4139,9 +3977,7 @@ class LensApiTests(TestCase):
         )
         self.client.force_authenticate(other_user)
 
-        response = self.client.get(
-            f"/api/lens/runs/{run_response.data['uuid']}/"
-        )
+        response = self.client.get(f"/api/lens/runs/{run_response.data['uuid']}/")
 
         self.assertEqual(response.status_code, 404)
 
@@ -4208,9 +4044,7 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["feedback"], "positive")
         self.assertIsNotNone(response.data["feedback_updated_at"])
-        messages = self.client.get(
-            f"/api/lens/sessions/{session.uuid}/messages/"
-        )
+        messages = self.client.get(f"/api/lens/sessions/{session.uuid}/messages/")
         assistant_message = next(
             item for item in messages.data if item["role"] == "assistant"
         )
@@ -4346,8 +4180,7 @@ class LensApiTests(TestCase):
 
     def test_check_datasource_path_blocks_existing_datasource_path(self):
         response = self.client.post(
-            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/"
-            "check-datasource-path/",
+            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/" "check-datasource-path/",
             {
                 "target_path": "/workspace/repo-cache",
                 "source_type": "git",
@@ -4373,8 +4206,7 @@ class LensApiTests(TestCase):
         check_path,
     ):
         response = self.client.post(
-            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/"
-            "check-datasource-path/",
+            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/" "check-datasource-path/",
             {
                 "target_path": "/workspace/repo-cache/restored",
                 "source_type": "managed_workspace",
@@ -4402,8 +4234,7 @@ class LensApiTests(TestCase):
         }
 
         response = self.client.post(
-            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/"
-            "check-datasource-path/",
+            f"/api/lens/admin/lensnodes/{self.lensnode.uuid}/" "check-datasource-path/",
             {
                 "datasource_uuid": str(self.datasource.uuid),
                 "target_path": "/workspace/repo-cache",
@@ -4637,9 +4468,8 @@ class LensApiTests(TestCase):
                 str(datasource.uuid),
                 "datasource-uploads/requirements.pdf",
                 "requirements.pdf",
-                task_id,
             ],
-            task_id=ANY,
+            task_id=task_id,
         )
         task = TaskExecution.objects.get(task_id=task_id)
         self.assertEqual(task.module, "lens_datasource_upload")
@@ -4742,14 +4572,11 @@ class LensApiTests(TestCase):
         datasource.refresh_from_db()
         self.assertEqual(datasource.last_conversion_status, "PENDING")
         self.assertIsNone(datasource.last_conversion_at)
-        detail = self.client.get(
-            f"/api/lens/admin/datasources/{datasource.uuid}/"
-        )
+        detail = self.client.get(f"/api/lens/admin/datasources/{datasource.uuid}/")
         self.assertEqual(detail.data["last_conversion_status"], "PENDING")
         self.assertIsNone(detail.data["last_conversion_at"])
         tasks = self.client.get(
-            f"/api/lens/admin/datasources/{datasource.uuid}/"
-            "conversion-tasks/"
+            f"/api/lens/admin/datasources/{datasource.uuid}/" "conversion-tasks/"
         )
         self.assertEqual(tasks.status_code, 200)
         self.assertEqual(tasks.data["results"][0]["task_id"], task_id)
@@ -4838,13 +4665,11 @@ class LensApiTests(TestCase):
         with (
             patch("core.celery.app.control.revoke") as revoke,
             patch(
-                "lens.views.datasources."
-                "cancel_datasource_conversion_on_lensnode"
+                "lens.views.datasources." "cancel_datasource_conversion_on_lensnode"
             ) as cancel,
         ):
             response = self.client.post(
-                f"/api/lens/admin/datasources/{datasource.uuid}/"
-                "cancel-conversion/",
+                f"/api/lens/admin/datasources/{datasource.uuid}/" "cancel-conversion/",
                 {},
                 format="json",
             )
@@ -4886,8 +4711,7 @@ class LensApiTests(TestCase):
         }
 
         response = self.client.post(
-            f"/api/lens/admin/datasources/{datasource.uuid}/"
-            "refresh-availability/",
+            f"/api/lens/admin/datasources/{datasource.uuid}/" "refresh-availability/",
             {},
             format="json",
         )
@@ -4899,8 +4723,7 @@ class LensApiTests(TestCase):
 
         check_path.side_effect = DataSourceDispatchError("LENSNODE_OFFLINE")
         response = self.client.post(
-            f"/api/lens/admin/datasources/{datasource.uuid}/"
-            "refresh-availability/",
+            f"/api/lens/admin/datasources/{datasource.uuid}/" "refresh-availability/",
             {},
             format="json",
         )
@@ -5020,10 +4843,7 @@ class LensApiTests(TestCase):
                 "lens.views.datasources.cancel_datasource_sync_on_lensnode"
             ) as cancel,
         ):
-            url = (
-                f"/api/lens/admin/datasources/{self.datasource.uuid}"
-                "/cancel-sync/"
-            )
+            url = f"/api/lens/admin/datasources/{self.datasource.uuid}" "/cancel-sync/"
             response = self.client.post(
                 url,
                 {},
@@ -5150,9 +4970,7 @@ class LensApiTests(TestCase):
             provider=DataSourceCredential.Provider.GITHUB,
             auth_type=DataSourceCredential.AuthType.NONE,
             endpoint_url="https://github.com",
-            scope_config={
-                "organization_url": "https://github.com/example/repo"
-            },
+            scope_config={"organization_url": "https://github.com/example/repo"},
         )
         payload = {
             "name": "Public Repo",
@@ -5249,9 +5067,7 @@ class LensApiTests(TestCase):
             auth_type=DataSourceCredential.AuthType.HTTPS_TOKEN,
             endpoint_url="https://github.com",
             sync_scope="service",
-            scope_config={
-                "organization_url": "https://github.com/CarltonXu/"
-            },
+            scope_config={"organization_url": "https://github.com/CarltonXu/"},
         )
         credential.set_secret("ghp_example")
         credential.save()
@@ -5301,9 +5117,7 @@ class LensApiTests(TestCase):
             enabled=True,
         )
 
-        response = self.client.get(
-            "/api/lens/admin/global-settings/system-health/"
-        )
+        response = self.client.get("/api/lens/admin/global-settings/system-health/")
 
         self.assertEqual(response.status_code, 200)
         task_types = {item["task_type"] for item in response.data}
@@ -5335,8 +5149,7 @@ class LensApiTests(TestCase):
         from django_celery_beat.models import PeriodicTask
 
         response = self.client.patch(
-            "/api/lens/admin/global-settings/"
-            "lensnode_cleanup.interval_seconds/",
+            "/api/lens/admin/global-settings/" "lensnode_cleanup.interval_seconds/",
             {
                 "key": "lensnode_cleanup.interval_seconds",
                 "value": 7200,
@@ -5386,40 +5199,35 @@ class AssistantAccessTests(TestCase):
         return client
 
     def test_public_view_404_for_private_assistant(self):
-        resp = self.client.get(
-            f"/api/lens/public/assistants/{self.assistant.slug}/"
-        )
+        resp = self.client.get(f"/api/lens/public/assistants/{self.assistant.slug}/")
         self.assertEqual(resp.status_code, 404)
 
     def test_public_view_200_when_public(self):
         self.assistant.visibility = Assistant.Visibility.PUBLIC
         self.assistant.save(update_fields=["visibility"])
-        resp = self.client.get(
-            f"/api/lens/public/assistants/{self.assistant.slug}/"
-        )
+        resp = self.client.get(f"/api/lens/public/assistants/{self.assistant.slug}/")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["description"], self.assistant.description)
 
     def test_list_hides_private_from_unauthorized_then_group_grant(self):
         client = self._client(self.member)
-        slugs = [a["slug"] for a in client.get(
-            "/api/lens/assistants/"
-        ).data["results"]]
+        slugs = [a["slug"] for a in client.get("/api/lens/assistants/").data["results"]]
         self.assertNotIn(self.assistant.slug, slugs)
 
         group = Group.objects.create(name="team")
         self.member.groups.add(group)
         AssistantAccess.objects.create(assistant=self.assistant, group=group)
 
-        slugs = [a["slug"] for a in client.get(
-            "/api/lens/assistants/"
-        ).data["results"]]
+        slugs = [a["slug"] for a in client.get("/api/lens/assistants/").data["results"]]
         self.assertIn(self.assistant.slug, slugs)
 
     def test_list_shows_private_to_admin(self):
-        slugs = [a["slug"] for a in self._client(self.admin).get(
-            "/api/lens/assistants/"
-        ).data["results"]]
+        slugs = [
+            a["slug"]
+            for a in self._client(self.admin)
+            .get("/api/lens/assistants/")
+            .data["results"]
+        ]
         self.assertIn(self.assistant.slug, slugs)
 
     def test_session_create_403_then_201_with_user_grant(self):
@@ -5428,9 +5236,7 @@ class AssistantAccessTests(TestCase):
         resp = client.post("/api/lens/sessions/", payload, format="json")
         self.assertEqual(resp.status_code, 403)
 
-        AssistantAccess.objects.create(
-            assistant=self.assistant, user=self.member
-        )
+        AssistantAccess.objects.create(assistant=self.assistant, user=self.member)
         resp = client.post("/api/lens/sessions/", payload, format="json")
         self.assertEqual(resp.status_code, 201)
 
@@ -5490,9 +5296,7 @@ class AssistantAccessTests(TestCase):
             list_resp.data["code"],
             "AUTHENTICATION_REQUIRED",
         )
-        single_resp = self.client.get(
-            f"/api/lens/public/qa/{share.token}/"
-        )
+        single_resp = self.client.get(f"/api/lens/public/qa/{share.token}/")
         self.assertEqual(single_resp.status_code, 403)
         self.assertEqual(
             single_resp.data["code"],
@@ -5511,13 +5315,9 @@ class AssistantAccessTests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            self.assistant.access_grants.filter(group=group).count(), 1
-        )
+        self.assertEqual(self.assistant.access_grants.filter(group=group).count(), 1)
         grants = resp.data["access_grants"]
-        self.assertEqual(grants, [
-            {"type": "group", "id": group.pk, "name": "grp"}
-        ])
+        self.assertEqual(grants, [{"type": "group", "id": group.pk, "name": "grp"}])
 
     def test_user_access_grants_include_selector_metadata(self):
         user = User.objects.create_user(
@@ -5631,9 +5431,7 @@ class AdminAccessSubjectTests(TestCase):
         )
         create_execution_run(session, "History question", enqueue=False)
 
-        response = self.client.get(
-            f"/api/lens/admin/access/users/{self.user.pk}/"
-        )
+        response = self.client.get(f"/api/lens/admin/access/users/{self.user.pk}/")
 
         self.assertEqual(response.status_code, 200, response.data)
         rows = {item["slug"]: item for item in response.data["assistants"]}
@@ -5724,9 +5522,7 @@ class AdminAccessSubjectTests(TestCase):
         client = APIClient()
         client.force_authenticate(self.user)
 
-        detail = client.get(
-            f"/api/lens/admin/access/users/{self.user.pk}/"
-        )
+        detail = client.get(f"/api/lens/admin/access/users/{self.user.pk}/")
         history = client.get("/api/lens/admin/runs/")
 
         self.assertEqual(detail.status_code, 200)

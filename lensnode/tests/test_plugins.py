@@ -27,10 +27,6 @@ def _config(**overrides):
 def test_codegraph_plugin_contributes_stdio_server(monkeypatch, tmp_path):
     (tmp_path / "app.py").write_text("print('hi')")
     monkeypatch.setattr(
-        "lensnode.plugins.codegraph.shutil.which",
-        lambda command: command,
-    )
-    monkeypatch.setattr(
         "lensnode.plugins.codegraph._ensure_codegraph_index",
         lambda *_args, **_kwargs: True,
     )
@@ -41,9 +37,7 @@ def test_codegraph_plugin_contributes_stdio_server(monkeypatch, tmp_path):
         command={"task": "code_analysis"},
     )
 
-    assert [server["name"] for server in servers] == [
-        CODEGRAPH_SERVER_NAME
-    ]
+    assert [server["name"] for server in servers] == [CODEGRAPH_SERVER_NAME]
     assert servers[0]["transport"] == "stdio"
     assert servers[0]["config"]["command"] == "codegraph"
     assert servers[0]["config"]["args"] == [
@@ -87,14 +81,15 @@ def test_codegraph_plugin_contributes_generic_agent_runtime_behavior():
 
     assert contribution.prompt_guidance.startswith("CodeGraph is available")
     assert contribution.middleware == contribution.subagent_middleware
-    assert contribution.always_visible_tool_prefixes == (
-        "mcp__codegraph__",
+    assert contribution.always_visible_tool_prefixes == ("mcp__codegraph__",)
+    assert (
+        plugin.contribute_agent_runtime(
+            _config(),
+            {"task": "knowledge_qa"},
+            tools,
+        )
+        is None
     )
-    assert plugin.contribute_agent_runtime(
-        _config(),
-        {"task": "knowledge_qa"},
-        tools,
-    ) is None
 
 
 def test_codegraph_plugin_disabled_when_toggle_off():
@@ -237,9 +232,7 @@ def test_codegraph_refresh_rebuilds_when_incomplete(monkeypatch, tmp_path):
     assert calls == ["rebuild"]
 
 
-def test_codegraph_refresh_keeps_index_when_status_unreadable(
-    monkeypatch, tmp_path
-):
+def test_codegraph_refresh_keeps_index_when_status_unreadable(monkeypatch, tmp_path):
     (tmp_path / ".codegraph").mkdir()
     calls = []
     monkeypatch.setattr(
@@ -345,9 +338,7 @@ def test_codegraph_sync_failure_returns_false(monkeypatch, tmp_path):
     def fail(*_args, **_kwargs):
         raise real_subprocess.CalledProcessError(1, "codegraph")
 
-    monkeypatch.setattr(
-        "lensnode.plugins.codegraph.subprocess.run", fail
-    )
+    monkeypatch.setattr("lensnode.plugins.codegraph.subprocess.run", fail)
 
     assert _codegraph_sync(_config(), tmp_path) is False
 
@@ -358,9 +349,7 @@ def test_codegraph_rebuild_failure_returns_false(monkeypatch, tmp_path):
     def fail(*_args, **_kwargs):
         raise real_subprocess.CalledProcessError(1, "codegraph")
 
-    monkeypatch.setattr(
-        "lensnode.plugins.codegraph.subprocess.run", fail
-    )
+    monkeypatch.setattr("lensnode.plugins.codegraph.subprocess.run", fail)
 
     assert _codegraph_rebuild(_config(), tmp_path) is False
 
@@ -403,9 +392,7 @@ def test_ensure_inits_missing_index(monkeypatch, tmp_path):
         (tmp_path / ".codegraph").mkdir()
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(
-        "lensnode.plugins.codegraph.subprocess.run", fake_run
-    )
+    monkeypatch.setattr("lensnode.plugins.codegraph.subprocess.run", fake_run)
 
     result = _ensure_codegraph_index(_config(), tmp_path)
 
@@ -442,12 +429,8 @@ def test_ensure_concurrent_runs_serialize_on_lock(monkeypatch, tmp_path):
             "state": "complete",
         }
 
-    monkeypatch.setattr(
-        "lensnode.plugins.codegraph._codegraph_sync", fake_sync
-    )
-    monkeypatch.setattr(
-        "lensnode.plugins.codegraph._codegraph_status", fake_status
-    )
+    monkeypatch.setattr("lensnode.plugins.codegraph._codegraph_sync", fake_sync)
+    monkeypatch.setattr("lensnode.plugins.codegraph._codegraph_status", fake_status)
 
     threads = [
         threading.Thread(
