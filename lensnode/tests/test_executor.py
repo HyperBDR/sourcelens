@@ -1158,6 +1158,28 @@ def test_code_analysis_has_bounded_default_agent_turns():
     ) == 10
 
 
+@pytest.mark.parametrize(
+    ("agent_rounds", "expected"),
+    [
+        ("flash", 5),
+        ("fast", 13),
+        ("balanced", 26),
+        ("deep", 50),
+        ("max", 100),
+    ],
+)
+def test_agent_rounds_resolve_to_model_turn_limits(agent_rounds, expected):
+    assert _resolve_agent_turn_limit(
+        {"task": "code_analysis", "agent_rounds": agent_rounds},
+    ) == expected
+
+
+def test_unknown_agent_rounds_keep_code_analysis_default():
+    assert _resolve_agent_turn_limit(
+        {"task": "code_analysis", "agent_rounds": "unknown"},
+    ) == 10
+
+
 def test_explicit_agent_turn_limit_overrides_code_analysis_default():
     assert _resolve_agent_turn_limit(
         {"task": "code_analysis", "max_agent_turns": 7},

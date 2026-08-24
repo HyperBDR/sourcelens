@@ -126,6 +126,13 @@ LOGGER = logging.getLogger("lensnode")
 
 _MAX_PRESENTED_CITATIONS = 5
 _DEFAULT_CODE_ANALYSIS_MAX_TURNS = 10
+_AGENT_TURNS_BY_ROUNDS = {
+    "flash": 5,
+    "fast": 13,
+    "balanced": 26,
+    "deep": 50,
+    "max": 100,
+}
 _EXECUTION_BACKEND_TRUSTED_CONTAINER = "trusted_container"
 _EXECUTION_BACKEND_FILESYSTEM = "filesystem"
 
@@ -149,6 +156,9 @@ def _resolve_agent_turn_limit(command):
         configured = None
     if configured is not None and configured > 0:
         return configured
+    agent_rounds = (command or {}).get("agent_rounds")
+    if agent_rounds in _AGENT_TURNS_BY_ROUNDS:
+        return _AGENT_TURNS_BY_ROUNDS[agent_rounds]
     if (command or {}).get("task") == "code_analysis":
         return _DEFAULT_CODE_ANALYSIS_MAX_TURNS
     return configured
