@@ -1,0 +1,8 @@
+type: fix
+audience: user
+en: >-
+  Fixed Assistant analysis tiers not being applied to LensNode model-turn
+  limits when the run command omitted an explicit max_agent_turns value.
+zh-CN: >-
+  修复运行命令未显式传入 max_agent_turns 时，助手分析规格未正确应用到
+  LensNode 模型轮次限制的问题。
