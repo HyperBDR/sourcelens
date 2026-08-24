@@ -48,9 +48,12 @@ def test_retrieval_plan_normalizes_bounded_limits():
             "question_type": "runtime_error",
             "evidence_requirements": ["runtime error text", "source lines"],
             "codegraph_queries": [
-                {"operation": "explore", "query": "raise None"},
+                *(
+                    {"operation": "explore", "query": str(index)}
+                    for index in range(20)
+                ),
             ],
-            "literal_queries": ["raise None", "raise None"],
+            "literal_queries": [str(index) for index in range(10)],
             "file_scopes": ["lensnode/", "lensnode/"],
             "max_files": 1000,
             "max_fallback_rounds": 99,
@@ -61,12 +64,12 @@ def test_retrieval_plan_normalizes_bounded_limits():
         }
     )
 
-    assert plan.max_files == 15
+    assert plan.max_files == 8
     assert plan.max_fallback_rounds == 1
     assert plan.budgets.max_source_window_lines == 250
     assert plan.budgets.max_evidence_tokens == 20000
-    assert len(plan.codegraph_queries) == 1
-    assert plan.literal_queries == ("raise None",)
+    assert len(plan.codegraph_queries) == 2
+    assert len(plan.literal_queries) == 8
 
 
 def test_retrieval_plan_accepts_planner_source_window_field_names():

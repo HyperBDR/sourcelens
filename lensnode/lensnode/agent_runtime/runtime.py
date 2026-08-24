@@ -1258,7 +1258,7 @@ def _scenario_for_task(task):
 def _normalize_code_analysis_paths(answer, command):
     """Present code paths relative to the selected resource directories."""
 
-    if command.get("task") != "code_analysis":
+    if command.get("task") == "general_chat":
         return answer
 
     normalized = str(answer or "")
@@ -1271,10 +1271,20 @@ def _normalize_code_analysis_paths(answer, command):
         key=len,
         reverse=True,
     )
+    workspace_path = command.get("workspace_path")
+    if workspace_path:
+        roots.append(Path(workspace_path).resolve().as_posix().rstrip("/"))
+    roots = sorted(set(roots or ["/workspace"]), key=len, reverse=True)
     for root in roots:
         normalized = re.sub(
-            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}(?P<separator>/|$)",
-            lambda match: "" if match.group("separator") == "/" else ".",
+            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}/",
+            "",
+            normalized,
+        )
+        normalized = re.sub(
+            rf"(?<![A-Za-z0-9_.-]){re.escape(root)}"
+            r"(?=$|[\s\"'`.,:;!?])",
+            ".",
             normalized,
         )
     return normalized

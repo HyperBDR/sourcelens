@@ -1136,6 +1136,22 @@ def test_code_analysis_paths_are_relative_to_resource_directories():
     )
 
 
+def test_workspace_paths_are_relative_for_non_code_analysis_tasks():
+    answer = _normalize_code_analysis_paths(
+        "The workspace is /workspace/sourcelens and the file is "
+        "/workspace/sourcelens/lensnode/lensnode/runtime.py.",
+        {
+            "task": "knowledge_qa",
+            "workspace_path": "/workspace/sourcelens",
+        },
+    )
+
+    assert answer == (
+        "The workspace is . and the file is "
+        "lensnode/lensnode/runtime.py."
+    )
+
+
 def test_code_analysis_has_bounded_default_agent_turns():
     assert _resolve_agent_turn_limit(
         {"task": "code_analysis"},
