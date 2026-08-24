@@ -440,6 +440,7 @@ import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 
 import { extractErrorMessage } from '@/utils/api'
+import { lensNodeErrorMessage } from '@/utils/lensNodeErrors'
 import { llmAdminApi } from '@/admin/api/llmAdmin'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
@@ -1385,7 +1386,9 @@ async function checkDatasourcePath() {
   } catch (error) {
     datasourcePathResult.value = {
       status: 'blocked',
-      message: extractErrorMessage(error, t('lensAdmin.messages.loadFailed'))
+      message:
+        lensNodeErrorMessage(error.response?.data?.detail, t) ||
+        extractErrorMessage(error, t('lensAdmin.messages.loadFailed'))
     }
   } finally {
     checkingDatasourcePath.value = false
@@ -1452,7 +1455,9 @@ async function testDatasourceConnection() {
   } catch (error) {
     datasourceConnectionResult.value = {
       status: 'failed',
-      message: extractErrorMessage(error, t('lensAdmin.messages.loadFailed'))
+      message:
+        lensNodeErrorMessage(error.response?.data?.detail, t) ||
+        extractErrorMessage(error, t('lensAdmin.messages.loadFailed'))
     }
   } finally {
     testingDatasourceConnection.value = false
@@ -1748,7 +1753,10 @@ async function sync(row) {
     )
     await load()
   } catch (error) {
-    showError(extractErrorMessage(error, t('lensAdmin.messages.syncFailed')))
+    showError(
+      lensNodeErrorMessage(error.response?.data?.detail, t) ||
+        extractErrorMessage(error, t('lensAdmin.messages.syncFailed'))
+    )
   }
 }
 

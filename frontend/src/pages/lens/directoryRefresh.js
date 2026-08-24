@@ -34,16 +34,10 @@ function mergeDirectoryEntries(rootDirs, existingByPath, responseDirs) {
   })
 }
 
-export function mergeRefreshedDirectories(
-  existingDirs,
-  result,
-  workspacePath
-) {
+export function mergeRefreshedDirectories(existingDirs, result, workspacePath) {
   const previous = Array.isArray(existingDirs) ? existingDirs : []
   const existingByPath = new Map(
-    previous
-      .map((dir) => [directoryPath(dir), dir])
-      .filter(([path]) => path)
+    previous.map((dir) => [directoryPath(dir), dir]).filter(([path]) => path)
   )
   const dirs = result?.dirs ?? result
 

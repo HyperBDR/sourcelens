@@ -61,8 +61,6 @@ test('data source parent refreshes directories for the selected LensNode', async
 })
 
 test('directory refresh normalizes supported list-dirs response shapes', async () => {
-  const contents = await source('pages/lens/DataSources.vue')
-
   const helper = await source('pages/lens/directoryRefresh.js')
 
   assert.match(helper, /const dirs = result\?\.dirs \?\? result/)
@@ -102,9 +100,7 @@ test('directory refresh preserves and updates nested directory entries', () => {
       {
         path: '/workspace/project',
         name: 'project',
-        children: [
-          { path: '/workspace/project/old', name: 'old' }
-        ]
+        children: [{ path: '/workspace/project/old', name: 'old' }]
       }
     ],
     {
@@ -126,9 +122,7 @@ test('directory refresh preserves and updates nested directory entries', () => {
     {
       path: '/workspace/project',
       name: 'project',
-      children: [
-        { path: '/workspace/project/new-child', name: 'new-child' }
-      ]
+      children: [{ path: '/workspace/project/new-child', name: 'new-child' }]
     },
     {
       path: '/workspace/new',
