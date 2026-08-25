@@ -65,10 +65,11 @@ test('run overview owns resource consumption and uses a dashboard layout', async
   const usageIndex = contents.indexOf('data-testid="run-overview-usage"')
   const executionIndex = contents.indexOf('data-testid="run-execution-content"')
 
+  assert.ok(overviewIndex >= 0)
   assert.ok(usageIndex > overviewIndex)
-  assert.ok(usageIndex < executionIndex)
+  assert.ok(executionIndex > overviewIndex)
   assert.match(contents, /class="overview-dashboard"/)
-  assert.match(contents, /class="overview-two-column"/)
+  assert.match(contents, /class="overview-time-row"/)
   assert.match(contents, /data-testid="run-token-summary"/)
   assert.doesNotMatch(contents, /data-testid="run-execution-usage-view"/)
   assert.doesNotMatch(contents, /activeExecutionView === 'usage'/)

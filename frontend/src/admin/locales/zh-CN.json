@@ -76,7 +76,6 @@
     "verifiedCitations": "已验证引用",
     "noVerifiedCitations": "当前 Run 未捕获到已验证引用。",
     "overviewSummary": "运行概览",
-    "overviewExecution": "执行配置",
     "modelsUsed": "执行模型",
     "overviewTiming": "时间信息",
     "overviewResources": "运行资源",

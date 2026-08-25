@@ -76,7 +76,6 @@
     "verifiedCitations": "Verified citations",
     "noVerifiedCitations": "No verified citations were captured for this Run.",
     "overviewSummary": "Run overview",
-    "overviewExecution": "Execution configuration",
     "modelsUsed": "Models used",
     "overviewTiming": "Timing",
     "overviewResources": "Runtime resources",
