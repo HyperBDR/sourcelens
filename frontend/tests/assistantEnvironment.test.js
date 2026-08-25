@@ -160,3 +160,18 @@ test('allows a new variable set to use the backend-generated name', () => {
     true
   )
 })
+
+test('accepts direct Skill values without selecting a variable set', () => {
+  assert.equal(
+    environmentConfigurationComplete({
+      selectedUuid: '',
+      requiredNames: ['INCOME_ENDPOINT', 'INCOME_USERNAME'],
+      draftValues: {
+        INCOME_ENDPOINT: 'https://income.example.com',
+        INCOME_USERNAME: 'admin'
+      },
+      savedKeys: []
+    }),
+    true
+  )
+})

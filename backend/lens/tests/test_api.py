@@ -3290,6 +3290,8 @@ class LensApiTests(TestCase):
         )
 
     def test_lensnode_list_exposes_run_workload(self):
+        from lens.models import RunTraceEvent
+
         LensNode.objects.create(
             name="Draining LensNode",
             status=LensNode.Status.DRAINING,
@@ -3319,6 +3321,14 @@ class LensApiTests(TestCase):
         expired.status = Run.Status.RUNNING
         expired.resume_by = timezone.now() - timedelta(minutes=2)
         expired.save(update_fields=["status", "resume_by"])
+        RunTraceEvent.objects.create(
+            run=running,
+            event_id=uuid.uuid4(),
+            sequence=1,
+            event_type="model.completed",
+            timestamp=timezone.now(),
+            payload={"usage": {"total_tokens": 7}},
+        )
 
         response = self.client.get("/api/lens/admin/lensnodes/")
 
@@ -3331,6 +3341,11 @@ class LensApiTests(TestCase):
         self.assertEqual(row["active_run_count"], 2)
         self.assertEqual(row["queued_run_count"], 1)
         self.assertEqual(row["awaiting_resume_count"], 1)
+        self.assertEqual(row["total_run_count"], 3)
+        self.assertEqual(row["succeeded_run_count"], 0)
+        self.assertEqual(row["failed_run_count"], 0)
+        self.assertEqual(row["total_tokens"], 7)
+        self.assertIsNotNone(row["last_run_at"])
         self.assertEqual(response.data["fleet_summary"]["active_runs"], 2)
         self.assertEqual(response.data["fleet_summary"]["queued_runs"], 1)
         self.assertEqual(response.data["fleet_summary"]["draining"], 1)
