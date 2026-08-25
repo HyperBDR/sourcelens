@@ -1,0 +1,7 @@
+type: fix
+audience: admin
+en: >-
+  Fixed the Assistant Multimodal Model selector so active models explicitly
+  configured to support image input can be selected.
+zh-CN: >-
+  修复助手多模态模型选择器问题，现在可以选择已明确配置为支持图片输入的启用模型。
