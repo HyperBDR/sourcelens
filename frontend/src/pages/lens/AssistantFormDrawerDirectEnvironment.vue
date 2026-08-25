@@ -431,102 +431,73 @@
                 data-testid="assistant-skill-environments"
               >
                 <div class="ml-8 border-l border-primary-200 pl-3">
-                  <div class="flex items-center justify-between gap-3">
-                    <h3 class="text-xs font-semibold text-ink-700">
-                      {{ t('lensAdmin.wizard.environmentSection') }}
-                    </h3>
-                    <span
-                      v-if="hasRequiredEnvironment(skill)"
-                      class="flex-shrink-0 text-[11px] font-medium text-danger-600"
-                    >
-                      {{ t('lensAdmin.wizard.environmentRequired') }}
-                    </span>
-                  </div>
-                  <div class="mt-2 space-y-2.5">
-                    <BaseSelect
-                      v-model="form.skill_environment_set_uuids[skill.uuid]"
-                      class="text-xs"
-                      :aria-label="t('lensAdmin.wizard.selectEnvironmentSet')"
-                    >
-                      <option value="">
-                        {{ t('lensAdmin.wizard.selectEnvironmentSet') }}
-                      </option>
-                      <option value="__new__">
-                        {{ t('lensAdmin.wizard.createEnvironmentSet') }}
-                      </option>
-                      <option
-                        v-for="variableSet in enabledEnvironmentVariableSets"
-                        :key="variableSet.uuid"
-                        :value="variableSet.uuid"
-                      >
-                        {{ variableSet.name }}
-                      </option>
-                    </BaseSelect>
-                    <p
-                      v-if="!form.skill_environment_set_uuids[skill.uuid]"
-                      class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-[11px] leading-4 text-primary-700"
-                      role="status"
-                    >
-                      {{ t('lensAdmin.wizard.environmentSetRequiredHint') }}
-                    </p>
-                    <div
-                      v-if="
-                        form.skill_environment_set_uuids[skill.uuid] ===
-                        '__new__'
-                      "
-                      class="space-y-1"
-                    >
-                      <label class="text-[11px] font-medium text-ink-700">
-                        {{ t('lensAdmin.wizard.environmentSetNameLabel') }}
-                      </label>
-                      <input
-                        v-model="environmentDraft(skill.uuid).name"
-                        class="form-input skill-environment-input"
-                        type="text"
-                        :placeholder="t('lensAdmin.wizard.environmentSetName')"
-                        :aria-label="
-                          t('lensAdmin.wizard.environmentSetNameLabel')
-                        "
-                        maxlength="160"
-                        autocomplete="off"
-                      />
-                      <p class="text-[11px] leading-4 text-ink-500">
-                        {{ t('lensAdmin.wizard.environmentSetNameHint') }}
-                      </p>
-                    </div>
-                    <div
-                      v-if="form.skill_environment_set_uuids[skill.uuid]"
-                      class="space-y-2.5 rounded-md bg-surface-sunken p-2.5"
-                    >
+                  <div class="space-y-2.5">
+                    <div class="space-y-2.5 rounded-md bg-surface-sunken p-2.5">
                       <div
                         v-for="item in skillEnvironment(skill)"
                         :key="item.name"
-                        class="space-y-1"
+                        class="flex items-center gap-2"
                       >
-                        <div class="flex items-center justify-between gap-3">
-                          <label
-                            class="font-mono text-[11px] font-medium text-ink-700"
+                        <label
+                          class="w-40 flex-shrink-0 truncate font-mono text-[11px] font-medium text-ink-700"
+                          :for="`skill-environment-${skill.uuid}-${item.name}`"
+                        >
+                          {{ item.name
+                          }}<span v-if="item.required" class="text-danger-600"
+                            >*</span
                           >
-                            {{ item.name
-                            }}<span
-                              v-if="item.required"
-                              class="text-danger-600"
-                            >
-                              *</span
-                            >
-                          </label>
+                        </label>
+                        <div class="relative min-w-0 flex-1">
+                          <input
+                            :id="`skill-environment-${skill.uuid}-${item.name}`"
+                            v-model="
+                              environmentDraft(skill.uuid).values[item.name]
+                            "
+                            class="form-input w-full pr-10 skill-environment-input font-mono"
+                            :type="
+                              isEnvironmentRevealed(skill.uuid, item.name)
+                                ? 'text'
+                                : 'password'
+                            "
+                            :placeholder="environmentInputPlaceholder(item)"
+                            :aria-label="item.name"
+                            autocomplete="off"
+                          />
+                          <button
+                            type="button"
+                            class="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-ink-400 transition-colors hover:bg-surface-sunken hover:text-ink-700"
+                            :aria-label="
+                              environmentRevealLabel(skill.uuid, item.name)
+                            "
+                            :title="
+                              environmentRevealLabel(skill.uuid, item.name)
+                            "
+                            @click="
+                              toggleEnvironmentReveal(skill.uuid, item.name)
+                            "
+                          >
+                            <component
+                              :is="
+                                isEnvironmentRevealed(skill.uuid, item.name)
+                                  ? EyeOffIcon
+                                  : EyeIcon
+                              "
+                              class="h-4 w-4"
+                              aria-hidden="true"
+                            />
+                          </button>
                         </div>
-                        <input
-                          v-model="
-                            environmentDraft(skill.uuid).values[item.name]
-                          "
-                          class="form-input skill-environment-input font-mono"
-                          :type="item.secret ? 'password' : 'text'"
-                          :placeholder="environmentInputPlaceholder(item)"
-                          :aria-label="item.name"
-                          autocomplete="off"
-                        />
                       </div>
+                      <p
+                        v-if="
+                          hasRequiredEnvironment(skill) &&
+                          !skillEnvironmentConfigured(skill)
+                        "
+                        class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-[11px] leading-4 text-primary-700"
+                        role="status"
+                      >
+                        {{ t('lensAdmin.wizard.skillEnvironmentRequiredHint') }}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -557,7 +528,7 @@
           class="space-y-2 rounded-md border border-line bg-surface-sunken p-2"
         >
           <div
-            v-for="mcp in mcps"
+            v-for="mcp in orderedMcps"
             :key="mcp.uuid"
             class="overflow-hidden rounded-md border bg-surface transition-colors"
             :class="
@@ -1015,6 +986,8 @@
 
 <script setup>
 import {
+  Eye as EyeIcon,
+  EyeOff as EyeOffIcon,
   Globe as GlobeIcon,
   Lock as LockIcon,
   Search,
@@ -1081,11 +1054,13 @@ const ACCESS_PAGE_SIZE = 20
 const SEARCH_DELAY_MS = 250
 const LOAD_MORE_THRESHOLD_PX = 96
 const wizardStep = ref(1)
+const initialSkillSelection = ref([])
+const initialMcpSelection = ref([])
 
 const visionModelOptions = computed(() => {
   const selected = props.form.multimodal_model_ref
-  const eligible = props.llmConfigOptions.filter(
-    (config) => isVisionModelEligible(config)
+  const eligible = props.llmConfigOptions.filter((config) =>
+    isVisionModelEligible(config)
   )
   const historical = props.llmConfigOptions.find(
     (config) => config.uuid === selected
@@ -1135,6 +1110,10 @@ watch(
     if (show) {
       wizardStep.value = 1
       skillSearch.value = ''
+      initialSkillSelection.value =
+        props.mode === 'edit' ? [...(props.form.skill_uuids || [])] : []
+      initialMcpSelection.value =
+        props.mode === 'edit' ? [...(props.form.mcp_uuids || [])] : []
       initializeAccessSelectors()
     } else {
       resetPendingAccessRequests()
@@ -1536,16 +1515,21 @@ const selectableSkills = computed(() =>
   filterSelectableSkills(props.skills, '')
 )
 
-const filteredSelectableSkills = computed(() =>
-  sortSkillsBySelection(
-    filterSelectableSkills(props.skills, skillSearch.value),
-    props.form.skill_uuids
-  )
+const orderedSkills = computed(() =>
+  sortSkillsBySelection(selectableSkills.value, initialSkillSelection.value)
 )
 
-const enabledEnvironmentVariableSets = computed(() =>
-  props.environmentVariableSets.filter((variableSet) => variableSet.enabled)
+const filteredSelectableSkills = computed(() =>
+  filterSelectableSkills(orderedSkills.value, skillSearch.value)
 )
+
+const orderedMcps = computed(() => {
+  const selected = new Set(initialMcpSelection.value)
+  return [...props.mcps].sort(
+    (left, right) =>
+      Number(selected.has(right.uuid)) - Number(selected.has(left.uuid))
+  )
+})
 
 function isSkillSelected(uuid) {
   return (props.form.skill_uuids || []).includes(uuid)
@@ -1564,9 +1548,12 @@ function environmentDraft(skillUuid) {
   props.form.skill_environment_drafts ||= {}
   props.form.skill_environment_drafts[skillUuid] ||= {
     name: '',
-    values: {}
+    values: {},
+    revealed: {}
   }
-  return props.form.skill_environment_drafts[skillUuid]
+  const draft = props.form.skill_environment_drafts[skillUuid]
+  draft.revealed ||= {}
+  return draft
 }
 
 function selectedEnvironmentSet(skillUuid) {
@@ -1578,6 +1565,32 @@ function selectedEnvironmentSet(skillUuid) {
 
 function environmentInputPlaceholder(item) {
   return item.description || item.name
+}
+
+function isEnvironmentRevealed(skillUuid, name) {
+  return !!environmentDraft(skillUuid).revealed?.[name]
+}
+
+function environmentRevealLabel(skillUuid, name) {
+  return isEnvironmentRevealed(skillUuid, name)
+    ? t('lensAdmin.wizard.maskEnvironmentValue')
+    : t('lensAdmin.wizard.revealEnvironmentValue')
+}
+
+function toggleEnvironmentReveal(skillUuid, name) {
+  const draft = environmentDraft(skillUuid)
+  draft.revealed[name] = !draft.revealed[name]
+}
+
+function skillEnvironmentConfigured(skill) {
+  return environmentConfigurationComplete({
+    selectedUuid: props.form.skill_environment_set_uuids?.[skill.uuid] || '',
+    requiredNames: skillEnvironment(skill)
+      .filter((item) => item.required)
+      .map((item) => item.name),
+    draftValues: environmentDraft(skill.uuid).values,
+    savedKeys: selectedEnvironmentSet(skill.uuid)?.keys
+  })
 }
 
 function selectedSkillEnvironmentsConfigured() {

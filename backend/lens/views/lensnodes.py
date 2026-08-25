@@ -2,7 +2,7 @@
 
 from pathlib import PurePosixPath
 
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.db.models.functions import Now
 from rest_framework import status
 from rest_framework.decorators import action
@@ -16,7 +16,7 @@ from lens.datasource_services import (
     test_datasource_connection,
 )
 from lens.lensnode_auth import issue_lensnode_token
-from lens.models import DataSource, LensNode, Run
+from lens.models import DataSource, LensNode, Run, RunTraceEvent
 from lens.serializers import LensNodeSerializer
 from .base import BaseAdminViewSet
 
@@ -51,6 +51,18 @@ class LensNodeViewSet(BaseAdminViewSet):
             ),
             distinct=True,
         ),
+        total_run_count=Count("runs", distinct=True),
+        succeeded_run_count=Count(
+            "runs",
+            filter=Q(runs__status=Run.Status.DONE),
+            distinct=True,
+        ),
+        failed_run_count=Count(
+            "runs",
+            filter=Q(runs__status=Run.Status.FAILED),
+            distinct=True,
+        ),
+        last_run_at=Max("runs__created_at"),
     ).order_by("name")
     serializer_class = LensNodeSerializer
 
@@ -58,6 +70,24 @@ class LensNodeViewSet(BaseAdminViewSet):
         """Return paginated nodes with fleet-wide health and workload."""
 
         response = super().list(request, *args, **kwargs)
+        node_ids = [
+            row.get("uuid") for row in response.data.get("results", [])
+        ]
+        token_totals = {}
+        events = RunTraceEvent.objects.filter(
+            run__lensnode__uuid__in=node_ids,
+            event_type="model.completed",
+        ).values("run__lensnode__uuid", "payload")
+        for event in events:
+            usage = (event.get("payload") or {}).get("usage") or {}
+            try:
+                tokens = max(int(usage.get("total_tokens") or 0), 0)
+            except (TypeError, ValueError):
+                tokens = 0
+            node_id = str(event["run__lensnode__uuid"])
+            token_totals[node_id] = token_totals.get(node_id, 0) + tokens
+        for row in response.data.get("results", []):
+            row["total_tokens"] = token_totals.get(str(row["uuid"]), 0)
         node_summary = LensNode.objects.aggregate(
             total=Count("pk"),
             online=Count("pk", filter=Q(status=LensNode.Status.ONLINE)),

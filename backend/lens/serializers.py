@@ -186,6 +186,11 @@ class LensNodeSerializer(serializers.ModelSerializer):
     active_run_count = serializers.IntegerField(read_only=True, default=0)
     queued_run_count = serializers.IntegerField(read_only=True, default=0)
     awaiting_resume_count = serializers.IntegerField(read_only=True, default=0)
+    total_run_count = serializers.IntegerField(read_only=True, default=0)
+    succeeded_run_count = serializers.IntegerField(read_only=True, default=0)
+    failed_run_count = serializers.IntegerField(read_only=True, default=0)
+    total_tokens = serializers.IntegerField(read_only=True, default=0)
+    last_run_at = serializers.DateTimeField(read_only=True, allow_null=True)
 
     class Meta:
         model = LensNode
@@ -209,6 +214,11 @@ class LensNodeSerializer(serializers.ModelSerializer):
             "active_run_count",
             "queued_run_count",
             "awaiting_resume_count",
+            "total_run_count",
+            "succeeded_run_count",
+            "failed_run_count",
+            "total_tokens",
+            "last_run_at",
             "registered_at",
             "created_at",
             "updated_at",

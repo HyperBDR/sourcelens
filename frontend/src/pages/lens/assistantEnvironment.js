@@ -78,7 +78,7 @@ export function environmentConfigurationComplete({
   const hasEnteredValue = Object.values(enteredValues).some((value) =>
     String(value ?? '').trim()
   )
-  if (!selectedUuid && (required.length || hasEnteredValue)) return false
+  if (!selectedUuid && required.length && !hasEnteredValue) return false
 
   const saved = new Set(savedKeys || [])
   return required.every(

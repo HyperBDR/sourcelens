@@ -14,42 +14,47 @@
         <StatusBadge :status="node.status" />
       </div>
 
-      <!-- Enrollment progress timeline -->
-      <div>
-        <div class="mb-3 text-sm font-medium text-ink-700">
-          {{ t('lensAdmin.timeline.title') }}
-        </div>
-        <ol class="relative">
-          <li
-            v-for="(step, i) in timelineSteps"
-            :key="step.key"
-            class="flex gap-3"
+      <section class="space-y-3">
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div
+            v-for="item in nodeMetricCards"
+            :key="item.label"
+            class="rounded-lg border border-line bg-surface-sunken px-3 py-2.5"
           >
-            <div class="flex flex-col items-center">
-              <span
-                class="mt-1 h-3 w-3 flex-shrink-0 rounded-full"
-                :class="dotClass(step.tone)"
-              />
-              <span
-                v-if="i < timelineSteps.length - 1"
-                class="my-1 w-px flex-1 bg-line"
-              />
+            <div class="text-xs text-ink-500">{{ item.label }}</div>
+            <div class="mt-1 text-lg font-semibold tabular-nums text-ink-900">
+              {{ item.value }}
             </div>
-            <div class="flex-1 pb-4">
-              <div class="text-sm font-medium text-ink-800">
-                {{ step.label }}
-              </div>
-              <div
-                v-if="step.meta"
-                class="text-xs"
-                :class="metaClass(step.tone)"
-              >
-                {{ step.meta }}
+          </div>
+        </div>
+        <div class="space-y-3">
+          <div class="rounded-lg border border-line bg-surface px-4 py-3">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-xs font-medium text-ink-500">
+                {{ nodeInfoRows[0].label }}
+              </span>
+              <span class="text-[11px] text-ink-400">
+                {{ t('lensAdmin.detail.runtimeLocation') }}
+              </span>
+            </div>
+            <div class="mt-2 break-all font-mono text-sm text-ink-900">
+              {{ nodeInfoRows[0].value }}
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div
+              v-for="item in nodeInfoRows.slice(1)"
+              :key="item.label"
+              class="rounded-lg border border-line bg-surface px-3 py-3"
+            >
+              <div class="text-xs text-ink-500">{{ item.label }}</div>
+              <div class="mt-1.5 break-words text-sm font-medium text-ink-800">
+                {{ item.value }}
               </div>
             </div>
-          </li>
-        </ol>
-      </div>
+          </div>
+        </div>
+      </section>
 
       <!-- Directory preview (lazy tree) -->
       <div>
@@ -85,6 +90,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { scanLensNodeDirs } from '@/api/lens'
+import { formatOperationMetric } from '@/admin/utils/operationsSummary'
 import { useToast } from '@/composables/useToast'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
@@ -111,86 +117,61 @@ const formatDateTime = useShortDateTime()
 
 const isOffline = computed(() => props.node?.status !== 'online')
 
-const timelineSteps = computed(() => {
-  const node = props.node
-  if (!node) return []
-  const enrollment = node.enrollment_status
+const nodeMetricCards = computed(() => {
+  const node = props.node || {}
   return [
     {
-      key: 'created',
-      label: t('lensAdmin.timeline.created'),
-      tone: 'done',
-      meta: formatDateTime(node.created_at)
+      label: t('lensAdmin.detail.totalRuns'),
+      value: formatOperationMetric(node.total_run_count)
     },
     {
-      key: 'approved',
-      label: t('lensAdmin.timeline.approved'),
-      tone:
-        enrollment === 'approved'
-          ? 'done'
-          : enrollment === 'rejected'
-            ? 'error'
-            : 'pending',
-      meta:
-        enrollment === 'rejected'
-          ? t('lensAdmin.timeline.rejected')
-          : enrollment === 'approved'
-            ? ''
-            : t('lensAdmin.timeline.pendingMeta')
+      label: t('lensAdmin.detail.succeededRuns'),
+      value: formatOperationMetric(node.succeeded_run_count)
     },
     {
-      key: 'credential',
-      label: t('lensAdmin.timeline.credential'),
-      tone: node.token_revoked ? 'error' : node.has_token ? 'done' : 'pending',
-      meta: node.token_revoked
-        ? t('lensAdmin.detail.revoked')
-        : node.has_token
-          ? node.token_issued_at
-            ? formatDateTime(node.token_issued_at)
-            : t('lensAdmin.detail.active')
-          : t('lensAdmin.detail.notIssued')
+      label: t('lensAdmin.detail.failedRuns'),
+      value: formatOperationMetric(node.failed_run_count)
     },
     {
-      key: 'connected',
-      label: t('lensAdmin.timeline.connected'),
-      tone: node.last_authenticated_at ? 'done' : 'idle',
-      meta: node.last_authenticated_at
-        ? formatDateTime(node.last_authenticated_at)
-        : t('lensAdmin.timeline.notConnected')
+      label: t('lensAdmin.detail.totalTokens'),
+      value: formatOperationMetric(node.total_tokens)
     },
     {
-      key: 'online',
-      label: t('lensAdmin.timeline.online'),
-      tone: node.status === 'online' ? 'done' : 'idle',
-      meta:
-        node.status === 'online' && node.last_heartbeat_at
-          ? t('lensAdmin.timeline.heartbeat', {
-              time: formatDateTime(node.last_heartbeat_at)
-            })
-          : t(`common.status.${node.status}`)
+      label: t('lensAdmin.detail.activeRuns'),
+      value: formatOperationMetric(node.active_run_count)
+    },
+    {
+      label: t('lensAdmin.detail.queuedRuns'),
+      value: formatOperationMetric(node.queued_run_count)
     }
   ]
 })
 
-function dotClass(tone) {
-  return (
+const nodeInfoRows = computed(() => {
+  const node = props.node || {}
+  return [
     {
-      done: 'bg-success-500',
-      error: 'bg-danger-500',
-      pending: 'bg-warning-400',
-      idle: 'bg-ink-300'
-    }[tone] || 'bg-ink-300'
-  )
-}
-
-function metaClass(tone) {
-  return (
+      label: t('lensAdmin.detail.workspace'),
+      value: node.workspace_path || t('lensAdmin.detail.notReported')
+    },
     {
-      error: 'text-danger-600',
-      pending: 'text-warning-700'
-    }[tone] || 'text-ink-500'
-  )
-}
+      label: t('lensAdmin.detail.agentVersion'),
+      value: node.agent_version || t('lensAdmin.detail.notReported')
+    },
+    {
+      label: t('lensAdmin.detail.protocolVersion'),
+      value: node.protocol_version || t('lensAdmin.detail.notReported')
+    },
+    {
+      label: t('lensAdmin.detail.lastHeartbeat'),
+      value: formatDateTime(node.last_heartbeat_at)
+    },
+    {
+      label: t('lensAdmin.detail.lastRun'),
+      value: formatDateTime(node.last_run_at)
+    }
+  ]
+})
 
 function toChildNode(child) {
   const path = typeof child === 'string' ? child : child.path

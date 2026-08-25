@@ -193,6 +193,28 @@ test('assistant Skill picker supports search and environment configuration', asy
   assert.match(chinese.lensAdmin.wizard.environmentSectionHint, /当前 Skill/)
 })
 
+test('assistant resource sorting only uses the selection captured on edit open', async () => {
+  const drawer = await source(
+    'pages/lens/AssistantFormDrawerDirectEnvironment.vue'
+  )
+
+  assert.match(drawer, /initialSkillSelection = ref\(\[\]\)/)
+  assert.match(drawer, /initialMcpSelection = ref\(\[\]\)/)
+  assert.match(
+    drawer,
+    /props\.mode === 'edit' \? \[\.\.\.\(props\.form\.skill_uuids \|\| \[\]\)\]/
+  )
+  assert.match(
+    drawer,
+    /sortSkillsBySelection\(selectableSkills\.value, initialSkillSelection\.value\)/
+  )
+  assert.match(drawer, /v-for="mcp in orderedMcps"/)
+  assert.doesNotMatch(
+    drawer,
+    /sortSkillsBySelection\([^)]*props\.form\.skill_uuids/s
+  )
+})
+
 test('chat exposes actionable messages for dispatch configuration failures', async () => {
   const [chat, nodeErrors, english, chinese] = await Promise.all([
     source('pages/lens/Chat.vue'),

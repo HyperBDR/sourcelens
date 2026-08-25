@@ -37,21 +37,81 @@
           </div>
         </div>
 
-        <dl
+        <section
           data-testid="lensnode-fleet-summary"
-          class="grid grid-cols-2 gap-3 border-b border-line bg-surface-sunken/50 px-5 py-4 lg:grid-cols-6"
+          class="border-b border-line bg-surface-sunken/50 px-5 py-4"
         >
-          <div
-            v-for="item in fleetSummary"
-            :key="item.label"
-            class="fleet-stat"
-          >
-            <dt class="text-xs font-medium text-ink-500">{{ item.label }}</dt>
-            <dd class="admin-metric-value mt-1">
-              {{ formatOperationMetric(item.value) }}
-            </dd>
+          <div class="mb-3 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h2 class="text-sm font-semibold text-ink-900">
+                {{ t('lensAdmin.fleet.overviewTitle') }}
+              </h2>
+              <p class="mt-1 text-xs text-ink-500">
+                {{ t('lensAdmin.fleet.overviewDescription') }}
+              </p>
+            </div>
+            <div class="text-right">
+              <div class="text-2xl font-semibold tabular-nums text-ink-900">
+                {{ formatOperationMetric(totalFleetNodes) }}
+              </div>
+              <div class="text-xs text-ink-500">
+                {{ t('lensAdmin.fleet.totalNodes') }}
+              </div>
+            </div>
           </div>
-        </dl>
+          <div class="grid gap-3 lg:grid-cols-[1.1fr_1fr]">
+            <div class="rounded-lg border border-line bg-surface px-4 py-3">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-xs font-medium text-ink-500">
+                  {{ t('lensAdmin.fleet.healthOverview') }}
+                </span>
+                <span class="text-sm font-semibold tabular-nums text-ink-800">
+                  {{ onlineRate }}
+                </span>
+              </div>
+              <div class="mt-3 h-2 overflow-hidden rounded-full bg-line-soft">
+                <div
+                  class="h-full rounded-full bg-success-500 transition-all"
+                  :style="{ width: onlineRateValue + '%' }"
+                />
+              </div>
+              <div class="mt-3 grid grid-cols-3 gap-3">
+                <div v-for="item in healthSummary" :key="item.label">
+                  <div class="flex items-center gap-1.5 text-xs text-ink-500">
+                    <span
+                      class="h-1.5 w-1.5 rounded-full"
+                      :class="item.dotClass"
+                    />
+                    {{ item.label }}
+                  </div>
+                  <div
+                    class="mt-1 text-lg font-semibold tabular-nums text-ink-900"
+                  >
+                    {{ formatOperationMetric(item.value) }}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-line bg-surface px-4 py-3">
+              <div class="text-xs font-medium text-ink-500">
+                {{ t('lensAdmin.fleet.workloadOverview') }}
+              </div>
+              <div class="mt-3 grid grid-cols-3 gap-3">
+                <div v-for="item in workloadSummary" :key="item.label">
+                  <div class="text-xs text-ink-500">{{ item.label }}</div>
+                  <div
+                    class="mt-1 text-lg font-semibold tabular-nums text-ink-900"
+                  >
+                    {{ formatOperationMetric(item.value) }}
+                  </div>
+                  <div class="mt-1 text-[11px] text-ink-400">
+                    {{ item.hint }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <div class="px-5 py-4">
           <BaseLoading v-if="loading && lensnodes.length === 0" />
@@ -387,32 +447,63 @@ const columns = computed(() =>
   ].map((column) => t(`lensAdmin.columns.${column}`))
 )
 
-const fleetSummary = computed(() => [
+const healthSummary = computed(() => [
   {
     label: t('lensAdmin.fleet.online'),
-    value: fleetSummaryData.value.online
+    value: fleetSummaryData.value.online,
+    dotClass: 'bg-success-500'
   },
   {
     label: t('lensAdmin.fleet.offline'),
-    value: fleetSummaryData.value.offline
+    value: fleetSummaryData.value.offline,
+    dotClass: 'bg-ink-400'
   },
   {
     label: t('lensAdmin.fleet.draining'),
-    value: fleetSummaryData.value.draining
-  },
+    value: fleetSummaryData.value.draining,
+    dotClass: 'bg-warning-500'
+  }
+])
+
+const workloadSummary = computed(() => [
   {
     label: t('lensAdmin.fleet.activeRuns'),
-    value: fleetSummaryData.value.active_runs
+    value: fleetSummaryData.value.active_runs,
+    hint: t('lensAdmin.fleet.activeRunsHint')
   },
   {
     label: t('lensAdmin.fleet.queuedRuns'),
-    value: fleetSummaryData.value.queued_runs
+    value: fleetSummaryData.value.queued_runs,
+    hint: t('lensAdmin.fleet.queuedRunsHint')
   },
   {
     label: t('lensAdmin.fleet.awaitingResume'),
-    value: fleetSummaryData.value.awaiting_resume
+    value: fleetSummaryData.value.awaiting_resume,
+    hint: t('lensAdmin.fleet.awaitingResumeHint')
   }
 ])
+
+const totalFleetNodes = computed(() => {
+  const values = healthSummary.value.map((item) => item.value)
+  return values.every((value) => hasOperationMetric(value))
+    ? values.reduce((total, value) => total + Number(value), 0)
+    : totalLensNodes.value || null
+})
+
+const onlineRateValue = computed(() => {
+  if (!hasOperationMetric(totalFleetNodes.value)) return 0
+  return Math.round(
+    (Number(fleetSummaryData.value.online || 0) /
+      Number(totalFleetNodes.value)) *
+      100
+  )
+})
+
+const onlineRate = computed(() =>
+  hasOperationMetric(totalFleetNodes.value)
+    ? `${onlineRateValue.value}% ${t('lensAdmin.fleet.onlineRate')}`
+    : EMPTY_VALUE
+)
 
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(totalLensNodes.value / pageSize.value))
