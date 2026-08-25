@@ -1,0 +1,9 @@
+type: feature
+audience: admin
+en: >-
+  Improved LensNode administration with runtime-focused node details, including
+  run counts, token usage, current workload, heartbeat information, and a more
+  readable workspace and runtime metadata layout.
+zh-CN: >-
+  完善 LensNode 管理：节点详情现在突出累计任务、Token 消耗、当前负载和心跳信息，
+  并以更清晰的卡片布局展示工作区与运行时元数据。
