@@ -371,38 +371,6 @@
                 <span>{{ t('lensAdmin.pages.credentials.title') }}</span>
               </router-link>
               <router-link
-                to="/management/lens/resources/environment-variables"
-                class="admin-nav-item admin-nav-item-child"
-                :class="
-                  isActive('/management/lens/resources/environment-variables')
-                    ? 'admin-nav-item-active'
-                    : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="
-                  preloadRoute(
-                    '/management/lens/resources/environment-variables'
-                  )
-                "
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M4 6h16M4 12h16M4 18h10"
-                  />
-                </svg>
-                <span>{{
-                  t('lensAdmin.pages.environmentVariables.title')
-                }}</span>
-              </router-link>
-              <router-link
                 to="/management/lens/resources/skills"
                 class="admin-nav-item admin-nav-item-child"
                 :class="
@@ -1148,14 +1116,16 @@ const clearAssistantReturnPath = () => {
 
 const navigation = ref(null)
 const activeMenu = computed(() => getAdminSidebarMenu(route.path))
-const openMenu = ref(activeMenu.value)
-const userManagementMenuOpen = computed(() => openMenu.value === 'users')
-const lensMenuOpen = computed(() => openMenu.value === 'lens')
-const dataManagementMenuOpen = computed(() => openMenu.value === 'data')
-const llmMenuOpen = computed(() => openMenu.value === 'llm')
-const taskManagementMenuOpen = computed(() => openMenu.value === 'tasks')
-const notificationManagementMenuOpen = computed(
-  () => openMenu.value === 'notifications'
+const openMenus = ref(
+  activeMenu.value ? new Set([activeMenu.value]) : new Set()
+)
+const userManagementMenuOpen = computed(() => openMenus.value.has('users'))
+const lensMenuOpen = computed(() => openMenus.value.has('lens'))
+const dataManagementMenuOpen = computed(() => openMenus.value.has('data'))
+const llmMenuOpen = computed(() => openMenus.value.has('llm'))
+const taskManagementMenuOpen = computed(() => openMenus.value.has('tasks'))
+const notificationManagementMenuOpen = computed(() =>
+  openMenus.value.has('notifications')
 )
 
 const { isMobile } = useIsMobile()
@@ -1204,13 +1174,13 @@ const isActive = (path) => {
 }
 
 const parentActiveClass = (menu) => {
-  return activeMenu.value === menu && openMenu.value !== menu
+  return activeMenu.value === menu && !openMenus.value.has(menu)
     ? 'admin-nav-item-parent-active'
     : ''
 }
 
 const toggleMenu = (menu) => {
-  openMenu.value = toggleAdminSidebarMenu(openMenu.value, menu)
+  openMenus.value = new Set(toggleAdminSidebarMenu(openMenus.value, menu))
 }
 
 const toggleUserManagementMenu = () => toggleMenu('users')
@@ -1224,7 +1194,7 @@ watch(
   () => route.path,
   async (newPath) => {
     const routeMenu = getAdminSidebarMenu(newPath)
-    if (routeMenu) openMenu.value = routeMenu
+    if (routeMenu) openMenus.value = new Set([routeMenu])
 
     if (navigation.value) {
       await nextTick()

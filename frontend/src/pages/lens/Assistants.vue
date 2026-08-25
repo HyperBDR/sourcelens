@@ -356,6 +356,7 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 
 import AssistantDetailDrawer from './AssistantDetailDrawer.vue'
 import AssistantFormDrawer from './AssistantFormDrawerDirectEnvironment.vue'
+import { buildWorkspaceGuidePayload } from './assistantWorkspaceGuide'
 import {
   buildMcpEnvironmentBinding,
   buildSkillEnvironmentBinding
@@ -616,11 +617,7 @@ function defaultForm() {
 
 function workspaceGuideSkillUuids() {
   return new Set(
-    skills.value
-      .filter(
-        (s) => typeof s.slug === 'string' && s.slug.endsWith('-workspace-guide')
-      )
-      .map((s) => s.uuid)
+    skills.value.filter((s) => s.kind === 'workspace_guide').map((s) => s.uuid)
   )
 }
 
@@ -746,8 +743,7 @@ function buildPayload() {
     multimodal_model_ref: form.value.multimodal_model_ref || null,
     settings: buildAssistantSettings(),
     workspace_guide: {
-      enabled: form.value.selected_task !== 'general_chat' && !!guideContent,
-      content: guideContent
+      ...buildWorkspaceGuidePayload({ content: guideContent })
     },
     skill_bindings: (form.value.skill_uuids || []).map((uuid) => {
       const skill = skills.value.find((item) => item.uuid === uuid) || {

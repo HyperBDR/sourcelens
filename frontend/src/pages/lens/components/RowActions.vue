@@ -13,7 +13,7 @@
 </template>
 
 <script setup>
-import { Pencil, Trash2 } from '@lucide/vue'
+import { Download, Pencil, Trash2 } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -30,12 +30,17 @@ const props = defineProps({
     default: true
   }
 })
-const emit = defineEmits(['edit', 'delete'])
+const emit = defineEmits(['download', 'edit', 'delete'])
 
 const { t } = useI18n()
 const confirming = ref(false)
 
 const actions = computed(() => [
+  {
+    key: 'download',
+    label: t('lensAdmin.skills.download'),
+    icon: Download
+  },
   {
     key: 'edit',
     label: t('common.edit'),
@@ -64,6 +69,10 @@ function requestDelete() {
 }
 
 function handleAction(action) {
+  if (action === 'download') {
+    emit('download', props.row)
+    return
+  }
   if (action === 'edit') {
     emit('edit', props.row)
     return

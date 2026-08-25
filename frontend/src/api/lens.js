@@ -540,11 +540,23 @@ export async function updateGithubSkill(uuid, url) {
   return unwrapResponse(response)
 }
 
+export async function checkSkillUpdates() {
+  const response = await api.post('/lens/admin/skills/check-updates/')
+  return unwrapResponse(response)
+}
+
 export async function downloadSkill(uuid) {
   const response = await api.get(`/lens/admin/skills/${uuid}/download/`, {
     responseType: 'blob'
   })
   return response
+}
+
+export async function previewSkillFile(uuid, path) {
+  const response = await api.get(`/lens/admin/skills/${uuid}/file-preview/`, {
+    params: { path }
+  })
+  return unwrapResponse(response)
 }
 
 export async function beautifySkill(payload) {

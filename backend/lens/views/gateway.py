@@ -366,7 +366,7 @@ class LensNodeSkillPackageView(LensNodeAuthMixin, APIView):
         response = FileResponse(
             archive,
             as_attachment=True,
-            filename=f"{skill.slug or skill.uuid}.zip",
+            filename=f"{skill.uuid}.zip",
             content_type="application/zip",
         )
         response["X-Skill-Package-Hash"] = skill.package_hash

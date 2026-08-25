@@ -4,7 +4,7 @@ from .llm import run_completion
 from .models import AssistantSkill, GlobalSetting, Skill
 
 BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
-WORKSPACE_GUIDE_SUFFIX = "workspace-guide"
+WORKSPACE_GUIDE_KIND = "workspace_guide"
 WORKSPACE_GUIDE_LOAD_CONFIG = {
     "mode": "context",
     "inject": True,
@@ -85,51 +85,18 @@ def beautify_skill_content(*, content, name="", user_id=None):
     return _strip_code_fence(result.content)
 
 
-def workspace_guide_slug(assistant):
-    """Return the deterministic Workspace Guide skill slug."""
-
-    return f"{assistant.slug}-{WORKSPACE_GUIDE_SUFFIX}"
-
-
 def sync_workspace_guide_skill(assistant, workspace_guide):
-    """Create, update, or disable an assistant Workspace Guide skill."""
+    """Persist an assistant Workspace Guide and disable legacy bindings."""
 
     if workspace_guide is None:
         return None
 
     enabled = bool(workspace_guide.get("enabled"))
     content = str(workspace_guide.get("content") or "").strip()
-    slug = workspace_guide_slug(assistant)
-
-    if not enabled or not content:
-        _disable_workspace_guide_binding(assistant, slug)
-        return None
-
-    skill_md = build_workspace_guide_skill_md(content=content)
-    skill, _ = Skill.objects.update_or_create(
-        slug=slug,
-        defaults={
-            "name": f"{assistant.name} Workspace Guide",
-            "definition": {
-                "content": skill_md,
-                "description": (
-                    "Workspace structure and search guidance for "
-                    f"{assistant.name}."
-                ),
-            },
-            "version": "1",
-            "enabled": True,
-        },
-    )
-    AssistantSkill.objects.update_or_create(
-        assistant=assistant,
-        skill=skill,
-        defaults={
-            "enabled": True,
-            "load_config": WORKSPACE_GUIDE_LOAD_CONFIG,
-        },
-    )
-    return skill
+    assistant.workspace_guide = content if enabled else ""
+    assistant.save(update_fields=["workspace_guide", "updated_at"])
+    _disable_workspace_guide_binding(assistant)
+    return content
 
 
 def build_workspace_guide_skill_md(*, content):
@@ -141,10 +108,15 @@ def build_workspace_guide_skill_md(*, content):
 def get_workspace_guide_payload(assistant):
     """Return the persisted Workspace Guide payload for an assistant."""
 
-    slug = workspace_guide_slug(assistant)
+    if assistant.workspace_guide:
+        return {
+            "enabled": True,
+            "content": assistant.workspace_guide,
+        }
+
     binding = (
         assistant.skill_bindings.select_related("skill")
-        .filter(skill__slug=slug)
+        .filter(skill__kind=WORKSPACE_GUIDE_KIND)
         .first()
     )
     if binding is None:
@@ -156,17 +128,16 @@ def get_workspace_guide_payload(assistant):
         "enabled": binding.enabled,
         "content": _workspace_guide_user_content(binding.skill.definition),
         "skill_uuid": str(binding.skill.uuid),
-        "skill_slug": binding.skill.slug,
         "load_config": binding.load_config,
     }
 
 
-def _disable_workspace_guide_binding(assistant, slug):
+def _disable_workspace_guide_binding(assistant):
     """Disable an existing Workspace Guide binding if one exists."""
 
     AssistantSkill.objects.filter(
         assistant=assistant,
-        skill__slug=slug,
+        skill__kind=WORKSPACE_GUIDE_KIND,
     ).update(enabled=False)
 
 

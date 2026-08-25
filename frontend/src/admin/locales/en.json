@@ -915,7 +915,7 @@
       },
       "skills": {
         "title": "Skill Library",
-        "description": "Manage reusable Skill resources that Assistants can load.",
+        "description": "Manage reusable Skills that Assistants can load, with source, version, and status at a glance.",
         "label": "Skill",
         "action": "Create Skill"
       },
@@ -945,6 +945,14 @@
       "environmentPlaceholderHint": "Reference a declared variable in the endpoint or Config with {placeholder}. SourceLens expands it only in the private per-Run MCP configuration."
     },
     "skills": {
+      "searchPlaceholder": "Search name, slug, description, or source",
+      "allSources": "All sources",
+      "allStatuses": "All statuses",
+      "version": "Version",
+      "uuid": "Identifier",
+      "updatedAt": "Updated",
+      "noDescription": "No description",
+      "noFilterResults": "No Skills match the current filters",
       "beautify": "Beautify",
       "beautifyHint": "Polish or generate the SKILL.md with the configured generator model",
       "beautifySuccess": "Content beautified",
@@ -977,6 +985,7 @@
       "importGithubHelp": "Skill name, description, and content will be read from the repository SKILL.md.",
       "githubUrl": "GitHub URL",
       "githubUrlHelp": "Use a public GitHub repository URL that contains a standard SKILL.md package.",
+      "updateAvailable": "Update available",
       "updateGithubHelp": "Re-import this Skill from the same source type while keeping assistant bindings.",
       "importSuccess": "Skill imported",
       "importFailed": "Skill import failed",
@@ -1024,10 +1033,10 @@
         "githubUrlRequired": "Enter a GitHub URL.",
         "githubPublicOnly": "Only public GitHub URLs are supported.",
         "githubRepositoryRequired": "The GitHub URL must include an owner and repository.",
+        "githubTagRequired": "The GitHub repository must publish a tag before it can be imported.",
         "githubUnsafeRedirect": "The GitHub download redirected to an unsafe host.",
         "environmentInvalid": "The Skill environment variable configuration is invalid. Check variable names, formats, and duplicates.",
         "generatorNotConfigured": "Configure a Skill generator model in Settings first.",
-        "skillSlugExists": "A Skill with this name already exists.",
         "githubDownloadFailed": "Failed to download the Skill from GitHub.",
         "transformInvalid": "The Skill Transform configuration is invalid. Check entrypoints, input formats, and environment declarations in sourcelens.json.",
         "apiPolicyInvalid": "The Skill API policy is invalid. Check base_url_env, routes, and request methods.",
@@ -1065,7 +1074,21 @@
       "hideValues": "Hide values"
     },
     "skillDetail": {
-      "title": "Skill Detail"
+      "title": "Skill Detail",
+      "descriptionZh": "Chinese description",
+      "descriptionZhPlaceholder": "Describe in Chinese what this Skill is useful for",
+      "sourceInfo": "Source information",
+      "sourceInfoHint": "Review the Skill source, version, and import path.",
+      "openSource": "Open source",
+      "sourceRef": "Source version",
+      "sourcePath": "Source path",
+      "environment": "Environment declarations",
+      "files": "Files",
+      "filesHint": "Select a file to view the saved read-only preview.",
+      "fileUnit": "files",
+      "previewHint": "SKILL.md is rendered as Markdown.",
+      "readOnly": "Read-only preview",
+      "filePreviewUnavailable": "This file cannot be previewed online. Download the Skill package to inspect it."
     },
     "assistantTypes": {
       "knowledgeQa": "Knowledge Q&A",
@@ -1645,8 +1668,8 @@
       "step3Desc": "Bind Skills and MCP, and add workspace context — all optional",
       "step4Title": "Access",
       "step4Desc": "Set visibility and choose which groups or users can access it",
-      "contextLabel": "Workspace Context (optional)",
-      "contextHint": "Write what the model cannot infer from reading code alone: business background, team conventions, search priorities, and directories to avoid.",
+      "contextLabel": "Workspace Guide (optional)",
+      "contextHint": "Tell the Assistant about workspace structure, business context, team conventions, search priorities, and directories to avoid. It is injected as this Assistant's private context after saving.",
       "contextPlaceholder": "# Information the model can't know just from reading code — write it here.\n\n## Project overview\n# SourceLens is a self-hosted AI code Q&A platform.\n# backend/ is the Django REST API; lensnode/ is a separately deployed execution node\n# that runs Deep Agents and pushes results back to the main service via WebSocket.\n# frontend/ is the Vue 3 admin console; it only talks to backend/ REST APIs.\n\n## Search priorities\n# Business logic lives in backend/lens/. backend/agentcore/ is a git submodule — don't look for business code there.\n# Frontend pages: frontend/src/pages/lens/. Admin components: frontend/src/admin/.\n# Agent behavior: lensnode/lensnode/agent_runtime.py.\n\n## Avoid misreading\n# references/ contains reference documents, not source code — don't analyze it as code.\n# For current field structure, read the latest migration only, not historical ones.",
       "back": "Back",
       "next": "Next",

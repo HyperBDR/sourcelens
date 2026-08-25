@@ -1884,12 +1884,15 @@ def _validate_feishu_config(config, instance=None, credential=None):
 class SkillSerializer(serializers.ModelSerializer):
     """Skill serializer."""
 
+    update_available = serializers.SerializerMethodField()
+
     class Meta:
         model = Skill
         fields = [
             "uuid",
             "name",
-            "slug",
+            "package_name",
+            "kind",
             "definition",
             "version",
             "enabled",
@@ -1898,19 +1901,39 @@ class SkillSerializer(serializers.ModelSerializer):
             "package_manifest",
             "source_type",
             "source_url",
+            "source_ref",
+            "source_path",
+            "latest_source_ref",
+            "source_checked_at",
+            "update_available",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "uuid",
+            "kind",
+            "package_name",
             "package_hash",
             "package_size",
             "package_manifest",
             "source_type",
             "source_url",
+            "source_ref",
+            "source_path",
+            "latest_source_ref",
+            "source_checked_at",
             "created_at",
             "updated_at",
         ]
+
+    def get_update_available(self, obj):
+        """Return whether a newer source tag is known for this Skill."""
+
+        return bool(
+            obj.source_type == "github"
+            and obj.latest_source_ref
+            and obj.latest_source_ref != obj.source_ref
+        )
 
     def validate_definition(self, value):
         """Validate and normalize the Skill environment declaration."""

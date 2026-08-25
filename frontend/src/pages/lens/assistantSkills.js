@@ -14,18 +14,24 @@ export function filterSelectableSkills(skills, keyword) {
     .trim()
     .toLocaleLowerCase()
   return (skills || []).filter((skill) => {
-    if (
-      typeof skill.slug === 'string' &&
-      skill.slug.endsWith('-workspace-guide')
-    ) {
+    if (skill.kind === 'workspace_guide') {
       return false
     }
     if (!query) return true
 
-    return [skill.name, skill.slug, skillDescription(skill)].some((value) =>
-      String(value || '')
-        .toLocaleLowerCase()
-        .includes(query)
+    return [skill.name, skill.package_name, skillDescription(skill)].some(
+      (value) =>
+        String(value || '')
+          .toLocaleLowerCase()
+          .includes(query)
     )
   })
+}
+
+export function sortSkillsBySelection(skills, selectedUuids) {
+  const selected = new Set(selectedUuids || [])
+  return [...(skills || [])].sort(
+    (left, right) =>
+      Number(selected.has(right.uuid)) - Number(selected.has(left.uuid))
+  )
 }

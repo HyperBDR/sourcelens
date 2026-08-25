@@ -3,6 +3,7 @@
     :show="show"
     :title="drawerTitle"
     :subtitle="drawerSubtitle"
+    width="3xl"
     @close="$emit('close')"
   >
     <!-- Wizard step indicator -->
@@ -308,7 +309,7 @@
     <!-- Wizard Step 3 — Workspace, Skills, Environment & MCP -->
     <div v-else-if="wizardStep === 3" class="space-y-5">
       <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step3Desc') }}</p>
-      <div v-if="!isGeneralChatTask">
+      <div>
         <span class="text-sm font-medium text-ink-700">{{
           t('lensAdmin.wizard.contextLabel')
         }}</span>
@@ -410,12 +411,9 @@
                     >
                       {{ skill.name }}
                     </div>
-                    <StatusBadge
-                      :status="skill.enabled ? 'enabled' : 'disabled'"
-                    />
                   </div>
-                  <div class="truncate font-mono text-xs text-ink-400">
-                    {{ skill.slug }}
+                  <div class="truncate text-xs text-ink-400">
+                    {{ skill.package_name || skill.uuid }}
                   </div>
                   <p
                     v-if="skillDescription(skill)"
@@ -444,17 +442,7 @@
                       {{ t('lensAdmin.wizard.environmentRequired') }}
                     </span>
                   </div>
-                  <p class="mt-1 text-[11px] leading-4 text-ink-500">
-                    {{ t('lensAdmin.wizard.environmentSectionHint') }}
-                  </p>
                   <div class="mt-2 space-y-2.5">
-                    <p class="text-[11px] leading-4 text-ink-500">
-                      {{
-                        t('lensAdmin.wizard.environmentConfigurationHint', {
-                          count: skillEnvironment(skill).length
-                        })
-                      }}
-                    </p>
                     <BaseSelect
                       v-model="form.skill_environment_set_uuids[skill.uuid]"
                       class="text-xs"
@@ -474,17 +462,6 @@
                         {{ variableSet.name }}
                       </option>
                     </BaseSelect>
-                    <EnvironmentSetValues
-                      v-if="
-                        form.skill_environment_set_uuids[skill.uuid] &&
-                        form.skill_environment_set_uuids[skill.uuid] !==
-                          '__new__'
-                      "
-                      :variable-set="selectedEnvironmentSet(skill.uuid)"
-                      :allowed-keys="
-                        skillEnvironment(skill).map((item) => item.name)
-                      "
-                    />
                     <p
                       v-if="!form.skill_environment_set_uuids[skill.uuid]"
                       class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-[11px] leading-4 text-primary-700"
@@ -538,12 +515,6 @@
                               *</span
                             >
                           </label>
-                          <span
-                            v-if="environmentItemSaved(skill, item)"
-                            class="text-[11px] text-success-700"
-                          >
-                            {{ t('lensAdmin.wizard.environmentConfigured') }}
-                          </span>
                         </div>
                         <input
                           v-model="
@@ -1076,7 +1047,11 @@ import {
   environmentConfigurationComplete,
   mcpRequiredEnvironmentNames
 } from './assistantEnvironment'
-import { filterSelectableSkills, skillDescription } from './assistantSkills'
+import {
+  filterSelectableSkills,
+  skillDescription,
+  sortSkillsBySelection
+} from './assistantSkills'
 
 const props = defineProps({
   show: Boolean,
@@ -1562,7 +1537,10 @@ const selectableSkills = computed(() =>
 )
 
 const filteredSelectableSkills = computed(() =>
-  filterSelectableSkills(props.skills, skillSearch.value)
+  sortSkillsBySelection(
+    filterSelectableSkills(props.skills, skillSearch.value),
+    props.form.skill_uuids
+  )
 )
 
 const enabledEnvironmentVariableSets = computed(() =>
@@ -1596,10 +1574,6 @@ function selectedEnvironmentSet(skillUuid) {
   return props.environmentVariableSets.find(
     (variableSet) => variableSet.uuid === selectedUuid
   )
-}
-
-function environmentItemSaved(skill, item) {
-  return (selectedEnvironmentSet(skill.uuid)?.keys || []).includes(item.name)
 }
 
 function environmentInputPlaceholder(item) {

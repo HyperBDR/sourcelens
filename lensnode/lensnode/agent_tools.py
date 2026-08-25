@@ -490,7 +490,7 @@ def build_agent_tools(command, resources=None, config=None, emit_event=None):
 class _RunSkillScriptArgs(BaseModel):
     """Args schema for running an executable bundled with a Skill."""
 
-    skill: str = Field(description="Loaded Skill slug or name.")
+    skill: str = Field(description="Loaded Skill package name.")
     script: str = Field(
         description=(
             "Path of the executable relative to the Skill root, for example "
@@ -611,7 +611,7 @@ class _InspectSavedOutputArgs(BaseModel):
 class _RunSkillTransformArgs(BaseModel):
     """Args schema for running a declared Skill Transform."""
 
-    skill: str = Field(description="Loaded Skill slug or name.")
+    skill: str = Field(description="Loaded Skill package name.")
     transform: str = Field(description="Transform name declared in sourcelens.json.")
     stdin_ref: str = Field(
         min_length=1,
@@ -628,7 +628,7 @@ class _RunSkillTransformArgs(BaseModel):
 class _CallSkillApiArgs(BaseModel):
     """Args schema for an HTTP request configured by a loaded Skill."""
 
-    skill: str = Field(description="Loaded Skill slug or name.")
+    skill: str = Field(description="Loaded Skill package name.")
     base_url_env: str = Field(
         description="Environment variable containing the API base URL."
     )
@@ -2526,7 +2526,7 @@ def _transform_input_failure(
 
 
 def _resolve_skill_dir(skills_root, value):
-    """Resolve a loaded Skill directory by slug/name."""
+    """Resolve a loaded Skill directory by package name."""
 
     name = _safe_resource_name(value)
     if not name:

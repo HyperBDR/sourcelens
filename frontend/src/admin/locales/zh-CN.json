@@ -915,7 +915,7 @@
       },
       "skills": {
         "title": "Skill 资源库",
-        "description": "维护可被 Assistant 加载的全局 Skill 资源。",
+        "description": "维护可被 Assistant 加载的全局 Skill 资源，按来源、版本和状态快速定位。",
         "label": "Skill",
         "action": "新建 Skill"
       },
@@ -945,6 +945,14 @@
       "environmentPlaceholderHint": "可在 Endpoint 或 Config 中使用 {placeholder} 引用已声明变量；SourceLens 只会在每次 Run 的私有 MCP 配置中解析。"
     },
     "skills": {
+      "searchPlaceholder": "搜索名称、Slug、描述或来源",
+      "allSources": "全部来源",
+      "allStatuses": "全部状态",
+      "version": "版本",
+      "uuid": "唯一标识",
+      "updatedAt": "最近更新",
+      "noDescription": "暂无描述",
+      "noFilterResults": "没有符合当前筛选条件的 Skill",
       "beautify": "一键美化",
       "beautifyHint": "使用已配置的 Skill 生成模型润色 / 生成 SKILL.md 内容",
       "beautifySuccess": "已生成美化内容",
@@ -977,6 +985,7 @@
       "importGithubHelp": "Skill 名称、描述和内容会从仓库内的 SKILL.md 读取。",
       "githubUrl": "GitHub URL",
       "githubUrlHelp": "请输入公开 GitHub 仓库 URL，仓库内需要包含标准 SKILL.md 包结构。",
+      "updateAvailable": "有可用更新",
       "updateGithubHelp": "从相同来源类型重新导入当前 Skill，并保留已有助手绑定。",
       "importSuccess": "Skill 导入成功",
       "importFailed": "Skill 导入失败",
@@ -1024,10 +1033,10 @@
         "githubUrlRequired": "请输入 GitHub URL。",
         "githubPublicOnly": "仅支持公开的 GitHub URL。",
         "githubRepositoryRequired": "GitHub URL 必须包含所有者和仓库名。",
+        "githubTagRequired": "GitHub 仓库必须先发布 tag 才能导入 Skill。",
         "githubUnsafeRedirect": "GitHub 下载被重定向到不安全的主机。",
         "environmentInvalid": "Skill 环境变量配置无效，请检查变量名称、格式和重复项。",
         "generatorNotConfigured": "请先在设置中配置 Skill 生成模型。",
-        "skillSlugExists": "已存在同名 Skill。",
         "githubDownloadFailed": "从 GitHub 下载 Skill 失败。",
         "transformInvalid": "Skill Transform 配置无效，请检查 sourcelens.json 中的入口、输入格式和环境变量声明。",
         "apiPolicyInvalid": "Skill API 策略无效，请检查 base_url_env、路由和请求方法。",
@@ -1065,7 +1074,21 @@
       "hideValues": "隐藏变量值"
     },
     "skillDetail": {
-      "title": "Skill 详情"
+      "title": "Skill 详情",
+      "descriptionZh": "中文描述",
+      "descriptionZhPlaceholder": "用中文说明这个 Skill 适合处理什么问题",
+      "sourceInfo": "来源信息",
+      "sourceInfoHint": "查看 Skill 的来源、版本和导入路径。",
+      "openSource": "打开来源",
+      "sourceRef": "来源版本",
+      "sourcePath": "来源路径",
+      "environment": "环境变量声明",
+      "files": "文件资源",
+      "filesHint": "选择文件查看当前已保存的只读预览。",
+      "fileUnit": "个文件",
+      "previewHint": "SKILL.md 以渲染后的 Markdown 形式展示。",
+      "readOnly": "只读预览",
+      "filePreviewUnavailable": "该文件暂不支持在线预览，请下载 Skill 包查看。"
     },
     "assistantTypes": {
       "knowledgeQa": "知识问答",
@@ -1645,8 +1668,8 @@
       "step3Desc": "绑定 Skills 与 MCP，并补充工作区背景，均为可选",
       "step4Title": "授权",
       "step4Desc": "设置可见性，并指定可访问该助手的组或用户",
-      "contextLabel": "工作区背景（可选）",
-      "contextHint": "把模型仅凭读代码无法知道的信息写在这里：业务背景、团队约定、检索优先级、禁止参考的目录。",
+      "contextLabel": "工作区指引（可选）",
+      "contextHint": "用于告诉 Assistant 工作区目录结构、业务背景、团队约定、检索优先级和需要避开的目录。保存后会作为该 Assistant 的专属上下文注入。",
       "contextPlaceholder": "# 模型不读代码就不知道的信息，写在这里能让它更快、更准。\n\n## 项目说明\n# SourceLens 是一个私有部署的 AI 代码问答平台。\n# backend/ 是 Django REST API 主服务；lensnode/ 是独立部署的执行节点，\n# 负责运行 Deep Agent 并通过 WebSocket 把结果推回主服务。\n# frontend/ 是 Vue 3 管理台，只和 backend/ 的 REST API 通信。\n\n## 检索优先级\n# 业务逻辑找 backend/lens/；backend/agentcore/ 是 git 子模块，不要在那里找业务代码。\n# 前端页面在 frontend/src/pages/lens/，管理台组件在 frontend/src/admin/。\n# lensnode 的 agent 行为看 lensnode/lensnode/agent_runtime.py。\n\n## 避免误判\n# references/ 是参考文档，不是源码，不要当作代码分析对象。\n# backend/lens/migrations/ 只看最新迁移文件，不要从历史迁移推断当前字段结构。",
       "back": "上一步",
       "next": "下一步",

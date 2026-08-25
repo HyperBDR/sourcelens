@@ -184,8 +184,8 @@
     position: relative;
   }
 
-  input[type='checkbox'],
-  input[type='radio'] {
+  input[type='checkbox']:not(.sr-only),
+  input[type='radio']:not(.sr-only) {
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
     appearance: none !important;
@@ -200,36 +200,22 @@
     accent-color: var(--sl-accent) !important;
   }
 
-  input[type='checkbox'] {
+  input[type='checkbox']:not(.sr-only) {
     border-radius: 0.25rem !important;
   }
 
-  input[type='radio'] {
+  input[type='radio']:not(.sr-only) {
     border-radius: 50% !important;
   }
 
-  input[type='checkbox']:checked,
-  input[type='radio']:checked {
+  input[type='checkbox']:not(.sr-only):checked,
+  input[type='radio']:not(.sr-only):checked {
     background-color: var(--sl-accent) !important;
     background-image: none !important;
     border-color: var(--sl-accent) !important;
   }
 
-  input[type='checkbox']:checked::before {
-    content: '' !important;
-    position: absolute !important;
-    left: 50% !important;
-    top: 50% !important;
-    box-sizing: border-box !important;
-    width: 5px !important;
-    height: 9px !important;
-    border: solid var(--sl-on-accent) !important;
-    border-width: 0 2px 2px 0 !important;
-    transform: translate(-50%, -58%) rotate(45deg) !important;
-    display: block !important;
-  }
-
-  input[type='radio']:checked::before {
+  input[type='radio']:not(.sr-only):checked::before {
     content: '' !important;
     position: absolute !important;
     left: 50% !important;
@@ -242,16 +228,16 @@
     display: block !important;
   }
 
-  input[type='checkbox']:disabled,
-  input[type='radio']:disabled {
+  input[type='checkbox']:not(.sr-only):disabled,
+  input[type='radio']:not(.sr-only):disabled {
     background-color: var(--sl-form-disabled-bg) !important;
     border-color: var(--sl-form-border) !important;
     opacity: 0.6 !important;
     cursor: not-allowed !important;
   }
 
-  input[type='checkbox']:disabled:checked,
-  input[type='radio']:disabled:checked {
+  input[type='checkbox']:not(.sr-only):disabled:checked,
+  input[type='radio']:not(.sr-only):disabled:checked {
     background-color: var(--sl-accent) !important;
     border-color: var(--sl-accent) !important;
     opacity: 0.7 !important;

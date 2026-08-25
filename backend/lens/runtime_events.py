@@ -140,7 +140,7 @@ def sanitize_loaded_skills(items):
 
     fields = (
         "skill_uuid",
-        "skill_slug",
+        "skill_package_name",
         "skill_name",
         "version",
         "content_hash",

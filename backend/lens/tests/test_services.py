@@ -915,7 +915,7 @@ class LensServiceTests(TransactionTestCase):
     def test_dispatch_refreshes_skill_package_snapshot(self):
         skill = Skill.objects.create(
             name="Packaged Skill",
-            slug="packaged-skill",
+            package_name="packaged-skill",
             package_hash="sha256:old",
         )
         AssistantSkill.objects.create(
@@ -1430,6 +1430,36 @@ class LensServiceTests(TransactionTestCase):
         )
         self.assertEqual(payload["answer_language"], "zh-CN")
         self.assertEqual(payload["settings"], {"runtime_mode": "original"})
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
+    def test_dispatch_uses_workspace_guide_runtime_snapshot(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        self.assistant.workspace_guide = "Use the frozen workspace guide."
+        self.assistant.save(update_fields=["workspace_guide"])
+        run = create_execution_run(
+            session=self.session,
+            question="Use the guide",
+            enqueue=False,
+        )
+
+        self.assistant.workspace_guide = "This must not affect the Run."
+        self.assistant.save(update_fields=["workspace_guide"])
+        dispatch_run_to_lensnode(run, "Use the guide")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(
+            run.execution.runtime_snapshot["workspace_guide"],
+            "Use the frozen workspace guide.",
+        )
+        self.assertEqual(
+            payload["workspace_guide"],
+            "Use the frozen workspace guide.",
+        )
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")

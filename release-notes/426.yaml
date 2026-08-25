@@ -1,0 +1,9 @@
+type: feature
+audience: user
+en: >-
+  Improved Assistant and Skill management with Workspace Guide configuration,
+  clearer Skill cards, detailed package previews, collapsible file lists, and
+  read-only previews for supported package files.
+zh-CN: >-
+  改进 Assistant 与 Skill 管理：支持工作区指引配置，优化 Skill 卡片和详情预览，
+  文件列表可折叠，并支持预览常见的文本类 Skill 文件。

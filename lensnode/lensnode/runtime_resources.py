@@ -787,8 +787,10 @@ def _materialize_skill(config, cache_root, skills_root, skill):
 
     skill_uuid = str(skill.get("skill_uuid") or "").strip()
     content_hash = str(skill.get("content_hash") or "").replace(":", "-")
-    slug = _safe_name(skill.get("skill_slug") or skill.get("skill_name"))
-    if not skill_uuid or not content_hash or not slug:
+    package_name = _safe_name(
+        skill.get("skill_package_name") or skill.get("skill_name")
+    )
+    if not skill_uuid or not content_hash or not package_name:
         return None
 
     cache_dir = cache_root / "skills" / skill_uuid / content_hash
@@ -796,10 +798,10 @@ def _materialize_skill(config, cache_root, skills_root, skill):
     if not complete_file.exists():
         _rebuild_skill_cache(config, cache_dir, skill)
 
-    runtime_dir = skills_root / slug
+    runtime_dir = skills_root / package_name
     _copy_dir(cache_dir, runtime_dir)
     _enable_skill_scripts(runtime_dir)
-    return Path("skills") / slug
+    return Path("skills") / package_name
 
 
 def _rebuild_skill_cache(config, cache_dir, skill):
@@ -1057,7 +1059,8 @@ def _skill_markdown(skill):
         )
     return (
         "---\n"
-        f"name: {skill.get('skill_slug') or skill.get('skill_name')}\n"
+        "name: "
+        f"{skill.get('skill_package_name') or skill.get('skill_name')}\n"
         f"description: {description or skill.get('skill_name')}\n"
         "---\n\n"
         f"{body.strip()}\n"
@@ -1087,8 +1090,8 @@ def _context_skill_content(skill, skill_path=None, force=False):
     body = _skill_body(skill.get("definition") or {}).strip()
     if not body and not force:
         return ""
-    name = skill.get("skill_name") or skill.get("skill_slug") or "Skill"
-    slug = skill.get("skill_slug") or name
+    name = skill.get("skill_name") or "Skill"
+    package_name = skill.get("skill_package_name") or name
     path_line = f"\nRuntime path: `{skill_path}`\n" if skill_path else ""
     manifest = skill.get("package_manifest") or {}
     manifest_line = ""
@@ -1106,7 +1109,10 @@ def _context_skill_content(skill, skill_path=None, force=False):
             "Use its bundled scripts and resources when they match the "
             "user's request."
         )
-    return f"## {name}\n\nSlug: `{slug}`{path_line}{manifest_line}\n{body[:12000]}"
+    return (
+        f"## {name}\n\nPackage name: `{package_name}`"
+        f"{path_line}{manifest_line}\n{body[:12000]}"
+    )
 
 
 def _skill_metadata(skill):
@@ -1114,7 +1120,7 @@ def _skill_metadata(skill):
 
     return {
         "uuid": skill.get("skill_uuid"),
-        "slug": skill.get("skill_slug"),
+        "package_name": skill.get("skill_package_name"),
         "name": skill.get("skill_name"),
         "version": skill.get("version"),
         "content_hash": skill.get("content_hash"),
