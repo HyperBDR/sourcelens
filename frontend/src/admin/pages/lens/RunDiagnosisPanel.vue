@@ -1,6 +1,6 @@
 <template>
-  <div class="flex min-h-[32rem] flex-col bg-gray-50/60">
-    <div class="flex-1 space-y-4 px-6 py-5">
+  <div class="diagnosis-panel">
+    <div class="space-y-4">
       <BaseLoading v-if="loading && !latest" />
 
       <div
@@ -13,19 +13,29 @@
 
       <section
         v-else-if="!latest"
-        class="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white px-8 text-center"
+        class="diagnosis-card flex flex-col gap-4 sm:flex-row sm:items-center"
         data-testid="diagnosis-empty"
       >
-        <Sparkles :size="28" class="text-primary-500" aria-hidden="true" />
-        <h3 class="mt-3 text-sm font-semibold text-gray-900">
-          {{ t('lensRuns.diagnosisEmptyTitle') }}
-        </h3>
-        <p class="mt-1 max-w-md text-sm leading-6 text-gray-500">
-          {{ t('lensRuns.diagnosisEmptyDescription') }}
-        </p>
+        <span
+          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-600"
+        >
+          <Sparkles :size="18" aria-hidden="true" />
+        </span>
+        <div data-testid="diagnosis-empty-content" class="min-w-0 flex-1">
+          <h3 class="text-sm font-semibold text-gray-900">
+            {{ t('lensRuns.diagnosisEmptyTitle') }}
+          </h3>
+          <p class="mt-1 text-sm leading-6 text-gray-500">
+            {{ t('lensRuns.diagnosisEmptyDescription') }}
+          </p>
+          <p v-if="!canGenerate" class="mt-1 text-xs text-amber-700">
+            {{ t('lensRuns.diagnosisTerminalOnly') }}
+          </p>
+        </div>
         <BaseButton
-          class="mt-4"
+          class="shrink-0"
           size="sm"
+          :disabled="!canGenerate"
           :loading="generating"
           @click="generate"
         >
@@ -50,6 +60,7 @@
               v-if="isStalePending"
               variant="outline"
               size="sm"
+              :disabled="!canGenerate"
               :loading="generating"
               @click="generate"
             >
@@ -101,6 +112,7 @@
                 class="mt-3"
                 variant="outline"
                 size="sm"
+                :disabled="!canGenerate"
                 :loading="generating"
                 @click="generate"
               >
@@ -111,9 +123,7 @@
         </section>
 
         <template v-else-if="latest.status === 'completed'">
-          <section
-            class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
-          >
+          <section class="diagnosis-card">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="min-w-0 flex-1">
                 <p
@@ -147,10 +157,7 @@
           </section>
 
           <!-- Timeline: what happened during the Run -->
-          <section
-            v-if="latest.result.events?.length"
-            class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
-          >
+          <section v-if="latest.result.events?.length" class="diagnosis-card">
             <h3 class="text-sm font-semibold text-gray-900">
               {{ t('lensRuns.timelineTitle') }}
             </h3>
@@ -243,7 +250,7 @@
             v-if="
               !latest.result.events?.length && latest.result.findings?.length
             "
-            class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+            class="diagnosis-card"
           >
             <h3 class="text-sm font-semibold text-gray-900">
               {{ t('lensRuns.findings') }}
@@ -333,7 +340,7 @@
           <!-- Deterministic evidence checks -->
           <section
             v-if="latest.deterministic_findings?.length"
-            class="rounded-xl border border-gray-200 bg-white p-5"
+            class="diagnosis-card"
           >
             <h3 class="text-sm font-semibold text-gray-900">
               {{ t('lensRuns.deterministicChecks') }}
@@ -369,7 +376,7 @@
 
           <section
             v-if="latest.turns?.length"
-            class="rounded-xl border border-gray-200 bg-white p-5"
+            class="diagnosis-card"
             aria-live="polite"
           >
             <h3 class="text-sm font-semibold text-gray-900">
@@ -411,7 +418,7 @@
 
     <form
       v-if="latest?.status === 'completed'"
-      class="sticky bottom-0 border-t border-gray-200 bg-white px-6 py-4 shadow-[0_-6px_18px_rgba(15,23,42,0.05)]"
+      class="diagnosis-card mt-4"
       data-testid="diagnosis-follow-up"
       @submit.prevent="submitFollowUp"
     >
@@ -471,7 +478,8 @@ import EvidenceLinks from './RunDiagnosisEvidenceLinks.vue'
 
 const props = defineProps({
   runUuid: { type: String, required: true },
-  active: { type: Boolean, default: false }
+  active: { type: Boolean, default: false },
+  canGenerate: { type: Boolean, default: true }
 })
 const emit = defineEmits(['navigate'])
 const { t } = useI18n()
@@ -613,7 +621,7 @@ async function load({ quiet = false } = {}) {
 }
 
 async function generate() {
-  if (!props.runUuid || generating.value) return
+  if (!props.runUuid || !props.canGenerate || generating.value) return
   const version = ++requestVersion
   generating.value = true
   loadError.value = ''
@@ -790,6 +798,12 @@ defineExpose({ generate, load })
 </script>
 
 <style scoped>
+.diagnosis-panel {
+  @apply space-y-4;
+}
+.diagnosis-card {
+  @apply rounded-lg border border-gray-200 bg-white p-4;
+}
 /* Mirrors the chat runtime-progress visual language from Chat.vue so the
    diagnosis progress stays consistent with the user Q&A experience. */
 .runtime-progress-live {

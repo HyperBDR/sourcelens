@@ -406,6 +406,151 @@ def _admin_run_row(run):
     }
 
 
+RESOURCE_SKILL_TOOLS = {
+    "call_skill_api",
+    "run_skill_artifact",
+    "run_skill_script",
+    "run_skill_transform",
+}
+
+
+def _resource_identity_candidates(payload):
+    """Return bounded resource identity candidates from one tool payload."""
+
+    candidates = []
+    sources = [payload]
+    for key in ("arguments", "args", "input", "params"):
+        value = payload.get(key) if isinstance(payload, dict) else None
+        if isinstance(value, dict):
+            sources.append(value)
+    keys = (
+        "mcp_name",
+        "mcp_uuid",
+        "server_name",
+        "server_uuid",
+        "skill_name",
+        "skill_package_name",
+        "skill_uuid",
+        "skill",
+        "resource_name",
+        "resource_uuid",
+    )
+    for source in sources:
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                candidates.append(value.strip()[:180])
+    return candidates
+
+
+def _configured_resource_name(candidates, resources, identity_keys):
+    """Match an observed identity to one configured resource name."""
+
+    for resource in resources:
+        identities = {
+            str(resource.get(key)).strip()
+            for key in identity_keys
+            if resource.get(key)
+        }
+        if identities.intersection(candidates):
+            return (
+                resource.get("skill_name")
+                or resource.get("skill_package_name")
+                or resource.get("mcp_name")
+                or ""
+            )
+    return ""
+
+
+def _admin_run_resource_usage(run, execution):
+    """Summarize configured resources and distinct observed tool calls."""
+
+    configured_skills = sanitize_loaded_skills(
+        execution.loaded_skills if execution else []
+    )
+    configured_mcps = sanitize_loaded_mcps(
+        execution.loaded_mcps if execution else []
+    )
+    calls = {}
+    seen_call_ids = set()
+    events = run.trace_events.filter(
+        Q(event_type__startswith="tool.")
+        | Q(event_type__startswith="subtool.")
+    ).exclude(call_id="")
+    skill_keys = ("skill_uuid", "skill_package_name", "skill_name")
+    mcp_keys = ("mcp_uuid", "mcp_name")
+    for event in events.order_by("sequence"):
+        if event.call_id in seen_call_ids:
+            continue
+        seen_call_ids.add(event.call_id)
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        name = str(
+            payload.get("name") or payload.get("tool_name") or ""
+        ).strip()
+        if not name:
+            continue
+        candidates = set(_resource_identity_candidates(payload))
+        resource_type = "tool"
+        resource_name = name
+        if name.startswith("mcp__"):
+            resource_type = "mcp"
+            configured_name = _configured_resource_name(
+                candidates,
+                configured_mcps,
+                mcp_keys,
+            )
+            if not configured_name:
+                server_token = name.split("__")[1:2]
+                server_token = (
+                    server_token[0].replace("-", "_")
+                    if server_token
+                    else ""
+                )
+                for resource in configured_mcps:
+                    configured_token = str(resource.get("mcp_name") or "")
+                    normalized = "".join(
+                        char.lower()
+                        for char in configured_token
+                        if char.isalnum()
+                    )
+                    if server_token and server_token.replace("_", "") in normalized:
+                        configured_name = configured_token
+                        break
+            resource_name = configured_name or name
+            if configured_name and "__" in name:
+                resource_name = f"{configured_name} · {name.rsplit('__', 1)[-1]}"
+        elif name in RESOURCE_SKILL_TOOLS or candidates.intersection(
+            {
+                str(value)
+                for resource in configured_skills
+                for key in skill_keys
+                for value in [resource.get(key)]
+                if value
+            }
+        ):
+            resource_type = "skill"
+            resource_name = _configured_resource_name(
+                candidates,
+                configured_skills,
+                skill_keys,
+            ) or name
+        key = (resource_type, resource_name)
+        item = calls.setdefault(
+            key,
+            {
+                "resource_type": resource_type,
+                "name": resource_name,
+                "calls": 0,
+            },
+        )
+        item["calls"] += 1
+    return {
+        "configured_skills": configured_skills,
+        "configured_mcps": configured_mcps,
+        "calls": list(calls.values()),
+    }
+
+
 def _admin_run_detail(run):
     """Serialize a run with full Q&A, timeline and execution snapshot."""
 
@@ -496,6 +641,10 @@ def _admin_run_detail(run):
                     "target_dirs": execution.target_dirs,
                     "loaded_skills": sanitize_loaded_skills(execution.loaded_skills),
                     "loaded_mcps": sanitize_loaded_mcps(execution.loaded_mcps),
+                    "resource_usage": _admin_run_resource_usage(
+                        run,
+                        execution,
+                    ),
                 }
                 if execution
                 else None

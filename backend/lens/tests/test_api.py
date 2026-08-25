@@ -3185,6 +3185,88 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["agent_rounds"], "max")
 
+    def test_admin_run_detail_summarizes_configured_and_called_resources(self):
+        from lens.models import RunTraceEvent
+
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
+        run.execution.loaded_skills = [
+            {
+                "skill_uuid": "skill-uuid",
+                "skill_package_name": "order-tools",
+                "skill_name": "Order tools",
+            }
+        ]
+        run.execution.loaded_mcps = [
+            {
+                "mcp_uuid": "mcp-uuid",
+                "mcp_name": "GitHub MCP",
+                "transport": "stdio",
+            }
+        ]
+        run.execution.save(update_fields=["loaded_skills", "loaded_mcps"])
+        now = timezone.now()
+        RunTraceEvent.objects.create(
+            run=run,
+            event_id=uuid.uuid4(),
+            sequence=1,
+            event_type="tool.started",
+            timestamp=now,
+            call_id="skill-call",
+            payload={
+                "name": "run_skill_script",
+                "arguments": {"skill_name": "Order tools"},
+            },
+        )
+        RunTraceEvent.objects.create(
+            run=run,
+            event_id=uuid.uuid4(),
+            sequence=2,
+            event_type="tool.completed",
+            timestamp=now,
+            call_id="skill-call",
+            payload={"name": "run_skill_script"},
+        )
+        RunTraceEvent.objects.create(
+            run=run,
+            event_id=uuid.uuid4(),
+            sequence=3,
+            event_type="tool.started",
+            timestamp=now,
+            call_id="mcp-call",
+            payload={"name": "mcp__github__search"},
+        )
+        RunTraceEvent.objects.create(
+            run=run,
+            event_id=uuid.uuid4(),
+            sequence=4,
+            event_type="tool.completed",
+            timestamp=now,
+            call_id="unnamed-call",
+        )
+
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
+
+        self.assertEqual(response.status_code, 200)
+        usage = response.data["execution"]["resource_usage"]
+        self.assertEqual(usage["configured_skills"][0]["skill_name"], "Order tools")
+        self.assertEqual(usage["configured_mcps"][0]["mcp_name"], "GitHub MCP")
+        self.assertEqual(
+            usage["calls"],
+            [
+                {
+                    "resource_type": "skill",
+                    "name": "Order tools",
+                    "calls": 1,
+                },
+                {
+                    "resource_type": "mcp",
+                    "name": "GitHub MCP · search",
+                    "calls": 1,
+                },
+            ],
+        )
+
     def test_admin_run_list_exposes_operational_metrics_and_filters(self):
         from lens.models import RunTraceEvent
 

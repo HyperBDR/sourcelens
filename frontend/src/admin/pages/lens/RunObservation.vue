@@ -448,9 +448,9 @@
           aria-modal="true"
         >
           <div
-            class="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100 flex-shrink-0"
+            class="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 flex-shrink-0"
           >
-            <h2 class="min-w-0 text-lg font-semibold text-gray-900">
+            <h2 class="min-w-0 flex-1 text-lg font-semibold text-gray-900">
               <span>{{ t('lensRuns.detailTitle') }}</span>
               <span
                 v-if="selectedUuid"
@@ -460,7 +460,9 @@
                 {{ selectedUuid }}
               </span>
             </h2>
-            <div class="flex shrink-0 items-center gap-2">
+            <div
+              class="flex w-full shrink-0 items-center justify-end gap-2 md:w-auto"
+            >
               <BaseButton
                 v-if="detail && detail.available_actions?.resume"
                 size="sm"
@@ -485,19 +487,13 @@
               >
                 {{ t('lensRuns.retryAction') }}
               </BaseButton>
-              <BaseButton size="sm" variant="outline" @click="exportRun">
-                {{ t('lensRuns.exportAction') }}
-              </BaseButton>
-              <BaseButton
-                v-if="canDiagnoseRun"
-                data-testid="generate-run-diagnosis"
-                size="sm"
-                variant="outline"
-                :disabled="!canGenerateDiagnosis"
-                @click="generateDiagnosis"
-              >
-                {{ t('lensRuns.generateDiagnosis') }}
-              </BaseButton>
+              <RowActionMenu
+                v-if="detail"
+                data-testid="run-detail-more-actions"
+                :actions="detailMoreActions"
+                :label="t('common.moreActions')"
+                @select="handleDetailMoreAction"
+              />
               <button
                 data-testid="close-run-detail"
                 type="button"
@@ -539,22 +535,13 @@
                 </button>
                 <button
                   class="detail-tab"
-                  data-testid="run-diagnosis-tab"
+                  data-testid="run-execution-tab"
                   :class="
-                    activeDetailTab === 'diagnosis' ? 'detail-tab-active' : ''
+                    activeDetailTab === 'execution' ? 'detail-tab-active' : ''
                   "
-                  @click="activeDetailTab = 'diagnosis'"
+                  @click="activeDetailTab = 'execution'"
                 >
-                  {{ t('lensRuns.tabDiagnosis') }}
-                </button>
-                <button
-                  class="detail-tab"
-                  :class="
-                    activeDetailTab === 'trace' ? 'detail-tab-active' : ''
-                  "
-                  @click="activeDetailTab = 'trace'"
-                >
-                  {{ t('lensRuns.tabTrace') }}
+                  {{ t('lensRuns.tabExecutionAnalysis') }}
                   <span class="ml-1 text-xs text-gray-400">{{
                     detail.trace_event_count ?? detail.event_count
                   }}</span>
@@ -567,675 +554,814 @@
                   "
                   @click="activeDetailTab = 'results'"
                 >
-                  {{ t('lensRuns.tabResults') }}
+                  {{ t('lensRuns.tabResultsAndArtifacts') }}
                   <span class="ml-1 text-xs text-gray-400">{{
                     (detail.citations || []).length +
                     (detail.output_files || []).length
                   }}</span>
                 </button>
-                <button
-                  class="detail-tab"
-                  data-testid="run-files-tab"
-                  :class="
-                    activeDetailTab === 'files' ? 'detail-tab-active' : ''
-                  "
-                  @click="activeDetailTab = 'files'"
-                >
-                  {{ t('lensRuns.tabFiles') }}
-                  <span class="ml-1 text-xs text-gray-400">
-                    {{ (detail.output_files || []).length }}
-                  </span>
-                </button>
-                <button
-                  class="detail-tab"
-                  data-testid="run-usage-tab"
-                  :class="
-                    activeDetailTab === 'usage' ? 'detail-tab-active' : ''
-                  "
-                  @click="activeDetailTab = 'usage'"
-                >
-                  {{ t('lensRuns.tabUsage') }}
-                </button>
               </div>
 
               <!-- Overview tab -->
-              <div
-                v-show="activeDetailTab === 'overview'"
-                class="space-y-4 px-6 py-5"
-              >
-                <section
-                  data-testid="run-overview-summary"
-                  class="overview-section"
-                >
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.overviewSummary') }}
-                  </h3>
-                  <dl class="overview-grid">
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.executorStatus') }}
-                      </dt>
-                      <dd class="mt-1">
-                        <span :class="statusClass(detail.executor_status)">
-                          {{
-                            statusText(detail.executor_status || detail.status)
-                          }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.businessOutcome') }}
-                      </dt>
-                      <dd class="mt-1">
-                        <span :class="statusClass(detail.outcome)">
-                          {{ statusText(detail.outcome) }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.colFeedback') }}
-                      </dt>
-                      <dd class="mt-1">
-                        <span
-                          v-if="detail.feedback === 'positive'"
-                          class="feedback-pill feedback-pill-positive"
-                        >
-                          <ThumbsUp :size="13" />
-                          {{ t('lensRuns.feedbackHelpful') }}
-                        </span>
-                        <span
-                          v-else-if="detail.feedback === 'negative'"
-                          class="feedback-pill feedback-pill-negative"
-                        >
-                          <ThumbsDown :size="13" />
-                          {{ t('lensRuns.feedbackUnhelpful') }}
-                        </span>
-                        <span v-else class="text-sm text-gray-400">—</span>
-                      </dd>
-                    </div>
-                    <div
-                      v-if="Object.keys(detail.termination_detail || {}).length"
-                      class="col-span-2"
-                    >
-                      <dt class="overview-label">
-                        {{ t('lensRuns.terminationDetail') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{ detail.termination_detail.reason || '-' }}
-                        <span
-                          v-if="detail.termination_detail.capability"
-                          class="font-normal text-gray-500"
-                        >
-                          · {{ detail.termination_detail.capability }}
-                        </span>
-                        <span
-                          v-if="detail.termination_detail.error_type"
-                          class="font-normal text-gray-500"
-                        >
-                          · {{ detail.termination_detail.error_type }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div
-                      v-if="hasFailureSummary"
-                      class="col-span-2"
-                      data-testid="run-failure-summary"
-                    >
-                      <dt class="overview-label">
-                        {{ t('lensRuns.failureScope') }}
-                      </dt>
-                      <dd class="mt-1 flex flex-wrap gap-2">
-                        <span
-                          v-if="detail.failure_summary.unresolved_failure_count"
-                          class="failure-pill failure-pill-error"
-                        >
-                          {{
-                            t('lensRuns.failureUnresolved', {
-                              n: detail.failure_summary.unresolved_failure_count
-                            })
-                          }}
-                        </span>
-                        <span
-                          v-if="detail.failure_summary.recovered_failure_count"
-                          class="failure-pill failure-pill-recovered"
-                        >
-                          {{
-                            t('lensRuns.failureRecovered', {
-                              n: detail.failure_summary.recovered_failure_count
-                            })
-                          }}
-                        </span>
-                        <span
-                          v-if="detail.failure_summary.warning_count"
-                          class="failure-pill failure-pill-warning"
-                        >
-                          {{
-                            t('lensRuns.failureWarning', {
-                              n: detail.failure_summary.warning_count
-                            })
-                          }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.colUser') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{ detail.username || '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.colSteps') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ detail.event_count }}
-                        <span
-                          v-if="detail.subagent_count > 0"
-                          class="font-normal text-indigo-600"
-                        >
-                          ·
-                          {{
-                            t('lensRuns.subagents', {
-                              n: detail.subagent_count
-                            })
-                          }}
-                        </span>
-                        <span
-                          v-if="detail.subagent_denied_count > 0"
-                          class="font-normal text-amber-600"
-                        >
-                          ·
-                          {{
-                            t('lensRuns.subagentsDenied', {
-                              n: detail.subagent_denied_count
-                            })
-                          }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div class="col-span-2">
-                      <dt class="overview-label">{{ t('lensRuns.tokens') }}</dt>
-                      <dd class="overview-value tabular-nums">
-                        {{
-                          detail.total_tokens
-                            ? detail.total_tokens.toLocaleString()
-                            : '-'
-                        }}
-                        <span
-                          v-if="detail.llm_calls"
-                          class="font-normal text-gray-500"
-                        >
-                          ·
-                          {{ t('lensRuns.llmCalls', { n: detail.llm_calls }) }}
-                        </span>
-                        <span
-                          v-if="detail.total_cost != null"
-                          class="font-normal text-gray-500"
-                        >
-                          · ${{ detail.total_cost }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div v-if="detail.structured_analysis_calls">
-                      <dt class="overview-label">
-                        {{ t('lensRuns.structuredAnalysisCalls') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ detail.structured_analysis_calls }}
-                      </dd>
-                    </div>
-                    <div v-if="detail.structured_validation_calls">
-                      <dt class="overview-label">
-                        {{ t('lensRuns.structuredValidationCalls') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ detail.structured_validation_calls }}
-                      </dd>
-                    </div>
-                    <div v-if="detail.transform_calls">
-                      <dt class="overview-label">
-                        {{ t('lensRuns.transformCalls') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ detail.transform_calls }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-
-                <section
-                  v-if="showLiveProgress"
-                  data-testid="run-live-progress"
-                  class="overview-section border-blue-200 bg-blue-50/60"
-                >
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.liveProgressTitle') }}
-                  </h3>
-                  <dl class="overview-grid">
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.executorStatus') }}
-                      </dt>
-                      <dd class="mt-1">
-                        <span :class="statusClass(detail.executor_status)">
-                          {{
-                            statusText(detail.executor_status || detail.status)
-                          }}
-                        </span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.lensnode') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{ detail.lensnode_name || '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.colOperations') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{
-                          t('lensRuns.toolCallsShort', {
-                            n: detail.tool_call_count || 0
-                          })
-                        }}
-                        ·
-                        {{
-                          t('lensRuns.retriesShort', {
-                            n: detail.retry_count || 0
-                          })
-                        }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.resumeDeadline') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ formatDateTime(detail.resume_by) }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-
-                <section
-                  data-testid="run-overview-execution"
-                  class="overview-section"
-                >
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.overviewExecution') }}
-                  </h3>
-                  <dl class="overview-grid">
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.colAssistant') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{ detail.assistant_name || '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.modelsUsed') }}
-                      </dt>
-                      <dd
-                        data-testid="run-models-used"
-                        class="overview-value break-all"
+              <div v-show="activeDetailTab === 'overview'" class="px-6 py-5">
+                <div class="overview-dashboard">
+                  <section
+                    data-testid="run-overview-summary"
+                    class="overview-section"
+                  >
+                    <h3 class="overview-title">
+                      {{ t('lensRuns.overviewSummary') }}
+                    </h3>
+                    <dl class="overview-grid">
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.executorStatus') }}
+                        </dt>
+                        <dd class="mt-1">
+                          <span :class="statusClass(detail.executor_status)">
+                            {{
+                              statusText(
+                                detail.executor_status || detail.status
+                              )
+                            }}
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.businessOutcome') }}
+                        </dt>
+                        <dd class="mt-1">
+                          <span :class="statusClass(detail.outcome)">
+                            {{ statusText(detail.outcome) }}
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.colFeedback') }}
+                        </dt>
+                        <dd class="mt-1">
+                          <span
+                            v-if="detail.feedback === 'positive'"
+                            class="feedback-pill feedback-pill-positive"
+                          >
+                            <ThumbsUp :size="13" />
+                            {{ t('lensRuns.feedbackHelpful') }}
+                          </span>
+                          <span
+                            v-else-if="detail.feedback === 'negative'"
+                            class="feedback-pill feedback-pill-negative"
+                          >
+                            <ThumbsDown :size="13" />
+                            {{ t('lensRuns.feedbackUnhelpful') }}
+                          </span>
+                          <span v-else class="text-sm text-gray-400">—</span>
+                        </dd>
+                      </div>
+                      <div
+                        v-if="
+                          Object.keys(detail.termination_detail || {}).length
+                        "
+                        class="col-span-2"
                       >
-                        {{ detail.models_used?.join(', ') || '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensAdmin.fields.agentRounds') }}
-                      </dt>
-                      <dd class="mt-1">
-                        <span
-                          data-testid="run-analysis-depth"
-                          class="analysis-depth-pill"
-                        >
-                          {{ agentRoundsLabel }}
+                        <dt class="overview-label">
+                          {{ t('lensRuns.terminationDetail') }}
+                        </dt>
+                        <dd class="overview-value">
+                          {{ detail.termination_detail.reason || '-' }}
+                          <span
+                            v-if="detail.termination_detail.capability"
+                            class="font-normal text-gray-500"
+                          >
+                            · {{ detail.termination_detail.capability }}
+                          </span>
+                          <span
+                            v-if="detail.termination_detail.error_type"
+                            class="font-normal text-gray-500"
+                          >
+                            · {{ detail.termination_detail.error_type }}
+                          </span>
+                        </dd>
+                      </div>
+                      <div
+                        v-if="hasFailureSummary"
+                        class="col-span-2"
+                        data-testid="run-failure-summary"
+                      >
+                        <dt class="overview-label">
+                          {{ t('lensRuns.failureScope') }}
+                        </dt>
+                        <dd class="mt-1 flex flex-wrap gap-2">
+                          <span
+                            v-if="
+                              detail.failure_summary.unresolved_failure_count
+                            "
+                            class="failure-pill failure-pill-error"
+                          >
+                            {{
+                              t('lensRuns.failureUnresolved', {
+                                n: detail.failure_summary
+                                  .unresolved_failure_count
+                              })
+                            }}
+                          </span>
+                          <span
+                            v-if="
+                              detail.failure_summary.recovered_failure_count
+                            "
+                            class="failure-pill failure-pill-recovered"
+                          >
+                            {{
+                              t('lensRuns.failureRecovered', {
+                                n: detail.failure_summary
+                                  .recovered_failure_count
+                              })
+                            }}
+                          </span>
+                          <span
+                            v-if="detail.failure_summary.warning_count"
+                            class="failure-pill failure-pill-warning"
+                          >
+                            {{
+                              t('lensRuns.failureWarning', {
+                                n: detail.failure_summary.warning_count
+                              })
+                            }}
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.colUser') }}
+                        </dt>
+                        <dd class="overview-value">
+                          {{ detail.username || '-' }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.colSteps') }}
+                        </dt>
+                        <dd class="overview-value tabular-nums">
+                          {{ detail.event_count }}
+                          <span
+                            v-if="detail.subagent_count > 0"
+                            class="font-normal text-indigo-600"
+                          >
+                            ·
+                            {{
+                              t('lensRuns.subagents', {
+                                n: detail.subagent_count
+                              })
+                            }}
+                          </span>
+                          <span
+                            v-if="detail.subagent_denied_count > 0"
+                            class="font-normal text-amber-600"
+                          >
+                            ·
+                            {{
+                              t('lensRuns.subagentsDenied', {
+                                n: detail.subagent_denied_count
+                              })
+                            }}
+                          </span>
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section
+                    data-testid="run-overview-usage"
+                    class="overview-section overview-usage-section"
+                  >
+                    <div data-testid="run-token-summary">
+                      <div class="overview-section-heading">
+                        <div>
+                          <h3 class="overview-title">
+                            {{ t('lensRuns.overviewUsage') }}
+                          </h3>
+                          <p class="overview-section-description">
+                            {{ t('lensRuns.overviewUsageDescription') }}
+                          </p>
+                        </div>
+                        <span class="overview-usage-callout">
+                          {{
+                            t('lensRuns.llmCalls', { n: detail.llm_calls || 0 })
+                          }}
                         </span>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">{{ t('lensRuns.task') }}</dt>
-                      <dd class="overview-value">
-                        {{ detail.execution?.task || '-' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.lensnode') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{ detail.lensnode_name || '-' }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
+                      </div>
 
-                <section
-                  data-testid="run-overview-timing"
-                  class="overview-section"
-                >
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.overviewTiming') }}
-                  </h3>
-                  <dl class="overview-grid">
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.submittedAt') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ formatDateTime(detail.created_at) }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.queueTime') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ queueText }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt class="overview-label">
-                        {{ t('lensRuns.execTime') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ durationText(detail.duration_seconds) }}
-                      </dd>
-                    </div>
-                    <div class="col-span-2">
-                      <dt class="overview-label">
-                        {{ t('lensRuns.execWindow') }}
-                      </dt>
-                      <dd class="overview-value tabular-nums">
-                        {{ formatDateTime(detail.started_at) }}
-                        <span class="font-normal text-gray-400">→</span>
-                        {{ formatDateTime(detail.finished_at) }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
+                      <div class="overview-usage-metrics">
+                        <div class="overview-usage-metric">
+                          <dt class="overview-label">
+                            {{ t('lensRuns.totalTokens') }}
+                          </dt>
+                          <dd class="overview-usage-value">
+                            {{ (detail.total_tokens || 0).toLocaleString() }}
+                          </dd>
+                        </div>
+                        <div class="overview-usage-metric">
+                          <dt class="overview-label">
+                            {{
+                              t('lensRuns.toolCallsShort', {
+                                n: detail.tool_call_count || 0
+                              })
+                            }}
+                          </dt>
+                          <dd class="overview-usage-value">
+                            {{ detail.tool_call_count || 0 }}
+                          </dd>
+                        </div>
+                        <div class="overview-usage-metric">
+                          <dt class="overview-label">
+                            {{
+                              t('lensRuns.retriesShort', {
+                                n: detail.retry_count || 0
+                              })
+                            }}
+                          </dt>
+                          <dd class="overview-usage-value">
+                            {{ detail.retry_count || 0 }}
+                          </dd>
+                        </div>
+                        <div class="overview-usage-metric">
+                          <dt class="overview-label">
+                            {{ t('lensRuns.cost') }}
+                          </dt>
+                          <dd class="overview-usage-value tabular-nums">
+                            {{
+                              detail.total_cost != null
+                                ? `$${detail.total_cost}`
+                                : '—'
+                            }}
+                          </dd>
+                        </div>
+                      </div>
 
-                <section
-                  v-if="detail.execution"
-                  data-testid="run-overview-resources"
-                  class="overview-section"
-                >
-                  <h3 class="overview-title">
-                    {{ t('lensRuns.overviewResources') }}
-                  </h3>
-                  <dl class="overview-grid">
-                    <div class="col-span-2">
-                      <dt class="overview-label">
-                        {{ t('lensRuns.resources') }}
-                      </dt>
-                      <dd class="overview-value">
-                        {{ (detail.execution.loaded_skills || []).length }}
-                        skills ·
-                        {{ (detail.execution.loaded_mcps || []).length }} mcps
-                      </dd>
-                    </div>
-                    <div class="col-span-2">
-                      <dt class="overview-label">
-                        {{ t('lensRuns.targetDirs') }}
-                      </dt>
-                      <dd class="overview-value break-all">
-                        {{
-                          (detail.execution.target_dirs || [])
-                            .map((d) => d.path || d)
-                            .join(', ') || '-'
-                        }}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
+                      <dl
+                        class="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-indigo-100 bg-indigo-100 sm:grid-cols-4"
+                      >
+                        <div class="bg-white px-3 py-2.5">
+                          <dt class="text-xs text-gray-500">
+                            {{ t('lensRuns.promptTokens') }}
+                          </dt>
+                          <dd
+                            class="mt-1 font-medium text-gray-900 tabular-nums"
+                          >
+                            {{ (detail.prompt_tokens || 0).toLocaleString() }}
+                          </dd>
+                        </div>
+                        <div class="bg-white px-3 py-2.5">
+                          <dt class="text-xs text-gray-500">
+                            {{ t('lensRuns.completionTokens') }}
+                          </dt>
+                          <dd
+                            class="mt-1 font-medium text-gray-900 tabular-nums"
+                          >
+                            {{
+                              (detail.completion_tokens || 0).toLocaleString()
+                            }}
+                          </dd>
+                        </div>
+                        <div class="bg-white px-3 py-2.5">
+                          <dt class="text-xs text-gray-500">
+                            {{ t('lensRuns.cachedTokens') }}
+                          </dt>
+                          <dd
+                            class="mt-1 font-medium text-gray-900 tabular-nums"
+                          >
+                            {{ (detail.cached_tokens || 0).toLocaleString() }}
+                          </dd>
+                        </div>
+                        <div class="bg-white px-3 py-2.5">
+                          <dt class="text-xs text-gray-500">
+                            {{ t('lensRuns.reasoningTokens') }}
+                          </dt>
+                          <dd
+                            class="mt-1 font-medium text-gray-900 tabular-nums"
+                          >
+                            {{
+                              (detail.reasoning_tokens || 0).toLocaleString()
+                            }}
+                          </dd>
+                        </div>
+                      </dl>
 
-                <section>
-                  <h3 class="text-sm font-semibold text-gray-700 mb-2">
-                    {{ t('lensRuns.question') }}
-                  </h3>
-                  <div
-                    class="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800 whitespace-pre-wrap"
+                      <div class="mt-3 flex flex-wrap gap-2">
+                        <span class="token-summary-pill">
+                          {{
+                            t('lensRuns.llmCalls', { n: detail.llm_calls || 0 })
+                          }}
+                        </span>
+                        <span
+                          v-if="detail.structured_analysis_calls"
+                          class="token-summary-pill"
+                        >
+                          {{
+                            t('lensRuns.structuredAnalysisCallsCount', {
+                              n: detail.structured_analysis_calls
+                            })
+                          }}
+                        </span>
+                        <span
+                          v-if="detail.structured_validation_calls"
+                          class="token-summary-pill"
+                        >
+                          {{
+                            t('lensRuns.structuredValidationCallsCount', {
+                              n: detail.structured_validation_calls
+                            })
+                          }}
+                        </span>
+                        <span
+                          v-if="detail.transform_calls"
+                          class="token-summary-pill"
+                        >
+                          {{
+                            t('lensRuns.transformCallsCount', {
+                              n: detail.transform_calls
+                            })
+                          }}
+                        </span>
+                        <span
+                          v-if="detail.subagent_model_calls"
+                          class="token-summary-pill token-summary-pill-accent"
+                        >
+                          {{
+                            t('lensRuns.subagentModelCalls', {
+                              n: detail.subagent_model_calls
+                            })
+                          }}
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section
+                    v-if="showLiveProgress"
+                    data-testid="run-live-progress"
+                    class="overview-section border-blue-200 bg-blue-50/60"
                   >
-                    {{ detail.question || '-' }}
-                  </div>
-                </section>
+                    <h3 class="overview-title">
+                      {{ t('lensRuns.liveProgressTitle') }}
+                    </h3>
+                    <dl class="overview-grid">
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.executorStatus') }}
+                        </dt>
+                        <dd class="mt-1">
+                          <span :class="statusClass(detail.executor_status)">
+                            {{
+                              statusText(
+                                detail.executor_status || detail.status
+                              )
+                            }}
+                          </span>
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.lensnode') }}
+                        </dt>
+                        <dd class="overview-value">
+                          {{ detail.lensnode_name || '-' }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.colOperations') }}
+                        </dt>
+                        <dd class="overview-value">
+                          {{
+                            t('lensRuns.toolCallsShort', {
+                              n: detail.tool_call_count || 0
+                            })
+                          }}
+                          ·
+                          {{
+                            t('lensRuns.retriesShort', {
+                              n: detail.retry_count || 0
+                            })
+                          }}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt class="overview-label">
+                          {{ t('lensRuns.resumeDeadline') }}
+                        </dt>
+                        <dd class="overview-value tabular-nums">
+                          {{ formatDateTime(detail.resume_by) }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
 
-                <section v-if="detail.attachments && detail.attachments.length">
-                  <h3 class="text-sm font-semibold text-gray-700 mb-2">
-                    {{ t('lensRuns.attachments') }}
-                  </h3>
-                  <div class="flex flex-wrap gap-3">
+                  <div class="overview-two-column">
+                    <section
+                      data-testid="run-overview-execution"
+                      class="overview-section"
+                    >
+                      <h3 class="overview-title">
+                        {{ t('lensRuns.overviewExecution') }}
+                      </h3>
+                      <dl class="overview-grid">
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensRuns.colAssistant') }}
+                          </dt>
+                          <dd class="overview-value">
+                            {{ detail.assistant_name || '-' }}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensRuns.modelsUsed') }}
+                          </dt>
+                          <dd
+                            data-testid="run-models-used"
+                            class="overview-value break-all"
+                          >
+                            {{ detail.models_used?.join(', ') || '-' }}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensAdmin.fields.agentRounds') }}
+                          </dt>
+                          <dd class="mt-1">
+                            <span
+                              data-testid="run-analysis-depth"
+                              class="analysis-depth-pill"
+                            >
+                              {{ agentRoundsLabel }}
+                            </span>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensRuns.task') }}
+                          </dt>
+                          <dd class="overview-value">
+                            {{ detail.execution?.task || '-' }}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensRuns.lensnode') }}
+                          </dt>
+                          <dd class="overview-value">
+                            {{ detail.lensnode_name || '-' }}
+                          </dd>
+                        </div>
+                      </dl>
+                    </section>
+
+                    <section
+                      data-testid="run-overview-timing"
+                      class="overview-section"
+                    >
+                      <h3 class="overview-title">
+                        {{ t('lensRuns.overviewTiming') }}
+                      </h3>
+                      <dl class="overview-grid">
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensRuns.submittedAt') }}
+                          </dt>
+                          <dd class="overview-value tabular-nums">
+                            {{ formatDateTime(detail.created_at) }}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensRuns.queueTime') }}
+                          </dt>
+                          <dd class="overview-value tabular-nums">
+                            {{ queueText }}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt class="overview-label">
+                            {{ t('lensRuns.execTime') }}
+                          </dt>
+                          <dd class="overview-value tabular-nums">
+                            {{ durationText(detail.duration_seconds) }}
+                          </dd>
+                        </div>
+                        <div class="col-span-2">
+                          <dt class="overview-label">
+                            {{ t('lensRuns.execWindow') }}
+                          </dt>
+                          <dd class="overview-value tabular-nums">
+                            {{ formatDateTime(detail.started_at) }}
+                            <span class="font-normal text-gray-400">→</span>
+                            {{ formatDateTime(detail.finished_at) }}
+                          </dd>
+                        </div>
+                      </dl>
+                    </section>
+                  </div>
+
+                  <section
+                    v-if="detail.execution"
+                    data-testid="run-overview-resources"
+                    class="overview-section"
+                  >
+                    <div class="overview-section-heading">
+                      <div>
+                        <h3 class="overview-title">
+                          {{ t('lensRuns.overviewResources') }}
+                        </h3>
+                        <p class="overview-section-description">
+                          {{ t('lensRuns.overviewResourcesDescription') }}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div class="resource-usage-grid">
+                      <div data-testid="run-configured-resources">
+                        <h4 class="resource-list-title">
+                          {{ t('lensRuns.configuredResources') }}
+                        </h4>
+                        <div class="resource-list">
+                          <span
+                            v-for="skill in detail.execution.resource_usage
+                              ?.configured_skills ||
+                            detail.execution.loaded_skills ||
+                            []"
+                            :key="`skill-${skill.skill_uuid || skill.skill_name}`"
+                            class="resource-pill"
+                          >
+                            <span class="resource-pill-type">
+                              {{ t('lensRuns.skillResource') }}
+                            </span>
+                            {{
+                              skill.skill_name ||
+                              skill.skill_package_name ||
+                              '-'
+                            }}
+                          </span>
+                          <span
+                            v-for="mcp in detail.execution.resource_usage
+                              ?.configured_mcps ||
+                            detail.execution.loaded_mcps ||
+                            []"
+                            :key="`mcp-${mcp.mcp_uuid || mcp.mcp_name}`"
+                            class="resource-pill"
+                          >
+                            <span class="resource-pill-type">
+                              {{ t('lensRuns.mcpResource') }}
+                            </span>
+                            {{ mcp.mcp_name || '-' }}
+                          </span>
+                          <span
+                            v-if="
+                              !(
+                                detail.execution.resource_usage
+                                  ?.configured_skills ||
+                                detail.execution.loaded_skills ||
+                                []
+                              ).length &&
+                              !(
+                                detail.execution.resource_usage
+                                  ?.configured_mcps ||
+                                detail.execution.loaded_mcps ||
+                                []
+                              ).length
+                            "
+                            class="resource-empty"
+                          >
+                            {{ t('lensRuns.noConfiguredResources') }}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div data-testid="run-resource-calls">
+                        <h4 class="resource-list-title">
+                          {{ t('lensRuns.calledResources') }}
+                        </h4>
+                        <div class="resource-call-list">
+                          <div
+                            v-for="call in detail.execution.resource_usage
+                              ?.calls || []"
+                            :key="`${call.resource_type}-${call.name}`"
+                            class="resource-call-row"
+                          >
+                            <span class="resource-call-name">
+                              <span class="resource-pill-type">
+                                {{
+                                  t(`lensRuns.${call.resource_type}Resource`)
+                                }}
+                              </span>
+                              <span class="break-all">{{ call.name }}</span>
+                            </span>
+                            <span class="resource-call-count">
+                              {{
+                                t('lensRuns.resourceCallCount', {
+                                  n: call.calls
+                                })
+                              }}
+                            </span>
+                          </div>
+                          <span
+                            v-if="
+                              !(detail.execution.resource_usage?.calls || [])
+                                .length
+                            "
+                            class="resource-empty"
+                          >
+                            {{ t('lensRuns.noResourceCalls') }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <dl class="overview-grid mt-4">
+                      <div class="col-span-2">
+                        <dt class="overview-label">
+                          {{ t('lensRuns.targetDirs') }}
+                        </dt>
+                        <dd class="overview-value break-all">
+                          {{
+                            (detail.execution.target_dirs || [])
+                              .map((d) => d.path || d)
+                              .join(', ') || '-'
+                          }}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section>
+                    <h3 class="text-sm font-semibold text-gray-700 mb-2">
+                      {{ t('lensRuns.question') }}
+                    </h3>
                     <div
-                      v-for="img in detail.attachments.filter(
-                        (item) => item.kind !== 'document'
-                      )"
-                      :key="img.uuid"
-                      class="flex flex-col gap-1"
+                      class="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800 whitespace-pre-wrap"
                     >
-                      <AuthImage
-                        :src="img.url"
-                        :alt="img.original_name || 'image'"
-                        class="run-attachment"
-                        zoomable
-                      />
-                      <span class="text-xs text-gray-500">
-                        {{
-                          img.source === 'inherited'
-                            ? t('lensRuns.inheritedAttachment')
-                            : t('lensRuns.directAttachment')
-                        }}
-                      </span>
+                      {{ detail.question || '-' }}
                     </div>
-                    <button
-                      v-for="file in detail.attachments.filter(
-                        (item) => item.kind === 'document'
-                      )"
-                      :key="file.uuid"
-                      type="button"
-                      class="run-document-attachment"
-                      @click="
-                        downloadOutputFile({
-                          ...file,
-                          filename: file.original_name
-                        })
-                      "
-                    >
-                      <FileText :size="20" aria-hidden="true" />
-                      <span>{{ file.original_name }}</span>
-                      <span class="text-xs text-gray-500">
-                        {{
-                          file.source === 'inherited'
-                            ? t('lensRuns.inheritedAttachment')
-                            : t('lensRuns.directAttachment')
-                        }}
-                      </span>
-                      <Download :size="16" aria-hidden="true" />
-                    </button>
-                  </div>
-                  <p v-if="visionQuery" class="mt-2 text-xs text-gray-500">
-                    {{ t('lensRuns.visionQuery') }}: {{ visionQuery }}
-                  </p>
-                  <p
-                    v-if="visionFailureReason"
-                    class="mt-2 text-xs text-red-600"
-                  >
-                    {{ t('lensRuns.visionFailureReason') }}:
-                    {{ visionFailureReason }}
-                  </p>
-                </section>
+                  </section>
 
-                <section v-if="detail.error">
-                  <h3 class="text-sm font-semibold text-red-600 mb-2">
-                    {{ t('lensRuns.error') }}
-                  </h3>
-                  <pre
-                    class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap"
+                  <section
+                    v-if="detail.attachments && detail.attachments.length"
                   >
+                    <h3 class="text-sm font-semibold text-gray-700 mb-2">
+                      {{ t('lensRuns.attachments') }}
+                    </h3>
+                    <div class="flex flex-wrap gap-3">
+                      <div
+                        v-for="img in detail.attachments.filter(
+                          (item) => item.kind !== 'document'
+                        )"
+                        :key="img.uuid"
+                        class="flex flex-col gap-1"
+                      >
+                        <AuthImage
+                          :src="img.url"
+                          :alt="img.original_name || 'image'"
+                          class="run-attachment"
+                          zoomable
+                        />
+                        <span class="text-xs text-gray-500">
+                          {{
+                            img.source === 'inherited'
+                              ? t('lensRuns.inheritedAttachment')
+                              : t('lensRuns.directAttachment')
+                          }}
+                        </span>
+                      </div>
+                      <button
+                        v-for="file in detail.attachments.filter(
+                          (item) => item.kind === 'document'
+                        )"
+                        :key="file.uuid"
+                        type="button"
+                        class="run-document-attachment"
+                        @click="
+                          downloadOutputFile({
+                            ...file,
+                            filename: file.original_name
+                          })
+                        "
+                      >
+                        <FileText :size="20" aria-hidden="true" />
+                        <span>{{ file.original_name }}</span>
+                        <span class="text-xs text-gray-500">
+                          {{
+                            file.source === 'inherited'
+                              ? t('lensRuns.inheritedAttachment')
+                              : t('lensRuns.directAttachment')
+                          }}
+                        </span>
+                        <Download :size="16" aria-hidden="true" />
+                      </button>
+                    </div>
+                    <p v-if="visionQuery" class="mt-2 text-xs text-gray-500">
+                      {{ t('lensRuns.visionQuery') }}: {{ visionQuery }}
+                    </p>
+                    <p
+                      v-if="visionFailureReason"
+                      class="mt-2 text-xs text-red-600"
+                    >
+                      {{ t('lensRuns.visionFailureReason') }}:
+                      {{ visionFailureReason }}
+                    </p>
+                  </section>
+
+                  <section v-if="detail.error">
+                    <h3 class="text-sm font-semibold text-red-600 mb-2">
+                      {{ t('lensRuns.error') }}
+                    </h3>
+                    <pre
+                      class="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 whitespace-pre-wrap"
+                    >
                     {{ detail.error }}</pre
-                  >
-                </section>
+                    >
+                  </section>
+                </div>
               </div>
 
-              <!-- Diagnosis tab -->
-              <RunDiagnosisPanel
-                v-show="activeDetailTab === 'diagnosis'"
-                ref="diagnosisPanel"
-                :run-uuid="selectedUuid"
-                :active="activeDetailTab === 'diagnosis'"
-                @navigate="navigateFromEvidence"
-              />
-
-              <!-- Trace tab -->
+              <!-- Execution analysis tab -->
               <div
-                v-show="
-                  activeDetailTab === 'trace' || activeDetailTab === 'usage'
-                "
-                class="px-6 py-5 space-y-6"
+                v-show="activeDetailTab === 'execution'"
+                data-testid="run-execution-content"
+                class="space-y-4 px-6 py-5"
               >
-                <section
-                  v-if="detail.llm_calls"
-                  v-show="activeDetailTab === 'usage'"
-                  data-testid="run-token-summary"
-                  class="rounded-lg border border-indigo-100 bg-indigo-50/60 p-4"
+                <div
+                  class="execution-view-tabs"
+                  role="tablist"
+                  :aria-label="t('lensRuns.executionViews')"
                 >
-                  <div class="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 class="text-xs font-medium text-indigo-700">
-                        {{ t('lensRuns.totalTokens') }}
-                      </h3>
-                      <p class="admin-metric-value mt-1">
-                        {{ (detail.total_tokens || 0).toLocaleString() }}
-                      </p>
-                    </div>
-                    <div
-                      v-if="detail.total_cost != null"
-                      class="rounded-md bg-white/80 px-3 py-2 text-right ring-1 ring-inset ring-indigo-100"
-                    >
-                      <p class="text-xs text-gray-500">
-                        {{ t('lensRuns.cost') }}
-                      </p>
-                      <p class="mt-0.5 font-medium text-gray-900 tabular-nums">
-                        ${{ detail.total_cost }}
-                      </p>
-                    </div>
-                  </div>
-
-                  <dl
-                    class="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-indigo-100 bg-indigo-100 sm:grid-cols-4"
+                  <button
+                    type="button"
+                    role="tab"
+                    data-testid="run-execution-trace-view"
+                    class="execution-view-tab"
+                    :class="
+                      activeExecutionView === 'trace'
+                        ? 'execution-view-tab-active'
+                        : ''
+                    "
+                    :aria-selected="activeExecutionView === 'trace'"
+                    @click="activeExecutionView = 'trace'"
                   >
-                    <div class="bg-white px-3 py-2.5">
-                      <dt class="text-xs text-gray-500">
-                        {{ t('lensRuns.promptTokens') }}
-                      </dt>
-                      <dd class="mt-1 font-medium text-gray-900 tabular-nums">
-                        {{ (detail.prompt_tokens || 0).toLocaleString() }}
-                      </dd>
-                    </div>
-                    <div class="bg-white px-3 py-2.5">
-                      <dt class="text-xs text-gray-500">
-                        {{ t('lensRuns.completionTokens') }}
-                      </dt>
-                      <dd class="mt-1 font-medium text-gray-900 tabular-nums">
-                        {{ (detail.completion_tokens || 0).toLocaleString() }}
-                      </dd>
-                    </div>
-                    <div class="bg-white px-3 py-2.5">
-                      <dt class="text-xs text-gray-500">
-                        {{ t('lensRuns.cachedTokens') }}
-                      </dt>
-                      <dd class="mt-1 font-medium text-gray-900 tabular-nums">
-                        {{ (detail.cached_tokens || 0).toLocaleString() }}
-                      </dd>
-                    </div>
-                    <div class="bg-white px-3 py-2.5">
-                      <dt class="text-xs text-gray-500">
-                        {{ t('lensRuns.reasoningTokens') }}
-                      </dt>
-                      <dd class="mt-1 font-medium text-gray-900 tabular-nums">
-                        {{ (detail.reasoning_tokens || 0).toLocaleString() }}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <span class="token-summary-pill">
-                      {{ t('lensRuns.llmCalls', { n: detail.llm_calls }) }}
+                    {{ t('lensRuns.tabTrace') }}
+                    <span class="text-xs text-gray-400">
+                      {{ detail.trace_event_count ?? detail.event_count }}
                     </span>
-                    <span
-                      v-if="detail.structured_analysis_calls"
-                      class="token-summary-pill"
-                    >
-                      {{
-                        t('lensRuns.structuredAnalysisCallsCount', {
-                          n: detail.structured_analysis_calls
-                        })
-                      }}
-                    </span>
-                    <span
-                      v-if="detail.structured_validation_calls"
-                      class="token-summary-pill"
-                    >
-                      {{
-                        t('lensRuns.structuredValidationCallsCount', {
-                          n: detail.structured_validation_calls
-                        })
-                      }}
-                    </span>
-                    <span
-                      v-if="detail.transform_calls"
-                      class="token-summary-pill"
-                    >
-                      {{
-                        t('lensRuns.transformCallsCount', {
-                          n: detail.transform_calls
-                        })
-                      }}
-                    </span>
-                    <span
-                      v-if="detail.subagent_model_calls"
-                      class="token-summary-pill token-summary-pill-accent"
-                    >
-                      {{
-                        t('lensRuns.subagentModelCalls', {
-                          n: detail.subagent_model_calls
-                        })
-                      }}
-                    </span>
-                  </div>
-                </section>
+                  </button>
+                  <button
+                    v-if="canDiagnoseRun"
+                    type="button"
+                    role="tab"
+                    data-testid="run-execution-diagnosis-view"
+                    class="execution-view-tab"
+                    :class="
+                      activeExecutionView === 'diagnosis'
+                        ? 'execution-view-tab-active'
+                        : ''
+                    "
+                    :aria-selected="activeExecutionView === 'diagnosis'"
+                    @click="activeExecutionView = 'diagnosis'"
+                  >
+                    {{ t('lensRuns.diagnosisSection') }}
+                  </button>
+                </div>
 
                 <RunTrajectoryPanel
-                  v-show="activeDetailTab === 'trace'"
+                  v-show="activeExecutionView === 'trace'"
                   :run-uuid="selectedUuid"
-                  :active="activeDetailTab === 'trace'"
+                  :active="
+                    activeDetailTab === 'execution' &&
+                    activeExecutionView === 'trace'
+                  "
+                />
+
+                <RunDiagnosisPanel
+                  v-if="canDiagnoseRun"
+                  v-show="activeExecutionView === 'diagnosis'"
+                  data-testid="run-execution-diagnosis"
+                  :run-uuid="selectedUuid"
+                  :active="
+                    activeDetailTab === 'execution' &&
+                    activeExecutionView === 'diagnosis'
+                  "
+                  :can-generate="canGenerateDiagnosis"
+                  @navigate="navigateFromEvidence"
                 />
               </div>
 
-              <!-- Results and evidence tab -->
+              <!-- Results and artifacts tab -->
               <div
-                v-show="
-                  activeDetailTab === 'results' || activeDetailTab === 'files'
-                "
+                v-show="activeDetailTab === 'results'"
                 data-testid="run-results-content"
                 class="space-y-4 px-6 py-5"
               >
-                <section
-                  v-if="detail.answer"
-                  v-show="activeDetailTab === 'results'"
-                  class="overview-section"
-                >
+                <section v-if="detail.answer" class="overview-section">
                   <h3 class="overview-title">{{ t('lensRuns.answer') }}</h3>
                   <div
                     class="mt-3 rounded-md border border-gray-200 bg-white p-3"
@@ -1244,10 +1370,7 @@
                   </div>
                 </section>
 
-                <section
-                  v-show="activeDetailTab === 'results'"
-                  class="overview-section"
-                >
+                <section class="overview-section">
                   <h3 class="overview-title">
                     {{ t('lensRuns.evidenceTitle') }}
                   </h3>
@@ -1276,7 +1399,6 @@
 
                 <section
                   v-if="hasPlannedEvidence"
-                  v-show="activeDetailTab === 'results'"
                   data-testid="run-planned-evidence"
                   class="overview-section"
                 >
@@ -1344,10 +1466,7 @@
                   </dl>
                 </section>
 
-                <section
-                  v-show="activeDetailTab === 'results'"
-                  class="overview-section"
-                >
+                <section class="overview-section">
                   <h3 class="overview-title">
                     {{ t('lensRuns.verifiedCitations') }}
                   </h3>
@@ -1504,7 +1623,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
@@ -1536,6 +1655,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import RowActionMenu from '@/components/ui/RowActionMenu.vue'
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import AuthImage from '@/components/ui/AuthImage.vue'
 import { useUserStore } from '@/store/user'
@@ -1559,9 +1679,9 @@ const detailLoading = ref(false)
 const detail = ref(null)
 const selectedUuid = ref(null)
 const activeDetailTab = ref('overview')
+const activeExecutionView = ref('trace')
 const advancedFiltersOpen = ref(false)
 const previewFile = ref(null)
-const diagnosisPanel = ref(null)
 const pendingAction = ref(null)
 const actionLoading = ref(false)
 
@@ -1576,9 +1696,18 @@ const canDiagnoseRun = computed(() => {
 
 const canGenerateDiagnosis = computed(
   () =>
+    canDiagnoseRun.value &&
     Boolean(detail.value) &&
     ['done', 'failed', 'cancelled'].includes(detail.value.status)
 )
+
+const detailMoreActions = computed(() => [
+  {
+    key: 'export',
+    label: t('lensRuns.exportAction'),
+    icon: Download
+  }
+])
 
 const filters = ref({
   q: '',
@@ -1893,6 +2022,10 @@ async function exportRun() {
   }
 }
 
+function handleDetailMoreAction(action) {
+  if (action === 'export') exportRun()
+}
+
 function handlePageSizeChange() {
   page.value = 1
   fetchRuns()
@@ -1915,6 +2048,7 @@ function openDetail(uuid) {
   detailVisible.value = true
   detail.value = null
   activeDetailTab.value = 'overview'
+  activeExecutionView.value = 'trace'
   previewFile.value = null
 }
 
@@ -1922,23 +2056,18 @@ function closeDetail() {
   detailVisible.value = false
   selectedUuid.value = null
   detail.value = null
+  activeExecutionView.value = 'trace'
   previewFile.value = null
-}
-
-async function generateDiagnosis() {
-  if (!canGenerateDiagnosis.value) return
-  activeDetailTab.value = 'diagnosis'
-  await nextTick()
-  diagnosisPanel.value?.generate()
 }
 
 function navigateFromEvidence(evidenceRef) {
   if (String(evidenceRef).startsWith('E-FILE-')) {
-    activeDetailTab.value = 'files'
+    activeDetailTab.value = 'results'
   } else if (evidenceRef === 'E-RUN') {
     activeDetailTab.value = 'overview'
   } else {
-    activeDetailTab.value = 'trace'
+    activeDetailTab.value = 'execution'
+    activeExecutionView.value = 'trace'
   }
 }
 
@@ -2018,6 +2147,67 @@ watch(detailVisible, (visible) => {
 .overview-section {
   @apply rounded-lg border border-gray-200 bg-gray-50/70 p-4;
 }
+.overview-dashboard {
+  @apply space-y-4;
+}
+.overview-two-column {
+  @apply grid gap-4 lg:grid-cols-2;
+}
+.overview-section-heading {
+  @apply flex flex-wrap items-start justify-between gap-3;
+}
+.overview-section-description {
+  @apply mt-1 text-xs leading-5 text-gray-500;
+}
+.overview-usage-section {
+  @apply border-indigo-100 bg-indigo-50/40;
+}
+.resource-usage-grid {
+  @apply mt-4 grid gap-4 lg:grid-cols-2;
+}
+.resource-list-title {
+  @apply text-xs font-semibold uppercase tracking-wide text-gray-500;
+}
+.resource-list {
+  @apply mt-2 flex min-h-10 flex-wrap content-start gap-2 rounded-md border
+    border-gray-200 bg-white p-2.5;
+}
+.resource-pill {
+  @apply inline-flex max-w-full items-center gap-1.5 rounded-full border
+    border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-700;
+}
+.resource-pill-type {
+  @apply shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400;
+}
+.resource-empty {
+  @apply self-center text-xs text-gray-400;
+}
+.resource-call-list {
+  @apply mt-2 min-h-10 overflow-hidden rounded-md border border-gray-200 bg-white;
+}
+.resource-call-row {
+  @apply flex items-center justify-between gap-3 border-b border-gray-100 px-3
+    py-2.5 text-xs last:border-b-0;
+}
+.resource-call-name {
+  @apply flex min-w-0 items-center gap-2 font-medium text-gray-700;
+}
+.resource-call-count {
+  @apply shrink-0 tabular-nums text-gray-500;
+}
+.overview-usage-callout {
+  @apply rounded-full bg-white px-2.5 py-1 text-xs font-medium text-indigo-700
+    ring-1 ring-inset ring-indigo-100;
+}
+.overview-usage-metrics {
+  @apply mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4;
+}
+.overview-usage-metric {
+  @apply rounded-md border border-indigo-100 bg-white px-3 py-2.5;
+}
+.overview-usage-value {
+  @apply mt-1 text-lg font-semibold text-gray-900 tabular-nums;
+}
 .overview-title {
   @apply text-sm font-semibold text-gray-800;
 }
@@ -2080,6 +2270,20 @@ watch(detailVisible, (visible) => {
 }
 .detail-tab-active {
   @apply border-primary-500 text-primary-600;
+}
+
+.execution-view-tabs {
+  @apply inline-flex max-w-full gap-1 overflow-x-auto rounded-lg border
+    border-gray-200 bg-gray-100 p-1;
+}
+.execution-view-tab {
+  @apply min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 text-xs
+    font-medium text-gray-600 transition-colors hover:bg-white
+    hover:text-gray-900 focus:outline-none focus:ring-2
+    focus:ring-primary-500/20 md:min-h-0 md:py-1.5;
+}
+.execution-view-tab-active {
+  @apply bg-white text-primary-700 shadow-sm ring-1 ring-gray-200;
 }
 
 .timeline {
