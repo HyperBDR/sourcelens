@@ -6,23 +6,31 @@ from .prompts import (
     command_answer_language as _command_answer_language,
     history_artifact_guidance as _history_artifact_guidance,
 )
+
+
 def _system_prompt(
     scenario,
     command,
     context_skill_contents=None,
     *,
+    workspace_guide=None,
     mcp_deferred=False,
     runtime_guidance=None,
 ):
     """Build the per-task Deep Agents system prompt."""
 
     if _is_general_chat(command):
-        prompt = _general_chat_system_prompt(command, context_skill_contents)
+        prompt = _general_chat_system_prompt(
+            command,
+            context_skill_contents,
+            workspace_guide=workspace_guide,
+        )
     else:
         prompt = _knowledge_system_prompt(
             scenario,
             command,
             context_skill_contents,
+            workspace_guide=workspace_guide,
             runtime_guidance=runtime_guidance,
         )
     if mcp_deferred:
@@ -45,6 +53,7 @@ def _knowledge_system_prompt(
     command,
     context_skill_contents=None,
     *,
+    workspace_guide=None,
     runtime_guidance=None,
 ):
     """Build the workspace-grounded system prompt."""
@@ -119,6 +128,7 @@ def _knowledge_system_prompt(
         )
     return (
         f"{language_requirement}\n\n"
+        f"{_workspace_guide_prompt(workspace_guide)}"
         f"{scenario['prompt']}\n\n"
         "You are running inside SourceLens LensNode. The control plane has "
         "selected the workspace directories below.\n\n"
@@ -229,7 +239,12 @@ def _knowledge_system_prompt(
     )
 
 
-def _general_chat_system_prompt(command, context_skill_contents=None):
+def _general_chat_system_prompt(
+    command,
+    context_skill_contents=None,
+    *,
+    workspace_guide=None,
+):
     """Build the General Chat system prompt."""
 
     answer_language = _command_answer_language(command)
@@ -238,6 +253,7 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
     history_artifact_guidance = _history_artifact_guidance(command)
     return (
         f"{language_requirement}\n\n"
+        f"{_workspace_guide_prompt(workspace_guide)}"
         "You are running inside SourceLens LensNode as General Chat.\n\n"
         "The bound Skills are your primary behavior contract. Follow their "
         "SKILL.md instructions and use bundled resources only when the Skill "
@@ -324,6 +340,21 @@ def _general_chat_system_prompt(command, context_skill_contents=None):
         f"{_route_guidance(command.get('runtime_route'))}"
         f"\n\n{language_requirement}"
     )
+
+
+def _workspace_guide_prompt(workspace_guide):
+    """Return the Assistant workspace guide system-prompt section."""
+
+    content = str(workspace_guide or "").strip()
+    if not content:
+        return ""
+    return (
+        "Assistant Workspace Guide\n"
+        "The following instructions are part of the Assistant configuration. "
+        "Apply them as trusted workspace context for this Run.\n\n"
+        f"{content}\n\n"
+    )
+
 
 def _subagent_guidance(agent_rounds):
     """Return depth-tiered guidance on when to use the task subagent.

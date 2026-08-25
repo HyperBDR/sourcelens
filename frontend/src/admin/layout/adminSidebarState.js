@@ -25,6 +25,12 @@ export const getAdminSidebarMenu = (path) => {
   )
 }
 
-export const toggleAdminSidebarMenu = (openMenu, selectedMenu) => {
-  return openMenu === selectedMenu ? null : selectedMenu
+export const toggleAdminSidebarMenu = (openMenus, selectedMenu) => {
+  const nextMenus = new Set(openMenus || [])
+  if (nextMenus.has(selectedMenu)) {
+    nextMenus.delete(selectedMenu)
+  } else {
+    nextMenus.add(selectedMenu)
+  }
+  return [...nextMenus]
 }

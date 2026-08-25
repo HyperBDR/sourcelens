@@ -782,7 +782,7 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
         "loaded_skills": [
             {
                 "skill_uuid": "11111111-1111-1111-1111-111111111111",
-                "skill_slug": "repo-guide",
+                "skill_package_name": "repo-guide",
                 "skill_name": "Repo Guide",
                 "content_hash": "sha256:abc",
                 "definition": {
@@ -1046,6 +1046,21 @@ def test_system_prompt_includes_context_skill_guidance():
     assert "Workspace Guidance from bound context skills" in prompt
     assert "Inspect service-api first" in prompt
     assert "/workspace/product" in prompt
+
+
+def test_system_prompt_includes_assistant_workspace_guide():
+    prompt = _system_prompt(
+        {
+            "prompt": "Answer the question.",
+        },
+        {
+            "task": "general_chat",
+        },
+        workspace_guide="Use the configured engineering scope.",
+    )
+
+    assert "Assistant Workspace Guide" in prompt
+    assert "Use the configured engineering scope." in prompt
 
 
 def test_system_prompt_omits_codegraph_guidance_by_default():

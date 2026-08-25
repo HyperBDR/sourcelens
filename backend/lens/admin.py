@@ -51,8 +51,8 @@ class DataSourceAdmin(admin.ModelAdmin):
 
 @admin.register(Skill)
 class SkillAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "enabled")
-    search_fields = ("name", "slug")
+    list_display = ("name", "uuid", "kind", "enabled")
+    search_fields = ("name", "package_name", "uuid")
 
 
 @admin.register(MCPServer)

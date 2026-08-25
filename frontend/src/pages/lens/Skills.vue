@@ -39,7 +39,7 @@
           </div>
         </div>
 
-        <div class="px-5 py-4">
+        <div class="space-y-4 px-5 py-4">
           <BaseLoading v-if="loading && skills.length === 0" />
 
           <div
@@ -51,103 +51,166 @@
             </p>
           </div>
 
-          <div
-            v-else
-            class="relative overflow-x-auto rounded-lg border border-line bg-surface"
-          >
-            <table
-              class="w-full min-w-[56rem] table-fixed divide-y divide-line"
+          <div v-else class="space-y-4">
+            <div
+              class="flex flex-col gap-3 rounded-lg border border-line bg-surface-sunken p-3 md:flex-row md:items-center"
             >
-              <colgroup>
-                <col />
-                <col class="w-44" />
-                <col class="w-28" />
-                <col class="w-24" />
-                <col class="w-52" />
-              </colgroup>
-              <thead class="bg-surface-sunken">
-                <tr>
-                  <th
-                    v-for="column in columns"
-                    :key="column"
-                    class="table-head"
-                    scope="col"
-                  >
-                    {{ column }}
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-line bg-surface">
-                <tr
-                  v-for="row in pagedSkills"
-                  :key="row.uuid"
-                  class="transition-colors hover:bg-line-soft"
+              <div class="relative min-w-0 flex-1">
+                <input
+                  v-model="searchQuery"
+                  class="form-input pl-9"
+                  type="search"
+                  :placeholder="t('lensAdmin.skills.searchPlaceholder')"
+                />
+                <span
+                  class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400"
+                  aria-hidden="true"
+                  >⌕</span
                 >
-                  <td class="table-cell">
-                    <button
-                      type="button"
-                      class="block max-w-full truncate text-left font-medium text-ink-900 hover:text-primary-700 hover:underline"
-                      :title="row.name"
-                      @click="openDetail(row)"
-                    >
-                      {{ row.name }}
-                    </button>
-                    <div
-                      v-if="skillDescription(row)"
-                      class="mt-1 max-w-xl truncate text-xs text-ink-500"
-                    >
-                      {{ skillDescription(row) }}
-                    </div>
-                  </td>
-                  <td class="table-cell font-mono text-ink-500">
-                    <span class="block truncate" :title="row.slug">
-                      {{ row.slug }}
-                    </span>
-                  </td>
-                  <td class="table-cell text-center">
-                    <span
-                      v-if="isWorkspaceGuideSkill(row)"
-                      class="inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
-                      :title="t('lensAdmin.columns.workspaceGuideHint')"
-                    >
-                      {{ t('lensAdmin.columns.workspaceGuideTag') }}
-                    </span>
-                    <span v-else class="text-sm text-ink-400">
-                      {{ t('lensAdmin.pages.skills.label') }}
-                    </span>
-                  </td>
-                  <td class="table-cell text-center">
-                    <StatusBadge
-                      :status="row.enabled ? 'enabled' : 'disabled'"
-                    />
-                  </td>
-                  <td class="table-cell">
-                    <div
-                      class="flex flex-nowrap items-center justify-center gap-2"
-                    >
-                      <BaseButton
-                        size="sm"
-                        variant="outline"
-                        @click="download(row)"
+              </div>
+              <BaseSelect v-model="sourceFilter" class="md:w-44">
+                <option value="all">
+                  {{ t('lensAdmin.skills.allSources') }}
+                </option>
+                <option value="github">GitHub</option>
+                <option value="upload">
+                  {{ t('lensAdmin.skills.upload') }}
+                </option>
+                <option value="manual">
+                  {{ t('lensAdmin.skills.manualCreate') }}
+                </option>
+                <option value="workspace">
+                  {{ t('lensAdmin.columns.workspaceGuideTag') }}
+                </option>
+              </BaseSelect>
+              <BaseSelect v-model="statusFilter" class="md:w-36">
+                <option value="all">
+                  {{ t('lensAdmin.skills.allStatuses') }}
+                </option>
+                <option value="enabled">
+                  {{ t('common.status.enabled') }}
+                </option>
+                <option value="disabled">
+                  {{ t('common.status.disabled') }}
+                </option>
+                <option value="updates">
+                  {{ t('lensAdmin.skills.updateAvailable') }}
+                </option>
+              </BaseSelect>
+            </div>
+
+            <div
+              v-if="pagedSkills.length"
+              class="grid items-stretch gap-4 lg:grid-cols-2"
+            >
+              <article
+                v-for="row in pagedSkills"
+                :key="row.uuid"
+                class="group flex h-full min-w-0 flex-col rounded-xl border border-line bg-surface p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-md"
+              >
+                <div class="flex min-w-0 items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="min-w-0">
+                      <button
+                        type="button"
+                        class="block max-w-full truncate text-left text-lg font-semibold text-ink-900 hover:text-primary-700"
+                        :title="row.name"
+                        @click="openDetail(row)"
                       >
-                        {{ t('lensAdmin.skills.download') }}
-                      </BaseButton>
-                      <RowActions
-                        :row="row"
-                        @edit="startEdit"
-                        @delete="remove"
-                      />
+                        {{ row.name }}
+                      </button>
                     </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                  </div>
+                  <StatusBadge :status="row.enabled ? 'enabled' : 'disabled'" />
+                </div>
+                <p
+                  class="mt-4 line-clamp-2 h-10 overflow-hidden text-sm leading-5 text-ink-600"
+                  :title="
+                    skillDescription(row) || t('lensAdmin.skills.noDescription')
+                  "
+                >
+                  {{
+                    skillDescription(row) || t('lensAdmin.skills.noDescription')
+                  }}
+                </p>
+                <div
+                  class="mt-4 grid grid-cols-2 gap-2 border-y border-line py-3 text-xs sm:grid-cols-4"
+                >
+                  <div class="min-w-0">
+                    <div class="truncate text-ink-400">
+                      {{ t('lensAdmin.skills.version') }}
+                    </div>
+                    <div
+                      class="mt-1 truncate font-medium text-ink-700"
+                      :title="skillVersion(row)"
+                    >
+                      {{ skillVersion(row) }}
+                    </div>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="truncate text-ink-400">
+                      {{ t('lensAdmin.skills.files') }}
+                    </div>
+                    <div class="mt-1 truncate font-medium text-ink-700">
+                      {{ skillFileCount(row) }}
+                    </div>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="truncate text-ink-400">
+                      {{ t('lensAdmin.skills.updatedAt') }}
+                    </div>
+                    <div
+                      class="mt-1 truncate font-medium text-ink-700"
+                      :title="formatDate(row.updated_at)"
+                    >
+                      {{ formatDate(row.updated_at) }}
+                    </div>
+                  </div>
+                </div>
+                <div
+                  class="mt-auto flex min-h-9 flex-wrap items-center justify-between gap-2 pt-3"
+                >
+                  <div class="flex min-w-0 flex-wrap items-center gap-2">
+                    <span
+                      class="flex items-center gap-1.5 rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs text-ink-500"
+                      :title="skillSourceLabel(row)"
+                    >
+                      <component
+                        :is="skillSourceIcon(row)"
+                        class="h-4 w-4"
+                        aria-hidden="true"
+                      />
+                      <span>{{ skillSourceLabel(row) }}</span>
+                    </span>
+                    <span
+                      v-if="row.update_available"
+                      class="rounded-md border border-warning-200 bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700"
+                      >{{ t('lensAdmin.skills.updateAvailable') }}</span
+                    >
+                  </div>
+                  <div class="flex shrink-0 items-center gap-1">
+                    <RowActions
+                      :row="row"
+                      @download="download"
+                      @edit="startEdit"
+                      @delete="remove"
+                    />
+                  </div>
+                </div>
+              </article>
+            </div>
+            <div
+              v-else
+              class="rounded-lg border border-line bg-surface-sunken py-12 text-center text-sm text-ink-500"
+            >
+              {{ t('lensAdmin.skills.noFilterResults') }}
+            </div>
           </div>
           <PaginationBar
-            v-if="!loading"
+            v-if="!loading && filteredSkills.length"
             v-model:page-size="pageSize"
             :current-page="currentPage"
-            :total="skills.length"
+            :total="filteredSkills.length"
             @page-size-change="handlePageSizeChange"
             @prev="goPrevPage"
             @next="goNextPage"
@@ -194,14 +257,20 @@
             <FormRow :label="t('lensAdmin.fields.name')" required>
               <input v-model="form.name" class="form-input" required />
             </FormRow>
-            <FormRow :label="t('lensAdmin.fields.slug')" required>
-              <input v-model="form.slug" class="form-input" required />
-            </FormRow>
             <FormRow :label="t('lensAdmin.fields.description')">
               <input
                 v-model="form.description"
                 class="form-input"
                 :placeholder="t('lensAdmin.placeholders.skillDescription')"
+              />
+            </FormRow>
+            <FormRow :label="t('lensAdmin.skillDetail.descriptionZh')">
+              <input
+                v-model="form.descriptionZh"
+                class="form-input"
+                :placeholder="
+                  t('lensAdmin.skillDetail.descriptionZhPlaceholder')
+                "
               />
             </FormRow>
             <SkillEnvironmentEditor
@@ -393,25 +462,56 @@
       <BaseDrawer
         :show="showDetail"
         :title="t('lensAdmin.skillDetail.title')"
+        :subtitle="detailRow?.package_name || detailRow?.name || ''"
+        width="3xl"
         @close="closeDetail"
       >
         <template #actions>
-          <BaseButton size="sm" variant="outline" @click="download(detailRow)">
+          <BaseButton
+            v-if="detailRow"
+            size="sm"
+            variant="outline"
+            @click="download(detailRow)"
+          >
             {{ t('lensAdmin.skills.download') }}
           </BaseButton>
-          <BaseButton size="sm" variant="outline" @click="editFromDetail">
+          <BaseButton
+            v-if="detailRow"
+            size="sm"
+            variant="outline"
+            @click="editFromDetail"
+          >
             {{ t('common.edit') }}
           </BaseButton>
         </template>
         <div v-if="detailRow" class="space-y-5">
-          <div class="space-y-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <StatusBadge
-                :status="detailRow.enabled ? 'enabled' : 'disabled'"
-              />
-              <h3 class="text-base font-semibold text-ink-900">
-                {{ detailRow.name }}
-              </h3>
+          <div
+            class="rounded-xl border border-line bg-surface-sunken p-4 sm:p-5"
+          >
+            <div class="flex items-start gap-3">
+              <div
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary-100 text-base font-bold text-primary-700"
+              >
+                {{ skillInitial(detailRow) }}
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-lg font-semibold text-ink-900">
+                    {{ detailRow.name }}
+                  </h3>
+                  <StatusBadge
+                    :status="detailRow.enabled ? 'enabled' : 'disabled'"
+                  />
+                </div>
+                <p class="mt-2 text-sm leading-6 text-ink-600">
+                  {{
+                    skillDescription(detailRow) ||
+                    t('lensAdmin.skills.noDescription')
+                  }}
+                </p>
+              </div>
+            </div>
+            <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
               <span
                 v-if="isWorkspaceGuideSkill(detailRow)"
                 class="inline-block rounded-md border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700"
@@ -425,20 +525,16 @@
               >
                 {{ t('lensAdmin.pages.skills.label') }}
               </span>
+              <span
+                v-if="detailRow.update_available"
+                class="rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 font-medium text-warning-700"
+              >
+                {{ t('lensAdmin.skills.updateAvailable') }}
+              </span>
             </div>
-            <p class="font-mono text-xs text-ink-500">{{ detailRow.slug }}</p>
           </div>
 
-          <div v-if="skillDescription(detailRow)">
-            <div class="mb-1 text-sm font-medium text-ink-700">
-              {{ t('lensAdmin.fields.description') }}
-            </div>
-            <p class="text-sm leading-6 text-ink-600">
-              {{ skillDescription(detailRow) }}
-            </p>
-          </div>
-
-          <div class="grid gap-3 sm:grid-cols-2">
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-lg border border-line bg-surface-sunken p-3">
               <div class="text-xs font-medium text-ink-400">
                 {{ t('lensAdmin.skills.sourceType') }}
@@ -455,20 +551,176 @@
                 {{ skillFileCount(detailRow) }}
               </div>
             </div>
+            <div class="rounded-lg border border-line bg-surface-sunken p-3">
+              <div class="text-xs font-medium text-ink-400">
+                {{ t('lensAdmin.skills.version') }}
+              </div>
+              <div
+                class="mt-1 truncate text-sm text-ink-700"
+                :title="skillVersion(detailRow)"
+              >
+                {{ skillVersion(detailRow) }}
+              </div>
+            </div>
+            <div class="rounded-lg border border-line bg-surface-sunken p-3">
+              <div class="text-xs font-medium text-ink-400">
+                {{ t('lensAdmin.skills.updatedAt') }}
+              </div>
+              <div
+                class="mt-1 truncate text-sm text-ink-700"
+                :title="formatDate(detailRow.updated_at)"
+              >
+                {{ formatDate(detailRow.updated_at) }}
+              </div>
+            </div>
           </div>
 
+          <div class="rounded-lg border border-line bg-surface-sunken p-4">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h4 class="text-sm font-semibold text-ink-800">
+                  {{ t('lensAdmin.skillDetail.sourceInfo') }}
+                </h4>
+                <p class="mt-1 text-xs text-ink-500">
+                  {{ t('lensAdmin.skillDetail.sourceInfoHint') }}
+                </p>
+              </div>
+              <a
+                v-if="detailRow.source_url"
+                class="shrink-0 text-xs font-medium text-primary-700 hover:text-primary-800"
+                :href="detailRow.source_url"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {{ t('lensAdmin.skillDetail.openSource') }}
+              </a>
+            </div>
+            <dl class="grid gap-x-4 gap-y-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt class="text-xs text-ink-400">
+                  {{ t('lensAdmin.skills.uuid') }}
+                </dt>
+                <dd class="mt-1 break-all text-ink-700">
+                  {{ detailRow.uuid }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs text-ink-400">
+                  {{ t('lensAdmin.skillDetail.sourceRef') }}
+                </dt>
+                <dd class="mt-1 break-all text-ink-700">
+                  {{ detailRow.source_ref || '—' }}
+                </dd>
+              </div>
+              <div v-if="detailRow.source_path" class="sm:col-span-2">
+                <dt class="text-xs text-ink-400">
+                  {{ t('lensAdmin.skillDetail.sourcePath') }}
+                </dt>
+                <dd class="mt-1 break-all font-mono text-xs text-ink-700">
+                  {{ detailRow.source_path }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div v-if="skillEnvironment(detailRow).length">
+            <h4 class="mb-2 text-sm font-semibold text-ink-800">
+              {{ t('lensAdmin.skillDetail.environment') }}
+            </h4>
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="item in skillEnvironment(detailRow)"
+                :key="item.name"
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1 font-mono text-xs text-ink-600"
+              >
+                {{ item.name
+                }}<span v-if="item.required" class="ml-1 text-danger-600"
+                  >*</span
+                >
+              </span>
+            </div>
+          </div>
+
+          <details class="overflow-hidden rounded-lg border border-line">
+            <summary
+              class="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-ink-800 hover:bg-surface-sunken [&::-webkit-details-marker]:hidden"
+            >
+              <span>{{ t('lensAdmin.skillDetail.files') }}</span>
+              <span class="text-xs font-normal text-ink-400">
+                {{ skillFileCount(detailRow) }}
+                {{ t('lensAdmin.skillDetail.fileUnit') }}
+              </span>
+            </summary>
+            <div class="border-t border-line px-4 pb-4 pt-3">
+              <p class="mb-3 text-xs text-ink-500">
+                {{ t('lensAdmin.skillDetail.filesHint') }}
+              </p>
+              <div class="overflow-hidden rounded-lg border border-line">
+                <button
+                  v-for="file in skillFiles(detailRow)"
+                  :key="file.path"
+                  type="button"
+                  class="flex w-full items-center justify-between gap-3 border-b border-line px-3 py-2 text-left text-xs last:border-b-0 hover:bg-surface-sunken"
+                  :class="
+                    selectedDetailFile === file.path
+                      ? 'bg-primary-50 text-primary-800'
+                      : 'text-ink-600'
+                  "
+                  @click="selectDetailFile(file.path)"
+                >
+                  <span class="min-w-0 truncate font-mono">{{
+                    file.path
+                  }}</span>
+                  <span class="shrink-0 text-ink-400">{{
+                    formatFileSize(file.size)
+                  }}</span>
+                </button>
+              </div>
+            </div>
+          </details>
           <div>
-            <div class="mb-2 text-sm font-medium text-ink-700">
-              {{ t('lensAdmin.fields.content') }}
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 class="text-sm font-semibold text-ink-800">
+                  {{ selectedDetailFile || 'SKILL.md' }}
+                </h4>
+                <p class="mt-1 text-xs text-ink-500">
+                  {{ t('lensAdmin.skillDetail.previewHint') }}
+                </p>
+              </div>
+              <span
+                class="rounded-md border border-line bg-surface-sunken px-2 py-1 text-xs text-ink-500"
+              >
+                {{ t('lensAdmin.skillDetail.readOnly') }}
+              </span>
             </div>
             <div
-              v-if="skillContent(detailRow)"
+              v-if="detailFilePreviewLoading"
+              class="rounded-lg border border-line bg-surface-sunken p-6"
+            >
+              <BaseLoading />
+            </div>
+            <div
+              v-else-if="
+                selectedDetailFile === 'SKILL.md' && skillContent(detailRow)
+              "
               class="rounded-lg border border-line bg-surface-sunken p-4"
             >
               <MarkdownRenderer :content="skillContent(detailRow)" />
             </div>
-            <p v-else class="text-sm text-ink-400">
-              {{ t('common.noData') }}
+            <pre
+              v-else-if="detailFilePreview"
+              class="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-surface-sunken p-4 font-mono text-xs leading-5 text-ink-700"
+              >{{ detailFilePreview }}</pre
+            >
+            <p
+              v-else
+              class="rounded-lg border border-line bg-surface-sunken p-4 text-sm text-ink-400"
+            >
+              {{
+                detailFilePreviewError ||
+                t('lensAdmin.skillDetail.filePreviewUnavailable')
+              }}
             </p>
           </div>
         </div>
@@ -551,12 +803,15 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Bot as BotIcon,
   ChevronDown as ChevronDownIcon,
   Copy as CopyIcon,
+  GitBranch as GitIcon,
+  PencilLine as PencilLineIcon,
+  Upload as UploadIcon,
   UploadCloud as UploadCloudIcon,
   X as XIcon
 } from '@lucide/vue'
@@ -564,6 +819,7 @@ import {
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   beautifySkill,
+  checkSkillUpdates,
   createSkill,
   deleteSkill,
   downloadSkill,
@@ -571,6 +827,7 @@ import {
   getSkillDeleteImpact,
   importSkillFromGithub,
   listSkills,
+  previewSkillFile,
   updateGithubSkill,
   updateSkill,
   updateUploadedSkill,
@@ -613,12 +870,19 @@ const skills = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
+const searchQuery = ref('')
+const sourceFilter = ref('all')
+const statusFilter = ref('all')
 const saving = ref(false)
 const beautifying = ref(false)
 const showModal = ref(false)
 const showDetail = ref(false)
 const showDeleteModal = ref(false)
 const detailRow = ref(null)
+const selectedDetailFile = ref('SKILL.md')
+const detailFilePreview = ref('')
+const detailFilePreviewError = ref('')
+const detailFilePreviewLoading = ref(false)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
@@ -653,18 +917,49 @@ const createMethodOptions = computed(() => [
 
 const createMethod = ref('manual')
 
-const columns = computed(() =>
-  ['skill', 'slug', 'type', 'status', 'actions'].map((column) =>
-    t(`lensAdmin.columns.${column}`)
-  )
-)
+const filteredSkills = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  return skills.value.filter((skill) => {
+    const matchesQuery =
+      !query ||
+      [
+        skill.name,
+        skill.package_name,
+        skillDescription(skill),
+        skill.source_ref,
+        skill.source_path
+      ].some((value) =>
+        String(value || '')
+          .toLowerCase()
+          .includes(query)
+      )
+    const matchesSource =
+      sourceFilter.value === 'all' ||
+      (sourceFilter.value === 'workspace'
+        ? isWorkspaceGuideSkill(skill)
+        : skill.source_type === sourceFilter.value &&
+          !isWorkspaceGuideSkill(skill))
+    const matchesStatus =
+      statusFilter.value === 'all' ||
+      (statusFilter.value === 'updates'
+        ? skill.update_available
+        : statusFilter.value === 'enabled'
+          ? skill.enabled
+          : !skill.enabled)
+    return matchesQuery && matchesSource && matchesStatus
+  })
+})
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(skills.value.length / pageSize.value))
+  Math.max(1, Math.ceil(filteredSkills.value.length / pageSize.value))
 )
 const pagedSkills = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return skills.value.slice(start, start + pageSize.value)
+  return filteredSkills.value.slice(start, start + pageSize.value)
+})
+
+watch([searchQuery, sourceFilter, statusFilter], () => {
+  currentPage.value = 1
 })
 
 function handlePageSizeChange() {
@@ -679,6 +974,41 @@ function goPrevPage() {
 function goNextPage() {
   if (currentPage.value >= totalPages.value) return
   currentPage.value += 1
+}
+
+function skillInitial(row) {
+  return (row?.name || 'S').trim().charAt(0).toUpperCase()
+}
+
+function skillVersion(row) {
+  return row?.source_ref || row?.version || '—'
+}
+
+function skillSourceLabel(row) {
+  if (isWorkspaceGuideSkill(row)) {
+    return t('lensAdmin.columns.workspaceGuideTag')
+  }
+  const labels = {
+    github: 'GitHub',
+    upload: t('lensAdmin.skills.upload'),
+    manual: t('lensAdmin.skills.manualCreate')
+  }
+  return labels[row?.source_type] || row?.source_type || '—'
+}
+
+function skillSourceIcon(row) {
+  if (row?.source_type === 'github') return GitIcon
+  if (row?.source_type === 'upload') return UploadIcon
+  return PencilLineIcon
+}
+
+function formatDate(value) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(new Date(value))
 }
 
 const modalTitle = computed(() => {
@@ -746,15 +1076,37 @@ const packageFileSize = computed(() => {
 })
 
 function isWorkspaceGuideSkill(row) {
-  return typeof row?.slug === 'string' && row.slug.endsWith('-workspace-guide')
+  return row?.kind === 'workspace_guide'
 }
 
 function skillDescription(row) {
   const definition = row?.definition
   if (definition && typeof definition === 'object') {
-    return definition.description || ''
+    return definition.description_zh || definition.description || ''
   }
   return ''
+}
+
+function skillEnvironment(row) {
+  const environment = row?.definition?.environment
+  return Array.isArray(environment)
+    ? environment.filter((item) => item && item.name)
+    : []
+}
+
+function skillFiles(row) {
+  const files = row?.package_manifest?.files
+  if (Array.isArray(files) && files.length) {
+    return files
+  }
+  return [{ path: 'SKILL.md', size: 0 }]
+}
+
+function formatFileSize(value) {
+  const size = Number(value) || 0
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
 function skillContent(row) {
@@ -770,6 +1122,24 @@ function skillContent(row) {
   return ''
 }
 
+async function selectDetailFile(path) {
+  selectedDetailFile.value = path
+  detailFilePreview.value = ''
+  detailFilePreviewError.value = ''
+  if (path === 'SKILL.md' || !detailRow.value?.uuid) return
+  detailFilePreviewLoading.value = true
+  try {
+    const result = await previewSkillFile(detailRow.value.uuid, path)
+    detailFilePreview.value = result?.content || ''
+  } catch (error) {
+    detailFilePreviewError.value =
+      error?.response?.data?.detail ||
+      t('lensAdmin.skillDetail.filePreviewUnavailable')
+  } finally {
+    detailFilePreviewLoading.value = false
+  }
+}
+
 function skillSourceType(row) {
   return row?.source_type || 'manual'
 }
@@ -781,8 +1151,8 @@ function skillFileCount(row) {
 function defaultForm() {
   return {
     name: '',
-    slug: '',
     description: '',
+    descriptionZh: '',
     content: '',
     environment: [],
     enabled: true
@@ -795,8 +1165,8 @@ function formFromRow(row) {
   return {
     uuid: row.uuid,
     name: row.name || '',
-    slug: row.slug || '',
-    description: skillDescription(row),
+    description: row?.definition?.description || '',
+    descriptionZh: row?.definition?.description_zh || '',
     content: skillContent(row),
     environment: skillEnvironmentForm(originalDefinition.environment),
     originalDefinition,
@@ -813,9 +1183,12 @@ function buildPayload() {
   if (description) {
     definition.description = description
   }
+  const descriptionZh = (form.value.descriptionZh || '').trim()
+  if (descriptionZh) {
+    definition.description_zh = descriptionZh
+  }
   return {
     name: form.value.name,
-    slug: form.value.slug,
     definition,
     enabled: !!form.value.enabled
   }
@@ -839,6 +1212,9 @@ async function load() {
   formError.value = ''
   try {
     skills.value = normalizeList(await listSkills())
+    if (skills.value.some((skill) => skill.source_type === 'github')) {
+      skills.value = normalizeList(await checkSkillUpdates())
+    }
   } catch (error) {
     showError(skillErrorMessage(error, t, t('lensAdmin.messages.loadFailed')))
   } finally {
@@ -918,12 +1294,17 @@ function closeModal() {
 
 function openDetail(row) {
   detailRow.value = row
+  selectedDetailFile.value = 'SKILL.md'
+  detailFilePreview.value = ''
+  detailFilePreviewError.value = ''
   showDetail.value = true
 }
 
 function closeDetail() {
   showDetail.value = false
   detailRow.value = null
+  detailFilePreview.value = ''
+  detailFilePreviewError.value = ''
 }
 
 function editFromDetail() {
@@ -1072,7 +1453,7 @@ async function download(row) {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `${row.slug || 'skill'}.zip`
+    link.download = `${row.name || 'skill'}.zip`
     link.click()
     URL.revokeObjectURL(url)
   } catch (error) {

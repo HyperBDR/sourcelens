@@ -928,6 +928,9 @@ class LensDeepAgentRuntime:
                         state.scenario,
                         state.command,
                         state.resources.context_skill_contents,
+                        workspace_guide=state.command.get(
+                            "workspace_guide", ""
+                        ),
                     ),
                     messages=(
                         state.resume_state.messages
@@ -1014,6 +1017,9 @@ class LensDeepAgentRuntime:
                 state.scenario,
                 state.command,
                 state.resources.context_skill_contents,
+                workspace_guide=state.command.get(
+                    "workspace_guide", ""
+                ),
                 mcp_deferred=state.mcp_middleware is not None,
                 runtime_guidance=state.runtime_guidance,
             ),

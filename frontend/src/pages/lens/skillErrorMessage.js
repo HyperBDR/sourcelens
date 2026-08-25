@@ -31,12 +31,13 @@ const EXACT_ERROR_KEYS = {
   'Only public GitHub URLs are supported.': 'githubPublicOnly',
   'GitHub URL must include owner and repository.': 'githubRepositoryRequired',
   'GitHub download redirected to an unsafe host.': 'githubUnsafeRedirect',
+  'GitHub repository must publish a tag before it can be imported.':
+    'githubTagRequired',
   'Environment variables must be valid JSON.': 'environmentInvalid',
   'Skill generator model is not configured.': 'generatorNotConfigured'
 }
 
 const ERROR_RULES = [
-  [/^Skill slug '.+' already exists\./, 'skillSlugExists'],
   [/^GitHub download failed:/, 'githubDownloadFailed'],
   [
     /^(Skill transforms|A Skill may declare at most 32 transforms|Transform names|Transform ')/,

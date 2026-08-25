@@ -9,9 +9,11 @@ import shutil
 import stat
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib import error as urlerror
 from urllib import parse, request
+from uuid import uuid4
 
 from django.conf import settings
 from django.db import transaction
@@ -30,6 +32,7 @@ MAX_SKILL_MD_SIZE = 256 * 1024
 MAX_FILE_COUNT = 300
 MAX_GITHUB_DOWNLOAD_SIZE = MAX_ZIP_SIZE
 GITHUB_TIMEOUT_SECONDS = 30
+GITHUB_API_URL = "https://api.github.com"
 BLOCKED_PARTS = {".git", ".ssh", "__pycache__", "node_modules", ".venv"}
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,179}$")
 SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -45,6 +48,9 @@ def import_skill_zip(
     original_name="",
     source_type="upload",
     source_url="",
+    source_ref="",
+    source_path="",
+    latest_source_ref="",
     environment_override=None,
 ):
     """Validate and persist a Skill zip package."""
@@ -67,17 +73,18 @@ def import_skill_zip(
         metadata = _parse_skill_md(skill_md)
         metadata.update(_parse_sourcelens_config(skill_root))
         _apply_environment_override(metadata, environment_override)
-        slug = _slug_from_metadata(metadata)
+        package_name = _package_name_from_metadata(metadata)
         manifest = _package_manifest(skill_root)
-        package_root = skill_package_root(slug, digest)
-        existing = Skill.objects.filter(slug=slug).first()
+        existing = _find_skill_by_package_name(package_name)
+        skill_uuid = existing.uuid if existing else uuid4()
+        package_root = skill_package_root(skill_uuid, digest)
         if existing and (
             existing.package_hash != digest
             or existing.source_type != source_type
         ):
             raise SkillPackageError(
-                f"Skill slug '{slug}' already exists. "
-                "Use a different name or update it explicitly."
+                f"Skill package '{package_name}' already exists. "
+                "Use the existing Skill update action."
             )
         staged_root = package_root.with_name(f".{digest}.tmp")
         if staged_root.exists():
@@ -92,28 +99,40 @@ def import_skill_zip(
                 staged_root.rename(package_root)
                 created_package_root = True
             with transaction.atomic():
-                skill, _created = Skill.objects.update_or_create(
-                    slug=slug,
-                    defaults={
-                        "name": metadata["name"],
-                        "definition": {
-                            "description": metadata["description"],
-                            "content": metadata["content"],
-                            "skill_md": metadata["skill_md"],
-                            "environment": metadata["environment"],
-                            "api": metadata["api"],
-                            "transforms": metadata["transforms"],
-                        },
-                        "version": digest[:12],
-                        "enabled": True,
-                        "package_path": str(package_root),
-                        "package_hash": digest,
-                        "package_size": len(data),
-                        "package_manifest": manifest,
-                        "source_type": source_type,
-                        "source_url": source_url,
-                    },
+                if existing:
+                    skill = existing
+                    created = False
+                else:
+                    skill = Skill(uuid=skill_uuid)
+                    created = True
+                skill.name = metadata["name"]
+                skill.package_name = package_name
+                skill.definition = {
+                    "package_name": package_name,
+                    "description": metadata["description"],
+                    "content": metadata["content"],
+                    "skill_md": metadata["skill_md"],
+                    "environment": metadata["environment"],
+                    "api": metadata["api"],
+                    "transforms": metadata["transforms"],
+                }
+                skill.version = source_ref or digest[:12]
+                skill.enabled = True
+                skill.package_path = str(package_root)
+                skill.package_hash = digest
+                skill.package_size = len(data)
+                skill.package_manifest = manifest
+                skill.source_type = source_type
+                skill.source_url = source_url
+                skill.source_ref = source_ref
+                skill.source_path = source_path
+                skill.latest_source_ref = latest_source_ref
+                skill.source_checked_at = (
+                    datetime.now(timezone.utc)
+                    if source_type == "github"
+                    else None
                 )
+                skill.save()
         except Exception:
             shutil.rmtree(staged_root, ignore_errors=True)
             if created_package_root:
@@ -129,6 +148,9 @@ def update_skill_zip(
     original_name="",
     source_type="upload",
     source_url="",
+    source_ref="",
+    source_path="",
+    latest_source_ref="",
     environment_override=None,
 ):
     """Validate a Skill zip package and replace an existing Skill snapshot."""
@@ -154,13 +176,13 @@ def update_skill_zip(
         metadata = _parse_skill_md(skill_root / "SKILL.md")
         metadata.update(_parse_sourcelens_config(skill_root))
         _apply_environment_override(metadata, environment_override)
-        slug = _slug_from_metadata(metadata)
-        if slug != skill.slug:
+        package_name = _package_name_from_metadata(metadata)
+        if package_name != skill.package_name:
             raise SkillPackageError(
                 "Updated package Skill name must match the existing Skill."
             )
         manifest = _package_manifest(skill_root)
-        package_root = skill_package_root(slug, digest)
+        package_root = skill_package_root(skill.uuid, digest)
         staged_root = package_root.with_name(f".{digest}.tmp")
         if staged_root.exists():
             shutil.rmtree(staged_root)
@@ -176,7 +198,9 @@ def update_skill_zip(
                 created_package_root = True
             with transaction.atomic():
                 skill.name = metadata["name"]
+                skill.package_name = package_name
                 skill.definition = {
+                    "package_name": package_name,
                     "description": metadata["description"],
                     "content": metadata["content"],
                     "skill_md": metadata["skill_md"],
@@ -184,16 +208,25 @@ def update_skill_zip(
                     "api": metadata["api"],
                     "transforms": metadata["transforms"],
                 }
-                skill.version = digest[:12]
+                skill.version = source_ref or digest[:12]
                 skill.enabled = True
                 skill.package_path = str(package_root)
                 skill.package_hash = digest
                 skill.package_size = len(data)
                 skill.package_manifest = manifest
                 skill.source_url = source_url
+                skill.source_ref = source_ref
+                skill.source_path = source_path
+                skill.latest_source_ref = latest_source_ref
+                skill.source_checked_at = (
+                    datetime.now(timezone.utc)
+                    if source_type == "github"
+                    else None
+                )
                 skill.save(
                     update_fields=[
                         "name",
+                        "package_name",
                         "definition",
                         "version",
                         "enabled",
@@ -202,6 +235,10 @@ def update_skill_zip(
                         "package_size",
                         "package_manifest",
                         "source_url",
+                        "source_ref",
+                        "source_path",
+                        "latest_source_ref",
+                        "source_checked_at",
                         "updated_at",
                     ]
                 )
@@ -220,24 +257,46 @@ def update_skill_zip(
 
 
 def import_skill_from_github(url):
-    """Download a public GitHub Skill zip and import it."""
+    """Download a public GitHub repository and import its Skills."""
 
-    return _github_skill_zip(url, import_skill_zip)
+    return _github_skills_zip(url, import_skill_zip)
 
 
 def update_skill_from_github(skill, url):
-    """Download a public GitHub Skill zip and update an existing Skill."""
+    """Download one GitHub Skill directory and update it."""
 
-    return _github_skill_zip(
+    return _github_skills_zip(
         url,
         lambda **kwargs: update_skill_zip(skill, **kwargs),
+        source_path=skill.source_path,
     )
 
 
-def _github_skill_zip(url, importer):
-    """Download a public GitHub Skill zip and pass it to an importer."""
+def check_skill_github_update(skill):
+    """Refresh the latest GitHub tag metadata for one Skill."""
 
-    zip_url = _github_zip_url(url)
+    if skill.source_type != "github" or not skill.source_url:
+        return skill
+    latest_ref = _github_latest_tag(skill.source_url)
+    if not latest_ref:
+        latest_ref = skill.source_ref
+    skill.latest_source_ref = latest_ref
+    skill.source_checked_at = datetime.now(timezone.utc)
+    skill.save(update_fields=["latest_source_ref", "source_checked_at"])
+    return skill
+
+
+def _github_skills_zip(url, importer, source_path=""):
+    """Download a GitHub repository and import one or more Skill roots."""
+
+    repo_url, requested_ref, requested_path = _github_repo_parts(url)
+    latest_ref = _github_latest_tag(repo_url)
+    ref = requested_ref or latest_ref
+    if not ref:
+        raise SkillPackageError(
+            "GitHub repository must publish a tag before it can be imported."
+        )
+    zip_url = _github_zip_url(repo_url, ref)
     opener = request.build_opener(_GitHubRedirectHandler)
     req = request.Request(
         zip_url,
@@ -255,12 +314,60 @@ def _github_skill_zip(url, importer):
         raise SkillPackageError(f"GitHub download failed: {exc.reason}")
     if len(data) > MAX_GITHUB_DOWNLOAD_SIZE:
         raise SkillPackageError("GitHub skill package exceeds 50 MB.")
-    return importer(
-        file_obj=io.BytesIO(data),
-        original_name="github-skill.zip",
-        source_type="github",
-        source_url=url,
+    return _import_github_roots(
+        data,
+        importer,
+        source_url=repo_url,
+        source_ref=ref,
+        latest_source_ref=latest_ref or ref,
+        requested_path=source_path or requested_path,
     )
+
+
+def _import_github_roots(
+    data,
+    importer,
+    *,
+    source_url,
+    source_ref,
+    latest_source_ref,
+    requested_path="",
+):
+    """Import each directory containing a SKILL.md independently."""
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        extract_root = Path(temp_dir) / "extract"
+        extract_root.mkdir()
+        _safe_extract_zip(data, extract_root, ignore_unsafe=True)
+        roots = _find_skill_roots(extract_root, requested_path)
+        if not roots:
+            raise SkillPackageError("GitHub repository contains no SKILL.md.")
+        results = []
+        for root in roots:
+            package = io.BytesIO()
+            with zipfile.ZipFile(
+                package,
+                "w",
+                zipfile.ZIP_DEFLATED,
+            ) as archive:
+                for path in root.rglob("*"):
+                    if path.is_file():
+                        archive.write(path, path.relative_to(root).as_posix())
+            package.seek(0)
+            relative_parts = root.relative_to(extract_root).parts
+            relative_path = Path(*relative_parts[1:])
+            results.append(
+                importer(
+                    file_obj=package,
+                    original_name="github-skill.zip",
+                    source_type="github",
+                    source_url=source_url,
+                    source_ref=source_ref,
+                    source_path=relative_path.as_posix(),
+                    latest_source_ref=latest_source_ref,
+                )
+            )
+        return results
 
 
 class _GitHubRedirectHandler(request.HTTPRedirectHandler):
@@ -271,14 +378,14 @@ class _GitHubRedirectHandler(request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def skill_package_root(slug, package_hash):
+def skill_package_root(skill_uuid, package_hash):
     """Return persistent storage path for one Skill package snapshot."""
 
     return (
         Path(settings.STORAGE_ROOT)
         / "lens"
         / "skills"
-        / slug
+        / str(skill_uuid)
         / package_hash
     )
 
@@ -287,6 +394,7 @@ def package_zip_bytes(skill):
     """Return a downloadable zip archive for a Skill."""
 
     buffer = io.BytesIO()
+    package_name = _package_name_for_skill(skill)
     package_path = Path(skill.package_path) if skill.package_path else None
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         if (
@@ -299,13 +407,13 @@ def package_zip_bytes(skill):
                     archive.write(
                         path,
                         str(
-                            PurePosixPath(skill.slug)
+                            PurePosixPath(package_name)
                             / path.relative_to(package_path)
                         ),
                     )
         else:
             archive.writestr(
-                f"{skill.slug}/SKILL.md",
+                f"{package_name}/SKILL.md",
                 _skill_md_from_definition(skill),
             )
             definition = skill.definition or {}
@@ -326,7 +434,7 @@ def package_zip_bytes(skill):
                         for name, transform in transforms.items()
                     }
                 archive.writestr(
-                    f"{skill.slug}/sourcelens.json",
+                    f"{package_name}/sourcelens.json",
                     json.dumps(
                         config,
                         ensure_ascii=False,
@@ -336,6 +444,17 @@ def package_zip_bytes(skill):
                 )
     buffer.seek(0)
     return buffer
+
+
+def _package_name_for_skill(skill):
+    """Return a valid external package name for a Skill snapshot."""
+
+    package_name = str(skill.package_name or "").strip().lower()
+    if SLUG_RE.match(package_name):
+        return package_name
+    package_name = re.sub(r"[^a-z0-9_-]+", "-", skill.name.lower())
+    package_name = package_name.strip("-_")
+    return package_name or f"skill-{skill.uuid}"
 
 
 def _read_limited(file_obj, limit):
@@ -354,7 +473,7 @@ def _read_limited(file_obj, limit):
     return file_obj.read(limit)
 
 
-def _safe_extract_zip(data, destination):
+def _safe_extract_zip(data, destination, ignore_unsafe=False):
     """Extract a zip after checking file count, size, and paths."""
 
     total_size = 0
@@ -375,7 +494,13 @@ def _safe_extract_zip(data, destination):
             total_size += info.file_size
             if total_size > MAX_UNPACKED_SIZE:
                 raise SkillPackageError("Skill package unpacks over 100 MB.")
-            member_path = _validate_zip_member(info)
+            try:
+                member_path = _validate_zip_member(info)
+            except SkillPackageError:
+                mode = (info.external_attr >> 16) & 0o170000
+                if ignore_unsafe and mode == 0o120000:
+                    continue
+                raise
             target = destination / member_path
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -389,6 +514,9 @@ def _safe_extract_zip(data, destination):
 
         for info in archive.infolist():
             if _zip_member_is_dir(info):
+                continue
+            source_mode = (info.external_attr >> 16) & 0o170000
+            if ignore_unsafe and source_mode == 0o120000:
                 continue
             relative_path = _zip_member_path(info.filename)
             target = destination / relative_path
@@ -440,6 +568,23 @@ def _find_skill_root(extract_root):
             "Skill package must contain one SKILL.md root."
         )
     return candidates[0]
+
+
+def _find_skill_roots(extract_root, requested_path=""):
+    """Find all Skill roots in an extracted GitHub repository."""
+
+    roots = []
+    requested = PurePosixPath(requested_path) if requested_path else None
+    for skill_md in sorted(extract_root.rglob("SKILL.md")):
+        root = skill_md.parent
+        relative_parts = root.relative_to(extract_root).parts
+        relative = PurePosixPath(*relative_parts[1:])
+        if requested and not (
+            relative == requested or requested in relative.parents
+        ):
+            continue
+        roots.append(root)
+    return roots
 
 
 def _parse_skill_md(path):
@@ -684,15 +829,21 @@ def _parse_simple_frontmatter(frontmatter):
     return fields
 
 
-def _slug_from_metadata(metadata):
-    """Return validated slug from Skill metadata name."""
+def _package_name_from_metadata(metadata):
+    """Return the validated external package name from Skill metadata."""
 
-    slug = str(metadata["name"]).strip()
-    if not SLUG_RE.match(slug):
+    package_name = str(metadata["name"]).strip()
+    if not SLUG_RE.match(package_name):
         raise SkillPackageError(
             "Skill name must use lowercase letters, numbers, '-' or '_'."
         )
-    return slug
+    return package_name
+
+
+def _find_skill_by_package_name(package_name):
+    """Return the existing Skill imported from the same package name."""
+
+    return Skill.objects.filter(package_name=package_name).first()
 
 
 def _package_manifest(skill_root):
@@ -718,7 +869,61 @@ def _package_manifest(skill_root):
     }
 
 
-def _github_zip_url(value):
+def _github_repo_parts(value):
+    """Return a canonical repository URL, ref, and optional Skill path."""
+
+    parsed = parse.urlsplit(str(value or "").strip())
+    if parsed.netloc not in {"github.com", "www.github.com"}:
+        raise SkillPackageError("Only public GitHub URLs are supported.")
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        raise SkillPackageError(
+            "GitHub URL must include owner and repository."
+        )
+    owner, repo = parts[:2]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    ref = ""
+    path = ""
+    if len(parts) >= 4 and parts[2] in {"tree", "blob"}:
+        ref = parts[3]
+        path = "/".join(parts[4:])
+    return f"https://github.com/{owner}/{repo}", ref, path
+
+
+def _github_api_json(url):
+    """Fetch public GitHub metadata with a bounded request."""
+
+    req = request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "SourceLens Skill Importer",
+        },
+    )
+    try:
+        with request.urlopen(req, timeout=GITHUB_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read(512 * 1024).decode("utf-8"))
+    except (
+        urlerror.HTTPError,
+        urlerror.URLError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise SkillPackageError("GitHub metadata request failed.") from exc
+
+
+def _github_latest_tag(repo_url):
+    """Return the newest GitHub tag, or an empty string when none exists."""
+
+    parsed = parse.urlsplit(repo_url)
+    owner, repo = parsed.path.strip("/").split("/")
+    payload = _github_api_json(
+        f"{GITHUB_API_URL}/repos/{owner}/{repo}/tags?per_page=1"
+    )
+    return str(payload[0].get("name") or "") if payload else ""
+
+
+def _github_zip_url(value, ref="main"):
     """Return a codeload GitHub zip URL from supported GitHub inputs."""
 
     parsed = parse.urlsplit(str(value or "").strip())
@@ -733,12 +938,12 @@ def _github_zip_url(value):
             "GitHub URL must include owner and repository."
         )
     owner, repo = parts[0], parts[1]
-    ref = "main"
     if len(parts) >= 4 and parts[2] in {"tree", "blob"}:
         ref = parts[3]
     elif len(parts) >= 4 and parts[2] == "archive":
         return parse.urlunsplit(parsed)
-    return f"https://codeload.github.com/{owner}/{repo}/zip/{ref}"
+    encoded_ref = parse.quote(ref, safe="")
+    return f"https://codeload.github.com/{owner}/{repo}/zip/{encoded_ref}"
 
 
 def _validate_github_download_url(value):
@@ -779,7 +984,7 @@ def _skill_md_from_definition(skill):
     )
     return (
         "---\n"
-        f"name: {skill.slug}\n"
+        f"name: {_package_name_for_skill(skill)}\n"
         f"description: {description}\n"
         "---\n\n"
         f"{str(content).strip()}\n"

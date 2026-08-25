@@ -1,7 +1,9 @@
 """Skill and MCP server management views."""
 
 import json
+import mimetypes
 import shutil
+from pathlib import Path, PurePosixPath
 
 from django.db import transaction
 from django.http import FileResponse
@@ -20,6 +22,7 @@ from lens.skill_generation import (
 )
 from lens.skill_packages import (
     SkillPackageError,
+    check_skill_github_update,
     import_skill_from_github,
     import_skill_zip,
     package_zip_bytes,
@@ -66,10 +69,91 @@ class SkillViewSet(BaseAdminViewSet):
                 "skill": {
                     "uuid": str(skill.uuid),
                     "name": skill.name,
-                    "slug": skill.slug,
+                    "kind": skill.kind,
                 },
                 "bound_count": len(assistants),
                 "bound_assistants": assistants,
+            }
+        )
+
+    @action(detail=True, methods=["get"], url_path="file-preview")
+    def file_preview(self, request, *args, **kwargs):
+        """Return a bounded UTF-8 preview for a package text file."""
+
+        skill = self.get_object()
+        relative_path = str(request.query_params.get("path") or "").strip()
+        try:
+            path = PurePosixPath(relative_path)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "A valid package file path is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not relative_path or path.is_absolute() or ".." in path.parts:
+            return Response(
+                {"detail": "A valid package file path is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        package_root = Path(skill.package_path or "").resolve()
+        file_path = (package_root / Path(*path.parts)).resolve()
+        if package_root not in file_path.parents or not file_path.is_file():
+            return Response(
+                {"detail": "Package file was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if file_path.stat().st_size > 512 * 1024:
+            return Response(
+                {"detail": "This file is too large to preview."},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        content_type = mimetypes.guess_type(file_path.name)[0] or ""
+        text_types = {
+            "application/json",
+            "application/javascript",
+            "application/xml",
+            "application/yaml",
+            "text/css",
+            "text/csv",
+            "text/html",
+            "text/javascript",
+            "text/markdown",
+            "text/plain",
+            "text/xml",
+        }
+        if content_type not in text_types and file_path.suffix.lower() not in {
+            ".conf",
+            ".env",
+            ".ini",
+            ".js",
+            ".json",
+            ".md",
+            ".py",
+            ".sh",
+            ".sql",
+            ".toml",
+            ".ts",
+            ".tsx",
+            ".txt",
+            ".vue",
+            ".yaml",
+            ".yml",
+        }:
+            return Response(
+                {"detail": "This file type is not supported for preview."},
+                status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            )
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return Response(
+                {"detail": "This file cannot be decoded for preview."},
+                status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            )
+        return Response(
+            {
+                "path": relative_path,
+                "content": content,
+                "content_type": content_type or "text/plain",
             }
         )
 
@@ -147,6 +231,20 @@ class SkillViewSet(BaseAdminViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(self.get_serializer(skill).data)
+
+    @action(detail=False, methods=["post"], url_path="check-updates")
+    def check_updates(self, request):
+        """Refresh GitHub tag metadata for all imported Skills."""
+
+        skills = self.get_queryset().filter(source_type="github")
+        for skill in skills:
+            try:
+                check_skill_github_update(skill)
+            except SkillPackageError:
+                continue
+        return Response(
+            self.get_serializer(self.get_queryset(), many=True).data
+        )
 
     def _bound_assistants(self, skill):
         """Return compact assistant data for delete confirmation."""
@@ -247,7 +345,7 @@ class SkillViewSet(BaseAdminViewSet):
                 {"detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(self.get_serializer(skill).data)
+        return Response(self.get_serializer(skill, many=True).data)
 
     @action(detail=True, methods=["get"], url_path="download")
     def download(self, request, *args, **kwargs):
@@ -258,7 +356,7 @@ class SkillViewSet(BaseAdminViewSet):
         return FileResponse(
             archive,
             as_attachment=True,
-            filename=f"{skill.slug}.zip",
+            filename=f"{skill.uuid}.zip",
         )
 
     @action(detail=False, methods=["post"])

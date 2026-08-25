@@ -28,8 +28,8 @@ test('standalone routes do not belong to an accordion menu', () => {
   assert.equal(getAdminSidebarMenu('/'), null)
 })
 
-test('selecting a menu opens it and selecting it again closes it', () => {
-  assert.equal(toggleAdminSidebarMenu(null, 'lens'), 'lens')
-  assert.equal(toggleAdminSidebarMenu('lens', 'data'), 'data')
-  assert.equal(toggleAdminSidebarMenu('data', 'data'), null)
+test('parent menu toggles preserve other expanded menus', () => {
+  assert.deepEqual(toggleAdminSidebarMenu([], 'lens'), ['lens'])
+  assert.deepEqual(toggleAdminSidebarMenu(['lens'], 'data'), ['lens', 'data'])
+  assert.deepEqual(toggleAdminSidebarMenu(['lens', 'data'], 'data'), ['lens'])
 })

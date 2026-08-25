@@ -354,7 +354,7 @@ def test_materialize_skill_repairs_scripts_from_existing_cache(tmp_path):
     skills_root = tmp_path / "runtime" / "skills"
     skill = {
         "skill_uuid": "skill-uuid",
-        "skill_slug": "cached-skill",
+        "skill_package_name": "cached-skill",
         "content_hash": "sha256:cached",
     }
     cache_dir = cache_root / "skills/skill-uuid/sha256-cached"

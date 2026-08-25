@@ -287,7 +287,7 @@ class LensApiTests(TestCase):
         )
         self.skill = Skill.objects.create(
             name="Code Search",
-            slug="code-search",
+            package_name="code-search",
             definition={"summary": "Search code"},
         )
         self.mcp = MCPServer.objects.create(
@@ -967,7 +967,7 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 405)
         self.assertTrue(Assistant.objects.filter(uuid=self.assistant.uuid).exists())
 
-    def test_assistant_create_saves_workspace_guide_skill(self):
+    def test_assistant_create_saves_workspace_guide_context(self):
         payload = {
             "name": "Workspace Aware",
             "slug": "workspace-aware",
@@ -988,22 +988,22 @@ class LensApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         assistant = Assistant.objects.get(slug="workspace-aware")
-        binding = AssistantSkill.objects.get(
-            assistant=assistant,
-            skill__slug="workspace-aware-workspace-guide",
-        )
-        self.assertTrue(binding.enabled)
         self.assertEqual(
-            binding.load_config,
-            {"mode": "context", "inject": True},
+            assistant.workspace_guide,
+            "- repo is the primary application repository.",
+        )
+        self.assertFalse(
+            assistant.skill_bindings.filter(
+                skill__kind="workspace_guide",
+            ).exists()
         )
         self.assertIn(
             "repo is the primary application repository",
-            binding.skill.definition["content"],
+            response.data["workspace_guide"]["content"],
         )
         self.assertTrue(response.data["workspace_guide"]["enabled"])
 
-    def test_assistant_update_disables_workspace_guide_binding(self):
+    def test_assistant_update_clears_workspace_guide_context(self):
         create_response = self.client.post(
             "/api/lens/assistants/",
             {
@@ -1033,11 +1033,44 @@ class LensApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        binding = AssistantSkill.objects.get(
-            assistant__uuid=create_response.data["uuid"],
-            skill__slug="workspace-aware-workspace-guide",
+        assistant = Assistant.objects.get(uuid=create_response.data["uuid"])
+        self.assertEqual(assistant.workspace_guide, "")
+
+    def test_assistant_saves_workspace_guide_as_assistant_context(self):
+        response = self.client.post(
+            "/api/lens/assistants/",
+            {
+                "name": "General Chat Guide",
+                "slug": "general-chat-guide",
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "selected_task": "general_chat",
+                "skill_bindings": [
+                    {"skill_uuid": str(self.skill.uuid)},
+                ],
+                "workspace_guide": {
+                    "enabled": True,
+                    "content": "Use the engineering workspace guide.",
+                },
+            },
+            format="json",
         )
-        self.assertFalse(binding.enabled)
+
+        self.assertEqual(response.status_code, 201)
+        assistant = Assistant.objects.get(slug="general-chat-guide")
+        self.assertEqual(
+            assistant.workspace_guide,
+            "Use the engineering workspace guide.",
+        )
+        self.assertFalse(
+            assistant.skill_bindings.filter(
+                skill__kind="workspace_guide",
+                enabled=True,
+            ).exists()
+        )
+        self.assertEqual(
+            response.data["workspace_guide"]["content"],
+            "Use the engineering workspace guide.",
+        )
 
     def test_global_setting_accepts_skill_generator_model_ref(self):
         response = self.client.post(
@@ -1123,7 +1156,6 @@ class LensApiTests(TestCase):
             "/api/lens/admin/skills/",
             {
                 "name": "Jira Connector",
-                "slug": "jira-connector",
                 "definition": {"content": "Use Jira.", "environment": []},
             },
             format="json",
@@ -1140,7 +1172,7 @@ class LensApiTests(TestCase):
     ):
         legacy_skill = Skill.objects.create(
             name="Legacy Skill",
-            slug="legacy-skill",
+            package_name="legacy-skill",
             definition={"content": "Old instructions."},
         )
 
@@ -1292,7 +1324,7 @@ class LensApiTests(TestCase):
                 )
 
                 self.assertEqual(response.status_code, 200)
-                skill = Skill.objects.get(slug="winrar-skill")
+                skill = Skill.objects.get(package_name="winrar-skill")
                 self.assertTrue(
                     Path(skill.package_path)
                     .joinpath("scripts", "run.sh")
@@ -1390,7 +1422,7 @@ class LensApiTests(TestCase):
             response.data["detail"],
             "Environment variables must be valid JSON.",
         )
-        self.assertFalse(Skill.objects.filter(slug="jira-connector").exists())
+        self.assertFalse(Skill.objects.filter(package_name="jira-connector").exists())
 
     def test_uploaded_skill_reads_api_access_policy(self):
         environment = [
@@ -1448,7 +1480,7 @@ class LensApiTests(TestCase):
                 )
 
                 self.assertEqual(response.status_code, 200)
-                skill = Skill.objects.get(slug="script-permissions")
+                skill = Skill.objects.get(package_name="script-permissions")
                 package_root = Path(skill.package_path)
                 self.assertEqual(
                     (package_root / "scripts/nested/run").stat().st_mode & 0o777,
@@ -1499,7 +1531,7 @@ class LensApiTests(TestCase):
                     saved_transform["sha256"],
                     hashlib.sha256(b"import json, sys\n").hexdigest(),
                 )
-                skill = Skill.objects.get(slug="order-transform")
+                skill = Skill.objects.get(package_name="order-transform")
                 with zipfile.ZipFile(package_zip_bytes(skill)) as archive:
                     config = json.loads(
                         archive.read("order-transform/sourcelens.json").decode("utf-8")
@@ -1637,7 +1669,7 @@ class LensApiTests(TestCase):
     def test_uploaded_skill_update_preserves_assistant_binding(self):
         skill = Skill.objects.create(
             name="package-skill",
-            slug="package-skill",
+            package_name="package-skill",
             definition={"content": "old"},
             source_type="upload",
         )
@@ -1670,7 +1702,7 @@ class LensApiTests(TestCase):
     def test_uploaded_skill_update_accepts_environment_schema_override(self):
         skill = Skill.objects.create(
             name="package-skill",
-            slug="package-skill",
+            package_name="package-skill",
             definition={"content": "old", "environment": []},
             source_type="upload",
         )

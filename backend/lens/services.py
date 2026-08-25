@@ -1408,8 +1408,9 @@ def build_loaded_skills(assistant):
         loaded.append(
             {
                 "skill_uuid": str(skill.uuid),
-                "skill_slug": skill.slug,
+                "skill_package_name": skill.package_name,
                 "skill_name": skill.name,
+                "skill_kind": skill.kind,
                 "version": skill.version,
                 "content_hash": content_hash,
                 "definition": skill.definition,
@@ -1757,6 +1758,7 @@ def _build_run_runtime_snapshot(assistant, lensnode, answer_language):
         "model_config_hashes": model_config_hashes,
         "settings": settings_payload,
         "settings_hash": _canonical_hash(settings_payload),
+        "workspace_guide": assistant.workspace_guide,
     }
 
 
@@ -2295,6 +2297,9 @@ def dispatch_run_to_lensnode(
                 "history": build_run_history(run),
                 "history_artifacts": history_artifacts,
                 "target_dirs": execution.target_dirs,
+                "workspace_guide": runtime_snapshot.get(
+                    "workspace_guide", ""
+                ),
                 "loaded_skills": resolve_loaded_skill_environment(
                     execution.loaded_skills
                 ),

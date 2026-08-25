@@ -155,6 +155,7 @@ class Assistant(TimestampedUUIDModel):
 
     selected_task = models.CharField(max_length=160)
     selected_dirs = models.JSONField(default=list, blank=True)
+    workspace_guide = models.TextField(blank=True, default="")
     preprocess_model_ref = models.UUIDField(null=True, blank=True)
     postprocess_model_ref = models.UUIDField(null=True, blank=True)
     multimodal_model_ref = models.UUIDField(null=True, blank=True)
@@ -280,7 +281,8 @@ class Skill(TimestampedUUIDModel):
     """Global skill resource."""
 
     name = models.CharField(max_length=160)
-    slug = models.SlugField(max_length=180, unique=True)
+    package_name = models.CharField(max_length=180, blank=True, default="")
+    kind = models.CharField(max_length=32, default="standard")
     definition = models.JSONField(default=dict, blank=True)
     version = models.CharField(max_length=64, blank=True, default="1")
     enabled = models.BooleanField(default=True)
@@ -290,6 +292,14 @@ class Skill(TimestampedUUIDModel):
     package_manifest = models.JSONField(default=dict, blank=True)
     source_type = models.CharField(max_length=32, blank=True, default="manual")
     source_url = models.CharField(max_length=1000, blank=True, default="")
+    source_ref = models.CharField(max_length=255, blank=True, default="")
+    source_path = models.CharField(max_length=500, blank=True, default="")
+    latest_source_ref = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    source_checked_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["name"]

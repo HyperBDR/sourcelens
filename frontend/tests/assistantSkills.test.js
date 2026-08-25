@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { filterSelectableSkills } from '../src/pages/lens/assistantSkills.js'
+import {
+  filterSelectableSkills,
+  sortSkillsBySelection
+} from '../src/pages/lens/assistantSkills.js'
 
 const skills = [
   {
     uuid: 'jira',
     name: 'Jira Issues',
-    slug: 'jira-issues',
+    package_name: 'jira-issues',
     definition: {
       description: 'Search project tickets',
       environment: [{ name: 'JIRA_TOKEN', required: true }]
@@ -16,13 +19,14 @@ const skills = [
   {
     uuid: 'github',
     name: 'GitHub Pull Requests',
-    slug: 'github-prs',
+    package_name: 'github-prs',
     package_manifest: { description: 'Review repository changes' }
   },
   {
     uuid: 'guide',
     name: 'Workspace Guide',
-    slug: 'project-workspace-guide'
+    package_name: 'project-workspace-guide',
+    kind: 'workspace_guide'
   }
 ]
 
@@ -35,7 +39,7 @@ test('returns every selectable Skill when the keyword is empty', () => {
   )
 })
 
-test('searches Skills by name, slug, and description without case sensitivity', () => {
+test('searches Skills by name, package name, and description without case sensitivity', () => {
   assert.deepEqual(
     filterSelectableSkills(skills, 'JIRA').map((skill) => skill.uuid),
     ['jira']
@@ -58,4 +62,13 @@ test('preserves environment declarations on filtered Skills', () => {
   assert.deepEqual(result.definition.environment, [
     { name: 'JIRA_TOKEN', required: true }
   ])
+})
+
+test('sorts selected Skills before unselected Skills', () => {
+  const results = sortSkillsBySelection(skills, ['github'])
+
+  assert.deepEqual(
+    results.map((skill) => skill.uuid),
+    ['github', 'jira', 'guide']
+  )
 })

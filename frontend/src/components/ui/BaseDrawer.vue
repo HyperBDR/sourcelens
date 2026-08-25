@@ -122,7 +122,8 @@ const widthClass = computed(() => {
     md: 'max-w-md',
     lg: 'max-w-lg',
     xl: 'max-w-xl',
-    '2xl': 'max-w-2xl'
+    '2xl': 'max-w-2xl',
+    '3xl': 'max-w-3xl'
   }
   return map[props.width] ?? 'max-w-2xl'
 })
