@@ -365,7 +365,7 @@
         },
         "blockedTitle": "Capability unavailable",
         "executionFailedTitle": "Capability execution failed",
-        "verificationFailedTitle": "Result verification incomplete",
+        "verificationFailedTitle": "Answer generated; result needs confirmation",
         "artifactTitle": "Artifact ready",
         "clarificationTitle": "More information is needed",
         "clarificationHint": "Answer in plain text to continue the analysis",
@@ -375,7 +375,7 @@
         "clarificationAnswered": "Submitted; continuing the analysis",
         "clarificationRequired": "Enter more information first.",
         "clarificationFailed": "Failed to submit the clarification. Try again.",
-        "outcomePartial": "Completed with limitations. Review the missing capability or unfinished items above.",
+        "outcomePartial": "Partial results were returned, but execution did not finish completely. Review the run details for missing items.",
         "outcomeBlocked": "This request did not complete. Review the runtime details and retry.",
         "activity": {
           "analyzingResults": "Analyzing collected results",
@@ -427,7 +427,7 @@
           "transient": "Retry later or use another available capability.",
           "request": "Correct or provide the missing input, then retry.",
           "tool": "Use another available capability or contact an administrator.",
-          "verification": "No verified result was returned. Review the runtime details and retry."
+          "verification": "An answer was generated, but no checkable business-tool result was recorded. Review the run details to confirm completeness."
         },
         "phase": {
           "analyzing": "Analyzing the question",

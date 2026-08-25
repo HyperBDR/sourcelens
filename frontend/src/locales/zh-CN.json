@@ -365,7 +365,7 @@
         },
         "blockedTitle": "所需能力当前不可用",
         "executionFailedTitle": "能力执行失败",
-        "verificationFailedTitle": "结果验证未完成",
+        "verificationFailedTitle": "回答已生成，结果需要确认",
         "artifactTitle": "交付文件已生成",
         "clarificationTitle": "需要补充信息",
         "clarificationHint": "请用文字回答后继续分析",
@@ -375,7 +375,7 @@
         "clarificationAnswered": "已提交，正在继续分析",
         "clarificationRequired": "请先输入补充信息。",
         "clarificationFailed": "补充信息提交失败，请重试。",
-        "outcomePartial": "已返回部分结果，请查看上方缺失能力或未完成事项。",
+        "outcomePartial": "已返回部分结果，但执行未完整结束，请查看运行详情了解缺失项。",
         "outcomeBlocked": "当前请求未完成，请查看运行详情后重试。",
         "activity": {
           "analyzingResults": "正在分析已取得的结果",
@@ -427,7 +427,7 @@
           "transient": "请稍后重试，或改用其他可用能力。",
           "request": "请修正或补充缺失输入，然后重试。",
           "tool": "请改用其他可用能力，或联系管理员处理。",
-          "verification": "本次执行未返回可验证结果，请查看运行详情后重试。"
+          "verification": "已生成回答，但未记录到可核对的业务工具结果，请查看运行详情确认是否完整。"
         },
         "phase": {
           "analyzing": "正在分析问题",

@@ -554,7 +554,10 @@
                 </details>
 
                 <div
-                  v-if="message._runtimeState?.capabilityBlock"
+                  v-if="
+                    runtimeOutcomeNotice(message._runtimeState).kind ===
+                    'capability'
+                  "
                   class="runtime-block-card"
                   role="status"
                 >
@@ -569,7 +572,10 @@
                 </div>
 
                 <div
-                  v-if="message._runtimeState?.executionFailure"
+                  v-if="
+                    runtimeOutcomeNotice(message._runtimeState).kind ===
+                    'execution'
+                  "
                   class="runtime-block-card"
                   role="status"
                 >
@@ -582,7 +588,10 @@
                 </div>
 
                 <div
-                  v-if="message._runtimeState?.verificationFailure"
+                  v-if="
+                    runtimeOutcomeNotice(message._runtimeState).kind ===
+                    'verification'
+                  "
                   class="runtime-outcome-card"
                   role="status"
                 >
@@ -596,18 +605,16 @@
 
                 <div
                   v-if="
-                    message._runtimeState?.outcome === 'partial' ||
-                    (message._runtimeState?.outcome === 'blocked' &&
-                      !message._runtimeState?.clarificationRequest &&
-                      !message._runtimeState?.capabilityBlock &&
-                      !message._runtimeState?.executionFailure &&
-                      !message._runtimeState?.verificationFailure)
+                    ['partial', 'blocked'].includes(
+                      runtimeOutcomeNotice(message._runtimeState).kind
+                    )
                   "
                   class="runtime-outcome-card"
                   role="status"
                 >
                   {{
-                    message._runtimeState.outcome === 'blocked'
+                    runtimeOutcomeNotice(message._runtimeState).kind ===
+                    'blocked'
                       ? t('lens.chat.runtime.outcomeBlocked')
                       : t('lens.chat.runtime.outcomePartial')
                   }}
@@ -1271,7 +1278,9 @@
                 </div>
 
                 <div
-                  v-if="runtimeState.capabilityBlock"
+                  v-if="
+                    runtimeOutcomeNotice(runtimeState).kind === 'capability'
+                  "
                   class="runtime-block-card"
                   role="status"
                 >
@@ -1284,7 +1293,7 @@
                 </div>
 
                 <div
-                  v-if="runtimeState.executionFailure"
+                  v-if="runtimeOutcomeNotice(runtimeState).kind === 'execution'"
                   class="runtime-block-card"
                   role="status"
                 >
@@ -1297,7 +1306,9 @@
                 </div>
 
                 <div
-                  v-if="runtimeState.verificationFailure"
+                  v-if="
+                    runtimeOutcomeNotice(runtimeState).kind === 'verification'
+                  "
                   class="runtime-outcome-card"
                   role="status"
                 >
@@ -1327,18 +1338,15 @@
 
                 <div
                   v-if="
-                    runtimeState.outcome === 'partial' ||
-                    (runtimeState.outcome === 'blocked' &&
-                      !runtimeState.clarificationRequest &&
-                      !runtimeState.capabilityBlock &&
-                      !runtimeState.executionFailure &&
-                      !runtimeState.verificationFailure)
+                    ['partial', 'blocked'].includes(
+                      runtimeOutcomeNotice(runtimeState).kind
+                    )
                   "
                   class="runtime-outcome-card"
                   role="status"
                 >
                   {{
-                    runtimeState.outcome === 'blocked'
+                    runtimeOutcomeNotice(runtimeState).kind === 'blocked'
                       ? t('lens.chat.runtime.outcomeBlocked')
                       : t('lens.chat.runtime.outcomePartial')
                   }}
@@ -1709,6 +1717,7 @@ import {
   summarizePlanProgress,
   summarizeStageProgress,
   terminalSyncEvent,
+  runtimeOutcomeNotice,
   workflowProgressSource
 } from '@/pages/lens/runtimeEvents'
 import {
