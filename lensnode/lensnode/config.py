@@ -43,7 +43,6 @@ class LensNodeConfig:
     reasoning_effort: str | None = None
     planning_reasoning_effort: str | None = "medium"
     planner_repair_enabled: bool = False
-    heavy_work_concurrency: int = 1
     execution_backend: str = "trusted_container"
 
 
@@ -153,10 +152,6 @@ def load_config():
             os.getenv("LENSNODE_DRAIN_TIMEOUT_S", "240")
         ),
         max_concurrent_runs=int(os.getenv("LENSNODE_MAX_CONCURRENT_RUNS", "1")),
-        heavy_work_concurrency=max(
-            1,
-            int(os.getenv("LENSNODE_HEAVY_WORK_CONCURRENCY", "1")),
-        ),
         summary_trigger_tokens=int(
             os.getenv("LENSNODE_SUMMARY_TRIGGER_TOKENS", "48000")
         ),

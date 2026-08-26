@@ -8,7 +8,7 @@ from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.utils import timezone
 
 from .lensnode_auth import hash_lensnode_token
-from .models import LensNode, Run
+from .models import DataSource, LensNode, Run
 from .run_trace import RunTraceValidationError, append_run_trace_events
 from .services import (
     acknowledge_run_admitted,
@@ -21,10 +21,7 @@ from .services import (
     resume_awaiting_runs_for_lensnode,
     schedule_lensnode_disconnect_grace_check,
 )
-from .tasks import (
-    reconcile_orphaned_datasource_conversions,
-    refresh_lensnode_heavy_work_slot,
-)
+from .tasks import reconcile_orphaned_datasource_conversions
 
 LOGGER = logging.getLogger(__name__)
 DETAIL_ITEMS_LIMIT = 200
@@ -518,12 +515,21 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         if task and task.status in TaskStatus.get_completed_statuses():
             return
         metadata = dict(task.metadata or {}) if task else {}
-        if task:
-            refresh_lensnode_heavy_work_slot(
-                metadata.get("lensnode_uuid"),
-                task_id,
-                metadata.get("heavy_work_slot"),
-            )
+        progress_task_status = TaskStatus.STARTED
+        queue_metadata = {}
+        if task and content.get("step") == "queue":
+            event_status = content.get("status")
+            if event_status == "queued":
+                progress_task_status = TaskStatus.PENDING
+                queue_metadata = {
+                    "queue_state": "QUEUED",
+                    "execution_class": "exclusive",
+                }
+            elif event_status == "running":
+                queue_metadata = {
+                    "queue_state": "STARTED",
+                    "execution_class": "exclusive",
+                }
         steps = list(metadata.get("steps") or [])
         step = {
             "name": content.get("step") or "sync",
@@ -563,6 +569,7 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
                 step[key] = value
         steps.append(step)
         metadata_update = {
+            **queue_metadata,
             "steps": steps,
             "progress_step": step["name"],
             "progress_message": step["message"],
@@ -598,11 +605,23 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
         for key in ["progress_total", "progress_current", "progress_percent"]:
             if key in content:
                 metadata_update[key] = content.get(key)
-        TaskTracker.update_task_status(
+        updated_task = TaskTracker.update_task_status(
             task_id,
-            TaskStatus.STARTED,
+            progress_task_status,
             metadata=metadata_update,
         )
+        if (
+            queue_metadata
+            and updated_task is not None
+            and updated_task.metadata.get("type")
+            == "datasource_conversion"
+        ):
+            datasource_uuid = updated_task.metadata.get("datasource_uuid")
+            if datasource_uuid:
+                DataSource.objects.filter(uuid=datasource_uuid).update(
+                    last_conversion_status=progress_task_status,
+                    updated_at=timezone.now(),
+                )
 
     @staticmethod
     def _merge_realtime_summary(current, incoming):

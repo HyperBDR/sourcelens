@@ -2594,7 +2594,7 @@ class LensServiceTests(TransactionTestCase):
             self.assertEqual(record.last_metrics, {})
             task = TaskExecution.objects.get(module="lens_datasource")
             self.assertEqual(task.task_name, "datasource_sync:Repo Cache")
-            self.assertEqual(task.status, "STARTED")
+            self.assertEqual(task.status, "PENDING")
             self.assertEqual(task.metadata["type"], "datasource")
             self.assertEqual(
                 task.metadata["completion_source"],
@@ -2779,46 +2779,91 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(result, 0)
         task = TaskExecution.objects.get(task_id="managed-conversion")
         datasource.refresh_from_db()
-        self.assertEqual(task.status, "STARTED")
+        self.assertEqual(task.status, "PENDING")
         self.assertEqual(
             task.metadata["datasource_conversion_request_id"],
             "conversion-request",
         )
-        self.assertEqual(datasource.last_conversion_status, "STARTED")
+        self.assertEqual(datasource.last_conversion_status, "PENDING")
 
-    def test_managed_workspace_conversion_waits_for_lensnode_heavy_slot(self):
+    def test_lensnode_queue_events_drive_managed_conversion_status(self):
         datasource = DataSource.objects.create(
             name="Managed Snapshot",
             source_type=DataSource.SourceType.MANAGED_WORKSPACE,
             lensnode=self.lensnode,
             target_path="/workspace/restores/finance",
         )
-        register_datasource_conversion_task(
+        task = register_datasource_conversion_task(
             datasource,
-            "queued-conversion",
+            "managed-queue-events",
             {"document": True},
         )
 
-        with (
-            patch(
-                "lens.tasks.acquire_lensnode_heavy_work_slot",
-                return_value=None,
-            ),
-            patch("lens.tasks._schedule_queued_conversion") as schedule,
-        ):
-            datasource_conversion_task(
-                str(datasource.uuid),
-                {"document": True},
-                False,
-                "queued-conversion",
-            )
-
-        task = TaskExecution.objects.get(task_id="queued-conversion")
+        LensNodeConsumer._record_datasource_sync_event(
+            task.task_id,
+            {
+                "step": "queue",
+                "status": "queued",
+                "message": "Waiting for exclusive LensNode capacity.",
+            },
+        )
+        task.refresh_from_db()
         datasource.refresh_from_db()
         self.assertEqual(task.status, "PENDING")
         self.assertEqual(task.metadata["queue_state"], "QUEUED")
         self.assertEqual(datasource.last_conversion_status, "PENDING")
-        schedule.assert_called_once()
+
+        LensNodeConsumer._record_datasource_sync_event(
+            task.task_id,
+            {
+                "step": "queue",
+                "status": "running",
+                "message": "Acquired exclusive LensNode capacity.",
+            },
+        )
+        task.refresh_from_db()
+        datasource.refresh_from_db()
+        self.assertEqual(task.status, "STARTED")
+        self.assertEqual(task.metadata["queue_state"], "STARTED")
+        self.assertEqual(datasource.last_conversion_status, "STARTED")
+
+    def test_managed_conversions_dispatch_without_backend_resource_slots(self):
+        datasources = [
+            DataSource.objects.create(
+                name=f"Managed Snapshot {index}",
+                source_type=DataSource.SourceType.MANAGED_WORKSPACE,
+                lensnode=self.lensnode,
+                target_path=f"/workspace/restores/finance-{index}",
+            )
+            for index in range(2)
+        ]
+        for index, datasource in enumerate(datasources):
+            register_datasource_conversion_task(
+                datasource,
+                f"managed-conversion-{index}",
+                {"document": True},
+            )
+
+        with patch(
+            "lens.tasks.dispatch_datasource_conversion_async",
+            side_effect=["conversion-request-0", "conversion-request-1"],
+        ) as dispatch:
+            for index, datasource in enumerate(datasources):
+                datasource_conversion_task(
+                    str(datasource.uuid),
+                    {"document": True},
+                    False,
+                    f"managed-conversion-{index}",
+                )
+
+        self.assertEqual(dispatch.call_count, 2)
+        self.assertEqual(
+            TaskExecution.objects.filter(
+                task_id__startswith="managed-conversion-",
+                status="PENDING",
+            ).count(),
+            2,
+        )
 
     def test_reconnect_reconciles_orphaned_conversion_and_releases_owners(
         self,
@@ -2840,7 +2885,6 @@ class LensServiceTests(TransactionTestCase):
             {
                 "lensnode_connection_id": "old-connection",
                 "lock_token": task.task_id,
-                "heavy_work_slot": "0",
             }
         )
         task.save(update_fields=["status", "metadata"])
@@ -2848,11 +2892,6 @@ class LensServiceTests(TransactionTestCase):
             f"lens:datasource-sync:{datasource.uuid}",
             task.task_id,
         )
-        cache.set(
-            f"lens:heavy-work:{self.lensnode.uuid}:0",
-            task.task_id,
-        )
-
         count = reconcile_orphaned_datasource_conversions(
             self.lensnode.uuid,
             "new-connection",
@@ -2866,9 +2905,6 @@ class LensServiceTests(TransactionTestCase):
         self.assertTrue(task.metadata["recovery_retryable"])
         self.assertEqual(datasource.last_conversion_status, "FAILURE")
         self.assertIsNone(cache.get(f"lens:datasource-sync:{datasource.uuid}"))
-        self.assertIsNone(
-            cache.get(f"lens:heavy-work:{self.lensnode.uuid}:0")
-        )
 
     def test_complete_managed_workspace_conversion_persists_summary(self):
         datasource = DataSource.objects.create(
@@ -3143,7 +3179,7 @@ class LensServiceTests(TransactionTestCase):
             1,
         )
         task = TaskExecution.objects.get(task_id=task_id)
-        self.assertEqual(task.status, "STARTED")
+        self.assertEqual(task.status, "PENDING")
         self.assertEqual(task.created_by, self.user)
         self.assertEqual(task.metadata["celery_task_id"], "celery-sync")
         dispatch.assert_called_once_with(

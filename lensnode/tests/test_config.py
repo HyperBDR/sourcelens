@@ -4,6 +4,16 @@ from lensnode.agent_runtime import _resolve_token_budget
 from lensnode.config import load_config
 
 
+def test_heavy_work_concurrency_setting_is_not_part_of_lensnode_config(
+    monkeypatch,
+):
+    monkeypatch.setenv("LENSNODE_HEAVY_WORK_CONCURRENCY", "7")
+
+    config = load_config()
+
+    assert not hasattr(config, "heavy_work_concurrency")
+
+
 @pytest.mark.parametrize(
     "value,expected",
     [

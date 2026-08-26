@@ -1,0 +1,9 @@
+type: improvement
+audience: admin
+en: >-
+  LensNode now runs standard assistant requests concurrently up to the node
+  limit while scheduling datasource sync and conversion as exclusive work,
+  replacing the previous shared heavy-work concurrency setting.
+zh-CN: >-
+  LensNode 现在可按节点上限并发执行普通助手请求，并将数据源同步和转换作为独占任务
+  排队执行，取代原有的共享 Heavy work 并发配置。
