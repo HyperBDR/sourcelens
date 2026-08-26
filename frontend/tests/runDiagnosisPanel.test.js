@@ -22,6 +22,17 @@ test('diagnosis panel exposes generation and evidence-bound follow-up', async ()
   assert.match(contents, /aria-live="polite"/)
 })
 
+test('diagnosis panel uses a compact single-surface layout', async () => {
+  const contents = await componentSource()
+
+  assert.match(contents, /data-testid="diagnosis-empty-content"/)
+  assert.match(contents, /:disabled="!canGenerate"/)
+  assert.match(contents, /class="diagnosis-card"/)
+  assert.doesNotMatch(contents, /min-h-\[32rem\]/)
+  assert.doesNotMatch(contents, /sticky bottom-0/)
+  assert.doesNotMatch(contents, /shadow-sm/)
+})
+
 test('lens API includes diagnosis list, generate, and follow-up calls', async () => {
   const contents = await apiSource()
 

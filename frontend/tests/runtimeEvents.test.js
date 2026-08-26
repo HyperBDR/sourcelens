@@ -22,6 +22,7 @@ import {
   summarizeStageProgress,
   summarizePlanProgress,
   terminalSyncEvent,
+  runtimeOutcomeNotice,
   workflowProgressSource
 } from '../src/pages/lens/runtimeEvents.js'
 import { createStreamTextBuffer } from '../src/pages/lens/streamBuffer.js'
@@ -263,6 +264,19 @@ test('keeps verification failures separate from tool execution failures', () => 
   assert.equal(state.executionFailure, null)
   assert.equal(state.verificationFailure.reason, 'evidence_unavailable')
   assert.equal(state.verificationFailure.error_type, 'verification')
+})
+
+test('shows one terminal notice when a verification failure has a partial answer', () => {
+  const state = applyRuntimeEvent(createRuntimeState(), {
+    type: 'done',
+    outcome: 'partial',
+    termination_detail: { reason: 'evidence_unavailable' }
+  })
+
+  assert.deepEqual(runtimeOutcomeNotice(state), {
+    kind: 'verification',
+    errorType: 'verification'
+  })
 })
 
 test('restores the correct block card from terminal run details', () => {

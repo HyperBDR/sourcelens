@@ -59,6 +59,52 @@ test('run overview shows the models actually used by the run', async () => {
   assert.match(contents, /detail\.models_used/)
 })
 
+test('run question collapses after ten lines and can be expanded', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-question-section"/)
+  assert.match(contents, /data-testid="run-question-content"/)
+  assert.match(contents, /data-testid="run-question-toggle"/)
+  assert.match(contents, /questionCanExpand/)
+  assert.match(contents, /questionExpanded/)
+  assert.match(contents, /-webkit-line-clamp: 10/)
+  assert.match(contents, /measureQuestionOverflow/)
+  assert.match(contents, /common\.collapse/)
+  assert.match(contents, /common\.expand/)
+})
+
+test('run overview owns resource consumption and uses a dashboard layout', async () => {
+  const contents = await source()
+  const overviewIndex = contents.indexOf("activeDetailTab === 'overview'")
+  const usageIndex = contents.indexOf('data-testid="run-overview-usage"')
+  const executionIndex = contents.indexOf('data-testid="run-execution-content"')
+
+  assert.ok(overviewIndex >= 0)
+  assert.ok(usageIndex > overviewIndex)
+  assert.ok(executionIndex > overviewIndex)
+  assert.match(contents, /class="overview-dashboard"/)
+  assert.match(contents, /class="overview-time-row"/)
+  assert.doesNotMatch(contents, /lensRuns\.submittedAt/)
+  assert.match(contents, /lensRuns\.queueTime/)
+  assert.match(contents, /lensRuns\.execWindow/)
+  assert.match(contents, /data-testid="run-token-summary"/)
+  assert.doesNotMatch(contents, /data-testid="run-execution-usage-view"/)
+  assert.doesNotMatch(contents, /activeExecutionView === 'usage'/)
+})
+
+test('run resources use one ledger with configured and call counts', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-resource-ledger"/)
+  assert.match(contents, /resource_usage[\s\S]*resources/)
+  assert.match(contents, /resource_usage[\s\S]*total_calls/)
+  assert.match(contents, /resource_usage[\s\S]*called_resource_count/)
+  assert.match(contents, /resource-ledger-row/)
+  assert.doesNotMatch(contents, /class="resource-pill"/)
+  assert.doesNotMatch(contents, /data-testid="run-configured-resources"/)
+  assert.doesNotMatch(contents, /data-testid="run-resource-calls"/)
+})
+
 test('run overview separates executor status from business outcome', async () => {
   const contents = await source()
 
@@ -70,26 +116,24 @@ test('run overview separates executor status from business outcome', async () =>
   assert.match(contents, /lensRuns\.businessOutcome/)
 })
 
-test('run detail exposes the stable operations tabs in order', async () => {
+test('run detail exposes three task-oriented tabs in order', async () => {
   const contents = await source()
   const overviewIndex = contents.indexOf("activeDetailTab = 'overview'")
-  const traceIndex = contents.indexOf("activeDetailTab = 'trace'")
+  const executionIndex = contents.indexOf("activeDetailTab = 'execution'")
   const resultsIndex = contents.indexOf("activeDetailTab = 'results'")
-  const usageIndex = contents.indexOf("activeDetailTab = 'usage'")
 
   assert.match(contents, /data-testid="close-run-detail"/)
-  assert.match(contents, /data-testid="run-diagnosis-tab"/)
+  assert.match(contents, /data-testid="run-execution-tab"/)
   assert.match(contents, /data-testid="run-results-tab"/)
-  assert.match(contents, /data-testid="run-files-tab"/)
-  assert.match(contents, /data-testid="run-usage-tab"/)
   assert.ok(overviewIndex >= 0)
-  assert.ok(traceIndex > overviewIndex)
-  assert.ok(resultsIndex > traceIndex)
-  assert.ok(usageIndex > resultsIndex)
+  assert.ok(executionIndex > overviewIndex)
+  assert.ok(resultsIndex > executionIndex)
   assert.doesNotMatch(contents, /activeDetailTab = 'progress'/)
   assert.doesNotMatch(contents, /activeDetailTab = 'evidence'/)
-  assert.match(contents, /activeDetailTab = 'files'/)
-  assert.match(contents, /activeDetailTab = 'diagnosis'/)
+  assert.doesNotMatch(contents, /activeDetailTab = 'files'/)
+  assert.doesNotMatch(contents, /activeDetailTab = 'diagnosis'/)
+  assert.doesNotMatch(contents, /activeDetailTab = 'trace'/)
+  assert.doesNotMatch(contents, /activeDetailTab = 'usage'/)
   assert.match(contents, /RunDiagnosisPanel/)
 })
 
@@ -102,12 +146,44 @@ test('run detail tabs stay single-line and scroll on narrow screens', async () =
   )
 })
 
-test('diagnosis is available as a dedicated tab', async () => {
+test('run detail header keeps actions reachable on narrow screens', async () => {
   const contents = await source()
 
-  assert.match(contents, /data-testid="run-diagnosis-tab"/)
-  assert.match(contents, /:active="activeDetailTab === 'diagnosis'"/)
+  assert.match(
+    contents,
+    /flex flex-wrap items-center gap-3 border-b border-gray-200/
+  )
+  assert.match(
+    contents,
+    /flex w-full shrink-0 items-center justify-end gap-2 md:w-auto/
+  )
+})
+
+test('execution analysis groups diagnosis and trajectory', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-execution-content"/)
+  assert.match(contents, /data-testid="run-execution-trace-view"/)
+  assert.match(contents, /data-testid="run-execution-diagnosis-view"/)
+  assert.match(contents, /data-testid="run-execution-diagnosis"/)
+  assert.match(contents, /activeExecutionView === 'trace'/)
+  assert.match(contents, /activeExecutionView === 'diagnosis'/)
+  assert.match(contents, /v-if="canDiagnoseRun"/)
+  assert.match(contents, /:can-generate="canGenerateDiagnosis"/)
   assert.match(contents, /@navigate="navigateFromEvidence"/)
+})
+
+test('low-frequency detail actions stay in the more menu', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-detail-more-actions"/)
+  assert.match(contents, /detailMoreActions/)
+  assert.match(contents, /handleDetailMoreAction/)
+  assert.doesNotMatch(contents, /data-testid="generate-run-diagnosis"/)
+  assert.doesNotMatch(
+    contents,
+    /<BaseButton size="sm" variant="outline" @click="exportRun">/
+  )
 })
 
 test('operations center shows summary, node and model filters, and metrics', async () => {
@@ -138,11 +214,15 @@ test('detail groups progress, evidence, artifacts, and diagnostics by task', asy
 
   assert.match(contents, /data-testid="run-results-tab"/)
   assert.match(contents, /data-testid="run-results-content"/)
-  assert.match(contents, /data-testid="run-usage-tab"/)
+  assert.match(contents, /data-testid="run-execution-tab"/)
+  assert.match(contents, /data-testid="run-overview-usage"/)
+  assert.match(contents, /data-testid="run-token-summary"/)
+  assert.doesNotMatch(contents, /data-testid="run-execution-usage-view"/)
   assert.match(contents, /data-testid="run-live-progress"/)
-  assert.match(contents, /data-testid="run-diagnosis-tab"/)
+  assert.match(contents, /data-testid="run-execution-diagnosis"/)
+  assert.match(contents, /data-testid="run-resource-ledger"/)
   assert.doesNotMatch(contents, /data-testid="run-evidence-tab"/)
-  assert.match(contents, /data-testid="run-files-tab"/)
+  assert.doesNotMatch(contents, /data-testid="run-files-tab"/)
   assert.match(contents, /detail\.citations/)
   assert.match(contents, /detail\.output_files/)
   assert.match(
@@ -171,6 +251,6 @@ test('run statuses are localized consistently across list and detail', async () 
   assert.match(contents, /statusText\(r\.status\)/)
   assert.match(
     contents,
-    /statusText\(detail\.executor_status \|\| detail\.status\)/
+    /statusText\(\s*detail\.executor_status\s*\|\|\s*detail\.status\s*\)/s
   )
 })

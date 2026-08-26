@@ -1,0 +1,9 @@
+type: improvement
+audience: admin
+en: >-
+  Improved Run Operations details with clearer verification outcomes,
+  consolidated timing and usage information, accurate resource call counts,
+  and a responsive overview that keeps long questions compact.
+zh-CN: >-
+  优化运行运营中心详情，明确验证结果，整合时间与用量信息，准确统计资源调用，
+  并通过响应式概览折叠过长问题以提升浏览效率。

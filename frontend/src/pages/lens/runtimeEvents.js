@@ -205,6 +205,37 @@ export function createRuntimeState() {
   }
 }
 
+export function runtimeOutcomeNotice(state) {
+  if (state?.clarificationRequest) {
+    return { kind: 'clarification', errorType: null }
+  }
+  if (state?.capabilityBlock) {
+    return {
+      kind: 'capability',
+      errorType: state.capabilityBlock.error_type || 'capability'
+    }
+  }
+  if (state?.executionFailure) {
+    return {
+      kind: 'execution',
+      errorType: state.executionFailure.error_type || 'tool'
+    }
+  }
+  if (state?.verificationFailure) {
+    return {
+      kind: 'verification',
+      errorType: state.verificationFailure.error_type || 'verification'
+    }
+  }
+  if (state?.outcome === 'partial') {
+    return { kind: 'partial', errorType: null }
+  }
+  if (state?.outcome === 'blocked') {
+    return { kind: 'blocked', errorType: null }
+  }
+  return { kind: null, errorType: null }
+}
+
 function activityKindForEvent(event) {
   const agentEvent = String(event?.agent_event || '')
   if (!agentEvent.startsWith('tool.')) return null
