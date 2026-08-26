@@ -167,6 +167,27 @@ test('reduces secondary account information in the mobile drawer', async () => {
   assert.match(source, /'dock-trigger-mobile': isMobile/)
 })
 
+test('keeps collapsed account actions inside the sidebar as icon controls', async () => {
+  const source = await userDockSource()
+
+  assert.match(source, /'dock-menu-collapsed': isCollapsed/)
+  assert.match(source, /'dock-link-collapsed': isCollapsed/)
+  assert.match(source, /const isCollapsed = computed\(\(\) => props\.collapsed/)
+  assert.match(source, /<Share2[\s\S]*<Settings[\s\S]*<LogOut/)
+  assert.match(source, /v-if="isAdmin"\s+class="dock-section"/)
+  assert.match(source, /<Shield[\s\S]*platforms\.adminConsole/)
+  assert.match(
+    source,
+    /v-if="!collapsed \|\| isMobile" class="dock-build-info"/
+  )
+  assert.match(source, /.dock-menu-collapsed\s*\{[^}]*left-0 w-full px-0/)
+  assert.equal(
+    (source.match(/v-if="!collapsed \|\| isMobile" class="truncate"/g) || [])
+      .length,
+    4
+  )
+})
+
 test('creates the first session only when the user submits a prompt', async () => {
   const source = await chatSource()
   const submit = source.indexOf('async function submit()')

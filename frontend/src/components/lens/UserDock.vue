@@ -55,40 +55,89 @@
       leave-from-class="transform opacity-100 translate-y-0 scale-100"
       leave-to-class="transform opacity-0 translate-y-1 scale-95"
     >
-      <div v-if="dockMenuOpen" class="dock-menu">
-        <div v-if="isAdmin" class="dock-section">
+      <div
+        v-if="dockMenuOpen"
+        class="dock-menu"
+        :class="{ 'dock-menu-collapsed': isCollapsed }"
+      >
+        <div
+          v-if="isAdmin"
+          class="dock-section"
+          :class="{ 'dock-section-collapsed': isCollapsed }"
+        >
           <router-link
             to="/management/users"
             class="dock-link"
+            :class="{ 'dock-link-collapsed': isCollapsed }"
+            :aria-label="isCollapsed ? t('platforms.adminConsole') : undefined"
+            :title="isCollapsed ? t('platforms.adminConsole') : undefined"
             @click="openAdminConsole"
           >
             <Shield :size="18" :stroke-width="2" aria-hidden="true" />
-            <span class="truncate">{{ t('platforms.adminConsole') }}</span>
+            <span v-if="!collapsed || isMobile" class="truncate">
+              {{ t('platforms.adminConsole') }}
+            </span>
           </router-link>
         </div>
 
-        <div class="dock-section" :class="{ 'border-t border-line': isAdmin }">
-          <button type="button" class="dock-link" @click="openMyShares">
+        <div
+          class="dock-section"
+          :class="{
+            'border-t border-line': isAdmin,
+            'dock-section-collapsed': isCollapsed
+          }"
+        >
+          <button
+            type="button"
+            class="dock-link"
+            :class="{ 'dock-link-collapsed': isCollapsed }"
+            :aria-label="isCollapsed ? t('lens.qa.mineEntry') : undefined"
+            :title="isCollapsed ? t('lens.qa.mineEntry') : undefined"
+            @click="openMyShares"
+          >
             <Share2 :size="18" :stroke-width="2" aria-hidden="true" />
-            <span class="truncate">{{ t('lens.qa.mineEntry') }}</span>
+            <span v-if="!collapsed || isMobile" class="truncate">
+              {{ t('lens.qa.mineEntry') }}
+            </span>
           </button>
-          <button type="button" class="dock-link" @click="openSettings">
+          <button
+            type="button"
+            class="dock-link"
+            :class="{ 'dock-link-collapsed': isCollapsed }"
+            :aria-label="isCollapsed ? t('common.settings') : undefined"
+            :title="isCollapsed ? t('common.settings') : undefined"
+            @click="openSettings"
+          >
             <Settings :size="18" :stroke-width="2" aria-hidden="true" />
-            <span class="truncate">{{ t('common.settings') }}</span>
+            <span v-if="!collapsed || isMobile" class="truncate">
+              {{ t('common.settings') }}
+            </span>
             <span
               v-if="uiStore.hasUnreadReleaseNotes"
               class="ml-auto h-2 w-2 shrink-0 rounded-full bg-primary-500"
+              :class="{ 'dock-unread-indicator': isCollapsed }"
             >
               <span class="sr-only">
                 {{ t('settings.modal.releaseNotesUnread') }}
               </span>
             </span>
           </button>
-          <button type="button" class="dock-link" @click="handleLogout">
+          <button
+            type="button"
+            class="dock-link"
+            :class="{ 'dock-link-collapsed': isCollapsed }"
+            :aria-label="isCollapsed ? t('common.logout') : undefined"
+            :title="isCollapsed ? t('common.logout') : undefined"
+            @click="handleLogout"
+          >
             <LogOut :size="18" :stroke-width="2" aria-hidden="true" />
-            <span class="truncate">{{ t('common.logout') }}</span>
+            <span v-if="!collapsed || isMobile" class="truncate">
+              {{ t('common.logout') }}
+            </span>
           </button>
-          <div class="dock-build-info">{{ buildInfo }}</div>
+          <div v-if="!collapsed || isMobile" class="dock-build-info">
+            {{ buildInfo }}
+          </div>
         </div>
       </div>
     </Transition>
@@ -106,7 +155,7 @@ import { useUserStore } from '@/store/user'
 import { useUiStore } from '@/store/ui'
 import { saveAdminReturnPath } from '@/utils/platformAccess'
 
-defineProps({
+const props = defineProps({
   collapsed: { type: Boolean, default: false },
   isMobile: { type: Boolean, default: false }
 })
@@ -119,6 +168,7 @@ const uiStore = useUiStore()
 
 const dockMenuOpen = ref(false)
 const dockMenuRef = ref(null)
+const isCollapsed = computed(() => props.collapsed && !props.isMobile)
 const buildInfo = [
   import.meta.env.VITE_APP_VERSION || 'dev',
   import.meta.env.VITE_APP_RELEASE_DATE
@@ -230,12 +280,28 @@ async function handleLogout() {
   @apply absolute bottom-full left-0 z-40 mb-2 w-full overflow-visible rounded-2xl border border-line bg-surface shadow-xl;
 }
 
+.dock-menu-collapsed {
+  @apply left-0 w-full px-0;
+}
+
 .dock-section {
   @apply border-b border-line px-3 py-3 last:border-b-0;
 }
 
+.dock-section-collapsed {
+  @apply px-1 py-2;
+}
+
 .dock-link {
   @apply flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-theme-secondary transition-colors;
+}
+
+.dock-link-collapsed {
+  @apply relative justify-center gap-0 px-1;
+}
+
+.dock-link-collapsed .dock-unread-indicator {
+  @apply absolute right-1 top-1 ml-0;
 }
 
 .dock-link:hover {
