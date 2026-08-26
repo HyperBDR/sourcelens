@@ -2617,9 +2617,11 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
         )
     else:
         execution = None
+    queue_state = (detail or {}).get("queue_state")
     if (
         execution is not None
         and execution.status == RunExecution.Status.DISPATCHED
+        and queue_state != "QUEUED"
     ):
         execution.status = RunExecution.Status.RUNNING
         execution.admitted_at = execution.admitted_at or timezone.now()

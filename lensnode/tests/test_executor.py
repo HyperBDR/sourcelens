@@ -360,6 +360,59 @@ def test_run_admission_echoes_dispatch_id_and_duplicate_is_idempotent():
     asyncio.run(exercise())
 
 
+def test_duplicate_delivery_for_queued_run_stays_queued():
+    """A duplicate dispatch does not fail a run waiting for capacity."""
+
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "max_concurrent_runs": 1,
+            },
+        )()
+        client = LensNodeClient(config)
+        executor = BlockingExecutor()
+        client.executor = executor
+        running_message = {
+            "type": "run_start",
+            "run_uuid": "running-run",
+            "dispatch_id": "running-dispatch",
+            "task": "knowledge_qa",
+            "target_dirs": [],
+        }
+        queued_message = {
+            "type": "run_start",
+            "run_uuid": "queued-run",
+            "dispatch_id": "queued-dispatch",
+            "task": "knowledge_qa",
+            "target_dirs": [],
+        }
+
+        await client._handle_message(json.dumps(running_message))
+        await asyncio.wait_for(executor.started.wait(), timeout=1)
+        await client._handle_message(json.dumps(queued_message))
+        await asyncio.sleep(0)
+        await client._handle_message(json.dumps(queued_message))
+
+        assert not any(
+            frame.get("run_uuid") == "queued-run"
+            and frame.get("type") in {"run_admitted", "run_done"}
+            for frame in client._outbox
+        )
+
+        queued_task = client.running_tasks["queued-run"]
+        queued_task.cancel()
+        await asyncio.gather(queued_task, return_exceptions=True)
+        running_task = client.running_tasks["running-run"]
+        running_task.cancel()
+        await asyncio.gather(running_task, return_exceptions=True)
+
+    asyncio.run(exercise())
+
+
 def test_executor_emits_checkpoint_ready_for_current_dispatch():
     class CheckpointAwareAgent(FakeAgent):
         async def answer(self, command, on_checkpoint_ready=None, **kwargs):
@@ -1304,6 +1357,258 @@ class BlockingExecutor:
         except asyncio.CancelledError:
             self.cancelled.set()
             raise
+
+    async def drain_pending_workers(self):
+        return None
+
+
+def test_lensnode_queues_standard_runs_and_executes_up_to_node_limit():
+    """Standard runs share the configured LensNode execution capacity."""
+
+    class ConcurrentExecutor:
+        def __init__(self):
+            self.started = set()
+            self.changed = asyncio.Event()
+            self.releases = {}
+
+        async def execute(self, command, emit):
+            del emit
+            run_uuid = command["run_uuid"]
+            self.started.add(run_uuid)
+            self.changed.set()
+            await self.releases.setdefault(run_uuid, asyncio.Event()).wait()
+
+        async def drain_pending_workers(self):
+            return None
+
+    async def wait_for_started(executor, run_uuids):
+        while not run_uuids.issubset(executor.started):
+            executor.changed.clear()
+            await asyncio.wait_for(executor.changed.wait(), timeout=1)
+
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "max_concurrent_runs": 2,
+            },
+        )()
+        client = LensNodeClient(config)
+        executor = ConcurrentExecutor()
+        client.executor = executor
+        run_uuids = ["run-1", "run-2", "run-3"]
+
+        for run_uuid in run_uuids:
+            await client._handle_message(
+                json.dumps(
+                    {
+                        "type": "run_start",
+                        "run_uuid": run_uuid,
+                        "dispatch_id": f"dispatch-{run_uuid}",
+                        "task": "knowledge_qa",
+                        "target_dirs": [],
+                    }
+                )
+            )
+
+        await wait_for_started(executor, {"run-1", "run-2"})
+        assert "run-3" not in executor.started
+        assert "run-3" in client.running_tasks
+        assert not any(
+            frame.get("dispatch_id") == "dispatch-run-3"
+            for frame in client._outbox
+            if frame.get("type") == "run_admitted"
+        )
+
+        executor.releases["run-1"].set()
+        await wait_for_started(executor, {"run-3"})
+        assert any(
+            frame.get("dispatch_id") == "dispatch-run-3"
+            for frame in client._outbox
+            if frame.get("type") == "run_admitted"
+        )
+
+        for run_uuid in ["run-2", "run-3"]:
+            executor.releases[run_uuid].set()
+        await asyncio.gather(*client.running_tasks.values())
+
+    asyncio.run(exercise())
+
+
+def test_lensnode_exclusive_work_blocks_later_standard_run(monkeypatch):
+    """Exclusive work runs after active work and before later runs."""
+
+    conversion_started = threading.Event()
+    conversion_release = threading.Event()
+
+    def convert_managed_workspace(command, workspace_path, emit):
+        del command, workspace_path, emit
+        conversion_started.set()
+        conversion_release.wait(timeout=1)
+        return {"status": "success"}
+
+    monkeypatch.setattr(
+        "lensnode.main.convert_managed_workspace",
+        convert_managed_workspace,
+    )
+
+    class OrderedExecutor:
+        def __init__(self):
+            self.started = set()
+            self.changed = asyncio.Event()
+            self.releases = {}
+
+        async def execute(self, command, emit):
+            del emit
+            run_uuid = command["run_uuid"]
+            self.started.add(run_uuid)
+            self.changed.set()
+            await self.releases.setdefault(run_uuid, asyncio.Event()).wait()
+
+        async def drain_pending_workers(self):
+            return None
+
+    async def wait_for_run(executor, run_uuid):
+        while run_uuid not in executor.started:
+            executor.changed.clear()
+            await asyncio.wait_for(executor.changed.wait(), timeout=1)
+
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "max_concurrent_runs": 2,
+                "workspace_path": "/workspace",
+                "ai_gateway_url": "http://gateway",
+                "token": "node-token",
+            },
+        )()
+        client = LensNodeClient(config)
+        executor = OrderedExecutor()
+        client.executor = executor
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_start",
+                    "run_uuid": "run-before-exclusive",
+                    "task": "knowledge_qa",
+                    "target_dirs": [],
+                }
+            )
+        )
+        await wait_for_run(executor, "run-before-exclusive")
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "datasource_convert",
+                    "request_id": "conversion-request",
+                    "task_id": "conversion-task",
+                    "source_type": "managed_workspace",
+                    "target_path": "/workspace/documents",
+                    "conversion": {"document": True},
+                }
+            )
+        )
+        await asyncio.sleep(0)
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_start",
+                    "run_uuid": "run-after-exclusive",
+                    "task": "knowledge_qa",
+                    "target_dirs": [],
+                }
+            )
+        )
+        await asyncio.sleep(0)
+
+        assert not conversion_started.is_set()
+        assert "run-after-exclusive" not in executor.started
+
+        executor.releases["run-before-exclusive"].set()
+        await asyncio.wait_for(
+            asyncio.to_thread(conversion_started.wait),
+            timeout=1,
+        )
+        assert "run-after-exclusive" not in executor.started
+
+        conversion_release.set()
+        await wait_for_run(executor, "run-after-exclusive")
+        executor.releases["run-after-exclusive"].set()
+        await asyncio.gather(*client.running_tasks.values())
+
+    asyncio.run(exercise())
+
+
+def test_lensnode_control_message_cancels_a_queued_standard_run():
+    """Control-plane cancellation remains responsive while work is queued."""
+
+    async def exercise():
+        config = type(
+            "Config",
+            (),
+            {
+                "name": "test-node",
+                "request_timeout_s": 240,
+                "max_concurrent_runs": 1,
+            },
+        )()
+        client = LensNodeClient(config)
+        executor = BlockingExecutor()
+        client.executor = executor
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_start",
+                    "run_uuid": "running-run",
+                    "task": "knowledge_qa",
+                    "target_dirs": [],
+                }
+            )
+        )
+        await asyncio.wait_for(executor.started.wait(), timeout=1)
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_start",
+                    "run_uuid": "queued-run",
+                    "task": "knowledge_qa",
+                    "target_dirs": [],
+                }
+            )
+        )
+        await asyncio.sleep(0)
+
+        queued_task = client.running_tasks["queued-run"]
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_cancel",
+                    "run_uuid": "queued-run",
+                }
+            )
+        )
+        await asyncio.gather(queued_task, return_exceptions=True)
+
+        assert "queued-run" not in client.running_tasks
+        assert "running-run" in client.running_tasks
+
+        client.running_tasks["running-run"].cancel()
+        await asyncio.gather(
+            client.running_tasks["running-run"],
+            return_exceptions=True,
+        )
+
+    asyncio.run(exercise())
 
 
 def test_lensnode_run_cancel_cancels_running_task():

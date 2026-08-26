@@ -189,6 +189,32 @@ class RunLifecycleTests(TransactionTestCase):
         )
         self.assertIsNotNone(run.execution.admitted_at)
 
+    def test_queued_running_event_does_not_mark_execution_admitted(self):
+        run = self._run(
+            Run.Status.STREAMING,
+            timedelta(seconds=10),
+            timedelta(seconds=10),
+        )
+        run.execution.status = RunExecution.Status.DISPATCHED
+        run.execution.save(update_fields=["status"])
+
+        record_lensnode_run_event(
+            run.uuid,
+            "retrieval",
+            "running",
+            {
+                "queue_state": "QUEUED",
+                "message": "Waiting for LensNode execution capacity.",
+            },
+        )
+
+        run.execution.refresh_from_db()
+        self.assertEqual(
+            run.execution.status,
+            RunExecution.Status.DISPATCHED,
+        )
+        self.assertIsNone(run.execution.admitted_at)
+
     def test_stale_dispatch_acknowledgements_are_ignored(self):
         run = self._run(
             Run.Status.STREAMING,
