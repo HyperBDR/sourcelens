@@ -1,0 +1,11 @@
+type: feature
+audience: user
+en: >-
+  Added Spanish language support across the user interface, administration
+  console, AI answers, notifications, release notes, and account emails.
+zh-CN: >-
+  新增西班牙语支持，覆盖用户界面、管理台、AI 回答、通知、更新日志和账户邮件。
+es: >-
+  Se añadió compatibilidad con español en la interfaz de usuario, la consola
+  de administración, las respuestas de IA, las notificaciones, las notas de
+  la versión y los correos de cuenta.

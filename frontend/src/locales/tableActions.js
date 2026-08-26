@@ -26,5 +26,19 @@ export default {
       bulkUpdated: '已更新 {count} 项',
       noEligibleRows: '所选项目均不适用于此操作'
     }
+  },
+  es: {
+    common: {
+      bulkActions: 'Acciones masivas',
+      clearSelection: 'Borrar selección',
+      confirmBulkAction: '¿Aplicar esta acción a las filas seleccionadas?',
+      selectRow: 'Seleccionar {name}',
+      selectedCount: '{count} seleccionados'
+    },
+    management: {
+      bulkDeleted: '{count} elementos eliminados',
+      bulkUpdated: '{count} elementos actualizados',
+      noEligibleRows: 'Ninguna de las filas seleccionadas admite esta acción'
+    }
   }
 }

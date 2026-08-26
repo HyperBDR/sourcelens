@@ -74,6 +74,20 @@ class PasswordResetEmailServiceTests(SimpleTestCase):
         assert '设置或重置密码' in html
         assert '24 小时后失效' in html
 
+    def test_renders_and_sends_spanish_password_reset_email(self):
+        sent = PasswordResetEmailService.send_password_reset_email(
+            email='person@example.com',
+            uid='uid-value',
+            token='token-value',
+            language='es',
+        )
+
+        assert sent is True
+        assert len(mail.outbox) == 1
+        html = mail.outbox[0].alternatives[0][0]
+        assert 'Configura o restablece tu contraseña' in html
+        assert 'Este enlace caduca en 24 horas' in html
+
     def test_unknown_language_uses_english_template(self):
         sent = PasswordResetEmailService.send_password_reset_email(
             email='person@example.com',
@@ -115,3 +129,15 @@ class VerificationCodeEmailStyleTests(SimpleTestCase):
         assert all(marker in login_html for marker in shared_style)
         assert 'Your verification code' in login_html
         assert '123456' in login_html
+
+    def test_login_code_email_supports_spanish(self):
+        sent = OtpLoginEmailService.send_login_code_email(
+            email='person@example.com',
+            code='123456',
+            language='es',
+        )
+
+        assert sent is True
+        html = mail.outbox[0].alternatives[0][0]
+        assert 'Tu código de verificación' in html
+        assert 'Caduca en 5 minutos' in html

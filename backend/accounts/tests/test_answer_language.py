@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from accounts.models import answer_language_name
 from accounts.serializers import normalize_language_code
 from accounts.services.registration import RegistrationService
 
@@ -33,14 +34,15 @@ class LanguagePreferenceTests(TestCase):
         )
 
     def test_language_variants_normalize_to_supported_choices(self):
-        """Only English and Chinese variants remain supported."""
+        """English, Chinese, and Spanish variants remain supported."""
 
         cases = {
             "en": "en-US",
             "en_us": "en-US",
             "zh": "zh-CN",
             "zh-hans": "zh-CN",
-            "es-MX": "en-US",
+            "es": "es",
+            "es-MX": "es",
             "ja": "en-US",
             "ko-kr": "en-US",
         }
@@ -48,6 +50,11 @@ class LanguagePreferenceTests(TestCase):
         for value, expected in cases.items():
             with self.subTest(value=value):
                 self.assertEqual(normalize_language_code(value), expected)
+
+    def test_spanish_uses_an_explicit_model_instruction_name(self):
+        """Spanish output preferences reach model prompts as Spanish."""
+
+        self.assertEqual(answer_language_name("es-MX"), "Spanish")
 
     def test_otp_user_without_language_defaults_to_english(self):
         """Non-browser OTP callers receive the neutral product default."""

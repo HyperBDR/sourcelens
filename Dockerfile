@@ -97,7 +97,7 @@ RUN set -eux; \
 
 # DJANGO_DEBUG is scoped to this build step because production-only settings
 # require secrets that are unavailable while the image is built.
-RUN DJANGO_DEBUG=true python manage.py compilemessages -l zh_Hans -l en \
+RUN DJANGO_DEBUG=true python manage.py compilemessages -l zh_Hans -l en -l es \
     && rm -rf /root/.cache /tmp/* \
     && find /opt/venv -type d -name __pycache__ -prune \
         -exec rm -rf {} + \

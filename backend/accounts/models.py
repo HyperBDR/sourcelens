@@ -40,6 +40,7 @@ def normalize_answer_language(value):
     return {
         'en': 'en-US',
         'zh': 'zh-CN',
+        'es': 'es',
     }.get(prefix, DEFAULT_ANSWER_LANGUAGE)
 
 
@@ -48,6 +49,8 @@ def answer_language_name(value):
 
     if normalize_answer_language(value) == 'zh-CN':
         return 'Simplified Chinese'
+    if normalize_answer_language(value) == 'es':
+        return 'Spanish'
     return 'English'
 
 

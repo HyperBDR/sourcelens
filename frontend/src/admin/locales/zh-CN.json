@@ -790,6 +790,7 @@
       "languageDesc": "选择该渠道通知消息的语言（如飞书/企业微信）。",
       "languageZhHans": "简体中文",
       "languageEn": "English",
+      "languageEs": "西班牙语",
       "setDefault": "设为默认",
       "mergeOptions": "合并选项",
       "mergeEnabled": "启用合并",

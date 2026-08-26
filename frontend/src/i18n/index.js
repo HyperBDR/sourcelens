@@ -1,12 +1,14 @@
 import { createI18n } from 'vue-i18n'
 
 import en from '../locales/en.json'
+import es from '../locales/es.json'
 import zhCN from '../locales/zh-CN.json'
 import adminEn from '../admin/locales/en.json'
+import adminEs from '../admin/locales/es.json'
 import adminZhCN from '../admin/locales/zh-CN.json'
 import tableActionMessages from '../locales/tableActions'
 
-export const SUPPORTED_UI_LANGUAGES = ['en', 'zh-CN']
+export const SUPPORTED_UI_LANGUAGES = ['en', 'zh-CN', 'es']
 
 const isPlainObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -53,6 +55,10 @@ const i18n = createI18n({
     'zh-CN': deepMergeMessages(
       deepMergeMessages(zhCN, adminZhCN),
       tableActionMessages['zh-CN']
+    ),
+    es: deepMergeMessages(
+      deepMergeMessages(es, adminEs),
+      tableActionMessages.es
     )
   }
 })

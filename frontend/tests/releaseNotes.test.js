@@ -17,6 +17,7 @@ const manifest = {
       {
         audience: 'user',
         en: 'Added release notes.',
+        es: 'Se añadieron notas de la versión.',
         'zh-CN': '\u65b0\u589e\u66f4\u65b0\u65e5\u5fd7\u3002'
       },
       {
@@ -76,6 +77,12 @@ test('falls back to English for unsupported locales', () => {
   const groups = selectLocalizedReleaseNotes(manifest, 'fr')
 
   assert.equal(groups[0].entries[0].text, 'Added release notes.')
+})
+
+test('selects Spanish release notes when available', () => {
+  const groups = selectLocalizedReleaseNotes(manifest, 'es')
+
+  assert.equal(groups[0].entries[0].text, 'Se añadieron notas de la versión.')
 })
 
 test('includes administrator entries only for administrators', () => {
