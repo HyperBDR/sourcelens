@@ -103,6 +103,25 @@ class ReleaseNotesTestCase(unittest.TestCase):
             ):
                 parse_fragment(fragment)
 
+    def test_parse_fragment_accepts_optional_spanish_translation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fragment = Path(directory) / "spanish.yaml"
+            fragment.write_text(
+                "type: feature\n"
+                "audience: user\n"
+                "en: Added Spanish release notes.\n"
+                "zh-CN: 新增西班牙语更新日志。\n"
+                "es: Se añadieron notas de la versión en español.\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                parse_fragment(fragment)["es"],
+                "Se añadieron notas de la versión en español.",
+            )
+
     def test_build_manifest_collects_only_new_fragments_since_previous_tag(
         self,
     ) -> None:
@@ -138,7 +157,8 @@ class ReleaseNotesTestCase(unittest.TestCase):
                 "en: Improved release visibility.\n"
                 "zh-CN: "
                 "\u6539\u8fdb\u7248\u672c\u53d8\u66f4"
-                "\u53ef\u89c1\u6027\u3002\n",
+                "\u53ef\u89c1\u6027\u3002\n"
+                "es: Mejorada la visibilidad de las versiones.\n",
                 encoding="utf-8",
             )
             self._commit_all(repo, "Second release")
@@ -164,6 +184,9 @@ class ReleaseNotesTestCase(unittest.TestCase):
                         "zh-CN": (
                             "\u6539\u8fdb\u7248\u672c\u53d8\u66f4"
                             "\u53ef\u89c1\u6027\u3002"
+                        ),
+                        "es": (
+                            "Mejorada la visibilidad de las versiones."
                         ),
                     }
                 ],

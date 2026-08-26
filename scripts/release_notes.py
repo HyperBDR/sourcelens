@@ -6,7 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import yaml
 
@@ -17,18 +17,30 @@ CATEGORY_HEADINGS = {
     "improvement": "Improvements",
     "fix": "Fixes",
 }
-FRAGMENT_FIELDS = {"type", "audience", "en", "zh-CN"}
+REQUIRED_FRAGMENT_FIELDS = {"type", "audience", "en", "zh-CN"}
+FRAGMENT_FIELDS = REQUIRED_FRAGMENT_FIELDS | {"es"}
 FRAGMENT_DIRECTORY = "release-notes"
 MAX_FRAGMENT_BYTES = 16 * 1024
 MAX_ENTRY_CHARACTERS = 1000
 
 ReleaseFragment = TypedDict(
     "ReleaseFragment",
-    {"type": str, "audience": str, "en": str, "zh-CN": str},
+    {
+        "type": str,
+        "audience": str,
+        "en": str,
+        "zh-CN": str,
+        "es": NotRequired[str],
+    },
 )
 LocalizedEntry = TypedDict(
     "LocalizedEntry",
-    {"audience": str, "en": str, "zh-CN": str},
+    {
+        "audience": str,
+        "en": str,
+        "zh-CN": str,
+        "es": NotRequired[str],
+    },
 )
 
 
@@ -83,7 +95,7 @@ def parse_fragment_content(content: str, source: str) -> ReleaseFragment:
         raise ReleaseNoteError(f"{source} field names must be strings")
 
     fields = set(payload)
-    missing = sorted(FRAGMENT_FIELDS - fields)
+    missing = sorted(REQUIRED_FRAGMENT_FIELDS - fields)
     if missing:
         raise ReleaseNoteError(
             f"{source} missing required fields: {', '.join(missing)}"
@@ -128,6 +140,19 @@ def parse_fragment_content(content: str, source: str) -> ReleaseFragment:
                 f"{MAX_ENTRY_CHARACTERS} characters"
             )
         fragment[language] = normalized
+    if "es" in payload:
+        text = payload["es"]
+        if not isinstance(text, str) or not text.strip():
+            raise ReleaseNoteError(
+                f"{source} field es must be a non-empty string"
+            )
+        normalized = " ".join(text.split())
+        if len(normalized) > MAX_ENTRY_CHARACTERS:
+            raise ReleaseNoteError(
+                f"{source} field es exceeds "
+                f"{MAX_ENTRY_CHARACTERS} characters"
+            )
+        fragment["es"] = normalized
     return fragment
 
 
@@ -150,13 +175,14 @@ def build_manifest(
     for path in paths:
         content = _read_fragment_at_ref(repository, tag, path)
         fragment = parse_fragment_content(content, path)
-        categories[fragment["type"]].append(
-            {
-                "audience": fragment["audience"],
-                "en": fragment["en"],
-                "zh-CN": fragment["zh-CN"],
-            }
-        )
+        entry: LocalizedEntry = {
+            "audience": fragment["audience"],
+            "en": fragment["en"],
+            "zh-CN": fragment["zh-CN"],
+        }
+        if "es" in fragment:
+            entry["es"] = fragment["es"]
+        categories[fragment["type"]].append(entry)
 
     return {
         "version": version,
