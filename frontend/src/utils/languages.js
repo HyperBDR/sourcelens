@@ -2,7 +2,8 @@ import { SUPPORTED_UI_LANGUAGES } from '@/i18n'
 
 const LANGUAGE_FLAGS = {
   en: '🇺🇸',
-  'zh-CN': '🇨🇳'
+  'zh-CN': '🇨🇳',
+  es: '🇪🇸'
 }
 
 export function getUiLanguageOptions(t) {

@@ -17,7 +17,7 @@ export function getReleaseNotesStorageKey(isAdmin = false) {
 }
 
 export function selectLocalizedReleaseNotes(manifest, locale, isAdmin = false) {
-  const language = locale === 'zh-CN' ? 'zh-CN' : 'en'
+  const language = locale === 'zh-CN' || locale === 'es' ? locale : 'en'
   const categories = manifest?.categories || {}
 
   return CATEGORY_ORDER.map((type) => {

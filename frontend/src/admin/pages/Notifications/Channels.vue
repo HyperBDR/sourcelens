@@ -320,6 +320,9 @@
                 <option value="en">
                   {{ t('notificationManagement.channels.languageEn') }}
                 </option>
+                <option value="es">
+                  {{ t('notificationManagement.channels.languageEs') }}
+                </option>
               </BaseSelect>
               <p class="mt-1 text-xs text-gray-500">
                 {{ t('notificationManagement.channels.languageDesc') }}
@@ -1077,7 +1080,11 @@ async function confirmValidateEmail() {
   }
 }
 
-const languageLabels = { 'zh-hans': '简体中文', en: 'English' }
+const languageLabels = {
+  'zh-hans': '简体中文',
+  en: 'English',
+  es: 'Español'
+}
 function configSummary(row) {
   if (!row.config || typeof row.config !== 'object') return '–'
   if (row.channel_type === 'webhook') {

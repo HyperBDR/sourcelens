@@ -23,13 +23,14 @@ test('validates password policy boundaries and character requirements', () => {
   assert.equal(getPasswordPolicyError('R7vM2Qp9'), '')
 })
 
-test('provides complete English and Chinese password messages', () => {
+test('provides complete password messages for every UI language', () => {
   assert.ok(passwordManagementMessages.en.passwordManagement.forgot.success)
   assert.ok(
     passwordManagementMessages['zh-CN'].passwordManagement.security.success
   )
   assert.equal(getPasswordManagementText('en-US').security.title, 'Security')
   assert.equal(getPasswordManagementText('zh-CN').security.title, '安全')
+  assert.equal(getPasswordManagementText('es').security.title, 'Seguridad')
   assert.match(
     getPasswordManagementText('en-US').forgot.description,
     /set up or reset/

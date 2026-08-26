@@ -298,6 +298,7 @@ LANGUAGE_CODE = 'en'
 LANGUAGES = (
     ('zh-hans', '简体中文'),
     ('en', 'English'),
+    ('es', 'Español'),
 )
 
 # TIME_ZONE: Default time zone for dates/times. Set to UTC so that values
@@ -375,6 +376,15 @@ LANGUAGE_CODE_MAPPING = {
     'en-ie': 'en',
     # South Africa English
     'en-za': 'en',
+
+    # Spanish variants
+    'es': 'es',
+    'es-es': 'es',
+    'es-mx': 'es',
+    'es-ar': 'es',
+    'es-cl': 'es',
+    'es-co': 'es',
+    'es-pe': 'es',
 }
 
 # ============================

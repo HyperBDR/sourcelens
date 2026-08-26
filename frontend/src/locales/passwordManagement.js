@@ -82,14 +82,58 @@ export const passwordManagementMessages = {
         requirements: '密码必须同时包含字母和数字'
       }
     }
+  },
+  es: {
+    passwordManagement: {
+      forgot: {
+        link: '¿Olvidaste tu contraseña?',
+        title: 'Configura o restablece tu contraseña',
+        description:
+          'Introduce el correo de tu cuenta para recibir un enlace de configuración o restablecimiento.',
+        email: 'Correo electrónico',
+        emailPlaceholder: 'Introduce tu correo electrónico',
+        required: 'El correo electrónico es obligatorio',
+        invalid: 'Introduce un correo electrónico válido',
+        submit: 'Enviar enlace',
+        sending: 'Enviando...',
+        success:
+          'Si existe una cuenta válida con este correo, se ha enviado un enlace.',
+        error: 'No se pudo solicitar el enlace. Inténtalo de nuevo.',
+        back: 'Volver al inicio de sesión con contraseña'
+      },
+      security: {
+        title: 'Seguridad',
+        description: 'Cambia la contraseña utilizada para iniciar sesión.',
+        unavailable:
+          'Esta cuenta no tiene contraseña local. Cierra sesión y utiliza la opción de contraseña olvidada para configurar una.',
+        currentPassword: 'Contraseña actual',
+        newPassword: 'Nueva contraseña',
+        confirmPassword: 'Confirmar nueva contraseña',
+        currentRequired: 'Introduce tu contraseña actual',
+        newRequired: 'Introduce una nueva contraseña',
+        confirmRequired: 'Confirma tu nueva contraseña',
+        mismatch: 'Las contraseñas no coinciden',
+        wrongCurrent: 'La contraseña actual es incorrecta',
+        submit: 'Cambiar contraseña',
+        changing: 'Cambiando...',
+        success: 'Contraseña cambiada correctamente',
+        error: 'No se pudo cambiar la contraseña. Inténtalo de nuevo.'
+      },
+      policy: {
+        tooShort: 'La contraseña debe tener al menos 8 caracteres',
+        tooLong: 'La contraseña no puede superar los 32 caracteres',
+        requirements: 'La contraseña debe contener letras y números'
+      }
+    }
   }
 }
 
 export function getPasswordManagementText(locale) {
-  const key = String(locale || '')
-    .toLowerCase()
-    .startsWith('zh')
+  const normalized = String(locale || '').toLowerCase()
+  const key = normalized.startsWith('zh')
     ? 'zh-CN'
-    : 'en'
+    : normalized.startsWith('es')
+      ? 'es'
+      : 'en'
   return passwordManagementMessages[key].passwordManagement
 }

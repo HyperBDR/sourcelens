@@ -790,6 +790,7 @@
       "languageDesc": "Select the language for notification messages (e.g. Feishu/WeCom).",
       "languageZhHans": "Simplified Chinese",
       "languageEn": "English",
+      "languageEs": "Spanish",
       "setDefault": "Set as default",
       "mergeOptions": "Merge options",
       "mergeEnabled": "Enable merge",

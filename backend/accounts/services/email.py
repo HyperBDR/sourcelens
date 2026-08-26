@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 VERIFICATION_CODE_TEMPLATE_MAP = {
     'zh-CN': 'emails/login_otp/login_otp_email_zh.html',
     'en-US': 'emails/login_otp/login_otp_email_en.html',
+    'es': 'emails/login_otp/login_otp_email_es.html',
 }
 
 
@@ -296,6 +297,9 @@ class PasswordResetEmailService:
                 ),
                 'en-US': (
                     'emails/password_reset/password_reset_email_en.html'
+                ),
+                'es': (
+                    'emails/password_reset/password_reset_email_es.html'
                 ),
             }
             template = template_map.get(
