@@ -723,14 +723,6 @@
                     >
                       <div>
                         <span class="overview-label">
-                          {{ t('lensRuns.submittedAt') }}
-                        </span>
-                        <span class="overview-time-value tabular-nums">
-                          {{ formatDateTime(detail.created_at) }}
-                        </span>
-                      </div>
-                      <div>
-                        <span class="overview-label">
                           {{ t('lensRuns.queueTime') }}
                         </span>
                         <span class="overview-time-value tabular-nums">
@@ -1032,100 +1024,98 @@
                       </div>
                     </div>
 
-                    <div class="resource-usage-grid">
-                      <div data-testid="run-configured-resources">
-                        <h4 class="resource-list-title">
-                          {{ t('lensRuns.configuredResources') }}
-                        </h4>
-                        <div class="resource-list">
-                          <span
-                            v-for="skill in detail.execution.resource_usage
-                              ?.configured_skills ||
-                            detail.execution.loaded_skills ||
-                            []"
-                            :key="`skill-${skill.skill_uuid || skill.skill_name}`"
-                            class="resource-pill"
-                          >
-                            <span class="resource-pill-type">
-                              {{ t('lensRuns.skillResource') }}
-                            </span>
+                    <div
+                      data-testid="run-resource-ledger"
+                      class="resource-ledger"
+                    >
+                      <div class="resource-ledger-summary">
+                        <div class="resource-ledger-summary-item">
+                          <span class="resource-ledger-summary-label">
+                            {{ t('lensRuns.configuredResources') }}
+                          </span>
+                          <strong class="resource-ledger-summary-value">
                             {{
-                              skill.skill_name ||
-                              skill.skill_package_name ||
-                              '-'
+                              detail.execution.resource_usage
+                                ?.configured_count || 0
                             }}
+                          </strong>
+                        </div>
+                        <div class="resource-ledger-summary-item">
+                          <span class="resource-ledger-summary-label">
+                            {{ t('lensRuns.calledResources') }}
                           </span>
-                          <span
-                            v-for="mcp in detail.execution.resource_usage
-                              ?.configured_mcps ||
-                            detail.execution.loaded_mcps ||
-                            []"
-                            :key="`mcp-${mcp.mcp_uuid || mcp.mcp_name}`"
-                            class="resource-pill"
-                          >
-                            <span class="resource-pill-type">
-                              {{ t('lensRuns.mcpResource') }}
-                            </span>
-                            {{ mcp.mcp_name || '-' }}
+                          <strong class="resource-ledger-summary-value">
+                            {{
+                              detail.execution.resource_usage
+                                ?.called_resource_count || 0
+                            }}
+                          </strong>
+                        </div>
+                        <div class="resource-ledger-summary-item">
+                          <span class="resource-ledger-summary-label">
+                            {{ t('lensRuns.totalResourceCalls') }}
                           </span>
-                          <span
-                            v-if="
-                              !(
-                                detail.execution.resource_usage
-                                  ?.configured_skills ||
-                                detail.execution.loaded_skills ||
-                                []
-                              ).length &&
-                              !(
-                                detail.execution.resource_usage
-                                  ?.configured_mcps ||
-                                detail.execution.loaded_mcps ||
-                                []
-                              ).length
-                            "
-                            class="resource-empty"
-                          >
-                            {{ t('lensRuns.noConfiguredResources') }}
-                          </span>
+                          <strong class="resource-ledger-summary-value">
+                            {{
+                              detail.execution.resource_usage?.total_calls || 0
+                            }}
+                          </strong>
                         </div>
                       </div>
 
-                      <div data-testid="run-resource-calls">
-                        <h4 class="resource-list-title">
-                          {{ t('lensRuns.calledResources') }}
-                        </h4>
-                        <div class="resource-call-list">
-                          <div
-                            v-for="call in detail.execution.resource_usage
-                              ?.calls || []"
-                            :key="`${call.resource_type}-${call.name}`"
-                            class="resource-call-row"
-                          >
-                            <span class="resource-call-name">
-                              <span class="resource-pill-type">
-                                {{
-                                  t(`lensRuns.${call.resource_type}Resource`)
-                                }}
-                              </span>
-                              <span class="break-all">{{ call.name }}</span>
-                            </span>
-                            <span class="resource-call-count">
+                      <div class="resource-ledger-header">
+                        <span>{{ t('lensRuns.resourceName') }}</span>
+                        <span>{{ t('lensRuns.resourceStatus') }}</span>
+                        <span class="text-right">
+                          {{ t('lensRuns.resourceCallCountLabel') }}
+                        </span>
+                      </div>
+                      <div class="resource-ledger-list">
+                        <div
+                          v-for="resource in detail.execution.resource_usage
+                            ?.resources || []"
+                          :key="`${resource.resource_type}-${resource.name}`"
+                          class="resource-ledger-row"
+                        >
+                          <div class="resource-ledger-name">
+                            <span
+                              class="resource-ledger-type"
+                              :class="`resource-ledger-type-${resource.resource_type}`"
+                            >
                               {{
-                                t('lensRuns.resourceCallCount', {
-                                  n: call.calls
-                                })
+                                t(`lensRuns.${resource.resource_type}Resource`)
                               }}
                             </span>
+                            <span class="break-all">{{ resource.name }}</span>
                           </div>
                           <span
-                            v-if="
-                              !(detail.execution.resource_usage?.calls || [])
-                                .length
-                            "
-                            class="resource-empty"
+                            class="resource-ledger-status"
+                            :class="{
+                              'resource-ledger-status-used': resource.calls > 0,
+                              'resource-ledger-status-idle':
+                                resource.calls === 0
+                            }"
                           >
-                            {{ t('lensRuns.noResourceCalls') }}
+                            {{
+                              resource.configured
+                                ? resource.calls > 0
+                                  ? t('lensRuns.resourceUsed')
+                                  : t('lensRuns.resourceNotCalled')
+                                : t('lensRuns.runtimeResource')
+                            }}
                           </span>
+                          <strong class="resource-ledger-count">
+                            {{ resource.calls || 0 }}
+                          </strong>
+                        </div>
+                        <div
+                          v-if="
+                            !(detail.execution.resource_usage?.resources || [])
+                              .length
+                          "
+                          class="resource-ledger-empty"
+                        >
+                          {{ t('lensRuns.noResourceCalls') }}
                         </div>
                       </div>
                     </div>
@@ -1146,12 +1136,34 @@
                     </dl>
                   </section>
 
-                  <section>
-                    <h3 class="text-sm font-semibold text-gray-700 mb-2">
-                      {{ t('lensRuns.question') }}
-                    </h3>
+                  <section data-testid="run-question-section">
+                    <div class="mb-2 flex items-center justify-between gap-3">
+                      <h3 class="text-sm font-semibold text-gray-700">
+                        {{ t('lensRuns.question') }}
+                      </h3>
+                      <button
+                        v-if="questionCanExpand"
+                        type="button"
+                        data-testid="run-question-toggle"
+                        class="question-toggle"
+                        :aria-expanded="questionExpanded"
+                        @click="questionExpanded = !questionExpanded"
+                      >
+                        {{
+                          questionExpanded
+                            ? t('common.collapse')
+                            : t('common.expand')
+                        }}
+                      </button>
+                    </div>
                     <div
-                      class="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800 whitespace-pre-wrap"
+                      ref="questionTextRef"
+                      data-testid="run-question-content"
+                      class="run-question-content"
+                      :class="{
+                        'run-question-collapsed':
+                          questionCanExpand && !questionExpanded
+                      }"
                     >
                       {{ detail.question || '-' }}
                     </div>
@@ -1574,7 +1586,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
@@ -1635,6 +1647,9 @@ const advancedFiltersOpen = ref(false)
 const previewFile = ref(null)
 const pendingAction = ref(null)
 const actionLoading = ref(false)
+const questionTextRef = ref(null)
+const questionCanExpand = ref(false)
+const questionExpanded = ref(false)
 
 const canDiagnoseRun = computed(() => {
   const user = userStore.userInfo
@@ -2001,6 +2016,8 @@ function openDetail(uuid) {
   activeDetailTab.value = 'overview'
   activeExecutionView.value = 'trace'
   previewFile.value = null
+  questionCanExpand.value = false
+  questionExpanded.value = false
 }
 
 function closeDetail() {
@@ -2009,6 +2026,21 @@ function closeDetail() {
   detail.value = null
   activeExecutionView.value = 'trace'
   previewFile.value = null
+  questionCanExpand.value = false
+  questionExpanded.value = false
+}
+
+async function measureQuestionOverflow() {
+  await nextTick()
+  const element = questionTextRef.value
+  if (!element) return
+
+  element.classList.add('run-question-collapsed')
+  const canExpand = element.scrollHeight > element.clientHeight + 1
+  questionCanExpand.value = canExpand
+  if (!canExpand || questionExpanded.value) {
+    element.classList.remove('run-question-collapsed')
+  }
 }
 
 function navigateFromEvidence(evidenceRef) {
@@ -2049,11 +2081,13 @@ async function fetchDetail() {
   detail.value = null
   try {
     detail.value = await getAdminRun(selectedUuid.value)
+    questionExpanded.value = false
   } catch (e) {
     showError(extractErrorMessage(e, t('common.error')))
     detail.value = null
   } finally {
     detailLoading.value = false
+    await measureQuestionOverflow()
   }
 }
 
@@ -2179,38 +2213,65 @@ watch(detailVisible, (visible) => {
 .overview-token-breakdown > div {
   @apply bg-white px-3 py-2;
 }
-.resource-usage-grid {
-  @apply mt-3 grid gap-3 lg:grid-cols-2;
+.resource-ledger {
+  @apply mt-3 overflow-hidden rounded-lg border border-gray-200 bg-white;
 }
-.resource-list-title {
-  @apply text-xs font-semibold uppercase tracking-wide text-gray-500;
+.resource-ledger-summary {
+  @apply grid grid-cols-3 divide-x divide-gray-200 border-b border-gray-200
+    bg-gray-50;
 }
-.resource-list {
-  @apply mt-2 flex min-h-10 flex-wrap content-start gap-1.5 rounded-md border
-    border-gray-200 bg-white p-2;
+.resource-ledger-summary-item {
+  @apply min-w-0 px-3 py-2.5;
 }
-.resource-pill {
-  @apply inline-flex max-w-full items-center gap-1.5 rounded-full border
-    border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-700;
+.resource-ledger-summary-label {
+  @apply block truncate text-[10px] font-semibold uppercase tracking-wide
+    text-gray-500;
 }
-.resource-pill-type {
-  @apply shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400;
+.resource-ledger-summary-value {
+  @apply mt-1 block text-lg font-semibold text-gray-900 tabular-nums;
 }
-.resource-empty {
-  @apply self-center text-xs text-gray-400;
+.resource-ledger-header {
+  @apply grid grid-cols-[minmax(0,1fr)_auto_2.5rem] items-center gap-3 border-b
+    border-gray-100 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide
+    text-gray-400;
 }
-.resource-call-list {
-  @apply mt-2 min-h-10 overflow-hidden rounded-md border border-gray-200 bg-white;
+.resource-ledger-list {
+  @apply divide-y divide-gray-100;
 }
-.resource-call-row {
-  @apply flex items-center justify-between gap-3 border-b border-gray-100 px-3
-    py-2 text-xs last:border-b-0;
+.resource-ledger-row {
+  @apply grid grid-cols-[minmax(0,1fr)_auto_2.5rem] items-center gap-3 px-3
+    py-2.5 text-xs;
 }
-.resource-call-name {
-  @apply flex min-w-0 items-center gap-2 font-medium text-gray-700;
+.resource-ledger-name {
+  @apply flex min-w-0 items-center gap-2 font-medium text-gray-800;
 }
-.resource-call-count {
-  @apply shrink-0 tabular-nums text-gray-500;
+.resource-ledger-type {
+  @apply shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold
+    uppercase tracking-wide;
+}
+.resource-ledger-type-skill {
+  @apply border-blue-200 bg-blue-50 text-blue-700;
+}
+.resource-ledger-type-mcp {
+  @apply border-emerald-200 bg-emerald-50 text-emerald-700;
+}
+.resource-ledger-type-tool {
+  @apply border-gray-200 bg-gray-100 text-gray-600;
+}
+.resource-ledger-status {
+  @apply whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium;
+}
+.resource-ledger-status-used {
+  @apply bg-green-50 text-green-700;
+}
+.resource-ledger-status-idle {
+  @apply bg-gray-100 text-gray-500;
+}
+.resource-ledger-count {
+  @apply text-right text-sm text-gray-900 tabular-nums;
+}
+.resource-ledger-empty {
+  @apply px-3 py-4 text-center text-xs text-gray-400;
 }
 .overview-usage-callout {
   @apply rounded-full bg-white px-2.5 py-1 text-xs font-medium text-indigo-700
@@ -2232,13 +2293,28 @@ watch(detailVisible, (visible) => {
   @apply mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm;
 }
 .overview-time-row {
-  @apply mt-3 grid gap-2 border-t border-gray-100 pt-3 text-xs sm:grid-cols-3;
+  @apply mt-3 grid gap-2 border-t border-gray-100 pt-3 text-xs sm:grid-cols-2;
 }
 .overview-time-row > div {
   @apply flex min-w-0 items-center gap-2;
 }
 .overview-time-value {
   @apply min-w-0 truncate font-medium text-gray-700;
+}
+.question-toggle {
+  @apply shrink-0 text-xs font-medium text-primary-600 underline-offset-2
+    hover:text-primary-700 hover:underline focus:outline-none focus:ring-2
+    focus:ring-primary-500/20;
+}
+.run-question-content {
+  @apply rounded-md border border-gray-200 bg-gray-50 p-3 text-sm leading-5
+    text-gray-800 whitespace-pre-wrap break-words;
+}
+.run-question-collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 10;
+  overflow: hidden;
 }
 .overview-label {
   @apply text-xs text-gray-500;

@@ -3261,8 +3261,129 @@ class LensApiTests(TestCase):
                 },
                 {
                     "resource_type": "mcp",
-                    "name": "GitHub MCP · search",
+                    "name": "GitHub MCP",
                     "calls": 1,
+                },
+            ],
+        )
+        self.assertEqual(
+            usage["resources"],
+            [
+                {
+                    "resource_type": "skill",
+                    "name": "Order tools",
+                    "configured": True,
+                    "calls": 1,
+                },
+                {
+                    "resource_type": "mcp",
+                    "name": "GitHub MCP",
+                    "configured": True,
+                    "calls": 1,
+                },
+            ],
+        )
+
+    def test_admin_run_resource_usage_keeps_named_call_after_unnamed_event(self):
+        from lens.models import RunTraceEvent
+
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
+        now = timezone.now()
+        RunTraceEvent.objects.create(
+            run=run,
+            event_id=uuid.uuid4(),
+            sequence=1,
+            event_type="tool.started",
+            timestamp=now,
+            call_id="same-call",
+        )
+        RunTraceEvent.objects.create(
+            run=run,
+            event_id=uuid.uuid4(),
+            sequence=2,
+            event_type="tool.completed",
+            timestamp=now,
+            call_id="same-call",
+            payload={"name": "run_skill_script"},
+        )
+
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["execution"]["resource_usage"]["calls"],
+            [
+                {
+                    "resource_type": "skill",
+                    "name": "run_skill_script",
+                    "calls": 1,
+                }
+            ],
+        )
+
+    def test_admin_run_resource_usage_uses_step_events_for_skill_identity(self):
+        from lens.models import RunStep
+
+        session = Session.objects.create(assistant=self.assistant, user=self.user)
+        run = create_execution_run(session=session, question="q", enqueue=False)
+        run.execution.loaded_skills = [
+            {
+                "skill_uuid": "skill-uuid",
+                "skill_package_name": "license-cli",
+                "skill_name": "License CLI",
+            },
+            {
+                "skill_uuid": "other-skill",
+                "skill_package_name": "other-cli",
+                "skill_name": "Other CLI",
+            },
+        ]
+        run.execution.save(update_fields=["loaded_skills"])
+        RunStep.objects.create(
+            run=run,
+            step_type="general_chat",
+            sequence=1,
+            status="completed",
+            detail={
+                "events": [
+                    {
+                        "agent_event": "tool.run_skill_script.start",
+                        "skill": "license-cli",
+                        "script": "bin/linux-arm64/income",
+                    },
+                    {
+                        "agent_event": "tool.run_skill_script.done",
+                        "skill": "license-cli",
+                        "script": "bin/linux-arm64/income",
+                    },
+                    {
+                        "agent_event": "tool.run_skill_script.start",
+                        "skill": "license-cli",
+                        "script": "bin/linux-arm64/income",
+                    },
+                ]
+            },
+        )
+
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
+
+        self.assertEqual(response.status_code, 200)
+        usage = response.data["execution"]["resource_usage"]
+        self.assertEqual(
+            usage["resources"],
+            [
+                {
+                    "resource_type": "skill",
+                    "name": "License CLI",
+                    "configured": True,
+                    "calls": 2,
+                },
+                {
+                    "resource_type": "skill",
+                    "name": "Other CLI",
+                    "configured": True,
+                    "calls": 0,
                 },
             ],
         )

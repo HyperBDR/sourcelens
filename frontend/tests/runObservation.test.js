@@ -59,6 +59,20 @@ test('run overview shows the models actually used by the run', async () => {
   assert.match(contents, /detail\.models_used/)
 })
 
+test('run question collapses after ten lines and can be expanded', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-question-section"/)
+  assert.match(contents, /data-testid="run-question-content"/)
+  assert.match(contents, /data-testid="run-question-toggle"/)
+  assert.match(contents, /questionCanExpand/)
+  assert.match(contents, /questionExpanded/)
+  assert.match(contents, /-webkit-line-clamp: 10/)
+  assert.match(contents, /measureQuestionOverflow/)
+  assert.match(contents, /common\.collapse/)
+  assert.match(contents, /common\.expand/)
+})
+
 test('run overview owns resource consumption and uses a dashboard layout', async () => {
   const contents = await source()
   const overviewIndex = contents.indexOf("activeDetailTab === 'overview'")
@@ -70,9 +84,25 @@ test('run overview owns resource consumption and uses a dashboard layout', async
   assert.ok(executionIndex > overviewIndex)
   assert.match(contents, /class="overview-dashboard"/)
   assert.match(contents, /class="overview-time-row"/)
+  assert.doesNotMatch(contents, /lensRuns\.submittedAt/)
+  assert.match(contents, /lensRuns\.queueTime/)
+  assert.match(contents, /lensRuns\.execWindow/)
   assert.match(contents, /data-testid="run-token-summary"/)
   assert.doesNotMatch(contents, /data-testid="run-execution-usage-view"/)
   assert.doesNotMatch(contents, /activeExecutionView === 'usage'/)
+})
+
+test('run resources use one ledger with configured and call counts', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-resource-ledger"/)
+  assert.match(contents, /resource_usage[\s\S]*resources/)
+  assert.match(contents, /resource_usage[\s\S]*total_calls/)
+  assert.match(contents, /resource_usage[\s\S]*called_resource_count/)
+  assert.match(contents, /resource-ledger-row/)
+  assert.doesNotMatch(contents, /class="resource-pill"/)
+  assert.doesNotMatch(contents, /data-testid="run-configured-resources"/)
+  assert.doesNotMatch(contents, /data-testid="run-resource-calls"/)
 })
 
 test('run overview separates executor status from business outcome', async () => {
@@ -190,8 +220,7 @@ test('detail groups progress, evidence, artifacts, and diagnostics by task', asy
   assert.doesNotMatch(contents, /data-testid="run-execution-usage-view"/)
   assert.match(contents, /data-testid="run-live-progress"/)
   assert.match(contents, /data-testid="run-execution-diagnosis"/)
-  assert.match(contents, /data-testid="run-configured-resources"/)
-  assert.match(contents, /data-testid="run-resource-calls"/)
+  assert.match(contents, /data-testid="run-resource-ledger"/)
   assert.doesNotMatch(contents, /data-testid="run-evidence-tab"/)
   assert.doesNotMatch(contents, /data-testid="run-files-tab"/)
   assert.match(contents, /detail\.citations/)
