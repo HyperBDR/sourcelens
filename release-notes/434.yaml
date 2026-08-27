@@ -1,0 +1,9 @@
+type: improvement
+audience: admin
+en: >-
+  Improved Run Operations Center feedback with explicit loading, empty, and
+  error states, preserved records during refresh, and retry actions.
+zh-CN: >-
+  优化运行运营中心反馈，新增明确的加载、
+  空结果和错误状态，刷新期间保留已有记录，
+  并提供重试操作。
