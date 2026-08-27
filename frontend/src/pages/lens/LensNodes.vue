@@ -164,7 +164,7 @@
                     <StatusBadge :status="row.status" />
                   </td>
                   <td class="table-cell">
-                    <div class="flex flex-wrap items-center gap-2">
+                    <div class="flex flex-nowrap items-center gap-2">
                       <StatusBadge :status="row.enrollment_status" />
                       <template v-if="row.enrollment_status === 'pending'">
                         <BaseButton
@@ -194,13 +194,41 @@
                       {{ row.workspace_path || EMPTY_VALUE }}
                     </button>
                   </td>
-                  <td class="table-cell text-ink-600">
-                    {{
-                      t('lensAdmin.table.dirTaskSummary', {
-                        dirs: row.available_dirs?.length || 0,
-                        tasks: row.tasks?.length || 0
-                      })
-                    }}
+                  <td class="table-cell">
+                    <button
+                      type="button"
+                      data-testid="lensnode-capabilities"
+                      class="max-w-72 text-left"
+                      :title="t('lensAdmin.detail.title')"
+                      @click="openDetail(row)"
+                    >
+                      <div class="flex flex-wrap gap-1.5">
+                        <span
+                          v-for="directory in directoryCapabilityLabels(row)"
+                          :key="directory"
+                          class="max-w-32 truncate rounded border border-line bg-surface-sunken px-1.5 py-0.5 font-mono text-xs text-ink-600"
+                        >
+                          {{ directory }}
+                        </span>
+                      </div>
+                      <div class="mt-2 flex flex-wrap gap-1.5">
+                        <span
+                          v-for="task in taskCapabilityLabels(row)"
+                          :key="task"
+                          class="rounded border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700"
+                        >
+                          {{ task }}
+                        </span>
+                      </div>
+                      <div class="mt-2 text-xs text-ink-400">
+                        {{
+                          t('lensAdmin.table.dirTaskSummary', {
+                            dirs: row.available_dirs?.length || 0,
+                            tasks: row.tasks?.length || 0
+                          })
+                        }}
+                      </div>
+                    </button>
                   </td>
                   <td class="table-cell">
                     <button
@@ -228,16 +256,34 @@
                     </button>
                   </td>
                   <td class="table-cell text-ink-600">
-                    <div>{{ row.agent_version || EMPTY_VALUE }}</div>
-                    <div class="mt-1 text-xs text-ink-400">
-                      {{ row.protocol_version || EMPTY_VALUE }}
+                    <div class="whitespace-nowrap">
+                      <span class="text-xs text-ink-400">
+                        {{ t('lensAdmin.table.runtimeVersion') }}
+                      </span>
+                      <span class="ml-1 font-mono text-xs">
+                        {{ row.agent_version || EMPTY_VALUE }}
+                      </span>
+                    </div>
+                    <div class="mt-1 whitespace-nowrap text-xs text-ink-400">
+                      <span>{{ t('lensAdmin.table.protocolVersion') }}</span>
+                      <span class="ml-1 font-mono">
+                        {{ row.protocol_version || EMPTY_VALUE }}
+                      </span>
                     </div>
                   </td>
-                  <td class="table-cell text-ink-600">
-                    {{ formatDateTime(row.last_heartbeat_at) }}
+                  <td class="table-cell whitespace-nowrap text-ink-600">
+                    <time
+                      :datetime="row.last_heartbeat_at || undefined"
+                      :title="
+                        row.last_heartbeat_at ||
+                        t('lensAdmin.table.notRecorded')
+                      "
+                    >
+                      {{ formatDateTime(row.last_heartbeat_at) }}
+                    </time>
                   </td>
-                  <td class="table-cell">
-                    <div class="flex items-center gap-2">
+                  <td class="table-cell whitespace-nowrap">
+                    <div class="flex flex-nowrap items-center gap-2">
                       <BaseButton
                         size="sm"
                         variant="outline"
@@ -504,6 +550,25 @@ const onlineRate = computed(() =>
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(totalLensNodes.value / pageSize.value))
 )
+
+function directoryCapabilityLabels(row) {
+  const directories = Array.isArray(row.available_dirs)
+    ? row.available_dirs
+    : []
+  const labels = directories.map((directory) => {
+    const path = typeof directory === 'string' ? directory : directory.path
+    return path?.split('/').filter(Boolean).pop() || path
+  })
+  return labels.filter(Boolean).slice(0, 2)
+}
+
+function taskCapabilityLabels(row) {
+  const tasks = Array.isArray(row.tasks) ? row.tasks : []
+  return tasks
+    .map((task) => (typeof task === 'string' ? task : task.title || task.name))
+    .filter(Boolean)
+    .slice(0, 3)
+}
 
 function handlePageSizeChange() {
   currentPage.value = 1

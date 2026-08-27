@@ -881,6 +881,37 @@
                   </section>
 
                   <section
+                    v-if="detail.routing_mode === 'smart'"
+                    data-testid="run-smart-routing"
+                    class="overview-section"
+                  >
+                    <div class="overview-section-heading">
+                      <div>
+                        <h3 class="overview-title">{{ t('lensRuns.smartRoutingTitle') }}</h3>
+                        <p class="overview-section-description">
+                          {{ t('lensRuns.smartRoutingDescription') }}
+                        </p>
+                      </div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <span
+                        v-for="assistant in detail.delegated_assistants || []"
+                        :key="assistant.uuid"
+                        class="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+                      >
+                        {{ assistant.name }}
+                        <span class="ml-1 text-indigo-500">· {{ assistant.capability }}</span>
+                      </span>
+                      <span
+                        v-if="!(detail.delegated_assistants || []).length"
+                        class="text-sm text-gray-400"
+                      >
+                        -
+                      </span>
+                    </div>
+                  </section>
+
+                  <section
                     data-testid="run-overview-usage"
                     class="overview-section overview-usage-section"
                   >

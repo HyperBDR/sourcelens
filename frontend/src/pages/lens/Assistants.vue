@@ -138,7 +138,7 @@
                     {{ lensNodeName(row.lensnode) }}
                   </td>
                   <td class="assistant-type-column table-cell text-ink-600">
-                    {{ assistantTypeLabel(row.selected_task) }}
+                    {{ assistantTypeLabel(row.capability) }}
                   </td>
                   <td class="table-cell text-ink-600">
                     <div
@@ -260,7 +260,11 @@
         :show="Boolean(detailAssistant)"
         :assistant="detailAssistant"
         :lensnode-name="lensNodeName(detailAssistant?.lensnode)"
-        :assistant-type="assistantTypeLabel(detailAssistant?.selected_task)"
+        :assistant-type="
+          assistantTypeLabel(
+            detailAssistant?.capability
+          )
+        "
         @close="closeDetails"
         @copy-share="copyShareUrl"
         @edit="startEditFromDetail"
@@ -272,6 +276,7 @@
         :mode="mode"
         :form="form"
         :lensnodes="lensnodes"
+        :assistants="assistants"
         :skills="skills"
         :environment-variable-sets="environmentVariableSets"
         :mcps="mcps"
@@ -586,9 +591,10 @@ function defaultForm() {
   return {
     name: '',
     description: '',
+    capability: '',
+    subagent_assistants: [],
     slug: '',
     lensnode_uuid: '',
-    selected_task: '',
     selected_dirs: [],
     agent_model_ref: '',
     agent_rounds: 'balanced',
@@ -627,9 +633,10 @@ function formFromRow(row) {
     uuid: row.uuid,
     name: row.name || '',
     description: row.description || '',
+    capability: row.capability || 'general_chat',
+    subagent_assistants: row.subagent_assistants || [],
     slug: row.slug || '',
     lensnode_uuid: row.lensnode?.uuid || row.lensnode || '',
-    selected_task: row.selected_task || '',
     selected_dirs: selectedDirsFromValue(row.selected_dirs || []),
     agent_model_ref: row.agent_model_ref || '',
     agent_rounds: row.agent_rounds || 'balanced',
@@ -732,11 +739,20 @@ function buildPayload() {
   return {
     name: form.value.name,
     description: form.value.description?.trim() || '',
+    capability: form.value.capability || 'general_chat',
+    subagent_assistants:
+      form.value.capability === 'orchestrator'
+        ? form.value.subagent_assistants || []
+        : [],
     slug: form.value.slug?.trim() || '',
-    lensnode_uuid: form.value.lensnode_uuid,
-    selected_task: form.value.selected_task,
+    ...(form.value.lensnode_uuid
+      ? { lensnode_uuid: form.value.lensnode_uuid }
+      : {}),
     selected_dirs:
-      form.value.selected_task === 'general_chat' ? [] : buildSelectedDirs(),
+      form.value.capability === 'general_chat' ||
+      form.value.capability === 'orchestrator'
+        ? []
+        : buildSelectedDirs(),
     agent_model_ref: form.value.agent_model_ref || null,
     agent_rounds: form.value.agent_rounds || 'balanced',
     max_concurrency: Number(form.value.max_concurrency) || 5,

@@ -14,6 +14,14 @@ def test_heavy_work_concurrency_setting_is_not_part_of_lensnode_config(
     assert not hasattr(config, "heavy_work_concurrency")
 
 
+def test_load_config_reads_runtime_version(monkeypatch):
+    monkeypatch.setenv("LENSNODE_AGENT_VERSION", "2026.08.27")
+
+    config = load_config()
+
+    assert config.agent_version == "2026.08.27"
+
+
 @pytest.mark.parametrize(
     "value,expected",
     [

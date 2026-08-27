@@ -55,6 +55,9 @@ from lens.models import (
 )
 from lens.serializers import (
     AssistantSerializer,
+    RunCreateSerializer,
+    SessionCreateSerializer,
+    SessionSerializer,
     validate_retrieval_policy,
     validate_retrieval_scope,
 )
@@ -2002,6 +2005,118 @@ class LensApiTests(TestCase):
         self.assertFalse(Assistant.objects.filter(slug="rollback-assistant").exists())
         self.assertFalse(
             EnvironmentVariableSet.objects.filter(name="Rollback Set").exists()
+        )
+
+    def test_orchestrator_can_optionally_bind_a_general_chat_node(self):
+        self.lensnode.tasks = [{"name": "general_chat"}]
+        self.lensnode.save(update_fields=["tasks"])
+        assistant = Assistant.objects.create(
+            name="Delegated Assistant",
+            slug="delegated-assistant",
+            capability=Assistant.Capability.GENERAL_CHAT,
+        )
+        serializer = AssistantSerializer(
+            data={
+                "name": "Pinned Orchestrator",
+                "slug": "pinned-orchestrator",
+                "capability": Assistant.Capability.ORCHESTRATOR,
+                "lensnode_uuid": str(self.lensnode.uuid),
+                "subagent_assistants": [str(assistant.uuid)],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        saved = serializer.save()
+
+        self.assertEqual(saved.lensnode, self.lensnode)
+        self.assertEqual(saved.selected_dirs, [])
+
+    def test_smart_routing_session_uses_global_model_and_allowed_range(self):
+        GlobalSetting.objects.create(
+            key="lens.smart_router.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        serializer = SessionCreateSerializer(
+            data={
+                "routing_mode": "smart",
+                "allowed_assistant_uuids": [str(self.assistant.uuid)],
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        session = serializer.save()
+
+        self.assertEqual(session.routing_mode, Session.RoutingMode.SMART)
+        self.assertEqual(
+            session.allowed_assistant_uuids,
+            [str(self.assistant.uuid)],
+        )
+        self.assertTrue(session.assistant.is_system)
+        self.assertEqual(
+            str(session.assistant.agent_model_ref),
+            "11111111-1111-1111-1111-111111111111",
+        )
+
+        update = SessionSerializer(
+            session,
+            data={"allowed_assistant_uuids": []},
+            partial=True,
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+        self.assertTrue(update.is_valid(), update.errors)
+        updated = update.save()
+        self.assertEqual(
+            updated.allowed_assistant_uuids,
+            [str(self.assistant.uuid)],
+        )
+
+    def test_smart_run_can_limit_one_run_without_updating_session_scope(self):
+        """A routing assistant override belongs to the Run snapshot only."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_router.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        session = SessionCreateSerializer(
+            data={"routing_mode": "smart"},
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+        self.assertTrue(session.is_valid(), session.errors)
+        session = session.save()
+        original_scope = list(session.allowed_assistant_uuids)
+        serializer = RunCreateSerializer(
+            data={
+                "question": "@Code Advisor Analyze this request.",
+                "routing_assistant_uuid": str(self.assistant.uuid),
+                "enqueue": False,
+            },
+            context={
+                "session": session,
+                "request": SimpleNamespace(user=self.user),
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        run = serializer.save()
+
+        session.refresh_from_db()
+        self.assertEqual(session.allowed_assistant_uuids, original_scope)
+        self.assertEqual(
+            run.input_message.content,
+            "@Code Advisor Analyze this request.",
+        )
+        self.assertEqual(
+            run.execution.runtime_snapshot["allowed_assistant_uuids"],
+            [str(self.assistant.uuid)],
+        )
+        self.assertEqual(
+            run.execution.runtime_snapshot["routing_question"],
+            "Analyze this request.",
         )
 
     def test_assistant_update_forks_shared_environment_set(self):

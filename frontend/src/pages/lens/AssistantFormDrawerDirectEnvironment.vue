@@ -169,33 +169,120 @@
     <div v-else-if="wizardStep === 2" class="space-y-4">
       <p class="text-sm text-ink-500">{{ t('lensAdmin.wizard.step2Desc') }}</p>
       <div class="grid gap-4 md:grid-cols-2">
-        <FormRow :label="t('lensAdmin.fields.lensnode')">
-          <BaseSelect v-model="form.lensnode_uuid" required>
-            <option value="">
-              {{ t('lensAdmin.placeholders.selectLensNode') }}
+        <FormRow :label="t('lensAdmin.fields.type')">
+          <BaseSelect v-model="form.capability" required>
+            <option value="" disabled>
+              {{ t('lensAdmin.placeholders.selectType') }}
             </option>
-            <option v-for="ln in lensnodes" :key="ln.uuid" :value="ln.uuid">
+            <option value="general_chat">
+              {{ t('lensAdmin.assistantTypes.generalChat') }}
+            </option>
+            <option value="code_analysis">
+              {{ t('lensAdmin.assistantTypes.codeAnalysis') }}
+            </option>
+            <option value="knowledge_qa">
+              {{ t('lensAdmin.assistantTypes.knowledgeQa') }}
+            </option>
+            <option
+              v-if="mode !== 'create' && form.capability === 'orchestrator'"
+              value="orchestrator"
+            >
+              {{ t('lensAdmin.assistantTypes.orchestrator') }}
+            </option>
+          </BaseSelect>
+        </FormRow>
+        <FormRow
+          v-if="requiresNodeSelection"
+          :label="t('lensAdmin.fields.lensnode')"
+        >
+          <BaseSelect
+            v-model="form.lensnode_uuid"
+            :required="requiresWorkspace"
+          >
+            <option value="">
+              {{
+                isOrchestratorTask
+                  ? t('lensAdmin.placeholders.autoAssignLensNode')
+                  : t('lensAdmin.placeholders.selectLensNode')
+              }}
+            </option>
+            <option
+              v-for="ln in compatibleLensnodes"
+              :key="ln.uuid"
+              :value="ln.uuid"
+            >
               {{ ln.name }}
             </option>
           </BaseSelect>
-        </FormRow>
-        <FormRow :label="t('lensAdmin.fields.type')">
-          <BaseSelect v-model="form.selected_task" required>
-            <option value="">
-              {{ t('lensAdmin.placeholders.selectType') }}
-            </option>
-            <option
-              v-for="task in selectedLensNodeTasks"
-              :key="task.name"
-              :value="task.name"
-              :title="task.description"
-            >
-              {{ formatAssistantType(task.name, t, task.title || task.name) }}
-            </option>
-          </BaseSelect>
+          <p
+            v-if="isOrchestratorTask"
+            class="mt-1 text-xs text-ink-500"
+          >
+            {{ t('lensAdmin.wizard.orchestratorExecutionHint') }}
+          </p>
         </FormRow>
       </div>
-      <div v-if="!isGeneralChatTask">
+      <FormRow
+        v-if="isOrchestratorTask"
+        :label="t('lensAdmin.fields.delegatedAssistants')"
+      >
+        <div class="rounded-lg border border-line bg-surface-sunken p-3">
+          <div class="mb-3 flex items-start justify-between gap-3">
+            <p class="text-xs leading-5 text-ink-500">
+              {{ t('lensAdmin.wizard.delegatedAssistantsHint') }}
+            </p>
+            <span
+              class="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-medium tabular-nums text-ink-600"
+            >
+              {{ t('lensAdmin.wizard.delegatedAssistantsSelected', {
+                count: delegatedAssistantCount
+              }) }}
+            </span>
+          </div>
+          <div
+            v-if="availableSubagents.length"
+            class="max-h-64 space-y-2 overflow-y-auto pr-1"
+          >
+          <label
+            v-for="assistant in availableSubagents"
+            :key="assistant.uuid"
+            class="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors"
+            :class="isDelegatedAssistantSelected(assistant.uuid)
+              ? 'border-brand-300 bg-brand-50'
+              : 'border-line bg-surface hover:border-brand-200 hover:bg-brand-50/40'"
+          >
+            <input
+              v-model="form.subagent_assistants"
+              type="checkbox"
+              :value="assistant.uuid"
+              class="mt-0.5 h-4 w-4 shrink-0 rounded border-line text-brand-600 focus:ring-brand-500"
+            />
+            <span class="min-w-0 flex-1">
+              <span class="flex items-center justify-between gap-3">
+                <span class="truncate font-medium text-ink-800">
+                  {{ assistant.name }}
+                </span>
+                <span
+                  class="shrink-0 rounded bg-surface-sunken px-1.5 py-0.5 text-xs text-ink-500"
+                >
+                  {{ assistantCapabilityLabel(assistant.capability) }}
+                </span>
+              </span>
+              <span class="mt-1 block line-clamp-2 text-xs leading-5 text-ink-500">
+                {{ assistant.description || t('lensAdmin.wizard.noAssistantDescription') }}
+              </span>
+            </span>
+          </label>
+          </div>
+          <p
+            v-else
+            class="rounded-md border border-dashed border-line bg-surface px-3 py-4 text-center text-sm text-ink-500"
+          >
+            {{ t('lensAdmin.wizard.noDelegatedAssistants') }}
+          </p>
+        </div>
+      </FormRow>
+      <div v-if="requiresWorkspace">
         <div class="mb-1 flex items-center justify-between">
           <span class="text-sm font-medium text-ink-700">{{
             t('lensAdmin.fields.selectedDirs')
@@ -257,13 +344,13 @@
         </div>
       </div>
       <div
-        v-else
+        v-else-if="isGeneralChatTask"
         class="rounded-md border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
       >
         {{ t('lensAdmin.wizard.generalChatExecutionHint') }}
       </div>
       <FormRow
-        v-if="!isGeneralChatTask"
+        v-if="requiresWorkspace"
         :label="t('lensAdmin.fields.retrievalPolicy')"
       >
         <div
@@ -1008,7 +1095,6 @@ import EnvironmentSetValues from './components/EnvironmentSetValues.vue'
 
 import {
   EMPTY_VALUE,
-  formatAssistantType,
   formatLLMConfigLabel
 } from './adminHelpers'
 import {
@@ -1033,6 +1119,7 @@ const props = defineProps({
   // it directly so the parent's save() can read the result unchanged.
   form: { type: Object, required: true },
   lensnodes: { type: Array, default: () => [] },
+  assistants: { type: Array, default: () => [] },
   skills: { type: Array, default: () => [] },
   environmentVariableSets: { type: Array, default: () => [] },
   mcps: { type: Array, default: () => [] },
@@ -1049,6 +1136,17 @@ const userStore = useUserStore()
 const isAdmin = computed(() => userStore.userHasFeature('admin_console'))
 
 const emptyValue = EMPTY_VALUE
+const availableSubagents = computed(() =>
+  props.assistants.filter(
+    (assistant) =>
+      assistant.uuid !== props.form.uuid &&
+      assistant.capability !== 'orchestrator' &&
+      assistant.status === 'active'
+  )
+)
+const delegatedAssistantCount = computed(
+  () => (props.form.subagent_assistants || []).length
+)
 const WIZARD_STEP_COUNT = 4
 const ACCESS_PAGE_SIZE = 20
 const SEARCH_DELAY_MS = 250
@@ -1257,12 +1355,13 @@ const canProceedWizard = computed(() => {
     )
   }
   if (wizardStep.value === 2) {
-    if (isGeneralChatTask.value) {
-      return !!props.form.lensnode_uuid && !!props.form.selected_task
+    if (!props.form.capability) return false
+    if (props.form.capability === 'orchestrator') {
+      return (props.form.subagent_assistants || []).length > 0
     }
+    if (isGeneralChatTask.value) return true
     return (
       !!props.form.lensnode_uuid &&
-      !!props.form.selected_task &&
       selectedDirs().length > 0
     )
   }
@@ -1279,19 +1378,46 @@ const canProceedWizard = computed(() => {
 })
 
 const isGeneralChatTask = computed(
-  () => props.form.selected_task === 'general_chat'
+  () => props.form.capability === 'general_chat'
 )
 
 const isCodeAnalysisTask = computed(
-  () => props.form.selected_task === 'code_analysis'
+  () => props.form.capability === 'code_analysis'
 )
 
-const selectedLensNodeTasks = computed(() => {
-  const selected = props.lensnodes.find(
-    (lensnode) => lensnode.uuid === props.form.lensnode_uuid
+const isOrchestratorTask = computed(
+  () => props.form.capability === 'orchestrator'
+)
+
+const requiresWorkspace = computed(() =>
+  ['code_analysis', 'knowledge_qa'].includes(props.form.capability)
+)
+
+const requiresNodeSelection = computed(
+  () => requiresWorkspace.value || isOrchestratorTask.value
+)
+
+watch(
+  () => props.form.capability,
+  (capability, previousCapability) => {
+    if (capability === previousCapability) return
+    if (!requiresWorkspace.value) props.form.selected_dirs = []
+    if (capability === 'general_chat') props.form.lensnode_uuid = ''
+  }
+)
+
+const compatibleLensnodes = computed(() =>
+  props.lensnodes.filter((lensnode) =>
+    (lensnode.tasks || []).some(
+      (task) =>
+        task.name === (
+          isOrchestratorTask.value
+            ? 'general_chat'
+            : props.form.capability
+        )
+    )
   )
-  return Array.isArray(selected?.tasks) ? selected.tasks : []
-})
+)
 
 const selectedLensNodeDirs = computed(() => {
   const selected = props.lensnodes.find(
@@ -1661,6 +1787,19 @@ function selectedDirs() {
   return Array.isArray(props.form.selected_dirs) ? props.form.selected_dirs : []
 }
 
+function isDelegatedAssistantSelected(uuid) {
+  return (props.form.subagent_assistants || []).includes(uuid)
+}
+
+function assistantCapabilityLabel(capability) {
+  const labels = {
+    code_analysis: 'codeAnalysis',
+    general_chat: 'generalChat',
+    knowledge_qa: 'knowledgeQa'
+  }
+  return t(`lensAdmin.assistantTypes.${labels[capability] || 'generalChat'}`)
+}
+
 const selectedDirPath = computed({
   get() {
     return selectedDirs()[0]?.path || ''
@@ -1686,36 +1825,6 @@ function updateDirScope(path, value) {
   )
 }
 
-watch(
-  () => props.form.lensnode_uuid,
-  () => {
-    if (
-      props.show &&
-      !selectedLensNodeTasks.value.some(
-        (task) => task.name === props.form.selected_task
-      )
-    ) {
-      props.form.selected_task = ''
-    }
-    ensureSelectedTask()
-  }
-)
-
-watch(
-  () => props.form.selected_task,
-  () => {
-    if (isGeneralChatTask.value) {
-      props.form.selected_dirs = []
-    }
-  }
-)
-
-function ensureSelectedTask() {
-  if (!props.show || props.form.selected_task) {
-    return
-  }
-  props.form.selected_task = selectedLensNodeTasks.value[0]?.name || ''
-}
 </script>
 
 <style scoped>

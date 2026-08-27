@@ -313,6 +313,26 @@
           </div>
           <div class="max-h-80 space-y-0.5 overflow-y-auto px-2 pb-2 pt-1">
             <button
+              type="button"
+              class="assistant-switcher-item assistant-switcher-item-smart"
+              :class="isSmartRouting ? 'assistant-switcher-item-active' : ''"
+              @click="selectSmartRouting"
+            >
+              <span
+                class="assistant-switcher-item-avatar assistant-tone-violet"
+              >
+                ✦
+              </span>
+              <span class="min-w-0 flex-1 text-left">
+                <span class="block truncate font-medium">
+                  {{ t('lens.chat.smartRouting') }}
+                </span>
+                <span class="assistant-switcher-item-description">
+                  {{ t('lens.chat.smartRoutingDescription') }}
+                </span>
+              </span>
+            </button>
+            <button
               v-for="assistant in filteredAssistants"
               :key="assistant.uuid"
               type="button"
@@ -401,8 +421,10 @@ const flyoutGridStyle = computed(() => {
 const assistants = computed(() => lensStore.activeAssistants)
 const loading = computed(() => lensStore.loading)
 const currentAssistantSlug = computed(() => route.params.slug || '')
+const isSmartRouting = computed(() => route.name === 'LensSmartChat')
 
 const currentAssistantLabel = computed(() => {
+  if (isSmartRouting.value) return t('lens.chat.smartRouting')
   const match = assistants.value.find(
     (item) => item.slug === currentAssistantSlug.value
   )
@@ -459,7 +481,7 @@ const filteredAssistants = computed(() => {
   )
 })
 
-const isVisible = computed(() => assistants.value.length > 1)
+const isVisible = computed(() => assistants.value.length > 0)
 
 const toggleOpen = () => {
   open.value = !open.value
@@ -489,6 +511,12 @@ const selectAssistant = async (slug) => {
   } catch {
     clearSwitchingState(0)
   }
+}
+
+const selectSmartRouting = async () => {
+  if (isSmartRouting.value) return
+  await router.push('/lens/chat')
+  open.value = false
 }
 
 const handleClickOutside = (event) => {

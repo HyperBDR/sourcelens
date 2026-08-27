@@ -2606,6 +2606,42 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "typed command" in prompt
 
 
+def test_smart_router_prompt_is_focused_on_routing_scope():
+    """Smart routing keeps only the necessary routing contract."""
+
+    prompt = _general_chat_system_prompt(
+        {
+            "assistant_capability": "orchestrator",
+            "subagents": [
+                {
+                    "name": "Code Reviewer",
+                    "capability": "code_analysis",
+                    "description": "Reviews the selected repository.",
+                },
+                {
+                    "name": "Data Investigator",
+                    "capability": "general_chat",
+                    "description": "Queries operational data.",
+                },
+            ],
+        }
+    )
+
+    assert "当前可委派助手" in prompt
+    assert "Code Reviewer｜代码分析" in prompt
+    assert "Data Investigator｜通用对话与已连接的 Skills" in prompt
+    assert "能力说明可直接回答" in prompt
+    assert "只说明助手集合及其能力" in prompt
+    assert "不要附加路由过程" in prompt
+    assert "未委派说明" in prompt
+    assert "不能臆称主路由" in prompt
+    assert "先检查全部已提供" in prompt
+    assert "历史消息" in prompt
+    assert "必须据此回答" in prompt
+    assert "analyze_structured_output" not in prompt
+    assert "private writable scratch directory" not in prompt
+
+
 def test_general_chat_prompt_keeps_runtime_instructions_confidential():
     prompt = _general_chat_system_prompt(
         {
@@ -4096,6 +4132,66 @@ def test_fast_subagent_inherits_runtime_extensions():
     )
 
     assert subagent["middleware"] == [runtime_extension]
+
+
+def test_orchestrator_subagent_uses_its_own_model_and_tools(monkeypatch):
+    """Configured assistants must not inherit the orchestrator toolset."""
+
+    resources = SimpleNamespace(mcp_configs=[], skill_paths=["/skills/data"])
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda command, *_args, **_kwargs: [command["task"]],
+    )
+    monkeypatch.setattr(agent_runtime, "load_mcp_tools", lambda *_args, **_kwargs: [])
+
+    class Model:
+        def __init__(self, **kwargs):
+            self.model_ref = kwargs["model_ref"]
+
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    state = SimpleNamespace(
+        run_uuid="00000000-0000-0000-0000-000000000021",
+        command={
+            "run_uuid": "00000000-0000-0000-0000-000000000021",
+            "subagents": [
+                {
+                    "uuid": "assistant-1",
+                    "name": "Production data",
+                    "description": "Query read-only production data.",
+                    "task": "general_chat",
+                    "agent_model_ref": "data-model",
+                    "loaded_skills": [],
+                    "loaded_mcps": [],
+                }
+            ],
+        },
+        cancel_event=None,
+        on_activity=None,
+        trace_context={},
+        emit_trace_observation=None,
+        trace_middleware=None,
+        subagent_resources=[],
+        emit_agent_event=lambda *_args, **_kwargs: None,
+    )
+
+    subagents = agent_runtime.LensDeepAgentRuntime(config)._build_configured_subagents(
+        state
+    )
+
+    assert subagents[0]["model"].model_ref == "data-model"
+    assert subagents[0]["tools"] == ["general_chat"]
+    assert subagents[0]["skills"] == ["/skills/data"]
 
 
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):

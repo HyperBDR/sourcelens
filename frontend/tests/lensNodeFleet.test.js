@@ -21,3 +21,14 @@ test('LensNode workload links to filtered run operations', async () => {
   assert.match(contents, /name: 'LensRunObservation'/)
   assert.match(contents, /lensnode: row\.uuid/)
 })
+
+test('LensNode list exposes readable directory and task capabilities', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="lensnode-capabilities"/)
+  assert.match(contents, /directoryCapabilityLabels/)
+  assert.match(contents, /taskCapabilityLabels/)
+  assert.match(contents, /whitespace-nowrap.*text-ink-600/)
+  assert.match(contents, /runtimeVersion/)
+  assert.match(contents, /protocolVersion/)
+})

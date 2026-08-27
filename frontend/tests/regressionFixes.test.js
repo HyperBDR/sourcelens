@@ -17,6 +17,34 @@ test('active chat run exposes a localized stop action', async () => {
   assert.equal(chinese.common.stop, '停止')
 })
 
+test('smart chat limits @ assistant mentions to the message start', async () => {
+  const [chat, submission, chinese, english] = await Promise.all([
+    source('pages/lens/Chat.vue'),
+    source('pages/lens/chatSubmission.js'),
+    source('locales/zh-CN.json').then(JSON.parse),
+    source('locales/en.json').then(JSON.parse)
+  ])
+
+  assert.match(chat, /\^@\(\[\^\\s\]\*\)/)
+  assert.match(chat, /routingAssistantUuid = mentionedAssistant\.value\.uuid/)
+  assert.match(submission, /payload\.routing_assistant_uuid = routingAssistantUuid/)
+  assert.doesNotMatch(chat, /lockMentionedAssistant/)
+  assert.match(chat, /v-if="showMentionPicker"/)
+  assert.match(chat, /messageMentionSegments\(message\.content\)/)
+  assert.match(chat, /text\.startsWith\(`@\$\{name\}`\)/)
+  assert.match(chat, /sort\(\(left, right\) => right\.length - left\.length\)/)
+  assert.match(chat, /text-blue-600/)
+  assert.match(chat, /@keydown="handleComposerKeydown"/)
+  assert.match(chat, /event\.key === 'ArrowDown'/)
+  assert.match(chat, /event\.key === 'ArrowUp'/)
+  assert.match(chat, /event\.key === 'Enter'/)
+  assert.equal(
+    chinese.lens.chat.mentionAssistantHint,
+    '输入 @ 后选择助手；选中后，仅由该助手处理本次消息。'
+  )
+  assert.match(english.lens.chat.mentionAssistantHint, /Type @/)
+})
+
 test('admin tables and assistant slugs preserve backend-compatible values', async () => {
   const [users, drawer, assistants, english, chinese] = await Promise.all([
     source('admin/pages/Management/Users.vue'),
@@ -157,6 +185,66 @@ test('assistant exposes one execution strategy without a token budget picker', a
   assert.doesNotMatch(drawer, /tokenBudgetProfiles/)
   assert.doesNotMatch(drawer, /v-model="form\.token_budget_profile"/)
   assert.doesNotMatch(drawer, /token_budget_profile:/)
+})
+
+test('orchestrator can pin its execution node without inheriting retrieval policy', async () => {
+  const drawer = await source(
+    'pages/lens/AssistantFormDrawerDirectEnvironment.vue'
+  )
+
+  assert.match(drawer, /const requiresNodeSelection = computed\(/)
+  assert.match(drawer, /requiresWorkspace\.value \|\|\s*isOrchestratorTask\.value/)
+  assert.match(drawer, /v-if="requiresNodeSelection"/)
+  assert.match(drawer, /v-else-if="isGeneralChatTask"/)
+  const retrievalStart = drawer.indexOf("t('lensAdmin.fields.retrievalPolicy')")
+  assert.notEqual(retrievalStart, -1)
+  assert.equal(
+    drawer.slice(retrievalStart - 120, retrievalStart).includes(
+      'v-if="requiresWorkspace"'
+    ),
+    true
+  )
+})
+
+test('assistant selects its type before conditional execution settings', async () => {
+  const [drawer, assistants, chinese] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('pages/lens/Assistants.vue'),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+  const firstStep = drawer.slice(
+    drawer.indexOf('<!-- Wizard Step 1'),
+    drawer.indexOf('<!-- Wizard Step 2')
+  )
+  const secondStep = drawer.slice(
+    drawer.indexOf('<!-- Wizard Step 2'),
+    drawer.indexOf('<!-- Wizard Step 3')
+  )
+
+  assert.doesNotMatch(firstStep, /v-model="form\.capability"/)
+  assert.ok(
+    secondStep.indexOf("t('lensAdmin.fields.type')") <
+      secondStep.indexOf('v-if="requiresNodeSelection"')
+  )
+  assert.match(secondStep, /lensAdmin\.placeholders\.selectType/)
+  assert.match(drawer, /if \(!props\.form\.capability\) return false/)
+  assert.match(assistants, /capability: '',/)
+  assert.match(chinese.lensAdmin.wizard.step2Desc, /先选择类型/)
+})
+
+test('delegated assistant picker exposes selection state and an empty state', async () => {
+  const [drawer, chinese] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.match(drawer, /delegatedAssistantCount/)
+  assert.match(drawer, /isDelegatedAssistantSelected/)
+  assert.match(drawer, /noDelegatedAssistants/)
+  assert.equal(
+    chinese.lensAdmin.wizard.delegatedAssistantsSelected,
+    '已选 {count} 个'
+  )
 })
 
 test('assistant Skill picker supports search and environment configuration', async () => {

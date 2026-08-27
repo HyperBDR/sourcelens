@@ -250,6 +250,7 @@ import { llmAdminApi } from '@/admin/api/llmAdmin'
 import { extractErrorMessage } from '@/utils/api'
 import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
+  createGlobalSetting,
   getSystemHealth,
   listGlobalSettings,
   updateGlobalSetting,
@@ -289,7 +290,8 @@ const defaultSettings = {
   'lensnode_cleanup.interval_seconds': 3600,
   'lensnode_health.interval_seconds': 60,
   'run_retention.interval_seconds': 86400,
-  'lens.skills.generator_model_ref': ''
+  'lens.skills.generator_model_ref': '',
+  'lens.smart_router.model_ref': ''
 }
 
 const settingsForm = ref({ ...defaultSettings })
@@ -354,6 +356,14 @@ const settingDefinitions = computed(() => {
       description: t('lensAdmin.settings.timeoutDesc'),
       type: 'number',
       unit: t('lensAdmin.settings.secondsUnit')
+    },
+    {
+      key: 'lens.smart_router.model_ref',
+      group: 'runtime',
+      label: t('lensAdmin.settings.smartRouterModelTitle'),
+      description: t('lensAdmin.settings.smartRouterModelDesc'),
+      type: 'model_ref',
+      unit: ''
     },
     {
       key: 'retention.run_days',
@@ -475,7 +485,11 @@ async function saveSettings() {
         value,
         description: setting.description
       }
-      await updateGlobalSetting(setting.key, payload)
+      if (globalSettings.value.some((item) => item.key === setting.key)) {
+        await updateGlobalSetting(setting.key, payload)
+      } else {
+        await createGlobalSetting(payload)
+      }
     }
     showSuccess(t('lensAdmin.messages.saveSuccess'))
     await load()

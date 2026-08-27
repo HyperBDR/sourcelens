@@ -418,6 +418,11 @@ def _admin_run_row(run):
             "export": True,
         },
         "planned_evidence": counts["planned_evidence"],
+        "routing_mode": runtime_snapshot.get("routing_mode") or "direct",
+        "allowed_assistant_uuids": runtime_snapshot.get(
+            "allowed_assistant_uuids", []
+        ),
+        "delegated_assistants": runtime_snapshot.get("subagents", []),
         "created_at": run.created_at.isoformat() if run.created_at else None,
     }
 
@@ -693,6 +698,7 @@ def _admin_run_detail(run):
     out = run.output_message
     assistant = run.session.assistant if run.session else None
     execution = run.execution if hasattr(run, "execution") else None
+    runtime_snapshot = execution.runtime_snapshot if execution else {}
     agent_rounds = execution.agent_rounds if execution else None
     if agent_rounds is None and assistant:
         agent_rounds = assistant.agent_rounds
@@ -774,6 +780,14 @@ def _admin_run_detail(run):
                     "task": execution.task,
                     "status": execution.status,
                     "target_dirs": execution.target_dirs,
+                    "routing_mode": runtime_snapshot.get("routing_mode")
+                    or "direct",
+                    "allowed_assistant_uuids": runtime_snapshot.get(
+                        "allowed_assistant_uuids", []
+                    ),
+                    "delegated_assistants": runtime_snapshot.get(
+                        "subagents", []
+                    ),
                     "loaded_skills": sanitize_loaded_skills(execution.loaded_skills),
                     "loaded_mcps": sanitize_loaded_mcps(execution.loaded_mcps),
                     "resource_usage": _admin_run_resource_usage(

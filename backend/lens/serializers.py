@@ -13,6 +13,8 @@ from rest_framework.exceptions import PermissionDenied
 from .assistant_lifecycle import (
     AssistantNotRunnableError,
     create_assistant_session,
+    create_smart_routing_session,
+    smart_routing_assistants,
 )
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE, AttachmentError
 from .citations import public_run_citations, sanitize_planned_evidence
@@ -220,6 +222,38 @@ class LensNodeSerializer(serializers.ModelSerializer):
             "total_tokens",
             "last_run_at",
             "registered_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "uuid",
+            "assistant",
+            "assistant_name",
+            "assistant_slug",
+            "routing_mode",
+            "routing_assistants",
+            "user",
+            "title_manually_edited",
+            "title_generation_status",
+            "pinned_at",
+            "has_shareable_answer",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "uuid",
+            "assistant",
+            "assistant_name",
+            "assistant_slug",
+            "routing_mode",
+            "routing_assistants",
+            "user",
+            "title_manually_edited",
+            "title_generation_status",
+            "pinned_at",
+            "has_shareable_answer",
+            "status",
             "created_at",
             "updated_at",
         ]
@@ -523,6 +557,11 @@ class AssistantSerializer(serializers.ModelSerializer):
     supports_document_attachments = serializers.SerializerMethodField()
     vision_model_capability = serializers.SerializerMethodField()
     can_process_images = serializers.SerializerMethodField()
+    subagent_assistants = serializers.ListField(
+        child=serializers.UUIDField(), required=False, write_only=True
+    )
+    kind = serializers.CharField(required=False, write_only=True)
+    selected_task = serializers.CharField(required=False, write_only=True)
 
     class Meta:
         model = Assistant
@@ -530,10 +569,10 @@ class AssistantSerializer(serializers.ModelSerializer):
             "uuid",
             "name",
             "description",
+            "capability",
             "slug",
             "lensnode",
             "lensnode_uuid",
-            "selected_task",
             "selected_dirs",
             "multimodal_model_ref",
             "agent_model_ref",
@@ -547,6 +586,9 @@ class AssistantSerializer(serializers.ModelSerializer):
             "mcp_bindings",
             "access_grants",
             "workspace_guide",
+            "subagent_assistants",
+            "kind",
+            "selected_task",
             "skill_summary",
             "mcp_summary",
             "supports_document_attachments",
@@ -604,16 +646,50 @@ class AssistantSerializer(serializers.ModelSerializer):
             "enabled": enabled,
         }
 
+    def to_internal_value(self, data):
+        """Accept legacy type inputs without exposing duplicate fields."""
+
+        normalized = data.copy()
+        legacy_task_input = (
+            not normalized.get("capability")
+            and not normalized.get("kind")
+            and bool(normalized.get("selected_task"))
+        )
+        capability = normalized.get("capability")
+        if not capability:
+            capability = normalized.get("kind") or normalized.get(
+                "selected_task"
+            )
+        if capability == "standard":
+            capability = normalized.get("selected_task") or "general_chat"
+        if capability == "qa":
+            capability = "knowledge_qa"
+        if capability:
+            normalized["capability"] = capability
+        try:
+            return super().to_internal_value(normalized)
+        except serializers.ValidationError as exc:
+            if legacy_task_input and "capability" in exc.detail:
+                detail = dict(exc.detail)
+                detail["selected_task"] = detail.pop("capability")
+                raise serializers.ValidationError(detail) from exc
+            raise
+
     def to_representation(self, instance):
         """Return assistant data including generated Workspace Guide state."""
 
         data = super().to_representation(instance)
         data["workspace_guide"] = get_workspace_guide_payload(instance)
+        data["subagent_assistants"] = list(
+            instance.subagent_assistant_uuids or []
+        )
         return data
 
     def validate(self, attrs):
-        """Validate selected task and directories against LensNode reports."""
+        """Validate capability, node, directory, and delegation settings."""
 
+        attrs.pop("kind", None)
+        attrs.pop("selected_task", None)
         lensnode_uuid = attrs.pop("lensnode_uuid", None)
         if lensnode_uuid is not None:
             attrs["lensnode"] = LensNode.objects.get(uuid=lensnode_uuid)
@@ -621,25 +697,95 @@ class AssistantSerializer(serializers.ModelSerializer):
             "lensnode",
             getattr(self.instance, "lensnode", None),
         )
-        if lensnode is None:
-            raise serializers.ValidationError(
-                {"lensnode_uuid": "lensnode_uuid is required"}
-            )
-
-        selected_task = attrs.get(
-            "selected_task",
-            getattr(self.instance, "selected_task", ""),
+        capability = attrs.get(
+            "capability",
+            getattr(
+                self.instance,
+                "capability",
+                Assistant.Capability.GENERAL_CHAT,
+            ),
         )
-        if selected_task not in _task_names(lensnode):
+        if (
+            capability == Assistant.Capability.ORCHESTRATOR
+            and self.instance is None
+            and self.context.get("request") is not None
+        ):
             raise serializers.ValidationError(
-                {"selected_task": "selected_task is not available on LensNode"}
+                {
+                    "capability": (
+                        "Orchestrator assistants are system-managed; "
+                        "use a smart-routing session instead."
+                    )
+                }
+            )
+        subagents = attrs.get(
+            "subagent_assistants",
+            getattr(self.instance, "subagent_assistant_uuids", []),
+        )
+        if capability == Assistant.Capability.ORCHESTRATOR:
+            if not subagents:
+                raise serializers.ValidationError(
+                    {
+                        "subagent_assistants": (
+                            "At least one assistant is required."
+                        )
+                    }
+                )
+            if self.instance is not None and self.instance.uuid in subagents:
+                raise serializers.ValidationError(
+                    {
+                        "subagent_assistants": (
+                            "An assistant cannot delegate to itself."
+                        )
+                    }
+                )
+            found = set(
+                Assistant.objects.filter(
+                    uuid__in=subagents,
+                    capability__in=[
+                        Assistant.Capability.GENERAL_CHAT,
+                        Assistant.Capability.CODE_ANALYSIS,
+                        Assistant.Capability.KNOWLEDGE_QA,
+                    ],
+                    status=Assistant.Status.ACTIVE,
+                ).values_list("uuid", flat=True)
+            )
+            if len(found) != len(set(subagents)):
+                raise serializers.ValidationError(
+                    {"subagent_assistants": "Unknown assistant UUID."}
+                )
+        else:
+            attrs["subagent_assistants"] = []
+        requires_workspace = capability in {
+            Assistant.Capability.CODE_ANALYSIS,
+            Assistant.Capability.KNOWLEDGE_QA,
+        }
+        allows_bound_lensnode = requires_workspace or (
+            capability == Assistant.Capability.ORCHESTRATOR
+        )
+        if not allows_bound_lensnode:
+            attrs["lensnode"] = None
+            lensnode = None
+        if requires_workspace and lensnode is None:
+            raise serializers.ValidationError(
+                {"lensnode_uuid": "A LensNode is required."}
+            )
+        execution_capability = capability
+        if capability == Assistant.Capability.ORCHESTRATOR:
+            execution_capability = Assistant.Capability.GENERAL_CHAT
+        if (
+            lensnode is not None
+            and execution_capability not in _task_names(lensnode)
+        ):
+            raise serializers.ValidationError(
+                {"capability": "capability is not available on LensNode"}
             )
 
         selected_dirs = attrs.get(
             "selected_dirs",
             getattr(self.instance, "selected_dirs", []),
         )
-        if selected_task == "general_chat":
+        if not requires_workspace:
             attrs["selected_dirs"] = []
             skill_bindings = attrs.get("skill_bindings")
             if skill_bindings is None and self.instance is not None:
@@ -657,7 +803,10 @@ class AssistantSerializer(serializers.ModelSerializer):
                     uuid__in=enabled_skill_uuids,
                     enabled=True,
                 ).exists()
-            if not has_enabled_skill:
+            if (
+                not has_enabled_skill
+                and capability != Assistant.Capability.ORCHESTRATOR
+            ):
                 raise serializers.ValidationError(
                     {
                         "skill_bindings": (
@@ -665,8 +814,17 @@ class AssistantSerializer(serializers.ModelSerializer):
                         )
                     }
                 )
-        else:
+        elif lensnode is not None:
             validate_selected_dirs(selected_dirs, lensnode)
+        elif selected_dirs:
+            raise serializers.ValidationError(
+                {
+                    "selected_dirs": (
+                        "Auto-scheduled assistants cannot select node-local "
+                        "directories."
+                    )
+                }
+            )
         settings = attrs.get(
             "settings",
             getattr(self.instance, "settings", {}),
@@ -846,6 +1004,10 @@ class AssistantSerializer(serializers.ModelSerializer):
         mcp_bindings = validated_data.pop("mcp_bindings", None)
         access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
+        subagents = validated_data.pop("subagent_assistants", [])
+        validated_data["subagent_assistant_uuids"] = [
+            str(item) for item in subagents
+        ]
         assistant = Assistant.objects.create(**validated_data)
         self._sync_bindings(
             assistant,
@@ -865,6 +1027,11 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
+        if "subagent_assistants" in validated_data:
+            subagents = validated_data.pop("subagent_assistants")
+            validated_data["subagent_assistant_uuids"] = [
+                str(item) for item in subagents
+            ]
         self._sync_bindings(instance, validated_data)
         assistant = super().update(instance, validated_data)
         self._sync_access_grants(assistant, access_grants)
@@ -2413,6 +2580,7 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
                 )
 
         model_ref_keys = {
+            "lens.smart_router.model_ref": "model_ref",
             "lens.skills.generator_model_ref": "generator_model_ref",
             "lens.datasource_conversion.vision_model_ref": (
                 "vision_model_ref"
@@ -2845,6 +3013,7 @@ class SessionSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     has_shareable_answer = serializers.SerializerMethodField()
+    routing_assistants = serializers.SerializerMethodField()
 
     class Meta:
         model = Session
@@ -2853,6 +3022,9 @@ class SessionSerializer(serializers.ModelSerializer):
             "assistant",
             "assistant_name",
             "assistant_slug",
+            "routing_mode",
+            "allowed_assistant_uuids",
+            "routing_assistants",
             "user",
             "title",
             "title_manually_edited",
@@ -2863,16 +3035,24 @@ class SessionSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = [
-            "uuid",
-            "user",
-            "title_manually_edited",
-            "title_generation_status",
-            "pinned_at",
-            "has_shareable_answer",
-            "status",
-            "created_at",
-            "updated_at",
+
+    def get_routing_assistants(self, obj):
+        """Return the frozen assistant range for a smart-routing session."""
+
+        if obj.routing_mode != Session.RoutingMode.SMART:
+            return []
+        selected = {
+            str(value) for value in (obj.allowed_assistant_uuids or [])
+        }
+        return [
+            {
+                "uuid": str(item.uuid),
+                "name": item.name,
+                "capability": item.capability,
+            }
+            for item in Assistant.objects.filter(uuid__in=selected)
+            .exclude(is_system=True)
+            .order_by("name")
         ]
 
     def validate_title(self, value):
@@ -2882,6 +3062,24 @@ class SessionSerializer(serializers.ModelSerializer):
         if not title:
             raise serializers.ValidationError("SESSION_TITLE_REQUIRED")
         return title
+
+    def validate_allowed_assistant_uuids(self, value):
+        """Keep a smart-routing range inside the current user's access."""
+
+        if self.instance is None:
+            return value
+        if self.instance.routing_mode != Session.RoutingMode.SMART:
+            raise serializers.ValidationError("Only smart sessions support this.")
+        try:
+            assistants = smart_routing_assistants(
+                self.context["request"].user,
+                value,
+            )
+        except AssistantNotRunnableError as exc:
+            raise serializers.ValidationError(
+                "Each assistant must be active and accessible."
+            ) from exc
+        return [str(item.uuid) for item in assistants]
 
     def get_has_shareable_answer(self, obj):
         """Return the list annotation or calculate the fallback value."""
@@ -2908,7 +3106,14 @@ class SessionSerializer(serializers.ModelSerializer):
 class SessionCreateSerializer(serializers.Serializer):
     """Session creation payload."""
 
-    assistant_uuid = serializers.UUIDField()
+    assistant_uuid = serializers.UUIDField(required=False)
+    routing_mode = serializers.ChoiceField(
+        choices=Session.RoutingMode.choices,
+        default=Session.RoutingMode.DIRECT,
+    )
+    allowed_assistant_uuids = serializers.ListField(
+        child=serializers.UUIDField(), required=False, default=list
+    )
     title = serializers.CharField(
         required=False,
         allow_blank=True,
@@ -2918,6 +3123,12 @@ class SessionCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         request = self.context["request"]
         try:
+            if validated_data["routing_mode"] == Session.RoutingMode.SMART:
+                return create_smart_routing_session(
+                    request.user,
+                    validated_data.get("title", ""),
+                    validated_data.get("allowed_assistant_uuids", []),
+                )
             return create_assistant_session(
                 validated_data["assistant_uuid"],
                 request.user,
@@ -2927,6 +3138,18 @@ class SessionCreateSerializer(serializers.Serializer):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
+
+    def validate(self, attrs):
+        """Require exactly the fields used by the selected routing mode."""
+
+        if attrs["routing_mode"] == Session.RoutingMode.DIRECT:
+            if not attrs.get("assistant_uuid"):
+                raise serializers.ValidationError(
+                    {"assistant_uuid": "This field is required."}
+                )
+        else:
+            attrs.pop("assistant_uuid", None)
+        return attrs
 
 
 class RunCreateSerializer(serializers.Serializer):
@@ -2951,6 +3174,7 @@ class RunCreateSerializer(serializers.Serializer):
         required=False,
         default=list,
     )
+    routing_assistant_uuid = serializers.UUIDField(required=False)
 
     def validate(self, attrs):
         """Require text or an attachment, and cap attachment count."""
@@ -2970,6 +3194,29 @@ class RunCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Attachment UUIDs must be unique."
             )
+        routing_assistant_uuid = attrs.get("routing_assistant_uuid")
+        if routing_assistant_uuid is not None:
+            session = self.context["session"]
+            if session.routing_mode != Session.RoutingMode.SMART:
+                raise serializers.ValidationError(
+                    {"routing_assistant_uuid": "Only smart sessions support this."}
+                )
+            if str(routing_assistant_uuid) not in {
+                str(value)
+                for value in (session.allowed_assistant_uuids or [])
+            }:
+                raise serializers.ValidationError(
+                    {"routing_assistant_uuid": "Assistant is outside this session's allowed range."}
+                )
+            try:
+                smart_routing_assistants(
+                    self.context["request"].user,
+                    [routing_assistant_uuid],
+                )
+            except AssistantNotRunnableError as exc:
+                raise serializers.ValidationError(
+                    {"routing_assistant_uuid": "Assistant is unavailable."}
+                ) from exc
         retry_uuid = attrs.get("retry_of_run_uuid")
         if retry_uuid is not None:
             try:
@@ -3000,6 +3247,9 @@ class RunCreateSerializer(serializers.Serializer):
                     for value in validated_data.get("attachment_uuids", [])
                 ],
                 user=request.user if request else None,
+                routing_assistant_uuid=validated_data.get(
+                    "routing_assistant_uuid"
+                ),
             )
         except AssistantNotRunnableError:
             raise PermissionDenied(

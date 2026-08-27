@@ -312,6 +312,60 @@
             >
               {{ assistantDescription }}
             </p>
+            <div
+              v-if="isSmartRoutingConversation && selectedSession"
+              class="relative mt-2"
+            >
+              <button
+                type="button"
+                class="rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-600 hover:border-brand-300 hover:text-brand-700"
+                @click="openRoutingScope"
+              >
+                {{ t('lens.chat.participatingAssistants', {
+                  count: selectedSession.allowed_assistant_uuids?.length || 0
+                }) }}
+              </button>
+              <div
+                v-if="routingScopeOpen"
+                class="absolute left-0 z-20 mt-2 w-80 rounded-lg border border-line bg-surface p-3 shadow-lg"
+              >
+                <p class="text-xs leading-5 text-ink-500">
+                  {{ t('lens.chat.participatingAssistantsHint') }}
+                </p>
+                <div class="mt-2 max-h-56 space-y-1 overflow-y-auto">
+                  <label
+                    v-for="assistant in routingCandidates"
+                    :key="assistant.uuid"
+                    class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-sunken"
+                  >
+                    <input
+                      v-model="routingScopeDraft"
+                      type="checkbox"
+                      :value="assistant.uuid"
+                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
+                    />
+                    <span class="min-w-0 flex-1 truncate">{{ assistant.name }}</span>
+                    <span class="text-xs text-ink-500">{{ assistantCapabilityLabel(assistant.capability) }}</span>
+                  </label>
+                </div>
+                <div class="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    class="rounded px-2 py-1 text-xs text-ink-600 hover:bg-surface-sunken"
+                    @click="routingScopeOpen = false"
+                  >
+                    {{ t('common.cancel') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded bg-brand-600 px-2 py-1 text-xs font-medium text-white hover:bg-brand-700"
+                    @click="saveRoutingScope"
+                  >
+                    {{ t('common.save') }}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
           <router-link
             v-if="assistantSlug"
@@ -723,7 +777,16 @@
                       </button>
                     </div>
                     <div v-if="message.content" class="message-text">
-                      {{ message.content }}
+                      <template
+                        v-for="(segment, index) in messageMentionSegments(message.content)"
+                        :key="`${message.uuid || 'message'}-${index}`"
+                      >
+                        <span
+                          v-if="segment.mentioned"
+                          class="font-semibold text-blue-600"
+                        >{{ segment.text }}</span>
+                        <span v-else>{{ segment.text }}</span>
+                      </template>
                     </div>
                   </template>
                   <MessageCitations
@@ -1400,7 +1463,7 @@
           :class="{ 'composer-wrap-empty': isEmptyConversation }"
         >
           <div class="composer-inner">
-            <div class="composer-shell">
+            <div class="composer-shell relative">
               <div v-if="attachments.length" class="composer-attachments">
                 <div
                   v-for="item in attachments"
@@ -1450,6 +1513,56 @@
                   {{ suggestion }}
                 </button>
               </div>
+              <div
+                v-if="mentionedAssistant"
+                class="mb-2 flex items-center justify-between rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800"
+              >
+                <span>
+                  <span class="font-semibold text-blue-600">
+                    @{{ mentionedAssistant.name }}
+                  </span>
+                  <span class="ml-1">
+                    {{ t('lens.chat.mentioningAssistantSuffix') }}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="rounded px-1.5 py-0.5 text-xs font-medium hover:bg-brand-100"
+                  @click="clearAssistantMention"
+                >
+                  {{ t('lens.chat.clearAssistantMention') }}
+                </button>
+              </div>
+              <div
+                v-if="showMentionPicker"
+                class="absolute bottom-full left-0 z-20 mb-3 w-full max-w-md overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
+              >
+                <div class="border-b border-line px-3 py-2 text-xs text-ink-500">
+                  {{ t('lens.chat.mentionAssistantHint') }}
+                </div>
+                <button
+                  v-for="(assistant, index) in mentionCandidates"
+                  :key="assistant.uuid"
+                  type="button"
+                  class="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-sunken"
+                  :class="{ 'bg-surface-sunken': index === mentionActiveIndex }"
+                  @mousedown.prevent
+                  @click="selectAssistantMention(assistant)"
+                >
+                  <span class="min-w-0 flex-1 truncate text-sm font-medium text-ink-800">
+                    {{ assistant.name }}
+                  </span>
+                  <span class="shrink-0 text-xs text-ink-500">
+                    {{ assistantCapabilityLabel(assistant.capability) }}
+                  </span>
+                </button>
+                <p
+                  v-if="!mentionCandidates.length"
+                  class="px-3 py-3 text-sm text-ink-500"
+                >
+                  {{ t('lens.chat.mentionAssistantEmpty') }}
+                </p>
+              </div>
               <div class="composer">
                 <input
                   ref="fileInput"
@@ -1487,10 +1600,10 @@
                   class="composer-input"
                   rows="1"
                   :placeholder="t('lens.chat.questionPlaceholder')"
-                  @keydown.enter.exact.prevent="insertNewline"
+                  @keydown="handleComposerKeydown"
                   @keydown.ctrl.enter.exact.prevent="handlePrimaryAction"
                   @paste="onComposerPaste"
-                  @input="autoResizeTextarea"
+                  @input="handleComposerInput"
                 />
                 <button
                   class="composer-action-btn"
@@ -1829,6 +1942,13 @@ const mySharesOpen = ref(false)
 // False until the current bootstrap settles, so the view can distinguish
 // "still loading" from "loaded, but no assistant to show".
 const booted = ref(false)
+const routingScopeOpen = ref(false)
+const routingScopeDraft = ref([])
+const mentionedAssistantUuid = ref('')
+const mentionActiveIndex = ref(0)
+const isSmartRoutingConversation = computed(
+  () => route.name === 'LensSmartChat'
+)
 
 const selectedAssistant = computed(
   () =>
@@ -1846,6 +1966,50 @@ const selectedSession = computed(
 const selectedSessionArchived = computed(
   () => selectedSession.value?.status === 'archived'
 )
+
+const routingCandidates = computed(() =>
+  assistants.value.filter((assistant) => assistant.status === 'active')
+)
+
+const mentionToken = computed(() => {
+  if (!isSmartRoutingConversation.value) return null
+  return /^@([^\s]*)/.exec(question.value)
+})
+
+const mentionCandidates = computed(() => {
+  const allowed = new Set(
+    selectedSession.value?.allowed_assistant_uuids ||
+      routingCandidates.value.map((assistant) => assistant.uuid)
+  )
+  const query = (mentionToken.value?.[1] || '').toLocaleLowerCase()
+  return routingCandidates.value.filter(
+    (assistant) =>
+      allowed.has(assistant.uuid) &&
+      assistant.name.toLocaleLowerCase().includes(query)
+  )
+})
+
+const mentionedAssistant = computed(
+  () =>
+    routingCandidates.value.find(
+      (assistant) => assistant.uuid === mentionedAssistantUuid.value
+    ) || null
+)
+
+const showMentionPicker = computed(
+  () => !!mentionToken.value && !mentionedAssistant.value
+)
+
+watch(mentionCandidates, (candidates) => {
+  if (!candidates.length) {
+    mentionActiveIndex.value = 0
+    return
+  }
+  mentionActiveIndex.value = Math.min(
+    mentionActiveIndex.value,
+    candidates.length - 1
+  )
+})
 
 const isAnonymous = computed(() => !userStore.isAuthenticated)
 
@@ -1899,7 +2063,9 @@ const canSubmit = computed(() => {
 })
 
 const hasAssistant = computed(() =>
-  isAnonymous.value ? !!publicAssistant.value : !!selectedAssistantUuid.value
+  isAnonymous.value
+    ? !!publicAssistant.value
+    : isSmartRoutingConversation.value || !!selectedAssistantUuid.value
 )
 
 const canCompose = computed(
@@ -1915,11 +2081,16 @@ const emptyVariant = computed(() =>
 )
 
 const assistantName = computed(
-  () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
+  () => isSmartRoutingConversation.value
+    ? t('lens.chat.smartRouting')
+    : selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
 const assistantDescription = computed(
   () =>
+    (isSmartRoutingConversation.value
+      ? t('lens.chat.smartRoutingDescription')
+      : '') ||
     selectedAssistant.value?.description?.trim() ||
     publicAssistant.value?.description?.trim() ||
     ''
@@ -1943,7 +2114,7 @@ const isGeneralChatAssistant = computed(
 const switchable = computed(
   () =>
     !isAnonymous.value &&
-    assistants.value.filter((item) => item.status === 'active').length > 1
+    assistants.value.filter((item) => item.status === 'active').length > 0
 )
 
 // Slug of the assistant in view — drives the public Q&A list entry in the
@@ -1963,6 +2134,122 @@ function handleSidebarLogoClick() {
     sidebarOpen.value = false
   }
   router.push('/dashboard')
+}
+
+function assistantCapabilityLabel(capability) {
+  const labels = {
+    code_analysis: 'codeAnalysis',
+    general_chat: 'generalChat',
+    knowledge_qa: 'knowledgeQa'
+  }
+  return t(`lens.chat.assistantTypes.${labels[capability] || 'generalChat'}`)
+}
+
+function messageMentionSegments(content) {
+  const text = String(content || '')
+  const names = assistants.value
+    .map((assistant) => String(assistant.name || '').trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+  const mention = names.find(
+    (name) => text.startsWith(`@${name}`) &&
+      (text.length === name.length + 1 || /\s/.test(text[name.length + 1]))
+  )
+  if (!mention) return [{ text, mentioned: false }]
+  const match = `@${mention}`
+  return [
+    { text: match, mentioned: true },
+    { text: text.slice(match.length), mentioned: false }
+  ]
+}
+
+function openRoutingScope() {
+  routingScopeDraft.value = [
+    ...(selectedSession.value?.allowed_assistant_uuids || [])
+  ]
+  routingScopeOpen.value = true
+}
+
+function selectAssistantMention(assistant) {
+  const token = mentionToken.value?.[0] || '@'
+  const remainder = question.value.slice(token.length).trimStart()
+  question.value = `@${assistant.name}${remainder ? ` ${remainder}` : ' '}`
+  mentionedAssistantUuid.value = assistant.uuid
+  nextTick(() => composerRef.value?.focus())
+}
+
+function clearAssistantMention() {
+  const prefix = mentionedAssistant.value
+    ? `@${mentionedAssistant.value.name}`
+    : mentionToken.value?.[0] || ''
+  question.value = question.value.startsWith(prefix)
+    ? question.value.slice(prefix.length).trimStart()
+    : question.value
+  mentionedAssistantUuid.value = ''
+  nextTick(() => composerRef.value?.focus())
+}
+
+function handleComposerInput(event) {
+  const mentionPrefix = mentionedAssistant.value
+    ? `@${mentionedAssistant.value.name}`
+    : ''
+  if (!mentionPrefix || !question.value.startsWith(mentionPrefix)) {
+    mentionedAssistantUuid.value = ''
+  }
+  if (mentionToken.value) mentionActiveIndex.value = 0
+  autoResizeTextarea(event)
+}
+
+function moveMentionSelection(direction) {
+  if (!showMentionPicker.value || !mentionCandidates.value.length) return
+  const count = mentionCandidates.value.length
+  mentionActiveIndex.value =
+    (mentionActiveIndex.value + direction + count) % count
+}
+
+function handleComposerKeydown(event) {
+  if (event.ctrlKey || event.metaKey) return
+  if (showMentionPicker.value && mentionCandidates.value.length) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      moveMentionSelection(1)
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveMentionSelection(-1)
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      selectAssistantMention(
+        mentionCandidates.value[mentionActiveIndex.value]
+      )
+      return
+    }
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    insertNewline()
+  }
+}
+
+async function saveRoutingScope() {
+  if (!selectedSession.value || !routingScopeDraft.value.length) {
+    showWarning(t('lens.chat.participatingAssistantsRequired'))
+    return
+  }
+  try {
+    const updated = await updateSession(selectedSession.value.uuid, {
+      allowed_assistant_uuids: routingScopeDraft.value
+    })
+    sessions.value = sessions.value.map((session) =>
+      session.uuid === updated.uuid ? updated : session
+    )
+    routingScopeOpen.value = false
+  } catch {
+    showError(t('lens.chat.participatingAssistantsSaveFailed'))
+  }
 }
 
 const isRunActive = computed(() =>
@@ -2712,6 +2999,14 @@ async function bootstrap() {
     // renders immediately (no flash) and skips its own redundant fetch.
     lensStore.assistants = assistants.value
 
+    if (isSmartRoutingConversation.value) {
+      selectedAssistantUuid.value = ''
+      await loadMyShareState()
+      await loadSessions()
+      booted.value = true
+      return
+    }
+
     const current =
       assistants.value.find((item) => item.slug === route.params.slug) ||
       assistants.value[0]
@@ -2773,11 +3068,12 @@ async function loadMyShareState() {
 }
 
 async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
-  if (!selectedAssistant.value) {
+  if (!selectedAssistant.value && !isSmartRoutingConversation.value) {
     return
   }
 
-  sessions.value = await listSessions(selectedAssistant.value.slug, {
+  sessions.value = await listSessions(selectedAssistant.value?.slug || '', {
+    routingMode: isSmartRoutingConversation.value ? 'smart' : '',
     archived: showArchivedSessions.value
   })
 
@@ -2800,7 +3096,7 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
 }
 
 async function createNewSession(notify = true) {
-  if (!selectedAssistant.value) {
+  if (!selectedAssistant.value && !isSmartRoutingConversation.value) {
     return null
   }
   mySharesOpen.value = false
@@ -2812,10 +3108,11 @@ async function createNewSession(notify = true) {
 
   let session
   try {
-    session = await createSession({
-      assistant_uuid: selectedAssistant.value.uuid,
-      title: ''
-    })
+    session = await createSession(
+      isSmartRoutingConversation.value
+        ? { routing_mode: 'smart', title: '' }
+        : { assistant_uuid: selectedAssistant.value.uuid, title: '' }
+    )
   } catch {
     showError(t('lens.chat.sessionCreateFailed'))
     return null
@@ -3534,7 +3831,19 @@ async function submit() {
   // not a failure, so we must not restore the draft, alarm the user, or write
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
+  let routingAssistantUuid = ''
+  if (isSmartRoutingConversation.value && mentionToken.value) {
+    if (!mentionedAssistant.value) {
+      showWarning(t('lens.chat.mentionAssistantRequired'))
+      loading.value.run = false
+      return
+    }
+    routingAssistantUuid = mentionedAssistant.value.uuid
+  }
   let submissionText = trimmedDraft
+  if (routingAssistantUuid) {
+    mentionedAssistantUuid.value = ''
+  }
   let oversizedAttachment = null
   if (oversizedFile) {
     const uploaded = await addAttachment(oversizedFile)
@@ -3562,6 +3871,7 @@ async function submit() {
     sessionUuid: sessionAtSubmit,
     question: optimisticText,
     attachmentUuids,
+    routingAssistantUuid,
     retryDraft: retryDraftAtSubmit,
     pendingSubmission: pendingRunSubmission.value
   })
@@ -4036,8 +4346,9 @@ watch(
   () => route.query.session,
   (sessionUuid) => {
     if (
-      route.name !== 'LensAssistantChat' ||
-      route.params.slug !== selectedAssistant.value?.slug ||
+      !['LensAssistantChat', 'LensSmartChat'].includes(route.name) ||
+      (!isSmartRoutingConversation.value &&
+        route.params.slug !== selectedAssistant.value?.slug) ||
       !sessionUuid ||
       sessionUuid === selectedSessionUuid.value
     ) {
@@ -4051,7 +4362,7 @@ watch(
 )
 
 watch(
-  () => route.params.slug,
+  () => [route.name, route.params.slug],
   () => {
     // On a hard load with a stored token, defer the first bootstrap to
     // onMounted so it runs after the user is hydrated — avoids a flash of

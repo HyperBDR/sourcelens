@@ -222,7 +222,8 @@ export async function revokeLensNodeToken(uuid) {
 export async function listSessions(assistantSlug = '', options = {}) {
   const params = {
     ...(assistantSlug ? { assistant_slug: assistantSlug } : {}),
-    ...(options.archived ? { archived: true } : {})
+    ...(options.archived ? { archived: true } : {}),
+    ...(options.routingMode ? { routing_mode: options.routingMode } : {})
   }
   const response = await api.get('/lens/sessions/', { params })
   return unwrapList(unwrapResponse(response))

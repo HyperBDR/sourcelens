@@ -123,6 +123,9 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         assistant_slug = self.request.query_params.get("assistant_slug")
         if assistant_slug:
             queryset = queryset.filter(assistant__slug=assistant_slug)
+        routing_mode = self.request.query_params.get("routing_mode")
+        if routing_mode:
+            queryset = queryset.filter(routing_mode=routing_mode)
         queryset = queryset.filter(user=self.request.user)
         if self.action == "list":
             archived = self.request.query_params.get("archived", "").lower()
@@ -294,7 +297,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         if uploaded is None:
             raise ValidationError("No file provided.")
         is_document = is_document_upload(uploaded)
-        if is_document and session.assistant.selected_task == "general_chat":
+        if is_document and session.assistant.capability == "general_chat":
             raise ValidationError(
                 "This assistant does not accept document attachments."
             )

@@ -140,7 +140,7 @@ def load_config():
         ),
         workspace_path=os.getenv("LENSNODE_WORKSPACE_PATH", "/workspace"),
         protocol_version=os.getenv("LENSNODE_PROTOCOL_VERSION", "v1"),
-        agent_version=os.getenv("LENSNODE_AGENT_VERSION", "0.1.0"),
+        agent_version=os.getenv("LENSNODE_AGENT_VERSION", "dev"),
         heartbeat_interval_s=int(
             os.getenv("LENSNODE_HEARTBEAT_INTERVAL_S", "15")
         ),
