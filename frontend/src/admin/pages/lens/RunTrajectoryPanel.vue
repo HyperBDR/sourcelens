@@ -441,7 +441,8 @@ import {
 
 const props = defineProps({
   runUuid: { type: String, default: '' },
-  active: { type: Boolean, default: false }
+  active: { type: Boolean, default: false },
+  runStatus: { type: String, default: '' }
 })
 
 const { t } = useI18n()
@@ -465,6 +466,7 @@ const resizeActive = ref(false)
 const showSnapshots = ref(false)
 
 let filterTimer = null
+let refreshTimer = null
 let requestId = 0
 let resizeOriginX = 0
 let resizeOriginWidth = 0
@@ -507,6 +509,8 @@ const KIND_LABEL = {
   cancelled: 'CANCELLED',
   step: 'STEP'
 }
+
+const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'streaming'])
 
 const categoryOptions = computed(() => {
   const counts = summary.value.categories || {}
@@ -851,8 +855,17 @@ async function fetchTrajectory(append = false) {
     showError(extractErrorMessage(error, t('common.error')))
     hasMore.value = false
   } finally {
-    if (currentRequestId === requestId) loading.value = false
+    if (currentRequestId === requestId) {
+      loading.value = false
+      scheduleRefresh()
+    }
   }
+}
+
+function scheduleRefresh() {
+  clearTimeout(refreshTimer)
+  if (!props.active || !ACTIVE_RUN_STATUSES.has(props.runStatus)) return
+  refreshTimer = setTimeout(() => fetchTrajectory(true), 2000)
 }
 
 function reset() {
@@ -897,14 +910,21 @@ watch(filteredEvents, (filtered) => {
 })
 
 watch(
-  () => props.active,
-  (active) => {
-    if (active && events.value.length === 0) fetchTrajectory()
+  [() => props.active, () => props.runStatus],
+  ([active]) => {
+    if (active && events.value.length === 0) {
+      fetchTrajectory()
+      return
+    }
+    scheduleRefresh()
   },
   { immediate: true }
 )
 
-onBeforeUnmount(() => clearTimeout(filterTimer))
+onBeforeUnmount(() => {
+  clearTimeout(filterTimer)
+  clearTimeout(refreshTimer)
+})
 </script>
 
 <style scoped>

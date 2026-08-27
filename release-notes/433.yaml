@@ -1,0 +1,4 @@
+type: fix
+audience: user
+en: Fixed account action menu visibility when the chat sidebar is collapsed.
+zh-CN: 修复聊天侧边栏折叠时账户操作菜单不可见的问题。

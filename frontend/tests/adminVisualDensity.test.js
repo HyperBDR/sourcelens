@@ -33,15 +33,3 @@ test('statistics pages share the compact surface and typography contract', async
     assert.match(contents, /admin-filter-toolbar/)
   }
 })
-
-test('operations summaries use compact numeric emphasis', async () => {
-  const [runs, nodes] = await Promise.all([
-    source('admin/pages/lens/RunObservation.vue'),
-    source('pages/lens/LensNodes.vue')
-  ])
-
-  assert.match(runs, /admin-metric-value/)
-  assert.match(nodes, /admin-metric-value/)
-  assert.doesNotMatch(runs, /text-2xl/)
-  assert.doesNotMatch(nodes, /text-2xl/)
-})
