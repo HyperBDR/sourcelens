@@ -51,7 +51,7 @@
               </p>
             </div>
             <div class="text-right">
-              <div class="text-2xl font-semibold tabular-nums text-ink-900">
+              <div class="admin-metric-value">
                 {{ formatOperationMetric(totalFleetNodes) }}
               </div>
               <div class="text-xs text-ink-500">
@@ -84,9 +84,7 @@
                     />
                     {{ item.label }}
                   </div>
-                  <div
-                    class="mt-1 text-lg font-semibold tabular-nums text-ink-900"
-                  >
+                  <div class="admin-metric-value mt-1">
                     {{ formatOperationMetric(item.value) }}
                   </div>
                 </div>
@@ -99,9 +97,7 @@
               <div class="mt-3 grid grid-cols-3 gap-3">
                 <div v-for="item in workloadSummary" :key="item.label">
                   <div class="text-xs text-ink-500">{{ item.label }}</div>
-                  <div
-                    class="mt-1 text-lg font-semibold tabular-nums text-ink-900"
-                  >
+                  <div class="admin-metric-value mt-1">
                     {{ formatOperationMetric(item.value) }}
                   </div>
                   <div class="mt-1 text-[11px] text-ink-400">
