@@ -115,6 +115,7 @@ class LensNodeClient:
         )
         self._outbox_dropped = 0
         self._pending_trace_frames = collections.OrderedDict()
+        self._pending_terminal_frames = collections.OrderedDict()
 
     def _enqueue(self, payload):
         """Append an outbound frame to the durable outbox.
@@ -138,6 +139,12 @@ class LensNodeClient:
                     self._pending_trace_frames.move_to_end(key)
             while len(self._pending_trace_frames) > self._outbox_max:
                 self._pending_trace_frames.popitem(last=False)
+        if payload.get("type") == "run_done" and payload.get("run_uuid"):
+            run_uuid = str(payload["run_uuid"])
+            self._pending_terminal_frames[run_uuid] = payload
+            self._pending_terminal_frames.move_to_end(run_uuid)
+            while len(self._pending_terminal_frames) > self._outbox_max:
+                self._pending_terminal_frames.popitem(last=False)
         while len(self._outbox) >= self._outbox_max:
             self._outbox.popleft()
             self._outbox_dropped += 1
@@ -389,6 +396,7 @@ class LensNodeClient:
         )
         await self._send_hello()
         self._restore_pending_trace_frames()
+        self._restore_pending_terminal_frames()
 
     def _restore_pending_trace_frames(self):
         """Requeue unacknowledged trace events once per reconnect."""
@@ -408,6 +416,20 @@ class LensNodeClient:
             if key not in queued and frame_id not in restored_frames:
                 self._outbox.append(frame)
                 restored_frames.add(frame_id)
+        if self._outbox:
+            self._outbox_ready.set()
+
+    def _restore_pending_terminal_frames(self):
+        """Requeue terminal Run frames until the control plane confirms them."""
+
+        queued_run_uuids = {
+            str(frame.get("run_uuid") or "")
+            for frame in self._outbox
+            if frame.get("type") == "run_done"
+        }
+        for run_uuid, frame in self._pending_terminal_frames.items():
+            if run_uuid not in queued_run_uuids:
+                self._outbox.append(frame)
         if self._outbox:
             self._outbox_ready.set()
 
@@ -520,6 +542,15 @@ class LensNodeClient:
             )
         elif message_type == "run_done_ack":
             run_uuid = str(message.get("run_uuid") or "")
+            self._pending_terminal_frames.pop(run_uuid, None)
+            self._outbox = collections.deque(
+                frame
+                for frame in self._outbox
+                if not (
+                    frame.get("type") == "run_done"
+                    and str(frame.get("run_uuid") or "") == run_uuid
+                )
+            )
             workspace_path = getattr(self.config, "workspace_path", None)
             cleanup_deferred = self.executor.defer_cleanup_until_worker_stops(
                 run_uuid,
@@ -1228,6 +1259,7 @@ class LensNodeClient:
             if payload.get("type") == "run_done"
             and payload.get("run_uuid")
         )
+        active_runs.update(self._pending_terminal_frames)
         return sorted(active_runs)
 
     async def _send_hello(self):

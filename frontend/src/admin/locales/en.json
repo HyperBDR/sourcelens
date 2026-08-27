@@ -112,6 +112,7 @@
     "downloadFailed": "Failed to download file",
     "execTime": "Exec time",
     "queueTime": "Queue time",
+    "admissionWait": "LensNode admission wait",
     "execWindow": "Execution window",
     "noTimeline": "No trace steps",
     "trajectoryEvents": "Events",

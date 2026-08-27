@@ -21,7 +21,7 @@ class _ExecutionRequest:
 
 
 class LensNodeExecutionQueue:
-    """Schedule standard work concurrently and exclusive work in order."""
+    """Prioritize standard work while reserving exclusive work for idle time."""
 
     def __init__(self, max_standard_concurrency):
         self.max_standard_concurrency = max(
@@ -84,31 +84,31 @@ class LensNodeExecutionQueue:
         self._active_standard -= 1
 
     def _admit_waiters(self):
-        """Admit all eligible requests while preserving queue order."""
+        """Admit standard work before starting the next exclusive request."""
 
         if self._exclusive_active:
             return
+        self._admit_standard_waiters()
         if self._active_standard:
-            self._admit_standard_prefix()
             return
         if not self._waiting:
             return
-        if self._waiting[0].execution_class == ExecutionClass.EXCLUSIVE:
-            request = self._waiting.popleft()
-            self._exclusive_active = True
-            request.admitted.set_result(None)
-            return
-        self._admit_standard_prefix()
+        request = self._waiting.popleft()
+        self._exclusive_active = True
+        request.admitted.set_result(None)
 
-    def _admit_standard_prefix(self):
-        """Admit standard requests before the next exclusive request."""
+    def _admit_standard_waiters(self):
+        """Fill free standard slots without letting exclusive work block them."""
 
-        while (
-            self._waiting
-            and not self._exclusive_active
-            and self._active_standard < self.max_standard_concurrency
-            and self._waiting[0].execution_class == ExecutionClass.STANDARD
-        ):
+        waiting = collections.deque()
+        while self._waiting:
             request = self._waiting.popleft()
-            self._active_standard += 1
-            request.admitted.set_result(None)
+            if (
+                request.execution_class == ExecutionClass.STANDARD
+                and self._active_standard < self.max_standard_concurrency
+            ):
+                self._active_standard += 1
+                request.admitted.set_result(None)
+            else:
+                waiting.append(request)
+        self._waiting = waiting

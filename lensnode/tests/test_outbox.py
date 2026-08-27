@@ -142,6 +142,36 @@ def test_trace_frames_remain_pending_until_cursor_ack_and_reconnect():
     asyncio.run(exercise())
 
 
+def test_run_done_remains_reported_and_retries_until_acknowledged():
+    async def exercise():
+        client = _make_client()
+        client._enqueue(
+            {
+                "type": "run_done",
+                "run_uuid": "completed-run",
+                "status": "done",
+            }
+        )
+
+        client._outbox.clear()
+        assert client._reported_active_runs() == ["completed-run"]
+
+        client._restore_pending_terminal_frames()
+        assert client._outbox[0]["run_uuid"] == "completed-run"
+
+        await client._handle_message(
+            json.dumps(
+                {
+                    "type": "run_done_ack",
+                    "run_uuid": "completed-run",
+                }
+            )
+        )
+        assert client._reported_active_runs() == []
+
+    asyncio.run(exercise())
+
+
 def test_resume_starts_after_unacknowledged_trace_cursor():
     async def exercise():
         client = _make_client()

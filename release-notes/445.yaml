@@ -1,0 +1,19 @@
+type: improvement
+audience: admin
+en: >-
+  Improved Run reliability and live observability: standard Runs no longer
+  wait behind pending exclusive work, terminal results retry until confirmed,
+  and Run details show separate control-plane queue and LensNode admission
+  waits with refreshed trajectories.
+zh-CN: >-
+  优化 Run 的可靠性与实时可观测性。
+  普通 Run 不再被等待中的独占任务阻塞。
+  终态结果会重试至确认送达。
+  详情页区分控制面排队与 LensNode 准入等待，
+  并持续刷新执行轨迹。
+es: >-
+  Se mejoraron la fiabilidad y la observabilidad en tiempo real de las
+  ejecuciones: las ejecuciones estándar ya no esperan tras trabajo exclusivo
+  pendiente, los resultados finales se reintentan hasta su confirmación y
+  los detalles separan la cola del plano de control de la espera de admisión
+  de LensNode con trayectorias actualizadas.

@@ -83,3 +83,16 @@ test('trajectory JSON uses compact recursive indentation', async () => {
   assert.match(node, /depth \* indent/)
   assert.match(node, /:indent="indent"/)
 })
+
+test('active runs refresh trajectory events incrementally', async () => {
+  const contents = await source()
+
+  assert.match(contents, /runStatus: \{ type: String, default: '' \}/)
+  assert.match(contents, /const ACTIVE_RUN_STATUSES = new Set/)
+  assert.match(contents, /function scheduleRefresh\(\)/)
+  assert.match(
+    contents,
+    /refreshTimer = setTimeout\(\(\) => fetchTrajectory\(true\), 2000\)/
+  )
+  assert.match(contents, /clearTimeout\(refreshTimer\)/)
+})
