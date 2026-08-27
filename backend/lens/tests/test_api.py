@@ -3169,6 +3169,28 @@ class LensApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["output_files"], [])
 
+    def test_admin_run_detail_exposes_lensnode_admission_wait(self):
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        run = create_execution_run(session=session, question="q", enqueue=False)
+        created_at = timezone.now() - timedelta(seconds=20)
+        started_at = created_at + timedelta(seconds=5)
+        admitted_at = started_at + timedelta(seconds=7)
+        run.created_at = created_at
+        run.started_at = started_at
+        run.save(update_fields=["created_at", "started_at"])
+        run.execution.admitted_at = admitted_at
+        run.execution.save(update_fields=["admitted_at"])
+
+        response = self.client.get(f"/api/lens/admin/runs/{run.uuid}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["control_queue_seconds"], 5.0)
+        self.assertEqual(response.data["admission_wait_seconds"], 7.0)
+        self.assertEqual(response.data["admitted_at"], admitted_at.isoformat())
+
     def test_admin_run_detail_uses_agent_rounds_snapshot(self):
         from lens.models import Session
         from lens.services import create_execution_run

@@ -731,6 +731,14 @@
                       </div>
                       <div>
                         <span class="overview-label">
+                          {{ t('lensRuns.admissionWait') }}
+                        </span>
+                        <span class="overview-time-value tabular-nums">
+                          {{ admissionWaitText }}
+                        </span>
+                      </div>
+                      <div>
+                        <span class="overview-label">
                           {{ t('lensRuns.execWindow') }}
                         </span>
                         <span class="overview-time-value tabular-nums">
@@ -1298,6 +1306,7 @@
                 <RunTrajectoryPanel
                   v-show="activeExecutionView === 'trace'"
                   :run-uuid="selectedUuid"
+                  :run-status="detail.status"
                   :active="
                     activeDetailTab === 'execution' &&
                     activeExecutionView === 'trace'
@@ -1586,7 +1595,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { format } from 'date-fns'
@@ -1650,6 +1659,9 @@ const actionLoading = ref(false)
 const questionTextRef = ref(null)
 const questionCanExpand = ref(false)
 const questionExpanded = ref(false)
+let detailRefreshTimer = null
+
+const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'streaming'])
 
 const canDiagnoseRun = computed(() => {
   const user = userStore.userInfo
@@ -1893,9 +1905,14 @@ async function downloadOutputFile(file) {
 
 const queueText = computed(() => {
   const d = detail.value
-  if (!d?.created_at || !d?.started_at) return '-'
-  const sec = (new Date(d.started_at) - new Date(d.created_at)) / 1000
-  if (sec < 0) return '-'
+  const sec = d?.control_queue_seconds
+  if (sec === null || sec === undefined || sec < 0) return '-'
+  return sec < 1 ? '<1s' : durationText(sec)
+})
+
+const admissionWaitText = computed(() => {
+  const sec = detail.value?.admission_wait_seconds
+  if (sec === null || sec === undefined || sec < 0) return '-'
   return sec < 1 ? '<1s' : durationText(sec)
 })
 
@@ -2075,20 +2092,37 @@ async function fetchRuns() {
   }
 }
 
-async function fetchDetail() {
+async function fetchDetail(background = false) {
   if (!selectedUuid.value) return
-  detailLoading.value = true
-  detail.value = null
+  if (!background) {
+    detailLoading.value = true
+    detail.value = null
+  }
   try {
     detail.value = await getAdminRun(selectedUuid.value)
     questionExpanded.value = false
   } catch (e) {
-    showError(extractErrorMessage(e, t('common.error')))
-    detail.value = null
+    if (!background) {
+      showError(extractErrorMessage(e, t('common.error')))
+      detail.value = null
+    }
   } finally {
-    detailLoading.value = false
-    await measureQuestionOverflow()
+    if (!background) {
+      detailLoading.value = false
+      await measureQuestionOverflow()
+    }
   }
+}
+
+function scheduleDetailRefresh() {
+  clearTimeout(detailRefreshTimer)
+  if (!detailVisible.value || !ACTIVE_RUN_STATUSES.has(detail.value?.status)) {
+    return
+  }
+  detailRefreshTimer = setTimeout(async () => {
+    await fetchDetail(true)
+    scheduleDetailRefresh()
+  }, 2000)
 }
 
 onMounted(async () => {
@@ -2110,6 +2144,14 @@ onMounted(async () => {
 watch(detailVisible, (visible) => {
   if (visible && selectedUuid.value) fetchDetail()
 })
+
+watch(
+  [detailVisible, () => detail.value?.status],
+  () => scheduleDetailRefresh(),
+  { immediate: true }
+)
+
+onBeforeUnmount(() => clearTimeout(detailRefreshTimer))
 </script>
 
 <style scoped>

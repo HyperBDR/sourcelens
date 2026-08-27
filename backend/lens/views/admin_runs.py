@@ -53,9 +53,15 @@ def _admin_safe_int(value, default, *, minimum=1, maximum=None):
 def _admin_run_duration(run):
     """Return execution seconds (started -> finished) or None."""
 
-    if run.started_at and run.finished_at:
-        return round((run.finished_at - run.started_at).total_seconds(), 1)
-    return None
+    return _admin_duration_seconds(run.started_at, run.finished_at)
+
+
+def _admin_duration_seconds(started_at, finished_at):
+    """Return a non-negative duration in seconds or None."""
+
+    if not started_at or not finished_at:
+        return None
+    return max(0, round((finished_at - started_at).total_seconds(), 1))
 
 
 def _admin_step_detail(step):
@@ -313,6 +319,7 @@ def _admin_run_row(run):
     counts = _admin_run_step_counts(run)
     execution = run.execution if hasattr(run, "execution") else None
     runtime_snapshot = execution.runtime_snapshot if execution else {}
+    admitted_at = execution.admitted_at if execution else None
     model_refs = runtime_snapshot.get("model_refs") or {}
     max_tokens = execution.token_budget_max_tokens if execution else None
     budget_consumption = None
@@ -368,8 +375,17 @@ def _admin_run_row(run):
             run.feedback_updated_at.isoformat() if run.feedback_updated_at else None
         ),
         "started_at": run.started_at.isoformat() if run.started_at else None,
+        "admitted_at": admitted_at.isoformat() if admitted_at else None,
         "finished_at": (run.finished_at.isoformat() if run.finished_at else None),
         "duration_seconds": _admin_run_duration(run),
+        "control_queue_seconds": _admin_duration_seconds(
+            run.created_at,
+            run.started_at,
+        ),
+        "admission_wait_seconds": _admin_duration_seconds(
+            run.started_at,
+            admitted_at,
+        ),
         "lensnode_name": run.lensnode.name if run.lensnode else None,
         "lensnode_uuid": str(run.lensnode.uuid) if run.lensnode else None,
         "model_ref": model_refs.get("agent") or None,

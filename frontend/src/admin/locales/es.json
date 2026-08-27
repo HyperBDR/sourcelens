@@ -112,6 +112,7 @@
     "downloadFailed": "Error al descargar el archivo",
     "execTime": "Tiempo de ejecución",
     "queueTime": "Tiempo en cola",
+    "admissionWait": "Espera de admisión de LensNode",
     "execWindow": "Ventana de ejecución",
     "noTimeline": "No hay pasos de trazado",
     "trajectoryEvents": "Eventos",

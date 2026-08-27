@@ -112,6 +112,7 @@
     "downloadFailed": "文件下载失败",
     "execTime": "执行耗时",
     "queueTime": "排队耗时",
+    "admissionWait": "LensNode 准入等待",
     "execWindow": "执行区间",
     "noTimeline": "暂无追踪步骤",
     "trajectoryEvents": "轨迹事件",
