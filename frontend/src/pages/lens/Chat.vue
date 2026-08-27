@@ -124,116 +124,153 @@
           v-if="!sidebarCollapsedActive || isMobile"
           class="sessions-section"
         >
-          <div class="sessions-head">
-            <h2 class="sr-only">{{ t('lens.chat.sessionLists') }}</h2>
-            <div
-              class="session-filters"
-              role="group"
-              :aria-label="t('lens.chat.sessionLists')"
+          <div
+            v-if="sessionHistoryCollapsed && !isMobile"
+            class="sessions-collapsed"
+          >
+            <button
+              type="button"
+              class="sessions-collapsed-trigger"
+              :aria-label="t('lens.chat.sessions')"
+              :title="t('lens.chat.sessions')"
+              @click="sessionHistoryCollapsed = false"
             >
-              <button
-                type="button"
-                :class="{ 'session-filter-active': !showArchivedSessions }"
-                :aria-pressed="!showArchivedSessions"
-                @click="switchSessionView(false)"
-              >
-                {{ t('lens.chat.sessions') }}
-              </button>
-              <button
-                type="button"
-                :class="{ 'session-filter-active': showArchivedSessions }"
-                :aria-pressed="showArchivedSessions"
-                @click="switchSessionView(true)"
-              >
-                {{ t('lens.chat.archivedSessions') }}
-              </button>
-            </div>
+              <span>{{ t('lens.chat.sessions') }}</span>
+              <ChevronRight :size="15" :stroke-width="2" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="sessions-collapsed-action"
+              :aria-label="t('lens.chat.newSession')"
+              :title="t('lens.chat.newSession')"
+              @click="createNewSession"
+            >
+              <Pencil :size="16" :stroke-width="2" aria-hidden="true" />
+            </button>
           </div>
-          <div class="sessions-list">
-            <div
-              v-for="session in sessions"
-              :key="session.uuid"
-              class="session-item"
-              :class="{
-                'session-item-active': selectedSessionUuid === session.uuid
-              }"
-            >
-              <input
-                v-if="renamingSessionUuid === session.uuid"
-                v-model="renameDraft"
-                class="session-rename-input"
-                :placeholder="t('lens.chat.untitledSession')"
-                @click.stop
-                @keydown.enter.stop.prevent="saveRename(session)"
-                @keydown.esc.stop="cancelRename"
-                @blur="saveRename(session)"
-              />
-              <template v-else>
-                <div
-                  class="min-w-0 flex-1 cursor-pointer"
-                  :title="session.title || t('lens.chat.untitledSession')"
-                  @click="selectSession(session)"
+          <template v-else>
+            <div class="sessions-head">
+              <h2 class="sr-only">{{ t('lens.chat.sessionLists') }}</h2>
+              <div
+                class="session-filters"
+                role="group"
+                :aria-label="t('lens.chat.sessionLists')"
+              >
+                <button
+                  type="button"
+                  :class="{ 'session-filter-active': !showArchivedSessions }"
+                  :aria-pressed="!showArchivedSessions"
+                  @click="switchSessionView(false)"
                 >
-                  <div class="session-title-row">
-                    <Pin
-                      v-if="session.pinned_at"
-                      class="session-pinned-icon"
-                      :size="13"
-                      :stroke-width="2.2"
-                      :aria-label="t('lens.chat.pinned')"
-                    />
-                    <div class="session-title">
-                      {{ session.title || t('lens.chat.untitledSession') }}
+                  {{ t('lens.chat.sessions') }}
+                </button>
+                <button
+                  type="button"
+                  :class="{ 'session-filter-active': showArchivedSessions }"
+                  :aria-pressed="showArchivedSessions"
+                  @click="switchSessionView(true)"
+                >
+                  {{ t('lens.chat.archivedSessions') }}
+                </button>
+                <button
+                  v-if="!isMobile"
+                  type="button"
+                  class="sessions-collapse-toggle"
+                  :aria-label="t('common.collapse')"
+                  :title="t('common.collapse')"
+                  @click="sessionHistoryCollapsed = true"
+                >
+                  <ChevronUp :size="15" :stroke-width="2" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <div class="sessions-list">
+              <div
+                v-for="session in sessions"
+                :key="session.uuid"
+                class="session-item"
+                :class="{
+                  'session-item-active': selectedSessionUuid === session.uuid
+                }"
+              >
+                <input
+                  v-if="renamingSessionUuid === session.uuid"
+                  v-model="renameDraft"
+                  class="session-rename-input"
+                  :placeholder="t('lens.chat.untitledSession')"
+                  @click.stop
+                  @keydown.enter.stop.prevent="saveRename(session)"
+                  @keydown.esc.stop="cancelRename"
+                  @blur="saveRename(session)"
+                />
+                <template v-else>
+                  <div
+                    class="min-w-0 flex-1 cursor-pointer"
+                    :title="session.title || t('lens.chat.untitledSession')"
+                    @click="selectSession(session)"
+                  >
+                    <div class="session-title-row">
+                      <Pin
+                        v-if="session.pinned_at"
+                        class="session-pinned-icon"
+                        :size="13"
+                        :stroke-width="2.2"
+                        :aria-label="t('lens.chat.pinned')"
+                      />
+                      <div class="session-title">
+                        {{ session.title || t('lens.chat.untitledSession') }}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div class="flex shrink-0 items-center gap-1">
-                  <span
-                    v-if="sessionActivity.hasActivity(session.uuid)"
-                    class="session-activity-indicator"
-                    :title="t('lens.chat.sessionActive')"
-                  >
-                    <LoaderCircle
-                      :size="15"
-                      :stroke-width="2.2"
-                      aria-hidden="true"
+                  <div class="flex shrink-0 items-center gap-1">
+                    <span
+                      v-if="sessionActivity.hasActivity(session.uuid)"
+                      class="session-activity-indicator"
+                      :title="t('lens.chat.sessionActive')"
+                    >
+                      <LoaderCircle
+                        :size="15"
+                        :stroke-width="2.2"
+                        aria-hidden="true"
+                      />
+                      <span class="sr-only">
+                        {{ t('lens.chat.sessionActive') }}
+                      </span>
+                    </span>
+                    <span
+                      v-else-if="sessionHasUnreadAnswer(session.uuid)"
+                      class="session-unread-indicator"
+                      :title="t('lens.chat.unreadAnswer')"
+                    >
+                      <span class="sr-only">
+                        {{ t('lens.chat.unreadAnswer') }}
+                      </span>
+                    </span>
+                    <RowActionMenu
+                      class="session-overflow"
+                      placement="right"
+                      :actions="sessionActions(session)"
+                      :label="
+                        t('lens.chat.sessionActions', {
+                          title: session.title || t('lens.chat.untitledSession')
+                        })
+                      "
+                      @click.stop
+                      @select="handleSessionAction(session, $event)"
                     />
-                    <span class="sr-only">
-                      {{ t('lens.chat.sessionActive') }}
-                    </span>
-                  </span>
-                  <span
-                    v-else-if="sessionHasUnreadAnswer(session.uuid)"
-                    class="session-unread-indicator"
-                    :title="t('lens.chat.unreadAnswer')"
-                  >
-                    <span class="sr-only">
-                      {{ t('lens.chat.unreadAnswer') }}
-                    </span>
-                  </span>
-                  <RowActionMenu
-                    class="session-overflow"
-                    :actions="sessionActions(session)"
-                    :label="
-                      t('lens.chat.sessionActions', {
-                        title: session.title || t('lens.chat.untitledSession')
-                      })
-                    "
-                    @click.stop
-                    @select="handleSessionAction(session, $event)"
-                  />
-                </div>
-              </template>
+                  </div>
+                </template>
+              </div>
+              <p v-if="!sessions.length" class="session-list-empty">
+                {{
+                  showArchivedSessions
+                    ? t('lens.chat.noArchivedSessions')
+                    : t('lens.chat.noRecentSessions')
+                }}
+              </p>
             </div>
-            <p v-if="!sessions.length" class="session-list-empty">
-              {{
-                showArchivedSessions
-                  ? t('lens.chat.noArchivedSessions')
-                  : t('lens.chat.noRecentSessions')
-              }}
-            </p>
-          </div>
+          </template>
         </section>
       </div>
 
@@ -1613,6 +1650,8 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  ChevronRight,
+  ChevronUp,
   MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -1785,6 +1824,7 @@ const loading = ref({ run: false })
 const streamController = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
+const sessionHistoryCollapsed = ref(false)
 const showArchivedSessions = ref(false)
 const deleteSessionTarget = ref(null)
 const deletingSession = ref(false)
@@ -4237,7 +4277,7 @@ onBeforeUnmount(() => {
 }
 
 .session-filters {
-  @apply flex items-center gap-1;
+  @apply flex w-full items-center gap-1;
 }
 
 .session-filters button {
@@ -4247,6 +4287,17 @@ onBeforeUnmount(() => {
 .session-filters button:hover,
 .session-filter-active {
   @apply bg-surface-hover text-theme;
+}
+
+.sessions-collapse-toggle {
+  @apply ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md
+    text-theme-muted transition-colors;
+}
+
+.sessions-collapse-toggle:hover,
+.sessions-collapse-toggle:focus-visible {
+  @apply bg-surface-hover text-theme;
+  outline: none;
 }
 
 .sessions-list {
@@ -4304,6 +4355,32 @@ onBeforeUnmount(() => {
 .session-item-active .session-overflow,
 .session-overflow.row-action-menu-open {
   @apply opacity-100;
+}
+
+.sessions-collapsed {
+  @apply flex items-center gap-1 px-1;
+}
+
+.sessions-collapsed-trigger {
+  @apply flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-2
+    text-left text-sm font-semibold text-theme-muted transition-colors;
+}
+
+.sessions-collapsed-trigger:hover,
+.sessions-collapsed-trigger:focus-visible,
+.sessions-collapsed-action:hover,
+.sessions-collapsed-action:focus-visible {
+  @apply bg-surface-hover text-theme;
+  outline: none;
+}
+
+.sessions-collapsed-trigger span {
+  @apply truncate;
+}
+
+.sessions-collapsed-action {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md
+    text-theme-muted transition-colors;
 }
 
 .session-rename-input {

@@ -296,10 +296,29 @@ test('desktop sidebar still expands and collapses', async ({ page }) => {
   await page.goto('/lens/assistants/drawer-test/chat')
 
   await expect.poll(() => sidebarBox(page)).toMatchObject({ x: 0, width: 264 })
-  await page.getByRole('button', { name: 'Collapse' }).click()
+  await page.locator('.sidebar-collapse-btn[aria-label="Collapse"]').click()
   await expect.poll(() => sidebarBox(page)).toMatchObject({ x: 0, width: 64 })
   await page.locator('.sidebar-collapse-btn[aria-label="Expand"]').click()
   await expect.poll(() => sidebarBox(page)).toMatchObject({ x: 0, width: 264 })
+})
+
+test('desktop history collapses into a compact Recent row', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockChat(page)
+  await page.goto('/lens/assistants/drawer-test/chat')
+
+  await expect.poll(() => sidebarBox(page)).toMatchObject({ x: 0, width: 264 })
+  await page.locator('.sessions-collapse-toggle').click()
+  await expect(page.locator('.sessions-collapsed')).toBeVisible()
+  await expect(page.locator('.sessions-collapsed-trigger')).toContainText(
+    'Recent'
+  )
+  await expect(page.locator('.sessions-collapsed-action')).toHaveCount(1)
+  await expect(page.locator('.session-item')).toHaveCount(0)
+
+  await page.locator('.sessions-collapsed-trigger').click()
+  await expect(page.locator('.sessions-collapsed')).toHaveCount(0)
+  await expect(page.locator('.session-item')).toHaveCount(3)
 })
 
 test.describe('touch input accessibility', () => {

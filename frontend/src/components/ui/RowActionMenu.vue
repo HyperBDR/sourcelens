@@ -82,6 +82,10 @@ const props = defineProps({
   label: {
     type: String,
     default: ''
+  },
+  placement: {
+    type: String,
+    default: 'left'
   }
 })
 
@@ -120,8 +124,21 @@ function openMenu(focusFirst = false) {
     return height + estimatedItemHeight + dividerHeight
   }, 8)
   const opensUpward = rect.bottom + estimatedHeight > window.innerHeight
+  const rightPosition = rect.right + 4
+  const leftPosition = rect.left - menuWidth - 4
+  const preferredLeft =
+    props.placement === 'right' ? rightPosition : rect.right - menuWidth
+  const fallbackLeft =
+    props.placement === 'right' ? leftPosition : preferredLeft
+  const boundedLeft =
+    preferredLeft + menuWidth <= window.innerWidth - 8
+      ? preferredLeft
+      : fallbackLeft
   menuStyle.value = {
-    left: `${Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8))}px`,
+    left: `${Math.max(
+      8,
+      Math.min(boundedLeft, window.innerWidth - menuWidth - 8)
+    )}px`,
     top: opensUpward ? undefined : `${rect.bottom + 4}px`,
     bottom: opensUpward ? `${window.innerHeight - rect.top + 4}px` : undefined
   }
