@@ -200,6 +200,34 @@ test('operations center shows summary, node and model filters, and metrics', asy
   assert.match(contents, /r\.budget_consumption/)
 })
 
+test('operations center distinguishes loading, empty, and error states', async () => {
+  const contents = await source()
+
+  assert.match(contents, /data-testid="run-loading-state"/)
+  assert.match(contents, /data-testid="run-empty-state"/)
+  assert.match(contents, /data-testid="run-error-state"/)
+  assert.match(contents, /data-testid="run-refresh-error"/)
+  assert.match(contents, /hasLoaded/)
+  assert.match(contents, /loadError/)
+  assert.match(contents, /@click="fetchRuns"/)
+  assert.match(contents, /lensRuns\.retry/)
+  assert.match(contents, /hasLoaded\.value = true/)
+  assert.match(
+    contents,
+    /v-else-if="hasLoaded && !loadError && runs\.length === 0"/
+  )
+  assert.doesNotMatch(contents, /runs\.value = \[\]/)
+})
+
+test('summary cards do not turn unknown metrics into zero while loading', async () => {
+  const contents = await source()
+
+  assert.match(contents, /loading && !hasLoaded/)
+  assert.match(contents, /const loading = ref\(true\)/)
+  assert.match(contents, /statusSummary\.value\?\.total/)
+  assert.doesNotMatch(contents, /statusSummary\.value\.total \|\| 0/)
+})
+
 test('run actions use server-provided availability and confirmations', async () => {
   const contents = await source()
 

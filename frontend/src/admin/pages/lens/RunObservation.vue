@@ -30,7 +30,14 @@
         >
           <p class="text-xs font-medium text-gray-500">{{ item.label }}</p>
           <p class="admin-metric-value mt-1">
-            {{ formatOperationMetric(item.count) }}
+            <span
+              v-if="loading && !hasLoaded"
+              class="metric-loading"
+              aria-hidden="true"
+            >
+              …
+            </span>
+            <span v-else>{{ formatOperationMetric(item.count) }}</span>
           </p>
         </button>
       </div>
@@ -172,248 +179,305 @@
             </div>
           </div>
 
-          <BaseLoading v-if="loading && runs.length === 0" />
-
-          <div
-            v-else-if="!loading && runs.length === 0"
-            class="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center"
-          >
-            <p class="text-sm font-medium text-gray-600">
-              {{ t('lensRuns.noRuns') }}
-            </p>
-          </div>
-
-          <div v-else class="flex flex-col md:min-h-0">
+          <template v-if="loading && !hasLoaded">
             <div
-              data-testid="mobile-run-observation-list"
-              class="space-y-3 md:hidden"
+              data-testid="run-loading-state"
+              class="flex min-h-52 items-center justify-center"
+              role="status"
+              aria-live="polite"
             >
-              <button
-                v-for="r in runs"
-                :key="`mobile-${r.uuid}`"
-                type="button"
-                class="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-primary-200 hover:bg-primary-50/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30"
-                :aria-label="`${t('common.viewDetails')}: ${r.question || '-'}`"
-                @click="openDetail(r.uuid)"
+              <BaseLoading size="sm" :text="t('lensRuns.loading')" />
+            </div>
+          </template>
+
+          <template v-else>
+            <div
+              v-if="loading && hasLoaded"
+              data-testid="run-refresh-loading"
+              class="mb-4 flex min-h-10 items-center justify-center"
+              role="status"
+              aria-live="polite"
+            >
+              <BaseLoading size="sm" :text="t('lensRuns.loading')" />
+            </div>
+
+            <div
+              v-if="loadError && hasLoaded"
+              data-testid="run-refresh-error"
+              class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+              role="alert"
+            >
+              <span>{{ loadError }}</span>
+              <BaseButton size="sm" variant="outline" @click="fetchRuns">
+                {{ t('lensRuns.retry') }}
+              </BaseButton>
+            </div>
+
+            <div
+              v-if="loadError && !hasLoaded"
+              data-testid="run-error-state"
+              class="flex min-h-52 flex-col items-center justify-center rounded-lg border border-red-200 bg-red-50 px-6 py-12 text-center"
+              role="alert"
+            >
+              <p class="text-sm font-medium text-red-800">
+                {{ t('lensRuns.loadErrorTitle') }}
+              </p>
+              <p class="mt-1 max-w-md text-sm text-red-700">
+                {{ loadError }}
+              </p>
+              <BaseButton class="mt-4" size="sm" @click="fetchRuns">
+                {{ t('lensRuns.retry') }}
+              </BaseButton>
+            </div>
+
+            <div
+              v-else-if="hasLoaded && !loadError && runs.length === 0"
+              data-testid="run-empty-state"
+              class="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center"
+            >
+              <p class="text-sm font-medium text-gray-600">
+                {{ t('lensRuns.noRuns') }}
+              </p>
+            </div>
+
+            <div v-else class="flex flex-col md:min-h-0">
+              <div
+                data-testid="mobile-run-observation-list"
+                class="space-y-3 md:hidden"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0 flex-1">
-                    <h2
-                      class="line-clamp-3 text-sm font-semibold leading-5 text-gray-900"
-                    >
-                      {{ r.question || '-' }}
-                    </h2>
-                    <p class="mt-2 text-xs text-gray-500">
-                      {{ formatDate(r.created_at) }}
-                    </p>
-                  </div>
-                  <span :class="statusClass(r.status)">
-                    {{ statusText(r.status) }}
-                  </span>
-                </div>
-
-                <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                  <div>
-                    <dt class="text-xs text-gray-500">
-                      {{ t('lensRuns.colUser') }}
-                    </dt>
-                    <dd class="mt-0.5 truncate font-medium text-gray-800">
-                      {{ r.username || '-' }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="text-xs text-gray-500">
-                      {{ t('lensRuns.colAssistant') }}
-                    </dt>
-                    <dd class="mt-0.5 truncate font-medium text-gray-800">
-                      {{ r.assistant_name || '-' }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="text-xs text-gray-500">
-                      {{ t('lensRuns.colDuration') }}
-                    </dt>
-                    <dd class="mt-0.5 font-medium tabular-nums text-gray-800">
-                      {{ durationText(r.duration_seconds) }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="text-xs text-gray-500">
-                      {{ t('lensRuns.colSteps') }}
-                    </dt>
-                    <dd class="mt-0.5 font-medium tabular-nums text-gray-800">
-                      {{ r.event_count }}
-                      <span
-                        v-if="r.subagent_count > 0"
-                        class="text-xs text-indigo-600"
-                      >
-                        · {{ t('lensRuns.subagents', { n: r.subagent_count }) }}
-                      </span>
-                    </dd>
-                  </div>
-                </dl>
-
-                <div
-                  class="mt-4 flex min-h-11 items-center justify-between border-t border-gray-100 pt-2"
+                <button
+                  v-for="r in runs"
+                  :key="`mobile-${r.uuid}`"
+                  type="button"
+                  class="block w-full rounded-lg border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors hover:border-primary-200 hover:bg-primary-50/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30"
+                  :aria-label="`${t('common.viewDetails')}: ${r.question || '-'}`"
+                  @click="openDetail(r.uuid)"
                 >
-                  <span
-                    v-if="r.feedback === 'positive'"
-                    class="feedback-pill feedback-pill-positive"
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0 flex-1">
+                      <h2
+                        class="line-clamp-3 text-sm font-semibold leading-5 text-gray-900"
+                      >
+                        {{ r.question || '-' }}
+                      </h2>
+                      <p class="mt-2 text-xs text-gray-500">
+                        {{ formatDate(r.created_at) }}
+                      </p>
+                    </div>
+                    <span :class="statusClass(r.status)">
+                      {{ statusText(r.status) }}
+                    </span>
+                  </div>
+
+                  <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                    <div>
+                      <dt class="text-xs text-gray-500">
+                        {{ t('lensRuns.colUser') }}
+                      </dt>
+                      <dd class="mt-0.5 truncate font-medium text-gray-800">
+                        {{ r.username || '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs text-gray-500">
+                        {{ t('lensRuns.colAssistant') }}
+                      </dt>
+                      <dd class="mt-0.5 truncate font-medium text-gray-800">
+                        {{ r.assistant_name || '-' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs text-gray-500">
+                        {{ t('lensRuns.colDuration') }}
+                      </dt>
+                      <dd class="mt-0.5 font-medium tabular-nums text-gray-800">
+                        {{ durationText(r.duration_seconds) }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs text-gray-500">
+                        {{ t('lensRuns.colSteps') }}
+                      </dt>
+                      <dd class="mt-0.5 font-medium tabular-nums text-gray-800">
+                        {{ r.event_count }}
+                        <span
+                          v-if="r.subagent_count > 0"
+                          class="text-xs text-indigo-600"
+                        >
+                          ·
+                          {{ t('lensRuns.subagents', { n: r.subagent_count }) }}
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <div
+                    class="mt-4 flex min-h-11 items-center justify-between border-t border-gray-100 pt-2"
                   >
-                    <ThumbsUp :size="13" />
-                    {{ t('lensRuns.feedbackHelpful') }}
-                  </span>
-                  <span
-                    v-else-if="r.feedback === 'negative'"
-                    class="feedback-pill feedback-pill-negative"
-                  >
-                    <ThumbsDown :size="13" />
-                    {{ t('lensRuns.feedbackUnhelpful') }}
-                  </span>
-                  <span v-else class="text-xs text-gray-400">
-                    {{ t('lensRuns.colFeedback') }}: —
-                  </span>
-                  <span
-                    class="inline-flex items-center gap-1 text-sm font-medium text-primary-700"
-                  >
-                    {{ t('common.viewDetails') }}
-                    <svg
-                      class="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
+                    <span
+                      v-if="r.feedback === 'positive'"
+                      class="feedback-pill feedback-pill-positive"
                     >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </span>
-                </div>
-              </button>
-            </div>
-
-            <div
-              data-testid="desktop-run-observation-table"
-              class="relative hidden max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm md:block"
-            >
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="sticky top-0 z-10 bg-gray-50">
-                  <tr>
-                    <th class="th">{{ t('lensRuns.colTime') }}</th>
-                    <th class="th">{{ t('lensRuns.colUser') }}</th>
-                    <th class="th">{{ t('lensRuns.colExecutor') }}</th>
-                    <th class="th">{{ t('lensRuns.colQuestion') }}</th>
-                    <th class="th">{{ t('lensRuns.colStatus') }}</th>
-                    <th class="th">{{ t('lensRuns.colFeedback') }}</th>
-                    <th class="th">{{ t('lensRuns.colDuration') }}</th>
-                    <th class="th">{{ t('lensRuns.colOperations') }}</th>
-                    <th class="th">{{ t('common.actions') }}</th>
-                  </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-100">
-                  <tr
-                    v-for="r in runs"
-                    :key="r.uuid"
-                    class="hover:bg-gray-50 cursor-pointer transition-colors"
-                    @click="openDetail(r.uuid)"
-                  >
-                    <td class="td text-gray-600 whitespace-nowrap">
-                      {{ formatDate(r.created_at) }}
-                    </td>
-                    <td class="td text-gray-900 whitespace-nowrap">
-                      {{ r.username || '-' }}
-                    </td>
-                    <td class="td whitespace-nowrap text-gray-600">
-                      <div>{{ r.assistant_name || '-' }}</div>
-                      <div class="mt-1 text-xs text-gray-400">
-                        {{ r.lensnode_name || '-' }}
-                      </div>
-                    </td>
-                    <td class="td text-gray-700 max-w-md truncate">
-                      {{ r.question || '-' }}
-                    </td>
-                    <td class="td whitespace-nowrap">
-                      <span :class="statusClass(r.status)">
-                        {{ statusText(r.status) }}
-                      </span>
-                    </td>
-                    <td class="td whitespace-nowrap">
-                      <span
-                        v-if="r.feedback === 'positive'"
-                        class="feedback-pill feedback-pill-positive"
+                      <ThumbsUp :size="13" />
+                      {{ t('lensRuns.feedbackHelpful') }}
+                    </span>
+                    <span
+                      v-else-if="r.feedback === 'negative'"
+                      class="feedback-pill feedback-pill-negative"
+                    >
+                      <ThumbsDown :size="13" />
+                      {{ t('lensRuns.feedbackUnhelpful') }}
+                    </span>
+                    <span v-else class="text-xs text-gray-400">
+                      {{ t('lensRuns.colFeedback') }}: —
+                    </span>
+                    <span
+                      class="inline-flex items-center gap-1 text-sm font-medium text-primary-700"
+                    >
+                      {{ t('common.viewDetails') }}
+                      <svg
+                        class="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
                       >
-                        <ThumbsUp :size="13" />
-                        {{ t('lensRuns.feedbackHelpful') }}
-                      </span>
-                      <span
-                        v-else-if="r.feedback === 'negative'"
-                        class="feedback-pill feedback-pill-negative"
-                      >
-                        <ThumbsDown :size="13" />
-                        {{ t('lensRuns.feedbackUnhelpful') }}
-                      </span>
-                      <span v-else class="text-gray-400">—</span>
-                    </td>
-                    <td class="td text-gray-600 whitespace-nowrap tabular-nums">
-                      {{ durationText(r.duration_seconds) }}
-                    </td>
-                    <td class="td whitespace-nowrap text-gray-600">
-                      <div class="text-xs">
-                        {{
-                          t('lensRuns.toolCallsShort', { n: r.tool_call_count })
-                        }}
-                        · {{ t('lensRuns.retriesShort', { n: r.retry_count }) }}
-                      </div>
-                      <div class="mt-1 text-xs text-gray-400">
-                        {{ r.model_ref || '-' }} ·
-                        {{ budgetPercent(r.budget_consumption) }}
-                      </div>
-                    </td>
-                    <td class="td whitespace-nowrap" @click.stop>
-                      <div class="flex items-center gap-1">
-                        <BaseButton
-                          v-if="r.available_actions?.cancel"
-                          size="sm"
-                          variant="outline"
-                          @click="requestRunAction('cancel', r)"
-                        >
-                          {{ t('lensRuns.cancelAction') }}
-                        </BaseButton>
-                        <BaseButton
-                          v-if="r.available_actions?.retry"
-                          size="sm"
-                          variant="outline"
-                          @click="requestRunAction('retry', r)"
-                        >
-                          {{ t('lensRuns.retryAction') }}
-                        </BaseButton>
-                        <BaseButton
-                          size="sm"
-                          variant="ghost"
-                          @click="openDetail(r.uuid)"
-                        >
-                          {{ t('common.viewDetails') }}
-                        </BaseButton>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                    </span>
+                  </div>
+                </button>
+              </div>
 
-            <PaginationBar
-              v-model:page-size="pageSize"
-              :current-page="page"
-              :total="total"
-              @page-size-change="handlePageSizeChange"
-              @prev="goPrevPage"
-              @next="goNextPage"
-            />
-          </div>
+              <div
+                data-testid="desktop-run-observation-table"
+                class="relative hidden max-h-full overflow-auto rounded-lg border border-gray-200 bg-white shadow-sm md:block"
+              >
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="sticky top-0 z-10 bg-gray-50">
+                    <tr>
+                      <th class="th">{{ t('lensRuns.colTime') }}</th>
+                      <th class="th">{{ t('lensRuns.colUser') }}</th>
+                      <th class="th">{{ t('lensRuns.colExecutor') }}</th>
+                      <th class="th">{{ t('lensRuns.colQuestion') }}</th>
+                      <th class="th">{{ t('lensRuns.colStatus') }}</th>
+                      <th class="th">{{ t('lensRuns.colFeedback') }}</th>
+                      <th class="th">{{ t('lensRuns.colDuration') }}</th>
+                      <th class="th">{{ t('lensRuns.colOperations') }}</th>
+                      <th class="th">{{ t('common.actions') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-100">
+                    <tr
+                      v-for="r in runs"
+                      :key="r.uuid"
+                      class="hover:bg-gray-50 cursor-pointer transition-colors"
+                      @click="openDetail(r.uuid)"
+                    >
+                      <td class="td text-gray-600 whitespace-nowrap">
+                        {{ formatDate(r.created_at) }}
+                      </td>
+                      <td class="td text-gray-900 whitespace-nowrap">
+                        {{ r.username || '-' }}
+                      </td>
+                      <td class="td whitespace-nowrap text-gray-600">
+                        <div>{{ r.assistant_name || '-' }}</div>
+                        <div class="mt-1 text-xs text-gray-400">
+                          {{ r.lensnode_name || '-' }}
+                        </div>
+                      </td>
+                      <td class="td text-gray-700 max-w-md truncate">
+                        {{ r.question || '-' }}
+                      </td>
+                      <td class="td whitespace-nowrap">
+                        <span :class="statusClass(r.status)">
+                          {{ statusText(r.status) }}
+                        </span>
+                      </td>
+                      <td class="td whitespace-nowrap">
+                        <span
+                          v-if="r.feedback === 'positive'"
+                          class="feedback-pill feedback-pill-positive"
+                        >
+                          <ThumbsUp :size="13" />
+                          {{ t('lensRuns.feedbackHelpful') }}
+                        </span>
+                        <span
+                          v-else-if="r.feedback === 'negative'"
+                          class="feedback-pill feedback-pill-negative"
+                        >
+                          <ThumbsDown :size="13" />
+                          {{ t('lensRuns.feedbackUnhelpful') }}
+                        </span>
+                        <span v-else class="text-gray-400">—</span>
+                      </td>
+                      <td
+                        class="td text-gray-600 whitespace-nowrap tabular-nums"
+                      >
+                        {{ durationText(r.duration_seconds) }}
+                      </td>
+                      <td class="td whitespace-nowrap text-gray-600">
+                        <div class="text-xs">
+                          {{
+                            t('lensRuns.toolCallsShort', {
+                              n: r.tool_call_count
+                            })
+                          }}
+                          ·
+                          {{ t('lensRuns.retriesShort', { n: r.retry_count }) }}
+                        </div>
+                        <div class="mt-1 text-xs text-gray-400">
+                          {{ r.model_ref || '-' }} ·
+                          {{ budgetPercent(r.budget_consumption) }}
+                        </div>
+                      </td>
+                      <td class="td whitespace-nowrap" @click.stop>
+                        <div class="flex items-center gap-1">
+                          <BaseButton
+                            v-if="r.available_actions?.cancel"
+                            size="sm"
+                            variant="outline"
+                            @click="requestRunAction('cancel', r)"
+                          >
+                            {{ t('lensRuns.cancelAction') }}
+                          </BaseButton>
+                          <BaseButton
+                            v-if="r.available_actions?.retry"
+                            size="sm"
+                            variant="outline"
+                            @click="requestRunAction('retry', r)"
+                          >
+                            {{ t('lensRuns.retryAction') }}
+                          </BaseButton>
+                          <BaseButton
+                            size="sm"
+                            variant="ghost"
+                            @click="openDetail(r.uuid)"
+                          >
+                            {{ t('common.viewDetails') }}
+                          </BaseButton>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <PaginationBar
+                v-model:page-size="pageSize"
+                :current-page="page"
+                :total="total"
+                @page-size-change="handlePageSizeChange"
+                @prev="goPrevPage"
+                @next="goNextPage"
+              />
+            </div>
+          </template>
         </div>
       </div>
 
@@ -1638,13 +1702,15 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const loading = ref(false)
+const loading = ref(true)
+const hasLoaded = ref(false)
+const loadError = ref('')
 const runs = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const assistants = ref([])
-const statusSummary = ref({})
+const statusSummary = ref(null)
 
 const detailVisible = ref(false)
 const detailLoading = ref(false)
@@ -1711,31 +1777,33 @@ const statusSummaryCards = computed(() => [
   {
     status: '',
     label: t('lensRuns.summaryTotal'),
-    count: statusSummary.value.total || 0
+    count: statusSummary.value?.total
   },
   {
     status: 'active',
     label: t('lensRuns.statusRunning'),
     count:
-      statusSummary.value.running === null ||
-      statusSummary.value.streaming === null
+      statusSummary.value?.running === null ||
+      statusSummary.value?.streaming === null ||
+      statusSummary.value?.running === undefined ||
+      statusSummary.value?.streaming === undefined
         ? null
         : statusSummary.value.running + statusSummary.value.streaming
   },
   {
     status: 'queued',
     label: t('lensRuns.statusQueued'),
-    count: statusSummary.value.queued
+    count: statusSummary.value?.queued
   },
   {
     status: 'failed',
     label: t('lensRuns.statusFailed'),
-    count: statusSummary.value.failed
+    count: statusSummary.value?.failed
   },
   {
     status: 'done',
     label: t('lensRuns.statusDone'),
-    count: statusSummary.value.done
+    count: statusSummary.value?.done
   }
 ])
 
@@ -2073,6 +2141,7 @@ function navigateFromEvidence(evidenceRef) {
 
 async function fetchRuns() {
   loading.value = true
+  loadError.value = ''
   try {
     const params = { page: page.value, page_size: pageSize.value }
     for (const [k, v] of Object.entries(filters.value)) {
@@ -2082,11 +2151,10 @@ async function fetchRuns() {
     runs.value = data?.results ?? []
     total.value = data?.total ?? 0
     statusSummary.value = resolveRunSummary(data)
+    hasLoaded.value = true
   } catch (e) {
-    showError(extractErrorMessage(e, t('common.error')))
-    runs.value = []
-    total.value = 0
-    statusSummary.value = {}
+    loadError.value = extractErrorMessage(e, t('common.error'))
+    showError(loadError.value)
   } finally {
     loading.value = false
   }
