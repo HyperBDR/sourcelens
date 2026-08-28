@@ -5040,7 +5040,7 @@ onBeforeUnmount(() => {
 
 .thread-scroll {
   @apply min-h-0 flex-1 overflow-y-auto;
-  overflow-anchor: none;
+  overflow-anchor: auto;
   scrollbar-gutter: stable;
 }
 

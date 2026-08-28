@@ -283,6 +283,13 @@ test('shows each delegated task inside its assistant activity group', async () =
   assert.match(source, /activity\?\.delegatedTask/)
 })
 
+test('keeps browser scroll anchoring enabled while activities grow', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /\.thread-scroll[\s\S]*overflow-anchor: auto/)
+  assert.doesNotMatch(source, /\.thread-scroll[\s\S]*overflow-anchor: none/)
+})
+
 test('keeps every conversation layout free of repeated message avatars', async () => {
   const source = await chatSource()
 
