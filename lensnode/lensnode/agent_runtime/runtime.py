@@ -123,6 +123,7 @@ from ..runtime_resources import (
 )
 
 LOGGER = logging.getLogger("lensnode")
+MAX_CONFIGURED_SUBAGENTS = 8
 
 _MAX_PRESENTED_CITATIONS = 5
 _DEFAULT_CODE_ANALYSIS_MAX_TURNS = 10
@@ -212,6 +213,17 @@ def _build_execution_backend(config, root_dir):
         f"{_EXECUTION_BACKEND_TRUSTED_CONTAINER!r} or "
         f"{_EXECUTION_BACKEND_FILESYSTEM!r}."
     )
+
+
+def _virtual_skill_path(resources, path):
+    """Return a skill path relative to the Deep Agents virtual root."""
+
+    candidate = Path(path)
+    if candidate.is_absolute():
+        candidate = candidate.relative_to(resources.root)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("Skill path must remain inside the run scratch root")
+    return candidate.as_posix()
 
 
 
@@ -335,6 +347,8 @@ class LensDeepAgentRuntime:
         finally:
             if cancel_event is None or not cancel_event.is_set():
                 cleanup_runtime_resources(state.resources)
+                for resources in getattr(state, "subagent_resources", []):
+                    cleanup_runtime_resources(resources)
 
     def _subagents_enabled(self, state):
         """Return whether this run may delegate work to a subagent.
@@ -342,13 +356,21 @@ class LensDeepAgentRuntime:
         General Chat exposes the task tool only on the plan_execute route,
         where a complex multi-step task can be split across subagents;
         simple direct-answer and direct-execute runs keep it disabled.
-        Legacy modes always keep the task tool available.
+        Smart Collaboration always keeps the task tool available.
         """
 
+        if self._is_smart_collaboration(state.command):
+            return state.command.get("task") != "code_analysis"
         if not state.runtime_mode.general_chat:
             return state.command.get("task") != "code_analysis"
         route_decision = getattr(state, "route_decision", None) or {}
         return route_decision.get("route") == "plan_execute"
+
+    @staticmethod
+    def _is_smart_collaboration(command):
+        """Return whether a command belongs to Smart Collaboration."""
+
+        return command.get("routing_mode") == "smart"
 
     def _seed_run_checkpoint(
         self,
@@ -553,6 +575,7 @@ class LensDeepAgentRuntime:
             cancel_event=cancel_event,
             on_activity=on_activity,
         )
+        state.subagent_resources = []
         emit_agent_event(
             "deepagents.runtime.stage.done",
             {
@@ -801,6 +824,9 @@ class LensDeepAgentRuntime:
     def _route_runtime(self, state):
         """Select and handle the general-chat execution route."""
 
+        if self._is_smart_collaboration(state.command):
+            state.route_decision = {"route": "plan_execute"}
+            return None
         if not state.runtime_mode.execution_gates:
             return None
         routing_started_at = time.monotonic()
@@ -1006,6 +1032,7 @@ class LensDeepAgentRuntime:
             else None
         )
         use_subagents = self._subagents_enabled(state)
+        dynamic_subagents = self._build_configured_subagents(state)
         backend = _build_execution_backend(
             self.config,
             state.resources.root,
@@ -1025,6 +1052,9 @@ class LensDeepAgentRuntime:
             ),
             "backend": backend,
             "subagents": (
+                dynamic_subagents
+                if dynamic_subagents
+                else
                 [
                     _fast_subagent(
                         state.mcp_middleware,
@@ -1110,11 +1140,110 @@ class LensDeepAgentRuntime:
                     )
                 except Exception:
                     state.kwargs.pop("checkpointer", None)
-                    LOGGER.exception(
-                        "Failed to enable agent run checkpoints"
-                    )
+                    LOGGER.exception("Failed to enable agent run checkpoints")
         state.agent = create_deep_agent(**state.kwargs)
         state.max_turns = _resolve_agent_turn_limit(state.command)
+
+    def _build_configured_subagents(self, state):
+        """Build isolated Deep Agents specs from frozen assistant snapshots."""
+
+        subagents = []
+        seen_names = set()
+        for index, snapshot in enumerate(
+            (state.command.get("subagents") or [])[:MAX_CONFIGURED_SUBAGENTS]
+        ):
+            if not isinstance(snapshot, dict):
+                continue
+            model_ref = str(snapshot.get("agent_model_ref") or "")
+            if not model_ref:
+                state.emit_agent_event(
+                    "deepagents.subagent.skipped",
+                    {"reason": "agent_model_missing"},
+                )
+                continue
+            raw_name = str(snapshot.get("name") or snapshot.get("uuid") or "")
+            name = re.sub(r"[^a-zA-Z0-9_-]+", "-", raw_name).strip("-")
+            name = (name or f"assistant-{index + 1}")[:80]
+            if name in seen_names:
+                name = f"{name[:70]}-{index + 1}"
+            seen_names.add(name)
+            command = {
+                "run_uuid": f"{state.run_uuid[:48]}-subagent-{index + 1}",
+                "task": snapshot.get("task") or "general_chat",
+                "target_dirs": snapshot.get("target_dirs") or [],
+                "loaded_skills": snapshot.get("loaded_skills") or [],
+                "loaded_mcps": snapshot.get("loaded_mcps") or [],
+                "features": (snapshot.get("settings") or {}).get("features", {}),
+                "workspace_guide": snapshot.get("workspace_guide") or "",
+            }
+            resources = prepare_runtime_resources(
+                self.config,
+                command,
+                emit_event=state.emit_agent_event,
+                cancel_event=state.cancel_event,
+                on_activity=state.on_activity,
+            )
+            state.subagent_resources.append(resources)
+            tools = build_agent_tools(
+                command,
+                resources,
+                self.config,
+                emit_event=state.emit_agent_event,
+            )
+            tools.extend(
+                load_mcp_tools(
+                    resources.mcp_configs,
+                    discovery_timeout_s=getattr(
+                        self.config, "mcp_discovery_timeout_s", 30
+                    ),
+                    tool_timeout_s=getattr(self.config, "mcp_tool_timeout_s", 60),
+                    emit_event=state.emit_agent_event,
+                    stdio_allowlist=getattr(
+                        self.config, "mcp_stdio_allowlist", ()
+                    ),
+                )
+            )
+            model = LensGatewayChatModel(
+                model_ref=model_ref,
+                ai_gateway_url=self.config.ai_gateway_url,
+                token=self.config.token,
+                request_timeout_s=self.config.request_timeout_s,
+                tls_skip_verify=getattr(self.config, "tls_skip_verify", False),
+                tls_ca_file=getattr(self.config, "tls_ca_file", None),
+                http_client=self.http_client,
+                on_activity=state.on_activity,
+                cancel_event=state.cancel_event,
+                run_uuid=state.run_uuid,
+                trace_context=state.trace_context,
+                emit_observation=state.emit_trace_observation,
+                observation_name=name,
+            )
+            subagents.append(
+                {
+                    "name": name,
+                    "description": (
+                        str(snapshot.get("description") or "")
+                        or f"Delegate work to the {raw_name} assistant."
+                    )[:500],
+                    "system_prompt": (
+                        "You are the delegated assistant named "
+                        f"{raw_name}. Use only your provided tools and skills. "
+                        "Return concise, evidence-based findings to the "
+                        "Smart Collaboration coordinator.\n\n"
+                        + str(snapshot.get("workspace_guide") or "")
+                    ),
+                    "model": model,
+                    "tools": tools,
+                    "skills": [
+                        _virtual_skill_path(resources, path)
+                        for path in resources.skill_paths
+                    ],
+                    "middleware": [state.trace_middleware]
+                    if state.trace_middleware is not None
+                    else [],
+                }
+            )
+        return subagents
 
     def _execute_agent(self, state):
         """Run the prepared Deep Agents graph and finalize its outcome."""

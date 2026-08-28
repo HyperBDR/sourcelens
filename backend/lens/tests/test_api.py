@@ -55,9 +55,13 @@ from lens.models import (
 )
 from lens.serializers import (
     AssistantSerializer,
+    RunCreateSerializer,
+    SessionCreateSerializer,
+    SessionSerializer,
     validate_retrieval_policy,
     validate_retrieval_scope,
 )
+from lens.routing_descriptions import build_routing_description
 from lens.services import (
     LensNodeDispatchError,
     append_lensnode_output,
@@ -74,7 +78,7 @@ from lens.tasks import (
     acquire_datasource_lock,
     release_datasource_lock,
 )
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -835,6 +839,11 @@ class LensApiTests(TestCase):
         self.assertEqual(assistant.selected_task, "knowledge_qa")
         self.assertEqual(assistant.skill_bindings.count(), 1)
         self.assertEqual(assistant.mcp_bindings.count(), 1)
+        self.assertIn("Knowledge Q&A", assistant.routing_description)
+        self.assertIn("Explore API behavior and implementation.", assistant.routing_description)
+        self.assertIn("Code Search", assistant.routing_description)
+        self.assertIn("GitHub MCP", assistant.routing_description)
+        self.assertNotIn("routing_description", response.data)
         self.assertEqual(
             assistant.settings["_model_check"]["agent_model_ref"]["status"],
             "skipped",
@@ -876,6 +885,55 @@ class LensApiTests(TestCase):
             response.data["description"],
             "Updated assistant description.",
         )
+        self.assertIn(
+            "Updated assistant description.",
+            self.assistant.routing_description,
+        )
+
+    def test_assistant_model_save_refreshes_routing_description(self):
+        """Direct model saves keep the routing synopsis current."""
+
+        self.assistant.description = "Updated outside the API serializer."
+        self.assistant.save(update_fields=["description"])
+        self.assistant.refresh_from_db()
+
+        self.assertIn(
+            "Updated outside the API serializer.",
+            self.assistant.routing_description,
+        )
+
+    def test_resource_changes_refresh_routing_description(self):
+        """Routing descriptions follow bound resource availability."""
+
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=self.skill,
+        )
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+        )
+        self.assistant.refresh_from_db()
+        self.assertIn(self.skill.name, self.assistant.routing_description)
+        self.assertIn(self.mcp.name, self.assistant.routing_description)
+
+        self.skill.name = "Renamed Code Search"
+        self.skill.save(update_fields=["name"])
+        self.mcp.enabled = False
+        self.mcp.save(update_fields=["enabled"])
+
+        self.assistant.refresh_from_db()
+        self.assertIn("Renamed Code Search", self.assistant.routing_description)
+        self.assertNotIn(self.mcp.name, self.assistant.routing_description)
+
+    def test_routing_description_uses_the_run_answer_language(self):
+        """Smart-routing metadata follows the current Run language."""
+
+        spanish = build_routing_description(self.assistant, "es")
+        chinese = build_routing_description(self.assistant, "zh-CN")
+
+        self.assertIn("Capacidad: Preguntas y respuestas de conocimiento.", spanish)
+        self.assertIn("能力：知识库问答。", chinese)
 
     def test_assistant_serializer_rejects_non_boolean_hidden_options(self):
         scope_serializer = AssistantSerializer(
@@ -2002,6 +2060,142 @@ class LensApiTests(TestCase):
         self.assertFalse(Assistant.objects.filter(slug="rollback-assistant").exists())
         self.assertFalse(
             EnvironmentVariableSet.objects.filter(name="Rollback Set").exists()
+        )
+
+    def test_orchestrator_is_not_an_assistant_capability(self):
+        """Smart Collaboration is a session mode, not an Assistant type."""
+
+        serializer = AssistantSerializer(
+            data={
+                "name": "Invalid Orchestrator",
+                "slug": "invalid-orchestrator",
+                "capability": "orchestrator",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("capability", serializer.errors)
+
+    def test_smart_collaboration_session_uses_global_model_and_allowed_range(self):
+        GlobalSetting.objects.create(
+            key="lens.smart_collaboration.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        serializer = SessionCreateSerializer(
+            data={
+                "routing_mode": "smart",
+                "allowed_assistant_uuids": [str(self.assistant.uuid)],
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        session = serializer.save()
+
+        self.assertEqual(session.routing_mode, Session.RoutingMode.SMART)
+        self.assertEqual(
+            session.allowed_assistant_uuids,
+            [str(self.assistant.uuid)],
+        )
+        self.assertTrue(session.assistant.is_system)
+        self.assertEqual(
+            str(session.assistant.agent_model_ref),
+            "11111111-1111-1111-1111-111111111111",
+        )
+
+        update = SessionSerializer(
+            session,
+            data={"allowed_assistant_uuids": []},
+            partial=True,
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+        self.assertTrue(update.is_valid(), update.errors)
+        updated = update.save()
+        self.assertEqual(
+            updated.allowed_assistant_uuids,
+            [str(self.assistant.uuid)],
+        )
+
+    def test_smart_collaboration_rejects_legacy_model_setting(self):
+        """Only the final Smart Collaboration model setting is accepted."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_router.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        serializer = SessionCreateSerializer(
+            data={"routing_mode": "smart"},
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        with self.assertRaises(PermissionDenied):
+            serializer.save()
+
+    def test_smart_run_can_limit_one_run_without_updating_session_scope(self):
+        """A routing assistant override belongs to the Run snapshot only."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_collaboration.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.description = "Use for focused repository analysis."
+        self.assistant.save(
+            update_fields=["visibility", "description"]
+        )
+        self.user.profile.language = "es"
+        self.user.profile.save(update_fields=["language"])
+        session = SessionCreateSerializer(
+            data={"routing_mode": "smart"},
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+        self.assertTrue(session.is_valid(), session.errors)
+        session = session.save()
+        original_scope = list(session.allowed_assistant_uuids)
+        serializer = RunCreateSerializer(
+            data={
+                "question": "@Code Advisor Analyze this request.",
+                "routing_assistant_uuid": str(self.assistant.uuid),
+                "enqueue": False,
+            },
+            context={
+                "session": session,
+                "request": SimpleNamespace(user=self.user),
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        run = serializer.save()
+
+        session.refresh_from_db()
+        self.assertEqual(session.allowed_assistant_uuids, original_scope)
+        self.assertEqual(
+            run.input_message.content,
+            "@Code Advisor Analyze this request.",
+        )
+        self.assertEqual(
+            run.execution.runtime_snapshot["allowed_assistant_uuids"],
+            [str(self.assistant.uuid)],
+        )
+        routing_description = run.execution.runtime_snapshot["subagents"][0][
+            "routing_description"
+        ]
+        self.assertIn(
+            "Capacidad: Preguntas y respuestas de conocimiento.",
+            routing_description,
+        )
+        self.assertIn(
+            "Resumen del asistente: Use for focused repository analysis.",
+            routing_description,
+        )
+        self.assertEqual(
+            run.execution.runtime_snapshot["routing_question"],
+            "Analyze this request.",
         )
 
     def test_assistant_update_forks_shared_environment_set(self):

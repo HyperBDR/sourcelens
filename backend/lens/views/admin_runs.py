@@ -26,6 +26,7 @@ from lens.serializers import (
     RunOutputFileSerializer,
 )
 from lens.services import (
+    cancel_descendant_runs,
     cancel_run_on_lensnode,
     create_execution_run,
     resume_awaiting_run,
@@ -54,6 +55,29 @@ def _admin_run_duration(run):
     """Return execution seconds (started -> finished) or None."""
 
     return _admin_duration_seconds(run.started_at, run.finished_at)
+
+
+def _sanitize_delegated_assistants(items):
+    """Return delegation identities without runtime config or secrets."""
+
+    result = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        result.append(
+            {
+                key: item[key]
+                for key in (
+                    "uuid",
+                    "name",
+                    "description",
+                    "capability",
+                    "task",
+                )
+                if item.get(key) is not None
+            }
+        )
+    return result
 
 
 def _admin_duration_seconds(started_at, finished_at):
@@ -418,6 +442,13 @@ def _admin_run_row(run):
             "export": True,
         },
         "planned_evidence": counts["planned_evidence"],
+        "routing_mode": runtime_snapshot.get("routing_mode") or "direct",
+        "allowed_assistant_uuids": runtime_snapshot.get(
+            "allowed_assistant_uuids", []
+        ),
+        "delegated_assistants": _sanitize_delegated_assistants(
+            runtime_snapshot.get("subagents", [])
+        ),
         "created_at": run.created_at.isoformat() if run.created_at else None,
     }
 
@@ -693,6 +724,7 @@ def _admin_run_detail(run):
     out = run.output_message
     assistant = run.session.assistant if run.session else None
     execution = run.execution if hasattr(run, "execution") else None
+    runtime_snapshot = execution.runtime_snapshot if execution else {}
     agent_rounds = execution.agent_rounds if execution else None
     if agent_rounds is None and assistant:
         agent_rounds = assistant.agent_rounds
@@ -774,6 +806,14 @@ def _admin_run_detail(run):
                     "task": execution.task,
                     "status": execution.status,
                     "target_dirs": execution.target_dirs,
+                    "routing_mode": runtime_snapshot.get("routing_mode")
+                    or "direct",
+                    "allowed_assistant_uuids": runtime_snapshot.get(
+                        "allowed_assistant_uuids", []
+                    ),
+                    "delegated_assistants": _sanitize_delegated_assistants(
+                        runtime_snapshot.get("subagents", [])
+                    ),
                     "loaded_skills": sanitize_loaded_skills(execution.loaded_skills),
                     "loaded_mcps": sanitize_loaded_mcps(execution.loaded_mcps),
                     "resource_usage": _admin_run_resource_usage(
@@ -956,6 +996,7 @@ class AdminRunCancelView(APIView):
     def post(self, request, uuid):
         """Cancel a queued or active Run idempotently."""
 
+        descendants = []
         with transaction.atomic():
             run = _admin_run_for_action(uuid, lock=True)
             if run is None:
@@ -985,7 +1026,10 @@ class AdminRunCancelView(APIView):
                 run.execution.status = RunExecution.Status.CANCELLED
                 run.execution.finished_at = now
                 run.execution.save(update_fields=["status", "finished_at"])
+            descendants = cancel_descendant_runs(run)
         cancel_run_on_lensnode(run)
+        for descendant in descendants:
+            cancel_run_on_lensnode(descendant)
         return Response(_admin_run_row(run))
 
 

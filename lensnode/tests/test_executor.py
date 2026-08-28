@@ -1268,6 +1268,25 @@ def test_code_analysis_does_not_enable_subagents():
     assert runtime._subagents_enabled(state) is False
 
 
+def test_smart_collaboration_enables_subagents():
+    runtime = LensDeepAgentRuntime.__new__(LensDeepAgentRuntime)
+    state = SimpleNamespace(
+        runtime_mode=SimpleNamespace(general_chat=True),
+        command={"task": "general_chat", "routing_mode": "smart"},
+    )
+
+    assert runtime._subagents_enabled(state) is True
+
+
+def test_smart_collaboration_bypasses_capability_route():
+    runtime = LensDeepAgentRuntime.__new__(LensDeepAgentRuntime)
+    state = SimpleNamespace(
+        command={"task": "general_chat", "routing_mode": "smart"},
+    )
+
+    assert runtime._is_smart_collaboration(state.command) is True
+
+
 def test_vague_code_analysis_questions_are_detected_without_target():
     assert _vague_code_analysis_question("帮我分析一下") is True
     assert _vague_code_analysis_question("请描述一下") is True

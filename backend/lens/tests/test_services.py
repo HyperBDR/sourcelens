@@ -58,6 +58,8 @@ from lens.runtime_events import (
 )
 from lens.serializers import MessageSerializer, RunSerializer
 from lens.services import (
+    AssistantNotRunnableError,
+    LensNodeDispatchError,
     _build_sync_event,
     _step_sequence,
     build_clarification_continuation_question,
@@ -65,12 +67,15 @@ from lens.services import (
     build_run_history,
     build_run_history_artifacts,
     create_execution_run,
+    create_delegated_run,
     create_run_execution_snapshot,
     dispatch_run_to_lensnode,
     finish_lensnode_run,
     max_agent_turns_for_rounds,
     rewrite_query,
     run_timeout_for_rounds,
+    select_execution_lensnode,
+    validate_run_dispatch,
 )
 from lens.tasks import (
     acquire_datasource_lock,
@@ -171,6 +176,109 @@ class LensServiceTests(TransactionTestCase):
     def test_max_agent_turns_falls_back_to_balanced(self):
         self.assertEqual(max_agent_turns_for_rounds("unknown"), 26)
         self.assertEqual(max_agent_turns_for_rounds(None), 26)
+
+    def test_unbound_assistant_uses_least_loaded_compatible_lensnode(self):
+        busy_run = create_execution_run(
+            session=self.session,
+            question="Busy work",
+            enqueue=False,
+        )
+        unbound = Assistant.objects.create(
+            name="Scheduled Assistant",
+            slug="scheduled-assistant",
+            lensnode=None,
+            selected_task="knowledge_qa",
+        )
+        idle = LensNode.objects.create(
+            name="Idle LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            tasks=[{"name": "knowledge_qa"}],
+        )
+
+        selected = select_execution_lensnode(unbound)
+
+        self.assertEqual(selected, idle)
+        self.assertEqual(busy_run.lensnode, self.lensnode)
+
+    def test_delegated_run_uses_selected_assistant_lensnode(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        child_node = LensNode.objects.create(
+            name="Data LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            tasks=[{"name": "knowledge_qa"}],
+        )
+        child = Assistant.objects.create(
+            name="Data Assistant",
+            slug="data-assistant",
+            lensnode=child_node,
+            selected_task="knowledge_qa",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        parent = create_execution_run(
+            session=self.session,
+            question="Investigate incident",
+            enqueue=False,
+        )
+        parent.execution.runtime_snapshot["subagents"] = [
+            {"uuid": str(child.uuid)}
+        ]
+        parent.execution.save(update_fields=["runtime_snapshot"])
+
+        delegated = create_delegated_run(
+            parent,
+            child.uuid,
+            "Query production error rate",
+        )
+
+        self.assertEqual(delegated.parent_run, parent)
+        self.assertEqual(delegated.session.assistant, child)
+        self.assertEqual(delegated.lensnode, child_node)
+
+    def test_delegated_run_rejects_depth_overflow(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        parent = create_execution_run(
+            session=self.session,
+            question="Root",
+            enqueue=False,
+        )
+        current = parent
+        for _ in range(3):
+            current = Run.objects.create(
+                session=self.session,
+                status=Run.Status.QUEUED,
+                input_message=parent.input_message,
+                parent_run=current,
+                lensnode=self.lensnode,
+            )
+        with self.assertRaisesMessage(
+            LensNodeDispatchError,
+            "SUBAGENT_DEPTH_EXCEEDED",
+        ):
+            create_delegated_run(current, self.assistant.uuid, "Too deep")
+
+    def test_smart_run_rechecks_live_assistant_access(self):
+        self.assistant.visibility = Assistant.Visibility.PRIVATE
+        self.assistant.save(update_fields=["visibility"])
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            routing_mode=Session.RoutingMode.SMART,
+            allowed_assistant_uuids=[str(self.assistant.uuid)],
+        )
+        with self.assertRaises(AssistantNotRunnableError):
+            create_execution_run(
+                session=session,
+                question="Must be rejected after access change",
+                enqueue=False,
+            )
 
     def test_explicit_language_request_overrides_profile_language(self):
         self.user.profile.language = "en-US"
@@ -328,6 +436,41 @@ class LensServiceTests(TransactionTestCase):
                 {"role": "assistant", "content": "a1"},
                 {"role": "user", "content": "q2"},
             ],
+        )
+
+    def test_build_run_history_keeps_default_continuity_after_eight_turns(
+        self,
+    ):
+        for index in range(8):
+            prior = create_execution_run(
+                session=self.session,
+                question=(
+                    "Remember continuity token CTX-ROUTE-908"
+                    if index == 0
+                    else f"Follow-up {index}"
+                ),
+                enqueue=False,
+            )
+            prior.output_message.content = f"Answer {index}"
+            prior.output_message.save(update_fields=["content"])
+            prior.status = Run.Status.DONE
+            prior.outcome = Run.Outcome.COMPLETED
+            prior.save(update_fields=["status", "outcome"])
+
+        current = create_execution_run(
+            session=self.session,
+            question="What was the continuity token?",
+            enqueue=False,
+        )
+
+        history = build_run_history(current)
+
+        self.assertIn(
+            {
+                "role": "user",
+                "content": "Remember continuity token CTX-ROUTE-908",
+            },
+            history,
         )
 
     def test_build_run_history_artifacts_returns_trusted_deliverable(self):
@@ -767,7 +910,7 @@ class LensServiceTests(TransactionTestCase):
         history = build_run_history(current)
 
         # message_chars clamps up to 200 (never a negative slice); pairs
-        # falls back to the default of 5.
+        # falls back to the default continuity window.
         self.assertEqual(history[0]["role"], "user")
         self.assertEqual(len(history[0]["content"]), 200)
 
@@ -911,6 +1054,38 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertEqual(run.status, Run.Status.DONE)
         self.assertEqual(run.execution.status, "completed")
+
+    def test_cancelled_queued_run_is_not_started_by_stale_task(self):
+        run = create_execution_run(
+            session=self.session,
+            question="Cancelled before worker delivery",
+            enqueue=False,
+        )
+        run.status = Run.Status.CANCELLED
+        run.save(update_fields=["status"])
+        with patch("lens.execution._build_execution_graph") as build_graph:
+            execute_answer_run(run, dispatch=False)
+        build_graph.assert_not_called()
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.CANCELLED)
+
+    def test_smart_dispatch_allows_empty_coordinator_skills(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        self.assistant.capability = Assistant.Capability.GENERAL_CHAT
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["capability", "visibility"])
+        self.lensnode.tasks = [
+            {"name": "general_chat", "description": "Delegate work"}
+        ]
+        self.lensnode.save(update_fields=["tasks"])
+        run = create_execution_run(
+            session=self.session,
+            question="Delegate this work",
+            enqueue=False,
+        )
+
+        validate_run_dispatch(run)
 
     def test_dispatch_refreshes_skill_package_snapshot(self):
         skill = Skill.objects.create(

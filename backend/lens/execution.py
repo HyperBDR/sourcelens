@@ -17,6 +17,7 @@ from .services import (
     finish_lensnode_run,
     rewrite_query,
     resolve_run_answer_language,
+    run_execution_question,
     validate_run_dispatch,
 )
 
@@ -87,7 +88,7 @@ def _lensnode_dispatch(state):
 
     run = state["run"]
     assistant = run.session.assistant
-    question = run.input_message.content
+    question = run_execution_question(run)
     execution = RunExecution.objects.filter(run=run).first()
     selected_image_uuids = set(
         (execution.runtime_snapshot if execution else {}).get(
@@ -194,7 +195,7 @@ def _lensnode_inline_done(state):
 
     run = state["run"]
     answer = (
-        f"Dispatched {run.session.assistant.selected_task} to "
+        f"Dispatched {run.execution.task} to "
         f"{run.lensnode.name}."
     )
     with transaction.atomic():
@@ -236,6 +237,9 @@ def execute_answer_run(
 ):
     """Execute a Lens answer run through LensNode dispatch flow."""
 
+    run.refresh_from_db(fields=["status"])
+    if run.status != Run.Status.QUEUED:
+        return run
     assistant = run.session.assistant
     max_concurrency = assistant.max_concurrency
     if max_concurrency > 0:

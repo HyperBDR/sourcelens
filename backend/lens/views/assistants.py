@@ -47,7 +47,9 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
     def get_queryset(self):
         """Scope assistants to those the caller may see."""
 
-        queryset = super().get_queryset().visible_to(self.request.user)
+        queryset = super().get_queryset().visible_to(self.request.user).filter(
+            is_system=False
+        )
         if self.action == "restore":
             return queryset.filter(status=Assistant.Status.ARCHIVED)
         if self.action == "archive":

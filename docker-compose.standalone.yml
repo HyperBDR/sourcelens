@@ -151,6 +151,7 @@ services:
     environment:
       LENSNODE_NAME: ${LENSNODE_NAME:-local-lensnode}
       LENSNODE_TOKEN: ${LENSNODE_TOKEN:-change-me-lensnode-token}
+      LENSNODE_AGENT_VERSION: ${APP_VERSION:-unknown}
       # Single fixed backend-api here (no blue/green), so talk to it directly
       # rather than through nginx. These override the nginx-based defaults the
       # blue/green stack puts in env.sample.

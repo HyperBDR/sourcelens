@@ -179,6 +179,7 @@ services:
     environment:
       LENSNODE_NAME: ${LENSNODE_NAME:-local-lensnode}
       LENSNODE_TOKEN: ${LENSNODE_TOKEN:-change-me-lensnode-token}
+      LENSNODE_AGENT_VERSION: ${APP_VERSION:-unknown}
       # Reach the API through nginx, not a color-specific container: nginx
       # always proxies to the active color, so lensnode rides a blue/green
       # switch by simply reconnecting. These are set explicitly here (not just

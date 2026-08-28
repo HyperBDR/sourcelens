@@ -69,6 +69,7 @@ from lens.serializers import (
     SharedQAMineSerializer,
 )
 from lens.services import (
+    cancel_descendant_runs,
     cancel_run_on_lensnode,
     create_execution_run,
     stream_run_events_async,
@@ -123,6 +124,9 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         assistant_slug = self.request.query_params.get("assistant_slug")
         if assistant_slug:
             queryset = queryset.filter(assistant__slug=assistant_slug)
+        routing_mode = self.request.query_params.get("routing_mode")
+        if routing_mode:
+            queryset = queryset.filter(routing_mode=routing_mode)
         queryset = queryset.filter(user=self.request.user)
         if self.action == "list":
             archived = self.request.query_params.get("archived", "").lower()
@@ -294,7 +298,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         if uploaded is None:
             raise ValidationError("No file provided.")
         is_document = is_document_upload(uploaded)
-        if is_document and session.assistant.selected_task == "general_chat":
+        if is_document and session.assistant.capability == "general_chat":
             raise ValidationError(
                 "This assistant does not accept document attachments."
             )
@@ -655,6 +659,7 @@ class RunViewSet(BaseAuthenticatedViewSet):
             return Response(RunSerializer(run).data)
 
         now = timezone.now()
+        descendants = []
         with transaction.atomic():
             run.status = Run.Status.CANCELLED
             run.resume_by = None
@@ -673,7 +678,10 @@ class RunViewSet(BaseAuthenticatedViewSet):
                 run.execution.save(
                     update_fields=["status", "finished_at"]
                 )
+            descendants = cancel_descendant_runs(run)
         cancel_run_on_lensnode(run)
+        for descendant in descendants:
+            cancel_run_on_lensnode(descendant)
         return Response(RunSerializer(run).data)
 
     @action(detail=True, methods=["post"])
