@@ -30,6 +30,7 @@ class RemoteSubagentRunnable(Runnable):
         token,
         http_client,
         cancel_event=None,
+        on_activity=None,
         poll_interval_s=0.3,
         push_wait_s=5,
         timeout_s=3600,
@@ -40,6 +41,7 @@ class RemoteSubagentRunnable(Runnable):
         self.token = token
         self.http_client = http_client
         self.cancel_event = cancel_event
+        self.on_activity = on_activity
         self.poll_interval_s = max(float(poll_interval_s), 0.05)
         self.push_wait_s = max(float(push_wait_s), self.poll_interval_s)
         self.timeout_s = max(float(timeout_s), 1)
@@ -76,6 +78,7 @@ class RemoteSubagentRunnable(Runnable):
         deadline = time.monotonic() + self.timeout_s
         while payload.get("status") not in TERMINAL_STATUSES:
             self._check_cancelled()
+            self._touch_activity()
             if time.monotonic() >= deadline:
                 raise TimeoutError("Delegated assistant timed out.")
             payload = delegation_events.wait(
@@ -83,6 +86,7 @@ class RemoteSubagentRunnable(Runnable):
                 min(self.push_wait_s, deadline - time.monotonic()),
             )
             if payload is not None:
+                self._touch_activity()
                 continue
             time.sleep(self.poll_interval_s)
             response = self.http_client.get(
@@ -91,6 +95,7 @@ class RemoteSubagentRunnable(Runnable):
             )
             response.raise_for_status()
             payload = self._response_data(response)
+            self._touch_activity()
 
         self._check_cancelled()
         if payload.get("status") == "done":
@@ -107,6 +112,12 @@ class RemoteSubagentRunnable(Runnable):
 
         if self.cancel_event is not None and self.cancel_event.is_set():
             raise RunCancelledError("Parent Run cancelled delegated work.")
+
+    def _touch_activity(self):
+        """Keep the parent watchdog alive while a child Run is active."""
+
+        if self.on_activity is not None:
+            self.on_activity()
 
     @staticmethod
     def _question(input):
