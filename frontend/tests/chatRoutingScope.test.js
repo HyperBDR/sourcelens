@@ -10,6 +10,15 @@ import {
 const chatSource = () =>
   readFile(new URL('../src/pages/lens/Chat.vue', import.meta.url), 'utf8')
 
+const routingScopePickerSource = () =>
+  readFile(
+    new URL(
+      '../src/pages/lens/components/ParticipatingAssistantsPicker.vue',
+      import.meta.url
+    ),
+    'utf8'
+  )
+
 test('filters participating assistants by name without changing selection', () => {
   const assistants = [
     { uuid: 'assistant-1', name: 'Repository Analyst' },
@@ -51,10 +60,13 @@ test('select-all toggles every participating assistant back to empty', () => {
 })
 
 test('Smart Collaboration starts with an empty searchable routing scope', async () => {
-  const source = await chatSource()
+  const [source, picker] = await Promise.all([
+    chatSource(),
+    routingScopePickerSource()
+  ])
 
-  assert.match(source, /v-model="routingScopeQuery"\s+type="search"/)
-  assert.match(source, /@click="toggleAllRoutingAssistants"/)
+  assert.match(picker, /:value="query"\s+type="search"/)
+  assert.match(picker, /@click="\$emit\('toggle-all'\)"/)
   assert.match(source, /routingScopeDraft\.value = \[\]/)
   assert.match(
     source,
@@ -64,5 +76,21 @@ test('Smart Collaboration starts with an empty searchable routing scope', async 
     source,
     /await createNewSession\(\s*false,\s*routingScopeAssistantUuids\.value\s*\)/
   )
-  assert.match(source, /participatingAssistantsAccuracyWarning/)
+  assert.match(picker, /participatingAssistantsAccuracyWarning/)
+})
+
+test('Smart Collaboration exposes the picker above the composer', async () => {
+  const [chat, picker] = await Promise.all([
+    chatSource(),
+    routingScopePickerSource()
+  ])
+
+  assert.match(
+    chat,
+    /<div class="composer-shell relative">\s+<ParticipatingAssistantsPicker\s+v-if="isSmartCollaborationConversation"/
+  )
+  assert.match(chat, /:mobile="isMobile"/)
+  assert.match(picker, /:class="\{ 'is-mobile': mobile \}"/)
+  assert.match(picker, /class="routing-scope-panel"/)
+  assert.match(chat, /v-model:draft="routingScopeDraft"/)
 })

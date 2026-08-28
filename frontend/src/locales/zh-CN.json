@@ -382,6 +382,7 @@
         "stageEnded": "已结束 {completed}/{total}",
         "activityProgress": "已记录 {count} 项活动",
         "activityCompleted": "已完成 {count} 项活动",
+        "currentAssistant": "当前助手：{name}",
         "documentProgress": {
           "downloading": "正在下载文档 {current}/{total}",
           "extractingText": "正在提取文档文本 {current}/{total}",

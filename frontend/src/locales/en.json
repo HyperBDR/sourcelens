@@ -382,6 +382,7 @@
         "stageEnded": "Ended {completed}/{total}",
         "activityProgress": "Recorded {count} activities",
         "activityCompleted": "Completed {count} activities",
+        "currentAssistant": "Current assistant: {name}",
         "documentProgress": {
           "downloading": "Downloading document {current}/{total}",
           "extractingText": "Extracting document text {current}/{total}",

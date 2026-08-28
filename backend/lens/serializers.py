@@ -2736,6 +2736,25 @@ class MessageSerializer(serializers.ModelSerializer):
         steps = []
         for step in run.steps.all():
             steps.extend(public_step_detail(step.detail)["events"])
+        for child in run.delegated_runs.all():
+            assistant_name = child.session.assistant.name[:160]
+            delegated_task = str(
+                child.input_message.content or ""
+            ).strip()[:2000]
+            for step in child.steps.all():
+                for event in public_step_detail(step.detail)["events"]:
+                    event = {
+                        **event,
+                        "assistant_name": assistant_name,
+                        "delegated_task": delegated_task,
+                    }
+                    if event.get("event_type") == "activity.recorded":
+                        event["payload"] = {
+                            **(event.get("payload") or {}),
+                            "assistant_name": assistant_name,
+                            "delegated_task": delegated_task,
+                        }
+                    steps.append(event)
         if not steps and not run.outcome:
             return None
         duration = None

@@ -20,6 +20,7 @@ from .views import (
     GlobalSettingViewSet,
     LensAttachmentView,
     LensNodeAIGatewayView,
+    LensNodeDelegationView,
     LensNodeDeliverableUploadView,
     LensNodeHistoryArtifactView,
     LensNodeRunAttachmentView,
@@ -206,6 +207,19 @@ urlpatterns = [
         "lensnode/ai-gateway/",
         LensNodeAIGatewayView.as_view(),
         name="lens-lensnode-ai-gateway",
+    ),
+    path(
+        "lensnode/runs/<uuid:run_uuid>/delegations/",
+        LensNodeDelegationView.as_view(),
+        name="lens-lensnode-delegations",
+    ),
+    path(
+        (
+            "lensnode/runs/<uuid:run_uuid>/delegations/"
+            "<uuid:child_uuid>/"
+        ),
+        LensNodeDelegationView.as_view(),
+        name="lens-lensnode-delegation-detail",
     ),
     path(
         "lensnode/skills/<uuid:uuid>/package/",

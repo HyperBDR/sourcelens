@@ -44,6 +44,7 @@ class LensNodeConfig:
     planning_reasoning_effort: str | None = "medium"
     planner_repair_enabled: bool = False
     execution_backend: str = "trusted_container"
+    delegation_base_url: str = ""
 
 
 def _optional_int(value):
@@ -222,6 +223,8 @@ def load_config():
         execution_backend=os.getenv(
             "LENSNODE_EXECUTION_BACKEND", "trusted_container"
         ).strip().lower(),
+        delegation_base_url=os.getenv("LENSNODE_DELEGATION_BASE_URL")
+        or f"{server_url}/api/lens/lensnode/runs",
         offload_tool_tokens=int(
             os.getenv("LENSNODE_OFFLOAD_TOOL_TOKENS") or "5000"
         ),

@@ -197,6 +197,9 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         messages = list(
             session.message_set.select_related("run").prefetch_related(
                 "run__steps",
+                "run__delegated_runs__steps",
+                "run__delegated_runs__input_message",
+                "run__delegated_runs__session__assistant",
                 "response_runs__steps",
                 "attachments",
                 "output_files",

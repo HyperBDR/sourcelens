@@ -19,6 +19,7 @@ from .checkpoint import (
     get_checkpoint_saver,
 )
 from .config import load_config
+from .delegation_events import delegation_events
 from .datasource_sync import DataSourceSyncError
 from .datasource_sync import convert_managed_workspace
 from .datasource_sync import inspect_datasource_path, sync_datasource
@@ -461,6 +462,8 @@ class LensNodeClient:
         message_type = message.get("type")
         if message_type == "run_start":
             await self._start_command(message)
+        elif message_type == "delegation_done":
+            delegation_events.publish(message)
         elif message_type == "skill_cache_invalidate":
             await asyncio.to_thread(
                 delete_skill_cache,

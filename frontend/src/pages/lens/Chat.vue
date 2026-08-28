@@ -349,100 +349,6 @@
             >
               {{ assistantDescription }}
             </p>
-            <div
-              v-if="isSmartCollaborationConversation"
-              class="relative mt-2"
-            >
-              <button
-                type="button"
-                class="rounded-md border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink-600 hover:border-brand-300 hover:text-brand-700"
-                @click="openRoutingScope"
-              >
-                {{ t('lens.chat.participatingAssistants', {
-                  count: routingScopeAssistantUuids.length
-                }) }}
-              </button>
-              <div
-                v-if="routingScopeOpen"
-                class="absolute left-0 z-20 mt-2 w-80 rounded-lg border border-line bg-surface p-3 shadow-lg"
-              >
-                <p class="text-xs leading-5 text-ink-500">
-                  {{ t('lens.chat.participatingAssistantsHint') }}
-                </p>
-                <p
-                  class="mt-2 rounded-md border border-warning-200 bg-warning-50 px-2.5 py-2 text-xs leading-5 text-warning-700"
-                >
-                  {{ t('lens.chat.participatingAssistantsAccuracyWarning') }}
-                </p>
-                <div class="mt-3 flex items-center gap-2">
-                  <input
-                    v-model="routingScopeQuery"
-                    type="search"
-                    name="participating-assistant-search"
-                    autocomplete="off"
-                    inputmode="search"
-                    :aria-label="t('lens.chat.searchParticipatingAssistants')"
-                    :placeholder="t('lens.chat.searchParticipatingAssistants')"
-                    class="min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-brand-400 focus:ring-1 focus:ring-brand-400"
-                  />
-                  <button
-                    type="button"
-                    :disabled="!routingCandidates.length"
-                    :aria-pressed="routingAllSelected"
-                    class="shrink-0 rounded px-2 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    @click="toggleAllRoutingAssistants"
-                  >
-                    {{
-                      routingAllSelected
-                        ? t('lens.chat.clearAllParticipatingAssistants')
-                        : t('common.selectAll')
-                    }}
-                  </button>
-                </div>
-                <div class="mt-2 max-h-56 space-y-1 overflow-y-auto">
-                  <label
-                    v-for="assistant in filteredRoutingCandidates"
-                    :key="assistant.uuid"
-                    class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-sunken"
-                  >
-                    <input
-                      v-model="routingScopeDraft"
-                      type="checkbox"
-                      :value="assistant.uuid"
-                      class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
-                    />
-                    <span class="min-w-0 flex-1 truncate">
-                      {{ assistant.name }}
-                    </span>
-                    <span class="text-xs text-ink-500">
-                      {{ assistantCapabilityLabel(assistant.capability) }}
-                    </span>
-                  </label>
-                  <p
-                    v-if="!filteredRoutingCandidates.length"
-                    class="px-2 py-4 text-center text-xs text-ink-500"
-                  >
-                    {{ t('lens.chat.participatingAssistantsEmpty') }}
-                  </p>
-                </div>
-                <div class="mt-3 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    class="rounded px-2 py-1 text-xs text-ink-600 hover:bg-surface-sunken"
-                    @click="cancelRoutingScope"
-                  >
-                    {{ t('common.cancel') }}
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded bg-brand-600 px-2 py-1 text-xs font-medium text-white hover:bg-brand-700"
-                    @click="saveRoutingScope"
-                  >
-                    {{ t('common.save') }}
-                  </button>
-                </div>
-              </div>
-            </div>
           </div>
           <router-link
             v-if="assistantSlug"
@@ -492,7 +398,11 @@
             >
               <div class="message-body">
                 <details
-                  v-if="structuredProgress(message._runtimeState).items.length"
+                  v-if="
+                    structuredProgress(message._runtimeState).items.length ||
+                    delegatedTaskGroups(message._runtimeState).length
+                  "
+                  open
                   class="runtime-progress-card"
                 >
                   <summary class="runtime-progress-summary">
@@ -503,6 +413,15 @@
                           structuredProgress(message._runtimeState).hasPlan
                         )
                       }}
+                      <span
+                        v-if="
+                          isSmartCollaborationConversation &&
+                          assistantNamesLabel(message._runtimeState)
+                        "
+                        class="runtime-assistant-names"
+                      >
+                        · {{ assistantNamesLabel(message._runtimeState) }}
+                      </span>
                     </span>
                     <span class="runtime-progress-summary-text">
                       {{
@@ -517,6 +436,35 @@
                       ⌄
                     </span>
                   </summary>
+                  <div
+                    v-if="
+                      structuredProgress(message._runtimeState).kind ===
+                        'workflow' &&
+                      delegatedTaskGroups(message._runtimeState).length
+                    "
+                    class="runtime-activity-groups runtime-delegation-groups"
+                  >
+                    <div
+                      v-for="group in delegatedTaskGroups(
+                        message._runtimeState
+                      )"
+                      :key="group.key"
+                      class="runtime-activity-group"
+                    >
+                      <div class="runtime-activity-group-title">
+                        {{ group.assistantName }}
+                      </div>
+                      <div
+                        v-for="task in group.tasks"
+                        :key="task"
+                        class="runtime-activity-task"
+                      >
+                        <span class="runtime-activity-task-text">
+                          {{ task }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                   <div
                     v-if="
                       structuredProgress(message._runtimeState).kind ===
@@ -616,23 +564,45 @@
                       structuredProgress(message._runtimeState).kind ===
                       'activity'
                     "
-                    class="runtime-node-activities runtime-standalone-activities"
+                    class="runtime-activity-groups"
                   >
                     <div
-                      v-for="activity in structuredProgress(
-                        message._runtimeState
-                      ).items"
-                      :key="activity.id"
-                      class="runtime-node-activity"
+                      v-for="group in assistantActivityGroups(
+                        message._runtimeState,
+                        structuredProgress(message._runtimeState).items
+                      )"
+                      :key="group.key"
+                      class="runtime-activity-group"
                     >
-                      <span class="runtime-activity-indicator">✓</span>
-                      <span>{{ activityLabel(activity.kind) }}</span>
-                      <span
-                        v-if="activity.count > 1"
-                        class="runtime-activity-count"
+                      <div
+                        v-if="group.assistantName"
+                        class="runtime-activity-group-title"
                       >
-                        ×{{ activity.count }}
-                      </span>
+                        {{ group.assistantName }}
+                      </div>
+                      <div
+                        v-for="task in group.tasks"
+                        :key="task"
+                        class="runtime-activity-task"
+                      >
+                        <span class="runtime-activity-task-text">
+                          {{ task }}
+                        </span>
+                      </div>
+                      <div
+                        v-for="activity in group.items"
+                        :key="activity.id"
+                        class="runtime-node-activity"
+                      >
+                        <span class="runtime-activity-indicator">✓</span>
+                        <span>{{ activityLabel(activity.kind) }}</span>
+                        <span
+                          v-if="activity.count > 1"
+                          class="runtime-activity-count"
+                        >
+                          ×{{ activity.count }}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div
@@ -672,7 +642,19 @@
                         class="runtime-node-activity"
                       >
                         <span class="runtime-activity-indicator">✓</span>
+                        <span
+                          v-if="activity.assistantName"
+                          class="runtime-activity-assistant"
+                        >
+                          {{ activity.assistantName }}
+                        </span>
                         <span>{{ activityLabel(activity.kind) }}</span>
+                        <span
+                          v-if="activity.delegatedTask"
+                          class="runtime-activity-task-inline"
+                        >
+                          · {{ activity.delegatedTask }}
+                        </span>
                         <span
                           v-if="activity.count > 1"
                           class="runtime-activity-count"
@@ -1150,9 +1132,13 @@
             >
               <div class="message-body">
                 <details
-                  v-if="isRunActive && liveStructuredProgress.items.length"
+                  v-if="
+                    isRunActive &&
+                    (liveStructuredProgress.items.length ||
+                      delegatedTaskGroups(runtimeState).length)
+                  "
+                  open
                   class="runtime-progress-card runtime-progress-live"
-                  :open="!isMobile"
                   role="status"
                   aria-live="polite"
                 >
@@ -1166,6 +1152,15 @@
                           liveStructuredProgress.hasPlan
                         )
                       }}
+                      <span
+                        v-if="
+                          isSmartCollaborationConversation &&
+                          assistantNamesLabel(runtimeState)
+                        "
+                        class="runtime-assistant-names"
+                      >
+                        · {{ assistantNamesLabel(runtimeState) }}
+                      </span>
                     </span>
                     <span class="runtime-progress-summary-text">
                       {{ liveProgressText }}
@@ -1185,6 +1180,41 @@
                           liveStructuredProgress.hasPlan
                         )
                       }}
+                      <span
+                        v-if="
+                          isSmartCollaborationConversation &&
+                          assistantNamesLabel(runtimeState)
+                        "
+                        class="runtime-assistant-names"
+                      >
+                        · {{ assistantNamesLabel(runtimeState) }}
+                      </span>
+                    </div>
+                    <div
+                      v-if="
+                        liveStructuredProgress.kind === 'workflow' &&
+                        delegatedTaskGroups(runtimeState).length
+                      "
+                      class="runtime-activity-groups runtime-delegation-groups"
+                    >
+                      <div
+                        v-for="group in delegatedTaskGroups(runtimeState)"
+                        :key="group.key"
+                        class="runtime-activity-group"
+                      >
+                        <div class="runtime-activity-group-title">
+                          {{ group.assistantName }}
+                        </div>
+                        <div
+                          v-for="task in group.tasks"
+                          :key="task"
+                          class="runtime-activity-task"
+                        >
+                          <span class="runtime-activity-task-text">
+                            {{ task }}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                     <div
                       v-if="liveStructuredProgress.kind === 'workflow'"
@@ -1293,39 +1323,63 @@
                     <div
                       v-else-if="liveStructuredProgress.kind === 'activity'"
                       ref="liveActivityScrollRef"
-                      class="runtime-node-activities runtime-standalone-activities"
+                      class="runtime-activity-groups"
                     >
                       <div
-                        v-for="activity in liveStructuredProgress.items"
-                        :key="activity.id"
-                        class="runtime-node-activity"
+                        v-for="group in assistantActivityGroups(
+                          runtimeState,
+                          liveStructuredProgress.items
+                        )"
+                        :key="group.key"
+                        class="runtime-activity-group"
                       >
-                        <span
-                          class="runtime-activity-indicator"
-                          :class="{
-                            'is-current': isCurrentStandaloneActivity(
-                              activity,
-                              liveStructuredProgress.items
-                            )
-                          }"
-                          aria-hidden="true"
+                        <div
+                          v-if="group.assistantName"
+                          class="runtime-activity-group-title"
                         >
-                          {{
-                            isCurrentStandaloneActivity(
-                              activity,
-                              liveStructuredProgress.items
-                            )
-                              ? ''
-                              : '✓'
-                          }}
-                        </span>
-                        <span>{{ activityLabel(activity.kind) }}</span>
-                        <span
-                          v-if="activity.count > 1"
-                          class="runtime-activity-count"
+                          {{ group.assistantName }}
+                        </div>
+                        <div
+                          v-for="task in group.tasks"
+                          :key="task"
+                          class="runtime-activity-task"
                         >
-                          ×{{ activity.count }}
-                        </span>
+                          <span class="runtime-activity-task-text">
+                            {{ task }}
+                          </span>
+                        </div>
+                        <div
+                          v-for="activity in group.items"
+                          :key="activity.id"
+                          class="runtime-node-activity"
+                        >
+                          <span
+                            class="runtime-activity-indicator"
+                            :class="{
+                              'is-current': isCurrentStandaloneActivity(
+                                activity,
+                                liveStructuredProgress.items
+                              )
+                            }"
+                            aria-hidden="true"
+                          >
+                            {{
+                              isCurrentStandaloneActivity(
+                                activity,
+                                liveStructuredProgress.items
+                              )
+                                ? ''
+                                : '✓'
+                            }}
+                          </span>
+                          <span>{{ activityLabel(activity.kind) }}</span>
+                          <span
+                            v-if="activity.count > 1"
+                            class="runtime-activity-count"
+                          >
+                            ×{{ activity.count }}
+                          </span>
+                        </div>
                       </div>
                     </div>
                     <div
@@ -1385,7 +1439,19 @@
                           >
                             {{ isCurrentActivity(activity, item) ? '' : '✓' }}
                           </span>
+                          <span
+                            v-if="activity.assistantName"
+                            class="runtime-activity-assistant"
+                          >
+                            {{ activity.assistantName }}
+                          </span>
                           <span>{{ activityLabel(activity.kind) }}</span>
+                          <span
+                            v-if="activity.delegatedTask"
+                            class="runtime-activity-task-inline"
+                          >
+                            · {{ activity.delegatedTask }}
+                          </span>
                           <span
                             v-if="activity.count > 1"
                             class="runtime-activity-count"
@@ -1541,6 +1607,21 @@
         >
           <div class="composer-inner">
             <div class="composer-shell relative">
+              <ParticipatingAssistantsPicker
+                v-if="isSmartCollaborationConversation"
+                v-model:draft="routingScopeDraft"
+                v-model:query="routingScopeQuery"
+                :all-selected="routingAllSelected"
+                :candidate-count="routingCandidates.length"
+                :count="routingScopeAssistantUuids.length"
+                :filtered-candidates="filteredRoutingCandidates"
+                :mobile="isMobile"
+                :open="routingScopeOpen"
+                @cancel="cancelRoutingScope"
+                @open="openRoutingScope"
+                @save="saveRoutingScope"
+                @toggle-all="toggleAllRoutingAssistants"
+              />
               <div v-if="attachments.length" class="composer-attachments">
                 <div
                   v-for="item in attachments"
@@ -1839,6 +1920,7 @@ import QaShareModal from '@/components/lens/QaShareModal.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import CodeCitationDrawer from '@/pages/lens/components/CodeCitationDrawer.vue'
 import MessageCitations from '@/pages/lens/components/MessageCitations.vue'
+import ParticipatingAssistantsPicker from '@/pages/lens/components/ParticipatingAssistantsPicker.vue'
 import {
   extensionOf,
   fetchDeliverableBlob,
@@ -2462,6 +2544,7 @@ function structuredProgress(state) {
     plan: state?.plan,
     stages: state?.stages,
     activities: state?.activities,
+    delegations: state?.delegations,
     standaloneActivities: !isGeneralChatAssistant.value
   })
 }
@@ -2618,6 +2701,63 @@ function activityLabel(kind) {
   ])
   const safeKind = known.has(kind) ? kind : 'usingCapability'
   return t(`lens.chat.runtime.activity.${safeKind}`)
+}
+
+function assistantNamesLabel(state) {
+  const names = []
+  for (const activity of [...(state?.activities || [])].reverse()) {
+    const name = String(activity?.assistantName || '').trim()
+    if (name && !names.includes(name)) names.push(name)
+  }
+  return names.join(', ')
+}
+
+function assistantActivityGroups(state, activities) {
+  const groups = new Map()
+  for (const delegation of state?.delegations || []) {
+    const name = String(delegation?.assistantName || '').trim()
+    const task = String(delegation?.delegatedTask || '').trim()
+    const key = name || 'default'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        assistantName: name,
+        tasks: [],
+        items: []
+      })
+    }
+    if (task && !groups.get(key).tasks.includes(task)) {
+      groups.get(key).tasks.push(task)
+    }
+  }
+  for (const activity of activities || []) {
+    const rawName = String(activity?.assistantName || '').trim()
+    const name = rawName || (
+      isSmartCollaborationConversation.value
+        ? t('lens.chat.smartCollaboration')
+        : ''
+    )
+    const key = name || 'default'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        assistantName: name,
+        tasks: [],
+        items: []
+      })
+    }
+    const group = groups.get(key)
+    const task = String(activity?.delegatedTask || '').trim()
+    if (task && !group.tasks.includes(task)) group.tasks.push(task)
+    group.items.push(activity)
+  }
+  return [...groups.values()]
+}
+
+function delegatedTaskGroups(state) {
+  return assistantActivityGroups(state, []).filter(
+    (group) => group.tasks.length > 0
+  )
 }
 
 function isCurrentActivity(activity, item) {
@@ -3851,7 +3991,26 @@ function handleStepEvent(event) {
   const newEvents = events.slice(seenCount)
   seenStepEventCounts.set(stepKey, events.length)
 
-  newEvents.forEach(pushAgentActivity)
+  newEvents.forEach((item) => {
+    if (!event.assistant_name && !event.delegated_task) {
+      pushAgentActivity(item)
+      return
+    }
+    pushAgentActivity({
+      ...item,
+      assistant_name: item.assistant_name || event.assistant_name,
+      delegated_task: item.delegated_task || event.delegated_task,
+      payload: item.payload
+        ? {
+            ...item.payload,
+            assistant_name:
+              item.payload.assistant_name || event.assistant_name,
+            delegated_task:
+              item.payload.delegated_task || event.delegated_task
+          }
+        : item.payload
+    })
+  })
 }
 
 async function submitClarification(message) {
@@ -4881,7 +5040,7 @@ onBeforeUnmount(() => {
 
 .thread-scroll {
   @apply min-h-0 flex-1 overflow-y-auto;
-  overflow-anchor: none;
+  overflow-anchor: auto;
   scrollbar-gutter: stable;
 }
 
@@ -5189,11 +5348,76 @@ onBeforeUnmount(() => {
   margin-left: 0;
 }
 
+.runtime-activity-groups {
+  display: grid;
+  gap: 0.45rem;
+  margin-left: 0;
+}
+
+.runtime-delegation-groups {
+  margin-bottom: 0.5rem;
+}
+
+.runtime-activity-group {
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--sl-border-default);
+  border-radius: 0.45rem;
+  background: var(--sl-bg-raised);
+}
+
+.runtime-activity-group-title {
+  margin-bottom: 0.15rem;
+  color: var(--sl-text-primary);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.runtime-activity-task {
+  display: flex;
+  min-width: 0;
+  gap: 0.35rem;
+  margin: 0 0 0.25rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 0.3rem;
+  background: var(--sl-bg-hover);
+  color: var(--sl-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.15rem;
+}
+
+.runtime-activity-task-label {
+  flex: 0 0 auto;
+  color: var(--sl-text-muted);
+  font-weight: 600;
+}
+
+.runtime-activity-task-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-activity-task-inline {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--sl-text-muted);
+  font-size: 0.68rem;
+}
+
 .runtime-node-activity {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   min-height: 1.3rem;
+}
+
+.runtime-assistant-names,
+.runtime-activity-assistant {
+  color: var(--sl-text-primary);
+  font-weight: 600;
+}
+
+.runtime-assistant-names {
+  font-size: 0.72rem;
 }
 
 .runtime-activity-indicator {
