@@ -313,7 +313,7 @@
               {{ assistantDescription }}
             </p>
             <div
-              v-if="isSmartRoutingConversation && selectedSession"
+              v-if="isSmartCollaborationConversation && selectedSession"
               class="relative mt-2"
             >
               <button
@@ -1946,7 +1946,7 @@ const routingScopeOpen = ref(false)
 const routingScopeDraft = ref([])
 const mentionedAssistantUuid = ref('')
 const mentionActiveIndex = ref(0)
-const isSmartRoutingConversation = computed(
+const isSmartCollaborationConversation = computed(
   () => route.name === 'LensSmartChat'
 )
 
@@ -1972,7 +1972,7 @@ const routingCandidates = computed(() =>
 )
 
 const mentionToken = computed(() => {
-  if (!isSmartRoutingConversation.value) return null
+  if (!isSmartCollaborationConversation.value) return null
   return /^@([^\s]*)/.exec(question.value)
 })
 
@@ -2065,7 +2065,7 @@ const canSubmit = computed(() => {
 const hasAssistant = computed(() =>
   isAnonymous.value
     ? !!publicAssistant.value
-    : isSmartRoutingConversation.value || !!selectedAssistantUuid.value
+    : isSmartCollaborationConversation.value || !!selectedAssistantUuid.value
 )
 
 const canCompose = computed(
@@ -2081,15 +2081,15 @@ const emptyVariant = computed(() =>
 )
 
 const assistantName = computed(
-  () => isSmartRoutingConversation.value
-    ? t('lens.chat.smartRouting')
+  () => isSmartCollaborationConversation.value
+    ? t('lens.chat.smartCollaboration')
     : selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
 const assistantDescription = computed(
   () =>
-    (isSmartRoutingConversation.value
-      ? t('lens.chat.smartRoutingDescription')
+    (isSmartCollaborationConversation.value
+      ? t('lens.chat.smartCollaborationDescription')
       : '') ||
     selectedAssistant.value?.description?.trim() ||
     publicAssistant.value?.description?.trim() ||
@@ -3000,7 +3000,7 @@ async function bootstrap() {
     // renders immediately (no flash) and skips its own redundant fetch.
     lensStore.assistants = assistants.value
 
-    if (isSmartRoutingConversation.value) {
+    if (isSmartCollaborationConversation.value) {
       selectedAssistantUuid.value = ''
       await loadMyShareState()
       await loadSessions()
@@ -3069,12 +3069,12 @@ async function loadMyShareState() {
 }
 
 async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
-  if (!selectedAssistant.value && !isSmartRoutingConversation.value) {
+  if (!selectedAssistant.value && !isSmartCollaborationConversation.value) {
     return
   }
 
   sessions.value = await listSessions(selectedAssistant.value?.slug || '', {
-    routingMode: isSmartRoutingConversation.value ? 'smart' : '',
+    routingMode: isSmartCollaborationConversation.value ? 'smart' : '',
     archived: showArchivedSessions.value
   })
 
@@ -3097,7 +3097,7 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
 }
 
 async function createNewSession(notify = true) {
-  if (!selectedAssistant.value && !isSmartRoutingConversation.value) {
+  if (!selectedAssistant.value && !isSmartCollaborationConversation.value) {
     return null
   }
   mySharesOpen.value = false
@@ -3110,7 +3110,7 @@ async function createNewSession(notify = true) {
   let session
   try {
     session = await createSession(
-      isSmartRoutingConversation.value
+      isSmartCollaborationConversation.value
         ? { routing_mode: 'smart', title: '' }
         : { assistant_uuid: selectedAssistant.value.uuid, title: '' }
     )
@@ -3833,7 +3833,7 @@ async function submit() {
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
   let routingAssistantUuid = ''
-  if (isSmartRoutingConversation.value && mentionToken.value) {
+  if (isSmartCollaborationConversation.value && mentionToken.value) {
     if (!mentionedAssistant.value) {
       showWarning(t('lens.chat.mentionAssistantRequired'))
       loading.value.run = false
@@ -4348,7 +4348,7 @@ watch(
   (sessionUuid) => {
     if (
       !['LensAssistantChat', 'LensSmartChat'].includes(route.name) ||
-      (!isSmartRoutingConversation.value &&
+      (!isSmartCollaborationConversation.value &&
         route.params.slug !== selectedAssistant.value?.slug) ||
       !sessionUuid ||
       sessionUuid === selectedSessionUuid.value

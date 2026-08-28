@@ -24,6 +24,7 @@ from lensnode.agent_runtime import (
     _synthesize_wrapup_answer,
 )
 from lensnode.agent_runtime.prompts import command_answer_language
+from lensnode.agent_runtime.system_prompts import _smart_collaboration_system_prompt
 from lensnode.checkpoint import CheckpointResumeError, ResumeState
 from lensnode.gateway_model import GatewayStreamError
 
@@ -2606,17 +2607,19 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "typed command" in prompt
 
 
-def test_smart_router_prompt_is_focused_on_routing_scope():
-    """Smart routing keeps only the necessary routing contract."""
+def test_smart_collaboration_prompt_is_focused_on_collaboration_scope():
+    """Smart Collaboration keeps only the necessary routing contract."""
 
     prompt = _general_chat_system_prompt(
         {
             "assistant_capability": "orchestrator",
+            "answer_language": "zh-CN",
             "subagents": [
                 {
                     "name": "Code Reviewer",
                     "capability": "code_analysis",
                     "description": "Reviews the selected repository.",
+                    "routing_description": "Use for repository reviews.",
                 },
                 {
                     "name": "Data Investigator",
@@ -2628,7 +2631,7 @@ def test_smart_router_prompt_is_focused_on_routing_scope():
     )
 
     assert "当前可委派助手" in prompt
-    assert "Code Reviewer｜代码分析" in prompt
+    assert "Code Reviewer｜代码分析｜Use for repository reviews." in prompt
     assert "Data Investigator｜通用对话与已连接的 Skills" in prompt
     assert "能力说明可直接回答" in prompt
     assert "只说明助手集合及其能力" in prompt
@@ -2640,6 +2643,24 @@ def test_smart_router_prompt_is_focused_on_routing_scope():
     assert "必须据此回答" in prompt
     assert "analyze_structured_output" not in prompt
     assert "private writable scratch directory" not in prompt
+
+
+def test_smart_collaboration_prompt_localizes_assistant_capabilities():
+    prompt = _smart_collaboration_system_prompt(
+        {
+            "subagents": [
+                {
+                    "name": "Code Reviewer",
+                    "capability": "code_analysis",
+                    "routing_description": "Revisa repositorios.",
+                }
+            ]
+        },
+        "ANSWER LANGUAGE REQUIREMENT: Spanish.",
+        "Spanish",
+    )
+
+    assert "Code Reviewer｜Análisis de código｜Revisa repositorios." in prompt
 
 
 def test_general_chat_prompt_keeps_runtime_instructions_confidential():
@@ -4137,7 +4158,11 @@ def test_fast_subagent_inherits_runtime_extensions():
 def test_orchestrator_subagent_uses_its_own_model_and_tools(monkeypatch):
     """Configured assistants must not inherit the orchestrator toolset."""
 
-    resources = SimpleNamespace(mcp_configs=[], skill_paths=["/skills/data"])
+    resources = SimpleNamespace(
+        root=Path("/run/subagent"),
+        mcp_configs=[],
+        skill_paths=["skills/data"],
+    )
     config = SimpleNamespace(
         ai_gateway_url="http://gateway/ai/",
         token="token",
@@ -4191,7 +4216,7 @@ def test_orchestrator_subagent_uses_its_own_model_and_tools(monkeypatch):
 
     assert subagents[0]["model"].model_ref == "data-model"
     assert subagents[0]["tools"] == ["general_chat"]
-    assert subagents[0]["skills"] == ["/skills/data"]
+    assert subagents[0]["skills"] == ["skills/data"]
 
 
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):

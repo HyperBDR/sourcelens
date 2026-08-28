@@ -215,6 +215,17 @@ def _build_execution_backend(config, root_dir):
     )
 
 
+def _virtual_skill_path(resources, path):
+    """Return a skill path relative to the Deep Agents virtual root."""
+
+    candidate = Path(path)
+    if candidate.is_absolute():
+        candidate = candidate.relative_to(resources.root)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("Skill path must remain inside the run scratch root")
+    return candidate.as_posix()
+
+
 
 
 
@@ -336,7 +347,7 @@ class LensDeepAgentRuntime:
         finally:
             if cancel_event is None or not cancel_event.is_set():
                 cleanup_runtime_resources(state.resources)
-                for resources in state.subagent_resources:
+                for resources in getattr(state, "subagent_resources", []):
                     cleanup_runtime_resources(resources)
 
     def _subagents_enabled(self, state):
@@ -1227,9 +1238,7 @@ class LensDeepAgentRuntime:
                     "model": model,
                     "tools": tools,
                     "skills": [
-                        str(resources.root / path)
-                        if not Path(path).is_absolute()
-                        else path
+                        _virtual_skill_path(resources, path)
                         for path in resources.skill_paths
                     ],
                     "middleware": [state.trace_middleware]

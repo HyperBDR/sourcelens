@@ -139,6 +139,7 @@ class Assistant(TimestampedUUIDModel):
 
     name = models.CharField(max_length=160)
     description = models.TextField(blank=True, default="")
+    routing_description = models.TextField(blank=True, default="")
     capability = models.CharField(
         max_length=24,
         choices=Capability.choices,
@@ -226,7 +227,7 @@ class Assistant(TimestampedUUIDModel):
         self.capability = value
 
     def save(self, *args, **kwargs):
-        """Map the removed task field in legacy update_fields calls."""
+        """Keep legacy task updates and routing metadata synchronized."""
 
         update_fields = kwargs.get("update_fields")
         if update_fields and "selected_task" in update_fields:
@@ -234,7 +235,12 @@ class Assistant(TimestampedUUIDModel):
                 "capability" if field == "selected_task" else field
                 for field in update_fields
             ]
-        return super().save(*args, **kwargs)
+            update_fields = kwargs["update_fields"]
+        result = super().save(*args, **kwargs)
+        routing_fields = {"capability", "description", "selected_dirs"}
+        if not update_fields or routing_fields.intersection(update_fields):
+            _refresh_assistant_routing_description(self)
+        return result
 
     def is_accessible_by(self, user):
         """Return True when the user may view/use this assistant."""
@@ -353,6 +359,14 @@ class Skill(TimestampedUUIDModel):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        """Refresh routing descriptions after changing a shared Skill."""
+
+        result = super().save(*args, **kwargs)
+        for binding in self.assistantskill_set.select_related("assistant"):
+            _refresh_assistant_routing_description(binding.assistant)
+        return result
+
 
 class EnvironmentVariableSet(TimestampedUUIDModel):
     """Reusable encrypted environment values for Skill and MCP bindings."""
@@ -419,6 +433,14 @@ class MCPServer(TimestampedUUIDModel):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        """Refresh routing descriptions after changing a shared MCP."""
+
+        result = super().save(*args, **kwargs)
+        for binding in self.assistantmcp_set.select_related("assistant"):
+            _refresh_assistant_routing_description(binding.assistant)
+        return result
 
 
 class DataSource(TimestampedUUIDModel):
@@ -571,6 +593,14 @@ def _datasource_fernet():
     return Fernet(key)
 
 
+def _refresh_assistant_routing_description(assistant):
+    """Refresh one Assistant's non-sensitive smart-routing synopsis."""
+
+    from .routing_descriptions import refresh_routing_description
+
+    refresh_routing_description(assistant)
+
+
 class AssistantSkill(models.Model):
     """Assistant to skill binding."""
 
@@ -592,6 +622,21 @@ class AssistantSkill(models.Model):
 
     class Meta:
         unique_together = [("assistant", "skill")]
+
+    def save(self, *args, **kwargs):
+        """Refresh the owning Assistant after changing its Skill binding."""
+
+        result = super().save(*args, **kwargs)
+        _refresh_assistant_routing_description(self.assistant)
+        return result
+
+    def delete(self, *args, **kwargs):
+        """Refresh the owning Assistant after deleting its Skill binding."""
+
+        assistant = self.assistant
+        result = super().delete(*args, **kwargs)
+        _refresh_assistant_routing_description(assistant)
+        return result
 
 
 class AssistantMCP(models.Model):
@@ -616,6 +661,21 @@ class AssistantMCP(models.Model):
     class Meta:
         unique_together = [("assistant", "mcp")]
 
+    def save(self, *args, **kwargs):
+        """Refresh the owning Assistant after changing its MCP binding."""
+
+        result = super().save(*args, **kwargs)
+        _refresh_assistant_routing_description(self.assistant)
+        return result
+
+    def delete(self, *args, **kwargs):
+        """Refresh the owning Assistant after deleting its MCP binding."""
+
+        assistant = self.assistant
+        result = super().delete(*args, **kwargs)
+        _refresh_assistant_routing_description(assistant)
+        return result
+
 
 class Session(TimestampedUUIDModel):
     """Conversation session for a user and assistant."""
@@ -626,7 +686,7 @@ class Session(TimestampedUUIDModel):
 
     class RoutingMode(models.TextChoices):
         DIRECT = "direct", "Direct"
-        SMART = "smart", "Smart routing"
+        SMART = "smart", "Smart Collaboration"
 
     class TitleGenerationStatus(models.TextChoices):
         SKIPPED = "skipped", "Skipped"

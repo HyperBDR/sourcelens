@@ -118,7 +118,7 @@ def test_save_deliverable_rejects_escape(monkeypatch, tmp_path):
     assert payload["error"] == "PATH_NOT_ALLOWED"
 
 
-def test_save_deliverable_accepts_external_tool_tmp_output(
+def test_save_deliverable_rejects_host_tmp_output(
     monkeypatch, tmp_path
 ):
     output = Path("/tmp") / f"sourcelens-test-{tmp_path.name}.pptx"
@@ -142,8 +142,35 @@ def test_save_deliverable_accepts_external_tool_tmp_output(
     finally:
         output.unlink(missing_ok=True)
 
+    assert payload["ok"] is False
+    assert payload["error"] == "FILE_NOT_FOUND"
+    assert captured == {}
+
+
+def test_save_deliverable_resolves_absolute_virtual_scratch_path(
+    monkeypatch, tmp_path
+):
+    virtual_output = tmp_path / "tmp" / "report.html"
+    virtual_output.parent.mkdir()
+    virtual_output.write_text("<h1>scratch</h1>", encoding="utf-8")
+    captured = {}
+
+    def handler(request):
+        captured["body"] = request.read()
+        return httpx.Response(201, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_save_deliverable_tool(
+        {"run_uuid": "run-123"},
+        _resources(tmp_path),
+        _config(),
+        None,
+    )
+
+    payload = json.loads(tool.invoke({"path": "/tmp/report.html"}))
+
     assert payload["ok"] is True
-    assert b"pptx" in captured["body"]
+    assert b"<h1>scratch</h1>" in captured["body"]
 
 
 def test_save_deliverable_rejects_oversized(monkeypatch, tmp_path):

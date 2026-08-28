@@ -217,8 +217,9 @@
     "chat": {
       "liveOutput": "Salida en vivo",
       "newSession": "Nueva sesión",
-      "smartRouting": "Enrutamiento inteligente",
-      "smartRoutingDescription": "Selecciona asistentes adecuados automáticamente y coordina solicitudes complejas.",
+      "smartCollaboration": "Colaboración inteligente",
+      "smartCollaborationBeta": "Beta",
+      "smartCollaborationDescription": "Selecciona asistentes adecuados automáticamente y coordina solicitudes complejas.",
       "participatingAssistants": "Asistentes participantes · {count}",
       "participatingAssistantsHint": "Solo se consideran los asistentes seleccionados para futuros mensajes de esta conversación.",
       "participatingAssistantsRequired": "Selecciona al menos un asistente participante.",

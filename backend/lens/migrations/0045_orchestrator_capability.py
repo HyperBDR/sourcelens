@@ -2,19 +2,113 @@ from django.db import migrations, models
 import django.db.models.deletion
 
 
+LEGACY_MODEL_SETTING = "lens.smart_router.model_ref"
+MODEL_SETTING = "lens.smart_collaboration.model_ref"
+LEGACY_ASSISTANT_SLUG = "__system-smart-router__"
+ASSISTANT_SLUG = "__system-smart-collaboration__"
+
+
 def migrate_assistant_capabilities(apps, schema_editor):
-    """Set Assistant capabilities from the legacy execution task."""
+    """Set Assistant capabilities and initial smart-routing descriptions."""
 
     del schema_editor
     Assistant = apps.get_model("lens", "Assistant")
+    AssistantMCP = apps.get_model("lens", "AssistantMCP")
+    AssistantSkill = apps.get_model("lens", "AssistantSkill")
     supported = {"general_chat", "code_analysis", "knowledge_qa"}
+    capability_descriptions = {
+        "general_chat": "general chat and requests related to connected tools",
+        "code_analysis": "code analysis, implementation review, and engineering troubleshooting",
+        "knowledge_qa": "questions about configured workspaces or knowledge bases",
+    }
+    capability_names = {
+        "general_chat": "General Chat",
+        "code_analysis": "Code Analysis",
+        "knowledge_qa": "Knowledge Q&A",
+    }
+    skills_by_assistant = {}
+    for binding in AssistantSkill.objects.filter(
+        enabled=True,
+        skill__enabled=True,
+    ).select_related("skill"):
+        names = skills_by_assistant.setdefault(binding.assistant_id, [])
+        if binding.skill.name and len(names) < 8:
+            names.append(" ".join(binding.skill.name.split())[:80])
+    mcps_by_assistant = {}
+    for binding in AssistantMCP.objects.filter(
+        enabled=True,
+        mcp__enabled=True,
+    ).select_related("mcp"):
+        names = mcps_by_assistant.setdefault(binding.assistant_id, [])
+        if binding.mcp.name and len(names) < 8:
+            names.append(" ".join(binding.mcp.name.split())[:80])
     for assistant in Assistant.objects.all():
         capability = assistant.selected_task
         if capability == "qa":
             capability = "knowledge_qa"
         if capability not in supported:
             capability = "general_chat"
-        Assistant.objects.filter(pk=assistant.pk).update(capability=capability)
+        parts = [
+            f"Capability: {capability_names[capability]}.",
+            f"Best suited for: {capability_descriptions[capability]}.",
+        ]
+        description = " ".join((assistant.description or "").split())[:320]
+        if description:
+            parts.append(f"Assistant overview: {description}.")
+        skills = skills_by_assistant.get(assistant.pk, [])
+        if skills:
+            parts.append(f"Available Skills: {', '.join(skills)}.")
+        mcps = mcps_by_assistant.get(assistant.pk, [])
+        if mcps:
+            parts.append(f"Available MCPs: {', '.join(mcps)}.")
+        if assistant.selected_dirs:
+            parts.append(
+                "The workspace scope is limited to configured directories."
+            )
+        Assistant.objects.filter(pk=assistant.pk).update(
+            capability=capability,
+            routing_description="".join(parts)[:1000],
+        )
+
+
+def rename_smart_collaboration(apps, schema_editor):
+    """Rename persisted Smart Collaboration configuration and coordinator."""
+
+    del schema_editor
+    Assistant = apps.get_model("lens", "Assistant")
+    GlobalSetting = apps.get_model("lens", "GlobalSetting")
+
+    legacy_setting = GlobalSetting.objects.filter(
+        key=LEGACY_MODEL_SETTING,
+    ).first()
+    if legacy_setting is not None:
+        setting = GlobalSetting.objects.filter(key=MODEL_SETTING).first()
+        if setting is None:
+            GlobalSetting.objects.create(
+                key=MODEL_SETTING,
+                value=legacy_setting.value,
+                description=legacy_setting.description,
+            )
+        elif not setting.value:
+            setting.value = legacy_setting.value
+            setting.description = legacy_setting.description
+            setting.save(update_fields=["value", "description"])
+        legacy_setting.delete()
+
+    legacy_assistant = Assistant.objects.filter(
+        slug=LEGACY_ASSISTANT_SLUG,
+    ).first()
+    if legacy_assistant is None:
+        return
+    if Assistant.objects.filter(slug=ASSISTANT_SLUG).exists():
+        legacy_assistant.name = "Smart Collaboration"
+        legacy_assistant.description = "Internal Smart Collaboration coordinator."
+        legacy_assistant.save(update_fields=["name", "description"])
+        return
+    legacy_assistant.slug = ASSISTANT_SLUG
+    legacy_assistant.name = "Smart Collaboration"
+    legacy_assistant.description = "Internal Smart Collaboration coordinator."
+    legacy_assistant.save(update_fields=["slug", "name", "description"])
 
 
 class Migration(migrations.Migration):
@@ -52,6 +146,11 @@ class Migration(migrations.Migration):
             field=models.JSONField(blank=True, default=list),
         ),
         migrations.AddField(
+            model_name="assistant",
+            name="routing_description",
+            field=models.TextField(blank=True, default=""),
+        ),
+        migrations.AddField(
             model_name="run",
             name="parent_run",
             field=models.ForeignKey(
@@ -77,7 +176,7 @@ class Migration(migrations.Migration):
             model_name="session",
             name="routing_mode",
             field=models.CharField(
-                choices=[("direct", "Direct"), ("smart", "Smart routing")],
+                choices=[("direct", "Direct"), ("smart", "Smart Collaboration")],
                 default="direct",
                 max_length=16,
             ),
@@ -86,5 +185,9 @@ class Migration(migrations.Migration):
             model_name="session",
             name="allowed_assistant_uuids",
             field=models.JSONField(blank=True, default=list),
+        ),
+        migrations.RunPython(
+            rename_smart_collaboration,
+            reverse_code=migrations.RunPython.noop,
         ),
     ]

@@ -20,7 +20,7 @@ from accounts.models import normalize_answer_language
 from .assistant_lifecycle import (
     AssistantNotRunnableError,
     lock_assistant_for_new_work,
-    smart_routing_assistants,
+    smart_collaboration_assistants,
 )
 from .attachments import (
     AttachmentError,
@@ -59,6 +59,7 @@ from .models import (
     RunTraceExport,
     Session,
 )
+from .routing_descriptions import build_routing_description
 from .runtime_events import public_step_detail, sanitize_termination_detail
 from .session_lifecycle import lock_active_session
 from .session_titles import fallback_session_title
@@ -1258,7 +1259,10 @@ def _validated_routing_assistant_uuids(session, user, selected_uuid=None):
         if selected_uuid is not None:
             raise AssistantNotRunnableError
         return None
-    allowed = smart_routing_assistants(user, session.allowed_assistant_uuids)
+    allowed = smart_collaboration_assistants(
+        user,
+        session.allowed_assistant_uuids,
+    )
     allowed_ids = {str(item.uuid) for item in allowed}
     if selected_uuid is not None:
         if str(selected_uuid) not in allowed_ids:
@@ -1999,6 +2003,10 @@ def _build_run_runtime_snapshot(
                 "uuid": str(item.uuid),
                 "name": item.name,
                 "description": item.description,
+                "routing_description": build_routing_description(
+                    item,
+                    answer_language,
+                ),
                 "capability": item.capability,
                 "task": execution_task_for_capability(item.capability),
                 "lensnode_uuid": (

@@ -1,4 +1,5 @@
 import hashlib
+import importlib
 import io
 import json
 import tempfile
@@ -14,6 +15,7 @@ from accounts.models import Role
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_task.adapters.django.models import TaskExecution
 from asgiref.sync import async_to_sync
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -60,6 +62,10 @@ from lens.serializers import (
     SessionSerializer,
     validate_retrieval_policy,
     validate_retrieval_scope,
+)
+from lens.routing_descriptions import (
+    build_routing_description,
+    refresh_missing_routing_descriptions,
 )
 from lens.services import (
     LensNodeDispatchError,
@@ -838,6 +844,11 @@ class LensApiTests(TestCase):
         self.assertEqual(assistant.selected_task, "knowledge_qa")
         self.assertEqual(assistant.skill_bindings.count(), 1)
         self.assertEqual(assistant.mcp_bindings.count(), 1)
+        self.assertIn("Knowledge Q&A", assistant.routing_description)
+        self.assertIn("Explore API behavior and implementation.", assistant.routing_description)
+        self.assertIn("Code Search", assistant.routing_description)
+        self.assertIn("GitHub MCP", assistant.routing_description)
+        self.assertNotIn("routing_description", response.data)
         self.assertEqual(
             assistant.settings["_model_check"]["agent_model_ref"]["status"],
             "skipped",
@@ -879,6 +890,67 @@ class LensApiTests(TestCase):
             response.data["description"],
             "Updated assistant description.",
         )
+        self.assertIn(
+            "Updated assistant description.",
+            self.assistant.routing_description,
+        )
+
+    def test_assistant_model_save_refreshes_routing_description(self):
+        """Direct model saves keep the routing synopsis current."""
+
+        self.assistant.description = "Updated outside the API serializer."
+        self.assistant.save(update_fields=["description"])
+        self.assistant.refresh_from_db()
+
+        self.assertIn(
+            "Updated outside the API serializer.",
+            self.assistant.routing_description,
+        )
+
+    def test_resource_changes_refresh_routing_description(self):
+        """Routing descriptions follow bound resource availability."""
+
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=self.skill,
+        )
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+        )
+        self.assistant.refresh_from_db()
+        self.assertIn(self.skill.name, self.assistant.routing_description)
+        self.assertIn(self.mcp.name, self.assistant.routing_description)
+
+        self.skill.name = "Renamed Code Search"
+        self.skill.save(update_fields=["name"])
+        self.mcp.enabled = False
+        self.mcp.save(update_fields=["enabled"])
+
+        self.assistant.refresh_from_db()
+        self.assertIn("Renamed Code Search", self.assistant.routing_description)
+        self.assertNotIn(self.mcp.name, self.assistant.routing_description)
+
+    def test_missing_routing_descriptions_are_backfilled(self):
+        """Deployment startup backfills descriptions from the final schema."""
+
+        self.assistant.routing_description = ""
+        self.assistant.save(update_fields=["routing_description"])
+
+        refreshed = refresh_missing_routing_descriptions()
+
+        self.assistant.refresh_from_db()
+        self.assertEqual(refreshed, 1)
+        self.assertIn("Knowledge Q&A", self.assistant.routing_description)
+
+    def test_routing_description_uses_the_run_answer_language(self):
+        """Smart-routing metadata follows the current Run language."""
+
+        spanish = build_routing_description(self.assistant, "es")
+        chinese = build_routing_description(self.assistant, "zh-CN")
+
+        self.assertIn("Capacidad: Preguntas y respuestas de conocimiento.", spanish)
+        self.assertIn("能力：知识库问答。", chinese)
 
     def test_assistant_serializer_rejects_non_boolean_hidden_options(self):
         scope_serializer = AssistantSerializer(
@@ -2031,9 +2103,9 @@ class LensApiTests(TestCase):
         self.assertEqual(saved.lensnode, self.lensnode)
         self.assertEqual(saved.selected_dirs, [])
 
-    def test_smart_routing_session_uses_global_model_and_allowed_range(self):
+    def test_smart_collaboration_session_uses_global_model_and_allowed_range(self):
         GlobalSetting.objects.create(
-            key="lens.smart_router.model_ref",
+            key="lens.smart_collaboration.model_ref",
             value="11111111-1111-1111-1111-111111111111",
         )
         self.assistant.visibility = Assistant.Visibility.PUBLIC
@@ -2073,8 +2145,8 @@ class LensApiTests(TestCase):
             [str(self.assistant.uuid)],
         )
 
-    def test_smart_run_can_limit_one_run_without_updating_session_scope(self):
-        """A routing assistant override belongs to the Run snapshot only."""
+    def test_smart_collaboration_accepts_legacy_model_setting(self):
+        """Existing smart-router configuration remains usable after renaming."""
 
         GlobalSetting.objects.create(
             key="lens.smart_router.model_ref",
@@ -2082,6 +2154,60 @@ class LensApiTests(TestCase):
         )
         self.assistant.visibility = Assistant.Visibility.PUBLIC
         self.assistant.save(update_fields=["visibility"])
+        serializer = SessionCreateSerializer(
+            data={"routing_mode": "smart"},
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        session = serializer.save()
+
+        self.assertEqual(session.assistant.slug, "__system-smart-collaboration__")
+
+    def test_smart_collaboration_migration_preserves_legacy_model_value(self):
+        """An empty renamed setting must not replace a configured legacy one."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_router.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        GlobalSetting.objects.create(
+            key="lens.smart_collaboration.model_ref",
+            value="",
+        )
+        migration = importlib.import_module(
+            "lens.migrations.0045_orchestrator_capability"
+        )
+
+        migration.rename_smart_collaboration(apps, None)
+
+        setting = GlobalSetting.objects.get(
+            key="lens.smart_collaboration.model_ref"
+        )
+        self.assertEqual(
+            setting.value,
+            "11111111-1111-1111-1111-111111111111",
+        )
+        self.assertFalse(
+            GlobalSetting.objects.filter(
+                key="lens.smart_router.model_ref"
+            ).exists()
+        )
+
+    def test_smart_run_can_limit_one_run_without_updating_session_scope(self):
+        """A routing assistant override belongs to the Run snapshot only."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_collaboration.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.description = "Use for focused repository analysis."
+        self.assistant.save(
+            update_fields=["visibility", "description"]
+        )
+        self.user.profile.language = "es"
+        self.user.profile.save(update_fields=["language"])
         session = SessionCreateSerializer(
             data={"routing_mode": "smart"},
             context={"request": SimpleNamespace(user=self.user)},
@@ -2113,6 +2239,17 @@ class LensApiTests(TestCase):
         self.assertEqual(
             run.execution.runtime_snapshot["allowed_assistant_uuids"],
             [str(self.assistant.uuid)],
+        )
+        routing_description = run.execution.runtime_snapshot["subagents"][0][
+            "routing_description"
+        ]
+        self.assertIn(
+            "Capacidad: Preguntas y respuestas de conocimiento.",
+            routing_description,
+        )
+        self.assertIn(
+            "Resumen del asistente: Use for focused repository analysis.",
+            routing_description,
         )
         self.assertEqual(
             run.execution.runtime_snapshot["routing_question"],

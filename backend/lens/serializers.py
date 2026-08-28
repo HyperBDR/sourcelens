@@ -13,8 +13,8 @@ from rest_framework.exceptions import PermissionDenied
 from .assistant_lifecycle import (
     AssistantNotRunnableError,
     create_assistant_session,
-    create_smart_routing_session,
-    smart_routing_assistants,
+    create_smart_collaboration_session,
+    smart_collaboration_assistants,
 )
 from .attachments import ATTACHMENT_MAX_PER_MESSAGE, AttachmentError
 from .citations import public_run_citations, sanitize_planned_evidence
@@ -63,6 +63,7 @@ from .runtime_events import (
     sanitize_loaded_skills,
     sanitize_termination_detail,
 )
+from .routing_descriptions import refresh_routing_description
 from .services import (
     CLARIFICATION_MAX_ORIGINAL_CHARS,
     create_execution_run,
@@ -1027,6 +1028,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         self._sync_access_grants(assistant, access_grants)
         sync_workspace_guide_skill(assistant, workspace_guide)
         check_assistant_model_refs(assistant)
+        refresh_routing_description(assistant)
         return assistant
 
     @transaction.atomic
@@ -1045,6 +1047,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         self._sync_access_grants(assistant, access_grants)
         sync_workspace_guide_skill(assistant, workspace_guide)
         check_assistant_model_refs(assistant)
+        refresh_routing_description(assistant)
         return assistant
 
 
@@ -2588,6 +2591,7 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
                 )
 
         model_ref_keys = {
+            "lens.smart_collaboration.model_ref": "model_ref",
             "lens.smart_router.model_ref": "model_ref",
             "lens.skills.generator_model_ref": "generator_model_ref",
             "lens.datasource_conversion.vision_model_ref": (
@@ -3079,7 +3083,7 @@ class SessionSerializer(serializers.ModelSerializer):
         if self.instance.routing_mode != Session.RoutingMode.SMART:
             raise serializers.ValidationError("Only smart sessions support this.")
         try:
-            assistants = smart_routing_assistants(
+            assistants = smart_collaboration_assistants(
                 self.context["request"].user,
                 value,
             )
@@ -3132,7 +3136,7 @@ class SessionCreateSerializer(serializers.Serializer):
         request = self.context["request"]
         try:
             if validated_data["routing_mode"] == Session.RoutingMode.SMART:
-                return create_smart_routing_session(
+                return create_smart_collaboration_session(
                     request.user,
                     validated_data.get("title", ""),
                     validated_data.get("allowed_assistant_uuids", []),
@@ -3217,7 +3221,7 @@ class RunCreateSerializer(serializers.Serializer):
                     {"routing_assistant_uuid": "Assistant is outside this session's allowed range."}
                 )
             try:
-                smart_routing_assistants(
+                smart_collaboration_assistants(
                     self.context["request"].user,
                     [routing_assistant_uuid],
                 )

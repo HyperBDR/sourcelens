@@ -18,13 +18,15 @@ test('active chat run exposes a localized stop action', async () => {
 })
 
 test('smart chat limits @ assistant mentions to the message start', async () => {
-  const [chat, submission, chinese, english, spanish] = await Promise.all([
-    source('pages/lens/Chat.vue'),
-    source('pages/lens/chatSubmission.js'),
-    source('locales/zh-CN.json').then(JSON.parse),
-    source('locales/en.json').then(JSON.parse),
-    source('locales/es.json').then(JSON.parse)
-  ])
+  const [chat, switcher, submission, chinese, english, spanish] =
+    await Promise.all([
+      source('pages/lens/Chat.vue'),
+      source('components/lens/AssistantSwitcher.vue'),
+      source('pages/lens/chatSubmission.js'),
+      source('locales/zh-CN.json').then(JSON.parse),
+      source('locales/en.json').then(JSON.parse),
+      source('locales/es.json').then(JSON.parse)
+    ])
 
   assert.match(chat, /\^@\(\[\^\\s\]\*\)/)
   assert.match(chat, /routingAssistantUuid = mentionedAssistant\.value\.uuid/)
@@ -35,6 +37,7 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
   assert.match(chat, /text\.startsWith\(`@\$\{name\}`\)/)
   assert.match(chat, /sort\(\(left, right\) => right\.length - left\.length\)/)
   assert.match(chat, /text-blue-600/)
+  assert.match(switcher, /smartCollaborationBeta/)
   assert.match(chat, /@keydown="handleComposerKeydown"/)
   assert.match(chat, /event\.key === 'ArrowDown'/)
   assert.match(chat, /event\.key === 'ArrowUp'/)
@@ -54,6 +57,15 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
     spanish.lens.chat.assistantTypes.orchestrator,
     'Modo de colaboración'
   )
+  assert.equal(chinese.lens.chat.smartCollaboration, '智能协作')
+  assert.equal(chinese.lens.chat.smartCollaborationBeta, 'Beta')
+  assert.equal(english.lens.chat.smartCollaboration, 'Smart Collaboration')
+  assert.equal(english.lens.chat.smartCollaborationBeta, 'Beta')
+  assert.equal(
+    spanish.lens.chat.smartCollaboration,
+    'Colaboración inteligente'
+  )
+  assert.equal(spanish.lens.chat.smartCollaborationBeta, 'Beta')
 })
 
 test('admin tables and assistant slugs preserve backend-compatible values', async () => {

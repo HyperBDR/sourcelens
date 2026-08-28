@@ -6,8 +6,9 @@ from django.db import transaction
 from .models import Assistant, GlobalSetting, Session
 
 
-SMART_ROUTER_SLUG = "__system-smart-router__"
-SMART_ROUTER_MODEL_SETTING = "lens.smart_router.model_ref"
+SMART_COLLABORATION_SLUG = "__system-smart-collaboration__"
+SMART_COLLABORATION_MODEL_SETTING = "lens.smart_collaboration.model_ref"
+LEGACY_SMART_ROUTER_MODEL_SETTING = "lens.smart_router.model_ref"
 
 
 class AssistantNotRunnableError(RuntimeError):
@@ -83,8 +84,8 @@ def create_assistant_session(assistant_uuid, user, title=""):
     )
 
 
-def smart_routing_assistants(user, assistant_uuids=None):
-    """Return active assistants that the user permits smart routing to use."""
+def smart_collaboration_assistants(user, assistant_uuids=None):
+    """Return active assistants allowed for Smart Collaboration."""
 
     assistants = Assistant.objects.visible_to(user).filter(
         status=Assistant.Status.ACTIVE,
@@ -106,20 +107,24 @@ def smart_routing_assistants(user, assistant_uuids=None):
     return values
 
 
-def _smart_router_assistant():
+def _smart_collaboration_assistant():
     """Return the hidden coordinator backed by the configured global model."""
 
     setting = GlobalSetting.objects.filter(
-        key=SMART_ROUTER_MODEL_SETTING
+        key=SMART_COLLABORATION_MODEL_SETTING
     ).first()
+    if setting is None:
+        setting = GlobalSetting.objects.filter(
+            key=LEGACY_SMART_ROUTER_MODEL_SETTING
+        ).first()
     model_ref = str(setting.value or "") if setting else ""
     if not model_ref:
         raise AssistantNotRunnableError
     assistant, _ = Assistant.objects.get_or_create(
-        slug=SMART_ROUTER_SLUG,
+        slug=SMART_COLLABORATION_SLUG,
         defaults={
-            "name": "Smart Router",
-            "description": "Internal smart routing coordinator.",
+            "name": "Smart Collaboration",
+            "description": "Internal Smart Collaboration coordinator.",
             "capability": Assistant.Capability.ORCHESTRATOR,
             "agent_model_ref": model_ref,
             "is_system": True,
@@ -133,11 +138,11 @@ def _smart_router_assistant():
 
 
 @transaction.atomic
-def create_smart_routing_session(user, title="", assistant_uuids=None):
-    """Create a smart-routing session with a user-scoped assistant range."""
+def create_smart_collaboration_session(user, title="", assistant_uuids=None):
+    """Create a Smart Collaboration session with a user-scoped range."""
 
-    allowed = smart_routing_assistants(user, assistant_uuids)
-    assistant = _smart_router_assistant()
+    allowed = smart_collaboration_assistants(user, assistant_uuids)
+    assistant = _smart_collaboration_assistant()
     normalized_title = " ".join(str(title or "").split())
     return Session.objects.create(
         assistant=assistant,

@@ -217,8 +217,9 @@
     "chat": {
       "liveOutput": "Live output",
       "newSession": "New session",
-      "smartRouting": "Smart routing",
-      "smartRoutingDescription": "Automatically selects suitable assistants and coordinates complex requests.",
+      "smartCollaboration": "Smart Collaboration",
+      "smartCollaborationBeta": "Beta",
+      "smartCollaborationDescription": "Automatically selects suitable assistants and coordinates complex requests.",
       "participatingAssistants": "Participating assistants · {count}",
       "participatingAssistantsHint": "Only checked assistants are considered for future messages in this conversation.",
       "participatingAssistantsRequired": "Select at least one participating assistant.",

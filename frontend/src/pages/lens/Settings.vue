@@ -291,7 +291,7 @@ const defaultSettings = {
   'lensnode_health.interval_seconds': 60,
   'run_retention.interval_seconds': 86400,
   'lens.skills.generator_model_ref': '',
-  'lens.smart_router.model_ref': ''
+  'lens.smart_collaboration.model_ref': ''
 }
 
 const settingsForm = ref({ ...defaultSettings })
@@ -358,10 +358,10 @@ const settingDefinitions = computed(() => {
       unit: t('lensAdmin.settings.secondsUnit')
     },
     {
-      key: 'lens.smart_router.model_ref',
+      key: 'lens.smart_collaboration.model_ref',
       group: 'runtime',
-      label: t('lensAdmin.settings.smartRouterModelTitle'),
-      description: t('lensAdmin.settings.smartRouterModelDesc'),
+      label: t('lensAdmin.settings.smartCollaborationModelTitle'),
+      description: t('lensAdmin.settings.smartCollaborationModelDesc'),
       type: 'model_ref',
       unit: ''
     },

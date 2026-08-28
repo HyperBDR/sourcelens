@@ -315,8 +315,8 @@
             <button
               type="button"
               class="assistant-switcher-item assistant-switcher-item-smart"
-              :class="isSmartRouting ? 'assistant-switcher-item-active' : ''"
-              @click="selectSmartRouting"
+              :class="isSmartCollaboration ? 'assistant-switcher-item-active' : ''"
+              @click="selectSmartCollaboration"
             >
               <span
                 class="assistant-switcher-item-avatar assistant-tone-violet"
@@ -325,10 +325,15 @@
               </span>
               <span class="min-w-0 flex-1 text-left">
                 <span class="block truncate font-medium">
-                  {{ t('lens.chat.smartRouting') }}
+                  {{ t('lens.chat.smartCollaboration') }}
+                  <span
+                    class="ml-1 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-amber-700"
+                  >
+                    {{ t('lens.chat.smartCollaborationBeta') }}
+                  </span>
                 </span>
                 <span class="assistant-switcher-item-description">
-                  {{ t('lens.chat.smartRoutingDescription') }}
+                  {{ t('lens.chat.smartCollaborationDescription') }}
                 </span>
               </span>
             </button>
@@ -421,10 +426,10 @@ const flyoutGridStyle = computed(() => {
 const assistants = computed(() => lensStore.activeAssistants)
 const loading = computed(() => lensStore.loading)
 const currentAssistantSlug = computed(() => route.params.slug || '')
-const isSmartRouting = computed(() => route.name === 'LensSmartChat')
+const isSmartCollaboration = computed(() => route.name === 'LensSmartChat')
 
 const currentAssistantLabel = computed(() => {
-  if (isSmartRouting.value) return t('lens.chat.smartRouting')
+  if (isSmartCollaboration.value) return t('lens.chat.smartCollaboration')
   const match = assistants.value.find(
     (item) => item.slug === currentAssistantSlug.value
   )
@@ -513,8 +518,8 @@ const selectAssistant = async (slug) => {
   }
 }
 
-const selectSmartRouting = async () => {
-  if (isSmartRouting.value) return
+const selectSmartCollaboration = async () => {
+  if (isSmartCollaboration.value) return
   await router.push('/lens/chat')
   open.value = false
 }

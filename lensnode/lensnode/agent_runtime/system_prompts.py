@@ -157,6 +157,10 @@ def _knowledge_system_prompt(
         "from them — that conclusion is always wrong. The workspace is "
         "always present and reachable ONLY through search_workspace / "
         "find_files / read_workspace_file.\n"
+        "- Prefer relative paths with built-in file tools (for example "
+        "report.html). If an absolute path is used accidentally, it is a "
+        "virtual path inside scratch, not the host filesystem; keep using "
+        "the same path when calling save_deliverable.\n"
         f"{runtime_guidance_text}\n{code_analysis_guidance}"
         "- For exact-text questions, or when CodeGraph is unavailable, your "
         "FIRST workspace action MUST be a search_workspace call, or a "
@@ -261,7 +265,11 @@ def _general_chat_system_prompt(
     answer_language = _command_answer_language(command)
     language_requirement = _answer_language_requirement(answer_language)
     if command.get("assistant_capability") == "orchestrator":
-        return _smart_router_system_prompt(command, language_requirement)
+        return _smart_collaboration_system_prompt(
+            command,
+            language_requirement,
+            answer_language,
+        )
     skill_guidance = _general_chat_guidance(context_skill_contents or [])
     history_artifact_guidance = _history_artifact_guidance(command)
     confidentiality_guidance = (
@@ -292,6 +300,8 @@ def _general_chat_system_prompt(
         "file deliverable the user should keep (for example an HTML brief "
         "or a report), write it to scratch and then call "
         "save_deliverable(path) with that path to deliver it for download. "
+        "Prefer relative scratch paths; an accidental absolute path is "
+        "treated as a virtual scratch path, not a host path. "
         "Only deliver the final artifact, not intermediate scratch files. "
         "Use call_skill_api when a loaded Skill describes an HTTP connector; "
         "refer to its bound environment variables by name and never ask the "
@@ -366,13 +376,36 @@ def _general_chat_system_prompt(
     )
 
 
-def _smart_router_system_prompt(command, language_requirement):
+def _smart_collaboration_system_prompt(
+    command,
+    language_requirement,
+    answer_language,
+):
     """Build the focused prompt for a smart-routing conversation."""
 
+    language_key = (
+        "Spanish"
+        if answer_language == "Spanish"
+        else "Chinese"
+        if "Chinese" in answer_language
+        else "English"
+    )
     capability_names = {
-        "general_chat": "通用对话与已连接的 Skills",
-        "code_analysis": "代码分析",
-        "knowledge_qa": "知识库问答",
+        "general_chat": {
+            "Chinese": "通用对话与已连接的 Skills",
+            "English": "General Chat with connected Skills",
+            "Spanish": "Conversación general con Skills conectadas",
+        },
+        "code_analysis": {
+            "Chinese": "代码分析",
+            "English": "Code Analysis",
+            "Spanish": "Análisis de código",
+        },
+        "knowledge_qa": {
+            "Chinese": "知识库问答",
+            "English": "Knowledge Q&A",
+            "Spanish": "Preguntas y respuestas de conocimiento",
+        },
     }
     assistants = []
     for item in command.get("subagents") or []:
@@ -382,8 +415,13 @@ def _smart_router_system_prompt(command, language_requirement):
         if not name:
             continue
         capability = str(item.get("capability") or "").strip()
-        description = str(item.get("description") or "").strip()
-        capability_label = capability_names.get(capability, capability)
+        description = str(
+            item.get("routing_description") or item.get("description") or ""
+        ).strip()
+        capability_label = capability_names.get(capability, {}).get(
+            language_key,
+            capability,
+        )
         assistants.append(
             f"- {name}｜{capability_label or '专用能力'}"
             f"｜{description or '无额外说明'}"
@@ -395,7 +433,7 @@ def _smart_router_system_prompt(command, language_requirement):
         else "- 简单的解释、问候或能力说明可直接回答，不必为了委派而委派。\n"
     )
     return (
-        "你是 SourceLens 的智能路由助手。根据用户问题，从下列允许范围中选择"
+        "你是 SourceLens 的智能协作助手。根据用户问题，从下列允许范围中选择"
         "最合适的助手完成工作，并对结果进行整合。\n\n"
         "工作原则：\n"
         "- 仅使用名单中的助手；独立子任务可以并行委派。\n"

@@ -882,14 +882,14 @@
 
                   <section
                     v-if="detail.routing_mode === 'smart'"
-                    data-testid="run-smart-routing"
+                    data-testid="run-smart-collaboration"
                     class="overview-section"
                   >
                     <div class="overview-section-heading">
                       <div>
-                        <h3 class="overview-title">{{ t('lensRuns.smartRoutingTitle') }}</h3>
+                        <h3 class="overview-title">{{ t('lensRuns.smartCollaborationTitle') }}</h3>
                         <p class="overview-section-description">
-                          {{ t('lensRuns.smartRoutingDescription') }}
+                          {{ t('lensRuns.smartCollaborationDescription') }}
                         </p>
                       </div>
                     </div>
