@@ -899,6 +899,31 @@ def test_runtime_resources_collect_context_skill_content(tmp_path):
         cleanup_runtime_resources(resources)
 
 
+def test_runtime_resources_use_runtime_instance_id_for_scratch(tmp_path):
+    config = type(
+        "Config",
+        (),
+        {
+            "workspace_path": str(tmp_path),
+        },
+    )()
+    parent_run_uuid = "00000000-0000-0000-0000-000000000002"
+    runtime_instance_id = f"{parent_run_uuid}-subagent-1"
+    command = {
+        "run_uuid": parent_run_uuid,
+        "runtime_instance_id": runtime_instance_id,
+        "loaded_skills": [],
+        "loaded_mcps": [],
+    }
+
+    resources = prepare_runtime_resources(config, command)
+
+    try:
+        assert resources.root.name == runtime_instance_id
+    finally:
+        cleanup_runtime_resources(resources)
+
+
 def test_mcp_credentials_are_materialized_only_in_run_directory(tmp_path):
     config = type(
         "Config",

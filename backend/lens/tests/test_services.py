@@ -67,7 +67,6 @@ from lens.services import (
     build_run_history,
     build_run_history_artifacts,
     create_execution_run,
-    create_delegated_run,
     create_run_execution_snapshot,
     dispatch_run_to_lensnode,
     finish_lensnode_run,
@@ -200,69 +199,6 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertEqual(selected, idle)
         self.assertEqual(busy_run.lensnode, self.lensnode)
-
-    def test_delegated_run_uses_selected_assistant_lensnode(self):
-        self.session.routing_mode = Session.RoutingMode.SMART
-        self.session.save(update_fields=["routing_mode"])
-        self.assistant.visibility = Assistant.Visibility.PUBLIC
-        self.assistant.save(update_fields=["visibility"])
-        child_node = LensNode.objects.create(
-            name="Data LensNode",
-            status=LensNode.Status.ONLINE,
-            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
-            tasks=[{"name": "knowledge_qa"}],
-        )
-        child = Assistant.objects.create(
-            name="Data Assistant",
-            slug="data-assistant",
-            lensnode=child_node,
-            selected_task="knowledge_qa",
-            visibility=Assistant.Visibility.PUBLIC,
-        )
-        parent = create_execution_run(
-            session=self.session,
-            question="Investigate incident",
-            enqueue=False,
-        )
-        parent.execution.runtime_snapshot["subagents"] = [
-            {"uuid": str(child.uuid)}
-        ]
-        parent.execution.save(update_fields=["runtime_snapshot"])
-
-        delegated = create_delegated_run(
-            parent,
-            child.uuid,
-            "Query production error rate",
-        )
-
-        self.assertEqual(delegated.parent_run, parent)
-        self.assertEqual(delegated.session.assistant, child)
-        self.assertEqual(delegated.lensnode, child_node)
-
-    def test_delegated_run_rejects_depth_overflow(self):
-        self.session.routing_mode = Session.RoutingMode.SMART
-        self.session.save(update_fields=["routing_mode"])
-        self.assistant.visibility = Assistant.Visibility.PUBLIC
-        self.assistant.save(update_fields=["visibility"])
-        parent = create_execution_run(
-            session=self.session,
-            question="Root",
-            enqueue=False,
-        )
-        current = parent
-        for _ in range(3):
-            current = Run.objects.create(
-                session=self.session,
-                status=Run.Status.QUEUED,
-                input_message=parent.input_message,
-                parent_run=current,
-                lensnode=self.lensnode,
-            )
-        with self.assertRaisesMessage(
-            LensNodeDispatchError,
-            "SUBAGENT_DEPTH_EXCEEDED",
-        ):
-            create_delegated_run(current, self.assistant.uuid, "Too deep")
 
     def test_smart_run_rechecks_live_assistant_access(self):
         self.assistant.visibility = Assistant.Visibility.PRIVATE

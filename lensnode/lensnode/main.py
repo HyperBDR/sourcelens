@@ -1198,8 +1198,13 @@ class LensNodeClient:
                     }
                 )
 
+            execution_class = (
+                ExecutionClass.DELEGATED
+                if message.get("parent_run_uuid")
+                else ExecutionClass.STANDARD
+            )
             await self._acquire_execution(
-                ExecutionClass.STANDARD,
+                execution_class,
                 on_queued=report_queued,
             )
             slot_acquired = True
@@ -1228,9 +1233,7 @@ class LensNodeClient:
                     await self.executor.drain_pending_workers()
             finally:
                 if slot_acquired:
-                    await self.execution_queue.release(
-                        ExecutionClass.STANDARD
-                    )
+                    await self.execution_queue.release(execution_class)
                 self.running_tasks.pop(run_uuid, None)
                 self.running_commands.pop(run_uuid, None)
                 self.admitted_runs.discard(run_uuid)
