@@ -3002,6 +3002,7 @@ class SessionSerializer(serializers.ModelSerializer):
             assistants = smart_collaboration_assistants(
                 self.context["request"].user,
                 value,
+                allow_empty=True,
             )
         except AssistantNotRunnableError as exc:
             raise serializers.ValidationError(

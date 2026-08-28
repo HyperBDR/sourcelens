@@ -48,6 +48,12 @@ def lock_assistant_for_new_work(assistant, user=None):
     """Lock and return an assistant after checking its current state."""
 
     locked = Assistant.objects.select_for_update().get(pk=assistant.pk)
+    if (
+        locked.slug == SMART_COLLABORATION_SLUG
+        and locked.capability != Assistant.Capability.GENERAL_CHAT
+    ):
+        locked.capability = Assistant.Capability.GENERAL_CHAT
+        locked.save(update_fields=["capability", "updated_at"])
     if locked.is_system:
         is_runnable = locked.status == Assistant.Status.ACTIVE
     elif user is None:
@@ -83,7 +89,11 @@ def create_assistant_session(assistant_uuid, user, title=""):
     )
 
 
-def smart_collaboration_assistants(user, assistant_uuids=None):
+def smart_collaboration_assistants(
+    user,
+    assistant_uuids=None,
+    allow_empty=False,
+):
     """Return active assistants allowed for Smart Collaboration."""
 
     assistants = Assistant.objects.visible_to(user).filter(
@@ -96,12 +106,15 @@ def smart_collaboration_assistants(user, assistant_uuids=None):
         ],
     )
     requested = {str(value) for value in assistant_uuids or []}
-    if requested:
+    if assistant_uuids is not None:
         assistants = assistants.filter(uuid__in=requested)
     values = list(assistants)
-    if requested and {str(item.uuid) for item in values} != requested:
+    if (
+        assistant_uuids is not None
+        and {str(item.uuid) for item in values} != requested
+    ):
         raise AssistantNotRunnableError
-    if not values:
+    if not values and not allow_empty:
         raise AssistantNotRunnableError
     return values
 
@@ -136,7 +149,11 @@ def _smart_collaboration_assistant():
 def create_smart_collaboration_session(user, title="", assistant_uuids=None):
     """Create a Smart Collaboration session with a user-scoped range."""
 
-    allowed = smart_collaboration_assistants(user, assistant_uuids)
+    allowed = smart_collaboration_assistants(
+        user,
+        assistant_uuids or [],
+        allow_empty=True,
+    )
     assistant = _smart_collaboration_assistant()
     normalized_title = " ".join(str(title or "").split())
     return Session.objects.create(

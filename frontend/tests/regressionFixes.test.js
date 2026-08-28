@@ -45,9 +45,9 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
   assert.doesNotMatch(chat, /orchestrator: 'orchestrator'/)
   assert.equal(
     chinese.lens.chat.mentionAssistantHint,
-    '输入 @ 后选择助手；选中后，仅由该助手处理本次消息。'
+    "输入 {'@'} 后选择助手；选中后，仅由该助手处理本次消息。"
   )
-  assert.match(english.lens.chat.mentionAssistantHint, /Type @/)
+  assert.match(english.lens.chat.mentionAssistantHint, /Type \{'@'\}/)
   assert.equal(chinese.lens.chat.assistantTypes.orchestrator, undefined)
   assert.equal(english.lens.chat.assistantTypes.orchestrator, undefined)
   assert.equal(spanish.lens.chat.assistantTypes.orchestrator, undefined)
@@ -60,6 +60,25 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
     'Colaboración inteligente'
   )
   assert.equal(spanish.lens.chat.smartCollaborationBeta, 'Beta')
+})
+
+test('escapes literal at-signs in translated assistant mention messages', async () => {
+  const locales = await Promise.all(
+    ['en', 'zh-CN', 'es'].map((locale) =>
+      source(`locales/${locale}.json`).then(JSON.parse)
+    )
+  )
+  for (const locale of locales) {
+    for (const key of [
+      'mentionAssistantHint',
+      'mentionAssistantRequired',
+      'mentionAssistantSaveFailed',
+      'mentionAssistantQuestionRequired',
+      'clearAssistantMention'
+    ]) {
+      assert.match(locale.lens.chat[key], /\{'@'\}/)
+    }
+  }
 })
 
 test('admin tables and assistant slugs preserve backend-compatible values', async () => {

@@ -2113,10 +2113,34 @@ class LensApiTests(TestCase):
         )
         self.assertTrue(update.is_valid(), update.errors)
         updated = update.save()
-        self.assertEqual(
-            updated.allowed_assistant_uuids,
-            [str(self.assistant.uuid)],
+        self.assertEqual(updated.allowed_assistant_uuids, [])
+
+    def test_smart_collaboration_session_defaults_to_empty_range(self):
+        """Smart Collaboration requires an explicit participant choice."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_collaboration.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
         )
+        serializer = SessionCreateSerializer(
+            data={"routing_mode": "smart"},
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        session = serializer.save()
+
+        self.assertEqual(session.allowed_assistant_uuids, [])
+        run = RunCreateSerializer(
+            data={"question": "Coordinate this request.", "enqueue": False},
+            context={
+                "session": session,
+                "request": SimpleNamespace(user=self.user),
+            },
+        )
+        self.assertTrue(run.is_valid(), run.errors)
+        with self.assertRaises(PermissionDenied):
+            run.save()
 
     def test_smart_collaboration_rejects_legacy_model_setting(self):
         """Only the final Smart Collaboration model setting is accepted."""
@@ -2147,7 +2171,10 @@ class LensApiTests(TestCase):
         self.assistant.save(update_fields=["visibility"])
         session_response = self.client.post(
             "/api/lens/sessions/",
-            {"routing_mode": "smart"},
+            {
+                "routing_mode": "smart",
+                "allowed_assistant_uuids": [str(self.assistant.uuid)],
+            },
             format="json",
         )
         self.assertEqual(session_response.status_code, 201)
@@ -2164,6 +2191,37 @@ class LensApiTests(TestCase):
         self.assertEqual(run_response.status_code, 201)
         self.assertEqual(run_response.data["execution"]["task"], "general_chat")
 
+    def test_smart_session_normalizes_legacy_coordinator_capability(self):
+        """Existing Smart sessions use General Chat after capability removal."""
+
+        coordinator = Assistant.objects.create(
+            name="Smart Collaboration",
+            slug="__system-smart-collaboration__",
+            capability="orchestrator",
+            agent_model_ref="11111111-1111-1111-1111-111111111111",
+            is_system=True,
+        )
+        session = Session.objects.create(
+            assistant=coordinator,
+            user=self.user,
+            routing_mode=Session.RoutingMode.SMART,
+            allowed_assistant_uuids=[str(self.assistant.uuid)],
+        )
+
+        response = self.client.post(
+            f"/api/lens/sessions/{session.uuid}/runs/",
+            {"question": "Coordinate this request.", "enqueue": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["execution"]["task"], "general_chat")
+        coordinator.refresh_from_db()
+        self.assertEqual(
+            coordinator.capability,
+            Assistant.Capability.GENERAL_CHAT,
+        )
+
     def test_smart_run_can_limit_one_run_without_updating_session_scope(self):
         """A routing assistant override belongs to the Run snapshot only."""
 
@@ -2179,7 +2237,10 @@ class LensApiTests(TestCase):
         self.user.profile.language = "es"
         self.user.profile.save(update_fields=["language"])
         session = SessionCreateSerializer(
-            data={"routing_mode": "smart"},
+            data={
+                "routing_mode": "smart",
+                "allowed_assistant_uuids": [str(self.assistant.uuid)],
+            },
             context={"request": SimpleNamespace(user=self.user)},
         )
         self.assertTrue(session.is_valid(), session.errors)
@@ -4076,6 +4137,27 @@ class LensApiTests(TestCase):
         body = collect_stream(stream_response.streaming_content).decode()
         self.assertIn('"type": "sync"', body)
         self.assertIn('"type": "done"', body)
+
+    def test_session_run_returns_service_unavailable_without_lensnode(self):
+        """A temporarily unavailable execution node is retryable."""
+
+        self.assistant.lensnode = None
+        self.assistant.save(update_fields=["lensnode"])
+        self.lensnode.status = LensNode.Status.OFFLINE
+        self.lensnode.save(update_fields=["status"])
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+
+        response = self.client.post(
+            f"/api/lens/sessions/{session.uuid}/runs/",
+            {"question": "Retry when the node reconnects."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data["detail"], "LENSNODE_UNAVAILABLE")
 
     def test_stream_does_not_replay_snapshot_steps_after_sync(self):
         session = Session.objects.create(

@@ -67,6 +67,16 @@ test('guards restored run state with the current session load', async () => {
   )
 })
 
+test('shows a retryable node-offline error when run creation is unavailable', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /const errorCode = err\?\.response\?\.data\?\.detail/
+  )
+  assert.match(source, /lensNodeErrorMessage\(errorCode, t\)/)
+})
+
 test('keeps the conversation viewport aligned with runtime events', async () => {
   const source = await chatSource()
   const handleEvent = source.indexOf('function handleEvent(event)')
@@ -203,7 +213,7 @@ test('creates the first session only when the user submits a prompt', async () =
   const source = await chatSource()
   const submit = source.indexOf('async function submit()')
   const createFirstSession = source.indexOf(
-    'await createNewSession(false)',
+    'await createNewSession(',
     submit
   )
   const bindSession = source.indexOf(
@@ -228,11 +238,16 @@ test('lets Smart Collaboration select assistants before its first session', asyn
   )
   const scopeCandidates = source.indexOf('const routingScopeAssistantUuids')
   const sessionPayload = source.indexOf(
-    'allowed_assistant_uuids: routingScopeAssistantUuids.value'
+    'allowed_assistant_uuids: allowedAssistantUuids'
+  )
+  const selectedScope = source.indexOf(
+    'await createNewSession(\n      false,\n      routingScopeAssistantUuids.value',
+    scopeCandidates
   )
 
   assert.notEqual(scopeButton, -1)
   assert.notEqual(scopeCandidates, -1)
+  assert.notEqual(selectedScope, -1)
   assert.notEqual(sessionPayload, -1)
 })
 

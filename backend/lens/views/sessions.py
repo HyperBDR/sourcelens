@@ -69,6 +69,7 @@ from lens.serializers import (
     SharedQAMineSerializer,
 )
 from lens.services import (
+    LensNodeDispatchError,
     cancel_descendant_runs,
     cancel_run_on_lensnode,
     create_execution_run,
@@ -282,6 +283,11 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             run = serializer.save()
         except SessionStateError:
             raise ValidationError("SESSION_ARCHIVED")
+        except LensNodeDispatchError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         run.refresh_from_db()
         return Response(RunSerializer(run).data, status=201)
 
