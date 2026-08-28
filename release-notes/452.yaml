@@ -1,0 +1,10 @@
+type: fix
+audience: user
+en: >-
+  Fixed assistants replying in the configured fallback language instead of
+  the language used in the user's latest request.
+zh-CN: >-
+  修复助手错误使用配置的回退语言回答，而未沿用用户最新请求语言的问题。
+es: >-
+  Se corrigió un problema por el que los asistentes respondían en el idioma
+  de respaldo configurado en vez del idioma de la solicitud más reciente.
