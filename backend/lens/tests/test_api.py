@@ -2136,6 +2136,34 @@ class LensApiTests(TestCase):
         with self.assertRaises(PermissionDenied):
             serializer.save()
 
+    def test_smart_session_run_allows_hidden_coordinator(self):
+        """Smart sessions may run through their hidden system coordinator."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_collaboration.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        session_response = self.client.post(
+            "/api/lens/sessions/",
+            {"routing_mode": "smart"},
+            format="json",
+        )
+        self.assertEqual(session_response.status_code, 201)
+
+        run_response = self.client.post(
+            f"/api/lens/sessions/{session_response.data['uuid']}/runs/",
+            {
+                "question": "Coordinate this request.",
+                "enqueue": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(run_response.status_code, 201)
+        self.assertEqual(run_response.data["execution"]["task"], "general_chat")
+
     def test_smart_run_can_limit_one_run_without_updating_session_scope(self):
         """A routing assistant override belongs to the Run snapshot only."""
 

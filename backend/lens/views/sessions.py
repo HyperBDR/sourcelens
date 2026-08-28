@@ -88,6 +88,17 @@ from .shares import _shared_qa_default_title, _unique_share_token
 logger = logging.getLogger(__name__)
 
 
+def _session_assistant_is_runnable(session, user):
+    """Return whether a session may start work for its owning user."""
+
+    assistant = session.assistant
+    if assistant.status != Assistant.Status.ACTIVE:
+        return False
+    if session.routing_mode == Session.RoutingMode.SMART:
+        return assistant.is_system
+    return assistant.is_accessible_by(user)
+
+
 async def run_stream_view(request, uuid):
     """Stream run events as SSE without DRF response buffering."""
 
@@ -258,10 +269,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Create an execution run for a session."""
 
         session = self.get_object()
-        if (
-            session.assistant.status != Assistant.Status.ACTIVE
-            or not session.assistant.is_accessible_by(request.user)
-        ):
+        if not _session_assistant_is_runnable(session, request.user):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
@@ -287,10 +295,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Upload one attachment for a session question."""
 
         session = self.get_object()
-        if (
-            session.assistant.status != Assistant.Status.ACTIVE
-            or not session.assistant.is_accessible_by(request.user)
-        ):
+        if not _session_assistant_is_runnable(session, request.user):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )

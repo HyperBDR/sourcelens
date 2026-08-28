@@ -221,6 +221,21 @@ test('creates the first session only when the user submits a prompt', async () =
   assert.ok(createFirstSession < bindSession)
 })
 
+test('lets Smart Collaboration select assistants before its first session', async () => {
+  const source = await chatSource()
+  const scopeButton = source.indexOf(
+    'v-if="isSmartCollaborationConversation"\n              class="relative mt-2"'
+  )
+  const scopeCandidates = source.indexOf('const routingScopeAssistantUuids')
+  const sessionPayload = source.indexOf(
+    'allowed_assistant_uuids: routingScopeAssistantUuids.value'
+  )
+
+  assert.notEqual(scopeButton, -1)
+  assert.notEqual(scopeCandidates, -1)
+  assert.notEqual(sessionPayload, -1)
+})
+
 test('keeps every conversation layout free of repeated message avatars', async () => {
   const source = await chatSource()
 
