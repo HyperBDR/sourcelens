@@ -426,11 +426,19 @@ def _smart_collaboration_system_prompt(
             f"｜{description or '无额外说明'}"
         )
     roster = "\n".join(assistants) or "- 当前没有可委派助手"
-    routing_directive = (
-        "- 用户已明确指定助手，必须委派给该助手；不要由主路由直接回答。\n"
-        if command.get("routing_assistant_uuid")
-        else "- 简单的解释、问候或能力说明可直接回答，不必为了委派而委派。\n"
-    )
+    if command.get("routing_assistant_uuid"):
+        routing_directive = (
+            "- 用户已明确指定助手，必须委派给该助手；不要由主路由直接回答。\n"
+        )
+    elif assistants:
+        routing_directive = (
+            "- 当前存在可用助手，必须先委派给最合适的助手；不要由主路由直接回答。"
+            "仅当所有委派都失败时，才说明无法完成。\n"
+        )
+    else:
+        routing_directive = (
+            "- 当前没有可委派助手；主路由可以直接回答，但不得编造工作区证据。\n"
+        )
     return (
         "你是 SourceLens 的智能协作助手。根据用户问题，从下列允许范围中选择"
         "最合适的助手完成工作，并对结果进行整合。\n\n"

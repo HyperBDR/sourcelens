@@ -2633,7 +2633,8 @@ def test_smart_collaboration_prompt_is_focused_on_collaboration_scope():
     assert "当前可委派助手" in prompt
     assert "Code Reviewer｜代码分析｜Use for repository reviews." in prompt
     assert "Data Investigator｜通用对话与已连接的 Skills" in prompt
-    assert "能力说明可直接回答" in prompt
+    assert "必须先委派" in prompt
+    assert "能力说明可直接回答" not in prompt
     assert "只说明助手集合及其能力" in prompt
     assert "不要附加路由过程" in prompt
     assert "未委派说明" in prompt

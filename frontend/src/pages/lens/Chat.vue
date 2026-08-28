@@ -369,9 +369,39 @@
                 <p class="text-xs leading-5 text-ink-500">
                   {{ t('lens.chat.participatingAssistantsHint') }}
                 </p>
+                <p
+                  class="mt-2 rounded-md border border-warning-200 bg-warning-50 px-2.5 py-2 text-xs leading-5 text-warning-700"
+                >
+                  {{ t('lens.chat.participatingAssistantsAccuracyWarning') }}
+                </p>
+                <div class="mt-3 flex items-center gap-2">
+                  <input
+                    v-model="routingScopeQuery"
+                    type="search"
+                    name="participating-assistant-search"
+                    autocomplete="off"
+                    inputmode="search"
+                    :aria-label="t('lens.chat.searchParticipatingAssistants')"
+                    :placeholder="t('lens.chat.searchParticipatingAssistants')"
+                    class="min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink-900 outline-none placeholder:text-ink-400 focus:border-brand-400 focus:ring-1 focus:ring-brand-400"
+                  />
+                  <button
+                    type="button"
+                    :disabled="!routingCandidates.length"
+                    :aria-pressed="routingAllSelected"
+                    class="shrink-0 rounded px-2 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    @click="toggleAllRoutingAssistants"
+                  >
+                    {{
+                      routingAllSelected
+                        ? t('lens.chat.clearAllParticipatingAssistants')
+                        : t('common.selectAll')
+                    }}
+                  </button>
+                </div>
                 <div class="mt-2 max-h-56 space-y-1 overflow-y-auto">
                   <label
-                    v-for="assistant in routingCandidates"
+                    v-for="assistant in filteredRoutingCandidates"
                     :key="assistant.uuid"
                     class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-sunken"
                   >
@@ -381,9 +411,19 @@
                       :value="assistant.uuid"
                       class="h-4 w-4 rounded border-line text-brand-600 focus:ring-brand-500"
                     />
-                    <span class="min-w-0 flex-1 truncate">{{ assistant.name }}</span>
-                    <span class="text-xs text-ink-500">{{ assistantCapabilityLabel(assistant.capability) }}</span>
+                    <span class="min-w-0 flex-1 truncate">
+                      {{ assistant.name }}
+                    </span>
+                    <span class="text-xs text-ink-500">
+                      {{ assistantCapabilityLabel(assistant.capability) }}
+                    </span>
                   </label>
+                  <p
+                    v-if="!filteredRoutingCandidates.length"
+                    class="px-2 py-4 text-center text-xs text-ink-500"
+                  >
+                    {{ t('lens.chat.participatingAssistantsEmpty') }}
+                  </p>
                 </div>
                 <div class="mt-3 flex justify-end gap-2">
                   <button
@@ -1638,8 +1678,6 @@
                   rows="1"
                   :placeholder="t('lens.chat.questionPlaceholder')"
                   @keydown="handleComposerKeydown"
-                  @keydown.enter.exact.prevent="handlePrimaryAction"
-                  @keydown.shift.enter.exact.prevent="insertNewline"
                   @paste="onComposerPaste"
                   @input="handleComposerInput"
                 />
@@ -1831,6 +1869,14 @@ import {
   retryRunUuid,
   retryableUserMessage
 } from '@/pages/lens/chatMessageContext'
+import {
+  isComposingKeyboardEvent,
+  resolveComposerEnterAction
+} from '@/pages/lens/chatComposerKeyboard'
+import {
+  filterRoutingCandidates,
+  toggleRoutingScopeSelection
+} from '@/pages/lens/chatRoutingScope'
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
 import { resolveChatViewport } from '@/pages/lens/chatViewport'
@@ -1986,6 +2032,7 @@ const booted = ref(false)
 const routingScopeOpen = ref(false)
 const routingScopeDraft = ref([])
 const routingScopeSnapshot = ref([])
+const routingScopeQuery = ref('')
 const mentionedAssistantUuid = ref('')
 const mentionActiveIndex = ref(0)
 const isSmartCollaborationConversation = computed(
@@ -2013,9 +2060,21 @@ const routingCandidates = computed(() =>
   assistants.value.filter((assistant) => assistant.status === 'active')
 )
 
+const filteredRoutingCandidates = computed(() =>
+  filterRoutingCandidates(routingCandidates.value, routingScopeQuery.value)
+)
+
+const routingAllSelected = computed(() => {
+  if (!routingCandidates.value.length) return false
+  const selected = new Set(routingScopeDraft.value)
+  return routingCandidates.value.every((assistant) =>
+    selected.has(assistant.uuid)
+  )
+})
+
 const routingScopeAssistantUuids = computed(() =>
-  selectedSession.value?.allowed_assistant_uuids?.length
-    ? selectedSession.value.allowed_assistant_uuids
+  selectedSession.value
+    ? selectedSession.value.allowed_assistant_uuids || []
     : routingScopeDraft.value
 )
 
@@ -2025,11 +2084,7 @@ const mentionToken = computed(() => {
 })
 
 const mentionCandidates = computed(() => {
-  const allowed = new Set(
-    routingScopeAssistantUuids.value.length
-      ? routingScopeAssistantUuids.value
-      : routingCandidates.value.map((assistant) => assistant.uuid)
-  )
+  const allowed = new Set(routingScopeAssistantUuids.value)
   const query = (mentionToken.value?.[1] || '').toLocaleLowerCase()
   return routingCandidates.value.filter(
     (assistant) =>
@@ -2215,16 +2270,22 @@ function messageMentionSegments(content) {
 function openRoutingScope() {
   routingScopeDraft.value = selectedSession.value
     ? [...(selectedSession.value.allowed_assistant_uuids || [])]
-    : routingScopeDraft.value.length
-      ? [...routingScopeDraft.value]
-      : routingCandidates.value.map((assistant) => assistant.uuid)
+    : [...routingScopeDraft.value]
   routingScopeSnapshot.value = [...routingScopeDraft.value]
+  routingScopeQuery.value = ''
   routingScopeOpen.value = true
 }
 
 function cancelRoutingScope() {
   routingScopeDraft.value = [...routingScopeSnapshot.value]
   routingScopeOpen.value = false
+}
+
+function toggleAllRoutingAssistants() {
+  routingScopeDraft.value = toggleRoutingScopeSelection(
+    routingScopeDraft.value,
+    routingCandidates.value
+  )
 }
 
 function selectAssistantMention(assistant) {
@@ -2264,7 +2325,8 @@ function moveMentionSelection(direction) {
     (mentionActiveIndex.value + direction + count) % count
 }
 
-function handleComposerKeydown(event) {
+async function handleComposerKeydown(event) {
+  if (isComposingKeyboardEvent(event)) return
   if (event.ctrlKey || event.metaKey) return
   if (showMentionPicker.value && mentionCandidates.value.length) {
     if (event.key === 'ArrowDown') {
@@ -2277,15 +2339,20 @@ function handleComposerKeydown(event) {
       moveMentionSelection(-1)
       return
     }
-    if (event.key === 'Enter') return
+  }
+  if (event.key === 'Enter') {
+    const action = resolveComposerEnterAction(event)
+    if (!action) return
+    event.preventDefault()
+    if (action === 'newline') {
+      insertNewline()
+      return
+    }
+    await handlePrimaryAction()
   }
 }
 
 async function saveRoutingScope() {
-  if (!routingScopeDraft.value.length) {
-    showWarning(t('lens.chat.participatingAssistantsRequired'))
-    return
-  }
   if (!selectedSession.value) {
     routingScopeOpen.value = false
     return
@@ -3052,9 +3119,7 @@ async function bootstrap() {
 
     if (isSmartCollaborationConversation.value) {
       selectedAssistantUuid.value = ''
-      routingScopeDraft.value = routingCandidates.value.map(
-        (assistant) => assistant.uuid
-      )
+      routingScopeDraft.value = []
       await loadMyShareState()
       await loadSessions()
       booted.value = true
@@ -3149,7 +3214,7 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
   await nextTick(() => composerRef.value?.focus())
 }
 
-async function createNewSession(notify = true) {
+async function createNewSession(notify = true, allowedAssistantUuids = []) {
   if (!selectedAssistant.value && !isSmartCollaborationConversation.value) {
     return null
   }
@@ -3167,7 +3232,7 @@ async function createNewSession(notify = true) {
         ? {
             routing_mode: 'smart',
             title: '',
-            allowed_assistant_uuids: routingScopeAssistantUuids.value
+            allowed_assistant_uuids: allowedAssistantUuids
           }
         : { assistant_uuid: selectedAssistant.value.uuid, title: '' }
     )
@@ -3188,6 +3253,9 @@ async function createNewSession(notify = true) {
   }
   sortManagedSessions()
   selectedSessionUuid.value = session.uuid
+  if (isSmartCollaborationConversation.value) {
+    routingScopeDraft.value = [...(session.allowed_assistant_uuids || [])]
+  }
   question.value = ''
   retryDraft.value = null
   clarificationAnswers.value = {}
@@ -3863,6 +3931,13 @@ async function submit() {
   if (!canSubmit.value) {
     return
   }
+  if (
+    isSmartCollaborationConversation.value &&
+    !routingScopeAssistantUuids.value.length
+  ) {
+    showWarning(t('lens.chat.participatingAssistantsRequired'))
+    return
+  }
   const draftTextAtSubmit = question.value
   const trimmedDraft = draftTextAtSubmit.replace(/^\s*\n+|\n+\s*$/g, '')
   const oversizedFile = createOversizedTextFile(trimmedDraft)
@@ -3880,7 +3955,10 @@ async function submit() {
   }
   loading.value.run = true
   if (!selectedSessionUuid.value) {
-    const session = await createNewSession(false)
+    const session = await createNewSession(
+      false,
+      routingScopeAssistantUuids.value
+    )
     if (!session) {
       question.value = draftTextAtSubmit
       loading.value.run = false
@@ -4056,7 +4134,10 @@ async function submit() {
     if (oversizedAttachment && requestRejected && !attachmentMissing) {
       deleteAttachment(oversizedAttachment.uuid).catch(() => {})
     }
-    showError(t('lens.chat.submitFailed'))
+    const errorCode = err?.response?.data?.detail
+    showError(
+      lensNodeErrorMessage(errorCode, t) || t('lens.chat.submitFailed')
+    )
   } finally {
     if (!keepAttachments) {
       pendingAttachments.forEach(
