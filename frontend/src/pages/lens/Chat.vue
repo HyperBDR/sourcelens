@@ -350,7 +350,7 @@
               {{ assistantDescription }}
             </p>
             <div
-              v-if="isSmartCollaborationConversation && selectedSession"
+              v-if="isSmartCollaborationConversation"
               class="relative mt-2"
             >
               <button
@@ -359,7 +359,7 @@
                 @click="openRoutingScope"
               >
                 {{ t('lens.chat.participatingAssistants', {
-                  count: selectedSession.allowed_assistant_uuids?.length || 0
+                  count: routingScopeAssistantUuids.length
                 }) }}
               </button>
               <div
@@ -389,7 +389,7 @@
                   <button
                     type="button"
                     class="rounded px-2 py-1 text-xs text-ink-600 hover:bg-surface-sunken"
-                    @click="routingScopeOpen = false"
+                    @click="cancelRoutingScope"
                   >
                     {{ t('common.cancel') }}
                   </button>
@@ -1985,6 +1985,7 @@ const mySharesOpen = ref(false)
 const booted = ref(false)
 const routingScopeOpen = ref(false)
 const routingScopeDraft = ref([])
+const routingScopeSnapshot = ref([])
 const mentionedAssistantUuid = ref('')
 const mentionActiveIndex = ref(0)
 const isSmartCollaborationConversation = computed(
@@ -2012,6 +2013,12 @@ const routingCandidates = computed(() =>
   assistants.value.filter((assistant) => assistant.status === 'active')
 )
 
+const routingScopeAssistantUuids = computed(() =>
+  selectedSession.value?.allowed_assistant_uuids?.length
+    ? selectedSession.value.allowed_assistant_uuids
+    : routingScopeDraft.value
+)
+
 const mentionToken = computed(() => {
   if (!isSmartCollaborationConversation.value) return null
   return /^@([^\s]*)/.exec(question.value)
@@ -2019,8 +2026,9 @@ const mentionToken = computed(() => {
 
 const mentionCandidates = computed(() => {
   const allowed = new Set(
-    selectedSession.value?.allowed_assistant_uuids ||
-      routingCandidates.value.map((assistant) => assistant.uuid)
+    routingScopeAssistantUuids.value.length
+      ? routingScopeAssistantUuids.value
+      : routingCandidates.value.map((assistant) => assistant.uuid)
   )
   const query = (mentionToken.value?.[1] || '').toLocaleLowerCase()
   return routingCandidates.value.filter(
@@ -2205,10 +2213,18 @@ function messageMentionSegments(content) {
 }
 
 function openRoutingScope() {
-  routingScopeDraft.value = [
-    ...(selectedSession.value?.allowed_assistant_uuids || [])
-  ]
+  routingScopeDraft.value = selectedSession.value
+    ? [...(selectedSession.value.allowed_assistant_uuids || [])]
+    : routingScopeDraft.value.length
+      ? [...routingScopeDraft.value]
+      : routingCandidates.value.map((assistant) => assistant.uuid)
+  routingScopeSnapshot.value = [...routingScopeDraft.value]
   routingScopeOpen.value = true
+}
+
+function cancelRoutingScope() {
+  routingScopeDraft.value = [...routingScopeSnapshot.value]
+  routingScopeOpen.value = false
 }
 
 function selectAssistantMention(assistant) {
@@ -2266,8 +2282,12 @@ function handleComposerKeydown(event) {
 }
 
 async function saveRoutingScope() {
-  if (!selectedSession.value || !routingScopeDraft.value.length) {
+  if (!routingScopeDraft.value.length) {
     showWarning(t('lens.chat.participatingAssistantsRequired'))
+    return
+  }
+  if (!selectedSession.value) {
+    routingScopeOpen.value = false
     return
   }
   try {
@@ -3032,6 +3052,9 @@ async function bootstrap() {
 
     if (isSmartCollaborationConversation.value) {
       selectedAssistantUuid.value = ''
+      routingScopeDraft.value = routingCandidates.value.map(
+        (assistant) => assistant.uuid
+      )
       await loadMyShareState()
       await loadSessions()
       booted.value = true
@@ -3141,7 +3164,11 @@ async function createNewSession(notify = true) {
   try {
     session = await createSession(
       isSmartCollaborationConversation.value
-        ? { routing_mode: 'smart', title: '' }
+        ? {
+            routing_mode: 'smart',
+            title: '',
+            allowed_assistant_uuids: routingScopeAssistantUuids.value
+          }
         : { assistant_uuid: selectedAssistant.value.uuid, title: '' }
     )
   } catch {
