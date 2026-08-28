@@ -1639,7 +1639,7 @@
                   :placeholder="t('lens.chat.questionPlaceholder')"
                   @keydown="handleComposerKeydown"
                   @keydown.enter.exact.prevent="handlePrimaryAction"
-                  @keydown.ctrl.enter.exact.prevent="insertNewline"
+                  @keydown.shift.enter.exact.prevent="insertNewline"
                   @paste="onComposerPaste"
                   @input="handleComposerInput"
                 />
