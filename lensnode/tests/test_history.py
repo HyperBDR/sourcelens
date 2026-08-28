@@ -4180,12 +4180,25 @@ def test_smart_subagent_uses_its_own_model_and_tools(monkeypatch):
         lambda command, *_args, **_kwargs: [command["task"]],
     )
     monkeypatch.setattr(agent_runtime, "load_mcp_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_execution_backend",
+        lambda _config, root: ("backend", root),
+    )
 
     class Model:
         def __init__(self, **kwargs):
             self.model_ref = kwargs["model_ref"]
+            self.observation_name = kwargs["observation_name"]
 
     monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    captured = {}
+
+    def capture_deep_agent(**kwargs):
+        captured.update(kwargs)
+        return "compiled-subagent"
+
+    monkeypatch.setattr(agent_runtime, "create_deep_agent", capture_deep_agent)
     state = SimpleNamespace(
         run_uuid="00000000-0000-0000-0000-000000000021",
         command={
@@ -4215,9 +4228,84 @@ def test_smart_subagent_uses_its_own_model_and_tools(monkeypatch):
         state
     )
 
-    assert subagents[0]["model"].model_ref == "data-model"
-    assert subagents[0]["tools"] == ["general_chat"]
-    assert subagents[0]["skills"] == ["skills/data"]
+    assert subagents[0]["runnable"] == "compiled-subagent"
+    assert captured["model"].model_ref == "data-model"
+    assert captured["tools"] == ["general_chat"]
+    assert captured["backend"] == ("backend", Path("/run/subagent"))
+    assert captured["skills"] == ["skills/data"]
+
+
+def test_smart_collaboration_builds_local_subagents(monkeypatch):
+    """Smart Collaboration must use local Deep Agents subagents."""
+
+    state = SimpleNamespace(
+        run_uuid="00000000-0000-0000-0000-000000000022",
+        command={
+            "run_uuid": "00000000-0000-0000-0000-000000000022",
+            "routing_mode": "smart",
+            "subagents": [
+                {
+                    "uuid": "assistant-1",
+                    "name": "Production data",
+                    "description": "Query read-only production data.",
+                    "task": "general_chat",
+                    "agent_model_ref": "data-model",
+                    "loaded_skills": [],
+                    "loaded_mcps": [],
+                }
+            ],
+        },
+        cancel_event=None,
+        on_activity=None,
+        trace_context={},
+        emit_trace_observation=None,
+        trace_middleware=None,
+        subagent_resources=[],
+        emit_agent_event=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            root=Path("/run/subagent"),
+            mcp_configs=[],
+            skill_paths=[],
+        ),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(agent_runtime, "load_mcp_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_execution_backend",
+        lambda _config, root: ("backend", root),
+    )
+
+    class Model:
+        def __init__(self, **kwargs):
+            self.model_ref = kwargs["model_ref"]
+            self.observation_name = kwargs["observation_name"]
+
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_kwargs: "compiled-subagent",
+    )
+
+    subagents = agent_runtime.LensDeepAgentRuntime(
+        SimpleNamespace(
+            ai_gateway_url="http://gateway/ai/",
+            token="token",
+            request_timeout_s=30,
+        )
+    )._build_configured_subagents(state)
+
+    assert len(subagents) == 1
+    assert subagents[0]["runnable"] == "compiled-subagent"
 
 
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):

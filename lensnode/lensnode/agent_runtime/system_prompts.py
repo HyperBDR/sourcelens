@@ -130,10 +130,10 @@ def _knowledge_system_prompt(
     if command.get("routing_mode") == "smart":
         collaboration_guidance = (
             "You are coordinating a Smart Collaboration request. Decompose "
-            "the request into "
-            "independent workstreams and delegate them to the named assistant "
-            "subagents when useful. You may issue multiple task calls in one "
-            "turn for parallel execution, then synthesize their findings.\n\n"
+            "the request into independent workstreams and call the task "
+            "tool for each selected assistant. You may issue multiple task "
+            "calls in one turn for parallel execution, then synthesize their "
+            "findings.\n\n"
         )
     return (
         collaboration_guidance +
@@ -190,7 +190,7 @@ def _knowledge_system_prompt(
         "multiple files at once, or run multiple searches at once, by "
         "issuing several tool calls in one message. Only go step by step "
         "when a later action genuinely depends on an earlier result.\n\n"
-        f"{_subagent_guidance(command.get('agent_rounds'))}"
+        f"{_subagent_guidance(command.get('agent_rounds'), command)}"
         "How search and read work:\n"
         "- search_workspace returns matching LINES (path + line number + "
         "surrounding context), not whole files, and works on files of any "
@@ -424,6 +424,7 @@ def _smart_collaboration_system_prompt(
         assistants.append(
             f"- {name}｜{capability_label or '专用能力'}"
             f"｜{description or '无额外说明'}"
+            f" [assistant_uuid={item.get('uuid', '')}]"
         )
     roster = "\n".join(assistants) or "- 当前没有可委派助手"
     if command.get("routing_assistant_uuid"):
@@ -443,7 +444,8 @@ def _smart_collaboration_system_prompt(
         "你是 SourceLens 的智能协作助手。根据用户问题，从下列允许范围中选择"
         "最合适的助手完成工作，并对结果进行整合。\n\n"
         "工作原则：\n"
-        "- 仅使用名单中的助手；独立子任务可以并行委派。\n"
+        "- 仅使用名单中的助手；独立子任务可以并行委派。使用 task 工具"
+        "并选择名单中的助手；所有子任务都属于当前 Run。\n"
         f"{routing_directive}"
         "- 委派后只根据实际返回的结果作答；缺少结果时明确说明。\n"
         "- 用户询问当前能力或可用助手时，只说明助手集合及其能力；仅在用户明确询问"
@@ -476,7 +478,7 @@ def _workspace_guide_prompt(workspace_guide):
     )
 
 
-def _subagent_guidance(agent_rounds):
+def _subagent_guidance(agent_rounds, command=None):
     """Return depth-tiered guidance on when to use the task subagent.
 
     Subagents are a completed agent loop each (multi-round, minute-scale),
@@ -486,6 +488,12 @@ def _subagent_guidance(agent_rounds):
     main loop and parallelize with batched tool calls instead.
     """
 
+    if (command or {}).get("routing_mode") == "smart":
+        return (
+            "Use the task tool for independent workstreams. Multiple task "
+            "calls in one turn are allowed; collect every subagent result "
+            "before synthesizing the final answer.\n\n"
+        )
     if agent_rounds in ("deep", "max"):
         return (
             "Delegating subtasks (task tool): when the question splits "

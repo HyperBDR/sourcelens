@@ -152,7 +152,15 @@ class SessionViewSet(BaseAuthenticatedViewSet):
                 status=Run.Status.DONE,
                 output_message__isnull=False,
             )
-            return queryset.filter(status=session_status).annotate(
+            delegated_sessions = Run.objects.filter(
+                session=OuterRef("pk"),
+                parent_run__isnull=False,
+            )
+            return queryset.filter(
+                status=session_status,
+            ).filter(
+                ~Exists(delegated_sessions),
+            ).annotate(
                 has_shareable_answer=Exists(shareable_runs),
             ).order_by(
                 F("pinned_at").desc(nulls_last=True),

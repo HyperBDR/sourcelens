@@ -9,6 +9,7 @@ class ExecutionClass(StrEnum):
     """Resource class used by the LensNode-local execution queue."""
 
     STANDARD = "standard"
+    DELEGATED = "delegated"
     EXCLUSIVE = "exclusive"
 
 
@@ -31,6 +32,8 @@ class LensNodeExecutionQueue:
         self._lock = asyncio.Lock()
         self._waiting = collections.deque()
         self._active_standard = 0
+        self._active_delegated = 0
+        self.max_delegated_concurrency = self.max_standard_concurrency
         self._exclusive_active = False
 
     async def acquire(
@@ -79,6 +82,11 @@ class LensNodeExecutionQueue:
                 raise RuntimeError("No exclusive LensNode work is active.")
             self._exclusive_active = False
             return
+        if execution_class == ExecutionClass.DELEGATED:
+            if self._active_delegated <= 0:
+                raise RuntimeError("No delegated LensNode work is active.")
+            self._active_delegated -= 1
+            return
         if self._active_standard <= 0:
             raise RuntimeError("No standard LensNode work is active.")
         self._active_standard -= 1
@@ -89,7 +97,8 @@ class LensNodeExecutionQueue:
         if self._exclusive_active:
             return
         self._admit_standard_waiters()
-        if self._active_standard:
+        self._admit_delegated_waiters()
+        if self._active_standard or self._active_delegated:
             return
         if not self._waiting:
             return
@@ -108,6 +117,22 @@ class LensNodeExecutionQueue:
                 and self._active_standard < self.max_standard_concurrency
             ):
                 self._active_standard += 1
+                request.admitted.set_result(None)
+            else:
+                waiting.append(request)
+        self._waiting = waiting
+
+    def _admit_delegated_waiters(self):
+        """Admit delegated work independently of the parent Run slot."""
+
+        waiting = collections.deque()
+        while self._waiting:
+            request = self._waiting.popleft()
+            if (
+                request.execution_class == ExecutionClass.DELEGATED
+                and self._active_delegated < self.max_delegated_concurrency
+            ):
+                self._active_delegated += 1
                 request.admitted.set_result(None)
             else:
                 waiting.append(request)

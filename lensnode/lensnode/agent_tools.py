@@ -1122,6 +1122,7 @@ def build_general_chat_tools(
     emit_event=None,
     runtime_evidence=None,
     on_runtime_evidence=None,
+    http_client=None,
 ):
     """Build tools for General Chat without workspace retrieval tools."""
 

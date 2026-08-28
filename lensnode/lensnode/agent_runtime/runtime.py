@@ -353,10 +353,8 @@ class LensDeepAgentRuntime:
     def _subagents_enabled(self, state):
         """Return whether this run may delegate work to a subagent.
 
-        General Chat exposes the task tool only on the plan_execute route,
-        where a complex multi-step task can be split across subagents;
-        simple direct-answer and direct-execute runs keep it disabled.
-        Smart Collaboration always keeps the task tool available.
+        General Chat exposes the task tool only on the plan_execute route.
+        Smart Collaboration uses the configured local subagents.
         """
 
         if self._is_smart_collaboration(state.command):
@@ -747,6 +745,7 @@ class LensDeepAgentRuntime:
                 on_runtime_evidence=lambda _state: (
                     state.persist_execution_state()
                 ),
+                http_client=self.http_client,
             )
         else:
             state.tools = build_agent_tools(
@@ -1063,6 +1062,7 @@ class LensDeepAgentRuntime:
                     )
                 ]
                 if use_subagents
+                and not self._is_smart_collaboration(state.command)
                 else []
             ),
             "name": f"lensnode-{state.command.get('task') or 'agent'}",
@@ -1167,6 +1167,7 @@ class LensDeepAgentRuntime:
             if name in seen_names:
                 name = f"{name[:70]}-{index + 1}"
             seen_names.add(name)
+            observation_name = name.lower()
             command = {
                 "run_uuid": f"{state.run_uuid[:48]}-subagent-{index + 1}",
                 "task": snapshot.get("task") or "general_chat",
@@ -1184,6 +1185,7 @@ class LensDeepAgentRuntime:
                 on_activity=state.on_activity,
             )
             state.subagent_resources.append(resources)
+            backend = _build_execution_backend(self.config, resources.root)
             tools = build_agent_tools(
                 command,
                 resources,
@@ -1216,31 +1218,42 @@ class LensDeepAgentRuntime:
                 run_uuid=state.run_uuid,
                 trace_context=state.trace_context,
                 emit_observation=state.emit_trace_observation,
-                observation_name=name,
+                observation_name=observation_name,
+            )
+            description = (
+                str(snapshot.get("description") or "")
+                or f"Delegate work to the {raw_name} assistant."
+            )[:500]
+            system_prompt = (
+                "You are the delegated assistant named "
+                f"{raw_name}. Use only your provided tools and skills. "
+                "Return concise, evidence-based findings to the "
+                "Smart Collaboration coordinator.\n\n"
+                + str(snapshot.get("workspace_guide") or "")
+            )
+            skill_paths = [
+                _virtual_skill_path(resources, path)
+                for path in resources.skill_paths
+            ]
+            middleware = (
+                [state.trace_middleware]
+                if state.trace_middleware is not None
+                else []
+            )
+            runnable = create_deep_agent(
+                model=model,
+                tools=tools,
+                system_prompt=system_prompt,
+                backend=backend,
+                skills=skill_paths or None,
+                middleware=middleware,
+                name=f"{name}-subagent",
             )
             subagents.append(
                 {
                     "name": name,
-                    "description": (
-                        str(snapshot.get("description") or "")
-                        or f"Delegate work to the {raw_name} assistant."
-                    )[:500],
-                    "system_prompt": (
-                        "You are the delegated assistant named "
-                        f"{raw_name}. Use only your provided tools and skills. "
-                        "Return concise, evidence-based findings to the "
-                        "Smart Collaboration coordinator.\n\n"
-                        + str(snapshot.get("workspace_guide") or "")
-                    ),
-                    "model": model,
-                    "tools": tools,
-                    "skills": [
-                        _virtual_skill_path(resources, path)
-                        for path in resources.skill_paths
-                    ],
-                    "middleware": [state.trace_middleware]
-                    if state.trace_middleware is not None
-                    else [],
+                    "description": description,
+                    "runnable": runnable,
                 }
             )
         return subagents

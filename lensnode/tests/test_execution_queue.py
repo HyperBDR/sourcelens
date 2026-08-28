@@ -80,3 +80,17 @@ def test_cancelling_queued_work_does_not_leak_capacity():
         await queue.release(ExecutionClass.STANDARD)
 
     asyncio.run(exercise())
+
+
+def test_delegated_work_has_capacity_while_parent_is_running():
+    async def exercise():
+        queue = LensNodeExecutionQueue(max_standard_concurrency=1)
+        await queue.acquire(ExecutionClass.STANDARD)
+        await asyncio.wait_for(
+            queue.acquire(ExecutionClass.DELEGATED),
+            timeout=1,
+        )
+        await queue.release(ExecutionClass.DELEGATED)
+        await queue.release(ExecutionClass.STANDARD)
+
+    asyncio.run(exercise())

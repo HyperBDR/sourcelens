@@ -91,7 +91,6 @@ HISTORY_MAX_TOTAL_CHARS = 32000
 CLARIFICATION_MAX_ORIGINAL_CHARS = HISTORY_MAX_TOTAL_CHARS
 CLARIFICATION_MAX_PROMPT_CHARS = 20000
 HISTORY_ARTIFACT_MAX_FILES = 3
-MAX_DELEGATION_DEPTH = 3
 MAX_SUBAGENTS_PER_RUN = 8
 
 QUERY_REWRITE_HISTORY_TURNS = 3
@@ -1314,70 +1313,6 @@ def select_execution_lensnode(assistant):
     return min(candidates, key=lambda item: (item.active_runs, item.created_at))
 
 
-@transaction.atomic
-def create_delegated_run(parent_run, assistant_uuid, question):
-    """Create a child Run on the selected assistant's own execution node."""
-
-    if parent_run.session.routing_mode != Session.RoutingMode.SMART:
-        raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
-    ancestry = set()
-    current = parent_run
-    depth = 0
-    while current is not None:
-        if current.pk in ancestry or depth >= MAX_DELEGATION_DEPTH:
-            raise LensNodeDispatchError("SUBAGENT_DEPTH_EXCEEDED")
-        ancestry.add(current.pk)
-        current = current.parent_run
-        depth += 1
-
-    configured = (
-        (parent_run.execution.runtime_snapshot or {}).get("subagents")
-        or []
-    )
-    allowed = {
-        str(item.get("uuid"))
-        for item in configured
-        if isinstance(item, dict)
-    }
-    if str(assistant_uuid) not in allowed:
-        raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
-    assistant = Assistant.objects.filter(
-        visibility__in=[
-            Assistant.Visibility.PUBLIC,
-            Assistant.Visibility.PRIVATE,
-        ],
-        uuid=assistant_uuid,
-        capability__in=[
-            Assistant.Capability.GENERAL_CHAT,
-            Assistant.Capability.CODE_ANALYSIS,
-            Assistant.Capability.KNOWLEDGE_QA,
-        ],
-        status=Assistant.Status.ACTIVE,
-    ).visible_to(parent_run.session.user).first()
-    if assistant is None:
-        raise LensNodeDispatchError("SUBAGENT_UNAVAILABLE")
-    if assistant.pk in {
-        item.session.assistant_id
-        for item in Run.objects.filter(pk__in=ancestry).select_related(
-            "session"
-        )
-    }:
-        raise LensNodeDispatchError("SUBAGENT_CYCLE")
-    session = Session.objects.create(
-        assistant=assistant,
-        user=parent_run.session.user,
-        title=f"Delegated: {parent_run.uuid}",
-        title_manually_edited=True,
-    )
-    return create_execution_run(
-        session=session,
-        question=question,
-        enqueue=True,
-        user=None,
-        parent_run=parent_run,
-    )
-
-
 def validate_retry_run(session, retry_of_run):
     """Reject Retry links outside the Session or with an existing cycle."""
 
@@ -1910,15 +1845,6 @@ def create_run_execution_snapshot(
         run.session,
         routing_assistant_uuids,
     )
-    if (
-        routing_assistant_uuids
-        and len(routing_assistant_uuids) == 1
-        and not any(
-            item.get("uuid") == str(routing_assistant_uuids[0])
-            for item in runtime_snapshot.get("subagents", [])
-        )
-    ):
-        raise LensNodeDispatchError("SUBAGENT_NODE_MISMATCH")
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
         defaults={
@@ -1988,11 +1914,7 @@ def _build_run_runtime_snapshot(
                 "mcp_bindings__environment_variable_set",
             )
         )
-        subagents = [
-            item
-            for item in subagents
-            if item.lensnode_id is None or item.lensnode_id == lensnode.id
-        ][:MAX_SUBAGENTS_PER_RUN]
+        subagents = subagents[:MAX_SUBAGENTS_PER_RUN]
         subagents = [
             {
                 "uuid": str(item.uuid),
