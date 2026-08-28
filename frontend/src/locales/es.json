@@ -235,8 +235,7 @@
       "assistantTypes": {
         "generalChat": "Chat general",
         "codeAnalysis": "Análisis de código",
-        "knowledgeQa": "Preguntas y respuestas de conocimiento",
-        "orchestrator": "Modo de colaboración"
+        "knowledgeQa": "Preguntas y respuestas de conocimiento"
       },
       "sessions": "Reciente",
       "sessionLists": "Listas de sesiones",

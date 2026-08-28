@@ -126,18 +126,17 @@ def _knowledge_system_prompt(
             "project-specific question. Only provide a concept explanation "
             "when the user explicitly says `只解释概念`.\n"
         )
-    orchestrator_guidance = ""
-    if command.get("assistant_capability") == "orchestrator" or command.get(
-        "assistant_kind"
-    ) == "orchestrator":
-        orchestrator_guidance = (
-            "You are an Orchestrator Assistant. Decompose the request into "
+    collaboration_guidance = ""
+    if command.get("routing_mode") == "smart":
+        collaboration_guidance = (
+            "You are coordinating a Smart Collaboration request. Decompose "
+            "the request into "
             "independent workstreams and delegate them to the named assistant "
             "subagents when useful. You may issue multiple task calls in one "
             "turn for parallel execution, then synthesize their findings.\n\n"
         )
     return (
-        orchestrator_guidance +
+        collaboration_guidance +
         f"{language_requirement}\n\n"
         f"{_workspace_guide_prompt(workspace_guide)}"
         f"{scenario['prompt']}\n\n"
@@ -264,7 +263,7 @@ def _general_chat_system_prompt(
 
     answer_language = _command_answer_language(command)
     language_requirement = _answer_language_requirement(answer_language)
-    if command.get("assistant_capability") == "orchestrator":
+    if command.get("routing_mode") == "smart":
         return _smart_collaboration_system_prompt(
             command,
             language_requirement,

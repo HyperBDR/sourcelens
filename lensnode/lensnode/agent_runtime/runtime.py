@@ -356,10 +356,10 @@ class LensDeepAgentRuntime:
         General Chat exposes the task tool only on the plan_execute route,
         where a complex multi-step task can be split across subagents;
         simple direct-answer and direct-execute runs keep it disabled.
-        Legacy modes always keep the task tool available.
+        Smart Collaboration always keeps the task tool available.
         """
 
-        if self._is_orchestrator(state.command):
+        if self._is_smart_collaboration(state.command):
             return state.command.get("task") != "code_analysis"
         if not state.runtime_mode.general_chat:
             return state.command.get("task") != "code_analysis"
@@ -367,13 +367,10 @@ class LensDeepAgentRuntime:
         return route_decision.get("route") == "plan_execute"
 
     @staticmethod
-    def _is_orchestrator(command):
-        """Recognize current and legacy orchestrator command snapshots."""
+    def _is_smart_collaboration(command):
+        """Return whether a command belongs to Smart Collaboration."""
 
-        return (
-            command.get("assistant_capability") == "orchestrator"
-            or command.get("assistant_kind") == "orchestrator"
-        )
+        return command.get("routing_mode") == "smart"
 
     def _seed_run_checkpoint(
         self,
@@ -827,7 +824,7 @@ class LensDeepAgentRuntime:
     def _route_runtime(self, state):
         """Select and handle the general-chat execution route."""
 
-        if self._is_orchestrator(state.command):
+        if self._is_smart_collaboration(state.command):
             state.route_decision = {"route": "plan_execute"}
             return None
         if not state.runtime_mode.execution_gates:
@@ -1232,7 +1229,7 @@ class LensDeepAgentRuntime:
                         "You are the delegated assistant named "
                         f"{raw_name}. Use only your provided tools and skills. "
                         "Return concise, evidence-based findings to the "
-                        "orchestrator.\n\n"
+                        "Smart Collaboration coordinator.\n\n"
                         + str(snapshot.get("workspace_guide") or "")
                     ),
                     "model": model,

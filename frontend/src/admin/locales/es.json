@@ -1127,8 +1127,7 @@
     "assistantTypes": {
       "knowledgeQa": "Preguntas y Respuestas de Conocimiento",
       "codeAnalysis": "Análisis de código",
-      "generalChat": "Chat General",
-      "orchestrator": "Modo de colaboración"
+      "generalChat": "Chat General"
     },
     "columns": {
       "assistant": "Asistente",
@@ -1340,7 +1339,6 @@
       "workspaceGuideHelp": "Describe la disposición del repositorio, la prioridad de búsqueda y las reglas de detención. SourceLens lo guardará como una Skill vinculada e inyectará en las ejecuciones de LensNode.",
       "agentModel": "Modelo de agente",
       "executionCapability": "Capacidad de ejecución del nodo",
-      "delegatedAssistants": "Asistentes delegables",
       "agentRounds": "Estrategia de ejecución",
       "maxConcurrency": "Concurrencia máxima",
       "multimodalModel": "Modelo multimodal",
@@ -1721,10 +1719,6 @@
       "step2Title": "Ejecución",
       "step2Desc": "Primero selecciona el tipo; después configura su nodo, directorios y política de recuperación",
       "generalChatExecutionHint": "El Chat General utiliza Skills vinculadas, scripts agrupados y binarios agrupados. La recuperación del directorio de trabajo está deshabilitada para este asistente.",
-      "orchestratorExecutionHint": "Las ejecuciones se equilibran por carga de forma predeterminada. Seleccionar un LensNode fija el modo de colaboración a ese nodo.",
-      "delegatedAssistantsHint": "Selecciona asistentes a los que el modo de colaboración puede delegar bajo demanda, ejecutar en paralelo y sintetizar.",
-      "delegatedAssistantsSelected": "{count} seleccionados",
-      "noDelegatedAssistants": "No hay asistentes activos disponibles para delegación.",
       "noAssistantDescription": "Sin descripción del asistente",
       "step3Title": "Skills y Espacio de trabajo",
       "step3Desc": "Vincula Skills y MCP, y agrega contexto de espacio de trabajo: todo opcional",

@@ -133,7 +133,6 @@ class Assistant(TimestampedUUIDModel):
         GENERAL_CHAT = "general_chat", "General Chat"
         CODE_ANALYSIS = "code_analysis", "Code Analysis"
         KNOWLEDGE_QA = "knowledge_qa", "Knowledge Q&A"
-        ORCHESTRATOR = "orchestrator", "Orchestrator"
 
     objects = AssistantQuerySet.as_manager()
 
@@ -184,7 +183,6 @@ class Assistant(TimestampedUUIDModel):
     )
     max_concurrency = models.PositiveSmallIntegerField(default=5)
     settings = models.JSONField(default=dict, blank=True)
-    subagent_assistant_uuids = models.JSONField(default=list, blank=True)
     is_system = models.BooleanField(default=False)
     status = models.CharField(
         max_length=16,
@@ -216,8 +214,6 @@ class Assistant(TimestampedUUIDModel):
     def selected_task(self):
         """Expose the derived LensNode task for transitional callers."""
 
-        if self.capability == self.Capability.ORCHESTRATOR:
-            return self.Capability.GENERAL_CHAT
         return self.capability
 
     @selected_task.setter

@@ -558,9 +558,6 @@ class AssistantSerializer(serializers.ModelSerializer):
     supports_document_attachments = serializers.SerializerMethodField()
     vision_model_capability = serializers.SerializerMethodField()
     can_process_images = serializers.SerializerMethodField()
-    subagent_assistants = serializers.ListField(
-        child=serializers.UUIDField(), required=False, write_only=True
-    )
     kind = serializers.CharField(required=False, write_only=True)
     selected_task = serializers.CharField(required=False, write_only=True)
 
@@ -587,7 +584,6 @@ class AssistantSerializer(serializers.ModelSerializer):
             "mcp_bindings",
             "access_grants",
             "workspace_guide",
-            "subagent_assistants",
             "kind",
             "selected_task",
             "skill_summary",
@@ -681,9 +677,6 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         data = super().to_representation(instance)
         data["workspace_guide"] = get_workspace_guide_payload(instance)
-        data["subagent_assistants"] = list(
-            instance.subagent_assistant_uuids or []
-        )
         return data
 
     def validate(self, attrs):
@@ -706,72 +699,11 @@ class AssistantSerializer(serializers.ModelSerializer):
                 Assistant.Capability.GENERAL_CHAT,
             ),
         )
-        if (
-            capability == Assistant.Capability.ORCHESTRATOR
-            and self.instance is None
-            and self.context.get("request") is not None
-        ):
-            raise serializers.ValidationError(
-                {
-                    "capability": (
-                        "Orchestrator assistants are system-managed; "
-                        "use a smart-routing session instead."
-                    )
-                }
-            )
-        subagents = attrs.get(
-            "subagent_assistants",
-            getattr(self.instance, "subagent_assistant_uuids", []),
-        )
-        if capability == Assistant.Capability.ORCHESTRATOR:
-            if not subagents:
-                raise serializers.ValidationError(
-                    {
-                        "subagent_assistants": (
-                            "At least one assistant is required."
-                        )
-                    }
-                )
-            if len(set(subagents)) > 8:
-                raise serializers.ValidationError(
-                    {
-                        "subagent_assistants": (
-                            "At most 8 delegated assistants are allowed."
-                        )
-                    }
-                )
-            if self.instance is not None and self.instance.uuid in subagents:
-                raise serializers.ValidationError(
-                    {
-                        "subagent_assistants": (
-                            "An assistant cannot delegate to itself."
-                        )
-                    }
-                )
-            found = set(
-                Assistant.objects.filter(
-                    uuid__in=subagents,
-                    capability__in=[
-                        Assistant.Capability.GENERAL_CHAT,
-                        Assistant.Capability.CODE_ANALYSIS,
-                        Assistant.Capability.KNOWLEDGE_QA,
-                    ],
-                    status=Assistant.Status.ACTIVE,
-                ).values_list("uuid", flat=True)
-            )
-            if len(found) != len(set(subagents)):
-                raise serializers.ValidationError(
-                    {"subagent_assistants": "Unknown assistant UUID."}
-                )
-        else:
-            attrs["subagent_assistants"] = []
         requires_workspace = capability in {
             Assistant.Capability.CODE_ANALYSIS,
             Assistant.Capability.KNOWLEDGE_QA,
         }
-        allows_bound_lensnode = requires_workspace or (
-            capability == Assistant.Capability.ORCHESTRATOR
-        )
+        allows_bound_lensnode = requires_workspace
         if not allows_bound_lensnode:
             attrs["lensnode"] = None
             lensnode = None
@@ -779,12 +711,9 @@ class AssistantSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"lensnode_uuid": "A LensNode is required."}
             )
-        execution_capability = capability
-        if capability == Assistant.Capability.ORCHESTRATOR:
-            execution_capability = Assistant.Capability.GENERAL_CHAT
         if (
             lensnode is not None
-            and execution_capability not in _task_names(lensnode)
+            and capability not in _task_names(lensnode)
         ):
             raise serializers.ValidationError(
                 {"capability": "capability is not available on LensNode"}
@@ -812,10 +741,7 @@ class AssistantSerializer(serializers.ModelSerializer):
                     uuid__in=enabled_skill_uuids,
                     enabled=True,
                 ).exists()
-            if (
-                not has_enabled_skill
-                and capability != Assistant.Capability.ORCHESTRATOR
-            ):
+            if not has_enabled_skill:
                 raise serializers.ValidationError(
                     {
                         "skill_bindings": (
@@ -1013,10 +939,6 @@ class AssistantSerializer(serializers.ModelSerializer):
         mcp_bindings = validated_data.pop("mcp_bindings", None)
         access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
-        subagents = validated_data.pop("subagent_assistants", [])
-        validated_data["subagent_assistant_uuids"] = [
-            str(item) for item in subagents
-        ]
         assistant = Assistant.objects.create(**validated_data)
         self._sync_bindings(
             assistant,
@@ -1037,11 +959,6 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
-        if "subagent_assistants" in validated_data:
-            subagents = validated_data.pop("subagent_assistants")
-            validated_data["subagent_assistant_uuids"] = [
-                str(item) for item in subagents
-            ]
         self._sync_bindings(instance, validated_data)
         assistant = super().update(instance, validated_data)
         self._sync_access_grants(assistant, access_grants)
@@ -2592,7 +2509,6 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
 
         model_ref_keys = {
             "lens.smart_collaboration.model_ref": "model_ref",
-            "lens.smart_router.model_ref": "model_ref",
             "lens.skills.generator_model_ref": "generator_model_ref",
             "lens.datasource_conversion.vision_model_ref": (
                 "vision_model_ref"

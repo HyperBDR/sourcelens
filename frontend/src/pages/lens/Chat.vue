@@ -2140,8 +2140,7 @@ function assistantCapabilityLabel(capability) {
   const labels = {
     code_analysis: 'codeAnalysis',
     general_chat: 'generalChat',
-    knowledge_qa: 'knowledgeQa',
-    orchestrator: 'orchestrator'
+    knowledge_qa: 'knowledgeQa'
   }
   return t(`lens.chat.assistantTypes.${labels[capability] || 'generalChat'}`)
 }

@@ -202,6 +202,10 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(busy_run.lensnode, self.lensnode)
 
     def test_delegated_run_uses_selected_assistant_lensnode(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
         child_node = LensNode.objects.create(
             name="Data LensNode",
             status=LensNode.Status.ONLINE,
@@ -213,6 +217,7 @@ class LensServiceTests(TransactionTestCase):
             slug="data-assistant",
             lensnode=child_node,
             selected_task="knowledge_qa",
+            visibility=Assistant.Visibility.PUBLIC,
         )
         parent = create_execution_run(
             session=self.session,
@@ -235,6 +240,10 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(delegated.lensnode, child_node)
 
     def test_delegated_run_rejects_depth_overflow(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
         parent = create_execution_run(
             session=self.session,
             question="Root",
@@ -253,7 +262,7 @@ class LensServiceTests(TransactionTestCase):
             LensNodeDispatchError,
             "SUBAGENT_DEPTH_EXCEEDED",
         ):
-            create_delegated_run(parent, self.assistant.uuid, "Too deep")
+            create_delegated_run(current, self.assistant.uuid, "Too deep")
 
     def test_smart_run_rechecks_live_assistant_access(self):
         self.assistant.visibility = Assistant.Visibility.PRIVATE
@@ -1060,14 +1069,16 @@ class LensServiceTests(TransactionTestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, Run.Status.CANCELLED)
 
-    def test_orchestrator_dispatch_allows_empty_parent_skills(self):
-        self.assistant.capability = Assistant.Capability.ORCHESTRATOR
-        self.assistant.lensnode = self.lensnode
+    def test_smart_dispatch_allows_empty_coordinator_skills(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        self.assistant.capability = Assistant.Capability.GENERAL_CHAT
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["capability", "visibility"])
         self.lensnode.tasks = [
             {"name": "general_chat", "description": "Delegate work"}
         ]
         self.lensnode.save(update_fields=["tasks"])
-        self.assistant.save(update_fields=["capability", "lensnode"])
         run = create_execution_run(
             session=self.session,
             question="Delegate this work",

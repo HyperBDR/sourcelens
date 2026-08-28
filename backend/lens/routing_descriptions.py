@@ -49,11 +49,6 @@ _CAPABILITY_DESCRIPTIONS = {
         "es": "preguntas sobre áreas de trabajo o bases de conocimiento configuradas",
         "zh": "已配置工作区或知识库中的问答请求",
     },
-    "orchestrator": {
-        "en": "multi-assistant collaboration and task orchestration",
-        "es": "colaboración entre asistentes y orquestación de tareas",
-        "zh": "多助手协作与任务编排请求",
-    },
 }
 
 _CAPABILITY_NAMES = {
@@ -71,11 +66,6 @@ _CAPABILITY_NAMES = {
         "en": "Knowledge Q&A",
         "es": "Preguntas y respuestas de conocimiento",
         "zh": "知识库问答",
-    },
-    "orchestrator": {
-        "en": "Collaboration Mode",
-        "es": "Modo de colaboración",
-        "zh": "协作模式",
     },
 }
 
@@ -165,19 +155,3 @@ def refresh_routing_description(assistant):
         assistant.routing_description = description
         assistant.save(update_fields=["routing_description", "updated_at"])
     return description
-
-
-def refresh_missing_routing_descriptions():
-    """Backfill Assistant routing descriptions left blank by older releases."""
-
-    from .models import Assistant
-
-    assistants = Assistant.objects.filter(routing_description="").prefetch_related(
-        "skill_bindings__skill",
-        "mcp_bindings__mcp",
-    )
-    refreshed = 0
-    for assistant in assistants.iterator(chunk_size=100):
-        refresh_routing_description(assistant)
-        refreshed += 1
-    return refreshed

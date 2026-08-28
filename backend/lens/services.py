@@ -85,6 +85,7 @@ RUN_ADMISSION_CHECKPOINT_CAPABILITY = "run_admission_checkpoint_v1"
 
 HISTORY_MAX_PAIRS = 20
 HISTORY_MAX_MESSAGE_CHARS = 2000
+CLARIFICATION_MAX_PAIRS = 5
 CLARIFICATION_MAX_ANSWER_CHARS = 4000
 HISTORY_MAX_TOTAL_CHARS = 32000
 CLARIFICATION_MAX_ORIGINAL_CHARS = HISTORY_MAX_TOTAL_CHARS
@@ -1317,6 +1318,8 @@ def select_execution_lensnode(assistant):
 def create_delegated_run(parent_run, assistant_uuid, question):
     """Create a child Run on the selected assistant's own execution node."""
 
+    if parent_run.session.routing_mode != Session.RoutingMode.SMART:
+        raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
     ancestry = set()
     current = parent_run
     depth = 0
@@ -1741,10 +1744,8 @@ def task_names(lensnode):
 
 
 def execution_task_for_capability(capability):
-    """Map an Assistant capability to the LensNode execution task."""
+    """Return the LensNode execution task for an Assistant capability."""
 
-    if capability == Assistant.Capability.ORCHESTRATOR:
-        return Assistant.Capability.GENERAL_CHAT
     return capability
 
 
@@ -1785,7 +1786,7 @@ def validate_run_dispatch(run):
     runtime_mcps = resolve_loaded_mcp_environment(execution.loaded_mcps)
     if (
         execution.task == "general_chat"
-        and assistant.capability != Assistant.Capability.ORCHESTRATOR
+        and run.session.routing_mode != Session.RoutingMode.SMART
     ):
         if not runtime_skills:
             raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
@@ -1929,11 +1930,7 @@ def create_run_execution_snapshot(
             "run_timeout_s": run_timeout_for_rounds(assistant.agent_rounds),
             "target_dirs": (
                 []
-                if assistant.capability
-                in [
-                    Assistant.Capability.GENERAL_CHAT,
-                    Assistant.Capability.ORCHESTRATOR,
-                ]
+                if assistant.capability == Assistant.Capability.GENERAL_CHAT
                 else assistant.selected_dirs
             ),
             "runtime_snapshot": runtime_snapshot,
@@ -1968,14 +1965,12 @@ def _build_run_runtime_snapshot(
     }
     settings_payload = assistant.settings or {}
     subagents = []
-    if assistant.capability == Assistant.Capability.ORCHESTRATOR:
-        configured = assistant.subagent_assistant_uuids or []
-        if session.routing_mode == Session.RoutingMode.SMART:
-            configured = (
-                routing_assistant_uuids
-                if routing_assistant_uuids is not None
-                else session.allowed_assistant_uuids or []
-            )
+    if session.routing_mode == Session.RoutingMode.SMART:
+        configured = (
+            routing_assistant_uuids
+            if routing_assistant_uuids is not None
+            else session.allowed_assistant_uuids or []
+        )
         subagents = list(
             Assistant.objects.visible_to(session.user).filter(
                 uuid__in=configured,
@@ -2131,7 +2126,7 @@ def build_clarification_continuation_question(run, current_question):
                 answer[:CLARIFICATION_MAX_ANSWER_CHARS],
             )
         )
-        if len(turns) > budget["pairs"]:
+        if len(turns) > min(budget["pairs"], CLARIFICATION_MAX_PAIRS):
             turns.pop()
         current = parent
 
@@ -2591,15 +2586,9 @@ def dispatch_run_to_lensnode(
                     "workspace_guide", ""
                 ),
                 "assistant_capability": runtime_snapshot.get(
-                    "assistant_capability"
-                )
-                or (
-                    "orchestrator"
-                    if runtime_snapshot.get("assistant_kind")
-                    == "orchestrator"
-                    else "general_chat"
+                    "assistant_capability", "general_chat"
                 ),
-                "assistant_kind": runtime_snapshot.get("assistant_kind", ""),
+                "routing_mode": runtime_snapshot.get("routing_mode", "direct"),
                 "routing_assistant_uuid": runtime_snapshot.get(
                     "routing_assistant_uuid", ""
                 ),

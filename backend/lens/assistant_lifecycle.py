@@ -8,7 +8,6 @@ from .models import Assistant, GlobalSetting, Session
 
 SMART_COLLABORATION_SLUG = "__system-smart-collaboration__"
 SMART_COLLABORATION_MODEL_SETTING = "lens.smart_collaboration.model_ref"
-LEGACY_SMART_ROUTER_MODEL_SETTING = "lens.smart_router.model_ref"
 
 
 class AssistantNotRunnableError(RuntimeError):
@@ -113,10 +112,6 @@ def _smart_collaboration_assistant():
     setting = GlobalSetting.objects.filter(
         key=SMART_COLLABORATION_MODEL_SETTING
     ).first()
-    if setting is None:
-        setting = GlobalSetting.objects.filter(
-            key=LEGACY_SMART_ROUTER_MODEL_SETTING
-        ).first()
     model_ref = str(setting.value or "") if setting else ""
     if not model_ref:
         raise AssistantNotRunnableError
@@ -125,7 +120,7 @@ def _smart_collaboration_assistant():
         defaults={
             "name": "Smart Collaboration",
             "description": "Internal Smart Collaboration coordinator.",
-            "capability": Assistant.Capability.ORCHESTRATOR,
+            "capability": Assistant.Capability.GENERAL_CHAT,
             "agent_model_ref": model_ref,
             "is_system": True,
         },

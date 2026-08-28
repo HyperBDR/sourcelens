@@ -2612,7 +2612,7 @@ def test_smart_collaboration_prompt_is_focused_on_collaboration_scope():
 
     prompt = _general_chat_system_prompt(
         {
-            "assistant_capability": "orchestrator",
+            "routing_mode": "smart",
             "answer_language": "zh-CN",
             "subagents": [
                 {
@@ -4155,8 +4155,8 @@ def test_fast_subagent_inherits_runtime_extensions():
     assert subagent["middleware"] == [runtime_extension]
 
 
-def test_orchestrator_subagent_uses_its_own_model_and_tools(monkeypatch):
-    """Configured assistants must not inherit the orchestrator toolset."""
+def test_smart_subagent_uses_its_own_model_and_tools(monkeypatch):
+    """Configured assistants must not inherit coordinator resources."""
 
     resources = SimpleNamespace(
         root=Path("/run/subagent"),

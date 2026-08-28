@@ -1127,8 +1127,7 @@
     "assistantTypes": {
       "knowledgeQa": "Knowledge Q&A",
       "codeAnalysis": "Code Analysis",
-      "generalChat": "General Chat",
-      "orchestrator": "Collaboration Mode"
+      "generalChat": "General Chat"
     },
     "columns": {
       "assistant": "Assistant",
@@ -1340,7 +1339,6 @@
       "workspaceGuideHelp": "Describe repository layout, search priority, and stopping rules. SourceLens will save it as a bound Skill and inject it into LensNode runs.",
       "agentModel": "Agent Model",
       "executionCapability": "Node execution capability",
-      "delegatedAssistants": "Delegated assistants",
       "agentRounds": "Execution strategy",
       "maxConcurrency": "Max Concurrency",
       "multimodalModel": "Multimodal Model",
@@ -1721,10 +1719,6 @@
       "step2Title": "Execution",
       "step2Desc": "Choose the type first, then configure its node, directories, and retrieval policy",
       "generalChatExecutionHint": "General Chat uses bound Skills, bundled scripts, and bundled binaries. Workspace directory retrieval is disabled for this assistant.",
-      "orchestratorExecutionHint": "Runs are load balanced by default. Selecting a LensNode pins Collaboration Mode to it.",
-      "delegatedAssistantsHint": "Select assistants that Collaboration Mode can delegate to on demand, run in parallel, and synthesize.",
-      "delegatedAssistantsSelected": "{count} selected",
-      "noDelegatedAssistants": "No active assistants are available for delegation.",
       "noAssistantDescription": "No assistant description",
       "step3Title": "Skills & Workspace",
       "step3Desc": "Bind Skills and MCP, and add workspace context — all optional",

@@ -592,7 +592,6 @@ function defaultForm() {
     name: '',
     description: '',
     capability: '',
-    subagent_assistants: [],
     slug: '',
     lensnode_uuid: '',
     selected_dirs: [],
@@ -634,7 +633,6 @@ function formFromRow(row) {
     name: row.name || '',
     description: row.description || '',
     capability: row.capability || 'general_chat',
-    subagent_assistants: row.subagent_assistants || [],
     slug: row.slug || '',
     lensnode_uuid: row.lensnode?.uuid || row.lensnode || '',
     selected_dirs: selectedDirsFromValue(row.selected_dirs || []),
@@ -740,17 +738,12 @@ function buildPayload() {
     name: form.value.name,
     description: form.value.description?.trim() || '',
     capability: form.value.capability || 'general_chat',
-    subagent_assistants:
-      form.value.capability === 'orchestrator'
-        ? form.value.subagent_assistants || []
-        : [],
     slug: form.value.slug?.trim() || '',
     ...(form.value.lensnode_uuid
       ? { lensnode_uuid: form.value.lensnode_uuid }
       : {}),
     selected_dirs:
-      form.value.capability === 'general_chat' ||
-      form.value.capability === 'orchestrator'
+      form.value.capability === 'general_chat'
         ? []
         : buildSelectedDirs(),
     agent_model_ref: form.value.agent_model_ref || null,

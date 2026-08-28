@@ -1,5 +1,4 @@
 import hashlib
-import importlib
 import io
 import json
 import tempfile
@@ -15,7 +14,6 @@ from accounts.models import Role
 from agentcore_metering.adapters.django.models import LLMConfig, LLMUsage
 from agentcore_task.adapters.django.models import TaskExecution
 from asgiref.sync import async_to_sync
-from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -63,10 +61,7 @@ from lens.serializers import (
     validate_retrieval_policy,
     validate_retrieval_scope,
 )
-from lens.routing_descriptions import (
-    build_routing_description,
-    refresh_missing_routing_descriptions,
-)
+from lens.routing_descriptions import build_routing_description
 from lens.services import (
     LensNodeDispatchError,
     append_lensnode_output,
@@ -83,7 +78,7 @@ from lens.tasks import (
     acquire_datasource_lock,
     release_datasource_lock,
 )
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -930,18 +925,6 @@ class LensApiTests(TestCase):
         self.assistant.refresh_from_db()
         self.assertIn("Renamed Code Search", self.assistant.routing_description)
         self.assertNotIn(self.mcp.name, self.assistant.routing_description)
-
-    def test_missing_routing_descriptions_are_backfilled(self):
-        """Deployment startup backfills descriptions from the final schema."""
-
-        self.assistant.routing_description = ""
-        self.assistant.save(update_fields=["routing_description"])
-
-        refreshed = refresh_missing_routing_descriptions()
-
-        self.assistant.refresh_from_db()
-        self.assertEqual(refreshed, 1)
-        self.assertIn("Knowledge Q&A", self.assistant.routing_description)
 
     def test_routing_description_uses_the_run_answer_language(self):
         """Smart-routing metadata follows the current Run language."""
@@ -2079,29 +2062,19 @@ class LensApiTests(TestCase):
             EnvironmentVariableSet.objects.filter(name="Rollback Set").exists()
         )
 
-    def test_orchestrator_can_optionally_bind_a_general_chat_node(self):
-        self.lensnode.tasks = [{"name": "general_chat"}]
-        self.lensnode.save(update_fields=["tasks"])
-        assistant = Assistant.objects.create(
-            name="Delegated Assistant",
-            slug="delegated-assistant",
-            capability=Assistant.Capability.GENERAL_CHAT,
-        )
+    def test_orchestrator_is_not_an_assistant_capability(self):
+        """Smart Collaboration is a session mode, not an Assistant type."""
+
         serializer = AssistantSerializer(
             data={
-                "name": "Pinned Orchestrator",
-                "slug": "pinned-orchestrator",
-                "capability": Assistant.Capability.ORCHESTRATOR,
-                "lensnode_uuid": str(self.lensnode.uuid),
-                "subagent_assistants": [str(assistant.uuid)],
+                "name": "Invalid Orchestrator",
+                "slug": "invalid-orchestrator",
+                "capability": "orchestrator",
             }
         )
 
-        self.assertTrue(serializer.is_valid(), serializer.errors)
-        saved = serializer.save()
-
-        self.assertEqual(saved.lensnode, self.lensnode)
-        self.assertEqual(saved.selected_dirs, [])
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("capability", serializer.errors)
 
     def test_smart_collaboration_session_uses_global_model_and_allowed_range(self):
         GlobalSetting.objects.create(
@@ -2145,8 +2118,8 @@ class LensApiTests(TestCase):
             [str(self.assistant.uuid)],
         )
 
-    def test_smart_collaboration_accepts_legacy_model_setting(self):
-        """Existing smart-router configuration remains usable after renaming."""
+    def test_smart_collaboration_rejects_legacy_model_setting(self):
+        """Only the final Smart Collaboration model setting is accepted."""
 
         GlobalSetting.objects.create(
             key="lens.smart_router.model_ref",
@@ -2160,39 +2133,8 @@ class LensApiTests(TestCase):
         )
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
-        session = serializer.save()
-
-        self.assertEqual(session.assistant.slug, "__system-smart-collaboration__")
-
-    def test_smart_collaboration_migration_preserves_legacy_model_value(self):
-        """An empty renamed setting must not replace a configured legacy one."""
-
-        GlobalSetting.objects.create(
-            key="lens.smart_router.model_ref",
-            value="11111111-1111-1111-1111-111111111111",
-        )
-        GlobalSetting.objects.create(
-            key="lens.smart_collaboration.model_ref",
-            value="",
-        )
-        migration = importlib.import_module(
-            "lens.migrations.0045_orchestrator_capability"
-        )
-
-        migration.rename_smart_collaboration(apps, None)
-
-        setting = GlobalSetting.objects.get(
-            key="lens.smart_collaboration.model_ref"
-        )
-        self.assertEqual(
-            setting.value,
-            "11111111-1111-1111-1111-111111111111",
-        )
-        self.assertFalse(
-            GlobalSetting.objects.filter(
-                key="lens.smart_router.model_ref"
-            ).exists()
-        )
+        with self.assertRaises(PermissionDenied):
+            serializer.save()
 
     def test_smart_run_can_limit_one_run_without_updating_session_scope(self):
         """A routing assistant override belongs to the Run snapshot only."""

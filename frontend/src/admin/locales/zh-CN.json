@@ -1127,8 +1127,7 @@
     "assistantTypes": {
       "knowledgeQa": "知识问答",
       "codeAnalysis": "代码分析",
-      "generalChat": "通用对话",
-      "orchestrator": "协作模式"
+      "generalChat": "通用对话"
     },
     "columns": {
       "assistant": "Assistant",
@@ -1340,7 +1339,6 @@
       "workspaceGuideHelp": "描述仓库结构、检索优先级和停止规则。SourceLens 会将其保存为绑定 Skill，并在节点执行时注入。",
       "agentModel": "Agent 模型",
       "executionCapability": "节点执行能力",
-      "delegatedAssistants": "可委派助手",
       "agentRounds": "执行策略",
       "maxConcurrency": "最大并发数",
       "multimodalModel": "多模态模型",
@@ -1721,10 +1719,6 @@
       "step2Title": "执行配置",
       "step2Desc": "先选择类型，再完成对应的执行节点、目录与检索配置",
       "generalChatExecutionHint": "通用对话使用绑定的 Skill、包内脚本和包内二进制运行，不启用工作区目录检索。",
-      "orchestratorExecutionHint": "默认按负载自动分配节点；选择节点后，协作模式固定在该节点执行。",
-      "delegatedAssistantsHint": "选择可由协作模式按需委派、并行执行并汇总结果的助手。",
-      "delegatedAssistantsSelected": "已选 {count} 个",
-      "noDelegatedAssistants": "当前没有可委派的已启用助手。",
       "noAssistantDescription": "未填写助手说明",
       "step3Title": "技能与工作区",
       "step3Desc": "绑定 Skills 与 MCP，并补充工作区背景，均为可选",

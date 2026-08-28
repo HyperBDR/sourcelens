@@ -12,7 +12,6 @@ const ASSISTANT_TYPE_TRANSLATION_KEYS = {
   code_analysis: 'codeAnalysis',
   general_chat: 'generalChat',
   knowledge_qa: 'knowledgeQa',
-  orchestrator: 'orchestrator',
   qa: 'knowledgeQa'
 }
 

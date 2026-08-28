@@ -50,8 +50,6 @@ class Command(BaseCommand):
 
         call_command("migrate", "--noinput", verbosity=1)
 
-        self._backfill_routing_descriptions()
-
         if not options["skip_superuser"]:
             self._ensure_superuser()
 
@@ -77,26 +75,6 @@ class Command(BaseCommand):
                 self.style.WARNING(
                     f"{command_name} completed with warnings: {exc}"
                 )
-            )
-
-    def _backfill_routing_descriptions(self):
-        """Fill routing summaries created by versions before the merge."""
-
-        try:
-            from lens.routing_descriptions import (
-                refresh_missing_routing_descriptions,
-            )
-        except Exception as exc:
-            self.stderr.write(
-                self.style.WARNING(
-                    f"Routing description backfill skipped: {exc}"
-                )
-            )
-            return
-        refreshed = refresh_missing_routing_descriptions()
-        if refreshed:
-            self.stdout.write(
-                f"Backfilled routing descriptions for {refreshed} assistants."
             )
 
     def _ensure_superuser(self):

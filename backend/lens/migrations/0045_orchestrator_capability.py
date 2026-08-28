@@ -2,12 +2,6 @@ from django.db import migrations, models
 import django.db.models.deletion
 
 
-LEGACY_MODEL_SETTING = "lens.smart_router.model_ref"
-MODEL_SETTING = "lens.smart_collaboration.model_ref"
-LEGACY_ASSISTANT_SLUG = "__system-smart-router__"
-ASSISTANT_SLUG = "__system-smart-collaboration__"
-
-
 def migrate_assistant_capabilities(apps, schema_editor):
     """Set Assistant capabilities and initial smart-routing descriptions."""
 
@@ -71,46 +65,6 @@ def migrate_assistant_capabilities(apps, schema_editor):
         )
 
 
-def rename_smart_collaboration(apps, schema_editor):
-    """Rename persisted Smart Collaboration configuration and coordinator."""
-
-    del schema_editor
-    Assistant = apps.get_model("lens", "Assistant")
-    GlobalSetting = apps.get_model("lens", "GlobalSetting")
-
-    legacy_setting = GlobalSetting.objects.filter(
-        key=LEGACY_MODEL_SETTING,
-    ).first()
-    if legacy_setting is not None:
-        setting = GlobalSetting.objects.filter(key=MODEL_SETTING).first()
-        if setting is None:
-            GlobalSetting.objects.create(
-                key=MODEL_SETTING,
-                value=legacy_setting.value,
-                description=legacy_setting.description,
-            )
-        elif not setting.value:
-            setting.value = legacy_setting.value
-            setting.description = legacy_setting.description
-            setting.save(update_fields=["value", "description"])
-        legacy_setting.delete()
-
-    legacy_assistant = Assistant.objects.filter(
-        slug=LEGACY_ASSISTANT_SLUG,
-    ).first()
-    if legacy_assistant is None:
-        return
-    if Assistant.objects.filter(slug=ASSISTANT_SLUG).exists():
-        legacy_assistant.name = "Smart Collaboration"
-        legacy_assistant.description = "Internal Smart Collaboration coordinator."
-        legacy_assistant.save(update_fields=["name", "description"])
-        return
-    legacy_assistant.slug = ASSISTANT_SLUG
-    legacy_assistant.name = "Smart Collaboration"
-    legacy_assistant.description = "Internal Smart Collaboration coordinator."
-    legacy_assistant.save(update_fields=["slug", "name", "description"])
-
-
 class Migration(migrations.Migration):
     dependencies = [("lens", "0044_skill_metadata_and_workspace_guide")]
 
@@ -134,16 +88,10 @@ class Migration(migrations.Migration):
                     ("general_chat", "General Chat"),
                     ("code_analysis", "Code Analysis"),
                     ("knowledge_qa", "Knowledge Q&A"),
-                    ("orchestrator", "Orchestrator"),
                 ],
                 default="general_chat",
                 max_length=24,
             ),
-        ),
-        migrations.AddField(
-            model_name="assistant",
-            name="subagent_assistant_uuids",
-            field=models.JSONField(blank=True, default=list),
         ),
         migrations.AddField(
             model_name="assistant",
@@ -185,9 +133,5 @@ class Migration(migrations.Migration):
             model_name="session",
             name="allowed_assistant_uuids",
             field=models.JSONField(blank=True, default=list),
-        ),
-        migrations.RunPython(
-            rename_smart_collaboration,
-            reverse_code=migrations.RunPython.noop,
         ),
     ]

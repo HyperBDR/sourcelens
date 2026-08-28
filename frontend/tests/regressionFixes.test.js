@@ -42,21 +42,15 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
   assert.match(chat, /event\.key === 'ArrowDown'/)
   assert.match(chat, /event\.key === 'ArrowUp'/)
   assert.match(chat, /event\.key === 'Enter'/)
-  assert.match(chat, /orchestrator: 'orchestrator'/)
+  assert.doesNotMatch(chat, /orchestrator: 'orchestrator'/)
   assert.equal(
     chinese.lens.chat.mentionAssistantHint,
     '输入 @ 后选择助手；选中后，仅由该助手处理本次消息。'
   )
   assert.match(english.lens.chat.mentionAssistantHint, /Type @/)
-  assert.equal(chinese.lens.chat.assistantTypes.orchestrator, '协作模式')
-  assert.equal(
-    english.lens.chat.assistantTypes.orchestrator,
-    'Collaboration Mode'
-  )
-  assert.equal(
-    spanish.lens.chat.assistantTypes.orchestrator,
-    'Modo de colaboración'
-  )
+  assert.equal(chinese.lens.chat.assistantTypes.orchestrator, undefined)
+  assert.equal(english.lens.chat.assistantTypes.orchestrator, undefined)
+  assert.equal(spanish.lens.chat.assistantTypes.orchestrator, undefined)
   assert.equal(chinese.lens.chat.smartCollaboration, '智能协作')
   assert.equal(chinese.lens.chat.smartCollaborationBeta, 'Beta')
   assert.equal(english.lens.chat.smartCollaboration, 'Smart Collaboration')
@@ -210,13 +204,14 @@ test('assistant exposes one execution strategy without a token budget picker', a
   assert.doesNotMatch(drawer, /token_budget_profile:/)
 })
 
-test('orchestrator can pin its execution node without inheriting retrieval policy', async () => {
+test('assistant node selection is limited to workspace capabilities', async () => {
   const drawer = await source(
     'pages/lens/AssistantFormDrawerDirectEnvironment.vue'
   )
 
   assert.match(drawer, /const requiresNodeSelection = computed\(/)
-  assert.match(drawer, /requiresWorkspace\.value \|\|\s*isOrchestratorTask\.value/)
+  assert.match(drawer, /requiresWorkspace\.value/)
+  assert.doesNotMatch(drawer, /isOrchestratorTask/)
   assert.match(drawer, /v-if="requiresNodeSelection"/)
   assert.match(drawer, /v-else-if="isGeneralChatTask"/)
   const retrievalStart = drawer.indexOf("t('lensAdmin.fields.retrievalPolicy')")
@@ -255,19 +250,15 @@ test('assistant selects its type before conditional execution settings', async (
   assert.match(chinese.lensAdmin.wizard.step2Desc, /先选择类型/)
 })
 
-test('delegated assistant picker exposes selection state and an empty state', async () => {
+test('assistant form does not configure fixed Smart Collaboration delegates', async () => {
   const [drawer, chinese] = await Promise.all([
     source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
     source('admin/locales/zh-CN.json').then(JSON.parse)
   ])
 
-  assert.match(drawer, /delegatedAssistantCount/)
-  assert.match(drawer, /isDelegatedAssistantSelected/)
-  assert.match(drawer, /noDelegatedAssistants/)
-  assert.equal(
-    chinese.lensAdmin.wizard.delegatedAssistantsSelected,
-    '已选 {count} 个'
-  )
+  assert.doesNotMatch(drawer, /delegatedAssistantCount/)
+  assert.doesNotMatch(drawer, /subagent_assistants/)
+  assert.equal(chinese.lensAdmin.wizard.delegatedAssistantsSelected, undefined)
 })
 
 test('assistant Skill picker supports search and environment configuration', async () => {
