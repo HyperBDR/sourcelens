@@ -2735,6 +2735,65 @@ class LensApiTests(TestCase):
             str(self.lensnode.uuid),
         )
 
+    def test_lensnode_delegation_routes_to_assistant_bound_node(self):
+        token = "dev-lensnode-token"
+        self.lensnode.auth_token_hash = hash_lensnode_token(token)
+        self.lensnode.save(update_fields=["auth_token_hash", "updated_at"])
+        remote_node = LensNode.objects.create(
+            name="Remote LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            tasks=[{"name": "knowledge_qa"}],
+        )
+        remote = Assistant.objects.create(
+            name="Remote Assistant",
+            slug="remote-api-assistant",
+            lensnode=remote_node,
+            selected_task="knowledge_qa",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            routing_mode=Session.RoutingMode.SMART,
+            allowed_assistant_uuids=[str(remote.uuid)],
+        )
+        parent = create_execution_run(
+            session=session,
+            question="Coordinate this request",
+            enqueue=False,
+        )
+        parent.status = Run.Status.RUNNING
+        parent.save(update_fields=["status"])
+        client = APIClient()
+        url = f"/api/lens/lensnode/runs/{parent.uuid}/delegations/"
+        payload = {
+            "assistant_uuid": str(remote.uuid),
+            "question": "Inspect production logs",
+            "delegation_key": "call-remote-1",
+        }
+
+        response = client.post(
+            url,
+            payload,
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+        replay = client.post(
+            url,
+            payload,
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 202, response.data)
+        self.assertEqual(replay.status_code, 202, replay.data)
+        self.assertEqual(response.data["run_uuid"], replay.data["run_uuid"])
+        child = Run.objects.get(uuid=response.data["run_uuid"])
+        self.assertEqual(child.parent_run, parent)
+        self.assertEqual(child.lensnode, remote_node)
+        self.assertEqual(parent.delegated_runs.count(), 1)
+
     def test_lensnode_ai_gateway_supports_tool_calling_payload(self):
         token = "dev-lensnode-token"
         self.lensnode.auth_token_hash = hash_lensnode_token(token)

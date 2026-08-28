@@ -23,6 +23,7 @@ from .datasources import DataSourceViewSet
 from .environment_variables import EnvironmentVariableSetViewSet
 from .gateway import (
     LensNodeAIGatewayView,
+    LensNodeDelegationView,
     LensNodeDeliverableUploadView,
     LensNodeHistoryArtifactView,
     LensNodeRunAttachmentView,
@@ -67,6 +68,7 @@ __all__ = [
     "GlobalSettingViewSet",
     "LensAttachmentView",
     "LensNodeAIGatewayView",
+    "LensNodeDelegationView",
     "LensNodeDeliverableUploadView",
     "LensNodeHistoryArtifactView",
     "LensNodeRunAttachmentView",

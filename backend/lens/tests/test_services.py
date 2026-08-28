@@ -66,6 +66,7 @@ from lens.services import (
     append_lensnode_output,
     build_run_history,
     build_run_history_artifacts,
+    create_delegated_run,
     create_execution_run,
     create_run_execution_snapshot,
     dispatch_run_to_lensnode,
@@ -199,6 +200,147 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertEqual(selected, idle)
         self.assertEqual(busy_run.lensnode, self.lensnode)
+
+    def test_delegated_run_uses_selected_assistant_lensnode(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        child_node = LensNode.objects.create(
+            name="Remote LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            tasks=[{"name": "knowledge_qa"}],
+        )
+        child = Assistant.objects.create(
+            name="Remote Assistant",
+            slug="remote-assistant",
+            lensnode=child_node,
+            selected_task="knowledge_qa",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        self.session.allowed_assistant_uuids = [str(child.uuid)]
+        self.session.save(update_fields=["allowed_assistant_uuids"])
+        parent = create_execution_run(
+            session=self.session,
+            question="Investigate incident",
+            enqueue=False,
+        )
+        parent.status = Run.Status.RUNNING
+        parent.save(update_fields=["status"])
+        snapshot = dict(parent.execution.runtime_snapshot)
+        snapshot["subagents"] = [{"uuid": str(child.uuid)}]
+        parent.execution.runtime_snapshot = snapshot
+        parent.execution.save(update_fields=["runtime_snapshot"])
+
+        delegated = create_delegated_run(
+            parent,
+            child.uuid,
+            "Query production error rate",
+            delegation_key="call-remote",
+        )
+
+        self.assertEqual(delegated.parent_run, parent)
+        self.assertEqual(delegated.session.assistant, child)
+        self.assertEqual(delegated.lensnode, child_node)
+
+    def test_parent_sync_event_aggregates_named_child_progress(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        child = Assistant.objects.create(
+            name="Remote Assistant",
+            slug="remote-progress-assistant",
+            lensnode=self.lensnode,
+            selected_task="knowledge_qa",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        self.session.allowed_assistant_uuids = [str(child.uuid)]
+        self.session.save(update_fields=["allowed_assistant_uuids"])
+        parent = create_execution_run(
+            session=self.session,
+            question="Investigate incident",
+            enqueue=False,
+        )
+        parent.status = Run.Status.RUNNING
+        parent.save(update_fields=["status"])
+        snapshot = dict(parent.execution.runtime_snapshot)
+        snapshot["subagents"] = [{"uuid": str(child.uuid)}]
+        parent.execution.runtime_snapshot = snapshot
+        parent.execution.save(update_fields=["runtime_snapshot"])
+        delegated = create_delegated_run(
+            parent,
+            child.uuid,
+            "Inspect logs",
+            delegation_key="call-progress",
+        )
+        RunStep.objects.create(
+            run=delegated,
+            step_type=RunStep.StepType.GENERAL_CHAT,
+            status=RunStep.Status.RUNNING,
+            sequence=3,
+            detail={
+                "events": [
+                    {
+                        "agent_event": "tool.search.invoke",
+                        "activity": "running",
+                    }
+                ]
+            },
+        )
+
+        event = _build_sync_event(parent)
+
+        delegated_step = next(
+            step for step in event["steps"] if step.get("assistant_name")
+        )
+        self.assertEqual(
+            delegated_step["assistant_name"],
+            "Remote Assistant",
+        )
+        self.assertEqual(
+            delegated_step["delegated_task"],
+            "Inspect logs",
+        )
+        self.assertEqual(
+            delegated_step["detail"]["events"][0]["assistant_name"],
+            "Remote Assistant",
+        )
+        self.assertEqual(
+            delegated_step["detail"]["events"][0]["delegated_task"],
+            "Inspect logs",
+        )
+        thinking = MessageSerializer(parent.output_message).data["thinking"]
+        delegated_activity = next(
+            item
+            for item in thinking["steps"]
+            if item.get("assistant_name") == "Remote Assistant"
+        )
+        self.assertEqual(
+            delegated_activity["delegated_task"],
+            "Inspect logs",
+        )
+
+    def test_terminal_child_notifies_parent_lensnode(self):
+        parent = create_execution_run(
+            session=self.session,
+            question="Coordinate",
+            enqueue=False,
+        )
+        child = create_execution_run(
+            session=self.session,
+            question="Delegated work",
+            parent_run=parent,
+            enqueue=False,
+        )
+        child.output_message.content = "Delegated findings"
+        child.output_message.save(update_fields=["content"])
+        child.status = Run.Status.DONE
+        child.save(update_fields=["status"])
+
+        payload = LensNodeConsumer._delegation_done_payload(child.pk)
+
+        self.assertEqual(payload["type"], "delegation_done")
+        self.assertEqual(payload["run_uuid"], str(child.uuid))
+        self.assertEqual(payload["answer"], "Delegated findings")
+        self.assertEqual(payload["lensnode_uuid"], str(self.lensnode.uuid))
 
     def test_smart_run_rechecks_live_assistant_access(self):
         self.assistant.visibility = Assistant.Visibility.PRIVATE
@@ -1092,6 +1234,31 @@ class LensServiceTests(TransactionTestCase):
 
     @patch("lens.services.async_to_sync")
     @patch("lens.services.get_channel_layer")
+    def test_delegated_dispatch_includes_parent_run_uuid(
+        self,
+        get_channel_layer,
+        mock_async_to_sync,
+    ):
+        sender = mock_async_to_sync.return_value
+        parent = create_execution_run(
+            session=self.session,
+            question="Coordinate",
+            enqueue=False,
+        )
+        child = create_execution_run(
+            session=self.session,
+            question="Delegated work",
+            parent_run=parent,
+            enqueue=False,
+        )
+
+        dispatch_run_to_lensnode(child, "Delegated work")
+
+        payload = sender.call_args.args[1]["payload"]
+        self.assertEqual(payload["parent_run_uuid"], str(parent.uuid))
+
+    @patch("lens.services.async_to_sync")
+    @patch("lens.services.get_channel_layer")
     def test_dispatch_preserves_clarification_context(
         self,
         get_channel_layer,
@@ -1774,6 +1941,19 @@ class LensServiceTests(TransactionTestCase):
             event["payload"],
             {"required_capabilities": ["skill"]},
         )
+
+    def test_runtime_event_preserves_safe_delegated_assistant_name(self):
+        event = sanitize_runtime_event(
+            {
+                "agent_event": "tool.read_file.invoke",
+                "activity": "reading_context",
+                "assistant_name": "Repository Analyst",
+                "secret": "must-not-leak",
+            }
+        )
+
+        self.assertEqual(event["assistant_name"], "Repository Analyst")
+        self.assertNotIn("must-not-leak", str(event))
 
     def test_capability_unavailable_route_is_public(self):
         event = sanitize_runtime_event(

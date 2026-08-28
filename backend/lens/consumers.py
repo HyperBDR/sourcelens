@@ -416,6 +416,17 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
             outcome=content.get("outcome") or "",
             termination_detail=content.get("termination_detail") or {},
         )
+        parent_update = await database_sync_to_async(
+            self._delegation_done_payload
+        )(run.pk)
+        if parent_update is not None:
+            await self.channel_layer.group_send(
+                lensnode_group_name(parent_update.pop("lensnode_uuid")),
+                {
+                    "type": "lensnode.command",
+                    "payload": parent_update,
+                },
+            )
         LOGGER.info(
             "Finished LensNode run run_uuid=%s status=%s error=%s",
             run_uuid,
@@ -434,6 +445,32 @@ class LensNodeConsumer(AsyncJsonWebsocketConsumer):
                     "run_uuid": str(run_uuid),
                 }
             )
+
+    @staticmethod
+    def _delegation_done_payload(run_pk):
+        """Return a parent-node notification for a terminal child Run."""
+
+        run = Run.objects.select_related(
+            "output_message",
+            "session__assistant",
+            "parent_run__lensnode",
+        ).get(pk=run_pk)
+        if run.parent_run_id is None or run.parent_run.lensnode_id is None:
+            return None
+        return {
+            "type": "delegation_done",
+            "run_uuid": str(run.uuid),
+            "status": run.status,
+            "outcome": run.outcome,
+            "assistant_name": run.session.assistant.name,
+            "answer": (
+                str(run.output_message.content or "")
+                if run.output_message_id
+                else ""
+            ),
+            "error": str(run.error or "")[:500],
+            "lensnode_uuid": str(run.parent_run.lensnode.uuid),
+        }
 
     def _parse_uuid(self, value):
         """Parse a UUID value or return None."""

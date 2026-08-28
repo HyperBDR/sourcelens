@@ -91,6 +91,7 @@ HISTORY_MAX_TOTAL_CHARS = 32000
 CLARIFICATION_MAX_ORIGINAL_CHARS = HISTORY_MAX_TOTAL_CHARS
 CLARIFICATION_MAX_PROMPT_CHARS = 20000
 HISTORY_ARTIFACT_MAX_FILES = 3
+MAX_DELEGATION_DEPTH = 3
 MAX_SUBAGENTS_PER_RUN = 8
 
 QUERY_REWRITE_HISTORY_TURNS = 3
@@ -1313,6 +1314,98 @@ def select_execution_lensnode(assistant):
     return min(candidates, key=lambda item: (item.active_runs, item.created_at))
 
 
+@transaction.atomic
+def create_delegated_run(
+    parent_run,
+    assistant_uuid,
+    question,
+    delegation_key="",
+):
+    """Create a child Run on the selected assistant's execution node."""
+
+    parent_run = Run.objects.select_for_update().select_related(
+        "session",
+        "session__user",
+    ).get(pk=parent_run.pk)
+    if parent_run.session.routing_mode != Session.RoutingMode.SMART:
+        raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
+    if parent_run.status not in {
+        Run.Status.RUNNING,
+        Run.Status.STREAMING,
+    }:
+        raise LensNodeDispatchError("PARENT_RUN_NOT_ACTIVE")
+    ancestry = set()
+    current = parent_run
+    depth = 0
+    while current is not None:
+        if current.pk in ancestry or depth >= MAX_DELEGATION_DEPTH:
+            raise LensNodeDispatchError("SUBAGENT_DEPTH_EXCEEDED")
+        ancestry.add(current.pk)
+        current = current.parent_run
+        depth += 1
+
+    configured = (
+        (parent_run.execution.runtime_snapshot or {}).get("subagents")
+        or []
+    )
+    allowed = {
+        str(item.get("uuid"))
+        for item in configured
+        if isinstance(item, dict)
+    }
+    if str(assistant_uuid) not in allowed:
+        raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
+    if delegation_key:
+        existing = Run.objects.filter(
+            parent_run=parent_run,
+            idempotency_key=f"delegation:{delegation_key}"[:128],
+        ).first()
+        if existing is not None:
+            return existing
+    assistant = (
+        Assistant.objects.visible_to(parent_run.session.user)
+        .filter(
+            visibility__in=[
+                Assistant.Visibility.PUBLIC,
+                Assistant.Visibility.PRIVATE,
+            ],
+            uuid=assistant_uuid,
+            capability__in=[
+                Assistant.Capability.GENERAL_CHAT,
+                Assistant.Capability.CODE_ANALYSIS,
+                Assistant.Capability.KNOWLEDGE_QA,
+            ],
+            status=Assistant.Status.ACTIVE,
+            is_system=False,
+        )
+        .first()
+    )
+    if assistant is None:
+        raise LensNodeDispatchError("SUBAGENT_UNAVAILABLE")
+    if assistant.pk in {
+        item.session.assistant_id
+        for item in Run.objects.filter(pk__in=ancestry).select_related(
+            "session"
+        )
+    }:
+        raise LensNodeDispatchError("SUBAGENT_CYCLE")
+    session = Session.objects.create(
+        assistant=assistant,
+        user=parent_run.session.user,
+        title=f"Delegated: {parent_run.uuid}",
+        title_manually_edited=True,
+    )
+    return create_execution_run(
+        session=session,
+        question=str(question or "")[:20000],
+        enqueue=True,
+        parent_run=parent_run,
+        idempotency_key=(
+            f"delegation:{delegation_key}"[:128] if delegation_key else ""
+        ),
+    )
+
+
 def validate_retry_run(session, retry_of_run):
     """Reject Retry links outside the Session or with an existing cycle."""
 
@@ -2490,6 +2583,9 @@ def dispatch_run_to_lensnode(
             "payload": {
                 "type": "run_start",
                 "run_uuid": str(run.uuid),
+                "parent_run_uuid": (
+                    str(run.parent_run.uuid) if run.parent_run_id else ""
+                ),
                 "dispatch_id": str(dispatch_id) if dispatch_id else None,
                 "task": execution.task,
                 "features": features_payload,
@@ -3192,18 +3288,16 @@ def stream_run_events(run):
         else:
             last_queue_position = None
 
-        for step in run.steps.all():
-            step_key = (step.sequence, step.status, step.updated_at)
+        for owner, step in _run_stream_steps(run):
+            step_key = (
+                owner.pk,
+                step.sequence,
+                step.status,
+                step.updated_at,
+            )
             if step_key not in emitted_steps:
                 emitted_steps.add(step_key)
-                yield {
-                    "type": "step",
-                    "step": step.step_type,
-                    "status": step.status,
-                    "detail": public_step_detail(step.detail),
-                    "sequence": step.sequence,
-                    "ts": timezone.now().isoformat(),
-                }
+                yield _build_stream_step_event(owner, step)
 
         if content != emitted_content:
             if not content.startswith(emitted_content):
@@ -3258,8 +3352,8 @@ async def stream_run_events_async(run):
     last_status = run.status
     last_resume_by = run.resume_by.isoformat() if run.resume_by else None
     emitted_steps = {
-        (step.sequence, step.status, step.updated_at)
-        for step in run.steps.all()
+        (owner.pk, step.sequence, step.status, step.updated_at)
+        for owner, step in _run_stream_steps(run)
     }
 
     while True:
@@ -3288,18 +3382,16 @@ async def stream_run_events_async(run):
         else:
             last_queue_position = None
 
-        for step in run.steps.all():
-            step_key = (step.sequence, step.status, step.updated_at)
+        for owner, step in _run_stream_steps(run):
+            step_key = (
+                owner.pk,
+                step.sequence,
+                step.status,
+                step.updated_at,
+            )
             if step_key not in emitted_steps:
                 emitted_steps.add(step_key)
-                yield {
-                    "type": "step",
-                    "step": step.step_type,
-                    "status": step.status,
-                    "detail": public_step_detail(step.detail),
-                    "sequence": step.sequence,
-                    "ts": timezone.now().isoformat(),
-                }
+                yield _build_stream_step_event(owner, step)
 
         if content != emitted_content:
             if not content.startswith(emitted_content):
@@ -3339,10 +3431,59 @@ def _load_run_stream_state(run_pk):
     """Load the latest run state needed for SSE snapshots."""
 
     return (
-        Run.objects.select_related("output_message", "session__assistant")
-        .prefetch_related("steps")
+        Run.objects.select_related(
+            "output_message",
+            "input_message",
+            "session__assistant",
+        )
+        .prefetch_related(
+            "steps",
+            "delegated_runs__steps",
+            "delegated_runs__input_message",
+            "delegated_runs__session__assistant",
+        )
         .get(pk=run_pk)
     )
+
+
+def _run_stream_steps(run):
+    """Return parent and direct child steps with their owning Runs."""
+
+    result = [(run, step) for step in run.steps.all()]
+    for child in run.delegated_runs.all():
+        result.extend((child, step) for step in child.steps.all())
+    return sorted(
+        result,
+        key=lambda item: (
+            item[1].updated_at,
+            item[0].pk,
+            item[1].sequence,
+        ),
+    )
+
+
+def _build_stream_step_event(owner, step):
+    """Build one public parent or delegated-child SSE step event."""
+
+    detail = public_step_detail(step.detail)
+    event = {
+        "type": "step",
+        "step": step.step_type,
+        "status": step.status,
+        "detail": detail,
+        "sequence": step.sequence,
+        "ts": timezone.now().isoformat(),
+    }
+    if owner.parent_run_id:
+        assistant_name = owner.session.assistant.name[:160]
+        delegated_task = str(owner.input_message.content or "").strip()[:2000]
+        event["delegated_run_uuid"] = str(owner.uuid)
+        event["assistant_name"] = assistant_name
+        event["delegated_task"] = delegated_task
+        for activity in detail.get("events", []):
+            activity.setdefault("assistant_name", assistant_name)
+            activity.setdefault("delegated_task", delegated_task)
+    return event
 
 
 def _queue_position(run):
@@ -3366,6 +3507,12 @@ def _run_content(run):
 def _build_sync_event(run):
     """Build a persisted snapshot event for new or reconnected SSE clients."""
 
+    steps = []
+    for owner, step in _run_stream_steps(run):
+        event = _build_stream_step_event(owner, step)
+        event.pop("type", None)
+        event.pop("ts", None)
+        steps.append(event)
     return {
         "type": "sync",
         "status": run.status,
@@ -3374,15 +3521,7 @@ def _build_sync_event(run):
         "termination_detail": sanitize_termination_detail(
             run.termination_detail
         ),
-        "steps": [
-            {
-                "step": step.step_type,
-                "status": step.status,
-                "detail": public_step_detail(step.detail),
-                "sequence": step.sequence,
-            }
-            for step in run.steps.all()
-        ],
+        "steps": steps,
         "content": _run_content(run),
         "ts": timezone.now().isoformat(),
     }

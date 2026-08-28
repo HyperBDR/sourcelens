@@ -40,6 +40,7 @@ def _run_agent_with_turn_limit(
     input_checkpoint_seeded=False,
     stream_recovery_attempts=0,
     on_stream_recovery=None,
+    subagent_display_names=None,
 ):
     """Stream agent events and optionally stop after NEW AI turns.
 
@@ -131,6 +132,7 @@ def _run_agent_with_turn_limit(
                 seen_tool_calls,
                 lambda _name, _detail: None,
                 plan_state=plan_state,
+                subagent_display_names=subagent_display_names,
             )
             seeded_baseline = True
         if emit_event is not None:
@@ -140,6 +142,7 @@ def _run_agent_with_turn_limit(
                 seen_tool_calls,
                 emit_event,
                 plan_state=plan_state,
+                subagent_display_names=subagent_display_names,
             )
         ai_turns = sum(
             1
@@ -500,6 +503,7 @@ def _emit_new_tool_calls(
     emit_event,
     *,
     plan_state=None,
+    subagent_display_names=None,
 ):
     """Emit a progress event for each not-yet-seen agent tool call.
 
@@ -589,7 +593,15 @@ def _emit_new_tool_calls(
                 # avoids a duplicate trace line; the tool emits its own
                 # .start/.done with a richer argument summary
                 continue
-            emit_event(
-                f"tool.{name}.invoke",
-                {"tool": name, "summary": _tool_call_summary(call)},
-            )
+            detail = {"tool": name, "summary": _tool_call_summary(call)}
+            if name == "task":
+                subagent_name = str(
+                    (call.get("args") or {}).get("subagent_type") or ""
+                )
+                display_name = (subagent_display_names or {}).get(
+                    subagent_name,
+                    subagent_name,
+                )
+                if display_name:
+                    detail["assistant_name"] = display_name[:160]
+            emit_event(f"tool.{name}.invoke", detail)
