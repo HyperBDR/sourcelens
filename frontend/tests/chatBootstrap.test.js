@@ -149,6 +149,17 @@ test('keeps the closed mobile sidebar out of keyboard navigation', async () => {
   assert.match(source, /:aria-hidden="isMobile && !sidebarOpen"/)
 })
 
+test('collapses the conversation history into a compact Recent row', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /sessionHistoryCollapsed = true/)
+  assert.match(source, /class="sessions-collapsed"/)
+  assert.match(source, /class="sessions-collapsed-trigger"[\s\S]*<ChevronRight/)
+  assert.match(source, /class="sessions-collapsed-action"/)
+  assert.match(source, /placement="right"/)
+  assert.match(source, /\.sessions-collapsed\s*\{[\s\S]*items-center/)
+})
+
 test('shows only a direct share action for mobile answer tools', async () => {
   const source = await chatSource()
 
