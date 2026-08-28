@@ -459,9 +459,6 @@
                         :key="task"
                         class="runtime-activity-task"
                       >
-                        <span class="runtime-activity-task-label">
-                          {{ t('lens.chat.runtime.delegatedTask') }}
-                        </span>
                         <span class="runtime-activity-task-text">
                           {{ task }}
                         </span>
@@ -588,9 +585,6 @@
                         :key="task"
                         class="runtime-activity-task"
                       >
-                        <span class="runtime-activity-task-label">
-                          {{ t('lens.chat.runtime.delegatedTask') }}
-                        </span>
                         <span class="runtime-activity-task-text">
                           {{ task }}
                         </span>
@@ -1216,9 +1210,6 @@
                           :key="task"
                           class="runtime-activity-task"
                         >
-                          <span class="runtime-activity-task-label">
-                            {{ t('lens.chat.runtime.delegatedTask') }}
-                          </span>
                           <span class="runtime-activity-task-text">
                             {{ task }}
                           </span>
@@ -1353,9 +1344,6 @@
                           :key="task"
                           class="runtime-activity-task"
                         >
-                          <span class="runtime-activity-task-label">
-                            {{ t('lens.chat.runtime.delegatedTask') }}
-                          </span>
                           <span class="runtime-activity-task-text">
                             {{ task }}
                           </span>

@@ -383,7 +383,6 @@
         "activityProgress": "Registradas {count} actividades",
         "activityCompleted": "Completadas {count} actividades",
         "currentAssistant": "Asistente actual: {name}",
-        "delegatedTask": "Tarea asignada:",
         "documentProgress": {
           "downloading": "Descargando documento {current}/{total}",
           "extractingText": "Extrayendo texto del documento {current}/{total}",

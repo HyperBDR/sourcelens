@@ -279,7 +279,7 @@ test('shows each delegated task inside its assistant activity group', async () =
 
   assert.match(source, /class="runtime-activity-task"/)
   assert.match(source, /group\.tasks/)
-  assert.match(source, /lens\.chat\.runtime\.delegatedTask/)
+  assert.doesNotMatch(source, /lens\.chat\.runtime\.delegatedTask/)
   assert.match(source, /activity\?\.delegatedTask/)
 })
 
