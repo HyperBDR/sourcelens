@@ -18,11 +18,12 @@ test('active chat run exposes a localized stop action', async () => {
 })
 
 test('smart chat limits @ assistant mentions to the message start', async () => {
-  const [chat, submission, chinese, english] = await Promise.all([
+  const [chat, submission, chinese, english, spanish] = await Promise.all([
     source('pages/lens/Chat.vue'),
     source('pages/lens/chatSubmission.js'),
     source('locales/zh-CN.json').then(JSON.parse),
-    source('locales/en.json').then(JSON.parse)
+    source('locales/en.json').then(JSON.parse),
+    source('locales/es.json').then(JSON.parse)
   ])
 
   assert.match(chat, /\^@\(\[\^\\s\]\*\)/)
@@ -38,11 +39,21 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
   assert.match(chat, /event\.key === 'ArrowDown'/)
   assert.match(chat, /event\.key === 'ArrowUp'/)
   assert.match(chat, /event\.key === 'Enter'/)
+  assert.match(chat, /orchestrator: 'orchestrator'/)
   assert.equal(
     chinese.lens.chat.mentionAssistantHint,
     '输入 @ 后选择助手；选中后，仅由该助手处理本次消息。'
   )
   assert.match(english.lens.chat.mentionAssistantHint, /Type @/)
+  assert.equal(chinese.lens.chat.assistantTypes.orchestrator, '协作模式')
+  assert.equal(
+    english.lens.chat.assistantTypes.orchestrator,
+    'Collaboration Mode'
+  )
+  assert.equal(
+    spanish.lens.chat.assistantTypes.orchestrator,
+    'Modo de colaboración'
+  )
 })
 
 test('admin tables and assistant slugs preserve backend-compatible values', async () => {

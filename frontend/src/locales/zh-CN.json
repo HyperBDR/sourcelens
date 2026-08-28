@@ -234,7 +234,8 @@
       "assistantTypes": {
         "generalChat": "通用对话",
         "codeAnalysis": "代码分析",
-        "knowledgeQa": "知识问答"
+        "knowledgeQa": "知识问答",
+        "orchestrator": "协作模式"
       },
       "sessions": "最近",
       "sessionLists": "会话列表",
