@@ -731,6 +731,14 @@ class AssistantSerializer(serializers.ModelSerializer):
                         )
                     }
                 )
+            if len(set(subagents)) > 8:
+                raise serializers.ValidationError(
+                    {
+                        "subagent_assistants": (
+                            "At most 8 delegated assistants are allowed."
+                        )
+                    }
+                )
             if self.instance is not None and self.instance.uuid in subagents:
                 raise serializers.ValidationError(
                     {

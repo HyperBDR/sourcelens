@@ -389,12 +389,17 @@ def _smart_router_system_prompt(command, language_requirement):
             f"｜{description or '无额外说明'}"
         )
     roster = "\n".join(assistants) or "- 当前没有可委派助手"
+    routing_directive = (
+        "- 用户已明确指定助手，必须委派给该助手；不要由主路由直接回答。\n"
+        if command.get("routing_assistant_uuid")
+        else "- 简单的解释、问候或能力说明可直接回答，不必为了委派而委派。\n"
+    )
     return (
         "你是 SourceLens 的智能路由助手。根据用户问题，从下列允许范围中选择"
         "最合适的助手完成工作，并对结果进行整合。\n\n"
         "工作原则：\n"
         "- 仅使用名单中的助手；独立子任务可以并行委派。\n"
-        "- 简单的解释、问候或能力说明可直接回答，不必为了委派而委派。\n"
+        f"{routing_directive}"
         "- 委派后只根据实际返回的结果作答；缺少结果时明确说明。\n"
         "- 用户询问当前能力或可用助手时，只说明助手集合及其能力；仅在用户明确询问"
         "  如何路由或为何选择时，才说明选择理由。其他回答不要附加路由过程、"

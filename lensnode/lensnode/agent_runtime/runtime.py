@@ -123,6 +123,7 @@ from ..runtime_resources import (
 )
 
 LOGGER = logging.getLogger("lensnode")
+MAX_CONFIGURED_SUBAGENTS = 8
 
 _MAX_PRESENTED_CITATIONS = 5
 _DEFAULT_CODE_ANALYSIS_MAX_TURNS = 10
@@ -1140,7 +1141,9 @@ class LensDeepAgentRuntime:
 
         subagents = []
         seen_names = set()
-        for index, snapshot in enumerate(state.command.get("subagents") or []):
+        for index, snapshot in enumerate(
+            (state.command.get("subagents") or [])[:MAX_CONFIGURED_SUBAGENTS]
+        ):
             if not isinstance(snapshot, dict):
                 continue
             model_ref = str(snapshot.get("agent_model_ref") or "")

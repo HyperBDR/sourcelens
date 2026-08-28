@@ -237,6 +237,9 @@ def execute_answer_run(
 ):
     """Execute a Lens answer run through LensNode dispatch flow."""
 
+    run.refresh_from_db(fields=["status"])
+    if run.status != Run.Status.QUEUED:
+        return run
     assistant = run.session.assistant
     max_concurrency = assistant.max_concurrency
     if max_concurrency > 0:

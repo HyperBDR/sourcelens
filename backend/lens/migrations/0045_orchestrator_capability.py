@@ -17,16 +17,6 @@ def migrate_assistant_capabilities(apps, schema_editor):
         Assistant.objects.filter(pk=assistant.pk).update(capability=capability)
 
 
-def clear_non_workspace_assignments(apps, schema_editor):
-    """Remove node-local settings from auto-scheduled capabilities."""
-
-    del schema_editor
-    Assistant = apps.get_model("lens", "Assistant")
-    Assistant.objects.exclude(
-        capability__in=["code_analysis", "knowledge_qa"]
-    ).update(lensnode=None, selected_dirs=[])
-
-
 class Migration(migrations.Migration):
     dependencies = [("lens", "0044_skill_metadata_and_workspace_guide")]
 
@@ -77,7 +67,6 @@ class Migration(migrations.Migration):
             index=models.Index(fields=["parent_run"], name="lens_run_parent_idx"),
         ),
         migrations.RunPython(migrate_assistant_capabilities),
-        migrations.RunPython(clear_non_workspace_assignments),
         migrations.RemoveField(model_name="assistant", name="selected_task"),
         migrations.AddField(
             model_name="assistant",

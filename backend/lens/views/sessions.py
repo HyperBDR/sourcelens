@@ -69,6 +69,7 @@ from lens.serializers import (
     SharedQAMineSerializer,
 )
 from lens.services import (
+    cancel_descendant_runs,
     cancel_run_on_lensnode,
     create_execution_run,
     stream_run_events_async,
@@ -658,6 +659,7 @@ class RunViewSet(BaseAuthenticatedViewSet):
             return Response(RunSerializer(run).data)
 
         now = timezone.now()
+        descendants = []
         with transaction.atomic():
             run.status = Run.Status.CANCELLED
             run.resume_by = None
@@ -676,7 +678,10 @@ class RunViewSet(BaseAuthenticatedViewSet):
                 run.execution.save(
                     update_fields=["status", "finished_at"]
                 )
+            descendants = cancel_descendant_runs(run)
         cancel_run_on_lensnode(run)
+        for descendant in descendants:
+            cancel_run_on_lensnode(descendant)
         return Response(RunSerializer(run).data)
 
     @action(detail=True, methods=["post"])

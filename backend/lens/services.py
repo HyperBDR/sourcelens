@@ -17,7 +17,11 @@ from django.utils import timezone
 
 from accounts.models import normalize_answer_language
 
-from .assistant_lifecycle import lock_assistant_for_new_work
+from .assistant_lifecycle import (
+    AssistantNotRunnableError,
+    lock_assistant_for_new_work,
+    smart_routing_assistants,
+)
 from .attachments import (
     AttachmentError,
     attachment_data_url,
@@ -85,6 +89,8 @@ HISTORY_MAX_TOTAL_CHARS = 32000
 CLARIFICATION_MAX_ORIGINAL_CHARS = HISTORY_MAX_TOTAL_CHARS
 CLARIFICATION_MAX_PROMPT_CHARS = 20000
 HISTORY_ARTIFACT_MAX_FILES = 3
+MAX_DELEGATION_DEPTH = 3
+MAX_SUBAGENTS_PER_RUN = 8
 
 QUERY_REWRITE_HISTORY_TURNS = 3
 QUERY_REWRITE_MAX_CHARS = 400
@@ -1086,6 +1092,12 @@ def create_execution_run(
     session = lock_active_session(session)
     session.assistant = assistant
 
+    routing_assistant_uuids = _validated_routing_assistant_uuids(
+        session,
+        user or session.user,
+        routing_assistant_uuid,
+    )
+
     answer_language = resolve_run_answer_language(
         session,
         question,
@@ -1150,11 +1162,7 @@ def create_execution_run(
     create_run_execution_snapshot(
         run,
         answer_language=answer_language,
-        routing_assistant_uuids=(
-            [str(routing_assistant_uuid)]
-            if routing_assistant_uuid is not None
-            else None
-        ),
+        routing_assistant_uuids=routing_assistant_uuids,
     )
     if routing_assistant_uuid is not None:
         _set_routing_execution_question(run, routing_assistant_uuid)
@@ -1243,6 +1251,22 @@ def _set_routing_execution_question(run, assistant_uuid):
     run.execution.save(update_fields=["runtime_snapshot"])
 
 
+def _validated_routing_assistant_uuids(session, user, selected_uuid=None):
+    """Recheck the live access scope before freezing a smart Run."""
+
+    if session.routing_mode != Session.RoutingMode.SMART:
+        if selected_uuid is not None:
+            raise AssistantNotRunnableError
+        return None
+    allowed = smart_routing_assistants(user, session.allowed_assistant_uuids)
+    allowed_ids = {str(item.uuid) for item in allowed}
+    if selected_uuid is not None:
+        if str(selected_uuid) not in allowed_ids:
+            raise AssistantNotRunnableError
+        return [str(selected_uuid)]
+    return sorted(allowed_ids)
+
+
 def run_execution_question(run):
     """Return this Run's prompt for agent execution, not chat display."""
 
@@ -1289,14 +1313,32 @@ def select_execution_lensnode(assistant):
 def create_delegated_run(parent_run, assistant_uuid, question):
     """Create a child Run on the selected assistant's own execution node."""
 
+    ancestry = set()
+    current = parent_run
+    depth = 0
+    while current is not None:
+        if current.pk in ancestry or depth >= MAX_DELEGATION_DEPTH:
+            raise LensNodeDispatchError("SUBAGENT_DEPTH_EXCEEDED")
+        ancestry.add(current.pk)
+        current = current.parent_run
+        depth += 1
+
     configured = (
         (parent_run.execution.runtime_snapshot or {}).get("subagents")
         or []
     )
-    allowed = {str(item.get("uuid")) for item in configured if isinstance(item, dict)}
+    allowed = {
+        str(item.get("uuid"))
+        for item in configured
+        if isinstance(item, dict)
+    }
     if str(assistant_uuid) not in allowed:
         raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
     assistant = Assistant.objects.filter(
+        visibility__in=[
+            Assistant.Visibility.PUBLIC,
+            Assistant.Visibility.PRIVATE,
+        ],
         uuid=assistant_uuid,
         capability__in=[
             Assistant.Capability.GENERAL_CHAT,
@@ -1304,9 +1346,16 @@ def create_delegated_run(parent_run, assistant_uuid, question):
             Assistant.Capability.KNOWLEDGE_QA,
         ],
         status=Assistant.Status.ACTIVE,
-    ).first()
+    ).visible_to(parent_run.session.user).first()
     if assistant is None:
         raise LensNodeDispatchError("SUBAGENT_UNAVAILABLE")
+    if assistant.pk in {
+        item.session.assistant_id
+        for item in Run.objects.filter(pk__in=ancestry).select_related(
+            "session"
+        )
+    }:
+        raise LensNodeDispatchError("SUBAGENT_CYCLE")
     session = Session.objects.create(
         assistant=assistant,
         user=parent_run.session.user,
@@ -1856,6 +1905,15 @@ def create_run_execution_snapshot(
         run.session,
         routing_assistant_uuids,
     )
+    if (
+        routing_assistant_uuids
+        and len(routing_assistant_uuids) == 1
+        and not any(
+            item.get("uuid") == str(routing_assistant_uuids[0])
+            for item in runtime_snapshot.get("subagents", [])
+        )
+    ):
+        raise LensNodeDispatchError("SUBAGENT_NODE_MISMATCH")
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
         defaults={
@@ -1915,7 +1973,7 @@ def _build_run_runtime_snapshot(
                 else session.allowed_assistant_uuids or []
             )
         subagents = list(
-            Assistant.objects.filter(
+            Assistant.objects.visible_to(session.user).filter(
                 uuid__in=configured,
                 status=Assistant.Status.ACTIVE,
                 capability__in=[
@@ -1932,12 +1990,20 @@ def _build_run_runtime_snapshot(
             )
         )
         subagents = [
+            item
+            for item in subagents
+            if item.lensnode_id is None or item.lensnode_id == lensnode.id
+        ][:MAX_SUBAGENTS_PER_RUN]
+        subagents = [
             {
                 "uuid": str(item.uuid),
                 "name": item.name,
                 "description": item.description,
                 "capability": item.capability,
                 "task": execution_task_for_capability(item.capability),
+                "lensnode_uuid": (
+                    str(item.lensnode.uuid) if item.lensnode_id else ""
+                ),
                 "target_dirs": (
                     []
                     if item.capability == Assistant.Capability.GENERAL_CHAT
@@ -1970,6 +2036,11 @@ def _build_run_runtime_snapshot(
             else session.allowed_assistant_uuids or []
         ),
         "subagents": subagents,
+        "routing_assistant_uuid": (
+            str(routing_assistant_uuids[0])
+            if routing_assistant_uuids and len(routing_assistant_uuids) == 1
+            else ""
+        ),
     }
 
 
@@ -2521,6 +2592,9 @@ def dispatch_run_to_lensnode(
                     else "general_chat"
                 ),
                 "assistant_kind": runtime_snapshot.get("assistant_kind", ""),
+                "routing_assistant_uuid": runtime_snapshot.get(
+                    "routing_assistant_uuid", ""
+                ),
                 "subagents": _runtime_subagents(
                     runtime_snapshot.get("subagents", [])
                 ),
@@ -2587,6 +2661,50 @@ def cancel_run_on_lensnode(run):
         },
     )
     return None
+
+
+@transaction.atomic
+def cancel_descendant_runs(root_run):
+    """Cancel active descendant Runs and return their node payloads."""
+
+    pending = [root_run.pk]
+    descendants = []
+    seen = set()
+    while pending:
+        parent_id = pending.pop()
+        child_ids = list(
+            Run.objects.filter(
+                parent_run_id=parent_id,
+                status__in=[
+                    Run.Status.QUEUED,
+                    Run.Status.RUNNING,
+                    Run.Status.STREAMING,
+                ],
+            ).values_list("pk", flat=True)
+        )
+        for child_id in child_ids:
+            if child_id in seen:
+                continue
+            seen.add(child_id)
+            pending.append(child_id)
+            descendants.append(child_id)
+    if not descendants:
+        return []
+    now = timezone.now()
+    runs = list(
+        Run.objects.select_related("lensnode").filter(pk__in=descendants)
+    )
+    Run.objects.filter(pk__in=descendants).update(
+        status=Run.Status.CANCELLED,
+        resume_by=None,
+        finished_at=now,
+        updated_at=now,
+    )
+    RunExecution.objects.filter(run_id__in=descendants).update(
+        status=RunExecution.Status.CANCELLED,
+        finished_at=now,
+    )
+    return runs
 
 
 def cancel_datasource_sync_on_lensnode(lensnode, task_id):

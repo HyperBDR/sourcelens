@@ -58,6 +58,8 @@ from lens.runtime_events import (
 )
 from lens.serializers import MessageSerializer, RunSerializer
 from lens.services import (
+    AssistantNotRunnableError,
+    LensNodeDispatchError,
     _build_sync_event,
     _step_sequence,
     build_clarification_continuation_question,
@@ -231,6 +233,43 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(delegated.parent_run, parent)
         self.assertEqual(delegated.session.assistant, child)
         self.assertEqual(delegated.lensnode, child_node)
+
+    def test_delegated_run_rejects_depth_overflow(self):
+        parent = create_execution_run(
+            session=self.session,
+            question="Root",
+            enqueue=False,
+        )
+        current = parent
+        for _ in range(3):
+            current = Run.objects.create(
+                session=self.session,
+                status=Run.Status.QUEUED,
+                input_message=parent.input_message,
+                parent_run=current,
+                lensnode=self.lensnode,
+            )
+        with self.assertRaisesMessage(
+            LensNodeDispatchError,
+            "SUBAGENT_DEPTH_EXCEEDED",
+        ):
+            create_delegated_run(parent, self.assistant.uuid, "Too deep")
+
+    def test_smart_run_rechecks_live_assistant_access(self):
+        self.assistant.visibility = Assistant.Visibility.PRIVATE
+        self.assistant.save(update_fields=["visibility"])
+        session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+            routing_mode=Session.RoutingMode.SMART,
+            allowed_assistant_uuids=[str(self.assistant.uuid)],
+        )
+        with self.assertRaises(AssistantNotRunnableError):
+            create_execution_run(
+                session=session,
+                question="Must be rejected after access change",
+                enqueue=False,
+            )
 
     def test_explicit_language_request_overrides_profile_language(self):
         self.user.profile.language = "en-US"
@@ -1006,6 +1045,20 @@ class LensServiceTests(TransactionTestCase):
 
         self.assertEqual(run.status, Run.Status.DONE)
         self.assertEqual(run.execution.status, "completed")
+
+    def test_cancelled_queued_run_is_not_started_by_stale_task(self):
+        run = create_execution_run(
+            session=self.session,
+            question="Cancelled before worker delivery",
+            enqueue=False,
+        )
+        run.status = Run.Status.CANCELLED
+        run.save(update_fields=["status"])
+        with patch("lens.execution._build_execution_graph") as build_graph:
+            execute_answer_run(run, dispatch=False)
+        build_graph.assert_not_called()
+        run.refresh_from_db()
+        self.assertEqual(run.status, Run.Status.CANCELLED)
 
     def test_orchestrator_dispatch_allows_empty_parent_skills(self):
         self.assistant.capability = Assistant.Capability.ORCHESTRATOR
