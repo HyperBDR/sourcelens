@@ -1487,8 +1487,8 @@
                   class="composer-input"
                   rows="1"
                   :placeholder="t('lens.chat.questionPlaceholder')"
-                  @keydown.enter.exact.prevent="insertNewline"
-                  @keydown.ctrl.enter.exact.prevent="handlePrimaryAction"
+                  @keydown.enter.exact.prevent="handlePrimaryAction"
+                  @keydown.ctrl.enter.exact.prevent="insertNewline"
                   @paste="onComposerPaste"
                   @input="autoResizeTextarea"
                 />
