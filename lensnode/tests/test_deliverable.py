@@ -100,6 +100,32 @@ def test_save_deliverable_uploads_file(monkeypatch, tmp_path):
     assert any(name == "tool.save_deliverable.done" for name, _ in events)
 
 
+def test_save_deliverable_ignores_runtime_instance_id(monkeypatch, tmp_path):
+    (tmp_path / "report.html").write_text("ok", encoding="utf-8")
+    captured = {}
+
+    def handler(request):
+        captured["body"] = request.read()
+        return httpx.Response(201, json={"ok": True})
+
+    _install_transport(monkeypatch, handler)
+    tool = _build_save_deliverable_tool(
+        {
+            "run_uuid": "parent-run",
+            "runtime_instance_id": "parent-run-subagent-1",
+        },
+        _resources(tmp_path),
+        _config(),
+        None,
+    )
+
+    payload = json.loads(tool.invoke({"path": "report.html"}))
+
+    assert payload["ok"] is True
+    assert b"\r\nparent-run\r\n" in captured["body"]
+    assert b"parent-run-subagent-1" not in captured["body"]
+
+
 def test_save_deliverable_rejects_escape(monkeypatch, tmp_path):
     def handler(request):
         raise AssertionError("upload must not be attempted")

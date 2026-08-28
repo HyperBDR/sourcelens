@@ -1169,7 +1169,10 @@ class LensDeepAgentRuntime:
             seen_names.add(name)
             observation_name = name.lower()
             command = {
-                "run_uuid": f"{state.run_uuid[:48]}-subagent-{index + 1}",
+                "run_uuid": state.run_uuid,
+                "runtime_instance_id": (
+                    f"{state.run_uuid[:48]}-subagent-{index + 1}"
+                ),
                 "task": snapshot.get("task") or "general_chat",
                 "target_dirs": snapshot.get("target_dirs") or [],
                 "loaded_skills": snapshot.get("loaded_skills") or [],

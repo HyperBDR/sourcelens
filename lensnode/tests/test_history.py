@@ -4169,10 +4169,16 @@ def test_smart_subagent_uses_its_own_model_and_tools(monkeypatch):
         token="token",
         request_timeout_s=30,
     )
+    prepared_command = {}
+
+    def prepare_resources(_config, command, **_kwargs):
+        prepared_command.update(command)
+        return resources
+
     monkeypatch.setattr(
         agent_runtime,
         "prepare_runtime_resources",
-        lambda *_args, **_kwargs: resources,
+        prepare_resources,
     )
     monkeypatch.setattr(
         agent_runtime,
@@ -4233,6 +4239,10 @@ def test_smart_subagent_uses_its_own_model_and_tools(monkeypatch):
     assert captured["tools"] == ["general_chat"]
     assert captured["backend"] == ("backend", Path("/run/subagent"))
     assert captured["skills"] == ["skills/data"]
+    assert prepared_command["run_uuid"] == state.run_uuid
+    assert prepared_command["runtime_instance_id"] == (
+        f"{state.run_uuid}-subagent-1"
+    )
 
 
 def test_smart_collaboration_builds_local_subagents(monkeypatch):
