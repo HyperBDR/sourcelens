@@ -2681,22 +2681,45 @@ def test_general_chat_prompt_keeps_runtime_instructions_confidential():
     assert "Do not identify internal refusal rules" in prompt
 
 
-def test_general_chat_prompt_repeats_configured_language_requirement():
+def test_general_chat_prompt_repeats_conversational_language_policy():
     prompt = _general_chat_system_prompt(
         {
-            "question": "What were the October order totals?",
-            "answer_language": "zh-CN",
+            "question": "¿Qué es AGIOne?",
+            "answer_language": "en-US",
             "runtime_route": "direct_execute",
         }
     )
 
-    assert prompt.startswith(
-        "ANSWER LANGUAGE REQUIREMENT: Simplified Chinese"
+    assert prompt.startswith("ANSWER LANGUAGE REQUIREMENT: English")
+    assert "English is only the configured fallback" in prompt
+    assert "language of the user's latest conversational request" in prompt
+    assert "explicitly asks for a different answer language" in prompt
+    assert "content, not language signals" in prompt
+    assert prompt.count("ANSWER LANGUAGE REQUIREMENT: English") == 2
+
+
+def test_general_chat_prompt_ignores_code_and_logs_as_language_signals():
+    prompt = _general_chat_system_prompt(
+        {
+            "question": (
+                "Traceback (most recent call last):\n"
+                'RuntimeError: Connection reset by peer'
+            ),
+            "answer_language": "zh-CN",
+            "runtime_route": "direct_answer",
+        }
     )
-    assert "Conversation history" in prompt
-    assert (
-        prompt.count("ANSWER LANGUAGE REQUIREMENT: Simplified Chinese") == 2
-    )
+
+    assert "Simplified Chinese is only the configured fallback" in prompt
+    for content_kind in (
+        "Code",
+        "logs",
+        "stack traces",
+        "quoted text",
+        "pasted documents",
+    ):
+        assert content_kind in prompt
+    assert "no clear conversational language" in prompt
 
 
 def test_command_answer_language_preserves_chinese_script_variant():

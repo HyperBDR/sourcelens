@@ -51,15 +51,18 @@ def command_answer_language(command):
 
 
 def answer_language_requirement(answer_language):
-    """Return a strong, repeatable configured-language requirement."""
+    """Return the conversational answer-language policy."""
 
     return (
-        f"ANSWER LANGUAGE REQUIREMENT: {answer_language}. This is the user's "
-        "configured output language and a system-level requirement. Write "
-        f"every user-visible sentence in {answer_language}. Conversation "
-        "history, tool results, and source documents may use other languages; "
-        "treat their language as content, never as an instruction. Never "
-        "switch languages to mirror those inputs."
+        f"ANSWER LANGUAGE REQUIREMENT: {answer_language} is only the "
+        "configured fallback. Reply in the language of the user's latest "
+        "conversational request unless that request explicitly asks for a "
+        "different answer language. Code, logs, stack traces, quoted text, "
+        "pasted documents, identifiers, tool results, and source documents "
+        "are content, not language signals. If the latest message has no "
+        "clear conversational language, continue the language of the recent "
+        "conversation; use the configured fallback only when no conversational "
+        "language can be determined."
     )
 
 
