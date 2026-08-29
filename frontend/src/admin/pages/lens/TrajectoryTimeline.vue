@@ -83,6 +83,7 @@
           :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
         >
           <strong>{{ tooltip.kind }}</strong>
+          <span v-if="tooltip.assistant">{{ tooltip.assistant }}</span>
           <span>{{ tooltip.range }}</span>
           <span v-if="tooltip.duration">{{ tooltip.duration }}</span>
         </div>
@@ -481,7 +482,14 @@ function showTooltip(step, event) {
       4,
       Math.min(trackRect.height - 4, rect.top - trackRect.top)
     )
-    tooltip.value = { kind, range, duration, x, y }
+    tooltip.value = {
+      kind,
+      assistant: step.assistantName,
+      range,
+      duration,
+      x,
+      y
+    }
   }, TOOLTIP_DELAY_MS)
 }
 

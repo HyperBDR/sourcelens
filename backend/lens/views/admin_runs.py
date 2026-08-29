@@ -1127,13 +1127,13 @@ class AdminRunResumeView(APIView):
         return Response(_admin_run_row(refreshed))
 
 
-def _trace_event_response(event):
+def _trace_event_response(event, *, trace_run=None, display_sequence=None):
     """Serialize one immutable trajectory row."""
 
     return {
         "uuid": str(event.uuid),
         "event_id": str(event.event_id),
-        "sequence": event.sequence,
+        "sequence": display_sequence if display_sequence is not None else event.sequence,
         "attempt": event.attempt,
         "event_type": event.event_type,
         "timestamp": event.timestamp.isoformat(),
@@ -1144,13 +1144,22 @@ def _trace_event_response(event):
         "parent_call_id": event.parent_call_id or None,
         "payload": event.payload,
         "created_at": event.created_at.isoformat(),
+        "trace_run_uuid": str(trace_run.uuid) if trace_run else None,
+        "trace_run_role": "child" if trace_run and trace_run.parent_run_id else "parent",
+        "assistant_name": (
+            trace_run.session.assistant.name
+            if trace_run and trace_run.session and trace_run.session.assistant
+            else None
+        ),
     }
 
 
-def _run_trace_summary(run):
+def _run_trace_summary(run, trace_runs=None):
     """Return unfiltered timing, category, call, and usage aggregates."""
 
-    events = run.trace_events.all()
+    events = RunTraceEvent.objects.filter(
+        run__in=trace_runs or [run]
+    )
     aggregate = events.aggregate(
         event_count=Count("uuid"),
         first_timestamp=Min("timestamp"),
@@ -1244,40 +1253,77 @@ class AdminRunTrajectoryView(APIView):
             0,
             minimum=0,
         )
-        queryset = RunTraceEvent.objects.filter(
-            run=run,
-            sequence__gt=after_sequence,
+        trace_runs = [run]
+        trace_runs.extend(
+            run.delegated_runs.select_related(
+                "session__assistant",
+            ).all()
         )
+        trace_events = []
+        for trace_run in trace_runs:
+            trace_events.extend(
+                (event, trace_run)
+                for event in RunTraceEvent.objects.filter(run=trace_run)
+            )
+        trace_events.sort(key=lambda item: (item[0].timestamp, item[0].created_at))
+        trace_events = [
+            item for item in trace_events if item[0].sequence > after_sequence
+        ]
         event_type = (params.get("event_type") or "").strip()[:128]
         if event_type:
-            queryset = queryset.filter(event_type=event_type)
+            trace_events = [
+                item for item in trace_events if item[0].event_type == event_type
+            ]
         category = (params.get("category") or "").strip().lower()[:128]
         if category:
-            queryset = queryset.filter(event_type__startswith=f"{category}.")
+            trace_events = [
+                item
+                for item in trace_events
+                if item[0].event_type.startswith(f"{category}.")
+            ]
         call_id = (params.get("call_id") or "").strip()[:128]
         if call_id:
-            queryset = queryset.filter(Q(call_id=call_id) | Q(parent_call_id=call_id))
+            trace_events = [
+                item
+                for item in trace_events
+                if item[0].call_id == call_id or item[0].parent_call_id == call_id
+            ]
         keyword = (params.get("q") or "").strip()[:256]
         if keyword:
-            queryset = queryset.annotate(
-                payload_text=Cast("payload", output_field=TextField())
-            ).filter(
-                Q(event_type__icontains=keyword)
-                | Q(call_id__icontains=keyword)
-                | Q(parent_call_id__icontains=keyword)
-                | Q(payload_text__icontains=keyword)
-            )
-        total = queryset.count()
-        rows = list(queryset.order_by("sequence")[:page_size])
-        next_after_sequence = rows[-1].sequence if rows else None
+            trace_events = [
+                item
+                for item in trace_events
+                if keyword.lower() in " ".join(
+                    [
+                        item[0].event_type or "",
+                        item[0].call_id or "",
+                        item[0].parent_call_id or "",
+                        str(item[0].payload or ""),
+                    ]
+                ).lower()
+            ]
+        numbered_events = [
+            (index, event, trace_run)
+            for index, (event, trace_run) in enumerate(trace_events, start=1)
+        ]
+        total = len(numbered_events)
+        rows = numbered_events[:page_size]
+        next_after_sequence = rows[-1][1].sequence if rows else None
         return Response(
             {
-                "results": [_trace_event_response(event) for event in rows],
+                "results": [
+                    _trace_event_response(
+                        event,
+                        trace_run=trace_run,
+                        display_sequence=event.sequence,
+                    )
+                    for sequence, event, trace_run in rows
+                ],
                 "total": total,
                 "page_size": page_size,
                 "after_sequence": after_sequence,
                 "next_after_sequence": next_after_sequence,
                 "has_more": total > len(rows),
-                "summary": _run_trace_summary(run),
+                "summary": _run_trace_summary(run, trace_runs),
             }
         )

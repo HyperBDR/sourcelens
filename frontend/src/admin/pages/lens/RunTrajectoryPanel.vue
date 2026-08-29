@@ -114,6 +114,18 @@
         @range-change="timelineRange = $event"
         @select-event="onTimelineSelect"
       />
+      <div
+        v-if="assistantNames.length"
+        class="trajectory-assistant-legend"
+        data-testid="trajectory-assistant-legend"
+      >
+        <span class="trajectory-assistant-legend-label">Subagents</span>
+        <span
+          v-for="name in assistantNames"
+          :key="name"
+          class="assistant-tag"
+        >{{ name }}</span>
+      </div>
 
       <div
         v-if="rows.length"
@@ -156,6 +168,12 @@
                     <span class="kind-tag-label">{{
                       kindLabel(row.event)
                     }}</span>
+                  </span>
+                  <span
+                    v-if="row.event.trace_run_role === 'child'"
+                    class="assistant-tag"
+                  >
+                    {{ row.event.assistant_name || 'Subagent' }}
                   </span>
                 </td>
                 <td class="content-cell">
@@ -549,6 +567,15 @@ const groupedRows = computed(() => groupTrajectoryRows(rows.value))
 
 const timelineLanes = computed(() =>
   buildTimelineLanes(baseEvents.value, summary.value)
+)
+
+const assistantNames = computed(() =>
+  [...new Set(
+    baseEvents.value
+      .filter((event) => event.trace_run_role === 'child')
+      .map((event) => event.assistant_name)
+      .filter(Boolean)
+  )]
 )
 
 const timelineDomain = computed(() => {
@@ -965,6 +992,28 @@ onBeforeUnmount(() => {
   min-width: 0;
   color: var(--t-text-1);
   background: var(--t-bg-1);
+}
+
+.trajectory-assistant-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--sl-text-muted, #64748b);
+  font-size: 11px;
+}
+
+.assistant-tag {
+  display: inline-flex;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid var(--sl-border, #cbd5e1);
+  border-radius: 3px;
+  color: var(--sl-text, #334155);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :root[data-theme='dark'] .run-trajectory {
