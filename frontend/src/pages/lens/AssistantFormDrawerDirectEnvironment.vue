@@ -1299,16 +1299,13 @@ const requiresWorkspace = computed(() =>
   ['code_analysis', 'knowledge_qa'].includes(props.form.capability)
 )
 
-const requiresNodeSelection = computed(
-  () => requiresWorkspace.value
-)
+const requiresNodeSelection = computed(() => !!props.form.capability)
 
 watch(
   () => props.form.capability,
   (capability, previousCapability) => {
     if (capability === previousCapability) return
     if (!requiresWorkspace.value) props.form.selected_dirs = []
-    if (capability === 'general_chat') props.form.lensnode_uuid = ''
   }
 )
 

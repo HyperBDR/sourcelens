@@ -223,13 +223,13 @@ test('assistant exposes one execution strategy without a token budget picker', a
   assert.doesNotMatch(drawer, /token_budget_profile:/)
 })
 
-test('assistant node selection is limited to workspace capabilities', async () => {
+test('assistant node selection is available for every capability', async () => {
   const drawer = await source(
     'pages/lens/AssistantFormDrawerDirectEnvironment.vue'
   )
 
   assert.match(drawer, /const requiresNodeSelection = computed\(/)
-  assert.match(drawer, /requiresWorkspace\.value/)
+  assert.match(drawer, /!!props\.form\.capability/)
   assert.doesNotMatch(drawer, /isOrchestratorTask/)
   assert.match(drawer, /v-if="requiresNodeSelection"/)
   assert.match(drawer, /v-else-if="isGeneralChatTask"/)

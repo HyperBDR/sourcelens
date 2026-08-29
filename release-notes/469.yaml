@@ -1,0 +1,13 @@
+type: improvement
+audience: user
+en: >-
+  Improved assistant capability parity and Smart Collaboration observability:
+  document attachments now follow LensNode support, and delegated retries are
+  grouped as logical Run attempts with clearer progress details.
+zh-CN: >-
+  优化助手能力一致性与智能协作可观测性：文档附件现在依据 LensNode 能力开放，
+  委派重试会归并为逻辑 Run 尝试，并展示更清晰的进度详情。
+es: >-
+  Se mejoró la paridad de capacidades de los asistentes y la observabilidad de
+  la colaboración inteligente: los adjuntos siguen el soporte del LensNode y
+  los reintentos delegados se agrupan como intentos lógicos del Run.

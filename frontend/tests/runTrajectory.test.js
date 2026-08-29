@@ -5,6 +5,8 @@ import {
   buildTimelineLanes,
   buildTimelineGroups,
   buildTrajectoryRows,
+  childRunAttempts,
+  childRunProgress,
   clampInspectorWidth,
   eventCategory,
   groupTrajectoryRows,
@@ -12,6 +14,61 @@ import {
   sortTrajectoryEvents,
   timelineLane
 } from '../src/admin/pages/lens/runTrajectory.js'
+
+test('child Run progress excludes the coordinator and keeps task context', () => {
+  const progress = childRunProgress({
+    run_progress: [
+      {
+        run_uuid: 'parent',
+        role: 'parent',
+        assistant_name: 'Smart Collaboration',
+        status: 'done'
+      },
+      {
+        run_uuid: 'office',
+        role: 'child',
+        assistant_name: 'Office',
+        status: 'running',
+        task: 'Prepare the report',
+        duration_ms: 1200,
+        event_count: 8
+      }
+    ]
+  })
+
+  assert.deepEqual(progress, [
+    {
+      run_uuid: 'office',
+      role: 'child',
+      assistant_name: 'Office',
+      status: 'running',
+      task: 'Prepare the report',
+      duration_ms: 1200,
+      event_count: 8
+    }
+  ])
+  assert.deepEqual(childRunProgress({}), [])
+})
+
+test('child Run attempts preserve retry order and support legacy rows', () => {
+  const attempts = [
+    { run_uuid: 'attempt-1', attempt: 1, status: 'failed' },
+    { run_uuid: 'attempt-2', attempt: 2, status: 'done' }
+  ]
+
+  assert.deepEqual(childRunAttempts({ attempts }), attempts)
+  assert.deepEqual(
+    childRunAttempts({ run_uuid: 'legacy', status: 'running' }),
+    [
+      {
+        run_uuid: 'legacy',
+        status: 'running',
+        attempt: 1,
+        retry_of_run_uuid: null
+      }
+    ]
+  )
+})
 
 test('inspector resizing preserves the minimum ledger width', () => {
   assert.equal(clampInspectorWidth(1200, 700), 700)

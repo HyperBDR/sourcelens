@@ -837,7 +837,8 @@ class AdminRunListView(APIView):
         page = _admin_safe_int(params.get("page"), 1)
         page_size = _admin_safe_int(params.get("page_size"), 20, maximum=100)
         qs = (
-            Run.objects.select_related(
+            Run.objects.filter(parent_run__isnull=True)
+            .select_related(
                 "session__user",
                 "session__assistant",
                 "input_message",
@@ -1110,7 +1111,13 @@ class AdminRunResumeView(APIView):
         return Response(_admin_run_row(refreshed))
 
 
-def _trace_event_response(event, *, trace_run=None, display_sequence=None):
+def _trace_event_response(
+    event,
+    *,
+    trace_run=None,
+    root_run=None,
+    display_sequence=None,
+):
     """Serialize one immutable trajectory row."""
 
     return {
@@ -1131,7 +1138,9 @@ def _trace_event_response(event, *, trace_run=None, display_sequence=None):
         "created_at": event.created_at.isoformat(),
         "trace_run_uuid": str(trace_run.uuid) if trace_run else None,
         "trace_run_role": (
-            "child" if trace_run and trace_run.parent_run_id else "parent"
+            "child"
+            if trace_run and root_run and trace_run.id != root_run.id
+            else "parent"
         ),
         "assistant_name": (
             trace_run.session.assistant.name
@@ -1141,10 +1150,139 @@ def _trace_event_response(event, *, trace_run=None, display_sequence=None):
     }
 
 
-def _run_trace_summary(run, trace_runs=None):
+def _run_trace_progress(root_run, trace_runs, events):
+    """Return the parent and logical delegated tasks with their attempts."""
+
+    event_counts = {
+        row["run_id"]: row["count"]
+        for row in events.values("run_id").annotate(count=Count("uuid"))
+    }
+    runs_by_id = {trace_run.id: trace_run for trace_run in trace_runs}
+
+    def attempt_payload(trace_run, attempt):
+        assistant = (
+            trace_run.session.assistant if trace_run.session_id else None
+        )
+        input_message = trace_run.input_message
+        duration_end = trace_run.finished_at
+        if trace_run.started_at and duration_end is None:
+            duration_end = timezone.now()
+        retry_run = runs_by_id.get(trace_run.retry_of_run_id)
+        return {
+            "run_uuid": str(trace_run.uuid),
+            "attempt": attempt,
+            "retry_of_run_uuid": str(retry_run.uuid) if retry_run else None,
+            "assistant_name": assistant.name if assistant else None,
+            "status": trace_run.status,
+            "outcome": trace_run.outcome,
+            "started_at": (
+                trace_run.started_at.isoformat()
+                if trace_run.started_at
+                else None
+            ),
+            "finished_at": (
+                trace_run.finished_at.isoformat()
+                if trace_run.finished_at
+                else None
+            ),
+            "duration_ms": _duration_ms(trace_run.started_at, duration_end),
+            "event_count": event_counts.get(trace_run.id, 0),
+            "task": (
+                (input_message.content or "")[:500] if input_message else ""
+            ),
+        }
+
+    parent_attempt = attempt_payload(root_run, 1)
+    progress = [
+        {
+            key: value
+            for key, value in parent_attempt.items()
+            if key not in {"attempt", "retry_of_run_uuid"}
+        }
+    ]
+    progress[0]["role"] = "parent"
+
+    snapshot = root_run.execution.runtime_snapshot or {}
+    explicit_assistant_uuid = (
+        str(snapshot.get("routing_assistant_uuid") or "")
+        if "routing_question" in snapshot
+        else ""
+    )
+    groups = {}
+    child_runs = sorted(
+        (
+            trace_run
+            for trace_run in trace_runs
+            if trace_run.id != root_run.id
+        ),
+        key=lambda item: (item.created_at, item.pk),
+    )
+    for trace_run in child_runs:
+        assistant_uuid = str(trace_run.session.assistant.uuid)
+        if explicit_assistant_uuid == assistant_uuid:
+            group_key = ("explicit", assistant_uuid)
+        else:
+            chain_root = trace_run
+            seen = set()
+            while (
+                chain_root.retry_of_run_id in runs_by_id
+                and chain_root.id not in seen
+            ):
+                seen.add(chain_root.id)
+                chain_root = runs_by_id[chain_root.retry_of_run_id]
+            group_key = ("run", chain_root.id)
+        groups.setdefault(group_key, []).append(trace_run)
+
+    for attempts in groups.values():
+        attempt_rows = [
+            attempt_payload(trace_run, index)
+            for index, trace_run in enumerate(attempts, start=1)
+        ]
+        first = attempt_rows[0]
+        latest = attempt_rows[-1]
+        durations = [
+            item["duration_ms"]
+            for item in attempt_rows
+            if item["duration_ms"] is not None
+        ]
+        progress.append(
+            {
+                "run_uuid": first["run_uuid"],
+                "role": "child",
+                "assistant_name": latest["assistant_name"],
+                "status": latest["status"],
+                "outcome": latest["outcome"],
+                "started_at": first["started_at"],
+                "finished_at": latest["finished_at"],
+                "duration_ms": sum(durations) if durations else None,
+                "event_count": sum(
+                    item["event_count"] for item in attempt_rows
+                ),
+                "task": first["task"],
+                "attempt_count": len(attempt_rows),
+                "attempts": attempt_rows,
+            }
+        )
+    return progress
+
+
+def _run_trace_summary(
+    run,
+    trace_runs=None,
+    *,
+    progress_root=None,
+    progress_runs=None,
+):
     """Return unfiltered timing, category, call, and usage aggregates."""
 
     events = RunTraceEvent.objects.filter(run__in=trace_runs or [run])
+    progress_root = progress_root or run
+    progress_runs = progress_runs or trace_runs or [run]
+    progress_events = (
+        events
+        if progress_runs is trace_runs
+        else RunTraceEvent.objects.filter(run__in=progress_runs)
+    )
     aggregate = events.aggregate(
         event_count=Count("uuid"),
         first_timestamp=Min("timestamp"),
@@ -1168,7 +1306,7 @@ def _run_trace_summary(run, trace_runs=None):
         ),
     )
     if not aggregate["event_count"]:
-        return {
+        summary = {
             "event_count": 0,
             "first_timestamp": None,
             "last_timestamp": None,
@@ -1179,6 +1317,12 @@ def _run_trace_summary(run, trace_runs=None):
             "error_count": 0,
             "categories": {},
         }
+        summary["run_progress"] = _run_trace_progress(
+            progress_root,
+            progress_runs,
+            progress_events,
+        )
+        return summary
     categories = {}
     for row in events.values("event_type").annotate(count=Count("uuid")):
         category = row["event_type"].split(".", 1)[0]
@@ -1195,7 +1339,7 @@ def _run_trace_summary(run, trace_runs=None):
             pass
     first_timestamp = aggregate["first_timestamp"]
     last_timestamp = aggregate["last_timestamp"]
-    return {
+    summary = {
         "event_count": aggregate["event_count"],
         "first_timestamp": first_timestamp.isoformat(),
         "last_timestamp": last_timestamp.isoformat(),
@@ -1209,6 +1353,12 @@ def _run_trace_summary(run, trace_runs=None):
         "error_count": aggregate["error_count"],
         "categories": categories,
     }
+    summary["run_progress"] = _run_trace_progress(
+        progress_root,
+        progress_runs,
+        progress_events,
+    )
+    return summary
 
 
 class AdminRunTrajectoryView(APIView):
@@ -1221,7 +1371,12 @@ class AdminRunTrajectoryView(APIView):
         """Return filtered events and unfiltered run summary."""
 
         try:
-            run = Run.objects.get(uuid=run_uuid)
+            run = Run.objects.select_related(
+                "session__assistant",
+                "input_message",
+                "parent_run__session__assistant",
+                "parent_run__input_message",
+            ).get(uuid=run_uuid)
         except Run.DoesNotExist:
             return Response(
                 {"detail": "Run not found."},
@@ -1242,9 +1397,21 @@ class AdminRunTrajectoryView(APIView):
         trace_runs.extend(
             run.delegated_runs.select_related(
                 "session__assistant",
+                "input_message",
             ).all()
         )
         trace_runs_by_id = {trace_run.id: trace_run for trace_run in trace_runs}
+        progress_root = run.parent_run or run
+        if progress_root.id == run.id:
+            progress_runs = trace_runs
+        else:
+            progress_runs = [progress_root]
+            progress_runs.extend(
+                progress_root.delegated_runs.select_related(
+                    "session__assistant",
+                    "input_message",
+                ).all()
+            )
         ordered_events = RunTraceEvent.objects.filter(
             run__in=trace_runs,
         ).order_by("created_at", "run_id", "sequence", "uuid")
@@ -1296,6 +1463,7 @@ class AdminRunTrajectoryView(APIView):
                     _trace_event_response(
                         event,
                         trace_run=trace_run,
+                        root_run=run,
                         display_sequence=sequence,
                     )
                     for sequence, event, trace_run in rows
@@ -1305,6 +1473,11 @@ class AdminRunTrajectoryView(APIView):
                 "after_sequence": after_sequence,
                 "next_after_sequence": next_after_sequence,
                 "has_more": total > len(rows),
-                "summary": _run_trace_summary(run, trace_runs),
+                "summary": _run_trace_summary(
+                    run,
+                    trace_runs,
+                    progress_root=progress_root,
+                    progress_runs=progress_runs,
+                ),
             }
         )

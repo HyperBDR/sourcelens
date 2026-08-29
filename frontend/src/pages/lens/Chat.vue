@@ -2088,14 +2088,22 @@ const acceptsImages = computed(
     selectedAssistant.value?.can_process_images === true
 )
 
-const acceptsDocuments = computed(
-  () =>
-    canCompose.value &&
-    !isAnonymous.value &&
-    !!selectedAssistant.value &&
-    selectedAssistant.value.selected_task !== 'general_chat' &&
-    selectedAssistant.value.supports_document_attachments === true
-)
+const acceptsDocuments = computed(() => {
+  if (!canCompose.value || isAnonymous.value) return false
+  if (isSmartCollaborationConversation.value) {
+    const allowed = new Set(routingScopeAssistantUuids.value)
+    const participants = assistants.value.filter((assistant) =>
+      allowed.has(assistant.uuid)
+    )
+    return (
+      participants.length > 0 &&
+      participants.every(
+        (assistant) => assistant.supports_document_attachments === true
+      )
+    )
+  }
+  return selectedAssistant.value?.supports_document_attachments === true
+})
 
 const acceptsAttachments = computed(
   () => acceptsImages.value || acceptsDocuments.value

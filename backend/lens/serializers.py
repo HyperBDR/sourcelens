@@ -703,10 +703,6 @@ class AssistantSerializer(serializers.ModelSerializer):
             Assistant.Capability.CODE_ANALYSIS,
             Assistant.Capability.KNOWLEDGE_QA,
         }
-        allows_bound_lensnode = requires_workspace
-        if not allows_bound_lensnode:
-            attrs["lensnode"] = None
-            lensnode = None
         if requires_workspace and lensnode is None:
             raise serializers.ValidationError(
                 {"lensnode_uuid": "A LensNode is required."}

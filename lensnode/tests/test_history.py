@@ -4403,6 +4403,8 @@ def test_smart_collaboration_builds_remote_subagents(monkeypatch):
         command={
             "run_uuid": "00000000-0000-0000-0000-000000000022",
             "routing_mode": "smart",
+            "routing_assistant_uuid": "assistant-1",
+            "routing_assistant_explicit": True,
             "subagents": [
                 {
                     "uuid": "assistant-1",
@@ -4470,6 +4472,9 @@ def test_smart_collaboration_builds_remote_subagents(monkeypatch):
         subagents[0]["runnable"],
         agent_runtime.RemoteSubagentRunnable,
     )
+    assert subagents[0]["runnable"].delegation_group_key == (
+        "explicit:assistant-1"
+    )
 
 
 def test_remote_subagent_returns_cross_node_child_answer():
@@ -4503,6 +4508,7 @@ def test_remote_subagent_returns_cross_node_child_answer():
     runnable = agent_runtime.RemoteSubagentRunnable(
         assistant_uuid="assistant-1",
         parent_run_uuid="parent-run",
+        delegation_group_key="explicit-assistant-1",
         delegation_base_url="http://control/api/lens/lensnode/runs",
         token="token",
         http_client=Client(),
@@ -4517,6 +4523,9 @@ def test_remote_subagent_returns_cross_node_child_answer():
     assert result["messages"][0].content == "Remote findings"
     assert calls[0][1].endswith("/parent-run/delegations/")
     assert calls[0][2]["json"]["assistant_uuid"] == "assistant-1"
+    assert calls[0][2]["json"]["delegation_group_key"] == (
+        "explicit-assistant-1"
+    )
     assert calls[1][1].endswith(
         "/parent-run/delegations/child-run/"
     )

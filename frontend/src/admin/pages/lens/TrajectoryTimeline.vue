@@ -563,7 +563,7 @@ function durationText(value) {
 
 .plot {
   display: grid;
-  grid-template-columns: 148px minmax(0, 1fr);
+  grid-template-columns: 188px minmax(0, 1fr);
   height: var(--timeline-height, 50px);
   overflow: hidden;
   background: var(--t-bg-2);
@@ -581,7 +581,7 @@ function durationText(value) {
 
 .lane-group-label {
   display: grid;
-  grid-template-columns: minmax(0, 92px) 44px;
+  grid-template-columns: minmax(0, 132px) 44px;
   grid-template-rows: repeat(3, 14px);
   height: 42px;
   padding: 0 4px;
@@ -638,7 +638,7 @@ function durationText(value) {
   box-sizing: border-box;
   width: 100%;
   height: 18px;
-  padding: 0 4px;
+  padding: 0 4px 0 192px;
   border-bottom: 1px solid var(--t-border-l2);
   color: var(--t-text-4);
   font:

@@ -29,6 +29,7 @@ class RemoteSubagentRunnable(Runnable):
         delegation_base_url,
         token,
         http_client,
+        delegation_group_key="",
         cancel_event=None,
         on_activity=None,
         poll_interval_s=0.3,
@@ -37,6 +38,7 @@ class RemoteSubagentRunnable(Runnable):
     ):
         self.assistant_uuid = str(assistant_uuid)
         self.parent_run_uuid = str(parent_run_uuid)
+        self.delegation_group_key = str(delegation_group_key or "")
         self.delegation_base_url = str(delegation_base_url).rstrip("/")
         self.token = token
         self.http_client = http_client
@@ -52,6 +54,7 @@ class RemoteSubagentRunnable(Runnable):
         del config, kwargs
         question = self._question(input)
         delegation_key = str(uuid.uuid4())
+        delegation_group_key = self.delegation_group_key or delegation_key
         url = (
             f"{self.delegation_base_url}/{self.parent_run_uuid}/"
             "delegations/"
@@ -63,6 +66,7 @@ class RemoteSubagentRunnable(Runnable):
                 "assistant_uuid": self.assistant_uuid,
                 "question": question,
                 "delegation_key": delegation_key,
+                "delegation_group_key": delegation_group_key,
             },
         )
         response.raise_for_status()
