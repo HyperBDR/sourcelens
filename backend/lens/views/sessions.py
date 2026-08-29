@@ -320,12 +320,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         if uploaded is None:
             raise ValidationError("No file provided.")
         is_document = is_document_upload(uploaded)
-        if is_document and session.assistant.capability == "general_chat":
-            raise ValidationError(
-                "This assistant does not accept document attachments."
-            )
-        if is_document and not supports_document_attachments(
-            session.assistant.lensnode
+        if (
+            is_document
+            and session.routing_mode != Session.RoutingMode.SMART
+            and not supports_document_attachments(session.assistant.lensnode)
         ):
             raise ValidationError(
                 "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"

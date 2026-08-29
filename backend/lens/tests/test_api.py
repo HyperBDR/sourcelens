@@ -1849,6 +1849,7 @@ class LensApiTests(TestCase):
         assistant = Assistant.objects.get(slug="skill-runner")
         self.assertEqual(assistant.selected_task, "general_chat")
         self.assertEqual(assistant.selected_dirs, [])
+        self.assertEqual(assistant.lensnode_id, self.lensnode.id)
         self.assertEqual(assistant.skill_bindings.count(), 1)
 
     def test_general_chat_create_requires_enabled_skill(self):

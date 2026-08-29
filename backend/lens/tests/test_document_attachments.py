@@ -1319,7 +1319,7 @@ class DocumentAttachmentTests(TestCase):
             storages["document_attachments"].exists(metadata["storage_name"])
         )
 
-    def test_general_chat_rejects_document_upload(self):
+    def test_general_chat_accepts_document_upload(self):
         self.assistant.selected_task = "general_chat"
         self.assistant.save(update_fields=["selected_task"])
         self.client.force_authenticate(self.user)
@@ -1330,9 +1330,10 @@ class DocumentAttachmentTests(TestCase):
             format="multipart",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data["kind"], "document")
 
-    def test_general_chat_rejects_previously_uploaded_document(self):
+    def test_general_chat_accepts_previously_uploaded_document(self):
         metadata = store_document_attachment(
             self.session,
             self.user,
@@ -1352,9 +1353,34 @@ class DocumentAttachmentTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(Run.objects.count(), 0)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(Run.objects.count(), 1)
         self.assertEqual(
             get_document_attachment(metadata["uuid"])["run_uuid"],
-            "",
+            str(response.data["uuid"]),
         )
+
+    def test_general_chat_rejects_document_without_lensnode_capability(self):
+        self.assistant.selected_task = "general_chat"
+        self.assistant.save(update_fields=["selected_task"])
+        self.lensnode.labels = {}
+        self.lensnode.save(update_fields=["labels"])
+        metadata = store_document_attachment(
+            self.session,
+            self.user,
+            _pdf_upload(),
+        )
+        self.client.force_authenticate(self.user)
+
+        response = self.client.post(
+            f"/api/lens/sessions/{self.session.uuid}/runs/",
+            {
+                "question": "Analyze it",
+                "enqueue": False,
+                "attachment_uuids": [metadata["uuid"]],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Run.objects.count(), 0)

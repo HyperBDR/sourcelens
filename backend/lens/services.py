@@ -1190,8 +1190,6 @@ def create_execution_run(
         for item in selected_context
         if item["kind"] == "document"
     ]
-    if document_uuids and run.execution.task == "general_chat":
-        raise AttachmentError("ATTACHMENT_UNSUPPORTED_TYPE")
     if document_uuids and not supports_document_attachments(run.lensnode):
         raise AttachmentError("DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE")
     documents = bind_document_attachments_to_run(
