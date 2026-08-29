@@ -206,6 +206,61 @@ export function createRuntimeState() {
   }
 }
 
+export function buildAssistantActivityGroups({
+  delegations = [],
+  activities = [],
+  fallbackAssistantName = ''
+} = {}) {
+  const groups = new Map()
+
+  function ensureGroup(assistantName) {
+    const name = String(assistantName || fallbackAssistantName).trim()
+    const key = name || 'default'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        assistantName: name,
+        tasks: [],
+        items: []
+      })
+    }
+    return groups.get(key)
+  }
+
+  for (const delegation of delegations || []) {
+    const group = ensureGroup(delegation?.assistantName)
+    const task = String(delegation?.delegatedTask || '').trim()
+    if (task && !group.tasks.includes(task)) group.tasks.push(task)
+  }
+
+  for (const activity of activities || []) {
+    const group = ensureGroup(activity?.assistantName)
+    const task = String(activity?.delegatedTask || '').trim()
+    if (task && !group.tasks.includes(task)) group.tasks.push(task)
+    group.items.push(activity)
+  }
+
+  return [...groups.values()].map((group) => {
+    const summaries = new Map()
+    group.items.forEach((item, index) => {
+      const kind = String(item?.kind || 'usingCapability')
+      const current = summaries.get(kind)
+      summaries.set(kind, {
+        ...(current || item),
+        kind,
+        count: Number(current?.count || 0) + Number(item?.count || 1),
+        lastIndex: index
+      })
+    })
+    const summaryItems = [...summaries.values()]
+      .sort((left, right) => right.lastIndex - left.lastIndex)
+      .slice(0, 3)
+      .sort((left, right) => left.lastIndex - right.lastIndex)
+      .map(({ kind, count }) => ({ kind, count }))
+    return { ...group, summaryItems }
+  })
+}
+
 function trackDelegation(state, event) {
   const assistantName = String(
     event?.assistant_name || event?.payload?.assistant_name || ''

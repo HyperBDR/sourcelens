@@ -2026,7 +2026,7 @@ def test_delivered_artifact_completes_after_token_budget_wrapup():
     assert termination_detail == {}
 
 
-def test_knowledge_qa_skips_general_chat_execution_gates(
+def test_knowledge_qa_skips_execution_gates_for_direct_runs(
     monkeypatch,
     tmp_path,
 ):
@@ -2156,6 +2156,88 @@ def test_knowledge_qa_skips_general_chat_execution_gates(
         "checkpoint",
         ("ready", "knowledge_qa"),
     ]
+
+
+def test_delegated_knowledge_qa_enables_execution_gates(
+    monkeypatch,
+    tmp_path,
+):
+    model_options = []
+
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 1}
+
+        def __init__(self, **options):
+            model_options.append(options)
+
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            root=tmp_path,
+            context_skill_contents=[],
+            mcp_configs=[],
+            skill_paths=[],
+            mcp_config_path=tmp_path / "mcp.json",
+        ),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_: object(),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_run_agent_with_turn_limit",
+        lambda *_args, **_kwargs: ("answer", False, None),
+    )
+    config = SimpleNamespace(
+        workspace_path=str(tmp_path),
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+        summary_trigger_tokens=0,
+    )
+
+    agent_runtime.LensDeepAgentRuntime(config)._answer_sync({
+        "run_uuid": "child",
+        "parent_run_uuid": "parent",
+        "task": "knowledge_qa",
+        "question": "Question",
+        "agent_model_ref": "model-ref",
+        "token_budget": {"max_tokens": 100, "final_reserve_tokens": 10},
+    })
+
+    assert model_options[0]["general_chat_execution_gates"] is True
 
 
 def test_unverified_answer_distinguishes_unavailable_from_execution_failure():
@@ -4438,6 +4520,46 @@ def test_remote_subagent_returns_cross_node_child_answer():
     assert calls[1][1].endswith(
         "/parent-run/delegations/child-run/"
     )
+
+
+def test_remote_subagent_refreshes_parent_activity_while_waiting():
+    activity = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        def post(self, *_args, **_kwargs):
+            return Response({"run_uuid": "child-run", "status": "queued"})
+
+        def get(self, *_args, **_kwargs):
+            return Response({
+                "run_uuid": "child-run",
+                "status": "done",
+                "answer": "done",
+            })
+
+    runnable = agent_runtime.RemoteSubagentRunnable(
+        assistant_uuid="assistant-1",
+        parent_run_uuid="parent-run",
+        delegation_base_url="http://control/api/lens/lensnode/runs",
+        token="token",
+        http_client=Client(),
+        on_activity=lambda: activity.append(True),
+        poll_interval_s=0.05,
+        push_wait_s=0.05,
+    )
+
+    runnable.invoke({"messages": [HumanMessage(content="Inspect logs")]})
+
+    assert activity
 
 
 def test_remote_subagent_uses_websocket_completion_push():

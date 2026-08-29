@@ -1401,6 +1401,7 @@
                 <RunTrajectoryPanel
                   v-show="activeExecutionView === 'trace'"
                   :run-uuid="selectedUuid"
+                  :assistant-name="detail.assistant_name"
                   :run-status="detail.status"
                   :active="
                     activeDetailTab === 'execution' &&
@@ -2224,7 +2225,7 @@ function scheduleDetailRefresh() {
   }, 2000)
 }
 
-onMounted(async () => {
+onMounted(() => {
   filters.value.user_id = String(route.query.user_id || '')
   filters.value.group_id = String(route.query.group_id || '')
   filters.value.username = String(route.query.username || '')
@@ -2232,12 +2233,16 @@ onMounted(async () => {
   filters.value.lensnode = String(route.query.lensnode || '')
   filters.value.model = String(route.query.model || '')
   advancedFiltersOpen.value = advancedFilterCount.value > 0
-  try {
-    assistants.value = await listAssistants()
-  } catch {
-    assistants.value = []
-  }
-  fetchRuns()
+  void Promise.all([
+    listAssistants()
+      .then((items) => {
+        assistants.value = items
+      })
+      .catch(() => {
+        assistants.value = []
+      }),
+    fetchRuns()
+  ])
 })
 
 watch(detailVisible, (visible) => {

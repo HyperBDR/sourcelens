@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   activitiesForNode,
   applyRuntimeEvent,
+  buildAssistantActivityGroups,
   buildWorkflowTree,
   calculateRunElapsedSeconds,
   createConversationAutoScroller,
@@ -129,6 +130,57 @@ test('exposes delegated tasks as progress when no child tool activity exists', (
 
   assert.equal(progress.kind, 'activity')
   assert.deepEqual(progress.items, [])
+})
+
+test('builds compact assistant activity groups without truncating tasks', () => {
+  const delegatedTask = 'Inspect the complete company knowledge base. '.repeat(
+    60
+  )
+  const groups = buildAssistantActivityGroups({
+    delegations: [{ assistantName: 'Company-Knowledge-Base', delegatedTask }],
+    activities: [
+      {
+        id: 1,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'readingSources',
+        count: 2
+      },
+      {
+        id: 2,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'searchingSources',
+        count: 1
+      },
+      {
+        id: 3,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'queryingData',
+        count: 3
+      },
+      {
+        id: 4,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'preparingOutput',
+        count: 1
+      },
+      {
+        id: 5,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'readingSources',
+        count: 4
+      }
+    ]
+  })
+
+  assert.equal(groups[0].tasks[0], delegatedTask.trim())
+  assert.deepEqual(
+    groups[0].summaryItems.map((item) => [item.kind, item.count]),
+    [
+      ['queryingData', 3],
+      ['preparingOutput', 1],
+      ['readingSources', 6]
+    ]
+  )
 })
 
 test('flushes pending stream text synchronously before completion', () => {

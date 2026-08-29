@@ -61,6 +61,7 @@ export function buildTimelineLanes(events, summary) {
       left,
       width: Math.min(width, 100 - left),
       subagent,
+      assistantName: event.assistant_name || null,
       startMs,
       durationMs: endMs - startMs,
       seqs: seqs.length > 0 ? seqs : [event.sequence]
@@ -72,7 +73,10 @@ export function buildTimelineLanes(events, summary) {
     if (!['model', 'tool', 'subtool'].includes(category)) continue
     const times = group.map(eventTime).filter(Number.isFinite)
     if (!times.length) continue
-    const subagent = group.some((event) => isSubagentEvent(category, event))
+    const subagent = group.some(
+      (event) =>
+        event.trace_run_role === 'child' || isSubagentEvent(category, event)
+    )
     pushStep(
       category,
       group[0],
@@ -98,6 +102,33 @@ export function buildTimelineLanes(events, summary) {
     { key: 'model', steps: stepsByLane.model },
     { key: 'tools', steps: stepsByLane.tools }
   ]
+}
+
+export function buildTimelineGroups(
+  events,
+  summary,
+  parentLabel = 'Parent Run'
+) {
+  const groups = new Map()
+  for (const event of events) {
+    const isChild = event.trace_run_role === 'child'
+    const label = isChild ? event.assistant_name || 'Subagent' : parentLabel
+    const key = isChild ? `child:${label}` : 'parent'
+    const group = groups.get(key) || { key, label, events: [] }
+    group.events.push(event)
+    groups.set(key, group)
+  }
+
+  const laneLabels = { input: 'Input', model: 'Model', tools: 'Tools' }
+  return [...groups.values()].flatMap((group) =>
+    buildTimelineLanes(group.events, summary).map((lane) => ({
+      ...lane,
+      key: `${group.key}:${lane.key}`,
+      groupKey: group.key,
+      groupLabel: group.label,
+      label: laneLabels[lane.key]
+    }))
+  )
 }
 
 function eventDepth(event, parentByCall) {

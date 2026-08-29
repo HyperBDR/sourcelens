@@ -276,11 +276,18 @@ test('shows the current delegated assistant above Smart Collaboration progress',
 
 test('shows each delegated task inside its assistant activity group', async () => {
   const source = await chatSource()
+  const component = await readFile(
+    new URL(
+      '../src/pages/lens/components/AssistantActivityGroups.vue',
+      import.meta.url
+    ),
+    'utf8'
+  )
 
-  assert.match(source, /class="runtime-activity-task"/)
-  assert.match(source, /group\.tasks/)
+  assert.match(source, /<AssistantActivityGroups/)
+  assert.match(component, /group\.tasks/)
+  assert.match(component, /class="runtime-assistant-full-task"/)
   assert.doesNotMatch(source, /lens\.chat\.runtime\.delegatedTask/)
-  assert.match(source, /activity\?\.delegatedTask/)
 })
 
 test('keeps browser scroll anchoring enabled while activities grow', async () => {
@@ -415,5 +422,28 @@ test('keeps completed agent activity visible until the user collapses it', async
   assert.match(
     source.slice(completedDetails, completedProgress + 240),
     /<details[\s\S]*?open[\s\S]*?class="runtime-progress-card"/
+  )
+})
+
+test('renders delegated assistants as bounded progressive-disclosure cards', async () => {
+  const source = await chatSource()
+  const component = await readFile(
+    new URL(
+      '../src/pages/lens/components/AssistantActivityGroups.vue',
+      import.meta.url
+    ),
+    'utf8'
+  )
+
+  assert.match(source, /<AssistantActivityGroups/)
+  assert.match(source, /:live="true"/)
+  assert.match(source, /:live="false"/)
+  assert.match(component, /<details[\s\S]*?:open="live"/)
+  assert.match(component, /class="runtime-assistant-task-summary"/)
+  assert.match(component, /class="runtime-assistant-full-task"/)
+  assert.match(component, /group\.summaryItems/)
+  assert.match(
+    component,
+    /\.runtime-assistant-task-summary \{[\s\S]*?-webkit-line-clamp: 2;/
   )
 })

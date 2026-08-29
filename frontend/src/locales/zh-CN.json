@@ -383,6 +383,9 @@
         "activityProgress": "已记录 {count} 项活动",
         "activityCompleted": "已完成 {count} 项活动",
         "currentAssistant": "当前助手：{name}",
+        "running": "执行中",
+        "completed": "已完成",
+        "fullTask": "查看完整任务",
         "documentProgress": {
           "downloading": "正在下载文档 {current}/{total}",
           "extractingText": "正在提取文档文本 {current}/{total}",
