@@ -383,6 +383,9 @@
         "activityProgress": "Recorded {count} activities",
         "activityCompleted": "Completed {count} activities",
         "currentAssistant": "Current assistant: {name}",
+        "running": "Running",
+        "completed": "Completed",
+        "fullTask": "View full task",
         "documentProgress": {
           "downloading": "Downloading document {current}/{total}",
           "extractingText": "Extracting document text {current}/{total}",

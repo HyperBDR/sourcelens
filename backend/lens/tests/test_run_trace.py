@@ -304,12 +304,82 @@ class AdminRunTrajectoryAPITests(RunTraceFixtureMixin, TestCase):
             900,
         )
 
+    def test_admin_pages_parent_and_child_events_with_one_global_cursor(self):
+        child_assistant = Assistant.objects.create(
+            name="Delegated trace assistant",
+            slug=f"delegated-trace-{uuid.uuid4()}",
+            lensnode=self.node,
+            selected_task="general_chat",
+        )
+        child_session = Session.objects.create(
+            assistant=child_assistant,
+            user=self.user,
+        )
+        child_run = create_execution_run(
+            child_session,
+            "Inspect the delegated run",
+            enqueue=False,
+            parent_run=self.run,
+        )
+        started_at = timezone.now() - timedelta(seconds=3)
+        append_run_trace_events(
+            self.run.uuid,
+            self.node.uuid,
+            [
+                self.trace_event(
+                    sequence=1,
+                    timestamp=started_at.isoformat(),
+                ),
+                self.trace_event(
+                    sequence=2,
+                    timestamp=(started_at + timedelta(seconds=2)).isoformat(),
+                ),
+            ],
+        )
+        append_run_trace_events(
+            child_run.uuid,
+            self.node.uuid,
+            [
+                self.trace_event(
+                    sequence=1,
+                    timestamp=(started_at + timedelta(seconds=1)).isoformat(),
+                )
+            ],
+        )
+
+        first_page = self.client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/",
+            {"page_size": 2},
+        )
+        second_page = self.client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/",
+            {
+                "page_size": 2,
+                "after_sequence": first_page.data["next_after_sequence"],
+            },
+        )
+
+        self.assertEqual(first_page.status_code, 200, first_page.data)
+        self.assertEqual(
+            [event["sequence"] for event in first_page.data["results"]],
+            [1, 2],
+        )
+        self.assertTrue(first_page.data["has_more"])
+        self.assertEqual(second_page.status_code, 200, second_page.data)
+        self.assertEqual(
+            [event["sequence"] for event in second_page.data["results"]],
+            [3],
+        )
+        self.assertEqual(
+            second_page.data["results"][0]["trace_run_role"],
+            "child",
+        )
+        self.assertFalse(second_page.data["has_more"])
+
     def test_non_admin_cannot_read_trajectory(self):
         client = APIClient()
         client.force_authenticate(self.user)
 
-        response = client.get(
-            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/"
-        )
+        response = client.get(f"/api/lens/admin/runs/{self.run.uuid}/trajectory/")
 
         self.assertEqual(response.status_code, 403)
