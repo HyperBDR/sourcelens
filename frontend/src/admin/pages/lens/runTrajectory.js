@@ -104,6 +104,33 @@ export function buildTimelineLanes(events, summary) {
   ]
 }
 
+export function buildTimelineGroups(
+  events,
+  summary,
+  parentLabel = 'Parent Run'
+) {
+  const groups = new Map()
+  for (const event of events) {
+    const isChild = event.trace_run_role === 'child'
+    const label = isChild ? event.assistant_name || 'Subagent' : parentLabel
+    const key = isChild ? `child:${label}` : 'parent'
+    const group = groups.get(key) || { key, label, events: [] }
+    group.events.push(event)
+    groups.set(key, group)
+  }
+
+  const laneLabels = { input: 'Input', model: 'Model', tools: 'Tools' }
+  return [...groups.values()].flatMap((group) =>
+    buildTimelineLanes(group.events, summary).map((lane) => ({
+      ...lane,
+      key: `${group.key}:${lane.key}`,
+      groupKey: group.key,
+      groupLabel: group.label,
+      label: laneLabels[lane.key]
+    }))
+  )
+}
+
 function eventDepth(event, parentByCall) {
   let parent = event.parent_call_id
   let depth = 0

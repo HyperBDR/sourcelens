@@ -1401,6 +1401,7 @@
                 <RunTrajectoryPanel
                   v-show="activeExecutionView === 'trace'"
                   :run-uuid="selectedUuid"
+                  :assistant-name="detail.assistant_name"
                   :run-status="detail.status"
                   :active="
                     activeDetailTab === 'execution' &&

@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildTimelineLanes,
+  buildTimelineGroups,
   buildTrajectoryRows,
   clampInspectorWidth,
   eventCategory,
@@ -228,6 +229,85 @@ test('timeline lanes fill per-call duration and keep events on lanes', () => {
   assert.equal(toolStep.subagent, true)
   assert.equal(toolStep.startMs, 5000)
   assert.equal(toolStep.durationMs, 3000)
+})
+
+test('timeline groups keep input, model and tools together per assistant', () => {
+  const summary = {
+    first_timestamp: new Date(0).toISOString(),
+    last_timestamp: new Date(1000).toISOString()
+  }
+  const events = ['parent', 'Office', 'ttt'].flatMap((assistant, index) => [
+    {
+      event_id: `${assistant}-input`,
+      event_type: 'request.started',
+      timestamp: new Date(index * 100).toISOString(),
+      ...(assistant === 'parent'
+        ? {}
+        : { trace_run_role: 'child', assistant_name: assistant })
+    },
+    {
+      event_id: `${assistant}-model`,
+      event_type: 'model.completed',
+      call_id: `${assistant}-model-call`,
+      timestamp: new Date(index * 100 + 10).toISOString(),
+      ...(assistant === 'parent'
+        ? {}
+        : { trace_run_role: 'child', assistant_name: assistant })
+    },
+    {
+      event_id: `${assistant}-tool`,
+      event_type: 'tool.completed',
+      call_id: `${assistant}-tool-call`,
+      timestamp: new Date(index * 100 + 20).toISOString(),
+      ...(assistant === 'parent'
+        ? {}
+        : { trace_run_role: 'child', assistant_name: assistant })
+    }
+  ])
+
+  const groups = buildTimelineGroups(events, summary, 'Smart Collaboration')
+
+  assert.deepEqual(
+    groups.map((lane) => [lane.groupLabel, lane.label]),
+    [
+      ['Smart Collaboration', 'Input'],
+      ['Smart Collaboration', 'Model'],
+      ['Smart Collaboration', 'Tools'],
+      ['Office', 'Input'],
+      ['Office', 'Model'],
+      ['Office', 'Tools'],
+      ['ttt', 'Input'],
+      ['ttt', 'Model'],
+      ['ttt', 'Tools']
+    ]
+  )
+})
+
+test('timeline groups keep a direct assistant run as one three-lane group', () => {
+  const summary = {
+    first_timestamp: new Date(0).toISOString(),
+    last_timestamp: new Date(1000).toISOString()
+  }
+  const groups = buildTimelineGroups(
+    [
+      {
+        event_id: 'direct-model',
+        event_type: 'model.completed',
+        timestamp: new Date(500).toISOString()
+      }
+    ],
+    summary,
+    'AGIOne-AI-Assistant'
+  )
+
+  assert.deepEqual(
+    groups.map((lane) => [lane.groupLabel, lane.label]),
+    [
+      ['AGIOne-AI-Assistant', 'Input'],
+      ['AGIOne-AI-Assistant', 'Model'],
+      ['AGIOne-AI-Assistant', 'Tools']
+    ]
+  )
 })
 
 test('timeline lanes treat single events as minimal markers', () => {

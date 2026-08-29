@@ -115,19 +115,6 @@
         @select-event="onTimelineSelect"
       />
       <div
-        v-if="assistantNames.length"
-        class="trajectory-assistant-legend"
-        data-testid="trajectory-assistant-legend"
-      >
-        <span class="trajectory-assistant-legend-label">Subagents</span>
-        <span
-          v-for="name in assistantNames"
-          :key="name"
-          class="assistant-tag"
-        >{{ name }}</span>
-      </div>
-
-      <div
         v-if="rows.length"
         data-testid="trajectory-ledger"
         class="trajectory-split"
@@ -450,7 +437,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import JsonTree from '@/components/ui/JsonTree.vue'
 import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import {
-  buildTimelineLanes,
+  buildTimelineGroups,
   buildTrajectoryRows,
   clampInspectorWidth,
   eventCategory,
@@ -459,6 +446,7 @@ import {
 
 const props = defineProps({
   runUuid: { type: String, default: '' },
+  assistantName: { type: String, default: '' },
   active: { type: Boolean, default: false },
   runStatus: { type: String, default: '' }
 })
@@ -566,16 +554,11 @@ const rows = computed(() =>
 const groupedRows = computed(() => groupTrajectoryRows(rows.value))
 
 const timelineLanes = computed(() =>
-  buildTimelineLanes(baseEvents.value, summary.value)
-)
-
-const assistantNames = computed(() =>
-  [...new Set(
-    baseEvents.value
-      .filter((event) => event.trace_run_role === 'child')
-      .map((event) => event.assistant_name)
-      .filter(Boolean)
-  )]
+  buildTimelineGroups(
+    baseEvents.value,
+    summary.value,
+    props.assistantName || 'Parent Run'
+  )
 )
 
 const timelineDomain = computed(() => {
@@ -992,16 +975,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   color: var(--t-text-1);
   background: var(--t-bg-1);
-}
-
-.trajectory-assistant-legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  color: var(--sl-text-muted, #64748b);
-  font-size: 11px;
 }
 
 .assistant-tag {
