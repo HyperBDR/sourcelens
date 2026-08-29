@@ -2191,6 +2191,10 @@ class LensApiTests(TestCase):
 
         self.assertEqual(run_response.status_code, 201)
         self.assertEqual(run_response.data["execution"]["task"], "general_chat")
+        run = Run.objects.get(uuid=run_response.data["uuid"])
+        self.assertFalse(
+            run.execution.runtime_snapshot["routing_assistant_explicit"]
+        )
 
     def test_smart_session_normalizes_legacy_coordinator_capability(self):
         """Existing Smart sessions use General Chat after capability removal."""
@@ -2271,6 +2275,9 @@ class LensApiTests(TestCase):
         self.assertEqual(
             run.execution.runtime_snapshot["allowed_assistant_uuids"],
             [str(self.assistant.uuid)],
+        )
+        self.assertTrue(
+            run.execution.runtime_snapshot["routing_assistant_explicit"]
         )
         routing_description = run.execution.runtime_snapshot["subagents"][0][
             "routing_description"
@@ -2772,6 +2779,7 @@ class LensApiTests(TestCase):
             "assistant_uuid": str(remote.uuid),
             "question": "Inspect production logs",
             "delegation_key": "call-remote-1",
+            "delegation_group_key": "explicit-remote-assistant",
         }
 
         response = client.post(
@@ -2794,6 +2802,27 @@ class LensApiTests(TestCase):
         self.assertEqual(child.parent_run, parent)
         self.assertEqual(child.lensnode, remote_node)
         self.assertEqual(parent.delegated_runs.count(), 1)
+
+        child.status = Run.Status.FAILED
+        child.save(update_fields=["status"])
+        retry_payload = {
+            **payload,
+            "question": "Finish the production log review",
+            "delegation_key": "call-remote-2",
+        }
+        retry_response = client.post(
+            url,
+            retry_payload,
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(retry_response.status_code, 202, retry_response.data)
+        retry = Run.objects.get(uuid=retry_response.data["run_uuid"])
+        self.assertEqual(retry.parent_run, parent)
+        self.assertEqual(retry.retry_of_run, child)
+        self.assertEqual(retry.session, child.session)
+        self.assertEqual(parent.delegated_runs.count(), 2)
 
     def test_lensnode_ai_gateway_supports_tool_calling_payload(self):
         token = "dev-lensnode-token"
@@ -3804,6 +3833,16 @@ class LensApiTests(TestCase):
             session=session,
             question="Retry checkout investigation",
             retry_of_run=failed,
+            enqueue=False,
+        )
+        delegated_session = Session.objects.create(
+            assistant=self.assistant,
+            user=self.user,
+        )
+        create_execution_run(
+            session=delegated_session,
+            question="Delegated checkout investigation",
+            parent_run=failed,
             enqueue=False,
         )
 

@@ -1182,6 +1182,15 @@ class LensDeepAgentRuntime:
             runnable = RemoteSubagentRunnable(
                 assistant_uuid=assistant_uuid,
                 parent_run_uuid=state.run_uuid,
+                delegation_group_key=(
+                    f"explicit:{assistant_uuid}"
+                    if state.command.get("routing_assistant_explicit")
+                    and str(
+                        state.command.get("routing_assistant_uuid") or ""
+                    )
+                    == assistant_uuid
+                    else ""
+                ),
                 delegation_base_url=getattr(
                     self.config,
                     "delegation_base_url",

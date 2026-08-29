@@ -107,7 +107,8 @@ export function buildTimelineLanes(events, summary) {
 export function buildTimelineGroups(
   events,
   summary,
-  parentLabel = 'Parent Run'
+  parentLabel = 'Parent Run',
+  laneLabels = { input: 'Input', model: 'Model', tools: 'Tools' }
 ) {
   const groups = new Map()
   for (const event of events) {
@@ -119,7 +120,6 @@ export function buildTimelineGroups(
     groups.set(key, group)
   }
 
-  const laneLabels = { input: 'Input', model: 'Model', tools: 'Tools' }
   return [...groups.values()].flatMap((group) =>
     buildTimelineLanes(group.events, summary).map((lane) => ({
       ...lane,
@@ -129,6 +129,19 @@ export function buildTimelineGroups(
       label: laneLabels[lane.key]
     }))
   )
+}
+
+export function childRunProgress(summary) {
+  if (!Array.isArray(summary?.run_progress)) return []
+  return summary.run_progress.filter((run) => run?.role === 'child')
+}
+
+export function childRunAttempts(run) {
+  if (Array.isArray(run?.attempts) && run.attempts.length) {
+    return run.attempts
+  }
+  if (!run?.run_uuid) return []
+  return [{ ...run, attempt: 1, retry_of_run_uuid: null }]
 }
 
 function eventDepth(event, parentByCall) {

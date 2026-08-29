@@ -1165,6 +1165,7 @@ def create_execution_run(
         run,
         answer_language=answer_language,
         routing_assistant_uuids=routing_assistant_uuids,
+        routing_assistant_explicit=(routing_assistant_uuid is not None),
     )
     if routing_assistant_uuid is not None:
         _set_routing_execution_question(run, routing_assistant_uuid)
@@ -1318,8 +1319,9 @@ def create_delegated_run(
     assistant_uuid,
     question,
     delegation_key="",
+    delegation_group_key="",
 ):
-    """Create a child Run on the selected assistant's execution node."""
+    """Create one attempt in a logical delegated task."""
 
     parent_run = Run.objects.select_for_update().select_related(
         "session",
@@ -1360,6 +1362,30 @@ def create_delegated_run(
         ).first()
         if existing is not None:
             return existing
+    delegation_group_key = str(
+        delegation_group_key or delegation_key or ""
+    )[:96]
+    previous_attempt = None
+    if delegation_group_key:
+        previous_attempt = (
+            Run.objects.filter(
+                parent_run=parent_run,
+                session__assistant__uuid=assistant_uuid,
+                execution__runtime_snapshot__delegation_group_key=(
+                    delegation_group_key
+                ),
+            )
+            .select_related("session")
+            .order_by("created_at", "pk")
+            .last()
+        )
+        if previous_attempt is not None and previous_attempt.status in {
+            Run.Status.QUEUED,
+            Run.Status.RUNNING,
+            Run.Status.STREAMING,
+            Run.Status.AWAITING_USER_INPUT,
+        }:
+            return previous_attempt
     assistant = (
         Assistant.objects.visible_to(parent_run.session.user)
         .filter(
@@ -1387,21 +1413,30 @@ def create_delegated_run(
         )
     }:
         raise LensNodeDispatchError("SUBAGENT_CYCLE")
-    session = Session.objects.create(
-        assistant=assistant,
-        user=parent_run.session.user,
-        title=f"Delegated: {parent_run.uuid}",
-        title_manually_edited=True,
-    )
-    return create_execution_run(
+    if previous_attempt is None:
+        session = Session.objects.create(
+            assistant=assistant,
+            user=parent_run.session.user,
+            title=f"Delegated: {parent_run.uuid}",
+            title_manually_edited=True,
+        )
+    else:
+        session = previous_attempt.session
+    delegated = create_execution_run(
         session=session,
         question=str(question or "")[:20000],
         enqueue=True,
         parent_run=parent_run,
+        retry_of_run=previous_attempt,
         idempotency_key=(
             f"delegation:{delegation_key}"[:128] if delegation_key else ""
         ),
     )
+    runtime_snapshot = dict(delegated.execution.runtime_snapshot or {})
+    runtime_snapshot["delegation_group_key"] = delegation_group_key
+    delegated.execution.runtime_snapshot = runtime_snapshot
+    delegated.execution.save(update_fields=["runtime_snapshot"])
+    return delegated
 
 
 def validate_retry_run(session, retry_of_run):
@@ -1920,6 +1955,7 @@ def create_run_execution_snapshot(
     run,
     answer_language=None,
     routing_assistant_uuids=None,
+    routing_assistant_explicit=False,
 ):
     """Create or return the per-run LensNode execution snapshot."""
 
@@ -1935,6 +1971,7 @@ def create_run_execution_snapshot(
         answer_language,
         run.session,
         routing_assistant_uuids,
+        routing_assistant_explicit,
     )
     execution, _ = RunExecution.objects.get_or_create(
         run=run,
@@ -1968,6 +2005,7 @@ def _build_run_runtime_snapshot(
     answer_language,
     session,
     routing_assistant_uuids=None,
+    routing_assistant_explicit=False,
 ):
     """Return execution provenance that later edits cannot change."""
 
@@ -2057,6 +2095,7 @@ def _build_run_runtime_snapshot(
             if routing_assistant_uuids and len(routing_assistant_uuids) == 1
             else ""
         ),
+        "routing_assistant_explicit": bool(routing_assistant_explicit),
     }
 
 
@@ -2607,6 +2646,9 @@ def dispatch_run_to_lensnode(
                 "routing_mode": runtime_snapshot.get("routing_mode", "direct"),
                 "routing_assistant_uuid": runtime_snapshot.get(
                     "routing_assistant_uuid", ""
+                ),
+                "routing_assistant_explicit": bool(
+                    runtime_snapshot.get("routing_assistant_explicit")
                 ),
                 "subagents": _runtime_subagents(
                     runtime_snapshot.get("subagents", [])

@@ -242,6 +242,68 @@ class LensServiceTests(TransactionTestCase):
         self.assertEqual(delegated.session.assistant, child)
         self.assertEqual(delegated.lensnode, child_node)
 
+    def test_delegated_attempts_share_one_logical_retry_chain(self):
+        self.session.routing_mode = Session.RoutingMode.SMART
+        self.session.save(update_fields=["routing_mode"])
+        child = Assistant.objects.create(
+            name="Retry Assistant",
+            slug="retry-assistant",
+            lensnode=self.lensnode,
+            selected_task="knowledge_qa",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        self.session.allowed_assistant_uuids = [str(child.uuid)]
+        self.session.save(update_fields=["allowed_assistant_uuids"])
+        parent = create_execution_run(
+            session=self.session,
+            question="Coordinate this request",
+            enqueue=False,
+        )
+        parent.status = Run.Status.RUNNING
+        parent.save(update_fields=["status"])
+        snapshot = dict(parent.execution.runtime_snapshot)
+        snapshot["subagents"] = [{"uuid": str(child.uuid)}]
+        parent.execution.runtime_snapshot = snapshot
+        parent.execution.save(update_fields=["runtime_snapshot"])
+
+        first = create_delegated_run(
+            parent,
+            child.uuid,
+            "Prepare the presentation",
+            delegation_key="call-1",
+            delegation_group_key="explicit-assistant",
+        )
+        first.status = Run.Status.FAILED
+        first.save(update_fields=["status"])
+        second = create_delegated_run(
+            parent,
+            child.uuid,
+            "Finish and attach the presentation",
+            delegation_key="call-2",
+            delegation_group_key="explicit-assistant",
+        )
+        replay = create_delegated_run(
+            parent,
+            child.uuid,
+            "Finish and attach the presentation",
+            delegation_key="call-2",
+            delegation_group_key="explicit-assistant",
+        )
+        separate = create_delegated_run(
+            parent,
+            child.uuid,
+            "Check a separate data source",
+            delegation_key="call-3",
+            delegation_group_key="independent-task",
+        )
+
+        self.assertEqual(second.parent_run, parent)
+        self.assertEqual(second.retry_of_run, first)
+        self.assertEqual(second.session, first.session)
+        self.assertEqual(replay, second)
+        self.assertIsNone(separate.retry_of_run)
+        self.assertNotEqual(separate.session, first.session)
+
     def test_parent_sync_event_aggregates_named_child_progress(self):
         self.session.routing_mode = Session.RoutingMode.SMART
         self.session.save(update_fields=["routing_mode"])

@@ -372,6 +372,9 @@ class LensNodeDelegationView(LensNodeAuthMixin, APIView):
         delegation_key = str(
             request.data.get("delegation_key") or ""
         ).strip()
+        delegation_group_key = str(
+            request.data.get("delegation_group_key") or delegation_key
+        ).strip()
         if not assistant_uuid or not question or not delegation_key:
             return Response(
                 {
@@ -387,12 +390,18 @@ class LensNodeDelegationView(LensNodeAuthMixin, APIView):
                 {"detail": "delegation_key is too long."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if len(delegation_group_key) > 96:
+            return Response(
+                {"detail": "delegation_group_key is too long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             child = create_delegated_run(
                 parent,
                 assistant_uuid,
                 question,
                 delegation_key=delegation_key,
+                delegation_group_key=delegation_group_key,
             )
         except (LensNodeDispatchError, ValidationError) as exc:
             return Response(

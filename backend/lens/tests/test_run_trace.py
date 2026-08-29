@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from lens.consumers import LensNodeConsumer
-from lens.models import Assistant, LensNode, RunTraceEvent, Session
+from lens.models import Assistant, LensNode, Run, RunTraceEvent, Session
 from lens.run_trace import RunTraceValidationError, append_run_trace_events
 from lens.services import create_execution_run, dispatch_run_to_lensnode
 
@@ -375,6 +375,152 @@ class AdminRunTrajectoryAPITests(RunTraceFixtureMixin, TestCase):
             "child",
         )
         self.assertFalse(second_page.data["has_more"])
+        self.assertEqual(
+            first_page.data["summary"]["run_progress"],
+            [
+                {
+                    "run_uuid": str(self.run.uuid),
+                    "role": "parent",
+                    "assistant_name": self.run.session.assistant.name,
+                    "status": self.run.status,
+                    "outcome": self.run.outcome,
+                    "started_at": None,
+                    "finished_at": None,
+                    "duration_ms": None,
+                    "event_count": 2,
+                    "task": self.run.input_message.content,
+                },
+                {
+                    "run_uuid": str(child_run.uuid),
+                    "role": "child",
+                    "assistant_name": child_assistant.name,
+                    "status": child_run.status,
+                    "outcome": child_run.outcome,
+                    "started_at": None,
+                    "finished_at": None,
+                    "duration_ms": None,
+                    "event_count": 1,
+                    "task": "Inspect the delegated run",
+                    "attempt_count": 1,
+                    "attempts": [
+                        {
+                            "run_uuid": str(child_run.uuid),
+                            "attempt": 1,
+                            "retry_of_run_uuid": None,
+                            "assistant_name": child_assistant.name,
+                            "status": child_run.status,
+                            "outcome": child_run.outcome,
+                            "started_at": None,
+                            "finished_at": None,
+                            "duration_ms": None,
+                            "event_count": 1,
+                            "task": "Inspect the delegated run",
+                        }
+                    ],
+                },
+            ],
+        )
+
+        child_response = self.client.get(
+            f"/api/lens/admin/runs/{child_run.uuid}/trajectory/"
+        )
+        self.assertEqual(child_response.status_code, 200, child_response.data)
+        self.assertEqual(
+            [
+                (item["role"], item["assistant_name"])
+                for item in child_response.data["summary"]["run_progress"]
+            ],
+            [
+                ("parent", self.run.session.assistant.name),
+                ("child", child_assistant.name),
+            ],
+        )
+
+    def test_admin_reports_child_progress_before_trace_events_exist(self):
+        child_assistant = Assistant.objects.create(
+            name="Queued delegated assistant",
+            slug=f"queued-delegated-{uuid.uuid4()}",
+            lensnode=self.node,
+            selected_task="general_chat",
+        )
+        child_session = Session.objects.create(
+            assistant=child_assistant,
+            user=self.user,
+        )
+        child_run = create_execution_run(
+            child_session,
+            "Wait for delegated execution",
+            enqueue=False,
+            parent_run=self.run,
+        )
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["summary"]["event_count"], 0)
+        self.assertEqual(
+            response.data["summary"]["run_progress"][1]["run_uuid"],
+            str(child_run.uuid),
+        )
+        self.assertEqual(
+            response.data["summary"]["run_progress"][1]["event_count"],
+            0,
+        )
+
+    def test_admin_groups_legacy_explicit_delegations_as_attempts(self):
+        child_assistant = Assistant.objects.create(
+            name="OfficeCli",
+            slug=f"office-cli-{uuid.uuid4()}",
+            lensnode=self.node,
+            selected_task="general_chat",
+        )
+        snapshot = dict(self.run.execution.runtime_snapshot)
+        snapshot.update(
+            {
+                "routing_assistant_uuid": str(child_assistant.uuid),
+                "routing_question": "整理成 ppt",
+            }
+        )
+        self.run.execution.runtime_snapshot = snapshot
+        self.run.execution.save(update_fields=["runtime_snapshot"])
+        child_runs = []
+        for index in range(2):
+            child_session = Session.objects.create(
+                assistant=child_assistant,
+                user=self.user,
+            )
+            child_run = create_execution_run(
+                child_session,
+                f"Prepare presentation attempt {index + 1}",
+                enqueue=False,
+                parent_run=self.run,
+            )
+            child_run.status = (
+                Run.Status.FAILED if index == 0 else Run.Status.DONE
+            )
+            child_run.save(update_fields=["status"])
+            child_runs.append(child_run)
+
+        response = self.client.get(
+            f"/api/lens/admin/runs/{self.run.uuid}/trajectory/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        children = [
+            item
+            for item in response.data["summary"]["run_progress"]
+            if item["role"] == "child"
+        ]
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0]["assistant_name"], "OfficeCli")
+        self.assertEqual(children[0]["attempt_count"], 2)
+        self.assertEqual(
+            [item["run_uuid"] for item in children[0]["attempts"]],
+            [str(item.uuid) for item in child_runs],
+        )
+        self.assertEqual(children[0]["status"], Run.Status.DONE)
 
     def test_non_admin_cannot_read_trajectory(self):
         client = APIClient()
