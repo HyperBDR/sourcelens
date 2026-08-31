@@ -1,6 +1,7 @@
 """Assistant CRUD and public assistant metadata views."""
 
 from django.db import transaction
+from django.db.models import Prefetch
 from rest_framework import permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -28,6 +29,10 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
         "mcp_bindings",
         "access_grants__group",
         "access_grants__user",
+        Prefetch(
+            "collaboration_members",
+            queryset=Assistant.objects.order_by("name", "uuid"),
+        ),
     )
     serializer_class = AssistantSerializer
 

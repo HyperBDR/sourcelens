@@ -1134,6 +1134,12 @@
       "codeAnalysis": "Análisis de código",
       "generalChat": "Chat General"
     },
+    "routingModes": {
+      "direct": "Modo normal",
+      "smart": "Colaboración inteligente",
+      "directHint": "Se ejecuta directamente con un solo asistente y la capacidad elegida.",
+      "smartHint": "Completa las tareas mediante la colaboración de los miembros configurados."
+    },
     "columns": {
       "assistant": "Asistente",
       "lensnode": "Nodo",
@@ -1397,7 +1403,8 @@
       "maxDepth": "Profundidad máxima",
       "feishuAppId": "ID de la App de Feishu",
       "feishuAppSecret": "Secreto de la App de Feishu",
-      "visibility": "Visibilidad"
+      "visibility": "Visibilidad",
+      "routingMode": "Modo del asistente"
     },
     "placeholders": {
       "assistantDescription": "Describe qué ayuda este asistente a los usuarios a hacer.",
@@ -1491,7 +1498,9 @@
       "archiveTitle": "Asistente de archivo",
       "archiveMessage": "¿Archivar {name}? Los enlaces dejan de funcionar hasta que se restauren.",
       "skillCount": "{count} Skills",
-      "mcpCount": "{count} Servidores MCP"
+      "mcpCount": "{count} Servidores MCP",
+      "collaborationMembers": "Miembros de colaboración",
+      "noCollaborationMembers": "No hay miembros de colaboración configurados"
     },
     "datasourceWizard": {
       "createTitle": "Crear Fuente de Datos",
@@ -1717,20 +1726,28 @@
       "step1Title": "Conceptos básicos y Modelos",
       "step1Desc": "Establecer nombre, identificador, modelo de agente (obligatorio) y modelo multimodal opcional",
       "agentModelHint": "Requerido — el LensNode usa este modelo para ejecutar agentes de análisis profundo.",
+      "smartAgentModelHint": "Obligatorio: el coordinador inteligente usa este modelo para enrutar y sintetizar el trabajo.",
       "multimodalModelHint": "Opcional — para tareas con visión o reconocimiento de imágenes.",
       "noVisionModel": "Ningún modelo compatible con entrada de imagen está configurado actualmente.",
       "configureVisionModel": "Configurar un modelo de visión",
       "maxConcurrencyHint": "Número máximo de ejecuciones simultáneas para este asistente. Las solicitudes adicionales se ponen en cola automáticamente.",
       "step2Title": "Ejecución",
       "step2Desc": "Primero selecciona el tipo; después configura su nodo, directorios y política de recuperación",
+      "step2SmartDesc": "Selecciona los asistentes directos con los que puede colaborar este asistente inteligente.",
+      "collaborationMembers": "Miembros de colaboración",
+      "collaborationMembersHint": "Elige asistentes directos activos. Las nuevas sesiones reutilizarán estos miembros.",
+      "noCollaborationMembers": "Crea primero un asistente directo activo.",
+      "smartResourcesHint": "Los asistentes inteligentes usan sus miembros seleccionados. Skills, MCP, LensNode y los espacios de trabajo de ejecución se gestionan en cada miembro; agrega la guía de colaboración a continuación.",
       "generalChatExecutionHint": "El Chat General utiliza Skills vinculadas, scripts agrupados y binarios agrupados. La recuperación del directorio de trabajo está deshabilitada para este asistente.",
       "noAssistantDescription": "Sin descripción del asistente",
       "step3Title": "Skills y Espacio de trabajo",
       "step3Desc": "Vincula Skills y MCP, y agrega contexto de espacio de trabajo: todo opcional",
+      "step3SmartDesc": "Agrega una guía del espacio de trabajo para la colaboración inteligente",
       "step4Title": "Acceso",
       "step4Desc": "Establecer visibilidad y elegir qué grupos o usuarios pueden acceder a ella",
       "contextLabel": "Guía del espacio de trabajo (opcional)",
       "contextHint": "Cuéntale al Asistente sobre la estructura del espacio de trabajo, el contexto del negocio, las convenciones del equipo, las prioridades de búsqueda y los directorios que se deben evitar. Se inyecta como el contexto privado de este Asistente después de guardarlo.",
+      "smartContextHint": "Agrega contexto del proyecto, principios de reparto del trabajo y prioridades de recuperación para la colaboración inteligente.",
       "contextPlaceholder": "# Escribe aquí la información que el modelo no puede conocer con solo leer el código.\n\n## Descripción general del proyecto\n# SourceLens es una plataforma autoalojada de preguntas y respuestas sobre código mediante IA.\n# backend/ es la API REST de Django; lensnode/ es un nodo de ejecución desplegado por separado\n# que ejecuta Deep Agents y envía los resultados al servicio principal mediante WebSocket.\n# frontend/ es la consola de administración Vue 3; solo se comunica con las API REST de backend/.\n\n## Prioridades de búsqueda\n# La lógica de negocio está en backend/lens/. backend/agentcore/ es un submódulo de git: no busques allí el código de negocio.\n# Páginas del frontend: frontend/src/pages/lens/. Componentes de administración: frontend/src/admin/.\n# Comportamiento del Agent: lensnode/lensnode/agent_runtime.py.\n\n## Evita interpretaciones erróneas\n# references/ contiene documentos de referencia, no código fuente: no lo analices como código.\n# Para conocer la estructura actual de los campos, consulta solo la migración más reciente, no las históricas.",
       "back": "Atrás",
       "next": "Siguiente",

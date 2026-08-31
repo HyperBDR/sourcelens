@@ -2072,6 +2072,7 @@ def _build_run_runtime_snapshot(
         "settings_hash": _canonical_hash(settings_payload),
         "workspace_guide": assistant.workspace_guide,
         "assistant_capability": assistant.capability,
+        "assistant_mode": assistant.mode,
         "routing_mode": session.routing_mode,
         "allowed_assistant_uuids": list(
             routing_assistant_uuids
