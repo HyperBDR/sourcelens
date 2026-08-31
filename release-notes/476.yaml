@@ -1,0 +1,10 @@
+type: feature
+audience: user
+en: >-
+  Added reusable Smart Assistants with administrator-managed teams whose
+  members are fixed for each conversation.
+zh-CN: >-
+  新增可复用的智能助手，管理员可配置协作团队，并为每次对话固定参与成员。
+es: >-
+  Se añadieron asistentes inteligentes reutilizables con equipos administrados
+  por el administrador y miembros fijos para cada conversación.
