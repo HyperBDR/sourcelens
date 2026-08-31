@@ -1,0 +1,11 @@
+type: feature
+audience: user
+en: >-
+  Smart Collaboration now lets you mention multiple assistants in one message
+  and coordinates their responses through a single collaboration run.
+zh-CN: >-
+  智能协作现在支持在一条消息中 @ 多个助手，并在同一个协作 Run 中汇总它们的
+  响应。
+es: >-
+  Smart Collaboration ahora permite mencionar varios asistentes en un mensaje
+  y coordina sus respuestas dentro de una sola ejecución colaborativa.

@@ -1160,9 +1160,7 @@ def _run_trace_progress(root_run, trace_runs, events):
     runs_by_id = {trace_run.id: trace_run for trace_run in trace_runs}
 
     def attempt_payload(trace_run, attempt):
-        assistant = (
-            trace_run.session.assistant if trace_run.session_id else None
-        )
+        assistant = trace_run.session.assistant if trace_run.session_id else None
         input_message = trace_run.input_message
         duration_end = trace_run.finished_at
         if trace_run.started_at and duration_end is None:
@@ -1176,20 +1174,14 @@ def _run_trace_progress(root_run, trace_runs, events):
             "status": trace_run.status,
             "outcome": trace_run.outcome,
             "started_at": (
-                trace_run.started_at.isoformat()
-                if trace_run.started_at
-                else None
+                trace_run.started_at.isoformat() if trace_run.started_at else None
             ),
             "finished_at": (
-                trace_run.finished_at.isoformat()
-                if trace_run.finished_at
-                else None
+                trace_run.finished_at.isoformat() if trace_run.finished_at else None
             ),
             "duration_ms": _duration_ms(trace_run.started_at, duration_end),
             "event_count": event_counts.get(trace_run.id, 0),
-            "task": (
-                (input_message.content or "")[:500] if input_message else ""
-            ),
+            "task": ((input_message.content or "")[:500] if input_message else ""),
         }
 
     parent_attempt = attempt_payload(root_run, 1)
@@ -1203,30 +1195,32 @@ def _run_trace_progress(root_run, trace_runs, events):
     progress[0]["role"] = "parent"
 
     snapshot = root_run.execution.runtime_snapshot or {}
-    explicit_assistant_uuid = (
-        str(snapshot.get("routing_assistant_uuid") or "")
+    explicit_assistant_uuids = (
+        {
+            str(value)
+            for value in (
+                snapshot.get("routing_assistant_uuids")
+                or [snapshot.get("routing_assistant_uuid")]
+            )
+            if value
+        }
         if "routing_question" in snapshot
-        else ""
+        else set()
     )
     groups = {}
     child_runs = sorted(
-        (
-            trace_run
-            for trace_run in trace_runs
-            if trace_run.id != root_run.id
-        ),
+        (trace_run for trace_run in trace_runs if trace_run.id != root_run.id),
         key=lambda item: (item.created_at, item.pk),
     )
     for trace_run in child_runs:
         assistant_uuid = str(trace_run.session.assistant.uuid)
-        if explicit_assistant_uuid == assistant_uuid:
+        if assistant_uuid in explicit_assistant_uuids:
             group_key = ("explicit", assistant_uuid)
         else:
             chain_root = trace_run
             seen = set()
             while (
-                chain_root.retry_of_run_id in runs_by_id
-                and chain_root.id not in seen
+                chain_root.retry_of_run_id in runs_by_id and chain_root.id not in seen
             ):
                 seen.add(chain_root.id)
                 chain_root = runs_by_id[chain_root.retry_of_run_id]
@@ -1255,9 +1249,7 @@ def _run_trace_progress(root_run, trace_runs, events):
                 "started_at": first["started_at"],
                 "finished_at": latest["finished_at"],
                 "duration_ms": sum(durations) if durations else None,
-                "event_count": sum(
-                    item["event_count"] for item in attempt_rows
-                ),
+                "event_count": sum(item["event_count"] for item in attempt_rows),
                 "task": first["task"],
                 "attempt_count": len(attempt_rows),
                 "attempts": attempt_rows,

@@ -840,7 +840,9 @@ class LensApiTests(TestCase):
         self.assertEqual(assistant.skill_bindings.count(), 1)
         self.assertEqual(assistant.mcp_bindings.count(), 1)
         self.assertIn("Knowledge Q&A", assistant.routing_description)
-        self.assertIn("Explore API behavior and implementation.", assistant.routing_description)
+        self.assertIn(
+            "Explore API behavior and implementation.", assistant.routing_description
+        )
         self.assertIn("Code Search", assistant.routing_description)
         self.assertIn("GitHub MCP", assistant.routing_description)
         self.assertNotIn("routing_description", response.data)
@@ -1384,9 +1386,7 @@ class LensApiTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 skill = Skill.objects.get(package_name="winrar-skill")
                 self.assertTrue(
-                    Path(skill.package_path)
-                    .joinpath("scripts", "run.sh")
-                    .is_file()
+                    Path(skill.package_path).joinpath("scripts", "run.sh").is_file()
                 )
 
     def test_uploaded_skill_rejects_package_file_over_fifty_megabytes(self):
@@ -2192,9 +2192,7 @@ class LensApiTests(TestCase):
         self.assertEqual(run_response.status_code, 201)
         self.assertEqual(run_response.data["execution"]["task"], "general_chat")
         run = Run.objects.get(uuid=run_response.data["uuid"])
-        self.assertFalse(
-            run.execution.runtime_snapshot["routing_assistant_explicit"]
-        )
+        self.assertFalse(run.execution.runtime_snapshot["routing_assistant_explicit"])
 
     def test_smart_session_normalizes_legacy_coordinator_capability(self):
         """Existing Smart sessions use General Chat after capability removal."""
@@ -2236,9 +2234,7 @@ class LensApiTests(TestCase):
         )
         self.assistant.visibility = Assistant.Visibility.PUBLIC
         self.assistant.description = "Use for focused repository analysis."
-        self.assistant.save(
-            update_fields=["visibility", "description"]
-        )
+        self.assistant.save(update_fields=["visibility", "description"])
         self.user.profile.language = "es"
         self.user.profile.save(update_fields=["language"])
         session = SessionCreateSerializer(
@@ -2276,9 +2272,7 @@ class LensApiTests(TestCase):
             run.execution.runtime_snapshot["allowed_assistant_uuids"],
             [str(self.assistant.uuid)],
         )
-        self.assertTrue(
-            run.execution.runtime_snapshot["routing_assistant_explicit"]
-        )
+        self.assertTrue(run.execution.runtime_snapshot["routing_assistant_explicit"])
         routing_description = run.execution.runtime_snapshot["subagents"][0][
             "routing_description"
         ]
@@ -2293,6 +2287,65 @@ class LensApiTests(TestCase):
         self.assertEqual(
             run.execution.runtime_snapshot["routing_question"],
             "Analyze this request.",
+        )
+
+    def test_smart_run_can_explicitly_route_to_multiple_assistants(self):
+        """A single message can explicitly request several assistants."""
+
+        GlobalSetting.objects.create(
+            key="lens.smart_collaboration.model_ref",
+            value="11111111-1111-1111-1111-111111111111",
+        )
+        self.assistant.visibility = Assistant.Visibility.PUBLIC
+        self.assistant.save(update_fields=["visibility"])
+        second = Assistant.objects.create(
+            name="Company Knowledge",
+            slug="company-knowledge",
+            lensnode=self.lensnode,
+            selected_task="knowledge_qa",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        requested = [str(self.assistant.uuid), str(second.uuid)]
+        session_serializer = SessionCreateSerializer(
+            data={
+                "routing_mode": "smart",
+                "allowed_assistant_uuids": requested,
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+        self.assertTrue(session_serializer.is_valid(), session_serializer.errors)
+        session = session_serializer.save()
+        serializer = RunCreateSerializer(
+            data={
+                "question": ("@Code Advisor @Company Knowledge Compare the findings."),
+                "routing_assistant_uuids": requested,
+                "enqueue": False,
+            },
+            context={
+                "session": session,
+                "request": SimpleNamespace(user=self.user),
+            },
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        run = serializer.save()
+
+        self.assertEqual(
+            run.execution.runtime_snapshot["allowed_assistant_uuids"],
+            requested,
+        )
+        self.assertEqual(
+            run.execution.runtime_snapshot["routing_assistant_uuids"],
+            requested,
+        )
+        self.assertEqual(
+            run.execution.runtime_snapshot["routing_assistant_uuid"],
+            "",
+        )
+        self.assertTrue(run.execution.runtime_snapshot["routing_assistant_explicit"])
+        self.assertEqual(
+            run.execution.runtime_snapshot["routing_question"],
+            "Compare the findings.",
         )
 
     def test_assistant_update_forks_shared_environment_set(self):

@@ -17,7 +17,7 @@ test('active chat run exposes a localized stop action', async () => {
   assert.equal(chinese.common.stop, '停止')
 })
 
-test('smart chat limits @ assistant mentions to the message start', async () => {
+test('smart chat supports multiple @ assistant chips at the message start', async () => {
   const [chat, switcher, submission, chinese, english, spanish] =
     await Promise.all([
       source('pages/lens/Chat.vue'),
@@ -28,14 +28,21 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
       source('locales/es.json').then(JSON.parse)
     ])
 
-  assert.match(chat, /\^@\(\[\^\\s\]\*\)/)
-  assert.match(chat, /routingAssistantUuid = mentionedAssistant\.value\.uuid/)
-  assert.match(submission, /payload\.routing_assistant_uuid = routingAssistantUuid/)
+  assert.match(chat, /parseAssistantMentionToken\(question\.value\)/)
+  assert.match(chat, /routingAssistantUuids/)
+  assert.match(
+    submission,
+    /payload\.routing_assistant_uuids = \[\.\.\.routingAssistantUuids\]/
+  )
   assert.doesNotMatch(chat, /lockMentionedAssistant/)
   assert.match(chat, /v-if="showMentionPicker"/)
-  assert.match(chat, /messageMentionSegments\(message\.content\)/)
-  assert.match(chat, /text\.startsWith\(`@\$\{name\}`\)/)
-  assert.match(chat, /sort\(\(left, right\) => right\.length - left\.length\)/)
+  assert.match(
+    chat,
+    /messageMentionSegments\(\s*message\.content,\s*assistants/
+  )
+  assert.match(chat, /class="composer-mention-chip"/)
+  assert.match(chat, /removeAssistantMention\(assistant\.uuid\)/)
+  assert.match(chat, /event\.key === 'Backspace'/)
   assert.match(chat, /text-blue-600/)
   assert.match(switcher, /smartCollaborationBeta/)
   assert.match(chat, /@keydown="handleComposerKeydown"/)
@@ -45,7 +52,7 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
   assert.doesNotMatch(chat, /orchestrator: 'orchestrator'/)
   assert.equal(
     chinese.lens.chat.mentionAssistantHint,
-    "输入 {'@'} 后选择助手；选中后，仅由该助手处理本次消息。"
+    "输入 {'@'} 后选择一个或多个助手；选中后，由这些助手处理本次消息。"
   )
   assert.match(english.lens.chat.mentionAssistantHint, /Type \{'@'\}/)
   assert.equal(chinese.lens.chat.assistantTypes.orchestrator, undefined)
@@ -55,10 +62,7 @@ test('smart chat limits @ assistant mentions to the message start', async () => 
   assert.equal(chinese.lens.chat.smartCollaborationBeta, 'Beta')
   assert.equal(english.lens.chat.smartCollaboration, 'Smart Collaboration')
   assert.equal(english.lens.chat.smartCollaborationBeta, 'Beta')
-  assert.equal(
-    spanish.lens.chat.smartCollaboration,
-    'Colaboración inteligente'
-  )
+  assert.equal(spanish.lens.chat.smartCollaboration, 'Colaboración inteligente')
   assert.equal(spanish.lens.chat.smartCollaborationBeta, 'Beta')
 })
 
@@ -73,8 +77,7 @@ test('escapes literal at-signs in translated assistant mention messages', async 
       'mentionAssistantHint',
       'mentionAssistantRequired',
       'mentionAssistantSaveFailed',
-      'mentionAssistantQuestionRequired',
-      'clearAssistantMention'
+      'mentionAssistantQuestionRequired'
     ]) {
       assert.match(locale.lens.chat[key], /\{'@'\}/)
     }
@@ -236,9 +239,9 @@ test('assistant node selection is available for every capability', async () => {
   const retrievalStart = drawer.indexOf("t('lensAdmin.fields.retrievalPolicy')")
   assert.notEqual(retrievalStart, -1)
   assert.equal(
-    drawer.slice(retrievalStart - 120, retrievalStart).includes(
-      'v-if="requiresWorkspace"'
-    ),
+    drawer
+      .slice(retrievalStart - 120, retrievalStart)
+      .includes('v-if="requiresWorkspace"'),
     true
   )
 })

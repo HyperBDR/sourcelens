@@ -793,13 +793,17 @@
                     </div>
                     <div v-if="message.content" class="message-text">
                       <template
-                        v-for="(segment, index) in messageMentionSegments(message.content)"
+                        v-for="(segment, index) in messageMentionSegments(
+                          message.content,
+                          assistants
+                        )"
                         :key="`${message.uuid || 'message'}-${index}`"
                       >
                         <span
                           v-if="segment.mentioned"
                           class="font-semibold text-blue-600"
-                        >{{ segment.text }}</span>
+                          >{{ segment.text }}</span
+                        >
                         <span v-else>{{ segment.text }}</span>
                       </template>
                     </div>
@@ -1499,11 +1503,12 @@
                 v-model:draft="routingScopeDraft"
                 v-model:query="routingScopeQuery"
                 :all-selected="routingAllSelected"
+                :candidates="routingCandidates"
                 :candidate-count="routingCandidates.length"
-                :count="routingScopeAssistantUuids.length"
                 :filtered-candidates="filteredRoutingCandidates"
                 :mobile="isMobile"
                 :open="routingScopeOpen"
+                :selected-uuids="routingScopeAssistantUuids"
                 @cancel="cancelRoutingScope"
                 @open="openRoutingScope"
                 @save="saveRoutingScope"
@@ -1559,30 +1564,12 @@
                 </button>
               </div>
               <div
-                v-if="mentionedAssistant"
-                class="mb-2 flex items-center justify-between rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800"
-              >
-                <span>
-                  <span class="font-semibold text-blue-600">
-                    @{{ mentionedAssistant.name }}
-                  </span>
-                  <span class="ml-1">
-                    {{ t('lens.chat.mentioningAssistantSuffix') }}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  class="rounded px-1.5 py-0.5 text-xs font-medium hover:bg-brand-100"
-                  @click="clearAssistantMention"
-                >
-                  {{ t('lens.chat.clearAssistantMention') }}
-                </button>
-              </div>
-              <div
                 v-if="showMentionPicker"
                 class="absolute bottom-full left-0 z-20 mb-3 w-full max-w-md overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
               >
-                <div class="border-b border-line px-3 py-2 text-xs text-ink-500">
+                <div
+                  class="border-b border-line px-3 py-2 text-xs text-ink-500"
+                >
                   {{ t('lens.chat.mentionAssistantHint') }}
                 </div>
                 <button
@@ -1594,7 +1581,9 @@
                   @mousedown.prevent
                   @click="selectAssistantMention(assistant)"
                 >
-                  <span class="min-w-0 flex-1 truncate text-sm font-medium text-ink-800">
+                  <span
+                    class="min-w-0 flex-1 truncate text-sm font-medium text-ink-800"
+                  >
                     {{ assistant.name }}
                   </span>
                   <span class="shrink-0 text-xs text-ink-500">
@@ -1639,16 +1628,35 @@
                     <path d="M12 5v14M5 12h14" stroke-linecap="round" />
                   </svg>
                 </button>
-                <textarea
-                  ref="composerRef"
-                  v-model="question"
-                  class="composer-input"
-                  rows="1"
-                  :placeholder="t('lens.chat.questionPlaceholder')"
-                  @keydown="handleComposerKeydown"
-                  @paste="onComposerPaste"
-                  @input="handleComposerInput"
-                />
+                <div class="composer-content">
+                  <button
+                    v-for="assistant in mentionedAssistants"
+                    :key="assistant.uuid"
+                    type="button"
+                    class="composer-mention-chip"
+                    :aria-label="
+                      t('lens.chat.removeAssistantMention', {
+                        name: mentionDisplayName(assistant.name)
+                      })
+                    "
+                    @click="removeAssistantMention(assistant.uuid)"
+                  >
+                    <span>@{{ mentionDisplayName(assistant.name) }}</span>
+                    <span class="composer-mention-remove" aria-hidden="true">
+                      ×
+                    </span>
+                  </button>
+                  <textarea
+                    ref="composerRef"
+                    v-model="question"
+                    class="composer-input"
+                    rows="1"
+                    :placeholder="t('lens.chat.questionPlaceholder')"
+                    @keydown="handleComposerKeydown"
+                    @paste="onComposerPaste"
+                    @input="handleComposerInput"
+                  />
+                </div>
                 <button
                   class="composer-action-btn"
                   :class="isRunActive ? 'composer-action-btn-stop' : ''"
@@ -1900,6 +1908,12 @@ import {
   filterRoutingCandidates,
   toggleRoutingScopeSelection
 } from '@/pages/lens/chatRoutingScope'
+import {
+  messageMentionSegments,
+  parseAssistantMentionToken,
+  prependAssistantMentions,
+  removeAssistantMentionToken
+} from '@/pages/lens/assistantMentions'
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
 import { resolveChatViewport } from '@/pages/lens/chatViewport'
@@ -2064,7 +2078,7 @@ const routingScopeOpen = ref(false)
 const routingScopeDraft = ref([])
 const routingScopeSnapshot = ref([])
 const routingScopeQuery = ref('')
-const mentionedAssistantUuid = ref('')
+const mentionedAssistantUuids = ref([])
 const mentionActiveIndex = ref(0)
 const isSmartCollaborationConversation = computed(
   () => route.name === 'LensSmartChat'
@@ -2111,29 +2125,30 @@ const routingScopeAssistantUuids = computed(() =>
 
 const mentionToken = computed(() => {
   if (!isSmartCollaborationConversation.value) return null
-  return /^@([^\s]*)/.exec(question.value)
+  return parseAssistantMentionToken(question.value)
 })
 
 const mentionCandidates = computed(() => {
   const allowed = new Set(routingScopeAssistantUuids.value)
-  const query = (mentionToken.value?.[1] || '').toLocaleLowerCase()
+  const selected = new Set(mentionedAssistantUuids.value)
+  const query = (mentionToken.value?.query || '').toLocaleLowerCase()
   return routingCandidates.value.filter(
     (assistant) =>
       allowed.has(assistant.uuid) &&
+      !selected.has(assistant.uuid) &&
       assistant.name.toLocaleLowerCase().includes(query)
   )
 })
 
-const mentionedAssistant = computed(
-  () =>
-    routingCandidates.value.find(
-      (assistant) => assistant.uuid === mentionedAssistantUuid.value
-    ) || null
+const mentionedAssistants = computed(() =>
+  mentionedAssistantUuids.value
+    .map((uuid) =>
+      routingCandidates.value.find((assistant) => assistant.uuid === uuid)
+    )
+    .filter(Boolean)
 )
 
-const showMentionPicker = computed(
-  () => !!mentionToken.value && !mentionedAssistant.value
-)
+const showMentionPicker = computed(() => !!mentionToken.value)
 
 watch(mentionCandidates, (candidates) => {
   if (!candidates.length) {
@@ -2223,8 +2238,8 @@ const emptyVariant = computed(() =>
   userStore.userHasFeature('admin_console') ? 'admin' : 'visitor'
 )
 
-const assistantName = computed(
-  () => isSmartCollaborationConversation.value
+const assistantName = computed(() =>
+  isSmartCollaborationConversation.value
     ? t('lens.chat.smartCollaboration')
     : selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
@@ -2358,24 +2373,6 @@ function assistantCapabilityLabel(capability) {
   return t(`lens.chat.assistantTypes.${labels[capability] || 'generalChat'}`)
 }
 
-function messageMentionSegments(content) {
-  const text = String(content || '')
-  const names = assistants.value
-    .map((assistant) => String(assistant.name || '').trim())
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length)
-  const mention = names.find(
-    (name) => text.startsWith(`@${name}`) &&
-      (text.length === name.length + 1 || /\s/.test(text[name.length + 1]))
-  )
-  if (!mention) return [{ text, mentioned: false }]
-  const match = `@${mention}`
-  return [
-    { text: match, mentioned: true },
-    { text: text.slice(match.length), mentioned: false }
-  ]
-}
-
 function openRoutingScope() {
   routingScopeDraft.value = selectedSession.value
     ? [...(selectedSession.value.allowed_assistant_uuids || [])]
@@ -2398,31 +2395,30 @@ function toggleAllRoutingAssistants() {
 }
 
 function selectAssistantMention(assistant) {
-  const token = mentionToken.value?.[0] || '@'
-  const remainder = question.value.slice(token.length).trimStart()
-  question.value = `@${assistant.name}${remainder ? ` ${remainder}` : ' '}`
-  mentionedAssistantUuid.value = assistant.uuid
+  question.value = removeAssistantMentionToken(question.value)
+  if (!mentionedAssistantUuids.value.includes(assistant.uuid)) {
+    mentionedAssistantUuids.value = [
+      ...mentionedAssistantUuids.value,
+      assistant.uuid
+    ]
+  }
   nextTick(() => composerRef.value?.focus())
 }
 
-function clearAssistantMention() {
-  const prefix = mentionedAssistant.value
-    ? `@${mentionedAssistant.value.name}`
-    : mentionToken.value?.[0] || ''
-  question.value = question.value.startsWith(prefix)
-    ? question.value.slice(prefix.length).trimStart()
-    : question.value
-  mentionedAssistantUuid.value = ''
+function mentionDisplayName(name) {
+  return String(name || '')
+    .trim()
+    .replace(/^@+/, '')
+}
+
+function removeAssistantMention(uuid) {
+  mentionedAssistantUuids.value = mentionedAssistantUuids.value.filter(
+    (value) => value !== uuid
+  )
   nextTick(() => composerRef.value?.focus())
 }
 
 function handleComposerInput(event) {
-  const mentionPrefix = mentionedAssistant.value
-    ? `@${mentionedAssistant.value.name}`
-    : ''
-  if (!mentionPrefix || !question.value.startsWith(mentionPrefix)) {
-    mentionedAssistantUuid.value = ''
-  }
   if (mentionToken.value) mentionActiveIndex.value = 0
   autoResizeTextarea(event)
 }
@@ -2437,6 +2433,16 @@ function moveMentionSelection(direction) {
 async function handleComposerKeydown(event) {
   if (isComposingKeyboardEvent(event)) return
   if (event.ctrlKey || event.metaKey) return
+  if (
+    event.key === 'Backspace' &&
+    composerRef.value?.selectionStart === 0 &&
+    composerRef.value?.selectionEnd === 0 &&
+    mentionedAssistantUuids.value.length
+  ) {
+    event.preventDefault()
+    removeAssistantMention(mentionedAssistantUuids.value.at(-1))
+    return
+  }
   if (showMentionPicker.value && mentionCandidates.value.length) {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
@@ -2472,6 +2478,10 @@ async function saveRoutingScope() {
     })
     sessions.value = sessions.value.map((session) =>
       session.uuid === updated.uuid ? updated : session
+    )
+    const allowed = new Set(updated.allowed_assistant_uuids || [])
+    mentionedAssistantUuids.value = mentionedAssistantUuids.value.filter(
+      (uuid) => allowed.has(uuid)
     )
     routingScopeOpen.value = false
   } catch {
@@ -3218,6 +3228,7 @@ async function bootstrap() {
   // permanently disabled. A stale submit during the brief load window is
   // instead guarded inside submit() by binding to the session it started in.
   question.value = ''
+  mentionedAssistantUuids.value = []
   currentRun.value = null
   runStatusResolvingSessionUuid.value = ''
   messages.value = []
@@ -3388,6 +3399,7 @@ async function createNewSession(notify = true, allowedAssistantUuids = []) {
     routingScopeDraft.value = [...(session.allowed_assistant_uuids || [])]
   }
   question.value = ''
+  mentionedAssistantUuids.value = []
   retryDraft.value = null
   clarificationAnswers.value = {}
   clarificationErrors.value = {}
@@ -3422,6 +3434,7 @@ function clearSessionSelection() {
   messages.value = []
   currentRun.value = null
   question.value = ''
+  mentionedAssistantUuids.value = []
   retryDraft.value = null
   clarificationAnswers.value = {}
   clarificationErrors.value = {}
@@ -3818,6 +3831,7 @@ async function selectSession(session, updateRoute = true) {
   booted.value = true
   if (sessionChanged) {
     question.value = ''
+    mentionedAssistantUuids.value = []
     retryDraft.value = null
     if (composerRef.value) composerRef.value.style.height = 'auto'
   }
@@ -3994,10 +4008,8 @@ function handleStepEvent(event) {
       payload: item.payload
         ? {
             ...item.payload,
-            assistant_name:
-              item.payload.assistant_name || event.assistant_name,
-            delegated_task:
-              item.payload.delegated_task || event.delegated_task
+            assistant_name: item.payload.assistant_name || event.assistant_name,
+            delegated_task: item.payload.delegated_task || event.delegated_task
           }
         : item.payload
     })
@@ -4089,6 +4101,8 @@ async function submit() {
     return
   }
   const draftTextAtSubmit = question.value
+  const mentionUuidsAtSubmit = [...mentionedAssistantUuids.value]
+  const mentionAssistantsAtSubmit = [...mentionedAssistants.value]
   const trimmedDraft = draftTextAtSubmit.replace(/^\s*\n+|\n+\s*$/g, '')
   const oversizedFile = createOversizedTextFile(trimmedDraft)
   if (oversizedFile && !acceptsDocuments.value) {
@@ -4121,19 +4135,12 @@ async function submit() {
   // not a failure, so we must not restore the draft, alarm the user, or write
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
-  let routingAssistantUuid = ''
   if (isSmartCollaborationConversation.value && mentionToken.value) {
-    if (!mentionedAssistant.value) {
-      showWarning(t('lens.chat.mentionAssistantRequired'))
-      loading.value.run = false
-      return
-    }
-    routingAssistantUuid = mentionedAssistant.value.uuid
+    showWarning(t('lens.chat.mentionAssistantRequired'))
+    loading.value.run = false
+    return
   }
   let submissionText = trimmedDraft
-  if (routingAssistantUuid) {
-    mentionedAssistantUuid.value = ''
-  }
   let oversizedAttachment = null
   if (oversizedFile) {
     const uploaded = await addAttachment(oversizedFile)
@@ -4148,8 +4155,12 @@ async function submit() {
   }
   const isFirstMessage = messages.value.length === 0
   resetStreamState()
-  const optimisticText = submissionText
+  const optimisticText = prependAssistantMentions(
+    submissionText,
+    mentionAssistantsAtSubmit
+  )
   question.value = ''
+  mentionedAssistantUuids.value = []
   // Snapshot ready attachments, clear the composer strip, and keep the object
   // URLs alive for the optimistic bubble until the server reload replaces it.
   const pendingAttachments = attachments.value.filter(
@@ -4161,7 +4172,7 @@ async function submit() {
     sessionUuid: sessionAtSubmit,
     question: optimisticText,
     attachmentUuids,
-    routingAssistantUuid,
+    routingAssistantUuids: mentionUuidsAtSubmit,
     retryDraft: retryDraftAtSubmit,
     pendingSubmission: pendingRunSubmission.value
   })
@@ -4264,6 +4275,7 @@ async function submit() {
     }
     messages.value = messages.value.filter((m) => m.uuid !== '__optimistic__')
     question.value = draftTextAtSubmit
+    mentionedAssistantUuids.value = mentionUuidsAtSubmit
     retryDraft.value = retryDraftAtSubmit
     // Only a 4xx response proves that the Run transaction rejected the
     // request. Network and server failures are ambiguous: the attachments may
@@ -4285,9 +4297,7 @@ async function submit() {
       deleteAttachment(oversizedAttachment.uuid).catch(() => {})
     }
     const errorCode = err?.response?.data?.detail
-    showError(
-      lensNodeErrorMessage(errorCode, t) || t('lens.chat.submitFailed')
-    )
+    showError(lensNodeErrorMessage(errorCode, t) || t('lens.chat.submitFailed'))
   } finally {
     if (!keepAttachments) {
       pendingAttachments.forEach(
@@ -5704,8 +5714,31 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgba(43, 78, 230, 0.08);
 }
 
+.composer-content {
+  @apply flex min-w-0 flex-1 flex-wrap items-center gap-1.5;
+}
+
+.composer-mention-chip {
+  @apply inline-flex h-7 max-w-full shrink-0 items-center gap-1 rounded-md
+    bg-primary-50 px-2 text-xs font-semibold text-primary-700 transition-colors;
+}
+
+.composer-mention-chip:hover,
+.composer-mention-chip:focus-visible {
+  @apply bg-primary-100 outline-none ring-2 ring-primary-200;
+}
+
+.composer-mention-chip > span:first-child {
+  @apply max-w-[15rem] truncate;
+}
+
+.composer-mention-remove {
+  @apply text-base font-normal leading-none text-primary-500;
+}
+
 .composer-input {
-  @apply flex-1 border-0 bg-transparent py-2 px-0 text-[16px] leading-6 outline-none;
+  @apply min-w-[10rem] flex-1 border-0 bg-transparent py-2 px-0 text-[16px]
+    leading-6 outline-none;
   color: var(--sl-text-primary);
   min-height: 2.5rem;
   max-height: 200px;
@@ -6107,6 +6140,10 @@ onBeforeUnmount(() => {
     max-height: 8.75rem;
     padding: 0.625rem 0.25rem;
     line-height: 1.5rem;
+  }
+
+  .composer-mention-chip {
+    min-height: 2rem;
   }
 
   .composer-attach-btn {

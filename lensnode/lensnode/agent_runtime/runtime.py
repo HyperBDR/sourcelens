@@ -1155,6 +1155,14 @@ class LensDeepAgentRuntime:
         subagents = []
         seen_names = set()
         state.subagent_display_names = {}
+        explicit_assistant_uuids = {
+            str(value)
+            for value in (
+                state.command.get("routing_assistant_uuids")
+                or [state.command.get("routing_assistant_uuid")]
+            )
+            if value
+        }
         for index, snapshot in enumerate(
             (state.command.get("subagents") or [])[:MAX_CONFIGURED_SUBAGENTS]
         ):
@@ -1185,10 +1193,7 @@ class LensDeepAgentRuntime:
                 delegation_group_key=(
                     f"explicit:{assistant_uuid}"
                     if state.command.get("routing_assistant_explicit")
-                    and str(
-                        state.command.get("routing_assistant_uuid") or ""
-                    )
-                    == assistant_uuid
+                    and assistant_uuid in explicit_assistant_uuids
                     else ""
                 ),
                 delegation_base_url=getattr(
