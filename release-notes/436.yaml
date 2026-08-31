@@ -1,0 +1,10 @@
+type: feature
+audience: user
+en: >-
+  Conversation history can now be searched by title across both recent and
+  archived conversations from the chat sidebar.
+zh-CN: >-
+  现在可以从聊天侧边栏按标题搜索最近会话和已归档会话。
+es: >-
+  Ahora se puede buscar el historial por título tanto en conversaciones
+  recientes como archivadas desde la barra lateral del chat.
