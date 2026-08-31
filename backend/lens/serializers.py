@@ -66,6 +66,7 @@ from .runtime_events import (
 from .routing_descriptions import refresh_routing_description
 from .services import (
     CLARIFICATION_MAX_ORIGINAL_CHARS,
+    MAX_SUBAGENTS_PER_RUN,
     assistant_supports_document_attachments,
     create_execution_run,
     validate_retry_run,
@@ -154,8 +155,7 @@ def validate_retrieval_policy(value):
     include_hidden = value.get("include_hidden")
     if "include_hidden" in value and not isinstance(include_hidden, bool):
         raise serializers.ValidationError(
-            "settings.retrieval_policy.include_hidden must be "
-            "a boolean"
+            "settings.retrieval_policy.include_hidden must be " "a boolean"
         )
     return value
 
@@ -280,9 +280,7 @@ class SkillBindingsField(serializers.Field):
     """Read/write field for assistant skill bindings."""
 
     def to_representation(self, bindings):
-        bindings = bindings.select_related(
-            "skill", "environment_variable_set"
-        ).all()
+        bindings = bindings.select_related("skill", "environment_variable_set").all()
         return [
             {
                 "skill_uuid": str(binding.skill.uuid),
@@ -381,9 +379,7 @@ class McpBindingsField(serializers.Field):
     """Read/write field for assistant MCP bindings."""
 
     def to_representation(self, bindings):
-        bindings = bindings.select_related(
-            "mcp", "environment_variable_set"
-        ).all()
+        bindings = bindings.select_related("mcp", "environment_variable_set").all()
         return [
             {
                 "mcp_uuid": str(binding.mcp.uuid),
@@ -527,9 +523,7 @@ class AccessGrantsField(serializers.Field):
         seen = set()
         for item in data:
             if not isinstance(item, dict):
-                raise serializers.ValidationError(
-                    "Each grant must be an object."
-                )
+                raise serializers.ValidationError("Each grant must be an object.")
             grant_type = item.get("type")
             grant_id = item.get("id")
             if grant_type not in ("group", "user") or grant_id is None:
@@ -624,8 +618,8 @@ class AssistantSerializer(serializers.ModelSerializer):
             cache = {}
             self._document_capability_cache = cache
         if assistant.capability not in cache:
-            cache[assistant.capability] = (
-                assistant_supports_document_attachments(assistant)
+            cache[assistant.capability] = assistant_supports_document_attachments(
+                assistant
             )
         return cache[assistant.capability]
 
@@ -664,9 +658,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         )
         capability = normalized.get("capability")
         if not capability:
-            capability = normalized.get("kind") or normalized.get(
-                "selected_task"
-            )
+            capability = normalized.get("kind") or normalized.get("selected_task")
         if capability == "standard":
             capability = normalized.get("selected_task") or "general_chat"
         if capability == "qa":
@@ -717,10 +709,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"lensnode_uuid": "A LensNode is required."}
             )
-        if (
-            lensnode is not None
-            and capability not in _task_names(lensnode)
-        ):
+        if lensnode is not None and capability not in _task_names(lensnode):
             raise serializers.ValidationError(
                 {"capability": "capability is not available on LensNode"}
             )
@@ -813,11 +802,9 @@ class AssistantSerializer(serializers.ModelSerializer):
                 for binding in bindings:
                     variable_set = binding.get("environment_variable_set")
                     if variable_set is not None:
-                        binding["environment_variable_set"] = (
-                            locked_variable_sets.get(
-                                variable_set.pk,
-                                variable_set,
-                            )
+                        binding["environment_variable_set"] = locked_variable_sets.get(
+                            variable_set.pk,
+                            variable_set,
                         )
 
         if skill_bindings is not None:
@@ -891,17 +878,13 @@ class AssistantSerializer(serializers.ModelSerializer):
 
         normalized_base = str(base_name or "Environment").strip()
         normalized_base = normalized_base[:160] or "Environment"
-        if not EnvironmentVariableSet.objects.filter(
-            name=normalized_base
-        ).exists():
+        if not EnvironmentVariableSet.objects.filter(name=normalized_base).exists():
             return normalized_base
         suffix = 2
         while True:
             suffix_text = f" ({suffix})"
             candidate = normalized_base[: 160 - len(suffix_text)] + suffix_text
-            if not EnvironmentVariableSet.objects.filter(
-                name=candidate
-            ).exists():
+            if not EnvironmentVariableSet.objects.filter(name=candidate).exists():
                 return candidate
             suffix += 1
 
@@ -1069,27 +1052,15 @@ class DataSourceSerializer(serializers.ModelSerializer):
         if source_type == DataSource.SourceType.MANAGED_WORKSPACE:
             if credential is not None:
                 raise serializers.ValidationError(
-                    {
-                        "credential_uuid": (
-                            "Managed workspace does not use credentials"
-                        )
-                    }
+                    {"credential_uuid": ("Managed workspace does not use credentials")}
                 )
             if config:
                 raise serializers.ValidationError(
-                    {
-                        "config": (
-                            "Managed workspace does not use connection config"
-                        )
-                    }
+                    {"config": ("Managed workspace does not use connection config")}
                 )
             if sync_policy:
                 raise serializers.ValidationError(
-                    {
-                        "sync_policy": (
-                            "Managed workspace does not use sync policy"
-                        )
-                    }
+                    {"sync_policy": ("Managed workspace does not use sync policy")}
                 )
             if self._managed_workspace_path_changed(
                 lensnode,
@@ -1135,12 +1106,9 @@ class DataSourceSerializer(serializers.ModelSerializer):
         if (
             source_type != DataSource.SourceType.MANAGED_WORKSPACE
             and self.instance is not None
-            and self.instance.source_type
-            == DataSource.SourceType.MANAGED_WORKSPACE
+            and self.instance.source_type == DataSource.SourceType.MANAGED_WORKSPACE
         ):
-            attrs["availability_status"] = (
-                DataSource.AvailabilityStatus.UNKNOWN
-            )
+            attrs["availability_status"] = DataSource.AvailabilityStatus.UNKNOWN
             attrs["availability_checked_at"] = None
             attrs["availability_message"] = ""
 
@@ -1185,9 +1153,7 @@ class DataSourceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"target_path": "MANAGED_WORKSPACE_DIRECTORY_REQUIRED"}
             )
-        attrs["availability_status"] = (
-            DataSource.AvailabilityStatus.AVAILABLE
-        )
+        attrs["availability_status"] = DataSource.AvailabilityStatus.AVAILABLE
         attrs["availability_checked_at"] = timezone.now()
         attrs["availability_message"] = str(result.get("message") or "")
 
@@ -1350,15 +1316,10 @@ class DataSourceConversionRequestSerializer(serializers.Serializer):
             conversion = {"document": True}
         _validate_conversion_policy(conversion, field_name="conversion")
         if not any(
-            conversion.get(key)
-            for key in ["document", "image", "embedded_image"]
+            conversion.get(key) for key in ["document", "image", "embedded_image"]
         ):
             raise serializers.ValidationError(
-                {
-                    "conversion": (
-                        "At least one conversion type must be enabled"
-                    )
-                }
+                {"conversion": ("At least one conversion type must be enabled")}
             )
         attrs["conversion"] = conversion
         return attrs
@@ -1544,9 +1505,7 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
         )
         folder_url = str(attrs.pop("folder_url", "") or "").strip()
         folder_token = str(attrs.pop("folder_token", "") or "").strip()
-        organization_url = str(
-            attrs.pop("organization_url", "") or ""
-        ).strip()
+        organization_url = str(attrs.pop("organization_url", "") or "").strip()
         if folder_url:
             scope_config["folder_url"] = folder_url
         if folder_token:
@@ -1567,21 +1526,15 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
         has_secret = bool(str(attrs.get("secret") or "").strip())
         has_app_id = bool(str(attrs.get("app_id") or "").strip())
         has_app_secret = bool(str(attrs.get("app_secret") or "").strip())
-        has_feishu = bool(
-            has_app_id and has_app_secret
-        )
-        auth_type_changed = bool(
-            self.instance and auth_type != self.instance.auth_type
-        )
+        has_feishu = bool(has_app_id and has_app_secret)
+        auth_type_changed = bool(self.instance and auth_type != self.instance.auth_type)
         if auth_type == DataSourceCredential.AuthType.FEISHU_APP:
             if provider != DataSourceCredential.Provider.FEISHU:
                 raise serializers.ValidationError(
                     {"provider": "feishu app credential requires feishu provider"}
                 )
             folder_url_value = scope_config.get("folder_url") or ""
-            if folder_url_value and not _is_feishu_drive_folder_url(
-                folder_url_value
-            ):
+            if folder_url_value and not _is_feishu_drive_folder_url(folder_url_value):
                 raise serializers.ValidationError(
                     {
                         "folder_url": (
@@ -1619,9 +1572,7 @@ class DataSourceCredentialSerializer(serializers.ModelSerializer):
             and not has_secret
             and (not has_existing or auth_type_changed)
         ):
-            raise serializers.ValidationError(
-                {"secret": "secret is required"}
-            )
+            raise serializers.ValidationError({"secret": "secret is required"})
         if auth_type in {
             DataSourceCredential.AuthType.HTTPS_TOKEN,
             DataSourceCredential.AuthType.NONE,
@@ -1708,9 +1659,7 @@ def _validate_sync_policy(sync_policy):
             )
         return
     interval = sync_policy.get("interval_seconds")
-    if interval is not None and (
-        not isinstance(interval, int) or interval <= 0
-    ):
+    if interval is not None and (not isinstance(interval, int) or interval <= 0):
         raise serializers.ValidationError(
             {"sync_policy": "interval_seconds must be a positive integer"}
         )
@@ -1720,9 +1669,7 @@ def _validate_conversion_policy(conversion, field_name="sync_policy"):
     """Validate datasource conversion settings."""
 
     if not isinstance(conversion, dict):
-        raise serializers.ValidationError(
-            {field_name: "conversion must be an object"}
-        )
+        raise serializers.ValidationError({field_name: "conversion must be an object"})
     for key in [
         "document",
         "image",
@@ -1738,12 +1685,7 @@ def _validate_conversion_policy(conversion, field_name="sync_policy"):
             )
     if conversion.get("embedded_image") and not conversion.get("document"):
         raise serializers.ValidationError(
-            {
-                field_name: (
-                    "conversion.embedded_image requires "
-                    "conversion.document"
-                )
-            }
+            {field_name: ("conversion.embedded_image requires " "conversion.document")}
         )
     for key in [
         "max_images",
@@ -1755,9 +1697,7 @@ def _validate_conversion_policy(conversion, field_name="sync_policy"):
         "pdf_render_dpi",
     ]:
         value = conversion.get(key)
-        if value is not None and (
-            not isinstance(value, int) or value <= 0
-        ):
+        if value is not None and (not isinstance(value, int) or value <= 0):
             raise serializers.ValidationError(
                 {field_name: f"conversion.{key} must be positive"}
             )
@@ -1768,8 +1708,7 @@ def _validate_conversion_policy(conversion, field_name="sync_policy"):
         raise serializers.ValidationError(
             {
                 field_name: (
-                    "conversion.pdf_min_image_area_ratio must be "
-                    "between 0 and 1"
+                    "conversion.pdf_min_image_area_ratio must be " "between 0 and 1"
                 )
             }
         )
@@ -1807,17 +1746,12 @@ def _validate_unique_datasource_target_path(
             continue
         managed_overlap = (
             source_type == DataSource.SourceType.MANAGED_WORKSPACE
-            or datasource.source_type
-            == DataSource.SourceType.MANAGED_WORKSPACE
+            or datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE
         )
         paths_overlap = _paths_overlap(existing, target)
         if existing == target or (managed_overlap and paths_overlap):
             raise serializers.ValidationError(
-                {
-                    "target_path": (
-                        "Another datasource uses an overlapping target path"
-                    )
-                }
+                {"target_path": ("Another datasource uses an overlapping target path")}
             )
 
 
@@ -1842,9 +1776,7 @@ def _validate_datasource_credential_type(credential, auth_type):
     if credential is None:
         return
     allowed_types = (
-        set(auth_type)
-        if isinstance(auth_type, (list, tuple, set))
-        else {auth_type}
+        set(auth_type) if isinstance(auth_type, (list, tuple, set)) else {auth_type}
     )
     if credential.auth_type not in allowed_types:
         raise serializers.ValidationError(
@@ -1911,9 +1843,7 @@ def _validate_git_config(config, instance=None, credential=None):
                 )
             seen_targets.add(target_subdir)
     elif not config.get("repo_url"):
-        raise serializers.ValidationError(
-            {"config": "git config.repo_url is required"}
-        )
+        raise serializers.ValidationError({"config": "git config.repo_url is required"})
     auth_scheme = config.get("auth_scheme", "none")
     if auth_scheme not in ["none", "token"]:
         raise serializers.ValidationError(
@@ -1922,11 +1852,7 @@ def _validate_git_config(config, instance=None, credential=None):
     if auth_scheme == "none" and credential:
         if credential.auth_type != DataSourceCredential.AuthType.NONE:
             raise serializers.ValidationError(
-                {
-                    "credential_uuid": (
-                        "Git credential must not be set without auth"
-                    )
-                }
+                {"credential_uuid": ("Git credential must not be set without auth")}
             )
     if auth_scheme == "token" and not credential:
         raise serializers.ValidationError(
@@ -1961,11 +1887,7 @@ def _validate_feishu_config(config, instance=None, credential=None):
             or scope_config.get("folder_token")
         ):
             raise serializers.ValidationError(
-                {
-                    "config": (
-                        "feishu config.folder_url or folder_token is required"
-                    )
-                }
+                {"config": ("feishu config.folder_url or folder_token is required")}
             )
         max_depth = config.get("max_depth", 10)
         if not isinstance(max_depth, int) or max_depth <= 0:
@@ -1975,15 +1897,12 @@ def _validate_feishu_config(config, instance=None, credential=None):
         return
 
     if not (
-        config.get("document_url")
-        or config.get("wiki_token")
-        or config.get("doc_ids")
+        config.get("document_url") or config.get("wiki_token") or config.get("doc_ids")
     ):
         raise serializers.ValidationError(
             {
                 "config": (
-                    "feishu config.document_url, wiki_token or doc_ids "
-                    "is required"
+                    "feishu config.document_url, wiki_token or doc_ids " "is required"
                 )
             }
         )
@@ -2050,13 +1969,9 @@ class SkillSerializer(serializers.ModelSerializer):
         """Validate and normalize the Skill environment declaration."""
 
         if not isinstance(value, dict):
-            raise serializers.ValidationError(
-                "The Skill definition must be an object."
-            )
+            raise serializers.ValidationError("The Skill definition must be an object.")
         normalized = dict(value)
-        environment = validate_environment_schema(
-            normalized.get("environment")
-        )
+        environment = validate_environment_schema(normalized.get("environment"))
         normalized["environment"] = environment
         api = validate_skill_api_policy(normalized.get("api"), environment)
         if api:
@@ -2190,9 +2105,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
         """Require MCP configuration to remain a key-value object."""
 
         if not isinstance(value, dict):
-            raise serializers.ValidationError(
-                "MCP configuration must be an object."
-            )
+            raise serializers.ValidationError("MCP configuration must be an object.")
         return value
 
     def validate_environment(self, value):
@@ -2236,9 +2149,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
             for item in environment or []
             if isinstance(item, dict) and item.get("name")
         }
-        references = environment_references(
-            {"endpoint": endpoint, "config": config}
-        )
+        references = environment_references({"endpoint": endpoint, "config": config})
         existing_references = environment_references(
             {
                 "endpoint": getattr(self.instance, "endpoint", ""),
@@ -2251,9 +2162,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
             if isinstance(item, dict) and item.get("name")
         }
         legacy_references = existing_references - existing_declared
-        undeclared = sorted(
-            references - declared - legacy_references
-        )
+        undeclared = sorted(references - declared - legacy_references)
         if undeclared:
             raise serializers.ValidationError(
                 {
@@ -2275,9 +2184,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
     @classmethod
     def _normalize_key(cls, key):
         return "".join(
-            character.lower()
-            for character in str(key or "")
-            if character.isalnum()
+            character.lower() for character in str(key or "") if character.isalnum()
         )
 
     @classmethod
@@ -2291,8 +2198,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
             str(key or ""),
         )
         segments = [
-            segment.lower()
-            for segment in re.findall(r"[A-Za-z0-9]+", segmented_key)
+            segment.lower() for segment in re.findall(r"[A-Za-z0-9]+", segmented_key)
         ]
         if any(
             segment
@@ -2344,14 +2250,9 @@ class MCPServerSerializer(serializers.ModelSerializer):
                     key,
                 )
             existing_value = (
-                existing.get(existing_key)
-                if isinstance(existing, dict)
-                else None
+                existing.get(existing_key) if isinstance(existing, dict) else None
             )
-            if (
-                value == cls.secret_mask
-                and existing_value in (None, "")
-            ):
+            if value == cls.secret_mask and existing_value in (None, ""):
                 raise serializers.ValidationError(
                     "Masked sensitive values require an existing value. "
                     "Provide the new sensitive value."
@@ -2371,13 +2272,10 @@ class MCPServerSerializer(serializers.ModelSerializer):
                 existing_items = (
                     existing_value if isinstance(existing_value, list) else []
                 )
-                if (
-                    cls._contains_sensitive_placeholder(
-                        value,
-                        existing_items,
-                    )
-                    and not cls._masked_list_matches(value, existing_items)
-                ):
+                if cls._contains_sensitive_placeholder(
+                    value,
+                    existing_items,
+                ) and not cls._masked_list_matches(value, existing_items):
                     raise serializers.ValidationError(
                         "Lists containing masked sensitive values cannot be "
                         "reordered or structurally edited. Provide every "
@@ -2400,18 +2298,14 @@ class MCPServerSerializer(serializers.ModelSerializer):
                 merged.append(
                     cls._merge_sensitive_values(
                         item,
-                        existing_item
-                        if isinstance(existing_item, dict)
-                        else {},
+                        existing_item if isinstance(existing_item, dict) else {},
                     )
                 )
             elif isinstance(item, list):
                 merged.append(
                     cls._merge_sensitive_list(
                         item,
-                        existing_item
-                        if isinstance(existing_item, list)
-                        else [],
+                        existing_item if isinstance(existing_item, list) else [],
                     )
                 )
             else:
@@ -2449,9 +2343,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
             return any(
                 cls._contains_sensitive_placeholder(
                     item,
-                    existing_items[index]
-                    if index < len(existing_items)
-                    else None,
+                    existing_items[index] if index < len(existing_items) else None,
                 )
                 for index, item in enumerate(value)
             )
@@ -2460,10 +2352,7 @@ class MCPServerSerializer(serializers.ModelSerializer):
     @classmethod
     def _masked_list_matches(cls, incoming, existing):
         if isinstance(incoming, dict):
-            if (
-                not isinstance(existing, dict)
-                or incoming.keys() != existing.keys()
-            ):
+            if not isinstance(existing, dict) or incoming.keys() != existing.keys():
                 return False
             return all(
                 (
@@ -2516,12 +2405,8 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
         model_ref_keys = {
             "lens.smart_collaboration.model_ref": "model_ref",
             "lens.skills.generator_model_ref": "generator_model_ref",
-            "lens.datasource_conversion.vision_model_ref": (
-                "vision_model_ref"
-            ),
-            "lens.datasource_conversion.document_model_ref": (
-                "document_model_ref"
-            ),
+            "lens.datasource_conversion.vision_model_ref": ("vision_model_ref"),
+            "lens.datasource_conversion.document_model_ref": ("document_model_ref"),
         }
         if key in model_ref_keys:
             if value not in [None, ""] and not isinstance(value, str):
@@ -2531,19 +2416,13 @@ class GlobalSettingSerializer(serializers.ModelSerializer):
 
         if key == "lens.history_budget":
             if not isinstance(value, dict):
-                raise serializers.ValidationError(
-                    {"value": "must be a JSON object"}
-                )
+                raise serializers.ValidationError({"value": "must be a JSON object"})
             for sub_key in ("pairs", "message_chars", "total_chars"):
                 if sub_key in value and (
                     not isinstance(value[sub_key], int) or value[sub_key] <= 0
                 ):
                     raise serializers.ValidationError(
-                        {
-                            "value": (
-                                f"{sub_key} must be a positive integer"
-                            )
-                        }
+                        {"value": (f"{sub_key} must be a positive integer")}
                     )
 
         return attrs
@@ -2600,9 +2479,7 @@ class RunOutputFileSerializer(serializers.ModelSerializer):
     def get_url(self, obj):
         """Return the authenticated download path for the file bytes."""
 
-        return reverse(
-            "lens-output-file", kwargs={"uuid": obj.uuid}
-        )
+        return reverse("lens-output-file", kwargs={"uuid": obj.uuid})
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -2744,9 +2621,7 @@ class MessageSerializer(serializers.ModelSerializer):
             steps.extend(public_step_detail(step.detail)["events"])
         for child in run.delegated_runs.all():
             assistant_name = child.session.assistant.name[:160]
-            delegated_task = str(
-                child.input_message.content or ""
-            ).strip()[:2000]
+            delegated_task = str(child.input_message.content or "").strip()[:2000]
             for step in child.steps.all():
                 for event in public_step_detail(step.detail)["events"]:
                     event = {
@@ -2771,12 +2646,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "steps": steps,
             "outcome": run.outcome,
             "status": run.status,
-            "clarification_answered_at": (
-                run.clarification_answered_at
-            ),
-            "termination_detail": sanitize_termination_detail(
-                run.termination_detail
-            ),
+            "clarification_answered_at": (run.clarification_answered_at),
+            "termination_detail": sanitize_termination_detail(run.termination_detail),
         }
 
 
@@ -2994,9 +2865,7 @@ class SessionSerializer(serializers.ModelSerializer):
 
         if obj.routing_mode != Session.RoutingMode.SMART:
             return []
-        selected = {
-            str(value) for value in (obj.allowed_assistant_uuids or [])
-        }
+        selected = {str(value) for value in (obj.allowed_assistant_uuids or [])}
         return [
             {
                 "uuid": str(item.uuid),
@@ -3051,9 +2920,7 @@ class SessionSerializer(serializers.ModelSerializer):
 
         if "title" in validated_data:
             instance.title_manually_edited = True
-            instance.title_generation_status = (
-                Session.TitleGenerationStatus.SKIPPED
-            )
+            instance.title_generation_status = Session.TitleGenerationStatus.SKIPPED
         return super().update(instance, validated_data)
 
 
@@ -3089,9 +2956,7 @@ class SessionCreateSerializer(serializers.Serializer):
                 validated_data.get("title", ""),
             )
         except AssistantNotRunnableError:
-            raise PermissionDenied(
-                "You do not have access to this assistant."
-            )
+            raise PermissionDenied("You do not have access to this assistant.")
 
     def validate(self, attrs):
         """Require exactly the fields used by the selected routing mode."""
@@ -3129,6 +2994,11 @@ class RunCreateSerializer(serializers.Serializer):
         default=list,
     )
     routing_assistant_uuid = serializers.UUIDField(required=False)
+    routing_assistant_uuids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False,
+        max_length=MAX_SUBAGENTS_PER_RUN,
+    )
 
     def validate(self, attrs):
         """Require text or an attachment, and cap attachment count."""
@@ -3141,35 +3011,51 @@ class RunCreateSerializer(serializers.Serializer):
             )
         if len(attachments) > ATTACHMENT_MAX_PER_MESSAGE:
             raise serializers.ValidationError(
-                "At most "
-                f"{ATTACHMENT_MAX_PER_MESSAGE} attachments per message."
+                "At most " f"{ATTACHMENT_MAX_PER_MESSAGE} attachments per message."
             )
         if len(set(attachments)) != len(attachments):
-            raise serializers.ValidationError(
-                "Attachment UUIDs must be unique."
-            )
+            raise serializers.ValidationError("Attachment UUIDs must be unique.")
         routing_assistant_uuid = attrs.get("routing_assistant_uuid")
-        if routing_assistant_uuid is not None:
+        routing_assistant_uuids = attrs.get("routing_assistant_uuids")
+        if routing_assistant_uuid is not None and routing_assistant_uuids is not None:
+            raise serializers.ValidationError(
+                "Use routing_assistant_uuid or routing_assistant_uuids, not both."
+            )
+        selected_assistant_uuids = (
+            routing_assistant_uuids
+            if routing_assistant_uuids is not None
+            else (
+                [routing_assistant_uuid] if routing_assistant_uuid is not None else []
+            )
+        )
+        if len(set(selected_assistant_uuids)) != len(selected_assistant_uuids):
+            raise serializers.ValidationError(
+                {"routing_assistant_uuids": "Assistant UUIDs must be unique."}
+            )
+        if selected_assistant_uuids:
             session = self.context["session"]
             if session.routing_mode != Session.RoutingMode.SMART:
                 raise serializers.ValidationError(
-                    {"routing_assistant_uuid": "Only smart sessions support this."}
+                    {"routing_assistant_uuids": ("Only smart sessions support this.")}
                 )
-            if str(routing_assistant_uuid) not in {
-                str(value)
-                for value in (session.allowed_assistant_uuids or [])
-            }:
+            if not {str(value) for value in selected_assistant_uuids}.issubset(
+                {str(value) for value in (session.allowed_assistant_uuids or [])}
+            ):
                 raise serializers.ValidationError(
-                    {"routing_assistant_uuid": "Assistant is outside this session's allowed range."}
+                    {
+                        "routing_assistant_uuids": (
+                            "Assistant is outside this session's allowed range."
+                        )
+                    }
                 )
             try:
                 smart_collaboration_assistants(
                     self.context["request"].user,
-                    [routing_assistant_uuid],
+                    selected_assistant_uuids,
                 )
             except AssistantNotRunnableError as exc:
                 raise serializers.ValidationError(
-                    {"routing_assistant_uuid": "Assistant is unavailable."}
+                    {"routing_assistant_uuids": "Assistant is unavailable."}
                 ) from exc
         retry_uuid = attrs.get("retry_of_run_uuid")
         if retry_uuid is not None:
@@ -3193,22 +3079,16 @@ class RunCreateSerializer(serializers.Serializer):
                 question=validated_data.get("question", ""),
                 idempotency_key=validated_data.get("idempotency_key", ""),
                 retry_of_run=validated_data.get("retry_of_run"),
-                enqueue=(
-                    validated_data.get("enqueue", True) and not run_inline
-                ),
+                enqueue=(validated_data.get("enqueue", True) and not run_inline),
                 attachment_uuids=[
-                    str(value)
-                    for value in validated_data.get("attachment_uuids", [])
+                    str(value) for value in validated_data.get("attachment_uuids", [])
                 ],
                 user=request.user if request else None,
-                routing_assistant_uuid=validated_data.get(
-                    "routing_assistant_uuid"
-                ),
+                routing_assistant_uuid=validated_data.get("routing_assistant_uuid"),
+                routing_assistant_uuids=validated_data.get("routing_assistant_uuids"),
             )
         except AssistantNotRunnableError:
-            raise PermissionDenied(
-                "You do not have access to this assistant."
-            )
+            raise PermissionDenied("You do not have access to this assistant.")
         except AttachmentError as exc:
             raise serializers.ValidationError(str(exc))
         if run_inline:
