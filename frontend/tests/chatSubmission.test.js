@@ -69,3 +69,17 @@ test('editing a Retry draft turns it into an ordinary new turn', () => {
 
   assert.equal('retry_of_run_uuid' in prepared.payload, false)
 })
+
+test('sends every explicitly mentioned assistant in one submission', () => {
+  const prepared = prepareRunSubmission({
+    sessionUuid: 'session-1',
+    question: '@First @Second Compare the findings',
+    routingAssistantUuids: ['assistant-1', 'assistant-2'],
+    randomUUID: () => 'multi-assistant-submission'
+  })
+
+  assert.deepEqual(prepared.payload.routing_assistant_uuids, [
+    'assistant-1',
+    'assistant-2'
+  ])
+})

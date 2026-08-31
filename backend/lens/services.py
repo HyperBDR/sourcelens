@@ -138,6 +138,8 @@ def _bounded_int(mapping, key, default, minimum, maximum):
     except (TypeError, ValueError):
         return default
     return max(minimum, min(value, maximum))
+
+
 QUERY_REWRITE_SYSTEM = (
     "You rewrite a user's latest question into ONE concise, self-contained "
     "search query for a document and code knowledge base. Resolve pronouns "
@@ -182,9 +184,7 @@ class MultimodalPreprocessingError(RuntimeError):
             "VISION_MODEL_NOT_CONFIGURED": "VISION_MODEL_NOT_CONFIGURED",
             "PROVIDER_QUOTA_EXCEEDED": "VISION_PROVIDER_QUOTA_EXCEEDED",
             "PROVIDER_UNAVAILABLE": "VISION_PROVIDER_UNAVAILABLE",
-            "MODEL_CONFIGURATION_INVALID": (
-                "VISION_MODEL_CONFIGURATION_INVALID"
-            ),
+            "MODEL_CONFIGURATION_INVALID": ("VISION_MODEL_CONFIGURATION_INVALID"),
         }.get(reason, "IMAGE_PREPROCESSING_FAILED")
         super().__init__(self.code)
 
@@ -245,14 +245,10 @@ def get_lensnode_disconnect_grace_seconds():
     GlobalSetting key ``lensnode.disconnect_grace_s``.
     """
 
-    setting = GlobalSetting.objects.filter(
-        key="lensnode.disconnect_grace_s"
-    ).first()
+    setting = GlobalSetting.objects.filter(key="lensnode.disconnect_grace_s").first()
     try:
         value = int(
-            setting.value
-            if setting
-            else LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT
+            setting.value if setting else LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT
         )
     except (TypeError, ValueError):
         return LENSNODE_DISCONNECT_GRACE_SECONDS_DEFAULT
@@ -304,9 +300,7 @@ def get_awaiting_resume_ttl_hours(lensnode=None):
     plane never promises a resume after the checkpoint may have been deleted.
     """
 
-    setting = GlobalSetting.objects.filter(
-        key="lensnode.resume_ttl_h"
-    ).first()
+    setting = GlobalSetting.objects.filter(key="lensnode.resume_ttl_h").first()
     try:
         value = int(setting.value if setting else AWAITING_RESUME_TTL_HOURS)
     except (TypeError, ValueError):
@@ -571,18 +565,20 @@ def resume_awaiting_runs_for_lensnode(
     reconnect retries it.
     """
 
-    reported_active = {
-        str(run_uuid) for run_uuid in reported_active_run_uuids or ()
-    }
+    reported_active = {str(run_uuid) for run_uuid in reported_active_run_uuids or ()}
     lensnode = LensNode.objects.filter(uuid=lensnode_uuid).first()
 
     report_at = lensnode.updated_at
-    awaiting_status = Q(status=Run.Status.RUNNING) | Q(
-        status=Run.Status.STREAMING,
-        last_activity_at__lt=report_at,
-    ) | Q(
-        status=Run.Status.STREAMING,
-        last_activity_at__isnull=True,
+    awaiting_status = (
+        Q(status=Run.Status.RUNNING)
+        | Q(
+            status=Run.Status.STREAMING,
+            last_activity_at__lt=report_at,
+        )
+        | Q(
+            status=Run.Status.STREAMING,
+            last_activity_at__isnull=True,
+        )
     )
     run_ids = (
         Run.objects.filter(
@@ -619,8 +615,7 @@ def resume_awaiting_runs_for_lensnode(
                 )
                 if (
                     run is None
-                    or run.status
-                    not in [Run.Status.RUNNING, Run.Status.STREAMING]
+                    or run.status not in [Run.Status.RUNNING, Run.Status.STREAMING]
                     or claimed_on_current_report
                     or run.resume_by is None
                     or run.resume_by <= timezone.now()
@@ -628,9 +623,7 @@ def resume_awaiting_runs_for_lensnode(
                     continue
                 now = timezone.now()
                 execution = (
-                    RunExecution.objects.select_for_update()
-                    .filter(run=run)
-                    .first()
+                    RunExecution.objects.select_for_update().filter(run=run).first()
                 )
                 if execution is None:
                     continue
@@ -667,9 +660,7 @@ def resume_awaiting_runs_for_lensnode(
                             "checkpoint_ready_at",
                         ]
                     )
-                    expected_document_count = get_run_document_expectation(
-                        run.uuid
-                    )
+                    expected_document_count = get_run_document_expectation(run.uuid)
                     transaction.on_commit(
                         lambda run_uuid=run.uuid, count=(
                             expected_document_count
@@ -678,8 +669,7 @@ def resume_awaiting_runs_for_lensnode(
                         ): _enqueue_answer_run(run_uuid, count)
                     )
                     logger.warning(
-                        "never-admitted run requeued run_uuid=%s "
-                        "lensnode_uuid=%s",
+                        "never-admitted run requeued run_uuid=%s " "lensnode_uuid=%s",
                         run.uuid,
                         lensnode_uuid,
                     )
@@ -714,8 +704,7 @@ def resume_awaiting_runs_for_lensnode(
                     execution.save(update_fields=["status", "finished_at"])
                     fail_running_steps_for_runs([run.id])
                     logger.error(
-                        "run resume rejected run_uuid=%s lensnode_uuid=%s "
-                        "reason=%s",
+                        "run resume rejected run_uuid=%s lensnode_uuid=%s " "reason=%s",
                         run.uuid,
                         lensnode_uuid,
                         recovery_error,
@@ -745,8 +734,7 @@ def resume_awaiting_runs_for_lensnode(
             )
             continue
         logger.info(
-            "run resume attempted run_uuid=%s lensnode_uuid=%s "
-            "dispatch_id=%s",
+            "run resume attempted run_uuid=%s lensnode_uuid=%s " "dispatch_id=%s",
             run.uuid,
             lensnode_uuid,
             execution.dispatch_id,
@@ -792,9 +780,7 @@ def get_reconcile_confirm_grace_seconds():
     ).first()
     try:
         value = int(
-            setting.value
-            if setting
-            else RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT
+            setting.value if setting else RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT
         )
     except (TypeError, ValueError):
         return RECONCILE_CONFIRM_GRACE_SECONDS_DEFAULT
@@ -873,9 +859,7 @@ def reconcile_lensnode_active_runs(lensnode_uuid, active_run_uuids):
     count = 0
     for run_uuid, started_at in candidates:
         run_age_s = (
-            max((now - started_at).total_seconds(), 0)
-            if started_at is not None
-            else 0
+            max((now - started_at).total_seconds(), 0) if started_at is not None else 0
         )
         schedule_reconcile_orphan_confirmation(
             run_uuid,
@@ -891,20 +875,14 @@ def reconcile_lensnode_active_runs(lensnode_uuid, active_run_uuids):
 def _next_sequence(session):
     """Return next message sequence for a session."""
 
-    last_sequence = session.message_set.aggregate(Max("sequence"))[
-        "sequence__max"
-    ]
+    last_sequence = session.message_set.aggregate(Max("sequence"))["sequence__max"]
     return (last_sequence or 0) + 1
 
 
 def _attachment_name_tokens(name):
     """Return normalized searchable tokens from an attachment name."""
 
-    return {
-        token.lower()
-        for token in re.split(r"[^\w]+", name or "")
-        if token
-    }
+    return {token.lower() for token in re.split(r"[^\w]+", name or "") if token}
 
 
 def select_session_attachment_context(session, question, explicit_uuids=None):
@@ -979,9 +957,7 @@ def select_session_attachment_context(session, question, explicit_uuids=None):
             if any(marker in lowered for marker in ("image", "图片"))
             else "document"
         )
-        same_kind = [
-            item for item in historical if item["kind"] == requested_kind
-        ]
+        same_kind = [item for item in historical if item["kind"] == requested_kind]
         historical = same_kind or historical
         return selected + historical[:1]
     return selected
@@ -1087,6 +1063,7 @@ def create_execution_run(
     user=None,
     parent_run=None,
     routing_assistant_uuid=None,
+    routing_assistant_uuids=None,
 ):
     """Create a queued run for LensNode execution."""
 
@@ -1094,10 +1071,17 @@ def create_execution_run(
     session = lock_active_session(session)
     session.assistant = assistant
 
+    explicit_routing_assistant_uuids = (
+        routing_assistant_uuids
+        if routing_assistant_uuids is not None
+        else ([routing_assistant_uuid] if routing_assistant_uuid is not None else None)
+    )
+    if not explicit_routing_assistant_uuids:
+        explicit_routing_assistant_uuids = None
     routing_assistant_uuids = _validated_routing_assistant_uuids(
         session,
         user or session.user,
-        routing_assistant_uuid,
+        explicit_routing_assistant_uuids,
     )
 
     answer_language = resolve_run_answer_language(
@@ -1118,9 +1102,7 @@ def create_execution_run(
         if existing:
             return existing
 
-    requested_attachment_uuids = [
-        str(value) for value in (attachment_uuids or [])
-    ]
+    requested_attachment_uuids = [str(value) for value in (attachment_uuids or [])]
     selected_context = select_session_attachment_context(
         session,
         question,
@@ -1140,9 +1122,7 @@ def create_execution_run(
         fallback_title = fallback_session_title(question)
         if fallback_title:
             session.title = fallback_title
-            session.title_generation_status = (
-                Session.TitleGenerationStatus.PENDING
-            )
+            session.title_generation_status = Session.TitleGenerationStatus.PENDING
             session.save(
                 update_fields=[
                     "title",
@@ -1179,10 +1159,13 @@ def create_execution_run(
         run,
         answer_language=answer_language,
         routing_assistant_uuids=routing_assistant_uuids,
-        routing_assistant_explicit=(routing_assistant_uuid is not None),
+        routing_assistant_explicit=(explicit_routing_assistant_uuids is not None),
     )
-    if routing_assistant_uuid is not None:
-        _set_routing_execution_question(run, routing_assistant_uuid)
+    if explicit_routing_assistant_uuids:
+        _set_routing_execution_question(
+            run,
+            explicit_routing_assistant_uuids,
+        )
     attachment_order = {
         value: order for order, value in enumerate(requested_attachment_uuids)
     }
@@ -1193,9 +1176,7 @@ def create_execution_run(
         order_by_uuid=attachment_order,
     )
     document_uuids = [
-        item["uuid"]
-        for item in selected_context
-        if item["kind"] == "document"
+        item["uuid"] for item in selected_context if item["kind"] == "document"
     ]
     if document_uuids and not supports_document_attachments(run.lensnode):
         raise AttachmentError("DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE")
@@ -1207,9 +1188,7 @@ def create_execution_run(
     )
     document_uuid_set = {item["uuid"] for item in documents}
     selected_image_uuids = {
-        item["uuid"]
-        for item in selected_context
-        if item["kind"] == "image"
+        item["uuid"] for item in selected_context if item["kind"] == "image"
     }
     requested_document_uuids = {
         value
@@ -1223,9 +1202,7 @@ def create_execution_run(
     execution = run.execution
     runtime_snapshot = dict(execution.runtime_snapshot or {})
     runtime_snapshot["session_attachment_uuids"] = [
-        item["uuid"]
-        for item in selected_context
-        if item["kind"] == "image"
+        item["uuid"] for item in selected_context if item["kind"] == "image"
     ]
     runtime_snapshot["document_attachment_count"] = document_count
     execution.runtime_snapshot = runtime_snapshot
@@ -1233,24 +1210,31 @@ def create_execution_run(
 
     set_run_document_expectation(run.uuid, document_count)
     if enqueue:
-        transaction.on_commit(
-            lambda: _enqueue_answer_run(run.uuid, document_count)
-        )
+        transaction.on_commit(lambda: _enqueue_answer_run(run.uuid, document_count))
 
     return run
 
 
-def _set_routing_execution_question(run, assistant_uuid):
+def _set_routing_execution_question(run, assistant_uuids):
     """Store the mention-free prompt without changing the visible message."""
 
-    assistant_name = Assistant.objects.filter(uuid=assistant_uuid).values_list(
-        "name",
-        flat=True,
-    ).first()
-    if not assistant_name:
+    assistant_names_by_uuid = {
+        str(uuid): name
+        for uuid, name in Assistant.objects.filter(
+            uuid__in=assistant_uuids
+        ).values_list("uuid", "name")
+    }
+    assistant_names = [
+        assistant_names_by_uuid.get(str(uuid), "") for uuid in assistant_uuids
+    ]
+    assistant_names = [name for name in assistant_names if name]
+    if not assistant_names:
         return
     visible_question = run.input_message.content or ""
-    pattern = rf"^@{re.escape(assistant_name)}(?=\s|$)\s*"
+    names = "|".join(
+        re.escape(name) for name in sorted(assistant_names, key=len, reverse=True)
+    )
+    pattern = rf"^(?:@(?:{names})(?=\s|$)\s*)+"
     execution_question = re.sub(pattern, "", visible_question, count=1)
     snapshot = dict(run.execution.runtime_snapshot or {})
     snapshot["routing_question"] = execution_question
@@ -1258,11 +1242,11 @@ def _set_routing_execution_question(run, assistant_uuid):
     run.execution.save(update_fields=["runtime_snapshot"])
 
 
-def _validated_routing_assistant_uuids(session, user, selected_uuid=None):
+def _validated_routing_assistant_uuids(session, user, selected_uuids=None):
     """Recheck the live access scope before freezing a smart Run."""
 
     if session.routing_mode != Session.RoutingMode.SMART:
-        if selected_uuid is not None:
+        if selected_uuids is not None:
             raise AssistantNotRunnableError
         return None
     allowed = smart_collaboration_assistants(
@@ -1270,10 +1254,11 @@ def _validated_routing_assistant_uuids(session, user, selected_uuid=None):
         session.allowed_assistant_uuids,
     )
     allowed_ids = {str(item.uuid) for item in allowed}
-    if selected_uuid is not None:
-        if str(selected_uuid) not in allowed_ids:
+    if selected_uuids is not None:
+        normalized = [str(uuid) for uuid in selected_uuids]
+        if not set(normalized).issubset(allowed_ids):
             raise AssistantNotRunnableError
-        return [str(selected_uuid)]
+        return normalized
     return sorted(allowed_ids)
 
 
@@ -1334,10 +1319,7 @@ def _compatible_execution_lensnodes(
             lensnode
         ):
             continue
-        if (
-            require_document_attachments
-            and not supports_document_attachments(lensnode)
-        ):
+        if require_document_attachments and not supports_document_attachments(lensnode):
             continue
         candidates.append(lensnode)
     return candidates
@@ -1353,10 +1335,14 @@ def create_delegated_run(
 ):
     """Create one attempt in a logical delegated task."""
 
-    parent_run = Run.objects.select_for_update().select_related(
-        "session",
-        "session__user",
-    ).get(pk=parent_run.pk)
+    parent_run = (
+        Run.objects.select_for_update()
+        .select_related(
+            "session",
+            "session__user",
+        )
+        .get(pk=parent_run.pk)
+    )
     if parent_run.session.routing_mode != Session.RoutingMode.SMART:
         raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
     if parent_run.status not in {
@@ -1374,15 +1360,8 @@ def create_delegated_run(
         current = current.parent_run
         depth += 1
 
-    configured = (
-        (parent_run.execution.runtime_snapshot or {}).get("subagents")
-        or []
-    )
-    allowed = {
-        str(item.get("uuid"))
-        for item in configured
-        if isinstance(item, dict)
-    }
+    configured = (parent_run.execution.runtime_snapshot or {}).get("subagents") or []
+    allowed = {str(item.get("uuid")) for item in configured if isinstance(item, dict)}
     if str(assistant_uuid) not in allowed:
         raise LensNodeDispatchError("SUBAGENT_NOT_ALLOWED")
     if delegation_key:
@@ -1392,9 +1371,7 @@ def create_delegated_run(
         ).first()
         if existing is not None:
             return existing
-    delegation_group_key = str(
-        delegation_group_key or delegation_key or ""
-    )[:96]
+    delegation_group_key = str(delegation_group_key or delegation_key or "")[:96]
     previous_attempt = None
     if delegation_group_key:
         previous_attempt = (
@@ -1438,9 +1415,7 @@ def create_delegated_run(
         raise LensNodeDispatchError("SUBAGENT_UNAVAILABLE")
     if assistant.pk in {
         item.session.assistant_id
-        for item in Run.objects.filter(pk__in=ancestry).select_related(
-            "session"
-        )
+        for item in Run.objects.filter(pk__in=ancestry).select_related("session")
     }:
         raise LensNodeDispatchError("SUBAGENT_CYCLE")
     if previous_attempt is None:
@@ -1504,8 +1479,7 @@ def supports_document_attachments(lensnode):
 
     labels = lensnode.labels if lensnode else {}
     return bool(
-        isinstance(labels, dict)
-        and labels.get(DOCUMENT_ATTACHMENT_CAPABILITY) is True
+        isinstance(labels, dict) and labels.get(DOCUMENT_ATTACHMENT_CAPABILITY) is True
     )
 
 
@@ -1583,9 +1557,7 @@ def analyze_multimodal_intent(run):
     )
     if not selected_uuids:
         attachments = list(
-            run.input_message.attachments.filter(
-                kind=MessageAttachment.Kind.IMAGE
-            )
+            run.input_message.attachments.filter(kind=MessageAttachment.Kind.IMAGE)
         )
     if not attachments:
         return {
@@ -1595,9 +1567,7 @@ def analyze_multimodal_intent(run):
             "status": "skipped",
         }
     if not assistant.multimodal_model_ref:
-        raise MultimodalPreprocessingError(
-            "VISION_MODEL_NOT_CONFIGURED"
-        )
+        raise MultimodalPreprocessingError("VISION_MODEL_NOT_CONFIGURED")
 
     image_data_urls = []
     for attachment in attachments:
@@ -1607,18 +1577,14 @@ def analyze_multimodal_intent(run):
     if not image_data_urls:
         raise MultimodalPreprocessingError("ATTACHMENT_UNREADABLE")
     try:
-        supports_vision = model_supports_vision(
-            assistant.multimodal_model_ref
-        )
+        supports_vision = model_supports_vision(assistant.multimodal_model_ref)
     except Exception as exc:
         logger.warning(
             "multimodal model capability check failed for run %s: %s",
             run.uuid,
             exc,
         )
-        raise MultimodalPreprocessingError(
-            "MODEL_CONFIGURATION_INVALID"
-        ) from exc
+        raise MultimodalPreprocessingError("MODEL_CONFIGURATION_INVALID") from exc
     if supports_vision not in (True, VISION_SUPPORTED):
         raise MultimodalPreprocessingError("MODEL_NOT_VISION_CAPABLE")
 
@@ -1636,9 +1602,7 @@ def analyze_multimodal_intent(run):
             user_id=run.session.user_id,
         )
     except Exception as exc:
-        logger.warning(
-            "multimodal intent failed for run %s: %s", run.uuid, exc
-        )
+        logger.warning("multimodal intent failed for run %s: %s", run.uuid, exc)
         message = str(exc).lower()
         if "429" in message or "quota" in message or "rate limit" in message:
             reason = "PROVIDER_QUOTA_EXCEEDED"
@@ -1650,9 +1614,7 @@ def analyze_multimodal_intent(run):
             reason = "MODEL_REQUEST_FAILED"
         raise MultimodalPreprocessingError(reason) from exc
 
-    text = " ".join((result.content or "").split())[
-        :MULTIMODAL_INTENT_MAX_CHARS
-    ]
+    text = " ".join((result.content or "").split())[:MULTIMODAL_INTENT_MAX_CHARS]
     if not text:
         raise MultimodalPreprocessingError("EMPTY_MODEL_RESPONSE")
     return {
@@ -1763,9 +1725,7 @@ def resolve_loaded_skill_environment(loaded_skills):
             if isinstance(item, dict) and item.get("name")
         }
         runtime_skill["environment"] = {
-            name: str(values[name])
-            for name in declared_names
-            if name in values
+            name: str(values[name]) for name in declared_names if name in values
         }
         runtime_skills.append(runtime_skill)
     return runtime_skills
@@ -1792,9 +1752,7 @@ def resolve_loaded_mcp_environment(loaded_mcps):
             if isinstance(item, dict) and item.get("name")
         }
         runtime_mcp["environment"] = {
-            name: str(values[name])
-            for name in declared_names
-            if name in values
+            name: str(values[name]) for name in declared_names if name in values
         }
         references = declared_environment_references(
             {
@@ -1812,8 +1770,7 @@ def resolve_loaded_mcp_environment(loaded_mcps):
             runtime_mcp["environment"],
         )
         runtime_mcp["environment_resolved"] = all(
-            str(runtime_mcp["environment"].get(name) or "")
-            for name in references
+            str(runtime_mcp["environment"].get(name) or "") for name in references
         )
         runtime_mcps.append(runtime_mcp)
     return runtime_mcps
@@ -1828,9 +1785,7 @@ def _runtime_subagents(subagents):
             "loaded_skills": resolve_loaded_skill_environment(
                 subagent.get("loaded_skills")
             ),
-            "loaded_mcps": resolve_loaded_mcp_environment(
-                subagent.get("loaded_mcps")
-            ),
+            "loaded_mcps": resolve_loaded_mcp_environment(subagent.get("loaded_mcps")),
         }
         for subagent in subagents
         if isinstance(subagent, dict)
@@ -1905,9 +1860,7 @@ def validate_run_dispatch(run):
         required = {
             item["name"]
             for item in declarations
-            if isinstance(item, dict)
-            and item.get("required")
-            and item.get("name")
+            if isinstance(item, dict) and item.get("required") and item.get("name")
         }
         values = skill.get("environment") or {}
         if any(not str(values.get(name) or "") for name in required):
@@ -1922,9 +1875,7 @@ def validate_run_dispatch(run):
         required = {
             item["name"]
             for item in declarations
-            if isinstance(item, dict)
-            and item.get("required")
-            and item.get("name")
+            if isinstance(item, dict) and item.get("required") and item.get("name")
         }
         values = mcp.get("environment") or {}
         referenced = declared_environment_references(
@@ -1934,10 +1885,7 @@ def validate_run_dispatch(run):
             },
             declarations,
         )
-        if any(
-            not str(values.get(name) or "")
-            for name in required | referenced
-        ):
+        if any(not str(values.get(name) or "") for name in required | referenced):
             raise LensNodeDispatchError("MCP_ENVIRONMENT_REQUIRED")
 
 
@@ -2033,9 +1981,7 @@ def create_run_execution_snapshot(
             "runtime_snapshot": runtime_snapshot,
             "token_budget_profile": token_budget["profile"],
             "token_budget_max_tokens": token_budget["max_tokens"],
-            "token_budget_final_reserve_tokens": token_budget[
-                "final_reserve_tokens"
-            ],
+            "token_budget_final_reserve_tokens": token_budget["final_reserve_tokens"],
             "status": RunExecution.Status.QUEUED,
         },
     )
@@ -2070,7 +2016,8 @@ def _build_run_runtime_snapshot(
             else session.allowed_assistant_uuids or []
         )
         subagents = list(
-            Assistant.objects.visible_to(session.user).filter(
+            Assistant.objects.visible_to(session.user)
+            .filter(
                 uuid__in=configured,
                 status=Assistant.Status.ACTIVE,
                 capability__in=[
@@ -2079,7 +2026,8 @@ def _build_run_runtime_snapshot(
                     Assistant.Capability.KNOWLEDGE_QA,
                 ],
                 is_system=False,
-            ).prefetch_related(
+            )
+            .prefetch_related(
                 "skill_bindings__skill",
                 "skill_bindings__environment_variable_set",
                 "mcp_bindings__mcp",
@@ -2098,9 +2046,7 @@ def _build_run_runtime_snapshot(
                 ),
                 "capability": item.capability,
                 "task": execution_task_for_capability(item.capability),
-                "lensnode_uuid": (
-                    str(item.lensnode.uuid) if item.lensnode_id else ""
-                ),
+                "lensnode_uuid": (str(item.lensnode.uuid) if item.lensnode_id else ""),
                 "target_dirs": (
                     []
                     if item.capability == Assistant.Capability.GENERAL_CHAT
@@ -2133,6 +2079,9 @@ def _build_run_runtime_snapshot(
             else session.allowed_assistant_uuids or []
         ),
         "subagents": subagents,
+        "routing_assistant_uuids": (
+            list(routing_assistant_uuids or []) if routing_assistant_explicit else []
+        ),
         "routing_assistant_uuid": (
             str(routing_assistant_uuids[0])
             if routing_assistant_uuids and len(routing_assistant_uuids) == 1
@@ -2217,7 +2166,7 @@ def build_clarification_continuation_question(run, current_question):
             break
         turns.append(
             (
-                clarification_question[:budget["message_chars"]],
+                clarification_question[: budget["message_chars"]],
                 answer[:CLARIFICATION_MAX_ANSWER_CHARS],
             )
         )
@@ -2257,7 +2206,7 @@ def build_clarification_continuation_question(run, current_question):
             [
                 "",
                 "Current execution prompt:",
-                current_question[:budget["message_chars"]],
+                current_question[: budget["message_chars"]],
             ]
         )
     return "\n".join(sections)[:CLARIFICATION_MAX_PROMPT_CHARS]
@@ -2281,9 +2230,7 @@ def build_run_history_artifacts(run):
         root, _ = _retry_chain_root(run, runs_by_id)
         cutoff_sequence = root.input_message.sequence
     prior_runs = [
-        item
-        for item in all_prior_runs
-        if item.input_message.sequence < cutoff_sequence
+        item for item in all_prior_runs if item.input_message.sequence < cutoff_sequence
     ]
     latest_attempts = _latest_retry_attempts(prior_runs)
     selected = []
@@ -2298,8 +2245,7 @@ def build_run_history_artifacts(run):
                 not output.file
                 or len(content_hash) != 64
                 or any(
-                    character not in "0123456789abcdef"
-                    for character in content_hash
+                    character not in "0123456789abcdef" for character in content_hash
                 )
                 or byte_size > settings.DELIVERABLE_MAX_BYTES
                 or total_bytes + byte_size > settings.DELIVERABLE_MAX_BYTES
@@ -2360,9 +2306,7 @@ def _build_run_history_data(run):
         )
         cutoff_sequence = root.input_message.sequence
     prior_runs = [
-        item
-        for item in all_prior_runs
-        if item.input_message.sequence < cutoff_sequence
+        item for item in all_prior_runs if item.input_message.sequence < cutoff_sequence
     ]
     latest_attempts = _latest_retry_attempts(prior_runs)
     limited_pairs = []
@@ -2387,9 +2331,7 @@ def _build_run_history_data(run):
                     "run_uuid": str(prior.uuid),
                     "messages": [
                         {
-                            "message_uuid": str(
-                                message_by_role[item["role"]].uuid
-                            ),
+                            "message_uuid": str(message_by_role[item["role"]].uuid),
                             "role": item["role"],
                             "chars": len(item["content"]),
                             "sha256": hashlib.sha256(
@@ -2409,14 +2351,11 @@ def _build_run_history_data(run):
         "history_runs_before_filtering": len(all_prior_runs),
         "history_runs_after_filtering": len(latest_attempts),
         "superseded_retry_attempts_removed": (
-            superseded_current_attempts
-            + len(prior_runs)
-            - len(latest_attempts)
+            superseded_current_attempts + len(prior_runs) - len(latest_attempts)
         ),
         "non_completed_assistant_outputs_excluded": sum(
             bool(
-                prior.output_message_id
-                and (prior.output_message.content or "").strip()
+                prior.output_message_id and (prior.output_message.content or "").strip()
             )
             and not _assistant_output_is_trusted(prior)
             for prior in latest_attempts
@@ -2493,8 +2432,7 @@ def _assistant_output_is_trusted(run):
         return run.outcome in {"", Run.Outcome.COMPLETED}
     return (
         run.status == Run.Status.AWAITING_USER_INPUT
-        and (run.termination_detail or {}).get("reason")
-        == "needs_user_input"
+        and (run.termination_detail or {}).get("reason") == "needs_user_input"
     )
 
 
@@ -2571,9 +2509,7 @@ def dispatch_run_to_lensnode(
     if not isinstance(runtime_settings, dict):
         runtime_settings = run.session.assistant.settings
     features_payload = (
-        runtime_settings.get("features")
-        if isinstance(runtime_settings, dict)
-        else None
+        runtime_settings.get("features") if isinstance(runtime_settings, dict) else None
     )
     if not isinstance(features_payload, dict):
         features_payload = {}
@@ -2590,9 +2526,7 @@ def dispatch_run_to_lensnode(
         for item in subject_documents
     ]
     if subject_documents and not supports_document_attachments(run.lensnode):
-        raise LensNodeDispatchError(
-            "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"
-        )
+        raise LensNodeDispatchError("DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE")
     channel_layer = get_channel_layer()
     if channel_layer is None:
         raise LensNodeDispatchError("LENS_CHANNEL_LAYER_UNAVAILABLE")
@@ -2602,9 +2536,7 @@ def dispatch_run_to_lensnode(
         or run.session.assistant.agent_rounds
         or Assistant.AgentRounds.BALANCED
     )
-    run_timeout_s = execution.run_timeout_s or run_timeout_for_rounds(
-        agent_rounds
-    )
+    run_timeout_s = execution.run_timeout_s or run_timeout_for_rounds(agent_rounds)
     elapsed_s = (
         max((timezone.now() - run.started_at).total_seconds(), 0)
         if run.started_at
@@ -2613,17 +2545,12 @@ def dispatch_run_to_lensnode(
     remaining_run_timeout_s = max(run_timeout_s - elapsed_s, 0)
     profile = getattr(run.session.user, "profile", None)
     history_artifacts = (
-        build_run_history_artifacts(run)
-        if execution.task == "general_chat"
-        else []
+        build_run_history_artifacts(run) if execution.task == "general_chat" else []
     )
     answer_language = normalize_answer_language(
-        runtime_snapshot.get("answer_language")
-        or getattr(profile, "language", None)
+        runtime_snapshot.get("answer_language") or getattr(profile, "language", None)
     )
-    selected_image_uuids = set(
-        runtime_snapshot.get("session_attachment_uuids") or []
-    )
+    selected_image_uuids = set(runtime_snapshot.get("session_attachment_uuids") or [])
     image_attachments = MessageAttachment.objects.filter(
         session=run.session,
         kind=MessageAttachment.Kind.IMAGE,
@@ -2643,8 +2570,7 @@ def dispatch_run_to_lensnode(
         model_refs.get("multimodal")
         or str(run.session.assistant.multimodal_model_ref or "")
         if image_data_urls
-        else model_refs.get("agent")
-        or str(run.session.assistant.agent_model_ref or "")
+        else model_refs.get("agent") or str(run.session.assistant.agent_model_ref or "")
     )
     rewritten_question = build_clarification_continuation_question(
         run,
@@ -2680,9 +2606,7 @@ def dispatch_run_to_lensnode(
                 "history": build_run_history(run),
                 "history_artifacts": history_artifacts,
                 "target_dirs": execution.target_dirs,
-                "workspace_guide": runtime_snapshot.get(
-                    "workspace_guide", ""
-                ),
+                "workspace_guide": runtime_snapshot.get("workspace_guide", ""),
                 "assistant_capability": runtime_snapshot.get(
                     "assistant_capability", "general_chat"
                 ),
@@ -2690,21 +2614,18 @@ def dispatch_run_to_lensnode(
                 "routing_assistant_uuid": runtime_snapshot.get(
                     "routing_assistant_uuid", ""
                 ),
+                "routing_assistant_uuids": runtime_snapshot.get(
+                    "routing_assistant_uuids", []
+                ),
                 "routing_assistant_explicit": bool(
                     runtime_snapshot.get("routing_assistant_explicit")
                 ),
-                "subagents": _runtime_subagents(
-                    runtime_snapshot.get("subagents", [])
-                ),
+                "subagents": _runtime_subagents(runtime_snapshot.get("subagents", [])),
                 "loaded_skills": resolve_loaded_skill_environment(
                     execution.loaded_skills
                 ),
-                "loaded_mcps": resolve_loaded_mcp_environment(
-                    execution.loaded_mcps
-                ),
-                "agent_model_ref": (
-                    agent_model_ref
-                ),
+                "loaded_mcps": resolve_loaded_mcp_environment(execution.loaded_mcps),
+                "agent_model_ref": (agent_model_ref),
                 "agent_rounds": agent_rounds,
                 "max_agent_turns": max_agent_turns_for_rounds(agent_rounds),
                 "resume": resume,
@@ -2724,9 +2645,7 @@ def dispatch_run_to_lensnode(
                 ),
                 "trace_context": {
                     "trace_id": trace_id_for_run(run.uuid),
-                    "root_observation_id": root_observation_id_for_run(
-                        run.uuid
-                    ),
+                    "root_observation_id": root_observation_id_for_run(run.uuid),
                 },
                 "settings": runtime_settings,
             },
@@ -2789,9 +2708,7 @@ def cancel_descendant_runs(root_run):
     if not descendants:
         return []
     now = timezone.now()
-    runs = list(
-        Run.objects.select_related("lensnode").filter(pk__in=descendants)
-    )
+    runs = list(Run.objects.select_related("lensnode").filter(pk__in=descendants))
     Run.objects.filter(pk__in=descendants).update(
         status=Run.Status.CANCELLED,
         resume_by=None,
@@ -2867,10 +2784,7 @@ def touch_run_activity(run_pk):
     now = timezone.now()
     Run.objects.filter(pk=run_pk).filter(
         Q(last_activity_at__isnull=True)
-        | Q(
-            last_activity_at__lt=now
-            - timedelta(seconds=RUN_ACTIVITY_THROTTLE_SECONDS)
-        )
+        | Q(last_activity_at__lt=now - timedelta(seconds=RUN_ACTIVITY_THROTTLE_SECONDS))
     ).update(last_activity_at=now)
 
 
@@ -2902,9 +2816,7 @@ def append_lensnode_output(
     elif reset:
         run.output_message.content = content_delta
     else:
-        run.output_message.content = (
-            f"{run.output_message.content}{content_delta}"
-        )
+        run.output_message.content = f"{run.output_message.content}{content_delta}"
     run.output_message.run = run
     run.output_message.save(update_fields=["content", "run"])
     run_update_fields = []
@@ -3050,11 +2962,7 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
         )
         return None
     if status == RunStep.Status.RUNNING:
-        execution = (
-            RunExecution.objects.select_for_update()
-            .filter(run=run)
-            .first()
-        )
+        execution = RunExecution.objects.select_for_update().filter(run=run).first()
     else:
         execution = None
     queue_state = (detail or {}).get("queue_state")
@@ -3072,9 +2980,7 @@ def record_lensnode_run_event(run_uuid, step_type, status, detail):
             execution.dispatch_id,
         )
     if run.resume_by is not None and status == RunStep.Status.RUNNING:
-        Run.objects.filter(pk=run.pk, resume_by__isnull=False).update(
-            resume_by=None
-        )
+        Run.objects.filter(pk=run.pk, resume_by__isnull=False).update(resume_by=None)
         run.resume_by = None
     sequence = _step_sequence(step_type)
     step, _ = RunStep.objects.get_or_create(
@@ -3213,9 +3119,7 @@ def finish_lensnode_run(
         execution_status = RunExecution.Status.FAILED
     valid_outcomes = {choice for choice, _ in Run.Outcome.choices}
     run.outcome = outcome if outcome in valid_outcomes else default_outcome
-    run.termination_detail = sanitize_termination_detail(
-        termination_detail or {}
-    )
+    run.termination_detail = sanitize_termination_detail(termination_detail or {})
     run.resume_by = None
     run.finished_at = now
     run.save(
@@ -3241,8 +3145,7 @@ def finish_lensnode_run(
         and run.output_message is not None
         and bool((run.output_message.content or "").strip())
         and not run.session.title_manually_edited
-        and run.session.title_generation_status
-        == Session.TitleGenerationStatus.PENDING
+        and run.session.title_generation_status == Session.TitleGenerationStatus.PENDING
     )
     if should_generate_title:
         transaction.on_commit(
@@ -3254,9 +3157,7 @@ def finish_lensnode_run(
     if _run_has_trace_observations(run):
         trace_export, _created = RunTraceExport.objects.get_or_create(run=run)
         transaction.on_commit(
-            lambda export_uuid=trace_export.uuid: _enqueue_trace_export(
-                export_uuid
-            )
+            lambda export_uuid=trace_export.uuid: _enqueue_trace_export(export_uuid)
         )
 
     _promote_next_queued_run(run.session.assistant)
@@ -3306,11 +3207,7 @@ def _promote_next_queued_run(assistant):
         expected_document_count = get_run_document_expectation(next_run.uuid)
         enqueue_answer_run_task(
             next_run.uuid,
-            (
-                expected_document_count
-                if expected_document_count is not None
-                else -1
-            ),
+            (expected_document_count if expected_document_count is not None else -1),
         )
 
 
@@ -3403,9 +3300,7 @@ def stream_run_events(run):
             return
 
         now = timezone.now()
-        if (
-            now - last_ping_at
-        ).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
+        if (now - last_ping_at).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
             last_ping_at = now
             yield {
                 "type": "ping",
@@ -3497,9 +3392,7 @@ async def stream_run_events_async(run):
             return
 
         now = timezone.now()
-        if (
-            now - last_ping_at
-        ).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
+        if (now - last_ping_at).total_seconds() >= STREAM_PING_INTERVAL_SECONDS:
             last_ping_at = now
             yield {
                 "type": "ping",
@@ -3601,9 +3494,7 @@ def _build_sync_event(run):
         "status": run.status,
         "resume_by": run.resume_by.isoformat() if run.resume_by else None,
         "outcome": run.outcome,
-        "termination_detail": sanitize_termination_detail(
-            run.termination_detail
-        ),
+        "termination_detail": sanitize_termination_detail(run.termination_detail),
         "steps": steps,
         "content": _run_content(run),
         "ts": timezone.now().isoformat(),
@@ -3618,9 +3509,7 @@ def _terminal_stream_event(run):
             "type": "awaiting_user_input",
             "status": run.status,
             "outcome": run.outcome,
-            "termination_detail": sanitize_termination_detail(
-                run.termination_detail
-            ),
+            "termination_detail": sanitize_termination_detail(run.termination_detail),
             "ts": timezone.now().isoformat(),
         }
     if run.status == Run.Status.FAILED:
@@ -3628,9 +3517,7 @@ def _terminal_stream_event(run):
             "type": "error",
             "status": run.status,
             "outcome": run.outcome,
-            "termination_detail": sanitize_termination_detail(
-                run.termination_detail
-            ),
+            "termination_detail": sanitize_termination_detail(run.termination_detail),
             "error": {
                 "code": run.error or "LENS_RUN_FAILED",
                 "message": run.error or "Run failed.",
@@ -3642,9 +3529,7 @@ def _terminal_stream_event(run):
             "type": "error",
             "status": run.status,
             "outcome": run.outcome,
-            "termination_detail": sanitize_termination_detail(
-                run.termination_detail
-            ),
+            "termination_detail": sanitize_termination_detail(run.termination_detail),
             "error": {
                 "code": "LENS_RUN_CANCELLED",
                 "message": "Run was cancelled.",
@@ -3655,8 +3540,6 @@ def _terminal_stream_event(run):
         "type": "done",
         "status": run.status,
         "outcome": run.outcome,
-        "termination_detail": sanitize_termination_detail(
-            run.termination_detail
-        ),
+        "termination_detail": sanitize_termination_detail(run.termination_detail),
         "ts": timezone.now().isoformat(),
     }

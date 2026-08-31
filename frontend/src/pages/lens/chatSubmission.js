@@ -20,10 +20,12 @@ function generateUUID() {
   ].join('-')
 }
 
-function sameAttachmentUuids(left, right) {
+function sameUuids(left, right) {
+  const leftValues = left || []
+  const rightValues = right || []
   return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
+    leftValues.length === rightValues.length &&
+    leftValues.every((value, index) => value === rightValues[index])
   )
 }
 
@@ -33,8 +35,11 @@ function isSameSubmission(pending, candidate) {
       pending.sessionUuid === candidate.sessionUuid &&
       pending.question === candidate.question &&
       pending.retryOfRunUuid === candidate.retryOfRunUuid &&
-      pending.routingAssistantUuid === candidate.routingAssistantUuid &&
-      sameAttachmentUuids(pending.attachmentUuids, candidate.attachmentUuids)
+      sameUuids(
+        pending.routingAssistantUuids,
+        candidate.routingAssistantUuids
+      ) &&
+      sameUuids(pending.attachmentUuids, candidate.attachmentUuids)
   )
 }
 
@@ -42,7 +47,7 @@ export function prepareRunSubmission({
   sessionUuid,
   question,
   attachmentUuids = [],
-  routingAssistantUuid = '',
+  routingAssistantUuids = [],
   retryDraft = null,
   pendingSubmission = null,
   randomUUID = generateUUID
@@ -53,7 +58,7 @@ export function prepareRunSubmission({
     sessionUuid,
     question,
     attachmentUuids: [...attachmentUuids],
-    routingAssistantUuid,
+    routingAssistantUuids: [...routingAssistantUuids],
     retryOfRunUuid
   }
   const idempotencyKey = isSameSubmission(pendingSubmission, candidate)
@@ -70,8 +75,8 @@ export function prepareRunSubmission({
   if (retryOfRunUuid) {
     payload.retry_of_run_uuid = retryOfRunUuid
   }
-  if (routingAssistantUuid) {
-    payload.routing_assistant_uuid = routingAssistantUuid
+  if (routingAssistantUuids.length) {
+    payload.routing_assistant_uuids = [...routingAssistantUuids]
   }
   return { payload, submission }
 }

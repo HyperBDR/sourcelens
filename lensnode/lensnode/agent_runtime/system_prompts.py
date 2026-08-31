@@ -427,7 +427,17 @@ def _smart_collaboration_system_prompt(
             f" [assistant_uuid={item.get('uuid', '')}]"
         )
     roster = "\n".join(assistants) or "- 当前没有可委派助手"
-    if command.get("routing_assistant_uuid"):
+    explicit_assistant_uuids = command.get("routing_assistant_uuids") or (
+        [command["routing_assistant_uuid"]]
+        if command.get("routing_assistant_uuid")
+        else []
+    )
+    if len(explicit_assistant_uuids) > 1:
+        routing_directive = (
+            "- 用户已明确指定多个助手，必须分别委派给每个助手（可以并行），"
+            "并整合所有实际返回的结果；不要由主路由直接回答。\n"
+        )
+    elif explicit_assistant_uuids:
         routing_directive = (
             "- 用户已明确指定助手，必须委派给该助手；不要由主路由直接回答。\n"
         )

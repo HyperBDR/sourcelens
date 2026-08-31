@@ -2791,6 +2791,24 @@ def test_smart_collaboration_prompt_localizes_assistant_capabilities():
     assert "Code Reviewer｜Análisis de código｜Revisa repositorios." in prompt
 
 
+def test_smart_collaboration_prompt_requires_every_explicit_assistant():
+    prompt = _smart_collaboration_system_prompt(
+        {
+            "routing_assistant_uuids": ["assistant-1", "assistant-2"],
+            "routing_assistant_explicit": True,
+            "subagents": [
+                {"uuid": "assistant-1", "name": "First Assistant"},
+                {"uuid": "assistant-2", "name": "Second Assistant"},
+            ],
+        },
+        "ANSWER LANGUAGE REQUIREMENT: English.",
+        "English",
+    )
+
+    assert "必须分别委派给每个助手" in prompt
+    assert "可以并行" in prompt
+
+
 def test_general_chat_prompt_keeps_runtime_instructions_confidential():
     prompt = _general_chat_system_prompt(
         {
