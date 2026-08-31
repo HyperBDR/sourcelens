@@ -721,6 +721,19 @@ generate_env() {
     set_env_key "${env_file}" NGINX_HTTP_PORT "${HTTP_PORT}"
     set_env_key "${env_file}" NGINX_HTTPS_PORT "${HTTPS_PORT}"
     ensure_turnstile_boots "${env_file}"
+    local stored_admin_username stored_admin_email
+    stored_admin_username="$(
+      read_env_key "${env_file}" DJANGO_SUPERUSER_USERNAME
+    )"
+    stored_admin_email="$(
+      read_env_key "${env_file}" DJANGO_SUPERUSER_EMAIL
+    )"
+    if [[ -n "${stored_admin_username}" ]]; then
+      ADMIN_USERNAME="${stored_admin_username}"
+    fi
+    if [[ -n "${stored_admin_email}" ]]; then
+      ADMIN_EMAIL="${stored_admin_email}"
+    fi
     ADMIN_PASSWORD="$(read_env_key "${env_file}" DJANGO_SUPERUSER_PASSWORD)"
     return 0
   fi
@@ -959,9 +972,9 @@ start_stack() {
 # Health check
 # ---------------------------------------------------------------------------
 health_check() {
-  log_step "Waiting for health endpoint (timeout: ${HEALTH_TIMEOUT}s)"
+  log_step "Waiting for system health endpoint (timeout: ${HEALTH_TIMEOUT}s)"
   local deadline=$((SECONDS + HEALTH_TIMEOUT))
-  local url="http://127.0.0.1:${HTTP_PORT}/health"
+  local url="http://127.0.0.1:${HTTP_PORT}/health/celery"
   until curl -fsS --max-time 5 "${url}" >/dev/null 2>&1; do
     if ((SECONDS >= deadline)); then
       log_error "health check timed out after ${HEALTH_TIMEOUT}s"
@@ -990,6 +1003,7 @@ write_install_info() {
     printf 'SOURCELENS_INSTALL_DIR=%s\n' "${INSTALL_DIR}"
     printf 'SOURCELENS_URL=%s\n' "${SCHEME}://${DOMAIN}${PORT_SUFFIX}"
     printf 'SOURCELENS_USERNAME=%s\n' "${ADMIN_USERNAME}"
+    printf 'SOURCELENS_EMAIL=%s\n' "${ADMIN_EMAIL}"
     printf 'SOURCELENS_INITIAL_PASSWORD=%s\n' "${ADMIN_PASSWORD}"
     printf 'SOURCELENS_REGISTRY=%s\n' "${REGISTRY}"
     printf 'SOURCELENS_HTTP_PORT=%s\n' "${HTTP_PORT}"
@@ -1019,7 +1033,7 @@ final_summary() {
   log_step "Installation complete"
   log_ok "SourceLens v${VERSION} installed at ${INSTALL_DIR}"
   log_info "URL:              ${SCHEME}://${DOMAIN}${PORT_SUFFIX}"
-  log_info "Username:         ${ADMIN_USERNAME}"
+  log_info "Email:            ${ADMIN_EMAIL}"
   log_info "Initial password: ${ADMIN_PASSWORD}"
   log_info "Install dir:      ${INSTALL_DIR}"
   log_info "Config file:      ${INSTALL_DIR}/.env"

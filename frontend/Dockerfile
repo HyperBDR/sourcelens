@@ -46,6 +46,8 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 
 # Copy custom nginx configuration for SPA routing
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh
 
 # Stamp the release version onto the runtime image so scripts/install.sh can
 # read it (docker inspect Config.Labels) for its version-skip check. Absent =>
