@@ -33,7 +33,7 @@ class LensNodeAdmin(admin.ModelAdmin):
 
 @admin.register(Assistant)
 class AssistantAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "lensnode", "selected_task", "status")
+    list_display = ("name", "slug", "lensnode", "capability", "status")
     search_fields = ("name", "slug")
 
 

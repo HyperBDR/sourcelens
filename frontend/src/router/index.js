@@ -82,6 +82,12 @@ const routes = [
     redirect: '/management/task-management/list'
   },
   {
+    path: '/lens/chat',
+    name: 'LensSmartChat',
+    component: () => import('@/pages/lens/Chat.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/lens/assistants/:slug',
     redirect: (to) => `/lens/assistants/${to.params.slug}/chat`
   },

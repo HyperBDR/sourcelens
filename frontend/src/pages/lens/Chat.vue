@@ -148,141 +148,138 @@
               <Pencil :size="16" :stroke-width="2" aria-hidden="true" />
             </button>
           </div>
-          <div
-            v-show="!sessionHistoryCollapsed || isMobile"
-            class="sessions-head"
-          >
-            <h2 class="sr-only">{{ t('lens.chat.sessionLists') }}</h2>
-            <div
-              class="session-filters"
-              role="group"
-              :aria-label="t('lens.chat.sessionLists')"
-            >
-              <button
-                type="button"
-                :class="{ 'session-filter-active': !showArchivedSessions }"
-                :aria-pressed="!showArchivedSessions"
-                @click="switchSessionView(false)"
+          <template v-else>
+            <div class="sessions-head">
+              <h2 class="sr-only">{{ t('lens.chat.sessionLists') }}</h2>
+              <div
+                class="session-filters"
+                role="group"
+                :aria-label="t('lens.chat.sessionLists')"
               >
-                {{ t('lens.chat.sessions') }}
-              </button>
-              <button
-                type="button"
-                :class="{ 'session-filter-active': showArchivedSessions }"
-                :aria-pressed="showArchivedSessions"
-                @click="switchSessionView(true)"
-              >
-                {{ t('lens.chat.archivedSessions') }}
-              </button>
-              <button
-                type="button"
-                class="session-search-btn"
-                :aria-label="t('lens.chat.searchSessions')"
-                :title="t('lens.chat.searchSessions')"
-                @click="openSessionSearch"
-              >
-                <Search :size="15" :stroke-width="2.2" aria-hidden="true" />
-              </button>
-              <button
-                v-if="!isMobile"
-                type="button"
-                class="sessions-collapse-toggle"
-                :aria-label="t('common.collapse')"
-                :title="t('common.collapse')"
-                @click="sessionHistoryCollapsed = true"
-              >
-                <ChevronUp :size="15" :stroke-width="2" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-          <div
-            v-show="!sessionHistoryCollapsed || isMobile"
-            class="sessions-list"
-          >
-            <div
-              v-for="session in sessions"
-              :key="session.uuid"
-              class="session-item"
-              :class="{
-                'session-item-active': selectedSessionUuid === session.uuid
-              }"
-            >
-              <input
-                v-if="renamingSessionUuid === session.uuid"
-                v-model="renameDraft"
-                class="session-rename-input"
-                :placeholder="t('lens.chat.untitledSession')"
-                @click.stop
-                @keydown.enter.stop.prevent="saveRename(session)"
-                @keydown.esc.stop="cancelRename"
-                @blur="saveRename(session)"
-              />
-              <template v-else>
-                <div
-                  class="min-w-0 flex-1 cursor-pointer"
-                  :title="session.title || t('lens.chat.untitledSession')"
-                  @click="selectSession(session)"
+                <button
+                  type="button"
+                  :class="{ 'session-filter-active': !showArchivedSessions }"
+                  :aria-pressed="!showArchivedSessions"
+                  @click="switchSessionView(false)"
                 >
-                  <div class="session-title-row">
-                    <Pin
-                      v-if="session.pinned_at"
-                      class="session-pinned-icon"
-                      :size="13"
-                      :stroke-width="2.2"
-                      :aria-label="t('lens.chat.pinned')"
-                    />
-                    <div class="session-title">
-                      {{ session.title || t('lens.chat.untitledSession') }}
+                  {{ t('lens.chat.sessions') }}
+                </button>
+                <button
+                  type="button"
+                  :class="{ 'session-filter-active': showArchivedSessions }"
+                  :aria-pressed="showArchivedSessions"
+                  @click="switchSessionView(true)"
+                >
+                  {{ t('lens.chat.archivedSessions') }}
+                </button>
+                <button
+                  type="button"
+                  class="session-search-btn"
+                  :aria-label="t('lens.chat.searchSessions')"
+                  :title="t('lens.chat.searchSessions')"
+                  @click="openSessionSearch"
+                >
+                  <Search :size="15" :stroke-width="2.2" aria-hidden="true" />
+                </button>
+                <button
+                  v-if="!isMobile"
+                  type="button"
+                  class="sessions-collapse-toggle"
+                  :aria-label="t('common.collapse')"
+                  :title="t('common.collapse')"
+                  @click="sessionHistoryCollapsed = true"
+                >
+                  <ChevronUp :size="15" :stroke-width="2" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <div class="sessions-list">
+              <div
+                v-for="session in sessions"
+                :key="session.uuid"
+                class="session-item"
+                :class="{
+                  'session-item-active': selectedSessionUuid === session.uuid
+                }"
+              >
+                <input
+                  v-if="renamingSessionUuid === session.uuid"
+                  v-model="renameDraft"
+                  class="session-rename-input"
+                  :placeholder="t('lens.chat.untitledSession')"
+                  @click.stop
+                  @keydown.enter.stop.prevent="saveRename(session)"
+                  @keydown.esc.stop="cancelRename"
+                  @blur="saveRename(session)"
+                />
+                <template v-else>
+                  <div
+                    class="min-w-0 flex-1 cursor-pointer"
+                    :title="session.title || t('lens.chat.untitledSession')"
+                    @click="selectSession(session)"
+                  >
+                    <div class="session-title-row">
+                      <Pin
+                        v-if="session.pinned_at"
+                        class="session-pinned-icon"
+                        :size="13"
+                        :stroke-width="2.2"
+                        :aria-label="t('lens.chat.pinned')"
+                      />
+                      <div class="session-title">
+                        {{ session.title || t('lens.chat.untitledSession') }}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div class="flex shrink-0 items-center gap-1">
-                  <span
-                    v-if="sessionActivity.hasActivity(session.uuid)"
-                    class="session-activity-indicator"
-                    :title="t('lens.chat.sessionActive')"
-                  >
-                    <LoaderCircle
-                      :size="15"
-                      :stroke-width="2.2"
-                      aria-hidden="true"
+                  <div class="flex shrink-0 items-center gap-1">
+                    <span
+                      v-if="sessionActivity.hasActivity(session.uuid)"
+                      class="session-activity-indicator"
+                      :title="t('lens.chat.sessionActive')"
+                    >
+                      <LoaderCircle
+                        :size="15"
+                        :stroke-width="2.2"
+                        aria-hidden="true"
+                      />
+                      <span class="sr-only">
+                        {{ t('lens.chat.sessionActive') }}
+                      </span>
+                    </span>
+                    <span
+                      v-else-if="sessionHasUnreadAnswer(session.uuid)"
+                      class="session-unread-indicator"
+                      :title="t('lens.chat.unreadAnswer')"
+                    >
+                      <span class="sr-only">
+                        {{ t('lens.chat.unreadAnswer') }}
+                      </span>
+                    </span>
+                    <RowActionMenu
+                      class="session-overflow"
+                      placement="right"
+                      :actions="sessionActions(session)"
+                      :label="
+                        t('lens.chat.sessionActions', {
+                          title: session.title || t('lens.chat.untitledSession')
+                        })
+                      "
+                      @click.stop
+                      @select="handleSessionAction(session, $event)"
                     />
-                    <span class="sr-only">
-                      {{ t('lens.chat.sessionActive') }}
-                    </span>
-                  </span>
-                  <span
-                    v-else-if="sessionHasUnreadAnswer(session.uuid)"
-                    class="session-unread-indicator"
-                    :title="t('lens.chat.unreadAnswer')"
-                  >
-                    <span class="sr-only">
-                      {{ t('lens.chat.unreadAnswer') }}
-                    </span>
-                  </span>
-                  <RowActionMenu
-                    class="session-overflow"
-                    :actions="sessionActions(session)"
-                    :label="
-                      t('lens.chat.sessionActions', {
-                        title: session.title || t('lens.chat.untitledSession')
-                      })
-                    "
-                    @click.stop
-                    @select="handleSessionAction(session, $event)"
-                  />
-                </div>
-              </template>
+                  </div>
+                </template>
+              </div>
+              <p v-if="!sessions.length" class="session-list-empty">
+                {{
+                  showArchivedSessions
+                    ? t('lens.chat.noArchivedSessions')
+                    : t('lens.chat.noRecentSessions')
+                }}
+              </p>
             </div>
-            <p v-if="!sessions.length" class="session-list-empty">
-              {{
-                showArchivedSessions
-                  ? t('lens.chat.noArchivedSessions')
-                  : t('lens.chat.noRecentSessions')
-              }}
-            </p>
-          </div>
+          </template>
         </section>
       </div>
 
@@ -410,7 +407,11 @@
             >
               <div class="message-body">
                 <details
-                  v-if="structuredProgress(message._runtimeState).items.length"
+                  v-if="
+                    structuredProgress(message._runtimeState).items.length ||
+                    delegatedTaskGroups(message._runtimeState).length
+                  "
+                  open
                   class="runtime-progress-card"
                 >
                   <summary class="runtime-progress-summary">
@@ -421,6 +422,15 @@
                           structuredProgress(message._runtimeState).hasPlan
                         )
                       }}
+                      <span
+                        v-if="
+                          isSmartCollaborationConversation &&
+                          assistantNamesLabel(message._runtimeState)
+                        "
+                        class="runtime-assistant-names"
+                      >
+                        · {{ assistantNamesLabel(message._runtimeState) }}
+                      </span>
                     </span>
                     <span class="runtime-progress-summary-text">
                       {{
@@ -435,6 +445,15 @@
                       ⌄
                     </span>
                   </summary>
+                  <AssistantActivityGroups
+                    v-if="
+                      structuredProgress(message._runtimeState).kind ===
+                        'workflow' &&
+                      delegatedTaskGroups(message._runtimeState).length
+                    "
+                    :groups="delegatedTaskGroups(message._runtimeState)"
+                    :live="false"
+                  />
                   <div
                     v-if="
                       structuredProgress(message._runtimeState).kind ===
@@ -529,30 +548,19 @@
                       </div>
                     </div>
                   </div>
-                  <div
+                  <AssistantActivityGroups
                     v-else-if="
                       structuredProgress(message._runtimeState).kind ===
                       'activity'
                     "
-                    class="runtime-node-activities runtime-standalone-activities"
-                  >
-                    <div
-                      v-for="activity in structuredProgress(
-                        message._runtimeState
-                      ).items"
-                      :key="activity.id"
-                      class="runtime-node-activity"
-                    >
-                      <span class="runtime-activity-indicator">✓</span>
-                      <span>{{ activityLabel(activity.kind) }}</span>
-                      <span
-                        v-if="activity.count > 1"
-                        class="runtime-activity-count"
-                      >
-                        ×{{ activity.count }}
-                      </span>
-                    </div>
-                  </div>
+                    :groups="
+                      assistantActivityGroups(
+                        message._runtimeState,
+                        structuredProgress(message._runtimeState).items
+                      )
+                    "
+                    :live="false"
+                  />
                   <div
                     v-else
                     v-for="item in structuredProgress(message._runtimeState)
@@ -590,7 +598,19 @@
                         class="runtime-node-activity"
                       >
                         <span class="runtime-activity-indicator">✓</span>
+                        <span
+                          v-if="activity.assistantName"
+                          class="runtime-activity-assistant"
+                        >
+                          {{ activity.assistantName }}
+                        </span>
                         <span>{{ activityLabel(activity.kind) }}</span>
+                        <span
+                          v-if="activity.delegatedTask"
+                          class="runtime-activity-task-inline"
+                        >
+                          · {{ activity.delegatedTask }}
+                        </span>
                         <span
                           v-if="activity.count > 1"
                           class="runtime-activity-count"
@@ -772,7 +792,16 @@
                       </button>
                     </div>
                     <div v-if="message.content" class="message-text">
-                      {{ message.content }}
+                      <template
+                        v-for="(segment, index) in messageMentionSegments(message.content)"
+                        :key="`${message.uuid || 'message'}-${index}`"
+                      >
+                        <span
+                          v-if="segment.mentioned"
+                          class="font-semibold text-blue-600"
+                        >{{ segment.text }}</span>
+                        <span v-else>{{ segment.text }}</span>
+                      </template>
                     </div>
                   </template>
                   <MessageCitations
@@ -1059,9 +1088,13 @@
             >
               <div class="message-body">
                 <details
-                  v-if="isRunActive && liveStructuredProgress.items.length"
+                  v-if="
+                    isRunActive &&
+                    (liveStructuredProgress.items.length ||
+                      delegatedTaskGroups(runtimeState).length)
+                  "
+                  open
                   class="runtime-progress-card runtime-progress-live"
-                  :open="!isMobile"
                   role="status"
                   aria-live="polite"
                 >
@@ -1075,6 +1108,15 @@
                           liveStructuredProgress.hasPlan
                         )
                       }}
+                      <span
+                        v-if="
+                          isSmartCollaborationConversation &&
+                          assistantNamesLabel(runtimeState)
+                        "
+                        class="runtime-assistant-names"
+                      >
+                        · {{ assistantNamesLabel(runtimeState) }}
+                      </span>
                     </span>
                     <span class="runtime-progress-summary-text">
                       {{ liveProgressText }}
@@ -1094,7 +1136,24 @@
                           liveStructuredProgress.hasPlan
                         )
                       }}
+                      <span
+                        v-if="
+                          isSmartCollaborationConversation &&
+                          assistantNamesLabel(runtimeState)
+                        "
+                        class="runtime-assistant-names"
+                      >
+                        · {{ assistantNamesLabel(runtimeState) }}
+                      </span>
                     </div>
+                    <AssistantActivityGroups
+                      v-if="
+                        liveStructuredProgress.kind === 'workflow' &&
+                        delegatedTaskGroups(runtimeState).length
+                      "
+                      :groups="delegatedTaskGroups(runtimeState)"
+                      :live="true"
+                    />
                     <div
                       v-if="liveStructuredProgress.kind === 'workflow'"
                       class="runtime-workflow"
@@ -1199,44 +1258,17 @@
                         </div>
                       </div>
                     </div>
-                    <div
+                    <AssistantActivityGroups
                       v-else-if="liveStructuredProgress.kind === 'activity'"
                       ref="liveActivityScrollRef"
-                      class="runtime-node-activities runtime-standalone-activities"
-                    >
-                      <div
-                        v-for="activity in liveStructuredProgress.items"
-                        :key="activity.id"
-                        class="runtime-node-activity"
-                      >
-                        <span
-                          class="runtime-activity-indicator"
-                          :class="{
-                            'is-current': isCurrentStandaloneActivity(
-                              activity,
-                              liveStructuredProgress.items
-                            )
-                          }"
-                          aria-hidden="true"
-                        >
-                          {{
-                            isCurrentStandaloneActivity(
-                              activity,
-                              liveStructuredProgress.items
-                            )
-                              ? ''
-                              : '✓'
-                          }}
-                        </span>
-                        <span>{{ activityLabel(activity.kind) }}</span>
-                        <span
-                          v-if="activity.count > 1"
-                          class="runtime-activity-count"
-                        >
-                          ×{{ activity.count }}
-                        </span>
-                      </div>
-                    </div>
+                      :groups="
+                        assistantActivityGroups(
+                          runtimeState,
+                          liveStructuredProgress.items
+                        )
+                      "
+                      :live="true"
+                    />
                     <div
                       v-else
                       v-for="item in liveStructuredProgress.items"
@@ -1294,7 +1326,19 @@
                           >
                             {{ isCurrentActivity(activity, item) ? '' : '✓' }}
                           </span>
+                          <span
+                            v-if="activity.assistantName"
+                            class="runtime-activity-assistant"
+                          >
+                            {{ activity.assistantName }}
+                          </span>
                           <span>{{ activityLabel(activity.kind) }}</span>
+                          <span
+                            v-if="activity.delegatedTask"
+                            class="runtime-activity-task-inline"
+                          >
+                            · {{ activity.delegatedTask }}
+                          </span>
                           <span
                             v-if="activity.count > 1"
                             class="runtime-activity-count"
@@ -1449,7 +1493,22 @@
           :class="{ 'composer-wrap-empty': isEmptyConversation }"
         >
           <div class="composer-inner">
-            <div class="composer-shell">
+            <div class="composer-shell relative">
+              <ParticipatingAssistantsPicker
+                v-if="isSmartCollaborationConversation"
+                v-model:draft="routingScopeDraft"
+                v-model:query="routingScopeQuery"
+                :all-selected="routingAllSelected"
+                :candidate-count="routingCandidates.length"
+                :count="routingScopeAssistantUuids.length"
+                :filtered-candidates="filteredRoutingCandidates"
+                :mobile="isMobile"
+                :open="routingScopeOpen"
+                @cancel="cancelRoutingScope"
+                @open="openRoutingScope"
+                @save="saveRoutingScope"
+                @toggle-all="toggleAllRoutingAssistants"
+              />
               <div v-if="attachments.length" class="composer-attachments">
                 <div
                   v-for="item in attachments"
@@ -1499,6 +1558,56 @@
                   {{ suggestion }}
                 </button>
               </div>
+              <div
+                v-if="mentionedAssistant"
+                class="mb-2 flex items-center justify-between rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800"
+              >
+                <span>
+                  <span class="font-semibold text-blue-600">
+                    @{{ mentionedAssistant.name }}
+                  </span>
+                  <span class="ml-1">
+                    {{ t('lens.chat.mentioningAssistantSuffix') }}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  class="rounded px-1.5 py-0.5 text-xs font-medium hover:bg-brand-100"
+                  @click="clearAssistantMention"
+                >
+                  {{ t('lens.chat.clearAssistantMention') }}
+                </button>
+              </div>
+              <div
+                v-if="showMentionPicker"
+                class="absolute bottom-full left-0 z-20 mb-3 w-full max-w-md overflow-hidden rounded-xl border border-line bg-surface shadow-lg"
+              >
+                <div class="border-b border-line px-3 py-2 text-xs text-ink-500">
+                  {{ t('lens.chat.mentionAssistantHint') }}
+                </div>
+                <button
+                  v-for="(assistant, index) in mentionCandidates"
+                  :key="assistant.uuid"
+                  type="button"
+                  class="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-sunken"
+                  :class="{ 'bg-surface-sunken': index === mentionActiveIndex }"
+                  @mousedown.prevent
+                  @click="selectAssistantMention(assistant)"
+                >
+                  <span class="min-w-0 flex-1 truncate text-sm font-medium text-ink-800">
+                    {{ assistant.name }}
+                  </span>
+                  <span class="shrink-0 text-xs text-ink-500">
+                    {{ assistantCapabilityLabel(assistant.capability) }}
+                  </span>
+                </button>
+                <p
+                  v-if="!mentionCandidates.length"
+                  class="px-3 py-3 text-sm text-ink-500"
+                >
+                  {{ t('lens.chat.mentionAssistantEmpty') }}
+                </p>
+              </div>
               <div class="composer">
                 <input
                   ref="fileInput"
@@ -1536,10 +1645,9 @@
                   class="composer-input"
                   rows="1"
                   :placeholder="t('lens.chat.questionPlaceholder')"
-                  @keydown.enter.exact.prevent="insertNewline"
-                  @keydown.ctrl.enter.exact.prevent="handlePrimaryAction"
+                  @keydown="handleComposerKeydown"
                   @paste="onComposerPaste"
-                  @input="autoResizeTextarea"
+                  @input="handleComposerInput"
                 />
                 <button
                   class="composer-action-btn"
@@ -1716,18 +1824,18 @@ import {
   ArrowLeft,
   ChevronRight,
   ChevronUp,
+  MessagesSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
   Download,
   Eye,
   FileText,
   LoaderCircle,
-  MessagesSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
-  Plus,
-  Search,
   Share2,
   ThumbsDown,
   ThumbsUp,
@@ -1752,6 +1860,8 @@ import QaShareModal from '@/components/lens/QaShareModal.vue'
 import FilePreviewModal from '@/components/lens/FilePreviewModal.vue'
 import CodeCitationDrawer from '@/pages/lens/components/CodeCitationDrawer.vue'
 import MessageCitations from '@/pages/lens/components/MessageCitations.vue'
+import AssistantActivityGroups from '@/pages/lens/components/AssistantActivityGroups.vue'
+import ParticipatingAssistantsPicker from '@/pages/lens/components/ParticipatingAssistantsPicker.vue'
 import {
   extensionOf,
   fetchDeliverableBlob,
@@ -1782,6 +1892,14 @@ import {
   retryRunUuid,
   retryableUserMessage
 } from '@/pages/lens/chatMessageContext'
+import {
+  isComposingKeyboardEvent,
+  resolveComposerEnterAction
+} from '@/pages/lens/chatComposerKeyboard'
+import {
+  filterRoutingCandidates,
+  toggleRoutingScopeSelection
+} from '@/pages/lens/chatRoutingScope'
 import { prepareRunSubmission } from '@/pages/lens/chatSubmission'
 import { promptSuggestionKeys } from '@/pages/lens/chatPromptSuggestions'
 import { resolveChatViewport } from '@/pages/lens/chatViewport'
@@ -1806,6 +1924,7 @@ import {
 import {
   activitiesForNode,
   applyRuntimeEvent,
+  buildAssistantActivityGroups,
   calculateRunElapsedSeconds,
   createConversationAutoScroller,
   createRuntimeState,
@@ -1941,6 +2060,15 @@ const mySharesOpen = ref(false)
 // False until the current bootstrap settles, so the view can distinguish
 // "still loading" from "loaded, but no assistant to show".
 const booted = ref(false)
+const routingScopeOpen = ref(false)
+const routingScopeDraft = ref([])
+const routingScopeSnapshot = ref([])
+const routingScopeQuery = ref('')
+const mentionedAssistantUuid = ref('')
+const mentionActiveIndex = ref(0)
+const isSmartCollaborationConversation = computed(
+  () => route.name === 'LensSmartChat'
+)
 
 const selectedAssistant = computed(
   () =>
@@ -1959,6 +2087,65 @@ const selectedSessionArchived = computed(
   () => selectedSession.value?.status === 'archived'
 )
 
+const routingCandidates = computed(() =>
+  assistants.value.filter((assistant) => assistant.status === 'active')
+)
+
+const filteredRoutingCandidates = computed(() =>
+  filterRoutingCandidates(routingCandidates.value, routingScopeQuery.value)
+)
+
+const routingAllSelected = computed(() => {
+  if (!routingCandidates.value.length) return false
+  const selected = new Set(routingScopeDraft.value)
+  return routingCandidates.value.every((assistant) =>
+    selected.has(assistant.uuid)
+  )
+})
+
+const routingScopeAssistantUuids = computed(() =>
+  selectedSession.value
+    ? selectedSession.value.allowed_assistant_uuids || []
+    : routingScopeDraft.value
+)
+
+const mentionToken = computed(() => {
+  if (!isSmartCollaborationConversation.value) return null
+  return /^@([^\s]*)/.exec(question.value)
+})
+
+const mentionCandidates = computed(() => {
+  const allowed = new Set(routingScopeAssistantUuids.value)
+  const query = (mentionToken.value?.[1] || '').toLocaleLowerCase()
+  return routingCandidates.value.filter(
+    (assistant) =>
+      allowed.has(assistant.uuid) &&
+      assistant.name.toLocaleLowerCase().includes(query)
+  )
+})
+
+const mentionedAssistant = computed(
+  () =>
+    routingCandidates.value.find(
+      (assistant) => assistant.uuid === mentionedAssistantUuid.value
+    ) || null
+)
+
+const showMentionPicker = computed(
+  () => !!mentionToken.value && !mentionedAssistant.value
+)
+
+watch(mentionCandidates, (candidates) => {
+  if (!candidates.length) {
+    mentionActiveIndex.value = 0
+    return
+  }
+  mentionActiveIndex.value = Math.min(
+    mentionActiveIndex.value,
+    candidates.length - 1
+  )
+})
+
 const isAnonymous = computed(() => !userStore.isAuthenticated)
 
 // Image upload requires both a multimodal-capable assistant and login (the
@@ -1970,14 +2157,22 @@ const acceptsImages = computed(
     selectedAssistant.value?.can_process_images === true
 )
 
-const acceptsDocuments = computed(
-  () =>
-    canCompose.value &&
-    !isAnonymous.value &&
-    !!selectedAssistant.value &&
-    selectedAssistant.value.selected_task !== 'general_chat' &&
-    selectedAssistant.value.supports_document_attachments === true
-)
+const acceptsDocuments = computed(() => {
+  if (!canCompose.value || isAnonymous.value) return false
+  if (isSmartCollaborationConversation.value) {
+    const allowed = new Set(routingScopeAssistantUuids.value)
+    const participants = assistants.value.filter((assistant) =>
+      allowed.has(assistant.uuid)
+    )
+    return (
+      participants.length > 0 &&
+      participants.every(
+        (assistant) => assistant.supports_document_attachments === true
+      )
+    )
+  }
+  return selectedAssistant.value?.supports_document_attachments === true
+})
 
 const acceptsAttachments = computed(
   () => acceptsImages.value || acceptsDocuments.value
@@ -2011,7 +2206,9 @@ const canSubmit = computed(() => {
 })
 
 const hasAssistant = computed(() =>
-  isAnonymous.value ? !!publicAssistant.value : !!selectedAssistantUuid.value
+  isAnonymous.value
+    ? !!publicAssistant.value
+    : isSmartCollaborationConversation.value || !!selectedAssistantUuid.value
 )
 
 const canCompose = computed(
@@ -2027,11 +2224,16 @@ const emptyVariant = computed(() =>
 )
 
 const assistantName = computed(
-  () => selectedAssistant.value?.name || publicAssistant.value?.name || ''
+  () => isSmartCollaborationConversation.value
+    ? t('lens.chat.smartCollaboration')
+    : selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
 const assistantDescription = computed(
   () =>
+    (isSmartCollaborationConversation.value
+      ? t('lens.chat.smartCollaborationDescription')
+      : '') ||
     selectedAssistant.value?.description?.trim() ||
     publicAssistant.value?.description?.trim() ||
     ''
@@ -2055,7 +2257,7 @@ const isGeneralChatAssistant = computed(
 const switchable = computed(
   () =>
     !isAnonymous.value &&
-    assistants.value.filter((item) => item.status === 'active').length > 1
+    assistants.value.filter((item) => item.status === 'active').length > 0
 )
 
 // Slug of the assistant in view — drives the public Q&A list entry in the
@@ -2069,18 +2271,27 @@ const sidebarCollapsedActive = computed(
 async function searchSessions(query) {
   const requestId = ++sessionSearchRequestId
   const normalizedQuery = query.trim()
-  if (!normalizedQuery || !selectedAssistant.value) {
+  if (
+    !normalizedQuery ||
+    (!selectedAssistant.value && !isSmartCollaborationConversation.value)
+  ) {
     sessionSearchResults.value = []
     sessionSearchLoading.value = false
     return
   }
 
   sessionSearchLoading.value = true
+  const routingMode = isSmartCollaborationConversation.value ? 'smart' : ''
+  const assistantSlug = selectedAssistant.value?.slug || ''
   try {
     const [recent, archived] = await Promise.all([
-      listSessions(selectedAssistant.value.slug, { search: normalizedQuery }),
-      listSessions(selectedAssistant.value.slug, {
+      listSessions(assistantSlug, {
+        routingMode,
+        search: normalizedQuery
+      }),
+      listSessions(assistantSlug, {
         archived: true,
+        routingMode,
         search: normalizedQuery
       })
     ])
@@ -2136,6 +2347,136 @@ function handleSidebarLogoClick() {
     sidebarOpen.value = false
   }
   router.push('/dashboard')
+}
+
+function assistantCapabilityLabel(capability) {
+  const labels = {
+    code_analysis: 'codeAnalysis',
+    general_chat: 'generalChat',
+    knowledge_qa: 'knowledgeQa'
+  }
+  return t(`lens.chat.assistantTypes.${labels[capability] || 'generalChat'}`)
+}
+
+function messageMentionSegments(content) {
+  const text = String(content || '')
+  const names = assistants.value
+    .map((assistant) => String(assistant.name || '').trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+  const mention = names.find(
+    (name) => text.startsWith(`@${name}`) &&
+      (text.length === name.length + 1 || /\s/.test(text[name.length + 1]))
+  )
+  if (!mention) return [{ text, mentioned: false }]
+  const match = `@${mention}`
+  return [
+    { text: match, mentioned: true },
+    { text: text.slice(match.length), mentioned: false }
+  ]
+}
+
+function openRoutingScope() {
+  routingScopeDraft.value = selectedSession.value
+    ? [...(selectedSession.value.allowed_assistant_uuids || [])]
+    : [...routingScopeDraft.value]
+  routingScopeSnapshot.value = [...routingScopeDraft.value]
+  routingScopeQuery.value = ''
+  routingScopeOpen.value = true
+}
+
+function cancelRoutingScope() {
+  routingScopeDraft.value = [...routingScopeSnapshot.value]
+  routingScopeOpen.value = false
+}
+
+function toggleAllRoutingAssistants() {
+  routingScopeDraft.value = toggleRoutingScopeSelection(
+    routingScopeDraft.value,
+    routingCandidates.value
+  )
+}
+
+function selectAssistantMention(assistant) {
+  const token = mentionToken.value?.[0] || '@'
+  const remainder = question.value.slice(token.length).trimStart()
+  question.value = `@${assistant.name}${remainder ? ` ${remainder}` : ' '}`
+  mentionedAssistantUuid.value = assistant.uuid
+  nextTick(() => composerRef.value?.focus())
+}
+
+function clearAssistantMention() {
+  const prefix = mentionedAssistant.value
+    ? `@${mentionedAssistant.value.name}`
+    : mentionToken.value?.[0] || ''
+  question.value = question.value.startsWith(prefix)
+    ? question.value.slice(prefix.length).trimStart()
+    : question.value
+  mentionedAssistantUuid.value = ''
+  nextTick(() => composerRef.value?.focus())
+}
+
+function handleComposerInput(event) {
+  const mentionPrefix = mentionedAssistant.value
+    ? `@${mentionedAssistant.value.name}`
+    : ''
+  if (!mentionPrefix || !question.value.startsWith(mentionPrefix)) {
+    mentionedAssistantUuid.value = ''
+  }
+  if (mentionToken.value) mentionActiveIndex.value = 0
+  autoResizeTextarea(event)
+}
+
+function moveMentionSelection(direction) {
+  if (!showMentionPicker.value || !mentionCandidates.value.length) return
+  const count = mentionCandidates.value.length
+  mentionActiveIndex.value =
+    (mentionActiveIndex.value + direction + count) % count
+}
+
+async function handleComposerKeydown(event) {
+  if (isComposingKeyboardEvent(event)) return
+  if (event.ctrlKey || event.metaKey) return
+  if (showMentionPicker.value && mentionCandidates.value.length) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      moveMentionSelection(1)
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveMentionSelection(-1)
+      return
+    }
+  }
+  if (event.key === 'Enter') {
+    const action = resolveComposerEnterAction(event)
+    if (!action) return
+    event.preventDefault()
+    if (action === 'newline') {
+      insertNewline()
+      return
+    }
+    await handlePrimaryAction()
+  }
+}
+
+async function saveRoutingScope() {
+  if (!selectedSession.value) {
+    routingScopeOpen.value = false
+    return
+  }
+  try {
+    const updated = await updateSession(selectedSession.value.uuid, {
+      allowed_assistant_uuids: routingScopeDraft.value
+    })
+    sessions.value = sessions.value.map((session) =>
+      session.uuid === updated.uuid ? updated : session
+    )
+    routingScopeOpen.value = false
+  } catch {
+    showError(t('lens.chat.participatingAssistantsSaveFailed'))
+  }
 }
 
 const isRunActive = computed(() =>
@@ -2230,6 +2571,7 @@ function structuredProgress(state) {
     plan: state?.plan,
     stages: state?.stages,
     activities: state?.activities,
+    delegations: state?.delegations,
     standaloneActivities: !isGeneralChatAssistant.value
   })
 }
@@ -2388,16 +2730,37 @@ function activityLabel(kind) {
   return t(`lens.chat.runtime.activity.${safeKind}`)
 }
 
+function assistantNamesLabel(state) {
+  const names = []
+  for (const activity of [...(state?.activities || [])].reverse()) {
+    const name = String(activity?.assistantName || '').trim()
+    if (name && !names.includes(name)) names.push(name)
+  }
+  return names.join(', ')
+}
+
+function assistantActivityGroups(state, activities) {
+  return buildAssistantActivityGroups({
+    delegations: state?.delegations,
+    activities,
+    fallbackAssistantName: isSmartCollaborationConversation.value
+      ? t('lens.chat.smartCollaboration')
+      : ''
+  })
+}
+
+function delegatedTaskGroups(state) {
+  return assistantActivityGroups(state, []).filter(
+    (group) => group.tasks.length > 0
+  )
+}
+
 function isCurrentActivity(activity, item) {
   const latest = runtimeState.value.activities.at(-1)
   const items = liveStructuredProgress.value.items
   return (
     livePlanStatus(item, items) === 'in_progress' && latest?.id === activity.id
   )
-}
-
-function isCurrentStandaloneActivity(activity, items) {
-  return isRunActive.value && items.at(-1)?.id === activity.id
 }
 
 watch(
@@ -2885,6 +3248,15 @@ async function bootstrap() {
     // renders immediately (no flash) and skips its own redundant fetch.
     lensStore.assistants = assistants.value
 
+    if (isSmartCollaborationConversation.value) {
+      selectedAssistantUuid.value = ''
+      routingScopeDraft.value = []
+      await loadMyShareState()
+      await loadSessions()
+      booted.value = true
+      return
+    }
+
     const current =
       assistants.value.find((item) => item.slug === route.params.slug) ||
       assistants.value[0]
@@ -2946,11 +3318,12 @@ async function loadMyShareState() {
 }
 
 async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
-  if (!selectedAssistant.value) {
+  if (!selectedAssistant.value && !isSmartCollaborationConversation.value) {
     return
   }
 
-  sessions.value = await listSessions(selectedAssistant.value.slug, {
+  sessions.value = await listSessions(selectedAssistant.value?.slug || '', {
+    routingMode: isSmartCollaborationConversation.value ? 'smart' : '',
     archived: showArchivedSessions.value
   })
 
@@ -2972,8 +3345,8 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
   await nextTick(() => composerRef.value?.focus())
 }
 
-async function createNewSession(notify = true) {
-  if (!selectedAssistant.value) {
+async function createNewSession(notify = true, allowedAssistantUuids = []) {
+  if (!selectedAssistant.value && !isSmartCollaborationConversation.value) {
     return null
   }
   mySharesOpen.value = false
@@ -2985,10 +3358,15 @@ async function createNewSession(notify = true) {
 
   let session
   try {
-    session = await createSession({
-      assistant_uuid: selectedAssistant.value.uuid,
-      title: ''
-    })
+    session = await createSession(
+      isSmartCollaborationConversation.value
+        ? {
+            routing_mode: 'smart',
+            title: '',
+            allowed_assistant_uuids: allowedAssistantUuids
+          }
+        : { assistant_uuid: selectedAssistant.value.uuid, title: '' }
+    )
   } catch {
     showError(t('lens.chat.sessionCreateFailed'))
     return null
@@ -3006,6 +3384,9 @@ async function createNewSession(notify = true) {
   }
   sortManagedSessions()
   selectedSessionUuid.value = session.uuid
+  if (isSmartCollaborationConversation.value) {
+    routingScopeDraft.value = [...(session.allowed_assistant_uuids || [])]
+  }
   question.value = ''
   retryDraft.value = null
   clarificationAnswers.value = {}
@@ -3392,6 +3773,10 @@ function autoResizeTextarea(el) {
 }
 
 async function handlePrimaryAction() {
+  if (showMentionPicker.value && mentionCandidates.value.length) {
+    selectAssistantMention(mentionCandidates.value[mentionActiveIndex.value])
+    return
+  }
   if (isRunActive.value) {
     await cancel()
     return
@@ -3597,7 +3982,26 @@ function handleStepEvent(event) {
   const newEvents = events.slice(seenCount)
   seenStepEventCounts.set(stepKey, events.length)
 
-  newEvents.forEach(pushAgentActivity)
+  newEvents.forEach((item) => {
+    if (!event.assistant_name && !event.delegated_task) {
+      pushAgentActivity(item)
+      return
+    }
+    pushAgentActivity({
+      ...item,
+      assistant_name: item.assistant_name || event.assistant_name,
+      delegated_task: item.delegated_task || event.delegated_task,
+      payload: item.payload
+        ? {
+            ...item.payload,
+            assistant_name:
+              item.payload.assistant_name || event.assistant_name,
+            delegated_task:
+              item.payload.delegated_task || event.delegated_task
+          }
+        : item.payload
+    })
+  })
 }
 
 async function submitClarification(message) {
@@ -3677,6 +4081,13 @@ async function submit() {
   if (!canSubmit.value) {
     return
   }
+  if (
+    isSmartCollaborationConversation.value &&
+    !routingScopeAssistantUuids.value.length
+  ) {
+    showWarning(t('lens.chat.participatingAssistantsRequired'))
+    return
+  }
   const draftTextAtSubmit = question.value
   const trimmedDraft = draftTextAtSubmit.replace(/^\s*\n+|\n+\s*$/g, '')
   const oversizedFile = createOversizedTextFile(trimmedDraft)
@@ -3694,7 +4105,10 @@ async function submit() {
   }
   loading.value.run = true
   if (!selectedSessionUuid.value) {
-    const session = await createNewSession(false)
+    const session = await createNewSession(
+      false,
+      routingScopeAssistantUuids.value
+    )
     if (!session) {
       question.value = draftTextAtSubmit
       loading.value.run = false
@@ -3707,7 +4121,19 @@ async function submit() {
   // not a failure, so we must not restore the draft, alarm the user, or write
   // into the now-current assistant's state.
   const sessionAtSubmit = selectedSessionUuid.value
+  let routingAssistantUuid = ''
+  if (isSmartCollaborationConversation.value && mentionToken.value) {
+    if (!mentionedAssistant.value) {
+      showWarning(t('lens.chat.mentionAssistantRequired'))
+      loading.value.run = false
+      return
+    }
+    routingAssistantUuid = mentionedAssistant.value.uuid
+  }
   let submissionText = trimmedDraft
+  if (routingAssistantUuid) {
+    mentionedAssistantUuid.value = ''
+  }
   let oversizedAttachment = null
   if (oversizedFile) {
     const uploaded = await addAttachment(oversizedFile)
@@ -3735,6 +4161,7 @@ async function submit() {
     sessionUuid: sessionAtSubmit,
     question: optimisticText,
     attachmentUuids,
+    routingAssistantUuid,
     retryDraft: retryDraftAtSubmit,
     pendingSubmission: pendingRunSubmission.value
   })
@@ -3857,7 +4284,10 @@ async function submit() {
     if (oversizedAttachment && requestRejected && !attachmentMissing) {
       deleteAttachment(oversizedAttachment.uuid).catch(() => {})
     }
-    showError(t('lens.chat.submitFailed'))
+    const errorCode = err?.response?.data?.detail
+    showError(
+      lensNodeErrorMessage(errorCode, t) || t('lens.chat.submitFailed')
+    )
   } finally {
     if (!keepAttachments) {
       pendingAttachments.forEach(
@@ -4209,8 +4639,9 @@ watch(
   () => route.query.session,
   (sessionUuid) => {
     if (
-      route.name !== 'LensAssistantChat' ||
-      route.params.slug !== selectedAssistant.value?.slug ||
+      !['LensAssistantChat', 'LensSmartChat'].includes(route.name) ||
+      (!isSmartCollaborationConversation.value &&
+        route.params.slug !== selectedAssistant.value?.slug) ||
       !sessionUuid ||
       sessionUuid === selectedSessionUuid.value
     ) {
@@ -4224,7 +4655,7 @@ watch(
 )
 
 watch(
-  () => route.params.slug,
+  () => [route.name, route.params.slug],
   () => {
     // On a hard load with a stored token, defer the first bootstrap to
     // onMounted so it runs after the user is hydrated — avoids a flash of
@@ -4486,32 +4917,6 @@ onBeforeUnmount(() => {
   max-width: 35rem;
 }
 
-.sessions-collapsed {
-  @apply flex items-center gap-1 px-1;
-}
-
-.sessions-collapsed-trigger {
-  @apply flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-2
-    text-left text-sm font-semibold text-theme-muted transition-colors;
-}
-
-.sessions-collapsed-trigger:hover,
-.sessions-collapsed-trigger:focus-visible,
-.sessions-collapsed-action:hover,
-.sessions-collapsed-action:focus-visible {
-  @apply bg-surface-hover text-theme;
-  outline: none;
-}
-
-.sessions-collapsed-trigger span {
-  @apply truncate;
-}
-
-.sessions-collapsed-action {
-  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md
-    text-theme-muted transition-colors;
-}
-
 .sessions-list {
   @apply space-y-1;
 }
@@ -4567,6 +4972,32 @@ onBeforeUnmount(() => {
 .session-item-active .session-overflow,
 .session-overflow.row-action-menu-open {
   @apply opacity-100;
+}
+
+.sessions-collapsed {
+  @apply flex items-center gap-1 px-1;
+}
+
+.sessions-collapsed-trigger {
+  @apply flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-2
+    text-left text-sm font-semibold text-theme-muted transition-colors;
+}
+
+.sessions-collapsed-trigger:hover,
+.sessions-collapsed-trigger:focus-visible,
+.sessions-collapsed-action:hover,
+.sessions-collapsed-action:focus-visible {
+  @apply bg-surface-hover text-theme;
+  outline: none;
+}
+
+.sessions-collapsed-trigger span {
+  @apply truncate;
+}
+
+.sessions-collapsed-action {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md
+    text-theme-muted transition-colors;
 }
 
 .session-rename-input {
@@ -4653,7 +5084,7 @@ onBeforeUnmount(() => {
 
 .thread-scroll {
   @apply min-h-0 flex-1 overflow-y-auto;
-  overflow-anchor: none;
+  overflow-anchor: auto;
   scrollbar-gutter: stable;
 }
 
@@ -4957,8 +5388,11 @@ onBeforeUnmount(() => {
   scrollbar-width: thin;
 }
 
-.runtime-standalone-activities {
-  margin-left: 0;
+.runtime-activity-task-inline {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--sl-text-muted);
+  font-size: 0.68rem;
 }
 
 .runtime-node-activity {
@@ -4966,6 +5400,16 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.4rem;
   min-height: 1.3rem;
+}
+
+.runtime-assistant-names,
+.runtime-activity-assistant {
+  color: var(--sl-text-primary);
+  font-weight: 600;
+}
+
+.runtime-assistant-names {
+  font-size: 0.72rem;
 }
 
 .runtime-activity-indicator {

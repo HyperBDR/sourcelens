@@ -274,7 +274,7 @@ test('deletes a document removed while its upload is in flight', async () => {
   assert.match(uploadCompletion, /removeAttachment\(item\)/)
 })
 
-test('requires task and LensNode capability before accepting documents', async () => {
+test('uses the LensNode capability for every assistant type', async () => {
   const source = await readFile(
     new URL('../src/pages/lens/Chat.vue', import.meta.url),
     'utf8'
@@ -283,6 +283,20 @@ test('requires task and LensNode capability before accepting documents', async (
   const end = source.indexOf('const acceptsAttachments = computed(', start)
   const capabilityGate = source.slice(start, end)
 
-  assert.match(capabilityGate, /selected_task !== 'general_chat'/)
+  assert.match(capabilityGate, /supports_document_attachments === true/)
+  assert.doesNotMatch(capabilityGate, /selected_task/)
+})
+
+test('Smart Collaboration aggregates document capability from participants', async () => {
+  const source = await readFile(
+    new URL('../src/pages/lens/Chat.vue', import.meta.url),
+    'utf8'
+  )
+  const start = source.indexOf('const acceptsDocuments = computed(')
+  const end = source.indexOf('const acceptsAttachments = computed(', start)
+  const capabilityGate = source.slice(start, end)
+
+  assert.match(capabilityGate, /isSmartCollaborationConversation\.value/)
+  assert.match(capabilityGate, /participants\.every/)
   assert.match(capabilityGate, /supports_document_attachments === true/)
 })

@@ -881,6 +881,37 @@
                   </section>
 
                   <section
+                    v-if="detail.routing_mode === 'smart'"
+                    data-testid="run-smart-collaboration"
+                    class="overview-section"
+                  >
+                    <div class="overview-section-heading">
+                      <div>
+                        <h3 class="overview-title">{{ t('lensRuns.smartCollaborationTitle') }}</h3>
+                        <p class="overview-section-description">
+                          {{ t('lensRuns.smartCollaborationDescription') }}
+                        </p>
+                      </div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <span
+                        v-for="assistant in detail.delegated_assistants || []"
+                        :key="assistant.uuid"
+                        class="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+                      >
+                        {{ assistant.name }}
+                        <span class="ml-1 text-indigo-500">· {{ assistant.capability }}</span>
+                      </span>
+                      <span
+                        v-if="!(detail.delegated_assistants || []).length"
+                        class="text-sm text-gray-400"
+                      >
+                        -
+                      </span>
+                    </div>
+                  </section>
+
+                  <section
                     data-testid="run-overview-usage"
                     class="overview-section overview-usage-section"
                   >
@@ -1370,6 +1401,7 @@
                 <RunTrajectoryPanel
                   v-show="activeExecutionView === 'trace'"
                   :run-uuid="selectedUuid"
+                  :assistant-name="detail.assistant_name"
                   :run-status="detail.status"
                   :active="
                     activeDetailTab === 'execution' &&
@@ -2193,7 +2225,7 @@ function scheduleDetailRefresh() {
   }, 2000)
 }
 
-onMounted(async () => {
+onMounted(() => {
   filters.value.user_id = String(route.query.user_id || '')
   filters.value.group_id = String(route.query.group_id || '')
   filters.value.username = String(route.query.username || '')
@@ -2201,12 +2233,16 @@ onMounted(async () => {
   filters.value.lensnode = String(route.query.lensnode || '')
   filters.value.model = String(route.query.model || '')
   advancedFiltersOpen.value = advancedFilterCount.value > 0
-  try {
-    assistants.value = await listAssistants()
-  } catch {
-    assistants.value = []
-  }
-  fetchRuns()
+  void Promise.all([
+    listAssistants()
+      .then((items) => {
+        assistants.value = items
+      })
+      .catch(() => {
+        assistants.value = []
+      }),
+    fetchRuns()
+  ])
 })
 
 watch(detailVisible, (visible) => {

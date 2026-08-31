@@ -1,0 +1,12 @@
+type: fix
+audience: user
+en: >-
+  Fixed document uploads and automatic long-input attachments for assistants
+  that select a compatible LensNode dynamically at Run time.
+zh-CN: >-
+  修复未绑定固定 LensNode 的助手无法上传文档、也无法将超长输入自动转为附件的
+  问题；此类助手现在会在 Run 执行时选择支持文档的兼容节点。
+es: >-
+  Se corrigieron las cargas de documentos y los adjuntos automáticos para
+  entradas largas en asistentes que seleccionan un LensNode compatible al
+  ejecutar el Run.

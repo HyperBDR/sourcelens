@@ -3,7 +3,11 @@
 from django.core.cache import cache
 from django.db import transaction
 
-from .models import Assistant, Session
+from .models import Assistant, GlobalSetting, Session
+
+
+SMART_COLLABORATION_SLUG = "__system-smart-collaboration__"
+SMART_COLLABORATION_MODEL_SETTING = "lens.smart_collaboration.model_ref"
 
 
 class AssistantNotRunnableError(RuntimeError):
@@ -44,7 +48,15 @@ def lock_assistant_for_new_work(assistant, user=None):
     """Lock and return an assistant after checking its current state."""
 
     locked = Assistant.objects.select_for_update().get(pk=assistant.pk)
-    if user is None:
+    if (
+        locked.slug == SMART_COLLABORATION_SLUG
+        and locked.capability != Assistant.Capability.GENERAL_CHAT
+    ):
+        locked.capability = Assistant.Capability.GENERAL_CHAT
+        locked.save(update_fields=["capability", "updated_at"])
+    if locked.is_system:
+        is_runnable = locked.status == Assistant.Status.ACTIVE
+    elif user is None:
         is_runnable = locked.status == Assistant.Status.ACTIVE
     else:
         is_runnable = locked.is_runnable_by(user)
@@ -68,6 +80,88 @@ def create_assistant_session(assistant_uuid, user, title=""):
         assistant=assistant,
         user=user,
         title=normalized_title,
+        title_manually_edited=bool(normalized_title),
+        title_generation_status=(
+            Session.TitleGenerationStatus.SKIPPED
+            if normalized_title
+            else Session.TitleGenerationStatus.PENDING
+        ),
+    )
+
+
+def smart_collaboration_assistants(
+    user,
+    assistant_uuids=None,
+    allow_empty=False,
+):
+    """Return active assistants allowed for Smart Collaboration."""
+
+    assistants = Assistant.objects.visible_to(user).filter(
+        status=Assistant.Status.ACTIVE,
+        is_system=False,
+        capability__in=[
+            Assistant.Capability.GENERAL_CHAT,
+            Assistant.Capability.CODE_ANALYSIS,
+            Assistant.Capability.KNOWLEDGE_QA,
+        ],
+    )
+    requested = {str(value) for value in assistant_uuids or []}
+    if assistant_uuids is not None:
+        assistants = assistants.filter(uuid__in=requested)
+    values = list(assistants)
+    if (
+        assistant_uuids is not None
+        and {str(item.uuid) for item in values} != requested
+    ):
+        raise AssistantNotRunnableError
+    if not values and not allow_empty:
+        raise AssistantNotRunnableError
+    return values
+
+
+def _smart_collaboration_assistant():
+    """Return the hidden coordinator backed by the configured global model."""
+
+    setting = GlobalSetting.objects.filter(
+        key=SMART_COLLABORATION_MODEL_SETTING
+    ).first()
+    model_ref = str(setting.value or "") if setting else ""
+    if not model_ref:
+        raise AssistantNotRunnableError
+    assistant, _ = Assistant.objects.get_or_create(
+        slug=SMART_COLLABORATION_SLUG,
+        defaults={
+            "name": "Smart Collaboration",
+            "description": "Internal Smart Collaboration coordinator.",
+            "capability": Assistant.Capability.GENERAL_CHAT,
+            "agent_model_ref": model_ref,
+            "is_system": True,
+        },
+    )
+    if assistant.agent_model_ref != model_ref or not assistant.is_system:
+        assistant.agent_model_ref = model_ref
+        assistant.is_system = True
+        assistant.save(update_fields=["agent_model_ref", "is_system", "updated_at"])
+    return assistant
+
+
+@transaction.atomic
+def create_smart_collaboration_session(user, title="", assistant_uuids=None):
+    """Create a Smart Collaboration session with a user-scoped range."""
+
+    allowed = smart_collaboration_assistants(
+        user,
+        assistant_uuids or [],
+        allow_empty=True,
+    )
+    assistant = _smart_collaboration_assistant()
+    normalized_title = " ".join(str(title or "").split())
+    return Session.objects.create(
+        assistant=assistant,
+        user=user,
+        title=normalized_title,
+        routing_mode=Session.RoutingMode.SMART,
+        allowed_assistant_uuids=[str(item.uuid) for item in allowed],
         title_manually_edited=bool(normalized_title),
         title_generation_status=(
             Session.TitleGenerationStatus.SKIPPED

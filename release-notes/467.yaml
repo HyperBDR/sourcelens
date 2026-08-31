@@ -1,0 +1,13 @@
+type: improvement
+audience: user
+en: >-
+  Improved Smart Collaboration progress with compact assistant summaries and
+  clearer assistant-specific Run timelines, while keeping full delegated tasks
+  available on demand.
+zh-CN: >-
+  优化智能协作进度展示，通过紧凑的助手摘要和更清晰的分助手 Run 时间轴呈现执行
+  过程，同时保留按需查看完整委派任务的能力。
+es: >-
+  Se mejoró el progreso de la colaboración inteligente con resúmenes compactos
+  por asistente y cronologías de ejecución más claras, manteniendo disponibles
+  las tareas delegadas completas bajo demanda.

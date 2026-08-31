@@ -3,7 +3,10 @@ import test from 'node:test'
 
 import {
   buildTimelineLanes,
+  buildTimelineGroups,
   buildTrajectoryRows,
+  childRunAttempts,
+  childRunProgress,
   clampInspectorWidth,
   eventCategory,
   groupTrajectoryRows,
@@ -11,6 +14,61 @@ import {
   sortTrajectoryEvents,
   timelineLane
 } from '../src/admin/pages/lens/runTrajectory.js'
+
+test('child Run progress excludes the coordinator and keeps task context', () => {
+  const progress = childRunProgress({
+    run_progress: [
+      {
+        run_uuid: 'parent',
+        role: 'parent',
+        assistant_name: 'Smart Collaboration',
+        status: 'done'
+      },
+      {
+        run_uuid: 'office',
+        role: 'child',
+        assistant_name: 'Office',
+        status: 'running',
+        task: 'Prepare the report',
+        duration_ms: 1200,
+        event_count: 8
+      }
+    ]
+  })
+
+  assert.deepEqual(progress, [
+    {
+      run_uuid: 'office',
+      role: 'child',
+      assistant_name: 'Office',
+      status: 'running',
+      task: 'Prepare the report',
+      duration_ms: 1200,
+      event_count: 8
+    }
+  ])
+  assert.deepEqual(childRunProgress({}), [])
+})
+
+test('child Run attempts preserve retry order and support legacy rows', () => {
+  const attempts = [
+    { run_uuid: 'attempt-1', attempt: 1, status: 'failed' },
+    { run_uuid: 'attempt-2', attempt: 2, status: 'done' }
+  ]
+
+  assert.deepEqual(childRunAttempts({ attempts }), attempts)
+  assert.deepEqual(
+    childRunAttempts({ run_uuid: 'legacy', status: 'running' }),
+    [
+      {
+        run_uuid: 'legacy',
+        status: 'running',
+        attempt: 1,
+        retry_of_run_uuid: null
+      }
+    ]
+  )
+})
 
 test('inspector resizing preserves the minimum ledger width', () => {
   assert.equal(clampInspectorWidth(1200, 700), 700)
@@ -228,6 +286,85 @@ test('timeline lanes fill per-call duration and keep events on lanes', () => {
   assert.equal(toolStep.subagent, true)
   assert.equal(toolStep.startMs, 5000)
   assert.equal(toolStep.durationMs, 3000)
+})
+
+test('timeline groups keep input, model and tools together per assistant', () => {
+  const summary = {
+    first_timestamp: new Date(0).toISOString(),
+    last_timestamp: new Date(1000).toISOString()
+  }
+  const events = ['parent', 'Office', 'ttt'].flatMap((assistant, index) => [
+    {
+      event_id: `${assistant}-input`,
+      event_type: 'request.started',
+      timestamp: new Date(index * 100).toISOString(),
+      ...(assistant === 'parent'
+        ? {}
+        : { trace_run_role: 'child', assistant_name: assistant })
+    },
+    {
+      event_id: `${assistant}-model`,
+      event_type: 'model.completed',
+      call_id: `${assistant}-model-call`,
+      timestamp: new Date(index * 100 + 10).toISOString(),
+      ...(assistant === 'parent'
+        ? {}
+        : { trace_run_role: 'child', assistant_name: assistant })
+    },
+    {
+      event_id: `${assistant}-tool`,
+      event_type: 'tool.completed',
+      call_id: `${assistant}-tool-call`,
+      timestamp: new Date(index * 100 + 20).toISOString(),
+      ...(assistant === 'parent'
+        ? {}
+        : { trace_run_role: 'child', assistant_name: assistant })
+    }
+  ])
+
+  const groups = buildTimelineGroups(events, summary, 'Smart Collaboration')
+
+  assert.deepEqual(
+    groups.map((lane) => [lane.groupLabel, lane.label]),
+    [
+      ['Smart Collaboration', 'Input'],
+      ['Smart Collaboration', 'Model'],
+      ['Smart Collaboration', 'Tools'],
+      ['Office', 'Input'],
+      ['Office', 'Model'],
+      ['Office', 'Tools'],
+      ['ttt', 'Input'],
+      ['ttt', 'Model'],
+      ['ttt', 'Tools']
+    ]
+  )
+})
+
+test('timeline groups keep a direct assistant run as one three-lane group', () => {
+  const summary = {
+    first_timestamp: new Date(0).toISOString(),
+    last_timestamp: new Date(1000).toISOString()
+  }
+  const groups = buildTimelineGroups(
+    [
+      {
+        event_id: 'direct-model',
+        event_type: 'model.completed',
+        timestamp: new Date(500).toISOString()
+      }
+    ],
+    summary,
+    'AGIOne-AI-Assistant'
+  )
+
+  assert.deepEqual(
+    groups.map((lane) => [lane.groupLabel, lane.label]),
+    [
+      ['AGIOne-AI-Assistant', 'Input'],
+      ['AGIOne-AI-Assistant', 'Model'],
+      ['AGIOne-AI-Assistant', 'Tools']
+    ]
+  )
 })
 
 test('timeline lanes treat single events as minimal markers', () => {

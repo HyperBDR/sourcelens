@@ -79,7 +79,6 @@ class LensNode(TimestampedUUIDModel):
     def __str__(self):
         return self.name
 
-
 def user_sees_all_assistants(user):
     """Return True when the user manages assistants (sees private ones).
 
@@ -130,10 +129,21 @@ class Assistant(TimestampedUUIDModel):
         DEEP = "deep", "Deep"
         UNLIMITED = "unlimited", "Unlimited"
 
+    class Capability(models.TextChoices):
+        GENERAL_CHAT = "general_chat", "General Chat"
+        CODE_ANALYSIS = "code_analysis", "Code Analysis"
+        KNOWLEDGE_QA = "knowledge_qa", "Knowledge Q&A"
+
     objects = AssistantQuerySet.as_manager()
 
     name = models.CharField(max_length=160)
     description = models.TextField(blank=True, default="")
+    routing_description = models.TextField(blank=True, default="")
+    capability = models.CharField(
+        max_length=24,
+        choices=Capability.choices,
+        default=Capability.GENERAL_CHAT,
+    )
     slug = models.SlugField(max_length=180, unique=True)
     visibility = models.CharField(
         max_length=16,
@@ -142,7 +152,9 @@ class Assistant(TimestampedUUIDModel):
     )
     lensnode = models.ForeignKey(
         LensNode,
-        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="assistants",
     )
 
@@ -153,7 +165,6 @@ class Assistant(TimestampedUUIDModel):
         DEEP = "deep", "深度"
         MAX = "max", "极限"
 
-    selected_task = models.CharField(max_length=160)
     selected_dirs = models.JSONField(default=list, blank=True)
     workspace_guide = models.TextField(blank=True, default="")
     preprocess_model_ref = models.UUIDField(null=True, blank=True)
@@ -172,6 +183,7 @@ class Assistant(TimestampedUUIDModel):
     )
     max_concurrency = models.PositiveSmallIntegerField(default=5)
     settings = models.JSONField(default=dict, blank=True)
+    is_system = models.BooleanField(default=False)
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
@@ -189,6 +201,42 @@ class Assistant(TimestampedUUIDModel):
 
     def __str__(self):
         return self.name
+
+    def __init__(self, *args, **kwargs):
+        """Accept the removed task argument while old callers migrate."""
+
+        selected_task = kwargs.pop("selected_task", None)
+        if selected_task and "capability" not in kwargs:
+            kwargs["capability"] = selected_task
+        super().__init__(*args, **kwargs)
+
+    @property
+    def selected_task(self):
+        """Expose the derived LensNode task for transitional callers."""
+
+        return self.capability
+
+    @selected_task.setter
+    def selected_task(self, value):
+        """Map legacy task assignments to the unified capability field."""
+
+        self.capability = value
+
+    def save(self, *args, **kwargs):
+        """Keep legacy task updates and routing metadata synchronized."""
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields and "selected_task" in update_fields:
+            kwargs["update_fields"] = [
+                "capability" if field == "selected_task" else field
+                for field in update_fields
+            ]
+            update_fields = kwargs["update_fields"]
+        result = super().save(*args, **kwargs)
+        routing_fields = {"capability", "description", "selected_dirs"}
+        if not update_fields or routing_fields.intersection(update_fields):
+            _refresh_assistant_routing_description(self)
+        return result
 
     def is_accessible_by(self, user):
         """Return True when the user may view/use this assistant."""
@@ -307,6 +355,14 @@ class Skill(TimestampedUUIDModel):
     def __str__(self):
         return self.name
 
+    def save(self, *args, **kwargs):
+        """Refresh routing descriptions after changing a shared Skill."""
+
+        result = super().save(*args, **kwargs)
+        for binding in self.assistantskill_set.select_related("assistant"):
+            _refresh_assistant_routing_description(binding.assistant)
+        return result
+
 
 class EnvironmentVariableSet(TimestampedUUIDModel):
     """Reusable encrypted environment values for Skill and MCP bindings."""
@@ -373,6 +429,14 @@ class MCPServer(TimestampedUUIDModel):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        """Refresh routing descriptions after changing a shared MCP."""
+
+        result = super().save(*args, **kwargs)
+        for binding in self.assistantmcp_set.select_related("assistant"):
+            _refresh_assistant_routing_description(binding.assistant)
+        return result
 
 
 class DataSource(TimestampedUUIDModel):
@@ -525,6 +589,14 @@ def _datasource_fernet():
     return Fernet(key)
 
 
+def _refresh_assistant_routing_description(assistant):
+    """Refresh one Assistant's non-sensitive smart-routing synopsis."""
+
+    from .routing_descriptions import refresh_routing_description
+
+    refresh_routing_description(assistant)
+
+
 class AssistantSkill(models.Model):
     """Assistant to skill binding."""
 
@@ -546,6 +618,21 @@ class AssistantSkill(models.Model):
 
     class Meta:
         unique_together = [("assistant", "skill")]
+
+    def save(self, *args, **kwargs):
+        """Refresh the owning Assistant after changing its Skill binding."""
+
+        result = super().save(*args, **kwargs)
+        _refresh_assistant_routing_description(self.assistant)
+        return result
+
+    def delete(self, *args, **kwargs):
+        """Refresh the owning Assistant after deleting its Skill binding."""
+
+        assistant = self.assistant
+        result = super().delete(*args, **kwargs)
+        _refresh_assistant_routing_description(assistant)
+        return result
 
 
 class AssistantMCP(models.Model):
@@ -570,6 +657,21 @@ class AssistantMCP(models.Model):
     class Meta:
         unique_together = [("assistant", "mcp")]
 
+    def save(self, *args, **kwargs):
+        """Refresh the owning Assistant after changing its MCP binding."""
+
+        result = super().save(*args, **kwargs)
+        _refresh_assistant_routing_description(self.assistant)
+        return result
+
+    def delete(self, *args, **kwargs):
+        """Refresh the owning Assistant after deleting its MCP binding."""
+
+        assistant = self.assistant
+        result = super().delete(*args, **kwargs)
+        _refresh_assistant_routing_description(assistant)
+        return result
+
 
 class Session(TimestampedUUIDModel):
     """Conversation session for a user and assistant."""
@@ -577,6 +679,10 @@ class Session(TimestampedUUIDModel):
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         ARCHIVED = "archived", "Archived"
+
+    class RoutingMode(models.TextChoices):
+        DIRECT = "direct", "Direct"
+        SMART = "smart", "Smart Collaboration"
 
     class TitleGenerationStatus(models.TextChoices):
         SKIPPED = "skipped", "Skipped"
@@ -586,6 +692,12 @@ class Session(TimestampedUUIDModel):
         FAILED = "failed", "Failed"
 
     assistant = models.ForeignKey(Assistant, on_delete=models.PROTECT)
+    routing_mode = models.CharField(
+        max_length=16,
+        choices=RoutingMode.choices,
+        default=RoutingMode.DIRECT,
+    )
+    allowed_assistant_uuids = models.JSONField(default=list, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE
     )
@@ -764,6 +876,13 @@ class Run(models.Model):
         on_delete=models.SET_NULL,
         related_name="retry_runs",
     )
+    parent_run = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="delegated_runs",
+    )
     lensnode = models.ForeignKey(
         LensNode,
         null=True,
@@ -812,6 +931,7 @@ class Run(models.Model):
                 name="lens_run_session_status_idx",
             ),
             models.Index(fields=["lensnode"], name="lens_run_lensnode_idx"),
+            models.Index(fields=["parent_run"], name="lens_run_parent_idx"),
         ]
         ordering = ["-started_at", "-created_at"]
 

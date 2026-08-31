@@ -30,6 +30,94 @@
         </div>
       </dl>
 
+      <section
+        v-if="childProgress.length"
+        class="assistant-progress"
+        data-testid="trajectory-assistant-progress"
+        :aria-label="t('lensRuns.trajectoryAssistantProgress')"
+      >
+        <div class="assistant-progress-header">
+          <strong>{{ t('lensRuns.trajectoryAssistantProgress') }}</strong>
+          <span>
+            {{
+              t('lensRuns.trajectoryAssistantProgressCount', {
+                completed: completedChildCount,
+                total: childProgress.length
+              })
+            }}
+          </span>
+        </div>
+        <div class="assistant-progress-list">
+          <article
+            v-for="run in childProgress"
+            :key="run.run_uuid"
+            class="assistant-progress-row"
+          >
+            <span
+              class="assistant-progress-indicator"
+              :data-status="run.status"
+              aria-hidden="true"
+            />
+            <strong :title="run.assistant_name || 'Subagent'">
+              {{ run.assistant_name || 'Subagent' }}
+            </strong>
+            <span class="assistant-progress-task" :title="run.task">
+              {{ run.task }}
+            </span>
+            <span class="assistant-progress-meta">
+              <span class="assistant-progress-status">
+                {{ progressStatusLabel(run.status) }}
+              </span>
+              <span>
+                {{
+                  t('lensRuns.trajectoryAssistantEvents', {
+                    n: run.event_count || 0
+                  })
+                }}
+              </span>
+              <span>{{ durationText(run.duration_ms) }}</span>
+            </span>
+            <details
+              v-if="childRunAttempts(run).length > 1"
+              class="assistant-attempts"
+            >
+              <summary>
+                {{
+                  t('lensRuns.trajectoryAssistantAttempts', {
+                    n: childRunAttempts(run).length
+                  })
+                }}
+              </summary>
+              <div class="assistant-attempt-list">
+                <div
+                  v-for="attempt in childRunAttempts(run)"
+                  :key="attempt.run_uuid"
+                  class="assistant-attempt-row"
+                >
+                  <strong>
+                    {{
+                      t('lensRuns.trajectoryAssistantAttempt', {
+                        n: attempt.attempt
+                      })
+                    }}
+                  </strong>
+                  <span :title="attempt.task">{{ attempt.task }}</span>
+                  <span>{{ progressStatusLabel(attempt.status) }}</span>
+                  <span>
+                    {{
+                      t('lensRuns.trajectoryAssistantEvents', {
+                        n: attempt.event_count || 0
+                      })
+                    }}
+                  </span>
+                  <span>{{ durationText(attempt.duration_ms) }}</span>
+                </div>
+              </div>
+            </details>
+          </article>
+        </div>
+      </section>
+
       <div class="trajectory-toolbar" role="toolbar">
         <div class="toolbar-actions">
           <button
@@ -114,7 +202,6 @@
         @range-change="timelineRange = $event"
         @select-event="onTimelineSelect"
       />
-
       <div
         v-if="rows.length"
         data-testid="trajectory-ledger"
@@ -156,6 +243,12 @@
                     <span class="kind-tag-label">{{
                       kindLabel(row.event)
                     }}</span>
+                  </span>
+                  <span
+                    v-if="row.event.trace_run_role === 'child'"
+                    class="assistant-tag"
+                  >
+                    {{ row.event.assistant_name || 'Subagent' }}
                   </span>
                 </td>
                 <td class="content-cell">
@@ -432,8 +525,10 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import JsonTree from '@/components/ui/JsonTree.vue'
 import TrajectoryTimeline from './TrajectoryTimeline.vue'
 import {
-  buildTimelineLanes,
+  buildTimelineGroups,
   buildTrajectoryRows,
+  childRunAttempts,
+  childRunProgress,
   clampInspectorWidth,
   eventCategory,
   groupTrajectoryRows
@@ -441,6 +536,7 @@ import {
 
 const props = defineProps({
   runUuid: { type: String, default: '' },
+  assistantName: { type: String, default: '' },
   active: { type: Boolean, default: false },
   runStatus: { type: String, default: '' }
 })
@@ -548,8 +644,41 @@ const rows = computed(() =>
 const groupedRows = computed(() => groupTrajectoryRows(rows.value))
 
 const timelineLanes = computed(() =>
-  buildTimelineLanes(baseEvents.value, summary.value)
+  buildTimelineGroups(
+    baseEvents.value,
+    summary.value,
+    props.assistantName || 'Parent Run',
+    {
+      input: t('lensRuns.trajectoryLaneInput'),
+      model: t('lensRuns.trajectoryLaneModel'),
+      tools: t('lensRuns.trajectoryLaneTools')
+    }
+  )
 )
+
+const childProgress = computed(() => childRunProgress(summary.value))
+
+const completedChildCount = computed(
+  () =>
+    childProgress.value.filter((run) =>
+      ['done', 'failed', 'cancelled'].includes(run.status)
+    ).length
+)
+
+const PROGRESS_STATUS_KEYS = {
+  awaiting_user_input: 'statusAwaitingInput',
+  cancelled: 'statusCancelled',
+  done: 'statusDone',
+  failed: 'statusFailed',
+  queued: 'statusQueued',
+  running: 'statusRunning',
+  streaming: 'statusRunning'
+}
+
+function progressStatusLabel(status) {
+  const key = PROGRESS_STATUS_KEYS[status]
+  return key ? t(`lensRuns.${key}`) : status || '—'
+}
 
 const timelineDomain = computed(() => {
   const times = []
@@ -967,6 +1096,18 @@ onBeforeUnmount(() => {
   background: var(--t-bg-1);
 }
 
+.assistant-tag {
+  display: inline-flex;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid var(--sl-border, #cbd5e1);
+  border-radius: 3px;
+  color: var(--sl-text, #334155);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 :root[data-theme='dark'] .run-trajectory {
   --t-accent: #679efe;
   --t-bg-1: #232324;
@@ -1047,6 +1188,207 @@ onBeforeUnmount(() => {
 @media (min-width: 1024px) {
   .trajectory-stats {
     grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--t-border-l2);
+    border-radius: 8px;
+  }
+
+  .trajectory-stats .stat {
+    border: 0;
+    border-right: 1px solid var(--t-border-l1);
+    border-radius: 0;
+  }
+
+  .trajectory-stats .stat:last-child {
+    border-right: 0;
+  }
+}
+
+/* Delegated Run progress */
+.assistant-progress {
+  margin: 0 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--t-border-l2);
+  border-radius: 8px;
+  background: var(--t-bg-1);
+}
+
+.assistant-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--t-border-l1);
+  color: var(--t-text-3);
+  background: var(--t-bg-2);
+  font-size: 11px;
+}
+
+.assistant-progress-header strong {
+  color: var(--t-text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.assistant-progress-list {
+  display: grid;
+}
+
+.assistant-progress-row {
+  display: grid;
+  grid-template-columns: 10px minmax(110px, 180px) minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 10px;
+  gap: 8px;
+  border-bottom: 1px solid var(--t-border-l1);
+  font-size: 12px;
+}
+
+.assistant-progress-row:last-child {
+  border-bottom: 0;
+}
+
+.assistant-progress-row > strong,
+.assistant-progress-task {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-progress-row > strong {
+  color: var(--t-text-1);
+  font-weight: 600;
+}
+
+.assistant-progress-task {
+  color: var(--t-text-2);
+}
+
+.assistant-progress-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--t-text-4);
+}
+
+.assistant-progress-indicator[data-status='done'] {
+  background: var(--t-context);
+}
+
+.assistant-progress-indicator[data-status='running'],
+.assistant-progress-indicator[data-status='streaming'] {
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border: 2px solid color-mix(in srgb, var(--t-accent) 28%, transparent);
+  border-top-color: var(--t-accent);
+  background: transparent;
+  animation: assistant-progress-spin 800ms linear infinite;
+}
+
+.assistant-progress-indicator[data-status='failed'],
+.assistant-progress-indicator[data-status='cancelled'] {
+  background: var(--t-error);
+}
+
+.assistant-progress-indicator[data-status='awaiting_user_input'] {
+  background: var(--t-tool);
+}
+
+.assistant-progress-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--t-text-4);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.assistant-attempts {
+  grid-column: 2 / -1;
+  min-width: 0;
+  margin: 0 0 7px;
+  color: var(--t-text-3);
+  font-size: 11px;
+}
+
+.assistant-attempts summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--t-accent);
+}
+
+.assistant-attempt-list {
+  display: grid;
+  margin-top: 6px;
+  border-top: 1px solid var(--t-border-l1);
+}
+
+.assistant-attempt-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  min-height: 28px;
+  gap: 8px;
+  border-bottom: 1px solid var(--t-border-l1);
+}
+
+.assistant-attempt-row > strong {
+  color: var(--t-text-2);
+  font-weight: 600;
+}
+
+.assistant-attempt-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-progress-status {
+  color: var(--t-text-2);
+}
+
+@keyframes assistant-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 720px) {
+  .assistant-progress-row {
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+
+  .assistant-progress-task {
+    grid-column: 2 / 4;
+    grid-row: 2;
+  }
+
+  .assistant-attempts {
+    grid-column: 2 / 4;
+  }
+
+  .assistant-attempt-row {
+    grid-template-columns: 68px minmax(0, 1fr) auto;
+  }
+
+  .assistant-attempt-row > span:nth-last-child(-n + 2) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-progress-indicator[data-status='running'],
+  .assistant-progress-indicator[data-status='streaming'] {
+    animation: none;
   }
 }
 

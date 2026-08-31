@@ -69,10 +69,12 @@ from lens.serializers import (
     SharedQAMineSerializer,
 )
 from lens.services import (
+    LensNodeDispatchError,
+    assistant_supports_document_attachments,
+    cancel_descendant_runs,
     cancel_run_on_lensnode,
     create_execution_run,
     stream_run_events_async,
-    supports_document_attachments,
 )
 from lens.shared_qa_files import snapshot_shared_qa_files
 
@@ -85,6 +87,17 @@ from .base import (
 from .shares import _shared_qa_default_title, _unique_share_token
 
 logger = logging.getLogger(__name__)
+
+
+def _session_assistant_is_runnable(session, user):
+    """Return whether a session may start work for its owning user."""
+
+    assistant = session.assistant
+    if assistant.status != Assistant.Status.ACTIVE:
+        return False
+    if session.routing_mode == Session.RoutingMode.SMART:
+        return assistant.is_system
+    return assistant.is_accessible_by(user)
 
 
 async def run_stream_view(request, uuid):
@@ -123,6 +136,9 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         assistant_slug = self.request.query_params.get("assistant_slug")
         if assistant_slug:
             queryset = queryset.filter(assistant__slug=assistant_slug)
+        routing_mode = self.request.query_params.get("routing_mode")
+        if routing_mode:
+            queryset = queryset.filter(routing_mode=routing_mode)
         queryset = queryset.filter(user=self.request.user)
         if self.action == "list":
             search = self.request.query_params.get("search", "").strip()
@@ -139,7 +155,15 @@ class SessionViewSet(BaseAuthenticatedViewSet):
                 status=Run.Status.DONE,
                 output_message__isnull=False,
             )
-            return queryset.filter(status=session_status).annotate(
+            delegated_sessions = Run.objects.filter(
+                session=OuterRef("pk"),
+                parent_run__isnull=False,
+            )
+            return queryset.filter(
+                status=session_status,
+            ).filter(
+                ~Exists(delegated_sessions),
+            ).annotate(
                 has_shareable_answer=Exists(shareable_runs),
             ).order_by(
                 F("pinned_at").desc(nulls_last=True),
@@ -176,6 +200,9 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         messages = list(
             session.message_set.select_related("run").prefetch_related(
                 "run__steps",
+                "run__delegated_runs__steps",
+                "run__delegated_runs__input_message",
+                "run__delegated_runs__session__assistant",
                 "response_runs__steps",
                 "attachments",
                 "output_files",
@@ -257,10 +284,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Create an execution run for a session."""
 
         session = self.get_object()
-        if (
-            session.assistant.status != Assistant.Status.ACTIVE
-            or not session.assistant.is_accessible_by(request.user)
-        ):
+        if not _session_assistant_is_runnable(session, request.user):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
@@ -273,6 +297,11 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             run = serializer.save()
         except SessionStateError:
             raise ValidationError("SESSION_ARCHIVED")
+        except LensNodeDispatchError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         run.refresh_from_db()
         return Response(RunSerializer(run).data, status=201)
 
@@ -286,10 +315,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         """Upload one attachment for a session question."""
 
         session = self.get_object()
-        if (
-            session.assistant.status != Assistant.Status.ACTIVE
-            or not session.assistant.is_accessible_by(request.user)
-        ):
+        if not _session_assistant_is_runnable(session, request.user):
             raise PermissionDenied(
                 "You do not have access to this assistant."
             )
@@ -297,12 +323,10 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         if uploaded is None:
             raise ValidationError("No file provided.")
         is_document = is_document_upload(uploaded)
-        if is_document and session.assistant.selected_task == "general_chat":
-            raise ValidationError(
-                "This assistant does not accept document attachments."
-            )
-        if is_document and not supports_document_attachments(
-            session.assistant.lensnode
+        if (
+            is_document
+            and session.routing_mode != Session.RoutingMode.SMART
+            and not assistant_supports_document_attachments(session.assistant)
         ):
             raise ValidationError(
                 "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"
@@ -658,6 +682,7 @@ class RunViewSet(BaseAuthenticatedViewSet):
             return Response(RunSerializer(run).data)
 
         now = timezone.now()
+        descendants = []
         with transaction.atomic():
             run.status = Run.Status.CANCELLED
             run.resume_by = None
@@ -676,7 +701,10 @@ class RunViewSet(BaseAuthenticatedViewSet):
                 run.execution.save(
                     update_fields=["status", "finished_at"]
                 )
+            descendants = cancel_descendant_runs(run)
         cancel_run_on_lensnode(run)
+        for descendant in descendants:
+            cancel_run_on_lensnode(descendant)
         return Response(RunSerializer(run).data)
 
     @action(detail=True, methods=["post"])

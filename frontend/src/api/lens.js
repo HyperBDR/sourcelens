@@ -223,6 +223,7 @@ export async function listSessions(assistantSlug = '', options = {}) {
   const params = {
     ...(assistantSlug ? { assistant_slug: assistantSlug } : {}),
     ...(options.archived ? { archived: true } : {}),
+    ...(options.routingMode ? { routing_mode: options.routingMode } : {}),
     ...(options.search ? { search: options.search, page_size: 10000 } : {})
   }
   const response = await api.get('/lens/sessions/', { params })

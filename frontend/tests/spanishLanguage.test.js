@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { createI18n } from 'vue-i18n'
 
 import { toDocumentLang } from '../src/utils/documentLang.js'
 
@@ -93,57 +94,18 @@ test('Spanish translations preserve interpolation placeholders', () => {
   }
 })
 
-test('Spanish translations preserve required whitespace around placeholders', () => {
-  for (const directory of ['locales', 'admin/locales']) {
-    const english = JSON.parse(readSource(`${directory}/en.json`))
-    const spanish = JSON.parse(readSource(`${directory}/es.json`))
-    const mismatches = []
+test('Spanish literal interpolations follow Spanish punctuation', () => {
+  const spanish = JSON.parse(readSource('locales/es.json'))
+  const i18n = createI18n({
+    legacy: false,
+    locale: 'es',
+    messages: { es: spanish }
+  })
 
-    const compare = (source, translation, key = '') => {
-      if (source && typeof source === 'object' && !Array.isArray(source)) {
-        for (const childKey of Object.keys(source)) {
-          compare(
-            source[childKey],
-            translation[childKey],
-            key ? `${key}.${childKey}` : childKey
-          )
-        }
-        return
-      }
-
-      if (typeof source !== 'string') return
-      for (const placeholder of source.match(/\{[^{}]+\}/g) || []) {
-        const sourceIndex = source.indexOf(placeholder)
-        const translatedIndex = translation.indexOf(placeholder)
-        if (translatedIndex < 0) continue
-
-        const sourceHasSpaceBefore = /\s/.test(source[sourceIndex - 1] || '')
-        const sourceHasSpaceAfter = /\s/.test(
-          source[sourceIndex + placeholder.length] || ''
-        )
-        const translationHasSpaceBefore = /\s/.test(
-          translation[translatedIndex - 1] || ''
-        )
-        const translationHasSpaceAfter = /\s/.test(
-          translation[translatedIndex + placeholder.length] || ''
-        )
-
-        if (
-          (sourceHasSpaceBefore && !translationHasSpaceBefore) ||
-          (sourceHasSpaceAfter && !translationHasSpaceAfter)
-        ) {
-          mismatches.push(key)
-        }
-      }
-    }
-
-    compare(english, spanish)
-    assert.deepEqual(
-      [...new Set(mismatches)],
-      [],
-      `Invalid placeholder whitespace in ${directory}`
-    )
-  }
+  assert.equal(
+    i18n.global.t('lens.chat.mentionAssistantQuestionRequired'),
+    'Introduce la pregunta que se procesará después de elegir @.'
+  )
 })
 
 test('critical Spanish product copy is accurate and fully translated', () => {

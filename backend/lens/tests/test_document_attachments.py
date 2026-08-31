@@ -323,6 +323,55 @@ class DocumentAttachmentTests(TestCase):
 
         self.assertIs(payload["supports_document_attachments"], False)
 
+    def test_unbound_assistant_reports_dynamic_document_capability(self):
+        self.assistant.lensnode = None
+        self.assistant.save(update_fields=["lensnode"])
+        self.lensnode.tasks = [{"name": self.assistant.capability}]
+        self.lensnode.save(update_fields=["tasks"])
+
+        payload = AssistantSerializer(self.assistant).data
+
+        self.assertIs(payload["supports_document_attachments"], True)
+
+    def test_unbound_assistant_routes_oversized_text_to_capable_node(self):
+        self.assistant.lensnode = None
+        self.assistant.save(update_fields=["lensnode"])
+        self.lensnode.tasks = [{"name": self.assistant.capability}]
+        self.lensnode.labels = {}
+        self.lensnode.save(update_fields=["labels", "tasks"])
+        capable_node = LensNode.objects.create(
+            name="Document-capable LensNode",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
+            tasks=[{"name": self.assistant.capability}],
+            labels={"run_document_attachments": True},
+        )
+        self.client.force_authenticate(self.user)
+
+        upload = self.client.post(
+            f"/api/lens/sessions/{self.session.uuid}/attachments/",
+            {"file": _text_upload(content="x" * 8001)},
+            format="multipart",
+        )
+
+        self.assertEqual(upload.status_code, 201, upload.content)
+        self.assertEqual(upload.data["kind"], "document")
+        self.assertEqual(upload.data["byte_size"], 8001)
+
+        response = self.client.post(
+            f"/api/lens/sessions/{self.session.uuid}/runs/",
+            {
+                "question": "",
+                "enqueue": False,
+                "attachment_uuids": [upload.data["uuid"]],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        run = self.session.run_set.get(uuid=response.data["uuid"])
+        self.assertEqual(run.lensnode, capable_node)
+
     def test_store_rejects_spoofed_document_extension(self):
         upload = SimpleUploadedFile(
             "tender.pdf",
@@ -1319,7 +1368,7 @@ class DocumentAttachmentTests(TestCase):
             storages["document_attachments"].exists(metadata["storage_name"])
         )
 
-    def test_general_chat_rejects_document_upload(self):
+    def test_general_chat_accepts_document_upload(self):
         self.assistant.selected_task = "general_chat"
         self.assistant.save(update_fields=["selected_task"])
         self.client.force_authenticate(self.user)
@@ -1330,9 +1379,10 @@ class DocumentAttachmentTests(TestCase):
             format="multipart",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data["kind"], "document")
 
-    def test_general_chat_rejects_previously_uploaded_document(self):
+    def test_general_chat_accepts_previously_uploaded_document(self):
         metadata = store_document_attachment(
             self.session,
             self.user,
@@ -1352,9 +1402,34 @@ class DocumentAttachmentTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(Run.objects.count(), 0)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(Run.objects.count(), 1)
         self.assertEqual(
             get_document_attachment(metadata["uuid"])["run_uuid"],
-            "",
+            str(response.data["uuid"]),
         )
+
+    def test_general_chat_rejects_document_without_lensnode_capability(self):
+        self.assistant.selected_task = "general_chat"
+        self.assistant.save(update_fields=["selected_task"])
+        self.lensnode.labels = {}
+        self.lensnode.save(update_fields=["labels"])
+        metadata = store_document_attachment(
+            self.session,
+            self.user,
+            _pdf_upload(),
+        )
+        self.client.force_authenticate(self.user)
+
+        response = self.client.post(
+            f"/api/lens/sessions/{self.session.uuid}/runs/",
+            {
+                "question": "Analyze it",
+                "enqueue": False,
+                "attachment_uuids": [metadata["uuid"]],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Run.objects.count(), 0)

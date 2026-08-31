@@ -1,10 +1,17 @@
 <template>
   <section class="trajectory-timeline" aria-label="Trajectory timeline">
-    <div class="plot">
+    <div class="plot" :style="timelineStyle">
       <div class="labels" aria-hidden="true">
-        <span>Input</span>
-        <span>Model</span>
-        <span>Tools</span>
+        <div
+          v-for="group in laneGroups"
+          :key="group.key"
+          class="lane-group-label"
+        >
+          <strong :title="group.label">{{ group.label }}</strong>
+          <span v-for="lane in group.lanes" :key="lane.key">
+            {{ lane.label }}
+          </span>
+        </div>
       </div>
       <div
         ref="trackEl"
@@ -52,6 +59,14 @@
           />
         </div>
 
+        <div v-if="!empty" class="lane-group-lines" aria-hidden="true">
+          <span
+            v-for="line in groupLines"
+            :key="line"
+            :style="{ top: `${line}px` }"
+          />
+        </div>
+
         <div
           v-if="
             hoverFraction !== null && dragging === false && hoveredSpan === null
@@ -83,6 +98,7 @@
           :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
         >
           <strong>{{ tooltip.kind }}</strong>
+          <span v-if="tooltip.assistant">{{ tooltip.assistant }}</span>
           <span>{{ tooltip.range }}</span>
           <span v-if="tooltip.duration">{{ tooltip.duration }}</span>
         </div>
@@ -123,18 +139,44 @@ const viewport = ref(null)
 let dragState = null
 let tooltipTimer = null
 
-const LANE_INDEX = { input: 0, model: 1, tools: 2 }
-
 const flatSteps = computed(() => {
   const steps = []
-  for (const lane of props.lanes) {
-    const laneIndex = LANE_INDEX[lane.key] ?? 0
+  for (const [laneIndex, lane] of props.lanes.entries()) {
     for (const step of lane.steps) {
       steps.push({ ...step, lane: laneIndex })
     }
   }
   return steps.sort((a, b) => a.startMs - b.startMs)
 })
+
+const laneGroups = computed(() => {
+  const groups = []
+  for (const lane of props.lanes) {
+    let group = groups.at(-1)
+    if (!group || group.key !== lane.groupKey) {
+      group = {
+        key: lane.groupKey || 'run',
+        label: lane.groupLabel || 'Run',
+        lanes: []
+      }
+      groups.push(group)
+    }
+    group.lanes.push(lane)
+  }
+  return groups
+})
+
+const timelineHeight = computed(() =>
+  Math.max(50, props.lanes.length * 14 + 14)
+)
+
+const timelineStyle = computed(() => ({
+  '--timeline-height': `${timelineHeight.value}px`
+}))
+
+const groupLines = computed(() =>
+  laneGroups.value.slice(1).map((_, index) => (index + 1) * 42)
+)
 
 const empty = computed(() => flatSteps.value.length === 0)
 
@@ -481,7 +523,14 @@ function showTooltip(step, event) {
       4,
       Math.min(trackRect.height - 4, rect.top - trackRect.top)
     )
-    tooltip.value = { kind, range, duration, x, y }
+    tooltip.value = {
+      kind,
+      assistant: step.assistantName,
+      range,
+      duration,
+      x,
+      y
+    }
   }, TOOLTIP_DELAY_MS)
 }
 
@@ -514,38 +563,50 @@ function durationText(value) {
 
 .plot {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  height: 50px;
+  grid-template-columns: 188px minmax(0, 1fr);
+  height: var(--timeline-height, 50px);
   overflow: hidden;
   background: var(--t-bg-2);
 }
 
 .labels {
-  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding-top: 7px;
   border-right: 1px solid var(--t-border-l1);
   color: var(--t-text-3);
   font-size: 10px;
   line-height: 1;
 }
 
-.labels span {
-  position: absolute;
-  right: 3px;
+.lane-group-label {
+  display: grid;
+  grid-template-columns: minmax(0, 132px) 44px;
+  grid-template-rows: repeat(3, 14px);
+  height: 42px;
+  padding: 0 4px;
+  border-top: 1px solid transparent;
+}
+
+.lane-group-label + .lane-group-label {
+  border-top-color: var(--t-border-l2);
+}
+
+.lane-group-label strong {
+  grid-row: 1 / 4;
+  align-self: center;
+  overflow: hidden;
+  color: var(--t-text-2);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lane-group-label span {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  height: 8px;
-  text-align: right;
-}
-
-.labels span:nth-child(1) {
-  top: 7px;
-}
-.labels span:nth-child(2) {
-  top: 21px;
-}
-.labels span:nth-child(3) {
-  top: 35px;
+  color: var(--t-text-4);
 }
 
 .track {
@@ -577,7 +638,7 @@ function durationText(value) {
   box-sizing: border-box;
   width: 100%;
   height: 18px;
-  padding: 0 4px;
+  padding: 0 4px 0 192px;
   border-bottom: 1px solid var(--t-border-l2);
   color: var(--t-text-4);
   font:
@@ -615,6 +676,24 @@ function durationText(value) {
   bottom: 7px;
   left: 0;
   right: 0;
+}
+
+.lane-group-lines {
+  position: absolute;
+  z-index: 1;
+  top: 7px;
+  right: 0;
+  bottom: 7px;
+  left: 0;
+  pointer-events: none;
+}
+
+.lane-group-lines span {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: var(--t-border-l2);
 }
 
 .span {

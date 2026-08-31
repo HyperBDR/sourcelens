@@ -192,6 +192,7 @@ export function createRuntimeState() {
     stages: [],
     stageRevision: 0,
     activities: [],
+    delegations: [],
     activityRevision: 0,
     activityAttempts: {},
     capabilityBlock: null,
@@ -202,6 +203,86 @@ export function createRuntimeState() {
     terminationDetail: null,
     clarificationRequest: null,
     clarificationAnsweredAt: null
+  }
+}
+
+export function buildAssistantActivityGroups({
+  delegations = [],
+  activities = [],
+  fallbackAssistantName = ''
+} = {}) {
+  const groups = new Map()
+
+  function ensureGroup(assistantName) {
+    const name = String(assistantName || fallbackAssistantName).trim()
+    const key = name || 'default'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        assistantName: name,
+        tasks: [],
+        items: []
+      })
+    }
+    return groups.get(key)
+  }
+
+  for (const delegation of delegations || []) {
+    const group = ensureGroup(delegation?.assistantName)
+    const task = String(delegation?.delegatedTask || '').trim()
+    if (task && !group.tasks.includes(task)) group.tasks.push(task)
+  }
+
+  for (const activity of activities || []) {
+    const group = ensureGroup(activity?.assistantName)
+    const task = String(activity?.delegatedTask || '').trim()
+    if (task && !group.tasks.includes(task)) group.tasks.push(task)
+    group.items.push(activity)
+  }
+
+  return [...groups.values()].map((group) => {
+    const summaries = new Map()
+    group.items.forEach((item, index) => {
+      const kind = String(item?.kind || 'usingCapability')
+      const current = summaries.get(kind)
+      summaries.set(kind, {
+        ...(current || item),
+        kind,
+        count: Number(current?.count || 0) + Number(item?.count || 1),
+        lastIndex: index
+      })
+    })
+    const summaryItems = [...summaries.values()]
+      .sort((left, right) => right.lastIndex - left.lastIndex)
+      .slice(0, 3)
+      .sort((left, right) => left.lastIndex - right.lastIndex)
+      .map(({ kind, count }) => ({ kind, count }))
+    return { ...group, summaryItems }
+  })
+}
+
+function trackDelegation(state, event) {
+  const assistantName = String(
+    event?.assistant_name || event?.payload?.assistant_name || ''
+  ).trim()
+  const delegatedTask = String(
+    event?.delegated_task || event?.payload?.delegated_task || ''
+  )
+    .trim()
+    .slice(0, 2000)
+  if (!assistantName || !delegatedTask) return state
+  const exists = state.delegations.some(
+    (item) =>
+      item.assistantName === assistantName &&
+      item.delegatedTask === delegatedTask
+  )
+  if (exists) return state
+  return {
+    ...state,
+    delegations: [
+      ...state.delegations,
+      { assistantName, delegatedTask }
+    ]
   }
 }
 
@@ -287,10 +368,20 @@ function activeNodeId(state) {
   return state.stages.find((item) => item.status === 'in_progress')?.id || ''
 }
 
-function appendActivity(state, kind) {
+function appendActivity(
+  state,
+  kind,
+  assistantName = '',
+  delegatedTask = ''
+) {
   const nodeId = activeNodeId(state) || 'legacy-runtime'
   const last = state.activities[state.activities.length - 1]
-  if (last?.nodeId === nodeId && last.kind === kind) {
+  if (
+    last?.nodeId === nodeId &&
+    last.kind === kind &&
+    (last.assistantName || '') === assistantName &&
+    (last.delegatedTask || '') === delegatedTask
+  ) {
     return {
       ...state,
       activities: [
@@ -305,7 +396,14 @@ function appendActivity(state, kind) {
     activityRevision,
     activities: capActivities([
       ...state.activities,
-      { id: activityRevision, nodeId, kind, count: 1 }
+      {
+        id: activityRevision,
+        nodeId,
+        kind,
+        count: 1,
+        ...(assistantName ? { assistantName } : {}),
+        ...(delegatedTask ? { delegatedTask } : {})
+      }
     ])
   }
 }
@@ -343,7 +441,13 @@ function appendStructuredActivity(state, payload) {
   if (!ACTIVITY_STATUSES.has(payload.status)) return state
 
   const exactExisting = state.activities.find(
-    (item) => item.structured && item.id === id
+    (item) =>
+      item.structured &&
+      item.id === id &&
+      (item.assistantName || '') ===
+        String(payload.assistant_name || '').trim() &&
+      (item.delegatedTask || '') ===
+        String(payload.delegated_task || '').trim()
   )
   const startDate = normalizeActivityDate(payload.start_date)
   const endDate = normalizeActivityDate(payload.end_date)
@@ -357,6 +461,10 @@ function appendStructuredActivity(state, payload) {
       item.taskId === currentTaskId &&
       item.stageKind === payload.stage_kind &&
       item.kind === payload.kind &&
+      (item.assistantName || '') ===
+        String(payload.assistant_name || '').trim() &&
+      (item.delegatedTask || '') ===
+        String(payload.delegated_task || '').trim() &&
       (item.startDate || '') === startDate &&
       (item.endDate || '') === endDate &&
       (item.orderRef || '') === orderRef
@@ -390,7 +498,27 @@ function appendStructuredActivity(state, payload) {
       ? { orderRef: existing?.orderRef || orderRef }
       : {}),
     planRevision: existing?.planRevision ?? state.planRevision,
-    structured: true
+    structured: true,
+    ...(String(
+      existing?.assistantName || payload.assistant_name || ''
+    ).trim()
+      ? {
+          assistantName: String(
+            existing?.assistantName || payload.assistant_name
+          ).trim()
+        }
+      : {}),
+    ...(String(
+      existing?.delegatedTask || payload.delegated_task || ''
+    ).trim()
+      ? {
+          delegatedTask: String(
+            existing?.delegatedTask || payload.delegated_task
+          )
+            .trim()
+            .slice(0, 2000)
+        }
+      : {})
   }
   const activities = existing
     ? state.activities.map((item) =>
@@ -438,6 +566,14 @@ function closeRuntimeProgress(state, status) {
 
 export function activitiesForNode(state, nodeId) {
   return (state?.activities || []).filter((item) => item.nodeId === nodeId)
+}
+
+export function selectCurrentAssistantActivity(state) {
+  return (
+    [...(state?.activities || [])]
+      .reverse()
+      .find((item) => String(item?.assistantName || '').trim()) || null
+  )
 }
 
 export function normalizeStages(stages) {
@@ -785,6 +921,7 @@ export function selectStructuredProgress({
   plan,
   stages,
   activities,
+  delegations = [],
   standaloneActivities = false
 }) {
   if (route) {
@@ -797,6 +934,14 @@ export function selectStructuredProgress({
         tasks
       }
     }
+    if (delegations.length > 0) {
+      return {
+        kind: 'activity',
+        items: (Array.isArray(activities) ? activities : []).filter(
+          (item) => !item.structured
+        )
+      }
+    }
     return { kind: null, items: [] }
   }
   if (Array.isArray(plan) && plan.length > 0) {
@@ -805,11 +950,13 @@ export function selectStructuredProgress({
   if (Array.isArray(stages) && stages.length > 0) {
     return { kind: 'stage', items: stages }
   }
-  if (standaloneActivities) {
+  if (standaloneActivities || delegations.length > 0) {
     const items = (Array.isArray(activities) ? activities : []).filter(
       (item) => !item.structured
     )
-    if (items.length > 0) return { kind: 'activity', items }
+    if (items.length > 0 || delegations.length > 0) {
+      return { kind: 'activity', items }
+    }
   }
   return { kind: null, items: [] }
 }
@@ -828,7 +975,7 @@ export function selectCurrentWorkflowStage(tasks) {
 }
 
 export function applyRuntimeEvent(state, event) {
-  const current = state || createRuntimeState()
+  const current = trackDelegation(state || createRuntimeState(), event)
   if (
     event?.type === 'sync' ||
     event?.type === 'done' ||
@@ -881,7 +1028,14 @@ export function applyRuntimeEvent(state, event) {
     return appendStructuredActivity(current, event.payload)
   }
   const activityKind = activityKindForEvent(event)
-  if (activityKind) return appendActivity(current, activityKind)
+  if (activityKind) {
+    return appendActivity(
+      current,
+      activityKind,
+      event.assistant_name,
+      String(event.delegated_task || '').trim().slice(0, 2000)
+    )
+  }
   if (event?.visibility !== 'user') return current
   const payload = event.payload || {}
   if (event.event_type === 'route.selected') {

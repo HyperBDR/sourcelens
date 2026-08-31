@@ -67,6 +67,16 @@ test('guards restored run state with the current session load', async () => {
   )
 })
 
+test('shows a retryable node-offline error when run creation is unavailable', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /const errorCode = err\?\.response\?\.data\?\.detail/
+  )
+  assert.match(source, /lensNodeErrorMessage\(errorCode, t\)/)
+})
+
 test('keeps the conversation viewport aligned with runtime events', async () => {
   const source = await chatSource()
   const handleEvent = source.indexOf('function handleEvent(event)')
@@ -113,11 +123,11 @@ test('searches recent and archived conversation titles from the sidebar', async 
   )
   assert.match(
     source,
-    /listSessions\(selectedAssistant\.value\.slug, \{ search: normalizedQuery \}\)/
+    /listSessions\(assistantSlug, \{\s+routingMode,\s+search: normalizedQuery/
   )
   assert.match(
     source,
-    /archived: true,\s+search: normalizedQuery/
+    /archived: true,\s+routingMode,\s+search: normalizedQuery/
   )
   assert.match(source, /function selectSearchedSession\(session\)/)
   assert.match(source, /noSessionSearchResults/)
@@ -175,6 +185,17 @@ test('keeps the closed mobile sidebar out of keyboard navigation', async () => {
   assert.match(source, /:aria-hidden="isMobile && !sidebarOpen"/)
 })
 
+test('collapses the conversation history into a compact Recent row', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /sessionHistoryCollapsed = true/)
+  assert.match(source, /class="sessions-collapsed"/)
+  assert.match(source, /class="sessions-collapsed-trigger"[\s\S]*<ChevronRight/)
+  assert.match(source, /class="sessions-collapsed-action"/)
+  assert.match(source, /placement="right"/)
+  assert.match(source, /\.sessions-collapsed\s*\{[\s\S]*items-center/)
+})
+
 test('shows only a direct share action for mobile answer tools', async () => {
   const source = await chatSource()
 
@@ -218,7 +239,7 @@ test('creates the first session only when the user submits a prompt', async () =
   const source = await chatSource()
   const submit = source.indexOf('async function submit()')
   const createFirstSession = source.indexOf(
-    'await createNewSession(false)',
+    'await createNewSession(',
     submit
   )
   const bindSession = source.indexOf(
@@ -234,6 +255,72 @@ test('creates the first session only when the user submits a prompt', async () =
   assert.ok(submitGuard < createFirstSession)
   assert.ok(markSubmitting < createFirstSession)
   assert.ok(createFirstSession < bindSession)
+})
+
+test('lets Smart Collaboration select assistants before its first session', async () => {
+  const source = await chatSource()
+  const composerShell = source.indexOf('<div class="composer-shell relative">')
+  const scopeButton = source.indexOf(
+    '<ParticipatingAssistantsPicker',
+    composerShell
+  )
+  const composer = source.indexOf('<div class="composer">', scopeButton)
+  const scopeCandidates = source.indexOf('const routingScopeAssistantUuids')
+  const sessionPayload = source.indexOf(
+    'allowed_assistant_uuids: allowedAssistantUuids'
+  )
+  const selectedScope = source.indexOf(
+    'await createNewSession(\n      false,\n      routingScopeAssistantUuids.value',
+    scopeCandidates
+  )
+
+  assert.notEqual(scopeButton, -1)
+  assert.ok(composerShell < scopeButton)
+  assert.ok(scopeButton < composer)
+  assert.notEqual(scopeCandidates, -1)
+  assert.notEqual(selectedScope, -1)
+  assert.notEqual(sessionPayload, -1)
+})
+
+test('shows the current delegated assistant above Smart Collaboration progress', async () => {
+  const source = await chatSource()
+  const liveAnswer = source.indexOf('<!-- Live answer:')
+  const currentAssistant = source.indexOf(
+    'class="runtime-assistant-names"',
+    liveAnswer
+  )
+  const liveProgress = source.indexOf(
+    'class="runtime-progress-card runtime-progress-live"',
+    liveAnswer
+  )
+
+  assert.notEqual(currentAssistant, -1)
+  assert.ok(liveProgress < currentAssistant)
+  assert.match(source, /assistantNamesLabel\(runtimeState\)/)
+  assert.match(source, /activity\.assistantName/)
+})
+
+test('shows each delegated task inside its assistant activity group', async () => {
+  const source = await chatSource()
+  const component = await readFile(
+    new URL(
+      '../src/pages/lens/components/AssistantActivityGroups.vue',
+      import.meta.url
+    ),
+    'utf8'
+  )
+
+  assert.match(source, /<AssistantActivityGroups/)
+  assert.match(component, /group\.tasks/)
+  assert.match(component, /class="runtime-assistant-full-task"/)
+  assert.doesNotMatch(source, /lens\.chat\.runtime\.delegatedTask/)
+})
+
+test('keeps browser scroll anchoring enabled while activities grow', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /\.thread-scroll[\s\S]*overflow-anchor: auto/)
+  assert.doesNotMatch(source, /\.thread-scroll[\s\S]*overflow-anchor: none/)
 })
 
 test('keeps every conversation layout free of repeated message avatars', async () => {
@@ -320,12 +407,12 @@ test('keeps the mobile welcome copy clear of the docked composer', async () => {
   assert.match(source, /\.chat-welcome \{[\s\S]*?padding: 0 1\.5rem 13\.5rem;/)
 })
 
-test('uses a compact disclosure for live analysis on mobile', async () => {
+test('keeps live agent activity expanded on mobile while allowing collapse', async () => {
   const source = await chatSource()
 
   assert.match(
     source,
-    /v-if="isRunActive && liveStructuredProgress\.items\.length"\s+class="runtime-progress-card runtime-progress-live"\s+:open="!isMobile"/
+    /v-if="[\s\S]*?isRunActive &&[\s\S]*?liveStructuredProgress\.items\.length[\s\S]*?open\s+class="runtime-progress-card runtime-progress-live"/
   )
   assert.match(
     source,
@@ -343,5 +430,46 @@ test('uses a compact disclosure for live analysis on mobile', async () => {
   assert.match(
     source,
     /\.runtime-progress-live > \.runtime-progress-summary \{[\s\S]*?display: flex;[\s\S]*?min-height: 2\.75rem;/
+  )
+})
+
+test('keeps completed agent activity visible until the user collapses it', async () => {
+  const source = await chatSource()
+  const completedProgress = source.indexOf(
+    'structuredProgress(message._runtimeState).items.length ||'
+  )
+  const completedDetails = source.lastIndexOf(
+    '<details',
+    completedProgress
+  )
+
+  assert.notEqual(completedProgress, -1)
+  assert.notEqual(completedDetails, -1)
+  assert.match(
+    source.slice(completedDetails, completedProgress + 240),
+    /<details[\s\S]*?open[\s\S]*?class="runtime-progress-card"/
+  )
+})
+
+test('renders delegated assistants as bounded progressive-disclosure cards', async () => {
+  const source = await chatSource()
+  const component = await readFile(
+    new URL(
+      '../src/pages/lens/components/AssistantActivityGroups.vue',
+      import.meta.url
+    ),
+    'utf8'
+  )
+
+  assert.match(source, /<AssistantActivityGroups/)
+  assert.match(source, /:live="true"/)
+  assert.match(source, /:live="false"/)
+  assert.match(component, /<details[\s\S]*?:open="live"/)
+  assert.match(component, /class="runtime-assistant-task-summary"/)
+  assert.match(component, /class="runtime-assistant-full-task"/)
+  assert.match(component, /group\.summaryItems/)
+  assert.match(
+    component,
+    /\.runtime-assistant-task-summary \{[\s\S]*?-webkit-line-clamp: 2;/
   )
 })

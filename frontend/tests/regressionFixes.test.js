@@ -17,6 +17,70 @@ test('active chat run exposes a localized stop action', async () => {
   assert.equal(chinese.common.stop, '停止')
 })
 
+test('smart chat limits @ assistant mentions to the message start', async () => {
+  const [chat, switcher, submission, chinese, english, spanish] =
+    await Promise.all([
+      source('pages/lens/Chat.vue'),
+      source('components/lens/AssistantSwitcher.vue'),
+      source('pages/lens/chatSubmission.js'),
+      source('locales/zh-CN.json').then(JSON.parse),
+      source('locales/en.json').then(JSON.parse),
+      source('locales/es.json').then(JSON.parse)
+    ])
+
+  assert.match(chat, /\^@\(\[\^\\s\]\*\)/)
+  assert.match(chat, /routingAssistantUuid = mentionedAssistant\.value\.uuid/)
+  assert.match(submission, /payload\.routing_assistant_uuid = routingAssistantUuid/)
+  assert.doesNotMatch(chat, /lockMentionedAssistant/)
+  assert.match(chat, /v-if="showMentionPicker"/)
+  assert.match(chat, /messageMentionSegments\(message\.content\)/)
+  assert.match(chat, /text\.startsWith\(`@\$\{name\}`\)/)
+  assert.match(chat, /sort\(\(left, right\) => right\.length - left\.length\)/)
+  assert.match(chat, /text-blue-600/)
+  assert.match(switcher, /smartCollaborationBeta/)
+  assert.match(chat, /@keydown="handleComposerKeydown"/)
+  assert.match(chat, /event\.key === 'ArrowDown'/)
+  assert.match(chat, /event\.key === 'ArrowUp'/)
+  assert.match(chat, /event\.key === 'Enter'/)
+  assert.doesNotMatch(chat, /orchestrator: 'orchestrator'/)
+  assert.equal(
+    chinese.lens.chat.mentionAssistantHint,
+    "输入 {'@'} 后选择助手；选中后，仅由该助手处理本次消息。"
+  )
+  assert.match(english.lens.chat.mentionAssistantHint, /Type \{'@'\}/)
+  assert.equal(chinese.lens.chat.assistantTypes.orchestrator, undefined)
+  assert.equal(english.lens.chat.assistantTypes.orchestrator, undefined)
+  assert.equal(spanish.lens.chat.assistantTypes.orchestrator, undefined)
+  assert.equal(chinese.lens.chat.smartCollaboration, '智能协作')
+  assert.equal(chinese.lens.chat.smartCollaborationBeta, 'Beta')
+  assert.equal(english.lens.chat.smartCollaboration, 'Smart Collaboration')
+  assert.equal(english.lens.chat.smartCollaborationBeta, 'Beta')
+  assert.equal(
+    spanish.lens.chat.smartCollaboration,
+    'Colaboración inteligente'
+  )
+  assert.equal(spanish.lens.chat.smartCollaborationBeta, 'Beta')
+})
+
+test('escapes literal at-signs in translated assistant mention messages', async () => {
+  const locales = await Promise.all(
+    ['en', 'zh-CN', 'es'].map((locale) =>
+      source(`locales/${locale}.json`).then(JSON.parse)
+    )
+  )
+  for (const locale of locales) {
+    for (const key of [
+      'mentionAssistantHint',
+      'mentionAssistantRequired',
+      'mentionAssistantSaveFailed',
+      'mentionAssistantQuestionRequired',
+      'clearAssistantMention'
+    ]) {
+      assert.match(locale.lens.chat[key], /\{'@'\}/)
+    }
+  }
+})
+
 test('admin tables and assistant slugs preserve backend-compatible values', async () => {
   const [users, drawer, assistants, english, chinese] = await Promise.all([
     source('admin/pages/Management/Users.vue'),
@@ -157,6 +221,63 @@ test('assistant exposes one execution strategy without a token budget picker', a
   assert.doesNotMatch(drawer, /tokenBudgetProfiles/)
   assert.doesNotMatch(drawer, /v-model="form\.token_budget_profile"/)
   assert.doesNotMatch(drawer, /token_budget_profile:/)
+})
+
+test('assistant node selection is available for every capability', async () => {
+  const drawer = await source(
+    'pages/lens/AssistantFormDrawerDirectEnvironment.vue'
+  )
+
+  assert.match(drawer, /const requiresNodeSelection = computed\(/)
+  assert.match(drawer, /!!props\.form\.capability/)
+  assert.doesNotMatch(drawer, /isOrchestratorTask/)
+  assert.match(drawer, /v-if="requiresNodeSelection"/)
+  assert.match(drawer, /v-else-if="isGeneralChatTask"/)
+  const retrievalStart = drawer.indexOf("t('lensAdmin.fields.retrievalPolicy')")
+  assert.notEqual(retrievalStart, -1)
+  assert.equal(
+    drawer.slice(retrievalStart - 120, retrievalStart).includes(
+      'v-if="requiresWorkspace"'
+    ),
+    true
+  )
+})
+
+test('assistant selects its type before conditional execution settings', async () => {
+  const [drawer, assistants, chinese] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('pages/lens/Assistants.vue'),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+  const firstStep = drawer.slice(
+    drawer.indexOf('<!-- Wizard Step 1'),
+    drawer.indexOf('<!-- Wizard Step 2')
+  )
+  const secondStep = drawer.slice(
+    drawer.indexOf('<!-- Wizard Step 2'),
+    drawer.indexOf('<!-- Wizard Step 3')
+  )
+
+  assert.doesNotMatch(firstStep, /v-model="form\.capability"/)
+  assert.ok(
+    secondStep.indexOf("t('lensAdmin.fields.type')") <
+      secondStep.indexOf('v-if="requiresNodeSelection"')
+  )
+  assert.match(secondStep, /lensAdmin\.placeholders\.selectType/)
+  assert.match(drawer, /if \(!props\.form\.capability\) return false/)
+  assert.match(assistants, /capability: '',/)
+  assert.match(chinese.lensAdmin.wizard.step2Desc, /先选择类型/)
+})
+
+test('assistant form does not configure fixed Smart Collaboration delegates', async () => {
+  const [drawer, chinese] = await Promise.all([
+    source('pages/lens/AssistantFormDrawerDirectEnvironment.vue'),
+    source('admin/locales/zh-CN.json').then(JSON.parse)
+  ])
+
+  assert.doesNotMatch(drawer, /delegatedAssistantCount/)
+  assert.doesNotMatch(drawer, /subagent_assistants/)
+  assert.equal(chinese.lensAdmin.wizard.delegatedAssistantsSelected, undefined)
 })
 
 test('assistant Skill picker supports search and environment configuration', async () => {

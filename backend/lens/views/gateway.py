@@ -15,11 +15,16 @@ from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from lens.citations import sanitize_run_citations
 from lens.document_attachments import (
     document_attachment_storage,
     get_document_attachment,
 )
 from lens.models import Run, RunOutputFile, Skill
+from lens.services import (
+    LensNodeDispatchError,
+    create_delegated_run,
+)
 from lens.skill_packages import package_zip_bytes
 
 from .base import EventStreamRenderer, LensNodeAuthMixin
@@ -143,6 +148,7 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
         else:
             data["content"] = content
         return Response(data)
+
 
     @staticmethod
     def _valid_trace_context(trace_context, run_uuid):
@@ -338,6 +344,117 @@ class LensNodeAIGatewayView(LensNodeAuthMixin, APIView):
         ):
             return "MODEL_STREAM_ERROR"
         return "MODEL_STREAM_ERROR"
+
+
+class LensNodeDelegationView(LensNodeAuthMixin, APIView):
+    """Create and inspect cross-node Smart Collaboration child Runs."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request, run_uuid):
+        """Create an idempotent delegated Run for an allowed assistant."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        parent = Run.objects.select_related("session").filter(
+            uuid=run_uuid,
+            lensnode=lensnode,
+        ).first()
+        if parent is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        assistant_uuid = request.data.get("assistant_uuid")
+        question = str(request.data.get("question") or "").strip()
+        delegation_key = str(
+            request.data.get("delegation_key") or ""
+        ).strip()
+        delegation_group_key = str(
+            request.data.get("delegation_group_key") or delegation_key
+        ).strip()
+        if not assistant_uuid or not question or not delegation_key:
+            return Response(
+                {
+                    "detail": (
+                        "assistant_uuid, question, and delegation_key "
+                        "are required."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(delegation_key) > 96:
+            return Response(
+                {"detail": "delegation_key is too long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(delegation_group_key) > 96:
+            return Response(
+                {"detail": "delegation_group_key is too long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            child = create_delegated_run(
+                parent,
+                assistant_uuid,
+                question,
+                delegation_key=delegation_key,
+                delegation_group_key=delegation_group_key,
+            )
+        except (LensNodeDispatchError, ValidationError) as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            self._run_payload(child),
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    def get(self, request, run_uuid, child_uuid):
+        """Return the current state and final answer of one child Run."""
+
+        lensnode = self._authenticate_lensnode(request)
+        if lensnode is None:
+            return Response(
+                {"detail": "Invalid LensNode token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        child = Run.objects.select_related(
+            "output_message",
+            "session__assistant",
+            "lensnode",
+            "parent_run",
+        ).filter(
+            uuid=child_uuid,
+            parent_run__uuid=run_uuid,
+            parent_run__lensnode=lensnode,
+        ).first()
+        if child is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(self._run_payload(child))
+
+    @staticmethod
+    def _run_payload(run):
+        """Return the bounded child-Run contract consumed by LensNode."""
+
+        return {
+            "run_uuid": str(run.uuid),
+            "status": run.status,
+            "outcome": run.outcome,
+            "assistant_name": run.session.assistant.name,
+            "lensnode_uuid": (
+                str(run.lensnode.uuid) if run.lensnode_id else ""
+            ),
+            "answer": (
+                str(run.output_message.content or "")
+                if run.output_message_id
+                else ""
+            ),
+            "error": str(run.error or "")[:500],
+        }
 
 
 class LensNodeSkillPackageView(LensNodeAuthMixin, APIView):

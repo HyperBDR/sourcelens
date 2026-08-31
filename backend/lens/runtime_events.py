@@ -551,13 +551,17 @@ def sanitize_runtime_event(item):
             and (item.get("payload") or {}).get("phase") == "completed"
             else "running"
         )
-        return {
+        output = {
             "agent_event": f"workflow.{event_type}",
             "activity": activity,
             "event_type": event_type,
             "visibility": "user",
             "payload": _sanitize_payload(event_type, item.get("payload")),
         }
+        assistant_name = _text(item.get("assistant_name"), 160).strip()
+        if assistant_name:
+            output["assistant_name"] = assistant_name
+        return output
     agent_event = _text(item.get("agent_event"), 128)
     if (
         item.get("runtime_scope") == "general_chat"
@@ -570,10 +574,14 @@ def sanitize_runtime_event(item):
     activity = _text(item.get("activity"), 64)
     if not agent_event and not activity:
         return None
-    return {
+    output = {
         "agent_event": agent_event,
         "activity": activity,
     }
+    assistant_name = _text(item.get("assistant_name"), 160).strip()
+    if assistant_name:
+        output["assistant_name"] = assistant_name
+    return output
 
 
 def public_step_detail(detail):

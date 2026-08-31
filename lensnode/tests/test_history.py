@@ -24,7 +24,9 @@ from lensnode.agent_runtime import (
     _synthesize_wrapup_answer,
 )
 from lensnode.agent_runtime.prompts import command_answer_language
+from lensnode.agent_runtime.system_prompts import _smart_collaboration_system_prompt
 from lensnode.checkpoint import CheckpointResumeError, ResumeState
+from lensnode.delegation_events import delegation_events
 from lensnode.gateway_model import GatewayStreamError
 
 
@@ -888,6 +890,50 @@ def test_write_todos_emits_user_visible_normalized_plan():
                 },
             },
         )
+    ]
+
+
+def test_parallel_task_calls_emit_each_assistant_display_name():
+    events = []
+    message = _Msg(
+        "ai",
+        tool_calls=[
+            {
+                "id": "call-office",
+                "name": "task",
+                "args": {
+                    "subagent_type": "office-agent",
+                    "description": "Review the document",
+                },
+            },
+            {
+                "id": "call-research",
+                "name": "task",
+                "args": {
+                    "subagent_type": "assistant-2",
+                    "description": "Collect supporting facts",
+                },
+            },
+        ],
+    )
+
+    _emit_new_tool_calls(
+        [message],
+        set(),
+        lambda name, detail: events.append((name, detail)),
+        subagent_display_names={
+            "office-agent": "Office",
+            "assistant-2": "调研 助手",
+        },
+    )
+
+    assert [name for name, _detail in events] == [
+        "tool.task.invoke",
+        "tool.task.invoke",
+    ]
+    assert [detail["assistant_name"] for _name, detail in events] == [
+        "Office",
+        "调研 助手",
     ]
 
 
@@ -1980,7 +2026,7 @@ def test_delivered_artifact_completes_after_token_budget_wrapup():
     assert termination_detail == {}
 
 
-def test_knowledge_qa_skips_general_chat_execution_gates(
+def test_knowledge_qa_skips_execution_gates_for_direct_runs(
     monkeypatch,
     tmp_path,
 ):
@@ -2110,6 +2156,88 @@ def test_knowledge_qa_skips_general_chat_execution_gates(
         "checkpoint",
         ("ready", "knowledge_qa"),
     ]
+
+
+def test_delegated_knowledge_qa_enables_execution_gates(
+    monkeypatch,
+    tmp_path,
+):
+    model_options = []
+
+    class Model:
+        stop_reason = None
+        token_usage = {"total_tokens": 1}
+
+        def __init__(self, **options):
+            model_options.append(options)
+
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            root=tmp_path,
+            context_skill_contents=[],
+            mcp_configs=[],
+            skill_paths=[],
+            mcp_config_path=tmp_path / "mcp.json",
+        ),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "cleanup_runtime_resources",
+        lambda _: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_apply_offload_thresholds",
+        lambda _: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "load_mcp_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_deferred_mcp_tools",
+        lambda *_args, **_kwargs: ([], None),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_: object(),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "_run_agent_with_turn_limit",
+        lambda *_args, **_kwargs: ("answer", False, None),
+    )
+    config = SimpleNamespace(
+        workspace_path=str(tmp_path),
+        ai_gateway_url="http://gateway/ai/",
+        token="token",
+        request_timeout_s=30,
+        offload_tool_tokens=5000,
+        offload_human_tokens=None,
+        summary_trigger_tokens=0,
+    )
+
+    agent_runtime.LensDeepAgentRuntime(config)._answer_sync({
+        "run_uuid": "child",
+        "parent_run_uuid": "parent",
+        "task": "knowledge_qa",
+        "question": "Question",
+        "agent_model_ref": "model-ref",
+        "token_budget": {"max_tokens": 100, "final_reserve_tokens": 10},
+    })
+
+    assert model_options[0]["general_chat_execution_gates"] is True
 
 
 def test_unverified_answer_distinguishes_unavailable_from_execution_failure():
@@ -2606,6 +2734,63 @@ def test_general_chat_prompt_forbids_unverified_business_results():
     assert "typed command" in prompt
 
 
+def test_smart_collaboration_prompt_is_focused_on_collaboration_scope():
+    """Smart Collaboration keeps only the necessary routing contract."""
+
+    prompt = _general_chat_system_prompt(
+        {
+            "routing_mode": "smart",
+            "answer_language": "zh-CN",
+            "subagents": [
+                {
+                    "name": "Code Reviewer",
+                    "capability": "code_analysis",
+                    "description": "Reviews the selected repository.",
+                    "routing_description": "Use for repository reviews.",
+                },
+                {
+                    "name": "Data Investigator",
+                    "capability": "general_chat",
+                    "description": "Queries operational data.",
+                },
+            ],
+        }
+    )
+
+    assert "当前可委派助手" in prompt
+    assert "Code Reviewer｜代码分析｜Use for repository reviews." in prompt
+    assert "Data Investigator｜通用对话与已连接的 Skills" in prompt
+    assert "必须先委派" in prompt
+    assert "能力说明可直接回答" not in prompt
+    assert "只说明助手集合及其能力" in prompt
+    assert "不要附加路由过程" in prompt
+    assert "未委派说明" in prompt
+    assert "不能臆称主路由" in prompt
+    assert "先检查全部已提供" in prompt
+    assert "历史消息" in prompt
+    assert "必须据此回答" in prompt
+    assert "analyze_structured_output" not in prompt
+    assert "private writable scratch directory" not in prompt
+
+
+def test_smart_collaboration_prompt_localizes_assistant_capabilities():
+    prompt = _smart_collaboration_system_prompt(
+        {
+            "subagents": [
+                {
+                    "name": "Code Reviewer",
+                    "capability": "code_analysis",
+                    "routing_description": "Revisa repositorios.",
+                }
+            ]
+        },
+        "ANSWER LANGUAGE REQUIREMENT: Spanish.",
+        "Spanish",
+    )
+
+    assert "Code Reviewer｜Análisis de código｜Revisa repositorios." in prompt
+
+
 def test_general_chat_prompt_keeps_runtime_instructions_confidential():
     prompt = _general_chat_system_prompt(
         {
@@ -2623,22 +2808,45 @@ def test_general_chat_prompt_keeps_runtime_instructions_confidential():
     assert "Do not identify internal refusal rules" in prompt
 
 
-def test_general_chat_prompt_repeats_configured_language_requirement():
+def test_general_chat_prompt_repeats_conversational_language_policy():
     prompt = _general_chat_system_prompt(
         {
-            "question": "What were the October order totals?",
-            "answer_language": "zh-CN",
+            "question": "¿Qué es AGIOne?",
+            "answer_language": "en-US",
             "runtime_route": "direct_execute",
         }
     )
 
-    assert prompt.startswith(
-        "ANSWER LANGUAGE REQUIREMENT: Simplified Chinese"
+    assert prompt.startswith("ANSWER LANGUAGE REQUIREMENT: English")
+    assert "English is only the configured fallback" in prompt
+    assert "language of the user's latest conversational request" in prompt
+    assert "explicitly asks for a different answer language" in prompt
+    assert "content, not language signals" in prompt
+    assert prompt.count("ANSWER LANGUAGE REQUIREMENT: English") == 2
+
+
+def test_general_chat_prompt_ignores_code_and_logs_as_language_signals():
+    prompt = _general_chat_system_prompt(
+        {
+            "question": (
+                "Traceback (most recent call last):\n"
+                'RuntimeError: Connection reset by peer'
+            ),
+            "answer_language": "zh-CN",
+            "runtime_route": "direct_answer",
+        }
     )
-    assert "Conversation history" in prompt
-    assert (
-        prompt.count("ANSWER LANGUAGE REQUIREMENT: Simplified Chinese") == 2
-    )
+
+    assert "Simplified Chinese is only the configured fallback" in prompt
+    for content_kind in (
+        "Code",
+        "logs",
+        "stack traces",
+        "quoted text",
+        "pasted documents",
+    ):
+        assert content_kind in prompt
+    assert "no clear conversational language" in prompt
 
 
 def test_command_answer_language_preserves_chinese_script_variant():
@@ -4096,6 +4304,406 @@ def test_fast_subagent_inherits_runtime_extensions():
     )
 
     assert subagent["middleware"] == [runtime_extension]
+
+
+def test_smart_subagent_routes_through_the_control_plane(monkeypatch):
+    """Configured assistants must execute on their bound LensNodes."""
+
+    resources = SimpleNamespace(
+        root=Path("/run/subagent"),
+        mcp_configs=[],
+        skill_paths=["skills/data"],
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        delegation_base_url="http://control/api/lens/lensnode/runs",
+        token="token",
+        request_timeout_s=30,
+    )
+    prepared_command = {}
+
+    def prepare_resources(_config, command, **_kwargs):
+        prepared_command.update(command)
+        return resources
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        prepare_resources,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda command, *_args, **_kwargs: [command["task"]],
+    )
+    monkeypatch.setattr(agent_runtime, "load_mcp_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_execution_backend",
+        lambda _config, root: ("backend", root),
+    )
+
+    class Model:
+        def __init__(self, **kwargs):
+            self.model_ref = kwargs["model_ref"]
+            self.observation_name = kwargs["observation_name"]
+
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    captured = {}
+
+    def capture_deep_agent(**kwargs):
+        captured.update(kwargs)
+        return "compiled-subagent"
+
+    monkeypatch.setattr(agent_runtime, "create_deep_agent", capture_deep_agent)
+    state = SimpleNamespace(
+        run_uuid="00000000-0000-0000-0000-000000000021",
+        command={
+            "run_uuid": "00000000-0000-0000-0000-000000000021",
+            "subagents": [
+                {
+                    "uuid": "assistant-1",
+                    "name": "Production data",
+                    "description": "Query read-only production data.",
+                    "task": "general_chat",
+                    "agent_model_ref": "data-model",
+                    "loaded_skills": [],
+                    "loaded_mcps": [],
+                }
+            ],
+        },
+        cancel_event=None,
+        on_activity=None,
+        trace_context={},
+        emit_trace_observation=None,
+        trace_middleware=None,
+        subagent_resources=[],
+        emit_agent_event=lambda *_args, **_kwargs: None,
+    )
+
+    subagents = agent_runtime.LensDeepAgentRuntime(config)._build_configured_subagents(
+        state
+    )
+
+    runnable = subagents[0]["runnable"]
+    assert isinstance(runnable, agent_runtime.RemoteSubagentRunnable)
+    assert runnable.assistant_uuid == "assistant-1"
+    assert runnable.parent_run_uuid == state.run_uuid
+    assert runnable.delegation_base_url == (
+        "http://control/api/lens/lensnode/runs"
+    )
+    assert prepared_command == {}
+
+
+def test_smart_collaboration_builds_remote_subagents(monkeypatch):
+    """Smart Collaboration must use control-plane delegated subagents."""
+
+    state = SimpleNamespace(
+        run_uuid="00000000-0000-0000-0000-000000000022",
+        command={
+            "run_uuid": "00000000-0000-0000-0000-000000000022",
+            "routing_mode": "smart",
+            "routing_assistant_uuid": "assistant-1",
+            "routing_assistant_explicit": True,
+            "subagents": [
+                {
+                    "uuid": "assistant-1",
+                    "name": "Production data",
+                    "description": "Query read-only production data.",
+                    "task": "general_chat",
+                    "agent_model_ref": "data-model",
+                    "loaded_skills": [],
+                    "loaded_mcps": [],
+                }
+            ],
+        },
+        cancel_event=None,
+        on_activity=None,
+        trace_context={},
+        emit_trace_observation=None,
+        trace_middleware=None,
+        subagent_resources=[],
+        emit_agent_event=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            root=Path("/run/subagent"),
+            mcp_configs=[],
+            skill_paths=[],
+        ),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "build_agent_tools",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(agent_runtime, "load_mcp_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_execution_backend",
+        lambda _config, root: ("backend", root),
+    )
+
+    class Model:
+        def __init__(self, **kwargs):
+            self.model_ref = kwargs["model_ref"]
+            self.observation_name = kwargs["observation_name"]
+
+    monkeypatch.setattr(agent_runtime, "LensGatewayChatModel", Model)
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_kwargs: "compiled-subagent",
+    )
+
+    subagents = agent_runtime.LensDeepAgentRuntime(
+        SimpleNamespace(
+            ai_gateway_url="http://gateway/ai/",
+            delegation_base_url="http://control/api/lens/lensnode/runs",
+            token="token",
+            request_timeout_s=30,
+        )
+    )._build_configured_subagents(state)
+
+    assert len(subagents) == 1
+    assert isinstance(
+        subagents[0]["runnable"],
+        agent_runtime.RemoteSubagentRunnable,
+    )
+    assert subagents[0]["runnable"].delegation_group_key == (
+        "explicit:assistant-1"
+    )
+
+
+def test_remote_subagent_returns_cross_node_child_answer():
+    calls = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        def post(self, url, **kwargs):
+            calls.append(("post", url, kwargs))
+            return Response({"run_uuid": "child-run", "status": "queued"})
+
+        def get(self, url, **kwargs):
+            calls.append(("get", url, kwargs))
+            return Response(
+                {
+                    "run_uuid": "child-run",
+                    "status": "done",
+                    "answer": "Remote findings",
+                }
+            )
+
+    runnable = agent_runtime.RemoteSubagentRunnable(
+        assistant_uuid="assistant-1",
+        parent_run_uuid="parent-run",
+        delegation_group_key="explicit-assistant-1",
+        delegation_base_url="http://control/api/lens/lensnode/runs",
+        token="token",
+        http_client=Client(),
+        poll_interval_s=0.05,
+        push_wait_s=0.05,
+    )
+
+    result = runnable.invoke(
+        {"messages": [HumanMessage(content="Inspect production logs")]}
+    )
+
+    assert result["messages"][0].content == "Remote findings"
+    assert calls[0][1].endswith("/parent-run/delegations/")
+    assert calls[0][2]["json"]["assistant_uuid"] == "assistant-1"
+    assert calls[0][2]["json"]["delegation_group_key"] == (
+        "explicit-assistant-1"
+    )
+    assert calls[1][1].endswith(
+        "/parent-run/delegations/child-run/"
+    )
+
+
+def test_remote_subagent_refreshes_parent_activity_while_waiting():
+    activity = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        def post(self, *_args, **_kwargs):
+            return Response({"run_uuid": "child-run", "status": "queued"})
+
+        def get(self, *_args, **_kwargs):
+            return Response({
+                "run_uuid": "child-run",
+                "status": "done",
+                "answer": "done",
+            })
+
+    runnable = agent_runtime.RemoteSubagentRunnable(
+        assistant_uuid="assistant-1",
+        parent_run_uuid="parent-run",
+        delegation_base_url="http://control/api/lens/lensnode/runs",
+        token="token",
+        http_client=Client(),
+        on_activity=lambda: activity.append(True),
+        poll_interval_s=0.05,
+        push_wait_s=0.05,
+    )
+
+    runnable.invoke({"messages": [HumanMessage(content="Inspect logs")]})
+
+    assert activity
+
+
+def test_remote_subagent_uses_websocket_completion_push():
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"run_uuid": "pushed-child", "status": "queued"}
+
+    class Client:
+        def post(self, *_args, **_kwargs):
+            delegation_events.publish(
+                {
+                    "run_uuid": "pushed-child",
+                    "status": "done",
+                    "answer": "Pushed findings",
+                }
+            )
+            return Response()
+
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("WebSocket push must avoid status polling")
+
+    runnable = agent_runtime.RemoteSubagentRunnable(
+        assistant_uuid="assistant-1",
+        parent_run_uuid="parent-run",
+        delegation_base_url="http://control/api/lens/lensnode/runs",
+        token="token",
+        http_client=Client(),
+        poll_interval_s=0.05,
+        push_wait_s=0.05,
+    )
+
+    result = runnable.invoke(
+        {"messages": [HumanMessage(content="Inspect production logs")]}
+    )
+
+    assert result["messages"][0].content == "Pushed findings"
+
+
+def test_smart_subagent_names_map_internal_names_to_display_names(
+    monkeypatch,
+):
+    """Task invocation events must use the configured display names."""
+
+    emitted = []
+
+    def emit_agent_event(event, detail=None):
+        emitted.append((event, detail or {}))
+
+    def prepare_resources(_config, command, **kwargs):
+        kwargs["emit_event"](
+            "runtime.resources.prepared",
+            {"source": command["runtime_instance_id"]},
+        )
+        return SimpleNamespace(
+            root=Path("/run/subagent"),
+            mcp_configs=[],
+            skill_paths=[],
+        )
+
+    def build_tools(command, *_args, **kwargs):
+        kwargs["emit_event"](
+            "tool.read_file.invoke",
+            {"source": command["runtime_instance_id"]},
+        )
+        return []
+
+    def load_tools(*_args, **kwargs):
+        kwargs["emit_event"]("mcp.discovery.completed", {})
+        return []
+
+    monkeypatch.setattr(
+        agent_runtime,
+        "prepare_runtime_resources",
+        prepare_resources,
+    )
+    monkeypatch.setattr(agent_runtime, "build_agent_tools", build_tools)
+    monkeypatch.setattr(agent_runtime, "load_mcp_tools", load_tools)
+    monkeypatch.setattr(
+        agent_runtime,
+        "_build_execution_backend",
+        lambda _config, root: ("backend", root),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "LensGatewayChatModel",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        agent_runtime,
+        "create_deep_agent",
+        lambda **_kwargs: "compiled-subagent",
+    )
+    state = SimpleNamespace(
+        run_uuid="00000000-0000-0000-0000-000000000023",
+        command={
+            "subagents": [
+                {
+                    "uuid": "assistant-1",
+                    "name": "Repository Analyst",
+                    "agent_model_ref": "model-1",
+                },
+                {
+                    "uuid": "assistant-2",
+                    "name": "Knowledge Guide",
+                    "agent_model_ref": "model-2",
+                },
+            ],
+        },
+        cancel_event=None,
+        on_activity=None,
+        trace_context={},
+        emit_trace_observation=None,
+        trace_middleware=None,
+        subagent_resources=[],
+        emit_agent_event=emit_agent_event,
+    )
+    config = SimpleNamespace(
+        ai_gateway_url="http://gateway/ai/",
+        delegation_base_url="http://control/api/lens/lensnode/runs",
+        token="token",
+        request_timeout_s=30,
+    )
+
+    agent_runtime.LensDeepAgentRuntime(config)._build_configured_subagents(
+        state
+    )
+
+    assert emitted == []
+    assert state.subagent_display_names == {
+        "Repository-Analyst": "Repository Analyst",
+        "Knowledge-Guide": "Knowledge Guide",
+    }
 
 
 def test_summarization_middleware_forwards_run_uuid(monkeypatch):

@@ -675,32 +675,42 @@ def _build_save_deliverable_tool(command, resources, config, emit_event):
         Write the finished artifact first (e.g. with write_file), then
         call this with its path. Only files passed here reach the user;
         the private scratch directory is discarded when the run ends, so
-        it is NOT a delivery target. Use this for the final deliverable
-        (e.g. an HTML report), not for intermediate scratch files.
+        it is the source for delivery, not a delivery target itself. Relative
+        paths resolve inside scratch. Absolute paths are virtual filesystem
+        paths and are also resolved inside scratch; host filesystem paths are
+        never accepted.
         """
 
         emit("tool.save_deliverable.start", {"path": path, "summary": path})
         root = resources.root.resolve()
         requested_path = Path(path)
-        resolved = (
-            requested_path
-            if requested_path.is_absolute()
-            else resources.root / requested_path
-        ).resolve()
-        scratch_root = Path("/tmp").resolve()
-        try:
-            resolved.relative_to(root)
-            allowed = True
-        except ValueError:
+        resolved = None
+        allowed = False
+
+        if requested_path.is_absolute():
+            # Deep Agents' virtual filesystem presents scratch as '/'.
+            # Map an absolute virtual path such as '/tmp/report.html' into
+            # the run's scratch root instead of reading the host filesystem.
+            if ".." not in requested_path.parts:
+                virtual = (root / str(requested_path).lstrip("/")).resolve()
+                try:
+                    virtual.relative_to(root)
+                    resolved = virtual
+                    allowed = True
+                except ValueError:
+                    pass
+        else:
+            resolved = (root / requested_path).resolve()
             try:
-                resolved.relative_to(scratch_root)
-                allowed = requested_path.is_absolute()
+                resolved.relative_to(root)
+                allowed = True
             except ValueError:
-                allowed = False
+                pass
+
         if not allowed:
             emit("tool.save_deliverable.denied", {"path": path})
             return _json({"ok": False, "error": "PATH_NOT_ALLOWED"})
-        if not resolved.is_file():
+        if resolved is None or not resolved.is_file():
             emit(
                 "tool.save_deliverable.done",
                 {"path": path, "summary": "not found"},
@@ -1112,6 +1122,7 @@ def build_general_chat_tools(
     emit_event=None,
     runtime_evidence=None,
     on_runtime_evidence=None,
+    http_client=None,
 ):
     """Build tools for General Chat without workspace retrieval tools."""
 

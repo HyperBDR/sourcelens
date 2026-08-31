@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   activitiesForNode,
   applyRuntimeEvent,
+  buildAssistantActivityGroups,
   buildWorkflowTree,
   calculateRunElapsedSeconds,
   createConversationAutoScroller,
@@ -17,6 +18,7 @@ import {
   planStepDisplayStatus,
   scrollConversationToBottomAfterRender,
   selectCurrentWorkflowStage,
+  selectCurrentAssistantActivity,
   selectLiveProgressText,
   selectStructuredProgress,
   summarizeStageProgress,
@@ -47,6 +49,138 @@ test('batches streamed answer deltas into one render frame', () => {
 
   frames.shift()()
   assert.deepEqual(chunks, ['Hello'])
+})
+
+test('tracks the latest delegated assistant activity for live progress', () => {
+  let state = createRuntimeState()
+
+  state = applyRuntimeEvent(state, {
+    agent_event: 'tool.read_file.invoke',
+    activity: 'reading_context',
+    assistant_name: 'Repository Analyst'
+  })
+  state = applyRuntimeEvent(state, {
+    agent_event: 'tool.search_workspace.invoke',
+    activity: 'searching_sources',
+    assistant_name: 'Knowledge Guide',
+    delegated_task: 'Find the latest deployment notes'
+  })
+
+  assert.deepEqual(selectCurrentAssistantActivity(state), {
+    id: 2,
+    kind: 'searchingSources',
+    nodeId: 'legacy-runtime',
+    count: 1,
+    assistantName: 'Knowledge Guide',
+    delegatedTask: 'Find the latest deployment notes'
+  })
+})
+
+test('keeps identical delegated operations separate per assistant task', () => {
+  let state = createRuntimeState()
+  const event = (assistantName, delegatedTask) => ({
+    visibility: 'user',
+    event_type: 'activity.recorded',
+    payload: {
+      id: 'query-1',
+      kind: 'querying_data',
+      stage_kind: 'data_query',
+      status: 'in_progress',
+      assistant_name: assistantName,
+      delegated_task: delegatedTask
+    }
+  })
+
+  state = applyRuntimeEvent(state, event('Office', 'Inspect invoices'))
+  state = applyRuntimeEvent(state, event('ttt', 'Inspect tickets'))
+
+  assert.equal(state.activities.length, 2)
+  assert.deepEqual(
+    state.activities.map((item) => [item.assistantName, item.delegatedTask]),
+    [
+      ['Office', 'Inspect invoices'],
+      ['ttt', 'Inspect tickets']
+    ]
+  )
+})
+
+test('retains delegated task metadata even before tool activity arrives', () => {
+  const state = applyRuntimeEvent(createRuntimeState(), {
+    agent_event: 'deepagents.runtime.start',
+    assistant_name: 'Office',
+    delegated_task: 'Inspect invoices'
+  })
+
+  assert.deepEqual(state.delegations, [
+    { assistantName: 'Office', delegatedTask: 'Inspect invoices' }
+  ])
+})
+
+test('exposes delegated tasks as progress when no child tool activity exists', () => {
+  const progress = selectStructuredProgress({
+    route: 'direct_answer',
+    plan: [],
+    stages: [],
+    activities: [],
+    delegations: [
+      { assistantName: 'Office', delegatedTask: 'Inspect invoices' }
+    ],
+    standaloneActivities: false
+  })
+
+  assert.equal(progress.kind, 'activity')
+  assert.deepEqual(progress.items, [])
+})
+
+test('builds compact assistant activity groups without truncating tasks', () => {
+  const delegatedTask = 'Inspect the complete company knowledge base. '.repeat(
+    60
+  )
+  const groups = buildAssistantActivityGroups({
+    delegations: [{ assistantName: 'Company-Knowledge-Base', delegatedTask }],
+    activities: [
+      {
+        id: 1,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'readingSources',
+        count: 2
+      },
+      {
+        id: 2,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'searchingSources',
+        count: 1
+      },
+      {
+        id: 3,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'queryingData',
+        count: 3
+      },
+      {
+        id: 4,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'preparingOutput',
+        count: 1
+      },
+      {
+        id: 5,
+        assistantName: 'Company-Knowledge-Base',
+        kind: 'readingSources',
+        count: 4
+      }
+    ]
+  })
+
+  assert.equal(groups[0].tasks[0], delegatedTask.trim())
+  assert.deepEqual(
+    groups[0].summaryItems.map((item) => [item.kind, item.count]),
+    [
+      ['queryingData', 3],
+      ['preparingOutput', 1],
+      ['readingSources', 6]
+    ]
+  )
 })
 
 test('flushes pending stream text synchronously before completion', () => {
