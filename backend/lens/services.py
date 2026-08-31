@@ -1118,7 +1118,21 @@ def create_execution_run(
         if existing:
             return existing
 
-    lensnode = select_execution_lensnode(assistant)
+    requested_attachment_uuids = [
+        str(value) for value in (attachment_uuids or [])
+    ]
+    selected_context = select_session_attachment_context(
+        session,
+        question,
+        requested_attachment_uuids,
+    )
+    requires_document_attachments = any(
+        item["kind"] == "document" for item in selected_context
+    )
+    lensnode = select_execution_lensnode(
+        assistant,
+        require_document_attachments=requires_document_attachments,
+    )
 
     validate_retry_run(session, retry_of_run)
 
@@ -1169,14 +1183,6 @@ def create_execution_run(
     )
     if routing_assistant_uuid is not None:
         _set_routing_execution_question(run, routing_assistant_uuid)
-    requested_attachment_uuids = [
-        str(value) for value in (attachment_uuids or [])
-    ]
-    selected_context = select_session_attachment_context(
-        session,
-        question,
-        requested_attachment_uuids,
-    )
     attachment_order = {
         value: order for order, value in enumerate(requested_attachment_uuids)
     }
@@ -1280,14 +1286,34 @@ def run_execution_question(run):
     return str(run.input_message.content or "")
 
 
-def select_execution_lensnode(assistant):
+def select_execution_lensnode(
+    assistant,
+    *,
+    require_document_attachments=False,
+):
     """Return the bound node or the least-loaded compatible online node."""
 
     if assistant.lensnode_id:
         return assistant.lensnode
 
+    candidates = _compatible_execution_lensnodes(
+        assistant,
+        require_document_attachments=require_document_attachments,
+    )
+    if not candidates:
+        raise LensNodeDispatchError("LENSNODE_UNAVAILABLE")
+    return min(candidates, key=lambda item: (item.active_runs, item.created_at))
+
+
+def _compatible_execution_lensnodes(
+    assistant,
+    *,
+    require_document_attachments=False,
+):
+    """Return online nodes that can execute an unbound Assistant."""
+
     candidates = []
-    for lensnode in LensNode.objects.filter(
+    queryset = LensNode.objects.filter(
         status=LensNode.Status.ONLINE,
         enrollment_status=LensNode.EnrollmentStatus.APPROVED,
         token_revoked=False,
@@ -1302,15 +1328,19 @@ def select_execution_lensnode(assistant):
                 ]
             ),
         )
-    ):
+    )
+    for lensnode in queryset:
         if execution_task_for_capability(assistant.capability) not in task_names(
             lensnode
         ):
             continue
+        if (
+            require_document_attachments
+            and not supports_document_attachments(lensnode)
+        ):
+            continue
         candidates.append(lensnode)
-    if not candidates:
-        raise LensNodeDispatchError("LENSNODE_UNAVAILABLE")
-    return min(candidates, key=lambda item: (item.active_runs, item.created_at))
+    return candidates
 
 
 @transaction.atomic
@@ -1476,6 +1506,19 @@ def supports_document_attachments(lensnode):
     return bool(
         isinstance(labels, dict)
         and labels.get(DOCUMENT_ATTACHMENT_CAPABILITY) is True
+    )
+
+
+def assistant_supports_document_attachments(assistant):
+    """Return whether an Assistant can execute with Run documents."""
+
+    if assistant.lensnode_id:
+        return supports_document_attachments(assistant.lensnode)
+    return bool(
+        _compatible_execution_lensnodes(
+            assistant,
+            require_document_attachments=True,
+        )
     )
 
 

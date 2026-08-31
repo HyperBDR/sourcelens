@@ -70,11 +70,11 @@ from lens.serializers import (
 )
 from lens.services import (
     LensNodeDispatchError,
+    assistant_supports_document_attachments,
     cancel_descendant_runs,
     cancel_run_on_lensnode,
     create_execution_run,
     stream_run_events_async,
-    supports_document_attachments,
 )
 from lens.shared_qa_files import snapshot_shared_qa_files
 
@@ -323,7 +323,7 @@ class SessionViewSet(BaseAuthenticatedViewSet):
         if (
             is_document
             and session.routing_mode != Session.RoutingMode.SMART
-            and not supports_document_attachments(session.assistant.lensnode)
+            and not assistant_supports_document_attachments(session.assistant)
         ):
             raise ValidationError(
                 "DOCUMENT_ATTACHMENTS_UNSUPPORTED_BY_LENSNODE"

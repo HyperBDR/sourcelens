@@ -66,8 +66,8 @@ from .runtime_events import (
 from .routing_descriptions import refresh_routing_description
 from .services import (
     CLARIFICATION_MAX_ORIGINAL_CHARS,
+    assistant_supports_document_attachments,
     create_execution_run,
-    supports_document_attachments,
     validate_retry_run,
 )
 from .vision_capabilities import (
@@ -615,9 +615,19 @@ class AssistantSerializer(serializers.ModelSerializer):
         }
 
     def get_supports_document_attachments(self, assistant):
-        """Return whether the assigned LensNode accepts Run documents."""
+        """Return whether the Assistant can execute with Run documents."""
 
-        return supports_document_attachments(assistant.lensnode)
+        if assistant.lensnode_id:
+            return assistant_supports_document_attachments(assistant)
+        cache = getattr(self, "_document_capability_cache", None)
+        if cache is None:
+            cache = {}
+            self._document_capability_cache = cache
+        if assistant.capability not in cache:
+            cache[assistant.capability] = (
+                assistant_supports_document_attachments(assistant)
+            )
+        return cache[assistant.capability]
 
     def get_vision_model_capability(self, assistant):
         """Return the authoritative capability of the assigned vision model."""
