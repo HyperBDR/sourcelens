@@ -124,7 +124,34 @@
           v-if="!sidebarCollapsedActive || isMobile"
           class="sessions-section"
         >
-          <div class="sessions-head">
+          <div
+            v-if="sessionHistoryCollapsed && !isMobile"
+            class="sessions-collapsed"
+          >
+            <button
+              type="button"
+              class="sessions-collapsed-trigger"
+              :aria-label="t('lens.chat.sessions')"
+              :title="t('lens.chat.sessions')"
+              @click="sessionHistoryCollapsed = false"
+            >
+              <span>{{ t('lens.chat.sessions') }}</span>
+              <ChevronRight :size="15" :stroke-width="2" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="sessions-collapsed-action"
+              :aria-label="t('lens.chat.newSession')"
+              :title="t('lens.chat.newSession')"
+              @click="createNewSession"
+            >
+              <Pencil :size="16" :stroke-width="2" aria-hidden="true" />
+            </button>
+          </div>
+          <div
+            v-show="!sessionHistoryCollapsed || isMobile"
+            class="sessions-head"
+          >
             <h2 class="sr-only">{{ t('lens.chat.sessionLists') }}</h2>
             <div
               class="session-filters"
@@ -156,9 +183,22 @@
               >
                 <Search :size="15" :stroke-width="2.2" aria-hidden="true" />
               </button>
+              <button
+                v-if="!isMobile"
+                type="button"
+                class="sessions-collapse-toggle"
+                :aria-label="t('common.collapse')"
+                :title="t('common.collapse')"
+                @click="sessionHistoryCollapsed = true"
+              >
+                <ChevronUp :size="15" :stroke-width="2" aria-hidden="true" />
+              </button>
             </div>
           </div>
-          <div class="sessions-list">
+          <div
+            v-show="!sessionHistoryCollapsed || isMobile"
+            class="sessions-list"
+          >
             <div
               v-for="session in sessions"
               :key="session.uuid"
@@ -1674,6 +1714,8 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  ChevronRight,
+  ChevronUp,
   Download,
   Eye,
   FileText,
@@ -1847,6 +1889,7 @@ const loading = ref({ run: false })
 const streamController = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
+const sessionHistoryCollapsed = ref(false)
 const showArchivedSessions = ref(false)
 const sessionSearchOpen = ref(false)
 const sessionSearchQuery = ref('')
@@ -4368,7 +4411,7 @@ onBeforeUnmount(() => {
 }
 
 .session-filters {
-  @apply flex items-center gap-1;
+  @apply flex w-full items-center gap-1;
 }
 
 .session-filters button {
@@ -4389,8 +4432,20 @@ onBeforeUnmount(() => {
   @apply bg-surface-hover text-theme;
 }
 
+.sessions-collapse-toggle {
+  @apply ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md
+    text-theme-muted transition-colors;
+}
+
+.sessions-collapse-toggle:hover,
+.sessions-collapse-toggle:focus-visible {
+  @apply bg-surface-hover text-theme;
+  outline: none;
+}
+
 .session-search-content {
   @apply flex flex-col gap-4;
+  height: min(22rem, 60vh);
 }
 
 .session-search-input {
@@ -4403,7 +4458,7 @@ onBeforeUnmount(() => {
 }
 
 .session-search-results {
-  @apply flex max-h-80 min-h-0 flex-col gap-1 overflow-y-auto;
+  @apply flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto;
 }
 
 .session-search-result {
@@ -4424,11 +4479,37 @@ onBeforeUnmount(() => {
 }
 
 .session-search-state {
-  @apply flex items-center justify-center py-10 text-sm text-theme-muted;
+  @apply flex flex-1 items-center justify-center text-sm text-theme-muted;
 }
 
 .session-search-modal :deep(.max-w-2xl) {
   max-width: 35rem;
+}
+
+.sessions-collapsed {
+  @apply flex items-center gap-1 px-1;
+}
+
+.sessions-collapsed-trigger {
+  @apply flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-2
+    text-left text-sm font-semibold text-theme-muted transition-colors;
+}
+
+.sessions-collapsed-trigger:hover,
+.sessions-collapsed-trigger:focus-visible,
+.sessions-collapsed-action:hover,
+.sessions-collapsed-action:focus-visible {
+  @apply bg-surface-hover text-theme;
+  outline: none;
+}
+
+.sessions-collapsed-trigger span {
+  @apply truncate;
+}
+
+.sessions-collapsed-action {
+  @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-md
+    text-theme-muted transition-colors;
 }
 
 .sessions-list {

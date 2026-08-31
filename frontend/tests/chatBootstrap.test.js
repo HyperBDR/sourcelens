@@ -102,6 +102,10 @@ test('searches recent and archived conversation titles from the sidebar', async 
 
   assert.match(source, /@click="openSessionSearch"/)
   assert.match(source, /class="session-search-modal"/)
+  assert.match(source, /sessionHistoryCollapsed/)
+  assert.match(source, /class="sessions-collapse-toggle"/)
+  assert.match(source, /<ChevronUp/)
+  assert.match(source, /<ChevronRight/)
   assert.match(source, /:show="sessionSearchOpen"/)
   assert.match(
     source,
