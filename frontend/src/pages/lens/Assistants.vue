@@ -138,7 +138,13 @@
                     {{ lensNodeName(row.lensnode) }}
                   </td>
                   <td class="assistant-type-column table-cell text-ink-600">
-                    {{ assistantTypeLabel(row.capability) }}
+                    <div>
+                      {{
+                        (row.mode || row.routing_mode) === 'smart'
+                          ? t('lensAdmin.routingModes.smart')
+                          : assistantTypeLabel(row.capability)
+                      }}
+                    </div>
                   </td>
                   <td class="table-cell text-ink-600">
                     <div
@@ -261,9 +267,9 @@
         :assistant="detailAssistant"
         :lensnode-name="lensNodeName(detailAssistant?.lensnode)"
         :assistant-type="
-          assistantTypeLabel(
-            detailAssistant?.capability
-          )
+          (detailAssistant?.mode || detailAssistant?.routing_mode) === 'smart'
+            ? t('lensAdmin.routingModes.smart')
+            : assistantTypeLabel(detailAssistant?.capability)
         "
         @close="closeDetails"
         @copy-share="copyShareUrl"
@@ -616,7 +622,9 @@ function defaultForm() {
     access_grant_options: [],
     settings: {},
     enable_codegraph: true,
-    status: 'active'
+    status: 'active',
+    mode: 'direct',
+    collaboration_member_uuids: []
   }
 }
 
@@ -633,6 +641,10 @@ function formFromRow(row) {
     name: row.name || '',
     description: row.description || '',
     capability: row.capability || 'general_chat',
+    mode: row.mode || row.routing_mode || 'direct',
+    collaboration_member_uuids: (row.collaboration_members || [])
+      .map((member) => member.uuid)
+      .filter(Boolean),
     slug: row.slug || '',
     lensnode_uuid: row.lensnode?.uuid || row.lensnode || '',
     selected_dirs: selectedDirsFromValue(row.selected_dirs || []),
@@ -738,14 +750,20 @@ function buildPayload() {
     name: form.value.name,
     description: form.value.description?.trim() || '',
     capability: form.value.capability || 'general_chat',
+    mode: form.value.mode || 'direct',
+    ...(form.value.mode === 'smart'
+      ? {
+          collaboration_member_uuids: [
+            ...(form.value.collaboration_member_uuids || [])
+          ]
+        }
+      : {}),
     slug: form.value.slug?.trim() || '',
     ...(form.value.lensnode_uuid
       ? { lensnode_uuid: form.value.lensnode_uuid }
       : {}),
     selected_dirs:
-      form.value.capability === 'general_chat'
-        ? []
-        : buildSelectedDirs(),
+      form.value.capability === 'general_chat' ? [] : buildSelectedDirs(),
     agent_model_ref: form.value.agent_model_ref || null,
     agent_rounds: form.value.agent_rounds || 'balanced',
     max_concurrency: Number(form.value.max_concurrency) || 5,

@@ -78,6 +78,7 @@ from lens.tasks import (
     acquire_datasource_lock,
     release_datasource_lock,
 )
+from lens.views.assistants import AssistantViewSet
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
@@ -2064,7 +2065,7 @@ class LensApiTests(TestCase):
         )
 
     def test_orchestrator_is_not_an_assistant_capability(self):
-        """Smart Collaboration is a session mode, not an Assistant type."""
+        """Smart Collaboration is a mode, not an execution capability."""
 
         serializer = AssistantSerializer(
             data={
@@ -2076,6 +2077,293 @@ class LensApiTests(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("capability", serializer.errors)
+
+    def test_smart_mode_is_exposed_independently_from_capability(self):
+        """Smart mode has its own API identity and coordinator capability."""
+
+        serializer = AssistantSerializer(
+            data={
+                "name": "Support Team",
+                "slug": "support-team-mode",
+                "mode": "smart",
+                "agent_model_ref": "11111111-1111-1111-1111-111111111111",
+                "collaboration_member_uuids": [str(self.assistant.uuid)],
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        assistant = serializer.save()
+        self.assertEqual(assistant.mode, Assistant.Mode.SMART)
+        self.assertEqual(
+            AssistantSerializer(
+                assistant,
+                context={"request": SimpleNamespace(user=self.user)},
+            ).data["mode"],
+            Assistant.Mode.SMART,
+        )
+        self.assertEqual(
+            assistant.mode_handler.execution_capability(assistant.capability),
+            Assistant.Capability.GENERAL_CHAT,
+        )
+
+    def test_smart_mode_does_not_require_general_chat_skill(self):
+        """Smart mode can coordinate members without direct Chat Skills."""
+
+        serializer = AssistantSerializer(
+            data={
+                "name": "Skill Free Team",
+                "slug": "skill-free-team",
+                "mode": "smart",
+                "capability": "code_analysis",
+                "agent_model_ref": "11111111-1111-1111-1111-111111111111",
+                "collaboration_member_uuids": [str(self.assistant.uuid)],
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        assistant = serializer.save()
+        self.assertEqual(assistant.capability, Assistant.Capability.GENERAL_CHAT)
+        self.assertFalse(assistant.skill_bindings.filter(enabled=True).exists())
+
+    def test_switching_to_smart_clears_direct_execution_resources(self):
+        """Smart mode must not retain bindings from direct execution."""
+
+        AssistantSkill.objects.create(
+            assistant=self.assistant,
+            skill=self.skill,
+        )
+        AssistantMCP.objects.create(
+            assistant=self.assistant,
+            mcp=self.mcp,
+        )
+        serializer = AssistantSerializer(
+            self.assistant,
+            data={
+                "mode": "smart",
+                "agent_model_ref": "11111111-1111-1111-1111-111111111111",
+                "collaboration_member_uuids": [],
+            },
+            partial=True,
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertFalse(serializer.is_valid())
+
+        serializer = AssistantSerializer(
+            self.assistant,
+            data={
+                "mode": "smart",
+                "agent_model_ref": "11111111-1111-1111-1111-111111111111",
+                "collaboration_member_uuids": [str(self.assistant.uuid)],
+            },
+            partial=True,
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertFalse(serializer.is_valid())
+
+        member = Assistant.objects.create(
+            name="General Helper",
+            slug="general-helper-for-switch",
+            visibility=Assistant.Visibility.PUBLIC,
+            selected_task="general_chat",
+        )
+        serializer = AssistantSerializer(
+            self.assistant,
+            data={
+                "mode": "smart",
+                "agent_model_ref": "11111111-1111-1111-1111-111111111111",
+                "collaboration_member_uuids": [str(member.uuid)],
+            },
+            partial=True,
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        assistant = serializer.save()
+        self.assertIsNone(assistant.lensnode)
+        self.assertEqual(assistant.selected_dirs, [])
+        self.assertFalse(assistant.skill_bindings.exists())
+        self.assertFalse(assistant.mcp_bindings.exists())
+        self.assertIsNone(assistant.multimodal_model_ref)
+
+    def test_fixed_smart_assistant_persists_direct_members(self):
+        """Admins can create a reusable Smart Collaboration Assistant."""
+
+        second = Assistant.objects.create(
+            name="General Helper",
+            slug="general-helper",
+            visibility=Assistant.Visibility.PUBLIC,
+            selected_task="general_chat",
+        )
+        serializer = AssistantSerializer(
+            data={
+                "name": "Support Team",
+                "slug": "support-team",
+                "routing_mode": "smart",
+                "agent_model_ref": "11111111-1111-1111-1111-111111111111",
+                "collaboration_member_uuids": [
+                    str(self.assistant.uuid),
+                    str(second.uuid),
+                ],
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        assistant = serializer.save()
+        assistant.refresh_from_db()
+
+        self.assertEqual(assistant.routing_mode, Assistant.RoutingMode.SMART)
+        self.assertEqual(
+            list(assistant.collaboration_members.order_by("name")),
+            [self.assistant, second],
+        )
+        payload = AssistantSerializer(
+            assistant,
+            context={"request": SimpleNamespace(user=self.user)},
+        ).data
+        self.assertEqual(
+            [item["uuid"] for item in payload["collaboration_members"]],
+            [str(self.assistant.uuid), str(second.uuid)],
+        )
+
+    def test_smart_member_list_uses_prefetched_members(self):
+        """Serializing Smart team members does not issue one query per team."""
+
+        second = Assistant.objects.create(
+            name="Second Helper",
+            slug="second-helper-for-prefetch",
+            visibility=Assistant.Visibility.PUBLIC,
+            selected_task="general_chat",
+        )
+        teams = []
+        for name, slug in (
+            ("First Team", "first-team-for-prefetch"),
+            ("Second Team", "second-team-for-prefetch"),
+        ):
+            team = Assistant.objects.create(
+                name=name,
+                slug=slug,
+                routing_mode=Assistant.RoutingMode.SMART,
+                agent_model_ref="11111111-1111-1111-1111-111111111111",
+            )
+            team.collaboration_members.set([self.assistant, second])
+            teams.append(team)
+
+        assistants = list(
+            AssistantViewSet.queryset.filter(pk__in=[team.pk for team in teams])
+        )
+        serializer = AssistantSerializer(
+            context={"request": SimpleNamespace(user=self.user)}
+        )
+
+        with CaptureQueriesContext(connection) as context:
+            members = [
+                serializer.get_collaboration_members(assistant)
+                for assistant in assistants
+            ]
+
+        self.assertEqual(len(context), 0)
+        self.assertEqual([len(team_members) for team_members in members], [2, 2])
+
+    def test_fixed_smart_assistant_rejects_nested_members(self):
+        """A Smart team cannot contain another Smart Assistant."""
+
+        nested = Assistant.objects.create(
+            name="Nested Team",
+            slug="nested-team",
+            routing_mode=Assistant.RoutingMode.SMART,
+            agent_model_ref="11111111-1111-1111-1111-111111111111",
+        )
+        serializer = AssistantSerializer(
+            data={
+                "name": "Outer Team",
+                "slug": "outer-team",
+                "routing_mode": "smart",
+                "agent_model_ref": "11111111-1111-1111-1111-111111111111",
+                "collaboration_member_uuids": [str(nested.uuid)],
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("collaboration_member_uuids", serializer.errors)
+
+    def test_fixed_smart_session_snapshots_members(self):
+        """A fixed Assistant creates a Smart Session with a member snapshot."""
+
+        second = Assistant.objects.create(
+            name="General Helper",
+            slug="general-helper",
+            visibility=Assistant.Visibility.PUBLIC,
+            selected_task="general_chat",
+        )
+        fixed = Assistant.objects.create(
+            name="Support Team",
+            slug="support-team",
+            routing_mode=Assistant.RoutingMode.SMART,
+            agent_model_ref="11111111-1111-1111-1111-111111111111",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        fixed.collaboration_members.set([self.assistant, second])
+
+        serializer = SessionCreateSerializer(
+            data={"assistant_uuid": str(fixed.uuid)},
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        session = serializer.save()
+
+        self.assertEqual(session.routing_mode, Session.RoutingMode.SMART)
+        self.assertEqual(
+            set(session.allowed_assistant_uuids),
+            {str(self.assistant.uuid), str(second.uuid)},
+        )
+
+    def test_smart_session_creation_rejects_mixed_assistant_payload(self):
+        """A configured Smart Assistant cannot fall back to the ad-hoc flow."""
+
+        serializer = SessionCreateSerializer(
+            data={
+                "assistant_uuid": str(self.assistant.uuid),
+                "routing_mode": "smart",
+            },
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("assistant_uuid", serializer.errors)
+
+    def test_fixed_smart_session_scope_cannot_be_edited(self):
+        """Smart Session member scope is immutable after creation."""
+
+        fixed = Assistant.objects.create(
+            name="Support Team",
+            slug="support-team",
+            routing_mode=Assistant.RoutingMode.SMART,
+            agent_model_ref="11111111-1111-1111-1111-111111111111",
+            visibility=Assistant.Visibility.PUBLIC,
+        )
+        fixed.collaboration_members.add(self.assistant)
+        session = Session.objects.create(
+            assistant=fixed,
+            user=self.user,
+            routing_mode=Session.RoutingMode.SMART,
+            allowed_assistant_uuids=[str(self.assistant.uuid)],
+        )
+        serializer = SessionSerializer(
+            session,
+            data={"allowed_assistant_uuids": []},
+            partial=True,
+            context={"request": SimpleNamespace(user=self.user)},
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("allowed_assistant_uuids", serializer.errors)
 
     def test_smart_collaboration_session_uses_global_model_and_allowed_range(self):
         GlobalSetting.objects.create(

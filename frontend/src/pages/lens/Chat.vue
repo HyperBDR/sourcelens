@@ -1500,6 +1500,7 @@
                 :mobile="isMobile"
                 :open="routingScopeOpen"
                 :selected-uuids="routingScopeAssistantUuids"
+                :readonly="isFixedSmartAssistant"
                 @cancel="cancelRoutingScope"
                 @open="openRoutingScope"
                 @save="saveRoutingScope"
@@ -2011,8 +2012,15 @@ const routingScopeSnapshot = ref([])
 const routingScopeQuery = ref('')
 const mentionedAssistantUuids = ref([])
 const mentionActiveIndex = ref(0)
+const isSmartCollaborationRoute = computed(() => route.name === 'LensSmartChat')
+const isFixedSmartAssistant = computed(
+  () =>
+    !isSmartCollaborationRoute.value &&
+    (selectedAssistant.value?.mode || selectedAssistant.value?.routing_mode) ===
+      'smart'
+)
 const isSmartCollaborationConversation = computed(
-  () => route.name === 'LensSmartChat'
+  () => isSmartCollaborationRoute.value || isFixedSmartAssistant.value
 )
 
 const selectedAssistant = computed(
@@ -2033,7 +2041,11 @@ const selectedSessionArchived = computed(
 )
 
 const routingCandidates = computed(() =>
-  assistants.value.filter((assistant) => assistant.status === 'active')
+  assistants.value.filter(
+    (assistant) =>
+      assistant.status === 'active' &&
+      (assistant.mode || assistant.routing_mode || 'direct') === 'direct'
+  )
 )
 
 const filteredRoutingCandidates = computed(() =>
@@ -2051,7 +2063,11 @@ const routingAllSelected = computed(() => {
 const routingScopeAssistantUuids = computed(() =>
   selectedSession.value
     ? selectedSession.value.allowed_assistant_uuids || []
-    : routingScopeDraft.value
+    : isFixedSmartAssistant.value
+      ? (selectedAssistant.value?.collaboration_members || []).map(
+          (member) => member.uuid
+        )
+      : routingScopeDraft.value
 )
 
 const mentionToken = computed(() => {
@@ -2170,14 +2186,14 @@ const emptyVariant = computed(() =>
 )
 
 const assistantName = computed(() =>
-  isSmartCollaborationConversation.value
+  isSmartCollaborationRoute.value
     ? t('lens.chat.smartCollaboration')
     : selectedAssistant.value?.name || publicAssistant.value?.name || ''
 )
 
 const assistantDescription = computed(
   () =>
-    (isSmartCollaborationConversation.value
+    (isSmartCollaborationRoute.value
       ? t('lens.chat.smartCollaborationDescription')
       : '') ||
     selectedAssistant.value?.description?.trim() ||
@@ -2235,6 +2251,7 @@ function assistantCapabilityLabel(capability) {
 }
 
 function openRoutingScope() {
+  if (isFixedSmartAssistant.value) return
   routingScopeDraft.value = selectedSession.value
     ? [...(selectedSession.value.allowed_assistant_uuids || [])]
     : [...routingScopeDraft.value]
@@ -2329,6 +2346,10 @@ async function handleComposerKeydown(event) {
 }
 
 async function saveRoutingScope() {
+  if (isFixedSmartAssistant.value) {
+    routingScopeOpen.value = false
+    return
+  }
   if (!selectedSession.value) {
     routingScopeOpen.value = false
     return
@@ -3120,7 +3141,7 @@ async function bootstrap() {
     // renders immediately (no flash) and skips its own redundant fetch.
     lensStore.assistants = assistants.value
 
-    if (isSmartCollaborationConversation.value) {
+    if (isSmartCollaborationRoute.value) {
       selectedAssistantUuid.value = ''
       routingScopeDraft.value = []
       await loadMyShareState()
@@ -3147,6 +3168,10 @@ async function bootstrap() {
     }
 
     selectedAssistantUuid.value = current.uuid
+    routingScopeDraft.value =
+      (current.mode || current.routing_mode) === 'smart'
+        ? (current.collaboration_members || []).map((member) => member.uuid)
+        : []
     await loadMyShareState()
     await loadSessions()
     booted.value = true
@@ -3231,7 +3256,7 @@ async function createNewSession(notify = true, allowedAssistantUuids = []) {
   let session
   try {
     session = await createSession(
-      isSmartCollaborationConversation.value
+      isSmartCollaborationRoute.value
         ? {
             routing_mode: 'smart',
             title: '',
@@ -4511,7 +4536,7 @@ watch(
   (sessionUuid) => {
     if (
       !['LensAssistantChat', 'LensSmartChat'].includes(route.name) ||
-      (!isSmartCollaborationConversation.value &&
+      (!isSmartCollaborationRoute.value &&
         route.params.slug !== selectedAssistant.value?.slug) ||
       !sessionUuid ||
       sessionUuid === selectedSessionUuid.value

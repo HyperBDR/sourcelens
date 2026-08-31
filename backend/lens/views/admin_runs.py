@@ -441,6 +441,7 @@ def _admin_run_row(run):
         },
         "planned_evidence": counts["planned_evidence"],
         "routing_mode": runtime_snapshot.get("routing_mode") or "direct",
+        "assistant_mode": runtime_snapshot.get("assistant_mode") or "direct",
         "allowed_assistant_uuids": runtime_snapshot.get("allowed_assistant_uuids", []),
         "delegated_assistants": _sanitize_delegated_assistants(
             runtime_snapshot.get("subagents", [])
@@ -791,6 +792,9 @@ def _admin_run_detail(run):
                     "status": execution.status,
                     "target_dirs": execution.target_dirs,
                     "routing_mode": runtime_snapshot.get("routing_mode") or "direct",
+                    "assistant_mode": (
+                        runtime_snapshot.get("assistant_mode") or "direct"
+                    ),
                     "allowed_assistant_uuids": runtime_snapshot.get(
                         "allowed_assistant_uuids", []
                     ),

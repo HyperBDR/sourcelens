@@ -9,8 +9,9 @@
           count: selectedAssistants.length
         })
       "
+      :aria-disabled="readonly"
       aria-controls="participating-assistants-panel"
-      @click="$emit('open')"
+      @click="handleEntryClick"
     >
       <span class="routing-scope-avatar-stack" aria-hidden="true">
         <span
@@ -208,7 +209,8 @@ const props = defineProps({
   mobile: { type: Boolean, default: false },
   open: { type: Boolean, default: false },
   query: { type: String, default: '' },
-  selectedUuids: { type: Array, default: () => [] }
+  selectedUuids: { type: Array, default: () => [] },
+  readonly: { type: Boolean, default: false }
 })
 
 const emit = defineEmits([
@@ -335,6 +337,10 @@ function assistantColor(assistant) {
 
 function handleBackdropClick() {
   emit('cancel')
+}
+
+function handleEntryClick() {
+  if (!props.readonly) emit('open')
 }
 
 function applyRecommendedAssistants() {

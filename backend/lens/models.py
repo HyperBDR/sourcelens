@@ -134,6 +134,14 @@ class Assistant(TimestampedUUIDModel):
         CODE_ANALYSIS = "code_analysis", "Code Analysis"
         KNOWLEDGE_QA = "knowledge_qa", "Knowledge Q&A"
 
+    class Mode(models.TextChoices):
+        """Product-level Assistant modes."""
+
+        DIRECT = "direct", "Standard Mode"
+        SMART = "smart", "Smart Collaboration"
+
+    RoutingMode = Mode
+
     objects = AssistantQuerySet.as_manager()
 
     name = models.CharField(max_length=160)
@@ -143,6 +151,12 @@ class Assistant(TimestampedUUIDModel):
         max_length=24,
         choices=Capability.choices,
         default=Capability.GENERAL_CHAT,
+    )
+    routing_mode = models.CharField(
+        max_length=16,
+        choices=RoutingMode.choices,
+        default=RoutingMode.DIRECT,
+        db_index=True,
     )
     slug = models.SlugField(max_length=180, unique=True)
     visibility = models.CharField(
@@ -156,6 +170,12 @@ class Assistant(TimestampedUUIDModel):
         blank=True,
         on_delete=models.SET_NULL,
         related_name="assistants",
+    )
+    collaboration_members = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        blank=True,
+        related_name="collaboration_coordinators",
     )
 
     class AgentRounds(models.TextChoices):
@@ -201,6 +221,30 @@ class Assistant(TimestampedUUIDModel):
 
     def __str__(self):
         return self.name
+
+    @property
+    def mode(self):
+        """Return the product mode while keeping routing_mode compatible."""
+
+        return self.routing_mode
+
+    @mode.setter
+    def mode(self, value):
+        """Set the product mode through the compatibility column."""
+
+        self.routing_mode = value
+
+    @property
+    def mode_handler(self):
+        """Return the polymorphic behavior object for this Assistant."""
+
+        return assistant_mode_for(self.routing_mode)
+
+    @property
+    def is_smart(self):
+        """Return whether this Assistant is a Smart Collaboration preset."""
+
+        return self.mode_handler.key == self.Mode.SMART
 
     def __init__(self, *args, **kwargs):
         """Accept the removed task argument while old callers migrate."""
@@ -258,6 +302,60 @@ class Assistant(TimestampedUUIDModel):
             self.status == Assistant.Status.ACTIVE
             and self.is_accessible_by(user)
         )
+
+
+class AssistantMode:
+    """Polymorphic product behavior shared by Assistant modes."""
+
+    key = Assistant.Mode.DIRECT
+    configures_execution_resources = True
+    requires_skill = True
+    supports_members = False
+
+    def normalize_capability(self, capability):
+        """Return the execution capability accepted by this mode."""
+
+        return capability
+
+    def execution_capability(self, capability):
+        """Return the capability used by the runtime coordinator."""
+
+        return capability
+
+
+class DirectAssistantMode(AssistantMode):
+    """Behavior for an Assistant that executes directly."""
+
+
+class SmartAssistantMode(AssistantMode):
+    """Behavior for a reusable Smart Collaboration Assistant."""
+
+    key = Assistant.Mode.SMART
+    configures_execution_resources = False
+    requires_skill = False
+    supports_members = True
+
+    def normalize_capability(self, capability):
+        """Smart mode delegates through the general_chat coordinator."""
+
+        return Assistant.Capability.GENERAL_CHAT
+
+    def execution_capability(self, capability):
+        """Return the internal coordinator capability for Smart mode."""
+
+        return Assistant.Capability.GENERAL_CHAT
+
+
+_ASSISTANT_MODES = {
+    Assistant.Mode.DIRECT: DirectAssistantMode(),
+    Assistant.Mode.SMART: SmartAssistantMode(),
+}
+
+
+def assistant_mode_for(mode):
+    """Return the behavior object for a stored Assistant mode."""
+
+    return _ASSISTANT_MODES.get(mode, _ASSISTANT_MODES[Assistant.Mode.DIRECT])
 
 
 class AssistantAccess(TimestampedUUIDModel):
