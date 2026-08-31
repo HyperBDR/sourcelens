@@ -125,6 +125,9 @@ class SessionViewSet(BaseAuthenticatedViewSet):
             queryset = queryset.filter(assistant__slug=assistant_slug)
         queryset = queryset.filter(user=self.request.user)
         if self.action == "list":
+            search = self.request.query_params.get("search", "").strip()
+            if search:
+                queryset = queryset.filter(title__icontains=search)
             archived = self.request.query_params.get("archived", "").lower()
             session_status = (
                 Session.Status.ARCHIVED

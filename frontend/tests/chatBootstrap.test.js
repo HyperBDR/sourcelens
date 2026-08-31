@@ -97,6 +97,28 @@ test('selects a conversation when its route query changes', async () => {
   assert.notEqual(selectWithoutRouteUpdate, -1)
 })
 
+test('searches recent and archived conversation titles from the sidebar', async () => {
+  const source = await chatSource()
+
+  assert.match(source, /@click="openSessionSearch"/)
+  assert.match(source, /class="session-search-modal"/)
+  assert.match(source, /:show="sessionSearchOpen"/)
+  assert.match(
+    source,
+    /v-model="sessionSearchQuery"\s+class="session-search-input"/
+  )
+  assert.match(
+    source,
+    /listSessions\(selectedAssistant\.value\.slug, \{ search: normalizedQuery \}\)/
+  )
+  assert.match(
+    source,
+    /archived: true,\s+search: normalizedQuery/
+  )
+  assert.match(source, /function selectSearchedSession\(session\)/)
+  assert.match(source, /noSessionSearchResults/)
+})
+
 test('switches assistants through the assistant chat route', async () => {
   const source = await assistantSwitcherSource()
 

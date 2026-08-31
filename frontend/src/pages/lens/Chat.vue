@@ -147,6 +147,15 @@
               >
                 {{ t('lens.chat.archivedSessions') }}
               </button>
+              <button
+                type="button"
+                class="session-search-btn"
+                :aria-label="t('lens.chat.searchSessions')"
+                :title="t('lens.chat.searchSessions')"
+                @click="openSessionSearch"
+              >
+                <Search :size="15" :stroke-width="2.2" aria-hidden="true" />
+              </button>
             </div>
           </div>
           <div class="sessions-list">
@@ -1558,6 +1567,58 @@
     />
 
     <BaseModal
+      class="session-search-modal"
+      :show="sessionSearchOpen"
+      :title="t('lens.chat.searchSessions')"
+      @close="closeSessionSearch"
+    >
+      <div class="session-search-content">
+        <label class="sr-only" for="session-search-input">
+          {{ t('lens.chat.searchSessions') }}
+        </label>
+        <input
+          id="session-search-input"
+          ref="sessionSearchInput"
+          v-model="sessionSearchQuery"
+          class="session-search-input"
+          type="search"
+          :placeholder="t('lens.chat.searchSessionsPlaceholder')"
+          autocomplete="off"
+        />
+
+        <div v-if="sessionSearchLoading" class="session-search-state">
+          {{ t('common.loading') }}
+        </div>
+        <div
+          v-else-if="sessionSearchQuery.trim() && !sessionSearchResults.length"
+          class="session-search-state"
+        >
+          {{ t('lens.chat.noSessionSearchResults') }}
+        </div>
+        <div v-else class="session-search-results">
+          <button
+            v-for="session in sessionSearchResults"
+            :key="session.uuid"
+            type="button"
+            class="session-search-result"
+            @click="selectSearchedSession(session)"
+          >
+            <span class="session-search-result-title">
+              {{ session.title || t('lens.chat.untitledSession') }}
+            </span>
+            <span class="session-search-result-status">
+              {{
+                session.status === 'archived'
+                  ? t('lens.chat.archivedSessions')
+                  : t('lens.chat.sessions')
+              }}
+            </span>
+          </button>
+        </div>
+      </div>
+    </BaseModal>
+
+    <BaseModal
       :show="Boolean(deleteSessionTarget)"
       :title="t('lens.chat.deleteSessionTitle')"
       :close-on-backdrop="!deletingSession"
@@ -1613,17 +1674,18 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
-  MessagesSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
   Download,
   Eye,
   FileText,
   LoaderCircle,
+  MessagesSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
+  Plus,
+  Search,
   Share2,
   ThumbsDown,
   ThumbsUp,
@@ -1786,6 +1848,13 @@ const streamController = ref(null)
 const sidebarOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const showArchivedSessions = ref(false)
+const sessionSearchOpen = ref(false)
+const sessionSearchQuery = ref('')
+const sessionSearchResults = ref([])
+const sessionSearchLoading = ref(false)
+const sessionSearchInput = ref(null)
+let sessionSearchRequestId = 0
+let sessionSearchTimer = null
 const deleteSessionTarget = ref(null)
 const deletingSession = ref(false)
 const renamingSessionUuid = ref('')
@@ -1953,6 +2022,67 @@ const assistantSlug = computed(() => route.params.slug || '')
 const sidebarCollapsedActive = computed(
   () => sidebarCollapsed.value && !isMobile.value
 )
+
+async function searchSessions(query) {
+  const requestId = ++sessionSearchRequestId
+  const normalizedQuery = query.trim()
+  if (!normalizedQuery || !selectedAssistant.value) {
+    sessionSearchResults.value = []
+    sessionSearchLoading.value = false
+    return
+  }
+
+  sessionSearchLoading.value = true
+  try {
+    const [recent, archived] = await Promise.all([
+      listSessions(selectedAssistant.value.slug, { search: normalizedQuery }),
+      listSessions(selectedAssistant.value.slug, {
+        archived: true,
+        search: normalizedQuery
+      })
+    ])
+    if (requestId !== sessionSearchRequestId) return
+    sessionSearchResults.value = [...recent, ...archived]
+  } catch {
+    if (requestId === sessionSearchRequestId) {
+      sessionSearchResults.value = []
+      showError(t('lens.chat.searchSessionsFailed'))
+    }
+  } finally {
+    if (requestId === sessionSearchRequestId) {
+      sessionSearchLoading.value = false
+    }
+  }
+}
+
+function openSessionSearch() {
+  sessionSearchOpen.value = true
+  nextTick(() => sessionSearchInput.value?.focus())
+}
+
+function closeSessionSearch() {
+  clearTimeout(sessionSearchTimer)
+  sessionSearchOpen.value = false
+  sessionSearchQuery.value = ''
+  sessionSearchResults.value = []
+  sessionSearchRequestId += 1
+}
+
+watch(sessionSearchQuery, (query) => {
+  clearTimeout(sessionSearchTimer)
+  sessionSearchTimer = setTimeout(() => searchSessions(query), 200)
+})
+
+async function selectSearchedSession(session) {
+  closeSessionSearch()
+  if (showArchivedSessions.value !== (session.status === 'archived')) {
+    await switchSessionView(session.status === 'archived')
+  }
+  if (!sessions.value.some((item) => item.uuid === session.uuid)) {
+    sessions.value = [session, ...sessions.value]
+  }
+  await selectSession(session)
+}
 
 function handleSidebarLogoClick() {
   if (sidebarCollapsedActive.value) {
@@ -4091,6 +4221,7 @@ onBeforeUnmount(() => {
   streamController.value?.abort()
   streamTextBuffer.clear()
   answerAutoScroller.dispose()
+  clearTimeout(sessionSearchTimer)
   clearInterval(elapsedTimer)
 })
 </script>
@@ -4247,6 +4378,57 @@ onBeforeUnmount(() => {
 .session-filters button:hover,
 .session-filter-active {
   @apply bg-surface-hover text-theme;
+}
+
+.session-search-btn {
+  @apply flex h-6 w-6 items-center justify-center rounded-md text-theme-muted
+    transition-colors;
+}
+
+.session-search-btn:hover {
+  @apply bg-surface-hover text-theme;
+}
+
+.session-search-content {
+  @apply flex flex-col gap-4;
+}
+
+.session-search-input {
+  @apply w-full rounded-lg border border-line bg-surface-sunken px-3 py-2
+    text-sm text-theme outline-none transition-colors;
+}
+
+.session-search-input:focus {
+  @apply border-primary-500 ring-2 ring-primary-500/20;
+}
+
+.session-search-results {
+  @apply flex max-h-80 min-h-0 flex-col gap-1 overflow-y-auto;
+}
+
+.session-search-result {
+  @apply flex min-w-0 items-center justify-between gap-3 rounded-lg
+    bg-surface-sunken px-3 py-2 text-left transition-colors;
+}
+
+.session-search-result:hover {
+  @apply bg-surface-hover;
+}
+
+.session-search-result-title {
+  @apply min-w-0 flex-1 truncate text-sm font-medium text-theme;
+}
+
+.session-search-result-status {
+  @apply shrink-0 text-xs text-theme-subtle;
+}
+
+.session-search-state {
+  @apply flex items-center justify-center py-10 text-sm text-theme-muted;
+}
+
+.session-search-modal :deep(.max-w-2xl) {
+  max-width: 35rem;
 }
 
 .sessions-list {

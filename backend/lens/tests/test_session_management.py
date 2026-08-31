@@ -105,6 +105,35 @@ class SessionManagementTests(TestCase):
         self.assertIsNone(self.second.pinned_at)
         self.assertEqual(self._list()[0]["uuid"], str(self.first.uuid))
 
+    def test_session_list_searches_titles_across_statuses(self):
+        self.second.status = Session.Status.ARCHIVED
+        self.second.title = "Archived searchable title"
+        self.second.save(update_fields=["status", "title"])
+
+        recent = self.client.get(
+            "/api/lens/sessions/",
+            {"assistant_slug": self.assistant.slug, "search": "first"},
+        )
+        archived = self.client.get(
+            "/api/lens/sessions/",
+            {
+                "assistant_slug": self.assistant.slug,
+                "archived": "true",
+                "search": "searchable",
+            },
+        )
+
+        self.assertEqual(recent.status_code, 200, recent.data)
+        self.assertEqual(archived.status_code, 200, archived.data)
+        self.assertEqual(
+            [row["uuid"] for row in recent.data["results"]],
+            [str(self.first.uuid)],
+        )
+        self.assertEqual(
+            [row["uuid"] for row in archived.data["results"]],
+            [str(self.second.uuid)],
+        )
+
     def test_archive_filters_lists_clears_pin_and_restores_history(self):
         run = create_execution_run(
             self.first,
