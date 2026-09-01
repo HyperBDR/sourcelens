@@ -1,0 +1,127 @@
+{
+  "key": "github",
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "display_name": "GitHub",
+  "description": "Connect approved GitHub repositories as data sources and read-only assistant tools.",
+  "datasource_source_type": "git",
+  "handlers": {
+    "runtime": "github_v1",
+    "datasource": "github_datasource_v1"
+  },
+  "connection_schema": {
+    "type": "object",
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "format": "uri",
+        "title": "GitHub endpoint",
+        "description": "The fixed public GitHub endpoint.",
+        "default": "https://github.com",
+        "write_to": "endpoint"
+      },
+      "secret_value": {
+        "type": "string",
+        "format": "password",
+        "title": "Personal access token",
+        "description": "A write-only token with read access to the approved repositories.",
+        "write_to": "secret_value"
+      },
+      "repositories": {
+        "type": "array",
+        "format": "provider-resource",
+        "resource": "repositories",
+        "title": "Allowed repositories",
+        "description": "Explicit owner/repository values this connection may access.",
+        "write_to": "allowed_scope.repositories",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": ["endpoint", "secret_value", "repositories"],
+    "additionalProperties": false
+  },
+  "datasource_schema": {
+    "type": "object",
+    "properties": {
+      "repository": {
+        "type": "string",
+        "format": "provider-resource",
+        "resource": "repositories",
+        "title": "Repository"
+      },
+      "branch": {
+        "type": "string",
+        "format": "provider-resource-option",
+        "resource": "branches",
+        "depends_on": "repository",
+        "title": "Branch"
+      },
+      "directory": {
+        "type": "string",
+        "format": "repository-path",
+        "title": "Directory",
+        "description": "Optional repository-relative directory to sync."
+      }
+    },
+    "required": ["repository"],
+    "additionalProperties": false
+  },
+  "tools": [
+    {
+      "key": "github_read_file",
+      "description": "Read a UTF-8 text file from an approved GitHub repository. Use repository in owner/repository form, a repository-relative path, and optionally a branch, tag, or commit ref.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "path": {
+            "type": "string",
+            "description": "Repository-relative file path."
+          },
+          "ref": {
+            "type": "string",
+            "description": "Optional branch, tag, or commit SHA."
+          }
+        },
+        "required": ["repository", "path"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "github_search_code",
+      "description": "Search code only within an approved GitHub repository and return bounded file metadata. Do not include GitHub search qualifiers such as repo:, org:, or user: in the query.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Approved repository in owner/repository form."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search terms without scope-changing qualifiers."
+          },
+          "path": {
+            "type": "string",
+            "description": "Optional repository-relative directory filter."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum result count from 1 through 20."
+          }
+        },
+        "required": ["repository", "query"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

@@ -1669,7 +1669,7 @@ def build_loaded_mcps(assistant):
     loaded = []
     for binding in assistant.mcp_bindings.select_related(
         "mcp", "environment_variable_set"
-    ).filter(enabled=True):
+    ).filter(enabled=True).exclude(mcp__transport="plugin"):
         loaded.append(
             {
                 "mcp_uuid": str(binding.mcp.uuid),
@@ -1703,14 +1703,32 @@ def build_loaded_plugins(assistant):
 
     loaded = []
     plugins = {}
-    bindings = assistant.plugin_bindings.select_related(
+    direct_bindings = assistant.plugin_bindings.select_related(
         "connection__secret_version__material"
     ).filter(
         enabled=True,
         connection__status="active",
     ).order_by("connection__plugin_key", "connection__uuid")
-    for binding in bindings:
-        connection = binding.connection
+    adapter_bindings = assistant.mcp_bindings.select_related(
+        "mcp__connection__secret_version__material"
+    ).filter(
+        enabled=True,
+        mcp__enabled=True,
+        mcp__transport="plugin",
+        mcp__connection__status="active",
+    ).order_by(
+        "mcp__connection__plugin_key",
+        "mcp__connection__uuid",
+    )
+    bindings = [
+        (binding.connection, binding.tools)
+        for binding in direct_bindings
+    ]
+    bindings.extend(
+        (binding.mcp.connection, binding.mcp.tools)
+        for binding in adapter_bindings
+    )
+    for connection, selected_tool_keys in bindings:
         secret_version = connection.secret_version
         if secret_version is None or secret_version.status != "active":
             continue
@@ -1725,7 +1743,7 @@ def build_loaded_plugins(assistant):
             for tool in plugin.tools
         }
         tools = []
-        for key in binding.tools or []:
+        for key in selected_tool_keys or []:
             tool = definitions.get(key)
             if tool is None:
                 continue

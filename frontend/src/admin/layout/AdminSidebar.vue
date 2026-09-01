@@ -343,6 +343,34 @@
                 <span>{{ t('lensAdmin.pages.datasources.title') }}</span>
               </router-link>
               <router-link
+                to="/management/lens/resources/connections"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/lens/resources/connections')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="
+                  preloadRoute('/management/lens/resources/connections')
+                "
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 12h8m-4-4v8m9-4a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>{{ t('lensAdmin.pages.connections.title') }}</span>
+              </router-link>
+              <router-link
                 to="/management/lens/resources/credentials"
                 class="admin-nav-item admin-nav-item-child"
                 :class="

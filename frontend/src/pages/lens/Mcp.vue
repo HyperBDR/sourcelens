@@ -80,7 +80,7 @@
                     {{ row.transport }}
                   </td>
                   <td class="table-cell font-mono text-ink-500">
-                    {{ row.endpoint || emptyValue }}
+                    {{ mcpTarget(row) }}
                   </td>
                   <td class="table-cell">
                     <StatusBadge
@@ -116,35 +116,86 @@
               <BaseSelect v-model="form.transport">
                 <option value="url">url</option>
                 <option value="stdio">stdio</option>
+                <option value="plugin">plugin</option>
               </BaseSelect>
             </FormRow>
-            <FormRow :label="t('lensAdmin.fields.endpoint')">
+            <FormRow
+              v-if="form.transport !== 'plugin'"
+              :label="t('lensAdmin.fields.endpoint')"
+            >
               <input v-model="form.endpoint" class="form-input" />
             </FormRow>
           </div>
-          <FormRow :label="t('lensAdmin.fields.config')">
-            <KeyValueEditor
-              v-model="form.config_rows"
-              :key-label="t('lensAdmin.fields.configKey')"
-              :value-label="t('lensAdmin.fields.configValue')"
-              :mask-sensitive-values="true"
-              :configured-label="t('lensAdmin.mcp.secretConfigured')"
+          <template v-if="form.transport === 'plugin'">
+            <FormRow :label="t('lensAdmin.mcp.pluginConnection')">
+              <BaseSelect
+                :model-value="form.connection_uuid"
+                @update:model-value="handleConnectionChange"
+              >
+                <option value="">{{ t('lensAdmin.mcp.selectConnection') }}</option>
+                <option
+                  v-for="connection in pluginConnections"
+                  :key="connection.uuid"
+                  :value="connection.uuid"
+                >
+                  {{ connection.name }} · {{ connection.plugin_key }}
+                </option>
+              </BaseSelect>
+            </FormRow>
+            <FormRow :label="t('lensAdmin.mcp.pluginTools')">
+              <div class="space-y-2 rounded-lg border border-line p-3">
+                <label
+                  v-for="tool in pluginTools"
+                  :key="tool.key"
+                  class="flex items-start gap-2 text-sm text-ink-700"
+                >
+                  <input
+                    type="checkbox"
+                    class="mt-1"
+                    :checked="form.tools.includes(tool.key)"
+                    @change="togglePluginTool(tool.key)"
+                  />
+                  <span>
+                    <span class="font-medium text-ink-900">{{ tool.key }}</span>
+                    <span class="mt-0.5 block text-xs text-ink-500">
+                      {{ tool.description }}
+                    </span>
+                  </span>
+                </label>
+                <p v-if="!pluginTools.length" class="text-xs text-ink-500">
+                  {{ t('lensAdmin.mcp.noPluginTools') }}
+                </p>
+              </div>
+              <p class="mt-2 text-xs leading-5 text-ink-500">
+                {{ t('lensAdmin.mcp.pluginAdapterHint') }}
+              </p>
+            </FormRow>
+          </template>
+          <template v-else>
+            <FormRow :label="t('lensAdmin.fields.config')">
+              <KeyValueEditor
+                v-model="form.config_rows"
+                :key-label="t('lensAdmin.fields.configKey')"
+                :value-label="t('lensAdmin.fields.configValue')"
+                :mask-sensitive-values="true"
+                :configured-label="t('lensAdmin.mcp.secretConfigured')"
+              />
+              <p class="mt-2 text-xs leading-5 text-ink-500">
+                {{ t('lensAdmin.mcp.sensitiveConfigHint') }}
+              </p>
+            </FormRow>
+            <SkillEnvironmentEditor
+              v-model="form.environment"
+              :help-text="t('lensAdmin.mcp.environmentVariablesHelp')"
             />
-            <p class="mt-2 text-xs leading-5 text-ink-500">
-              {{ t('lensAdmin.mcp.sensitiveConfigHint') }}
+            <p class="text-xs leading-5 text-ink-500">
+              {{
+                t('lensAdmin.mcp.environmentPlaceholderHint', {
+                  placeholder: '${VARIABLE_NAME}'
+                })
+              }}
             </p>
-          </FormRow>
-          <SkillEnvironmentEditor
-            v-model="form.environment"
-            :help-text="t('lensAdmin.mcp.environmentVariablesHelp')"
-          />
-          <p class="text-xs leading-5 text-ink-500">
-            {{
-              t('lensAdmin.mcp.environmentPlaceholderHint', {
-                placeholder: '${VARIABLE_NAME}'
-              })
-            }}
-          </p>
+          </template>
           <BooleanRow v-model="form.enabled" />
 
           <p v-if="formError" class="text-sm text-danger-700">
@@ -174,7 +225,10 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   createMcpServer,
   deleteMcpServer,
+  getPluginManifest,
+  listConnections,
   listMcpServers,
+  listPlugins,
   updateMcpServer
 } from '@/api/lens'
 import { useToast } from '@/composables/useToast'
@@ -203,6 +257,8 @@ const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const mcps = ref([])
+const connections = ref([])
+const pluginManifests = ref({})
 const currentPage = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
@@ -211,6 +267,19 @@ const showModal = ref(false)
 const mode = ref('create')
 const form = ref({})
 const formError = ref('')
+
+const pluginConnections = computed(() =>
+  connections.value.filter((connection) => connection.status === 'active')
+)
+const selectedConnection = computed(() =>
+  connections.value.find(
+    (connection) => connection.uuid === form.value.connection_uuid
+  )
+)
+const pluginTools = computed(() => {
+  const pluginKey = selectedConnection.value?.plugin_key
+  return pluginManifests.value[pluginKey]?.tools || []
+})
 
 const columns = computed(() =>
   ['mcpServer', 'transport', 'endpoint', 'status', 'actions'].map((column) =>
@@ -255,6 +324,8 @@ function defaultForm() {
     endpoint: '',
     config_rows: [],
     environment: [],
+    connection_uuid: '',
+    tools: [],
     enabled: true
   }
 }
@@ -267,17 +338,33 @@ function formFromRow(row) {
     endpoint: row.endpoint || '',
     config_rows: mcpConfigToRows(row.config || {}),
     environment: mcpEnvironmentForm(row.environment || []),
+    connection_uuid: row.connection_uuid || '',
+    tools: Array.isArray(row.tools) ? [...row.tools] : [],
     enabled: row.enabled !== false
   }
 }
 
 function buildPayload() {
+  if (form.value.transport === 'plugin') {
+    return {
+      name: form.value.name,
+      transport: form.value.transport,
+      endpoint: '',
+      config: {},
+      environment: [],
+      connection_uuid: form.value.connection_uuid,
+      tools: form.value.tools,
+      enabled: !!form.value.enabled
+    }
+  }
   return {
     name: form.value.name,
     transport: form.value.transport,
     endpoint: form.value.endpoint,
     config: mcpRowsToConfig(form.value.config_rows),
     environment: buildMcpEnvironment(form.value.environment),
+    connection_uuid: null,
+    tools: [],
     enabled: !!form.value.enabled
   }
 }
@@ -286,12 +373,44 @@ async function load() {
   loading.value = true
   formError.value = ''
   try {
-    mcps.value = normalizeList(await listMcpServers())
+    const [mcpRows, connectionRows, installedPlugins] = await Promise.all([
+      listMcpServers(),
+      listConnections(),
+      listPlugins()
+    ])
+    const manifests = await Promise.all(
+      installedPlugins.map((plugin) => getPluginManifest(plugin.key))
+    )
+    mcps.value = normalizeList(mcpRows)
+    connections.value = connectionRows
+    pluginManifests.value = Object.fromEntries(
+      manifests.map((manifest) => [manifest.key, manifest])
+    )
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
     loading.value = false
   }
+}
+
+function handleConnectionChange(connectionUuid) {
+  form.value.connection_uuid = connectionUuid
+  form.value.tools = []
+}
+
+function togglePluginTool(toolKey) {
+  const tools = new Set(form.value.tools)
+  if (tools.has(toolKey)) tools.delete(toolKey)
+  else tools.add(toolKey)
+  form.value.tools = [...tools]
+}
+
+function mcpTarget(row) {
+  if (row.transport !== 'plugin') return row.endpoint || emptyValue
+  const connection = connections.value.find(
+    (item) => item.uuid === row.connection_uuid
+  )
+  return connection?.name || row.connection_uuid || emptyValue
 }
 
 function startCreate() {

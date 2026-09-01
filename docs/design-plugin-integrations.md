@@ -1,6 +1,8 @@
 # 设计稿：内置集成 Plugin（Tool + Datasource）
 
-- 状态：实施中（V1 控制面、DataSource 与 LensNode Tool 主链路已落地）
+- 状态：GitHub、GitLab、Jira Cloud V1、通用 manifest UI、Skill capability 依赖、
+  调用审计、凭证轮换/撤销、MCP Adapter 和可回滚旧凭证迁移工具已完成；现有
+  GitLab/Jira Server/DC Skill 包迁移和制品签名仍属于后续发布工作
 - 日期：2026-09-01
 - 范围：GitHub、GitLab、Jira 等内置集成；同时服务代码数据源和助手工具。
 
@@ -26,7 +28,8 @@ SourceLens 采用这一方向，但增加独立的 Connection、Capability 和�
 - 将现有管理 CLI 封装为 GitHub、GitLab、Jira 等内置 Plugin Runtime。
 - 一个 Plugin 同时提供 DataSource 适配器和面向大模型的 Tool Provider。
 - 凭证、连接目标、资源范围和消费者配置分层，支持真正复用。
-- 管理页面由 Plugin manifest 动态生成，不硬编码每个供应商的表单。
+- 管理页面由 Plugin manifest 驱动；前端只内置安全字段类型和通用资源依赖渲染器，
+  不内置 GitHub/GitLab/Jira 的资源 key、工具列表或响应结构。
 - 改造数据源管理，使其通过 Connection 与 Plugin Provider 同步，而不再向 LensNode
   下发解密后的 credential config。
 - 支持 Plugin 内部并发请求第三方 API，并统一处理超时、限流、重试和取消。
@@ -206,7 +209,8 @@ Manifest 应包含：
 独立维护代码、测试、文档和发布流程，SourceLens 主仓库只维护 Registry、通用
 Connection、DataSource、Task、Lease 和 schema renderer。
 
-动态页面只使用 schema 生成表单；后端必须再次执行完整校验。
+动态页面使用 Manifest schema 生成供应商字段和资源选择控件；通用 renderer 只保留
+少量受控组件，后端始终再次执行完整校验。
 
 ## 5. Tool Provider 设计
 
@@ -284,7 +288,7 @@ Datasource Provider 面向资源发现、内容摄取和增量同步，不直接
 
 ```text
 DataSource
-  - plugin: github
+  - plugin_key: github
   - connection: github-company-readonly
   - resource: HyperBDR/sourcelens
   - branch: main
@@ -307,6 +311,10 @@ Provider 在创建、更新、资源发现和执行前均验证其资源选择�
 `datasource_schema` 选择资源并配置同步。API 同样分离 Connection 的 CRUD/验证与
 DataSource 的资源选择/调度，避免继续向通用 `config` 字段塞入认证字段。
 
+manifest 通过受限 `write_to` 将 Connection 字段映射到 `endpoint`、`secret_value`、
+`config.<key>` 或 `allowed_scope.<key>`；资源发现统一返回 `resources.<name>.items`，
+子资源通过 `depends_on` 与父资源的 `options` 关联。前端不解释供应商专用 payload。
+
 ## 7. MCP 集成
 
 MCP 可以作为 Plugin 的另一种工具呈现方式：
@@ -321,6 +329,16 @@ Plugin Connection
   ├─ Native Tool Provider
   └─ MCP Adapter
 ```
+
+当前 MCP Adapter 是现有 `MCPServer` 的受控 `plugin` transport：管理员只能选择一个
+有效 Connection 和该 Plugin manifest 已声明的只读工具。它不能配置 MCP endpoint、
+header、config、environment 或额外 credential。Assistant 仍可通过 `mcp_bindings`
+选择该资源，但控制端在固化 Run 时将其转换为 `loaded_plugins`；LensNode 因而继续走
+原生 Tool ExecutionSnapshot、lease、scope 校验和 PluginInvocation 审计链路，而不会
+启动一个可绕过策略的远程 MCP Server。原有 URL/STDIO MCP 保持独立路径。
+
+Skill 的 `required_plugins` capability 可以由直接 Plugin binding 或 Plugin MCP
+Adapter 满足；两种绑定之间仍要求模型 Tool 名全局唯一。
 
 ## 8. 凭证与运行时安全
 
@@ -377,8 +395,6 @@ datasource 和插件运行参数标识，并以节点身份取得短期 lease。
 6. 工具读写级别、确认和速率限制；
 7. lease、SecretVersion、ExecutionSnapshot 和 Plugin manifest 是否仍有效。
 
-说明文字不是安全边界，所有约束必须在执行器中落实。
-
 ## 9. Plugin 内部并发与异步
 
 工具对模型可以同步返回，但 Plugin 内部可以并行请求：
@@ -423,8 +439,17 @@ GitHub Plugin Runtime
 - 限制工作目录、网络和文件输出；
 - 将 stdout/stderr 转为脱敏的结构化结果和进度事件。
 
+当前 Provider 通过共享 `PluginRequestContext` 统一约束内部并行请求：每个
+Connection 有界线程池、请求超时、调用 deadline、取消事件、指数退避和受限的
+`Retry-After`。资源发现会保留成功项，并以 `warnings[{resource,label,code}]` 返回
+单项失败；连接验证仍在不可恢复或全部失败时返回稳定错误。当前实现保持 Tool 对
+模型同步返回，独立资源请求在 Provider 内部并行；后续可将同一上下文替换为
+`httpx.AsyncClient`，不改变上层 Provider 契约。
+
 对于 GitHub/GitLab/Jira 的标准 HTTP API，优先在 Plugin Runtime 使用异步 HTTP
-客户端；CLI 保留给已有复杂流程或必须复用的同步实现。
+客户端；CLI 保留给已有复杂流程或必须复用的同步实现。GitLab 自托管 endpoint
+允许企业管理员配置任意 HTTPS 根域名，生产部署应在网络层或管理员配置中增加
+出站 allowlist，并防范私网解析和 DNS rebinding，不能仅依赖 URL 格式校验。
 
 ## 11. API 与数据模型草案
 
@@ -455,8 +480,9 @@ GET  /api/lens/admin/connections/
 POST /api/lens/admin/connections/
 PATCH /api/lens/admin/connections/{uuid}/
 POST /api/lens/admin/connections/{uuid}/validate/
-POST /api/lens/admin/connections/{uuid}/rotate/
 GET  /api/lens/admin/connections/{uuid}/resources/
+POST /api/lens/admin/connections/{uuid}/revoke/
+GET  /api/lens/admin/plugin-invocations/
 POST /api/lens/plugin-runtime/tool-snapshots/
 GET  /api/lens/plugin-runtime/snapshots/{uuid}/
 POST /api/lens/plugin-runtime/leases/
@@ -474,11 +500,17 @@ GET    /api/lens/admin/connections/
 POST   /api/lens/admin/connections/
 PATCH  /api/lens/admin/connections/{uuid}/
 DELETE /api/lens/admin/connections/{uuid}/
+POST   /api/lens/admin/connections/{uuid}/validate/
+GET    /api/lens/admin/connections/{uuid}/resources/
+POST   /api/lens/admin/connections/{uuid}/revoke/
 ```
 
-Connection 的 `secret_value` 仅允许写入，不会出现在响应中；每次更新会创建新的
-SecretVersion，并复用同一个 SecretMaterial。V1 GitHub Provider 只接受
-`https://github.com` endpoint，后续企业 GitHub 域名需要单独增加受控 allowlist。
+Connection 的 `secret_value` 仅允许写入，不会出现在响应中；PATCH 更新
+`secret_value` 会创建新的 SecretVersion，并复用同一个 SecretMaterial。V1 GitHub
+Provider 只接受 `https://github.com` endpoint，后续企业 GitHub 域名需要单独增加受控
+allowlist。普通轮换保留旧 SecretVersion，使已经固化的 ExecutionSnapshot 继续使用
+原版本；紧急撤销会停用整个 SecretMaterial 血缘、所有共享该材料的 Connection，并
+撤销其尚未过期的 active lease。重复撤销是幂等的。
 
 Assistant 创建和更新接口通过可选的 `plugin_bindings` 管理模型工具授权：
 
@@ -505,7 +537,7 @@ GitHub API；执行失败不会回退到旧凭证路径。
 持久化 Run 关联 ExecutionSnapshot；该快照记录 Plugin、Connection、
 SecretVersion、Capability 和资源引用，不记录解析后的 secret。
 
-DataSource API 保持数据源生命周期入口，但外部类型的写入契约调整为 `plugin`、
+DataSource API 保持数据源生命周期入口，但外部类型的写入契约调整为 `plugin_key`、
 `connection_uuid` 和受 manifest 校验的 `datasource_config`。创建/更新后注册同步策略；
 初始、手动、定时和重试任务统一通过 snapshot + lease 下发。迁移期间旧
 `source_type`、`config` 和 `credential_uuid` 仅作为兼容读路径，不能成为新写入路径。
@@ -529,26 +561,29 @@ DataSource API 保持数据源生命周期入口，但外部类型的写入契�
 
 ### Phase 2：动态管理页、Skill 迁移与更多 Provider
 
-- 根据 manifest 动态渲染 Connection 与 DataSource 页面；
-- 增加资源发现、能力筛选和绑定校验；
-- 将现有 GitHub/GitLab/Jira Skills 改为流程 Skill，移除自行读取 Token 和执行
-  任意 CLI 的逻辑。
-- 增加 GitLab/Jira 内置 Plugin，并分别完成其 DataSource 垂直切片。
+- 已根据 manifest 动态渲染 Connection、DataSource 和 Assistant Plugin binding；
+- 已增加通用资源发现、依赖选项、能力筛选、`required_plugins` 和绑定校验；
+- GitHub Skills 可声明流程依赖并使用平台 Tool；GitLab/Jira Skill 包的实际迁移
+  需要在各自 Skill 项目中移除 Token/任意 CLI 读取，属于独立发布任务；
+- GitLab/Jira Cloud 内置 Plugin 已完成各自 DataSource 与 Tool 垂直切片；Jira
+  Server/Data Center PAT 暂不属于 V1。
 
 ### Phase 3：扩展集成与受控能力
 
-- 增加凭证轮换、撤销和 PluginInvocation 审计；
-- MCP 通过同一 Connection/Capability 层接入。
+- 已增加凭证轮换、紧急撤销和 Secret-free PluginInvocation 审计；
+- 已增加受控 `plugin` MCP Adapter，并复用 Connection/Capability/运行时安全链路。
 
 写操作、第三方 Plugin、OAuth callback/refresh token rotation 和完整的
 ConnectionRevision 仅在明确的产品需求出现后另行设计。
 
 ### Phase 4：兼容迁移和清理
 
-- 将旧 DataSourceCredential 映射为 Connection，将旧 DataSource 的可迁移资源字段
-  映射为 datasource_config；
-- 校验并修正 endpoint/scope，并识别无法自动迁移的 config；
-- 提供失败可回滚的双读迁移；
+- 已提供 `migrate_legacy_plugin_integrations` 管理命令；默认 dry-run，`--apply` 才写入，
+  `--rollback` 恢复旧执行路径并停用迁移生成的 Connection；
+- 仅自动迁移有效 GitHub HTTPS Token 和可无歧义解析的单仓库 DataSource，同时保留旧
+  credential/config 作为回滚依据；每个决策写入 `LegacyIntegrationMigration`；
+- 组织批量配置、公开访问、非 GitHub Provider、异常 endpoint/scope 或无法解析的资源
+  标记为 `manual_review`，不会猜测转换；
 - 删除旧的 DataSourceCredential API 和明文 Reveal 能力。
 
 ## 13. 主要风险与取舍
@@ -563,26 +598,41 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 | Tool 与 Datasource 语义混淆 | 中 | 两套 Provider 接口，共享 Connection 但分离执行契约 |
 | 数据源仍经消息传递解密 Token | 高 | 同步下发统一改为 task metadata、snapshot 和 lease |
 | DataSource 资源越过 Connection scope | 高 | 创建、更新、发现和执行时做子集校验 |
-| endpoint 变更导致 Token 外发 | 高 | endpoint allowlist、重新连通性验证、执行快照 |
+| endpoint 变更导致 Token 外发 | 高 | allowlist、显式验证、执行快照；PATCH 后不自动探测 |
 | Plugin 目录或版本被错误加载 | 高 | 受控安装目录、Registry handler allowlist、制品校验和版本握手 |
+| 单个资源发现失败 | 中 | 保留成功结果并返回结构化 warning；重试受 deadline、取消信号和并发预算约束 |
+| 管理端验证/资源发现请求被滥用 | 中 | 当前依赖管理员权限和上限；后续增加按用户/Connection 的限流 |
+| manifest 无法表达复杂供应商 UI | 中 | 保持受限通用协议；确有第三个稳定用例后再扩展字段类型 |
 
 ## 14. 验收标准
 
+### GitHub V1 已满足
+
 - GitHub Plugin 可以同时出现在 DataSource 和 Skill 工具选择流程中；
-- 同一个 Connection 可绑定多个 DataSource 和多个 Skill/MCP；
-- 管理页面只依赖 manifest，不写 GitHub/Jira 专用分支；
+- 同一个 Connection 可绑定多个 DataSource 和多个 Assistant Plugin Tool；
 - 模型只能看到已授权 capability 对应的工具；
-- Plugin 内部可并行读取多个 API，且有并发上限、超时、取消和部分失败结果；
 - 原始 secret 不进入 prompt、Tool 参数、Run 快照和普通日志；
 - V1 只暴露代码圈定的只读 Tool，且不提供 raw exec 或任意 URL 请求；
 - LensNode 仅接收任务元数据，并按执行快照取得与任务绑定的短期 lease；
-- 外部 DataSource 持有 `plugin + connection + datasource_config`，不持有 Token 或
+- 外部 DataSource 持有 `plugin_key + connection + datasource_config`，不持有 Token 或
   endpoint；其资源选择经过 manifest 与 Connection scope 校验；
 - 初始、手动、定时和重试同步均不向 LensNode 下发解密 credential config；
+- 控制端和 LensNode 拒绝执行未注册、版本不兼容或协议不兼容的 Plugin。
+- Connection 与 DataSource 管理不硬编码供应商资源 key、工具或响应结构；
+- Skill capability 可由直接 Plugin binding 或 Plugin MCP Adapter 满足，且两者共享快照、
+  lease、scope 和审计链路；
+- 普通轮换不破坏旧快照，紧急撤销覆盖共享 SecretMaterial 的 Connection 和 active lease；
+- 旧 GitHub 凭证迁移支持 dry-run、审计、人工复核标记和回滚。
+
+### 项目级后续验收
+
+- Plugin 内部并行请求已具备统一的并发上限、超时、取消、重试和部分失败结果协议；
+- 现有 GitHub/GitLab/Jira Skills 完成流程化迁移，移除自行读取 Token 和执行任意
+  CLI 的逻辑（待各 Skill 项目发布）；
+- GitLab/Jira Cloud Provider 已完成各自的 DataSource 与 Tool 垂直切片；
 - 现有 CLI 能在不改变业务行为的情况下作为 Plugin Runtime 后端执行器。
 - Plugin 可作为独立项目构建、测试和发布，并由企业部署安装到受控目录；普通用户
   无 Plugin 上传或安装权限；
-- 控制端和 LensNode 拒绝执行未注册、版本不兼容或协议不兼容的 Plugin。
 
 ## 15. 待确认问题
 

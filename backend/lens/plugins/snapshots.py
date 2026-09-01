@@ -3,23 +3,25 @@
 from copy import deepcopy
 
 from django.db import transaction
-
 from lens.models import DataSource, ExecutionSnapshot
+
 from .providers import DatasourceProviderError, get_datasource_provider
+from .audit import create_invocation_audit
 from .registry import PluginRegistryError, latest_plugin
 
-
-SENSITIVE_CONFIG_KEYS = frozenset({
-    "access_token",
-    "api_key",
-    "app_secret",
-    "authorization",
-    "credential",
-    "credentials",
-    "password",
-    "secret",
-    "token",
-})
+SENSITIVE_CONFIG_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "app_secret",
+        "authorization",
+        "credential",
+        "credentials",
+        "password",
+        "secret",
+        "token",
+    }
+)
 
 
 def create_datasource_sync_snapshot(datasource):
@@ -28,6 +30,7 @@ def create_datasource_sync_snapshot(datasource):
     datasource = DataSource.objects.select_related(
         "connection",
         "connection__secret_version",
+        "connection__secret_version__material",
         "lensnode",
     ).get(pk=datasource.pk)
     connection = datasource.connection
@@ -35,8 +38,23 @@ def create_datasource_sync_snapshot(datasource):
         raise PluginRegistryError("datasource connection is required")
     if connection.status != connection.Status.ACTIVE:
         raise PluginRegistryError("datasource connection is disabled")
-    if not datasource.plugin_key or datasource.plugin_key != connection.plugin_key:
-        raise PluginRegistryError("datasource and connection plugin keys differ")
+    secret_version = connection.secret_version
+    if (
+        secret_version is None
+        or secret_version.status != "active"
+        or secret_version.material.status != "active"
+        or not secret_version.encrypted_value
+    ):
+        raise PluginRegistryError(
+            "datasource connection secret is unavailable"
+        )
+    if (
+        not datasource.plugin_key
+        or datasource.plugin_key != connection.plugin_key
+    ):
+        raise PluginRegistryError(
+            "datasource and connection plugin keys differ"
+        )
     if datasource.lensnode is None:
         raise PluginRegistryError("datasource LensNode is required")
     _reject_sensitive_values(connection.config)
@@ -44,6 +62,7 @@ def create_datasource_sync_snapshot(datasource):
     _reject_sensitive_values(datasource.datasource_config)
     try:
         provider = get_datasource_provider(datasource.plugin_key)
+        provider.validate_datasource_source_type(datasource.source_type)
         endpoint = provider.validate_connection(
             connection.endpoint,
             connection.config,
@@ -65,7 +84,7 @@ def create_datasource_sync_snapshot(datasource):
         "lensnode_uuid": str(datasource.lensnode.uuid),
     }
     with transaction.atomic():
-        return ExecutionSnapshot.objects.create(
+        snapshot = ExecutionSnapshot.objects.create(
             kind=ExecutionSnapshot.Kind.DATASOURCE_SYNC,
             connection=connection,
             datasource=datasource,
@@ -75,6 +94,12 @@ def create_datasource_sync_snapshot(datasource):
             protocol_version=plugin.protocol_version,
             resolved_config=resolved_config,
         )
+        create_invocation_audit(
+            snapshot,
+            lensnode=datasource.lensnode,
+            resource_summary=datasource_config,
+        )
+        return snapshot
 
 
 def _reject_sensitive_values(value):
@@ -83,7 +108,9 @@ def _reject_sensitive_values(value):
     if isinstance(value, dict):
         for key, nested in value.items():
             if str(key).lower() in SENSITIVE_CONFIG_KEYS:
-                raise PluginRegistryError("plugin config cannot contain credentials")
+                raise PluginRegistryError(
+                    "plugin config cannot contain credentials"
+                )
             _reject_sensitive_values(nested)
     elif isinstance(value, list):
         for nested in value:

@@ -2,10 +2,14 @@
 
 from .base import DatasourceProviderError
 from .github import GitHubDatasourceProvider
+from .gitlab import GitLabDatasourceProvider
+from .jira import JiraDatasourceProvider
 
 
 PROVIDERS = {
     "github": GitHubDatasourceProvider(),
+    "gitlab": GitLabDatasourceProvider(),
+    "jira": JiraDatasourceProvider(),
 }
 
 

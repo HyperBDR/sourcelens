@@ -7,22 +7,58 @@ from pathlib import Path
 
 from django.conf import settings
 
-
 PLUGIN_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 PLUGIN_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+RESOURCE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+CONNECTION_WRITE_TARGET_PATTERN = re.compile(
+    r"^(endpoint|secret_value|config\.[a-z][a-z0-9_-]{0,63}|"
+    r"allowed_scope\.[a-z][a-z0-9_-]{0,63})$"
+)
 SUPPORTED_PROTOCOL_VERSION = 1
-ALLOWED_HANDLERS = frozenset({"github_v1", "github_datasource_v1"})
+ALLOWED_HANDLERS = frozenset(
+    {
+        "github_v1",
+        "github_datasource_v1",
+        "gitlab_v1",
+        "gitlab_datasource_v1",
+        "jira_v1",
+        "jira_datasource_v1",
+    }
+)
 ALLOWED_TOOL_ARGUMENTS = {
     "github_read_file": frozenset({"repository", "path", "ref"}),
-    "github_search_code": frozenset({
-        "repository",
-        "query",
-        "path",
-        "ref",
-        "max_results",
-    }),
+    "github_search_code": frozenset(
+        {
+            "repository",
+            "query",
+            "path",
+            "ref",
+            "max_results",
+        }
+    ),
+    "gitlab_read_file": frozenset({"project", "path", "ref"}),
+    "gitlab_search_code": frozenset(
+        {"project", "query", "path", "ref", "max_results"}
+    ),
+    "jira_get_issue": frozenset({"issue_key"}),
+    "jira_search_issues": frozenset(
+        {"project", "query", "max_results"}
+    ),
 }
-READ_ONLY_TOOL_CAPABILITIES = frozenset({"repository.read"})
+READ_ONLY_TOOL_CAPABILITIES = frozenset(
+    {"issue.read", "jira.issue.search", "repository.read"}
+)
+DATASOURCE_SOURCE_TYPES = frozenset({"git", "jira"})
+SCHEMA_TYPES = frozenset({"array", "boolean", "integer", "string"})
+SCHEMA_FORMATS = frozenset(
+    {
+        "password",
+        "provider-resource",
+        "provider-resource-option",
+        "repository-path",
+        "uri",
+    }
+)
 
 
 class PluginRegistryError(ValueError):
@@ -40,6 +76,11 @@ class InstalledPlugin:
     key: str
     version: str
     protocol_version: int
+    display_name: str
+    description: str
+    datasource_source_type: str
+    connection_schema: dict
+    datasource_schema: dict
     runtime_handler: str
     datasource_handler: str
     tools: tuple
@@ -78,7 +119,9 @@ def discover_plugins():
                 plugin = _load_plugin(root, key_dir, version_dir)
                 identity = (plugin.key, plugin.version)
                 if identity in identities:
-                    raise PluginRegistryError("duplicate plugin key and version")
+                    raise PluginRegistryError(
+                        "duplicate plugin key and version"
+                    )
                 identities.add(identity)
                 plugins.append(plugin)
     return plugins
@@ -112,7 +155,9 @@ def _load_plugin(root, key_dir, version_dir):
     try:
         manifest = json.loads(resolved_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise PluginRegistryError("plugin manifest must be valid JSON") from exc
+        raise PluginRegistryError(
+            "plugin manifest must be valid JSON"
+        ) from exc
     if not isinstance(manifest, dict):
         raise PluginRegistryError("plugin manifest must be an object")
 
@@ -122,10 +167,14 @@ def _load_plugin(root, key_dir, version_dir):
     handlers = manifest.get("handlers")
     if not isinstance(key, str) or not PLUGIN_KEY_PATTERN.fullmatch(key):
         raise PluginRegistryError("plugin key is invalid")
-    if not isinstance(version, str) or not PLUGIN_VERSION_PATTERN.fullmatch(version):
+    if not isinstance(version, str) or not PLUGIN_VERSION_PATTERN.fullmatch(
+        version
+    ):
         raise PluginRegistryError("plugin version is invalid")
     if key != key_dir.name or version != version_dir.name:
-        raise PluginRegistryError("plugin manifest does not match directory identity")
+        raise PluginRegistryError(
+            "plugin manifest does not match directory identity"
+        )
     if protocol_version != SUPPORTED_PROTOCOL_VERSION:
         raise PluginRegistryError("plugin protocol version is unsupported")
     if not isinstance(handlers, dict):
@@ -137,10 +186,37 @@ def _load_plugin(root, key_dir, version_dir):
     if datasource_handler not in ALLOWED_HANDLERS:
         raise PluginRegistryError("plugin datasource handler is not allowed")
     tools = _validate_tools(manifest.get("tools") or [])
+    display_name = _bounded_manifest_text(
+        manifest.get("display_name") or key,
+        "plugin display name",
+        160,
+    )
+    description = _bounded_manifest_text(
+        manifest.get("description") or "",
+        "plugin description",
+        1000,
+        required=False,
+    )
+    datasource_source_type = manifest.get("datasource_source_type", "git")
+    if datasource_source_type not in DATASOURCE_SOURCE_TYPES:
+        raise PluginRegistryError("plugin datasource source type is invalid")
+    connection_schema = _validate_form_schema(
+        manifest.get("connection_schema"),
+        "connection",
+    )
+    datasource_schema = _validate_form_schema(
+        manifest.get("datasource_schema"),
+        "datasource",
+    )
     return InstalledPlugin(
         key=key,
         version=version,
         protocol_version=protocol_version,
+        display_name=display_name,
+        description=description,
+        datasource_source_type=datasource_source_type,
+        connection_schema=connection_schema,
+        datasource_schema=datasource_schema,
         runtime_handler=runtime_handler,
         datasource_handler=datasource_handler,
         tools=tools,
@@ -201,9 +277,8 @@ def _validate_tool_schema(tool_key, value):
     if not isinstance(properties, dict) or not isinstance(required, list):
         raise PluginRegistryError("plugin tool input schema is invalid")
     allowed = ALLOWED_TOOL_ARGUMENTS[tool_key]
-    if (
-        set(properties).difference(allowed)
-        or set(required).difference(properties)
+    if set(properties).difference(allowed) or set(required).difference(
+        properties
     ):
         raise PluginRegistryError("plugin tool input schema is not allowed")
     for name, field in properties.items():
@@ -218,3 +293,142 @@ def _validate_tool_schema(tool_key, value):
         "required": required,
         "additionalProperties": False,
     }
+
+
+def _validate_form_schema(value, label):
+    """Return a bounded JSON Schema subset for administrator forms."""
+
+    if value is None:
+        return {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        }
+    if not isinstance(value, dict) or value.get("type") != "object":
+        raise PluginRegistryError(f"plugin {label} schema is invalid")
+    properties = value.get("properties") or {}
+    required = value.get("required") or []
+    if (
+        not isinstance(properties, dict)
+        or len(properties) > 20
+        or not isinstance(required, list)
+        or len(set(required)) != len(required)
+        or set(required).difference(properties)
+    ):
+        raise PluginRegistryError(f"plugin {label} schema is invalid")
+    normalized = {}
+    for key, field in properties.items():
+        if (
+            not isinstance(key, str)
+            or not PLUGIN_KEY_PATTERN.fullmatch(key)
+            or not isinstance(field, dict)
+            or field.get("type") not in SCHEMA_TYPES
+        ):
+            raise PluginRegistryError(f"plugin {label} field is invalid")
+        field_format = field.get("format")
+        if field_format is not None and field_format not in SCHEMA_FORMATS:
+            raise PluginRegistryError(
+                f"plugin {label} field format is invalid"
+            )
+        safe_field = {
+            "type": field["type"],
+            "title": _bounded_manifest_text(
+                field.get("title") or key,
+                f"plugin {label} field title",
+                160,
+            ),
+        }
+        description = field.get("description")
+        if description:
+            safe_field["description"] = _bounded_manifest_text(
+                description,
+                f"plugin {label} field description",
+                500,
+            )
+        if field_format is not None:
+            safe_field["format"] = field_format
+        resource = field.get("resource")
+        if resource is not None:
+            if (
+                not isinstance(resource, str)
+                or not RESOURCE_KEY_PATTERN.fullmatch(resource)
+            ):
+                raise PluginRegistryError(
+                    f"plugin {label} field resource is invalid"
+                )
+            safe_field["resource"] = resource
+        depends_on = field.get("depends_on")
+        if depends_on is not None:
+            if (
+                not isinstance(depends_on, str)
+                or not PLUGIN_KEY_PATTERN.fullmatch(depends_on)
+            ):
+                raise PluginRegistryError(
+                    f"plugin {label} field dependency is invalid"
+                )
+            safe_field["depends_on"] = depends_on
+        if field_format == "provider-resource":
+            if resource is None or depends_on is not None:
+                raise PluginRegistryError(
+                    f"plugin {label} field resource is invalid"
+                )
+        elif field_format == "provider-resource-option":
+            if resource is None or depends_on is None:
+                raise PluginRegistryError(
+                    f"plugin {label} field dependency is invalid"
+                )
+        elif resource is not None or depends_on is not None:
+            raise PluginRegistryError(
+                f"plugin {label} field resource is invalid"
+            )
+        if "default" in field and isinstance(
+            field["default"],
+            (str, int, bool),
+        ):
+            safe_field["default"] = field["default"]
+        if field["type"] == "array":
+            items = field.get("items")
+            if not isinstance(items, dict) or items.get("type") != "string":
+                raise PluginRegistryError(
+                    f"plugin {label} array field is invalid"
+                )
+            safe_field["items"] = {"type": "string"}
+        write_to = field.get("write_to")
+        if write_to is not None:
+            if (
+                label != "connection"
+                or not isinstance(write_to, str)
+                or not CONNECTION_WRITE_TARGET_PATTERN.fullmatch(write_to)
+            ):
+                raise PluginRegistryError(
+                    f"plugin {label} field write target is invalid"
+                )
+            safe_field["write_to"] = write_to
+        normalized[key] = safe_field
+    for field in normalized.values():
+        depends_on = field.get("depends_on")
+        if depends_on is None:
+            continue
+        dependency = normalized.get(depends_on)
+        if dependency is None or dependency.get("format") != "provider-resource":
+            raise PluginRegistryError(
+                f"plugin {label} field dependency is invalid"
+            )
+    return {
+        "type": "object",
+        "properties": normalized,
+        "required": list(required),
+        "additionalProperties": False,
+    }
+
+
+def _bounded_manifest_text(value, label, limit, required=True):
+    """Return one bounded display string from an installed manifest."""
+
+    if not isinstance(value, str):
+        raise PluginRegistryError(f"{label} is invalid")
+    text = value.strip()
+    if (required and not text) or len(text) > limit:
+        raise PluginRegistryError(f"{label} is invalid")
+    return text

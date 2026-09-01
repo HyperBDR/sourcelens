@@ -183,7 +183,10 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
             "resolved_config": {
                 "endpoint": "https://github.com",
                 "target_path": "/workspace/repo",
-                "datasource_config": {"repository": "owner/repo"},
+                "datasource_config": {
+                    "repository": "owner/repo",
+                    "directory": "docs",
+                },
             },
         },
     )
@@ -199,6 +202,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
 
     def fake_sync(command, workspace, emit):
         seen["token"] = command["config"].get("access_token")
+        seen["directory"] = command["config"].get("directory")
         return {"status": "success"}
 
     monkeypatch.setattr("lensnode.main.sync_datasource", fake_sync)
@@ -208,6 +212,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     )
     assert result["status"] == "success"
     assert seen["token"] == "secret"
+    assert seen["directory"] == "docs"
 
 
 def test_plugin_sync_rejects_material_for_another_endpoint(monkeypatch):
@@ -321,4 +326,118 @@ def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
     )
 
     assert result["error"] == "PLUGIN_MATERIAL_MISMATCH"
+    assert material["value"] == ""
+
+
+def test_gitlab_plugin_sync_builds_git_command_from_snapshot(monkeypatch):
+    client = LensNodeClient.__new__(LensNodeClient)
+    client.config = SimpleNamespace(
+        ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
+        token="node-token",
+        workspace_path="/workspace",
+    )
+    client.gateway_http_client = object()
+    monkeypatch.setattr(
+        "lensnode.main.fetch_plugin_snapshot",
+        lambda *args: {
+            "plugin_key": "gitlab",
+            "datasource_uuid": "datasource-1",
+            "resolved_config": {
+                "endpoint": "https://gitlab.internal.example",
+                "target_path": "/workspace/repo",
+                "datasource_config": {
+                    "project": "platform/backend/sourcelens",
+                    "branch": "main",
+                    "directory": "docs",
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.main.acquire_plugin_lease",
+        lambda *args: {"lease_uuid": "lease-1"},
+    )
+    material = {
+        "plugin_key": "gitlab",
+        "endpoint": "https://gitlab.internal.example",
+        "value": "gitlab-secret",
+    }
+    monkeypatch.setattr(
+        "lensnode.main.retrieve_plugin_material",
+        lambda *args: material,
+    )
+    seen = {}
+
+    def fake_sync(command, workspace, emit):
+        seen.update(command)
+        return {"status": "success"}
+
+    monkeypatch.setattr("lensnode.main.sync_datasource", fake_sync)
+
+    result = client._execute_plugin_datasource_sync(
+        {"snapshot_uuid": "snapshot-1"}
+    )
+
+    assert result["status"] == "success"
+    assert seen["config"]["repo_url"] == (
+        "https://gitlab.internal.example/platform/backend/sourcelens.git"
+    )
+    assert seen["config"]["access_token"] == "gitlab-secret"
+    assert material["value"] == ""
+
+
+def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
+    client = LensNodeClient.__new__(LensNodeClient)
+    client.config = SimpleNamespace(
+        ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
+        token="node-token",
+        workspace_path="/workspace",
+    )
+    client.gateway_http_client = object()
+    monkeypatch.setattr(
+        "lensnode.main.fetch_plugin_snapshot",
+        lambda *args: {
+            "plugin_key": "jira",
+            "datasource_uuid": "datasource-1",
+            "resolved_config": {
+                "endpoint": "https://company.atlassian.net",
+                "connection_config": {"email": "admin@example.com"},
+                "target_path": "/workspace/jira",
+                "datasource_config": {
+                    "project": "SL",
+                    "max_issues": 50,
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.main.acquire_plugin_lease",
+        lambda *args: {"lease_uuid": "lease-1"},
+    )
+    material = {
+        "plugin_key": "jira",
+        "endpoint": "https://company.atlassian.net",
+        "value": "jira-api-token",
+    }
+    monkeypatch.setattr(
+        "lensnode.main.retrieve_plugin_material",
+        lambda *args: material,
+    )
+    seen = {}
+
+    def fake_sync(command, workspace, emit):
+        seen.update(command)
+        return {"status": "success"}
+
+    monkeypatch.setattr("lensnode.main.sync_datasource", fake_sync)
+
+    result = client._execute_plugin_datasource_sync(
+        {"snapshot_uuid": "snapshot-1"}
+    )
+
+    assert result["status"] == "success"
+    assert seen["source_type"] == "jira"
+    assert seen["config"]["project"] == "SL"
+    assert seen["config"]["email"] == "admin@example.com"
+    assert seen["config"]["access_token"] == "jira-api-token"
     assert material["value"] == ""

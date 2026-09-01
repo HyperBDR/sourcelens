@@ -408,6 +408,9 @@
         :config="datasourceConfig"
         :lensnodes="lensnodes"
         :credentials="credentials"
+        :connections="connections"
+        :plugins="plugins"
+        :plugin-manifest="currentPluginManifest"
         :llm-config-options="llmConfigOptions"
         v-model:sync-interval-seconds="syncIntervalSeconds"
         v-model:sync-policy-mode="syncPolicyMode"
@@ -463,9 +466,13 @@ import {
   checkLensNodeDataSourcePath,
   createDataSource,
   deleteDataSource,
+  getConnectionResources,
+  getPluginManifest,
   listCredentials,
+  listConnections,
   listDataSources,
   listLensNodes,
+  listPlugins,
   scanLensNodeDirs,
   refreshDataSourceAvailability,
   uploadDataSourceFile,
@@ -528,6 +535,9 @@ const searchInputRef = ref(null)
 const searchValueInputRef = ref(null)
 const lensnodes = ref([])
 const credentials = ref([])
+const connections = ref([])
+const plugins = ref([])
+const pluginManifests = ref({})
 const llmConfigOptions = ref([])
 const selectedDataSource = ref(null)
 const uploadInput = ref(null)
@@ -567,6 +577,10 @@ const dynamicRefreshInFlight = ref(false)
 
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(totalDataSources.value / pageSize.value))
+)
+
+const currentPluginManifest = computed(
+  () => pluginManifests.value[form.value.plugin_key] || null
 )
 
 const datasourceSearchOptions = computed(() => [
@@ -815,6 +829,12 @@ function closeDataSourceDetail() {
 }
 
 function formatSourceType(sourceType) {
+  if (isPluginSourceType(sourceType)) {
+    const plugin = plugins.value.find(
+      (item) => item.key === pluginKeyFromSourceType(sourceType)
+    )
+    return plugin?.display_name || pluginKeyFromSourceType(sourceType)
+  }
   if (isGitSourceType(sourceType)) {
     if (sourceType === 'github') return 'GitHub'
     if (sourceType === 'gitlab') return 'GitLab'
@@ -834,12 +854,26 @@ function isGitSourceType(sourceType) {
 }
 
 function normalizedSourceType(sourceType) {
+  if (isPluginSourceType(sourceType)) {
+    return currentPluginManifest.value?.datasource_source_type || ''
+  }
   return isGitSourceType(sourceType) ? 'git' : sourceType
+}
+
+function isPluginSourceType(sourceType) {
+  return String(sourceType || '').startsWith('plugin:')
+}
+
+function pluginKeyFromSourceType(sourceType) {
+  return isPluginSourceType(sourceType) ? sourceType.slice(7) : ''
 }
 
 function uiSourceTypeFromRow(row) {
   if (row?.source_type !== 'git') {
     return row?.source_type || 'feishu'
+  }
+  if (row?.plugin_key && row?.connection) {
+    return `plugin:${row.plugin_key}`
   }
   const credentialUuid = row?.credential || ''
   const credential = credentials.value.find(
@@ -882,16 +916,32 @@ async function load() {
   loading.value = true
   formError.value = ''
   try {
-    const [dataSourceRows, lensnodeRows, credentialRows, llmConfigRows] =
-      await Promise.all([
-        listDataSources(datasourceListParams()),
-        listLensNodes(),
-        listCredentials(),
-        llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
-      ])
+    const [
+      dataSourceRows,
+      lensnodeRows,
+      credentialRows,
+      connectionRows,
+      installedPlugins,
+      llmConfigRows
+    ] = await Promise.all([
+      listDataSources(datasourceListParams()),
+      listLensNodes(),
+      listCredentials(),
+      listConnections({ status: 'active' }),
+      listPlugins(),
+      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
+    ])
     applyDataSourceRows(dataSourceRows, { selectFallback: true })
     lensnodes.value = normalizeList(lensnodeRows)
     credentials.value = normalizeList(credentialRows)
+    connections.value = normalizeList(connectionRows)
+    plugins.value = normalizeList(installedPlugins)
+    const manifests = await Promise.all(
+      plugins.value.map((plugin) => getPluginManifest(plugin.key))
+    )
+    pluginManifests.value = Object.fromEntries(
+      manifests.map((manifest) => [manifest.key, manifest])
+    )
     llmConfigOptions.value = normalizeList(llmConfigRows)
     updateDynamicRefresh()
   } catch (error) {
@@ -1014,14 +1064,17 @@ function closeDrawer() {
 }
 
 function defaultForm() {
+  const defaultPluginKey = plugins.value[0]?.key || ''
   const seed = {
     name: '',
-    source_type: 'github',
+    source_type: defaultPluginKey ? `plugin:${defaultPluginKey}` : 'gitlab',
     lensnode_uuid: '',
     workspace_relative_path: '',
     target_path: '',
     credential_uuid: '',
     credential_configured: false,
+    connection_uuid: '',
+    plugin_key: defaultPluginKey,
     conversion_document: true,
     conversion_document_model_ref: '',
     conversion_image: false,
@@ -1060,6 +1113,8 @@ function formFromRow(row) {
     target_path: row.target_path || '',
     credential_uuid: row.credential || '',
     credential_configured: !!row.credential_configured,
+    connection_uuid: row.connection || '',
+    plugin_key: row.plugin_key || '',
     conversion_document: row.sync_policy?.conversion?.document === true,
     conversion_document_model_ref:
       row.sync_policy?.conversion?.document_model_ref || '',
@@ -1094,6 +1149,9 @@ function formFromRow(row) {
 }
 
 function datasourceConfigFromRow(row) {
+  if (row.plugin_key && row.connection) {
+    return { ...(row.datasource_config || {}) }
+  }
   if (row.source_type === 'feishu') {
     return {
       ...(row.config || {}),
@@ -1119,6 +1177,9 @@ function datasourceConfigFromRow(row) {
 }
 
 function cachedDatasourceConnectionResult(row) {
+  if (row.plugin_key && row.connection) {
+    return null
+  }
   const config = datasourceConfig.value || {}
   if (row.source_type === 'git' && Array.isArray(config.git_repositories)) {
     return {
@@ -1160,9 +1221,18 @@ function handleDatasourceTypeChange(seed = null) {
   resetDatasourceSyncPolicy()
   if (!seed) {
     form.value.credential_uuid = ''
+    form.value.connection_uuid = ''
+    form.value.plugin_key = ''
   }
   const sourceType = seed?.source_type || form.value.source_type
-  if (isGitSourceType(sourceType)) {
+  if (isPluginSourceType(sourceType)) {
+    const pluginKey = pluginKeyFromSourceType(sourceType)
+    datasourceConfig.value = datasourceSchemaDefaults(
+      pluginManifests.value[pluginKey]?.datasource_schema
+    )
+    if (seed) seed.plugin_key = pluginKey
+    else form.value.plugin_key = pluginKey
+  } else if (isGitSourceType(sourceType)) {
     datasourceConfig.value = {
       repo_url: '',
       branch: '',
@@ -1241,7 +1311,7 @@ async function save() {
 
 function buildPayload() {
   const managedWorkspace = form.value.source_type === 'managed_workspace'
-  return {
+  const payload = {
     name: form.value.name,
     source_type: normalizedSourceType(form.value.source_type),
     lensnode_uuid: form.value.lensnode_uuid,
@@ -1253,6 +1323,44 @@ function buildPayload() {
       ? form.value.credential_uuid
       : null
   }
+  if (isPluginSourceType(form.value.source_type)) {
+    payload.plugin_key = form.value.plugin_key
+    payload.connection_uuid = form.value.connection_uuid
+    payload.datasource_config = buildPluginDatasourceConfig()
+    payload.config = {}
+    payload.credential_uuid = null
+  } else {
+    payload.connection_uuid = null
+    payload.plugin_key = ''
+    payload.datasource_config = {}
+  }
+  return payload
+}
+
+function buildPluginDatasourceConfig() {
+  const config = datasourceConfig.value || {}
+  const properties =
+    currentPluginManifest.value?.datasource_schema?.properties || {}
+  return Object.fromEntries(
+    Object.keys(properties)
+      .filter((key) => hasDatasourceFieldValue(config[key]))
+      .map((key) => [key, config[key]])
+  )
+}
+
+function datasourceSchemaDefaults(schema) {
+  return Object.fromEntries(
+    Object.entries(schema?.properties || {}).map(([key, field]) => [
+      key,
+      field.default ?? (field.type === 'array' ? [] : '')
+    ])
+  )
+}
+
+function hasDatasourceFieldValue(value) {
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === 'string') return value.trim().length > 0
+  return value !== null && value !== undefined && value !== ''
 }
 
 async function buildCreatePayloads() {
@@ -1279,6 +1387,9 @@ async function buildCreatePayloads() {
 }
 
 function buildDatasourceConfig() {
+  if (isPluginSourceType(form.value.source_type)) {
+    return {}
+  }
   const config = { ...datasourceConfig.value }
   if (isGitSourceType(form.value.source_type)) {
     if (Array.isArray(config.git_repositories)) {
@@ -1452,6 +1563,14 @@ function resetDatasourceConnectionResult() {
     suppressDatasourceConnectionReset.value = false
     return
   }
+  if (
+    isPluginSourceType(form.value.source_type) &&
+    datasourceConnectionResult.value?.status === 'success' &&
+    datasourceConnectionResult.value?.details?.connection_uuid ===
+      form.value.connection_uuid
+  ) {
+    return
+  }
   if (shouldKeepGitBranchConnectionResult()) {
     datasourceConnectionResult.value = {
       ...datasourceConnectionResult.value,
@@ -1471,6 +1590,21 @@ async function testDatasourceConnection() {
   testingDatasourceConnection.value = true
   datasourceConnectionResult.value = null
   try {
+    if (isPluginSourceType(form.value.source_type)) {
+      if (!form.value.connection_uuid) return
+      const resources = await getConnectionResources(form.value.connection_uuid)
+      datasourceConnectionResult.value = {
+        status: 'success',
+        message: 'GitHub resources are available.',
+        details: {
+          ...resources,
+          connection_uuid: form.value.connection_uuid
+        }
+      }
+      datasourceConnectionBaseSignature.value =
+        datasourceConnectionSignature(true)
+      return
+    }
     const result = await testLensNodeDataSourceConnection(
       form.value.lensnode_uuid,
       {
@@ -1499,6 +1633,9 @@ async function testDatasourceConnection() {
 }
 
 function shouldUseDatasourceCredential() {
+  if (isPluginSourceType(form.value.source_type)) {
+    return false
+  }
   if (!form.value.credential_uuid) {
     return false
   }
@@ -1551,6 +1688,9 @@ async function refreshDirectories() {
 }
 
 function applyDatasourceConnectionResult(result) {
+  if (isPluginSourceType(form.value.source_type)) {
+    return
+  }
   if (
     !isGitSourceType(form.value.source_type) ||
     result?.status !== 'success'
@@ -1606,12 +1746,16 @@ function shouldKeepGitBranchConnectionResult() {
 }
 
 function datasourceConnectionSignature(ignoreBranch = false) {
-  const config = buildDatasourceConfig()
+  const config =
+    isPluginSourceType(form.value.source_type)
+      ? buildPluginDatasourceConfig()
+      : buildDatasourceConfig()
   if (ignoreBranch) {
     delete config.branch
   }
   return JSON.stringify({
     lensnode_uuid: form.value.lensnode_uuid || '',
+    connection_uuid: form.value.connection_uuid || '',
     source_type: normalizedSourceType(form.value.source_type) || '',
     config
   })
@@ -1620,6 +1764,7 @@ function datasourceConnectionSignature(ignoreBranch = false) {
 function isGitOrganizationCreateMode() {
   return (
     mode.value === 'create' &&
+    !isPluginSourceType(form.value.source_type) &&
     isGitSourceType(form.value.source_type) &&
     Array.isArray(datasourceConnectionResult.value?.details?.repositories) &&
     datasourceConnectionResult.value.details.repositories.length > 0
@@ -1637,6 +1782,7 @@ function selectedGitOrganizationRepositories() {
 
 function isGitOrganizationSelectionMode() {
   return (
+    !isPluginSourceType(form.value.source_type) &&
     isGitSourceType(form.value.source_type) &&
     Array.isArray(datasourceConfig.value.git_repositories)
   )
@@ -1821,9 +1967,7 @@ async function uploadFile(event) {
     )
     await load()
   } catch (error) {
-    showError(
-      extractErrorMessage(error, t('lensAdmin.messages.uploadFailed'))
-    )
+    showError(extractErrorMessage(error, t('lensAdmin.messages.uploadFailed')))
   } finally {
     uploadDataSource.value = null
   }

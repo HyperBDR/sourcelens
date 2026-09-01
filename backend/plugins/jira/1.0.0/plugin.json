@@ -1,0 +1,99 @@
+{
+  "key": "jira",
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "display_name": "Jira Cloud",
+  "description": "Connect approved Jira Cloud projects as Issue data sources and read-only assistant tools.",
+  "datasource_source_type": "jira",
+  "handlers": {
+    "runtime": "jira_v1",
+    "datasource": "jira_datasource_v1"
+  },
+  "connection_schema": {
+    "type": "object",
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "format": "uri",
+        "title": "Jira Cloud endpoint",
+        "description": "Root HTTPS endpoint under atlassian.net.",
+        "write_to": "endpoint"
+      },
+      "email": {
+        "type": "string",
+        "title": "Account email",
+        "description": "Non-secret email paired with the Jira Cloud API Token.",
+        "write_to": "config.email"
+      },
+      "secret_value": {
+        "type": "string",
+        "format": "password",
+        "title": "API Token",
+        "description": "A write-only Jira Cloud API Token with read access.",
+        "write_to": "secret_value"
+      },
+      "projects": {
+        "type": "array",
+        "format": "provider-resource",
+        "resource": "projects",
+        "title": "Allowed projects",
+        "description": "Explicit Jira project keys this connection may access.",
+        "write_to": "allowed_scope.projects",
+        "items": {"type": "string"}
+      }
+    },
+    "required": ["endpoint", "email", "secret_value", "projects"],
+    "additionalProperties": false
+  },
+  "datasource_schema": {
+    "type": "object",
+    "properties": {
+      "project": {
+        "type": "string",
+        "format": "provider-resource",
+        "resource": "projects",
+        "title": "Project"
+      },
+      "max_issues": {
+        "type": "integer",
+        "title": "Maximum issues",
+        "description": "Export up to 100 most recently updated Issues.",
+        "default": 100
+      }
+    },
+    "required": ["project"],
+    "additionalProperties": false
+  },
+  "tools": [
+    {
+      "key": "jira_get_issue",
+      "description": "Read one Issue from an approved Jira Cloud project.",
+      "capability": "issue.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "issue_key": {"type": "string"}
+        },
+        "required": ["issue_key"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "jira_search_issues",
+      "description": "Search Issues by text within one approved Jira Cloud project.",
+      "capability": "jira.issue.search",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {"type": "string"},
+          "query": {"type": "string"},
+          "max_results": {"type": "integer"}
+        },
+        "required": ["project", "query"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

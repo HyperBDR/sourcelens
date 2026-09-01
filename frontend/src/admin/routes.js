@@ -57,6 +57,12 @@ export const adminRoutes = [
     meta: { requiresAuth: true, requiredFeature: 'admin_console' }
   },
   {
+    path: '/management/lens/resources/connections',
+    name: 'LensConnections',
+    component: () => import('@/pages/lens/Connections.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
     path: '/management/lens/resources/credentials',
     name: 'LensCredentials',
     component: () => import('@/pages/lens/Credentials.vue'),

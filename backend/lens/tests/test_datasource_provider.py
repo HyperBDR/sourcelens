@@ -1,7 +1,9 @@
-from django.test import SimpleTestCase
+from threading import Barrier
 
-from lens.plugins.providers.github import GitHubDatasourceProvider
+import httpx
+from django.test import SimpleTestCase
 from lens.plugins.providers.base import DatasourceProviderError
+from lens.plugins.providers.github import GitHubDatasourceProvider
 
 
 class GitHubDatasourceProviderTests(SimpleTestCase):
@@ -41,6 +43,26 @@ class GitHubDatasourceProviderTests(SimpleTestCase):
                 },
             )
 
+    def test_rejects_overlong_branch_and_directory_values(self):
+        invalid_configs = [
+            {
+                "repository": "HyperBDR/sourcelens",
+                "branch": "b" * 256,
+            },
+            {
+                "repository": "HyperBDR/sourcelens",
+                "directory": "d" * 1001,
+            },
+        ]
+
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                with self.assertRaises(DatasourceProviderError):
+                    self.provider.validate_datasource_config(
+                        self.scope,
+                        config,
+                    )
+
     def test_rejects_non_github_connection_endpoint(self):
         with self.assertRaisesMessage(DatasourceProviderError, "endpoint"):
             self.provider.validate_connection(
@@ -52,4 +74,133 @@ class GitHubDatasourceProviderTests(SimpleTestCase):
         self.assertEqual(
             self.provider.validate_connection("https://github.com/", {}),
             "https://github.com",
+        )
+
+    def test_rejects_non_git_datasource_source_type(self):
+        with self.assertRaisesMessage(DatasourceProviderError, "source type"):
+            self.provider.validate_datasource_source_type("feishu")
+
+    def test_normalizes_connection_repository_scope(self):
+        scope = self.provider.validate_connection_scope(
+            {
+                "repositories": [" HyperBDR/sourcelens/", "owner/repo"],
+            }
+        )
+
+        self.assertEqual(
+            scope,
+            {"repositories": ["HyperBDR/sourcelens", "owner/repo"]},
+        )
+
+    def test_live_validation_rejects_redirect_without_leaking_body(self):
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(
+                302,
+                headers={"Location": "https://evil.example"},
+                text="provider-secret-body",
+                request=request,
+            )
+        )
+
+        with httpx.Client(transport=transport) as client:
+            with self.assertRaisesMessage(
+                DatasourceProviderError,
+                "GITHUB_REDIRECT_REJECTED",
+            ) as error:
+                self.provider.validate_live_connection("secret", client=client)
+
+        self.assertNotIn("provider-secret-body", str(error.exception))
+
+    def test_discovers_only_allowed_repository_metadata(self):
+        def handler(request):
+            if request.url.path == "/repos/owner/repo":
+                return httpx.Response(
+                    200,
+                    json={
+                        "full_name": "owner/repo",
+                        "default_branch": "main",
+                        "private": True,
+                    },
+                    request=request,
+                )
+            if request.url.path == "/repos/owner/repo/branches":
+                return httpx.Response(
+                    200,
+                    json=[{"name": "main"}, {"name": "release"}],
+                    request=request,
+                )
+            raise AssertionError(request.url)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            resources = self.provider.discover_resources(
+                {"repositories": ["owner/repo"]},
+                "secret",
+                client=client,
+            )
+
+        self.assertEqual(
+            resources,
+            {
+                "resources": {
+                    "repositories": {
+                        "items": [
+                            {
+                                "value": "owner/repo",
+                                "label": "owner/repo",
+                                "metadata": {
+                                    "default_branch": "main",
+                                    "private": True,
+                                },
+                                "options": {
+                                    "branches": [
+                                        {"value": "main", "label": "main"},
+                                        {
+                                            "value": "release",
+                                            "label": "release",
+                                        },
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                }
+            },
+        )
+
+    def test_discovers_allowed_repositories_in_parallel(self):
+        metadata_barrier = Barrier(2, timeout=2)
+
+        def handler(request):
+            repository = request.url.path.split("/")[2:4]
+            name = "/".join(repository)
+            if request.url.path.endswith("/branches"):
+                return httpx.Response(
+                    200,
+                    json=[{"name": "main"}],
+                    request=request,
+                )
+            metadata_barrier.wait()
+            return httpx.Response(
+                200,
+                json={
+                    "full_name": name,
+                    "default_branch": "main",
+                    "private": False,
+                },
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            resources = self.provider.discover_resources(
+                {"repositories": ["owner/one", "owner/two"]},
+                "secret",
+                client=client,
+            )
+
+        self.assertEqual(
+            [
+                item["value"]
+                for item in resources["resources"]["repositories"]["items"]
+            ],
+            ["owner/one", "owner/two"],
         )

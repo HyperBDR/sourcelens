@@ -36,6 +36,7 @@ from .plugins import (
     PluginCredentialLeaseView,
     PluginCredentialMaterialView,
     PluginExecutionSnapshotView,
+    PluginInvocationViewSet,
     PluginRegistryViewSet,
     PluginToolExecutionSnapshotView,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "PluginCredentialLeaseView",
     "PluginCredentialMaterialView",
     "PluginExecutionSnapshotView",
+    "PluginInvocationViewSet",
     "PluginToolExecutionSnapshotView",
     "ConnectionViewSet",
     "RunCitationSourceView",

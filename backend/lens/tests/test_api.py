@@ -137,6 +137,7 @@ def skill_zip_upload(
     environment=None,
     api=None,
     transforms=None,
+    required_plugins=None,
     package_files=None,
 ):
     """Return an uploaded zip containing one SKILL.md."""
@@ -153,7 +154,10 @@ def skill_zip_upload(
         archive.writestr(f"{name}/SKILL.md", skill_md)
         for path, content in (package_files or {}).items():
             archive.writestr(f"{name}/{path}", content)
-        if any(value is not None for value in (environment, api, transforms)):
+        if any(
+            value is not None
+            for value in (environment, api, transforms, required_plugins)
+        ):
             config = {}
             if environment is not None:
                 config["environment"] = environment
@@ -161,6 +165,8 @@ def skill_zip_upload(
                 config["api"] = api
             if transforms is not None:
                 config["transforms"] = transforms
+            if required_plugins is not None:
+                config["required_plugins"] = required_plugins
             archive.writestr(
                 f"{name}/sourcelens.json",
                 json.dumps(config),
@@ -1367,6 +1373,34 @@ class LensApiTests(TestCase):
         self.assertEqual(
             response.data["definition"]["environment"],
             environment,
+        )
+
+    def test_uploaded_skill_reads_plugin_capability_requirements(self):
+        required_plugins = [
+            {
+                "plugin": "github",
+                "capabilities": ["repository.read"],
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.settings(STORAGE_ROOT=temp_dir):
+                response = self.client.post(
+                    "/api/lens/admin/skills/upload/",
+                    {
+                        "file": skill_zip_upload(
+                            "github-workflow",
+                            "Use the installed GitHub Plugin tools.",
+                            required_plugins=required_plugins,
+                        )
+                    },
+                    format="multipart",
+                )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data["definition"]["required_plugins"],
+            required_plugins,
         )
 
     def test_uploaded_skill_accepts_thirty_five_megabyte_package_file(self):

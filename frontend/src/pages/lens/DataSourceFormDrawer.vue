@@ -107,7 +107,62 @@
       <p class="text-sm text-ink-500">
         {{ t('lensAdmin.datasourceWizard.step3Desc') }}
       </p>
-      <template v-if="isGitSourceType(form.source_type)">
+      <template v-if="isPluginSourceType(form.source_type)">
+        <FormRow :label="t('lensAdmin.pages.connections.label')" required>
+          <BaseSelect
+            :model-value="form.connection_uuid"
+            @update:model-value="handlePluginConnectionChange"
+          >
+            <option value="">
+              {{ t('lensAdmin.datasourceWizard.selectConnection') }}
+            </option>
+            <option
+              v-for="connection in pluginConnections"
+              :key="connection.uuid"
+              :value="connection.uuid"
+            >
+              {{ connection.name }}
+            </option>
+          </BaseSelect>
+          <p class="mt-1 text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.createConnectionHint') }}
+            <a
+              class="font-medium text-brand-600 hover:text-brand-700"
+              href="/management/lens/resources/connections"
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              {{ t('lensAdmin.datasourceWizard.createConnectionLink') }}
+            </a>
+          </p>
+        </FormRow>
+        <div
+          v-if="selectedConnection"
+          class="rounded-md border border-line bg-surface-sunken p-3 text-xs text-ink-600"
+        >
+          <div class="font-medium text-ink-900">
+            {{ selectedConnection.name }} · {{ selectedConnection.plugin_key }}
+          </div>
+          <div class="mt-1 break-all font-mono">
+            {{ selectedConnectionScope }}
+          </div>
+        </div>
+        <div
+          v-if="testingConnection"
+          class="flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
+        >
+          <LoaderCircleIcon class="h-4 w-4 animate-spin" />
+          <span>{{ t('lensAdmin.datasourceWizard.loadingGitScope') }}</span>
+        </div>
+        <ManifestSchemaForm
+          v-else-if="datasourceSchema"
+          :model-value="config"
+          :resources="pluginResources"
+          :schema="datasourceSchema"
+          @update:model-value="updatePluginConfig"
+        />
+      </template>
+      <template v-else-if="isGitSourceType(form.source_type)">
         <FormRow :label="t('lensAdmin.fields.credential')" required>
           <div class="flex flex-col gap-2">
             <div class="flex gap-2">
@@ -296,7 +351,11 @@
         </div>
       </template>
       <div
-        v-if="isGitSourceType(form.source_type) && testingConnection"
+        v-if="
+          !isPluginSourceType(form.source_type) &&
+          isGitSourceType(form.source_type) &&
+          testingConnection
+        "
         class="flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 p-3 text-sm text-primary-700"
       >
         <LoaderCircleIcon class="h-4 w-4 animate-spin" />
@@ -304,6 +363,7 @@
       </div>
       <div
         v-if="
+          !isPluginSourceType(form.source_type) &&
           isGitSourceType(form.source_type) &&
           !testingConnection &&
           gitBranchOptions.length
@@ -319,6 +379,7 @@
       <div class="flex items-center gap-2">
         <span
           v-if="
+            !isPluginSourceType(form.source_type) &&
             isGitSourceType(form.source_type) &&
             !testingConnection &&
             !gitBranchOptions.length &&
@@ -1213,6 +1274,7 @@ import { useI18n } from 'vue-i18n'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseDrawer from '@/components/ui/BaseDrawer.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
+import ManifestSchemaForm from '@/components/lens/ManifestSchemaForm.vue'
 
 import { formatLLMConfigLabel } from './adminHelpers'
 
@@ -1223,6 +1285,9 @@ const props = defineProps({
   config: { type: Object, required: true },
   lensnodes: { type: Array, default: () => [] },
   credentials: { type: Array, default: () => [] },
+  connections: { type: Array, default: () => [] },
+  plugins: { type: Array, default: () => [] },
+  pluginManifest: { type: Object, default: null },
   llmConfigOptions: { type: Array, default: () => [] },
   syncIntervalSeconds: { type: Number, default: 3600 },
   syncPolicyMode: { type: String, default: 'interval' },
@@ -1405,11 +1470,11 @@ const drawerSubtitle = computed(() =>
 )
 
 const sourceTypes = computed(() => [
-  {
-    value: 'github',
-    label: 'GitHub',
-    description: t('lensAdmin.datasourceWizard.githubDesc')
-  },
+  ...props.plugins.map((plugin) => ({
+    value: `plugin:${plugin.key}`,
+    label: plugin.display_name,
+    description: plugin.description || ''
+  })),
   {
     value: 'gitlab',
     label: 'GitLab',
@@ -1433,6 +1498,14 @@ const selectedSourceTypeDescription = computed(() => {
   )
   return selected?.description || ''
 })
+
+const datasourceSchema = computed(
+  () => props.pluginManifest?.datasource_schema || null
+)
+
+const pluginResources = computed(
+  () => props.connectionResult?.details?.resources || {}
+)
 
 const isManagedWorkspace = computed(
   () => props.form.source_type === 'managed_workspace'
@@ -1500,6 +1573,9 @@ const canCreateTargetDirectory = computed(
 )
 
 const canTestConnection = computed(() => {
+  if (isPluginSourceType(props.form.source_type)) {
+    return !!props.form.connection_uuid
+  }
   if (!props.form.lensnode_uuid) {
     return false
   }
@@ -1565,6 +1641,15 @@ const canProceedWizard = computed(() => {
       return false
     }
     if (isGitSourceType(props.form.source_type)) {
+      if (isPluginSourceType(props.form.source_type)) {
+        return Boolean(
+          props.form.connection_uuid &&
+            schemaRequiredFieldsHaveValues(
+              datasourceSchema.value,
+              props.config
+            )
+        )
+      }
       if (isGitOrganizationMode.value) {
         return selectedGitOrganizationRepositories.value.length > 0
       }
@@ -1601,6 +1686,24 @@ const gitBranchOptions = computed(() => {
   const branches = props.connectionResult?.details?.branches
   return Array.isArray(branches) ? branches : []
 })
+
+const pluginConnections = computed(() =>
+  props.connections.filter(
+    (connection) =>
+      connection.plugin_key === props.form.plugin_key &&
+      connection.status === 'active'
+  )
+)
+
+const selectedConnection = computed(() =>
+  pluginConnections.value.find(
+    (connection) => connection.uuid === props.form.connection_uuid
+  )
+)
+
+const selectedConnectionScope = computed(() =>
+  JSON.stringify(selectedConnection.value?.allowed_scope || {})
+)
 
 const isGitOrganizationMode = computed(
   () =>
@@ -1668,6 +1771,37 @@ const filteredCredentials = computed(() => {
 
 function isGitSourceType(sourceType) {
   return ['git', 'github', 'gitlab'].includes(sourceType)
+}
+
+function isPluginSourceType(sourceType) {
+  return String(sourceType || '').startsWith('plugin:')
+}
+
+function schemaRequiredFieldsHaveValues(schema, value) {
+  const required = Array.isArray(schema?.required) ? schema.required : []
+  return required.every((key) => {
+    const fieldValue = value?.[key]
+    return Array.isArray(fieldValue)
+      ? fieldValue.length > 0
+      : String(fieldValue ?? '').trim().length > 0
+  })
+}
+
+async function handlePluginConnectionChange(connectionUuid) {
+  props.form.connection_uuid = connectionUuid
+  if (!connectionUuid) props.form.plugin_key = ''
+  Object.keys(props.config).forEach((key) => delete props.config[key])
+  emit('connection-change')
+  await nextTick()
+  testConnectionIfVisible()
+}
+
+function updatePluginConfig(value) {
+  Object.keys(props.config).forEach((key) => {
+    if (!(key in value)) delete props.config[key]
+  })
+  Object.assign(props.config, value)
+  emit('connection-change')
 }
 
 function credentialOptionLabel(credential) {
@@ -2023,6 +2157,7 @@ watch(
     props.form.lensnode_uuid,
     props.form.source_type,
     props.form.credential_uuid,
+    props.form.connection_uuid,
     datasourceConnectionConfigSignature()
   ],
   () => {
@@ -2039,6 +2174,9 @@ watch(
 )
 
 function datasourceConnectionConfigSignature() {
+  if (isPluginSourceType(props.form.source_type)) {
+    return JSON.stringify(props.config || {})
+  }
   const config = { ...(props.config || {}) }
   delete config.git_repositories
   delete config.organization_url

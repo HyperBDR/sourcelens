@@ -513,12 +513,21 @@ class MCPServer(TimestampedUUIDModel):
     class Transport(models.TextChoices):
         URL = "url", "URL"
         STDIO = "stdio", "STDIO"
+        PLUGIN = "plugin", "Plugin Adapter"
 
     name = models.CharField(max_length=160)
     transport = models.CharField(max_length=16, choices=Transport.choices)
     endpoint = models.CharField(max_length=500, blank=True, default="")
     config = models.JSONField(default=dict, blank=True)
     environment = models.JSONField(default=list, blank=True)
+    connection = models.ForeignKey(
+        "Connection",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="mcp_adapters",
+    )
+    tools = models.JSONField(default=list, blank=True)
     version = models.CharField(max_length=64, blank=True, default="1")
     enabled = models.BooleanField(default=True)
 
@@ -543,6 +552,7 @@ class DataSource(TimestampedUUIDModel):
     class SourceType(models.TextChoices):
         GIT = "git", "Git"
         FEISHU = "feishu", "Feishu"
+        JIRA = "jira", "Jira"
         MANAGED_WORKSPACE = "managed_workspace", "Managed Workspace"
 
     class Status(models.TextChoices):
@@ -769,6 +779,48 @@ class Connection(TimestampedUUIDModel):
         return self.name
 
 
+class LegacyIntegrationMigration(TimestampedUUIDModel):
+    """Audit one reversible legacy credential or datasource migration."""
+
+    class SourceKind(models.TextChoices):
+        CREDENTIAL = "credential", "Credential"
+        DATASOURCE = "datasource", "Datasource"
+
+    class Status(models.TextChoices):
+        MIGRATED = "migrated", "Migrated"
+        MANUAL_REVIEW = "manual_review", "Manual Review"
+        ROLLED_BACK = "rolled_back", "Rolled Back"
+
+    source_kind = models.CharField(max_length=16, choices=SourceKind.choices)
+    source_uuid = models.UUIDField()
+    status = models.CharField(max_length=24, choices=Status.choices)
+    reason = models.CharField(max_length=64, blank=True, default="")
+    connection = models.ForeignKey(
+        Connection,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="legacy_migration_records",
+    )
+    datasource = models.ForeignKey(
+        DataSource,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="legacy_migration_records",
+    )
+    details = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["source_kind", "source_uuid"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_kind", "source_uuid"],
+                name="lens_legacy_migration_source_uniq",
+            )
+        ]
+
+
 class ExecutionSnapshot(TimestampedUUIDModel):
     """Immutable resolved configuration used by a started plugin operation."""
 
@@ -857,6 +909,65 @@ class CredentialLease(TimestampedUUIDModel):
     )
     expires_at = models.DateTimeField()
     revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class PluginInvocation(TimestampedUUIDModel):
+    """Secret-free audit record for one authorized Plugin execution."""
+
+    class Status(models.TextChoices):
+        AUTHORIZED = "authorized", "Authorized"
+        MATERIALIZED = "materialized", "Materialized"
+
+    snapshot = models.OneToOneField(
+        ExecutionSnapshot,
+        on_delete=models.PROTECT,
+        related_name="invocation_audit",
+    )
+    connection = models.ForeignKey(
+        Connection,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    datasource = models.ForeignKey(
+        DataSource,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    run = models.ForeignKey(
+        "Run",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="plugin_invocations",
+    )
+    lensnode = models.ForeignKey(
+        LensNode,
+        on_delete=models.PROTECT,
+        related_name="plugin_invocations",
+    )
+    kind = models.CharField(max_length=32, choices=ExecutionSnapshot.Kind.choices)
+    plugin_key = models.CharField(max_length=64)
+    tool_key = models.CharField(max_length=128, blank=True, default="")
+    capability = models.CharField(max_length=128, blank=True, default="")
+    resource_summary = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=24,
+        choices=Status.choices,
+        default=Status.AUTHORIZED,
+    )
+    materialized_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

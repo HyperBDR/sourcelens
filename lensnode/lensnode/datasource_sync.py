@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, parse, request
 
+import httpx
+
 from .datasource_adapters import DataSourceAdapterRegistry
 from .datasource_adapters import FunctionDataSourceAdapter
 from . import datasource_manifest as manifest_store
@@ -750,6 +752,7 @@ def datasource_adapter_registry():
     registry = DataSourceAdapterRegistry()
     registry.register(FunctionDataSourceAdapter("git", _sync_git))
     registry.register(FunctionDataSourceAdapter("feishu", _sync_feishu))
+    registry.register(FunctionDataSourceAdapter("jira", _sync_jira))
     return registry
 
 
@@ -1919,6 +1922,233 @@ def _git_item_signature(item):
         "size": str(metadata.get("size") or ""),
         "sha256": str(metadata.get("sha256") or ""),
     }
+
+
+def _sync_jira(command, workspace_path, emit):
+    """Export bounded Jira Cloud Issues into local Markdown files."""
+
+    config = command.get("config") or {}
+    target = normalize_target_path(command.get("target_path"), workspace_path)
+    issues_dir = target / "issues"
+    issues_dir.mkdir(parents=True, exist_ok=True)
+    issues = _jira_fetch_issues(config)
+    previous_paths = {
+        path.relative_to(target).as_posix()
+        for path in issues_dir.glob("*.md")
+        if path.is_file()
+    }
+    sync_items = []
+    current_paths = set()
+    for issue in issues:
+        key, markdown, metadata = _jira_issue_document(
+            issue,
+            config.get("project"),
+            config.get("endpoint"),
+        )
+        local_path = f"issues/{key}.md"
+        path = target / local_path
+        path.write_text(markdown, encoding="utf-8")
+        current_paths.add(local_path)
+        sync_items.append(
+            _manifest_item_to_sync_item(
+                {
+                    "source_id": f"jira:{key}",
+                    "source_type": "jira",
+                    "source_path": key,
+                    "local_path": local_path,
+                    "name": f"{key}.md",
+                    "kind": "issue",
+                    "extension": "md",
+                    "status": "synced",
+                    "metadata": metadata,
+                    "remote": {"key": key, "type": "jira_issue"},
+                },
+                target,
+            )
+        )
+    deleted_paths = sorted(previous_paths.difference(current_paths))
+    for local_path in deleted_paths:
+        (target / local_path).unlink(missing_ok=True)
+    stats = {
+        "scanned": len(issues),
+        "changed": len(sync_items),
+        "skipped": 0,
+        "deleted": len(deleted_paths),
+        "failed": 0,
+        "folders": 0,
+        "documents": len(sync_items),
+        "files": len(sync_items),
+        "by_extension": {"md": len(sync_items)},
+        "by_type": {"jira_issue": len(sync_items)},
+    }
+    _emit(
+        emit,
+        "manifest",
+        "done",
+        f"Jira sync completed with {len(sync_items)} Issues.",
+        category="summary",
+        progress_total=len(sync_items),
+        progress_current=len(sync_items),
+        progress_percent=100,
+        summary=stats,
+    )
+    return {
+        "synced": len(sync_items),
+        "target_path": str(target),
+        "_sync_items": sync_items,
+        "_changed_paths": sorted(current_paths),
+        "_deleted_paths": deleted_paths,
+        **stats,
+    }
+
+
+def _jira_fetch_issues(config):
+    """Fetch a bounded page of recently updated Jira Cloud Issues."""
+
+    endpoint = str(config.get("endpoint") or "").rstrip("/")
+    email = config.get("email")
+    token = config.get("access_token")
+    project = str(config.get("project") or "").upper()
+    max_issues = config.get("max_issues", 100)
+    parsed = parse.urlsplit(endpoint)
+    hostname = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme != "https"
+        or not hostname.endswith(".atlassian.net")
+        or hostname == "atlassian.net"
+        or parsed.path not in {"", "/"}
+        or not isinstance(email, str)
+        or not email
+        or not isinstance(token, str)
+        or not token
+        or not re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", project)
+        or isinstance(max_issues, bool)
+        or not isinstance(max_issues, int)
+        or max_issues < 1
+        or max_issues > 100
+    ):
+        raise DataSourceSyncError("LENS_SOURCE_CONFIG_INVALID")
+    credential = base64.b64encode(
+        f"{email}:{token}".encode("utf-8")
+    ).decode("ascii")
+    try:
+        with httpx.Client(timeout=30, follow_redirects=False) as client:
+            with client.stream(
+                "GET",
+                f"{endpoint}/rest/api/3/search/jql",
+                params={
+                    "jql": f'project = "{project}" ORDER BY updated DESC',
+                    "maxResults": max_issues,
+                    "fields": (
+                        "summary,status,assignee,priority,updated,description"
+                    ),
+                },
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Basic {credential}",
+                    "User-Agent": "SourceLens-LensNode",
+                },
+                follow_redirects=False,
+            ) as response:
+                if response.is_redirect:
+                    raise DataSourceSyncError("JIRA_REDIRECT_REJECTED")
+                if response.status_code >= 400:
+                    raise DataSourceSyncError("JIRA_REQUEST_FAILED")
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(body) + len(chunk) > 1_000_000:
+                        raise DataSourceSyncError("JIRA_RESPONSE_TOO_LARGE")
+                    body.extend(chunk)
+    except DataSourceSyncError:
+        raise
+    except httpx.HTTPError as exc:
+        raise DataSourceSyncError("JIRA_REQUEST_FAILED") from exc
+    try:
+        payload = json.loads(body)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise DataSourceSyncError("JIRA_RESPONSE_INVALID") from exc
+    issues = payload.get("issues") if isinstance(payload, dict) else None
+    if not isinstance(issues, list):
+        raise DataSourceSyncError("JIRA_RESPONSE_INVALID")
+    return issues[:max_issues]
+
+
+def _jira_issue_document(issue, project, endpoint):
+    """Return a validated Jira Issue key, Markdown, and safe metadata."""
+
+    if not isinstance(issue, dict) or not isinstance(issue.get("fields"), dict):
+        raise DataSourceSyncError("JIRA_RESPONSE_INVALID")
+    key = issue.get("key")
+    fields = issue["fields"]
+    if (
+        not isinstance(key, str)
+        or not key.startswith(f"{project}-")
+        or not key.removeprefix(f"{project}-").isdigit()
+    ):
+        raise DataSourceSyncError("JIRA_RESPONSE_INVALID")
+    summary = str(fields.get("summary") or "")[:1000]
+    status = fields.get("status")
+    assignee = fields.get("assignee")
+    priority = fields.get("priority")
+    status_name = (
+        str(status.get("name") or "")[:160]
+        if isinstance(status, dict)
+        else ""
+    )
+    assignee_name = (
+        str(assignee.get("displayName") or "")[:160]
+        if isinstance(assignee, dict)
+        else ""
+    )
+    priority_name = (
+        str(priority.get("name") or "")[:160]
+        if isinstance(priority, dict)
+        else ""
+    )
+    updated = str(fields.get("updated") or "")[:64]
+    description = _jira_description_text(fields.get("description"))
+    issue_url = f"{str(endpoint).rstrip('/')}/browse/{key}"
+    markdown = (
+        f"# {key}: {summary}\n\n"
+        f"- Status: {status_name}\n"
+        f"- Assignee: {assignee_name}\n"
+        f"- Priority: {priority_name}\n"
+        f"- Updated: {updated}\n"
+        f"- URL: {issue_url}\n\n"
+        f"## Description\n\n{description}\n"
+    )
+    return key, markdown, {
+        "summary": summary,
+        "status": status_name,
+        "updated": updated,
+        "url": issue_url,
+    }
+
+
+def _jira_description_text(value):
+    """Flatten bounded text from Atlassian document format."""
+
+    text = []
+    captured = 0
+
+    def visit(node):
+        nonlocal captured
+        if captured >= 20_000:
+            return
+        if isinstance(node, dict):
+            item = node.get("text")
+            if isinstance(item, str):
+                bounded = item[: 20_000 - captured]
+                text.append(bounded)
+                captured += len(bounded)
+            for child in node.get("content") or []:
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(value)
+    return "\n".join(text)
 
 
 def _sync_feishu(command, workspace_path, emit):

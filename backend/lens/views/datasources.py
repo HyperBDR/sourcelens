@@ -57,6 +57,7 @@ class DataSourceViewSet(BaseAdminViewSet):
             super()
             .get_queryset()
             .select_related(
+                "connection",
                 "lensnode",
                 "credential",
             )

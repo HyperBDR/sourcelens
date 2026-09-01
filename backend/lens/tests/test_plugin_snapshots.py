@@ -1,14 +1,20 @@
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
-
-from lens.models import Connection, DataSource, LensNode, SecretMaterial, SecretVersion
+from lens.datasource_services import dispatch_datasource_sync_async
+from lens.models import (
+    Connection,
+    DataSource,
+    LensNode,
+    PluginInvocation,
+    SecretMaterial,
+    SecretVersion,
+)
 from lens.plugins.registry import PluginRegistryError
 from lens.plugins.snapshots import create_datasource_sync_snapshot
-from lens.datasource_services import dispatch_datasource_sync_async
-from unittest.mock import patch
 
 
 class PluginSnapshotTests(TestCase):
@@ -42,6 +48,7 @@ class PluginSnapshotTests(TestCase):
             datasource_config={
                 "repository": "HyperBDR/sourcelens",
                 "branch": "main",
+                "directory": "docs",
             },
             sync_policy={"interval_seconds": 3600},
             target_path="/workspace/sourcelens",
@@ -65,14 +72,35 @@ class PluginSnapshotTests(TestCase):
                 snapshot = create_datasource_sync_snapshot(self.datasource)
 
         self.assertEqual(snapshot.plugin_version, "1.0.0")
-        self.assertEqual(snapshot.secret_version, self.connection.secret_version)
-        self.assertEqual(snapshot.resolved_config["endpoint"], "https://github.com")
+        self.assertEqual(
+            snapshot.secret_version, self.connection.secret_version
+        )
+        self.assertEqual(
+            snapshot.resolved_config["endpoint"], "https://github.com"
+        )
         self.assertEqual(
             snapshot.resolved_config["datasource_config"]["branch"],
             "main",
         )
-        self.assertEqual(snapshot.resolved_config["target_path"], "/workspace/sourcelens")
+        self.assertEqual(
+            snapshot.resolved_config["datasource_config"]["directory"],
+            "docs",
+        )
+        self.assertEqual(
+            snapshot.resolved_config["target_path"], "/workspace/sourcelens"
+        )
         self.assertNotIn("encrypted", json.dumps(snapshot.resolved_config))
+        invocation = PluginInvocation.objects.get(snapshot=snapshot)
+        self.assertEqual(invocation.status, PluginInvocation.Status.AUTHORIZED)
+        self.assertEqual(invocation.datasource, self.datasource)
+        self.assertEqual(
+            invocation.resource_summary,
+            {
+                "repository": "HyperBDR/sourcelens",
+                "branch": "main",
+                "directory": "docs",
+            },
+        )
 
     def test_snapshot_rejects_credential_shaped_datasource_config(self):
         self.datasource.datasource_config["access_token"] = "must-not-be-here"
@@ -86,6 +114,13 @@ class PluginSnapshotTests(TestCase):
         self.datasource.save(update_fields=["datasource_config"])
 
         with self.assertRaisesMessage(PluginRegistryError, "scope"):
+            create_datasource_sync_snapshot(self.datasource)
+
+    def test_snapshot_rejects_disabled_secret_version(self):
+        self.connection.secret_version.status = "disabled"
+        self.connection.secret_version.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(PluginRegistryError, "secret"):
             create_datasource_sync_snapshot(self.datasource)
 
     def test_plugin_datasource_dispatch_sends_snapshot_metadata_only(self):
@@ -103,7 +138,9 @@ class PluginSnapshotTests(TestCase):
             path.mkdir(parents=True)
             (path / "plugin.json").write_text(json.dumps(manifest))
             with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                with patch("lens.datasource_services._send_lensnode_command") as send:
+                with patch(
+                    "lens.datasource_services._send_lensnode_command"
+                ) as send:
                     dispatch_datasource_sync_async(
                         self.datasource,
                         task_id="sync-task",

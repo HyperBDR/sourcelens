@@ -3,16 +3,20 @@
 import uuid
 from datetime import timedelta
 
+from django.db import transaction
 from django.db.models import Count
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
-from rest_framework import status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.viewsets import ViewSet
-
-from lens.models import Connection, CredentialLease, ExecutionSnapshot
+from lens.models import (
+    Connection,
+    CredentialLease,
+    ExecutionSnapshot,
+    PluginInvocation,
+)
+from lens.plugins.providers import (
+    DatasourceProviderError,
+    get_datasource_provider,
+)
 from lens.plugins.registry import (
     PluginNotFoundError,
     discover_plugins,
@@ -23,20 +27,58 @@ from lens.plugins.tool_snapshots import (
     ToolSnapshotError,
     create_tool_execution_snapshot,
 )
-from lens.serializers import ConnectionSerializer
+from lens.serializers import (
+    ConnectionSerializer,
+    PluginInvocationSerializer,
+)
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.viewsets import ViewSet
+
 from .base import BaseAdminViewSet, LensNodeAuthMixin
 
+SENSITIVE_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "authorization",
+        "credential",
+        "credentials",
+        "password",
+        "secret",
+        "token",
+    }
+)
 
-SENSITIVE_KEYS = frozenset({
-    "access_token",
-    "api_key",
-    "authorization",
-    "credential",
-    "credentials",
-    "password",
-    "secret",
-    "token",
-})
+
+def _active_connection_secret(connection):
+    """Return active secret material or a stable lifecycle response."""
+
+    if connection.status != Connection.Status.ACTIVE:
+        return Response(
+            {"detail": "CONNECTION_DISABLED"},
+            status=status.HTTP_409_CONFLICT,
+        )
+    version = connection.secret_version
+    if version is None or version.status != "active":
+        return Response(
+            {"detail": "SECRET_VERSION_DISABLED"},
+            status=status.HTTP_409_CONFLICT,
+        )
+    if version.material.status != "active":
+        return Response(
+            {"detail": "SECRET_MATERIAL_DISABLED"},
+            status=status.HTTP_409_CONFLICT,
+        )
+    secret = version.get_value()
+    if not secret:
+        return Response(
+            {"detail": "SECRET_UNAVAILABLE"},
+            status=status.HTTP_409_CONFLICT,
+        )
+    return secret
 
 
 class PluginRuntimeNoStoreMixin:
@@ -65,14 +107,21 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
         """List installed Plugin versions visible to administrators."""
 
         del request
-        return Response([
-            {
-                "key": plugin.key,
-                "version": plugin.version,
-                "protocol_version": plugin.protocol_version,
-            }
-            for plugin in discover_plugins()
-        ])
+        return Response(
+            [
+                {
+                    "key": plugin.key,
+                    "version": plugin.version,
+                    "protocol_version": plugin.protocol_version,
+                    "display_name": plugin.display_name,
+                    "description": plugin.description,
+                    "datasource_source_type": (
+                        plugin.datasource_source_type
+                    ),
+                }
+                for plugin in discover_plugins()
+            ]
+        )
 
     @action(detail=True, methods=["get"], url_path="tools")
     def tools(self, request, key=None):
@@ -83,16 +132,78 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
             plugin = latest_plugin(key)
         except PluginNotFoundError:
             return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
-        return Response([
+        return Response(
+            [
+                {
+                    "key": tool.key,
+                    "description": tool.description,
+                    "capability": tool.capability,
+                    "side_effect": tool.side_effect,
+                    "input_schema": tool.input_schema,
+                }
+                for tool in plugin.tools
+            ]
+        )
+
+    @action(detail=True, methods=["get"], url_path="manifest")
+    def manifest(self, request, key=None):
+        """Return safe metadata and form schemas for one Plugin."""
+
+        del request
+        try:
+            plugin = latest_plugin(key)
+        except PluginNotFoundError:
+            return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
+        return Response(
             {
-                "key": tool.key,
-                "description": tool.description,
-                "capability": tool.capability,
-                "side_effect": tool.side_effect,
-                "input_schema": tool.input_schema,
+                "key": plugin.key,
+                "version": plugin.version,
+                "protocol_version": plugin.protocol_version,
+                "display_name": plugin.display_name,
+                "description": plugin.description,
+                "datasource_source_type": plugin.datasource_source_type,
+                "connection_schema": plugin.connection_schema,
+                "datasource_schema": plugin.datasource_schema,
+                "tools": [
+                    {
+                        "key": tool.key,
+                        "description": tool.description,
+                        "capability": tool.capability,
+                        "side_effect": tool.side_effect,
+                        "input_schema": tool.input_schema,
+                    }
+                    for tool in plugin.tools
+                ],
             }
-            for tool in plugin.tools
-        ])
+        )
+
+
+class PluginInvocationViewSet(BaseAdminViewSet):
+    """Expose secret-free Plugin execution audit records to administrators."""
+
+    http_method_names = ["get", "head", "options"]
+    serializer_class = PluginInvocationSerializer
+    queryset = PluginInvocation.objects.select_related(
+        "snapshot",
+        "connection",
+        "datasource",
+        "run",
+        "actor",
+        "lensnode",
+    )
+
+    def get_queryset(self):
+        """Apply bounded exact-match audit filters."""
+
+        queryset = super().get_queryset()
+        for field in ("plugin_key", "kind", "status", "tool_key"):
+            value = self.request.query_params.get(field)
+            if value:
+                queryset = queryset.filter(**{field: value[:128]})
+        connection_uuid = self.request.query_params.get("connection_uuid")
+        if connection_uuid:
+            queryset = queryset.filter(connection__uuid=connection_uuid)
+        return queryset
 
 
 class ConnectionViewSet(BaseAdminViewSet):
@@ -126,6 +237,49 @@ class ConnectionViewSet(BaseAdminViewSet):
             queryset = queryset.filter(status=status_value)
         return queryset
 
+    @action(detail=True, methods=["post"], url_path="revoke")
+    def revoke(self, request, *args, **kwargs):
+        """Emergency-revoke one Connection secret lineage and its leases."""
+
+        del request, args, kwargs
+        connection_id = self.get_object().pk
+        now = timezone.now()
+        with transaction.atomic():
+            connection = (
+                Connection.objects.select_for_update()
+                .select_related("secret_version__material")
+                .get(pk=connection_id)
+            )
+            version = connection.secret_version
+            if version is not None:
+                material = version.material
+                material.status = "disabled"
+                material.save(update_fields=["status", "updated_at"])
+                material.versions.select_for_update().update(
+                    status="disabled",
+                    updated_at=now,
+                )
+                connection_ids = list(
+                    Connection.objects.select_for_update()
+                    .filter(secret_version__material=material)
+                    .values_list("pk", flat=True)
+                )
+                Connection.objects.filter(pk__in=connection_ids).update(
+                    status=Connection.Status.DISABLED,
+                    updated_at=now,
+                )
+            else:
+                connection_ids = [connection.pk]
+                connection.status = Connection.Status.DISABLED
+                connection.save(update_fields=["status", "updated_at"])
+            CredentialLease.objects.filter(
+                snapshot__connection_id__in=connection_ids,
+                revoked_at__isnull=True,
+                expires_at__gt=now,
+            ).update(revoked_at=now)
+        connection.refresh_from_db()
+        return Response(self.get_serializer(connection).data)
+
     def destroy(self, request, *args, **kwargs):
         """Reject deletion while a connection is referenced."""
 
@@ -146,6 +300,55 @@ class ConnectionViewSet(BaseAdminViewSet):
                 {"detail": "CONNECTION_IN_USE"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+    @action(detail=True, methods=["post"], url_path="validate")
+    def validate_connection(self, request, *args, **kwargs):
+        """Validate stored authentication without returning the secret."""
+
+        del request, args, kwargs
+        connection = self.get_object()
+        secret_or_response = _active_connection_secret(connection)
+        if isinstance(secret_or_response, Response):
+            return secret_or_response
+        try:
+            result = get_datasource_provider(
+                connection.plugin_key
+            ).validate_live_connection(
+                secret_or_response,
+                endpoint=connection.endpoint,
+                connection_config=connection.config,
+            )
+        except DatasourceProviderError as exc:
+            return Response(
+                {"status": "failed", "detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"status": "success", **result})
+
+    @action(detail=True, methods=["get"], url_path="resources")
+    def resources(self, request, *args, **kwargs):
+        """Discover resources only inside the Connection allowlist."""
+
+        del request, args, kwargs
+        connection = self.get_object()
+        secret_or_response = _active_connection_secret(connection)
+        if isinstance(secret_or_response, Response):
+            return secret_or_response
+        try:
+            resources = get_datasource_provider(
+                connection.plugin_key
+            ).discover_resources(
+                connection.allowed_scope,
+                secret_or_response,
+                endpoint=connection.endpoint,
+                connection_config=connection.config,
+            )
+        except DatasourceProviderError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(resources)
 
 
 class PluginToolExecutionSnapshotView(
@@ -196,9 +399,7 @@ class PluginToolExecutionSnapshotView(
                 "protocol_version": snapshot.protocol_version,
             },
             status=(
-                status.HTTP_201_CREATED
-                if created
-                else status.HTTP_200_OK
+                status.HTTP_201_CREATED if created else status.HTTP_200_OK
             ),
         )
         return response
@@ -305,10 +506,7 @@ class PluginCredentialMaterialView(
         ):
             return Response({"detail": "CONNECTION_DISABLED"}, status=409)
         secret_version = lease.snapshot.secret_version
-        if (
-            secret_version is not None
-            and secret_version.status != "active"
-        ):
+        if secret_version is not None and secret_version.status != "active":
             return Response({"detail": "SECRET_VERSION_DISABLED"}, status=409)
         if (
             secret_version is not None
@@ -318,6 +516,13 @@ class PluginCredentialMaterialView(
         value = secret_version.get_value() if secret_version else ""
         if not value:
             return Response({"detail": "SECRET_UNAVAILABLE"}, status=409)
+        PluginInvocation.objects.filter(
+            snapshot=lease.snapshot,
+            status=PluginInvocation.Status.AUTHORIZED,
+        ).update(
+            status=PluginInvocation.Status.MATERIALIZED,
+            materialized_at=now,
+        )
         response = Response(
             {
                 "lease_uuid": str(lease.uuid),
@@ -358,18 +563,18 @@ class PluginExecutionSnapshotView(
             "plugin_key": snapshot.plugin_key,
             "plugin_version": snapshot.plugin_version,
             "protocol_version": snapshot.protocol_version,
-            "resolved_config": _safe_snapshot_config(
-                snapshot.resolved_config
-            ),
+            "resolved_config": _safe_snapshot_config(snapshot.resolved_config),
         }
         if snapshot.kind == ExecutionSnapshot.Kind.DATASOURCE_SYNC:
             payload["datasource_uuid"] = str(snapshot.datasource.uuid)
         elif snapshot.kind == ExecutionSnapshot.Kind.TOOL_INVOKE:
-            payload.update({
-                "run_uuid": str(snapshot.run.uuid),
-                "tool_key": snapshot.tool_key,
-                "invocation_id": snapshot.invocation_id,
-            })
+            payload.update(
+                {
+                    "run_uuid": str(snapshot.run.uuid),
+                    "tool_key": snapshot.tool_key,
+                    "invocation_id": snapshot.invocation_id,
+                }
+            )
         else:
             return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
         response = Response(

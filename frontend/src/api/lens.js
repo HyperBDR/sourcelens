@@ -391,6 +391,55 @@ export async function deleteCredential(uuid) {
   return unwrapResponse(response)
 }
 
+export async function listPlugins() {
+  const response = await api.get('/lens/admin/plugins/')
+  return unwrapList(unwrapResponse(response))
+}
+
+export async function getPluginManifest(key) {
+  const response = await api.get(`/lens/admin/plugins/${key}/manifest/`)
+  return unwrapResponse(response)
+}
+
+export async function listConnections(params = {}) {
+  return collectPaginatedResults(async (page) => {
+    const response = await api.get('/lens/admin/connections/', {
+      params: { page_size: 1000, ...params, page }
+    })
+    return unwrapResponse(response)
+  })
+}
+
+export async function createConnection(payload) {
+  const response = await api.post('/lens/admin/connections/', payload)
+  return unwrapResponse(response)
+}
+
+export async function updateConnection(uuid, payload) {
+  const response = await api.patch(`/lens/admin/connections/${uuid}/`, payload)
+  return unwrapResponse(response)
+}
+
+export async function deleteConnection(uuid) {
+  const response = await api.delete(`/lens/admin/connections/${uuid}/`)
+  return unwrapResponse(response)
+}
+
+export async function validateConnection(uuid) {
+  const response = await api.post(`/lens/admin/connections/${uuid}/validate/`)
+  return unwrapResponse(response)
+}
+
+export async function revokeConnection(uuid) {
+  const response = await api.post(`/lens/admin/connections/${uuid}/revoke/`)
+  return unwrapResponse(response)
+}
+
+export async function getConnectionResources(uuid) {
+  const response = await api.get(`/lens/admin/connections/${uuid}/resources/`)
+  return unwrapResponse(response)
+}
+
 export async function listEnvironmentVariableSets() {
   return collectPaginatedResults(async (page) => {
     const response = await api.get('/lens/admin/environment-variable-sets/', {

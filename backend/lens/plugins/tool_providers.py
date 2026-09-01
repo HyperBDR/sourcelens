@@ -4,6 +4,10 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
+from .providers.gitlab import _endpoint as _gitlab_endpoint
+from .providers.gitlab import _project_name
+from .providers.jira import _endpoint as _jira_endpoint
+from .providers.jira import _project_key
 
 REPOSITORY_PART_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 SEARCH_SCOPE_PATTERN = re.compile(r"(?:repo|org|user):", re.IGNORECASE)
@@ -25,7 +29,7 @@ class GitHubToolProvider:
         if not isinstance(arguments, dict):
             raise ToolProviderError("tool arguments must be an object")
         repository = _repository_name(arguments.get("repository"))
-        if repository not in _allowed_repositories(allowed_scope):
+        if repository.casefold() not in _allowed_repositories(allowed_scope):
             raise ToolProviderError("repository is outside connection scope")
         if tool_key == "github_read_file":
             normalized = {
@@ -44,8 +48,7 @@ class GitHubToolProvider:
             }
             path = _repository_path(arguments.get("path"), required=False)
             if path and (
-                any(character.isspace() for character in path)
-                or '"' in path
+                any(character.isspace() for character in path) or '"' in path
             ):
                 raise ToolProviderError("search path is invalid")
             if path:
@@ -70,8 +73,91 @@ class GitHubToolProvider:
         return "https://github.com"
 
 
+class GitLabToolProvider:
+    """Validate bounded read-only GitLab Tool requests."""
+
+    key = "gitlab"
+
+    def validate_request(self, endpoint, allowed_scope, tool_key, arguments):
+        """Return canonical endpoint and normalized authorized arguments."""
+
+        endpoint = _gitlab_endpoint(endpoint)
+        if not isinstance(arguments, dict):
+            raise ToolProviderError("tool arguments must be an object")
+        project = _project_name(arguments.get("project"))
+        if project.casefold() not in _allowed_projects(allowed_scope):
+            raise ToolProviderError("project is outside connection scope")
+        if tool_key == "gitlab_read_file":
+            normalized = {
+                "project": project,
+                "path": _repository_path(arguments.get("path"), required=True),
+            }
+            ref = _bounded_text(arguments.get("ref"), "ref", 255)
+            if ref:
+                normalized["ref"] = ref
+            return endpoint, normalized
+        if tool_key == "gitlab_search_code":
+            normalized = {
+                "project": project,
+                "query": _bounded_text(
+                    arguments.get("query"),
+                    "query",
+                    1024,
+                    required=True,
+                ),
+                "max_results": _max_results(arguments.get("max_results")),
+            }
+            path = _repository_path(arguments.get("path"), required=False)
+            if path:
+                normalized["path"] = path
+            ref = _bounded_text(arguments.get("ref"), "ref", 255)
+            if ref:
+                normalized["ref"] = ref
+            return endpoint, normalized
+        raise ToolProviderError("tool is unsupported")
+
+
+class JiraToolProvider:
+    """Validate bounded read-only Jira Cloud Tool requests."""
+
+    key = "jira"
+
+    def validate_request(self, endpoint, allowed_scope, tool_key, arguments):
+        """Return canonical endpoint and normalized authorized arguments."""
+
+        endpoint = _jira_endpoint(endpoint)
+        if not isinstance(arguments, dict):
+            raise ToolProviderError("tool arguments must be an object")
+        allowed_projects = _allowed_jira_projects(allowed_scope)
+        if tool_key == "jira_get_issue":
+            issue_key = _jira_issue_key(arguments.get("issue_key"))
+            if issue_key.rsplit("-", 1)[0] not in allowed_projects:
+                raise ToolProviderError("issue is outside connection scope")
+            return endpoint, {"issue_key": issue_key}
+        if tool_key == "jira_search_issues":
+            try:
+                project = _project_key(arguments.get("project"))
+            except ValueError as exc:
+                raise ToolProviderError(str(exc)) from exc
+            if project not in allowed_projects:
+                raise ToolProviderError("project is outside connection scope")
+            return endpoint, {
+                "project": project,
+                "query": _bounded_text(
+                    arguments.get("query"),
+                    "query",
+                    500,
+                    required=True,
+                ),
+                "max_results": _max_results(arguments.get("max_results")),
+            }
+        raise ToolProviderError("tool is unsupported")
+
+
 PROVIDERS = {
     "github": GitHubToolProvider(),
+    "gitlab": GitLabToolProvider(),
+    "jira": JiraToolProvider(),
 }
 
 
@@ -92,7 +178,51 @@ def _allowed_repositories(value):
     repositories = value.get("repositories")
     if not isinstance(repositories, list) or not repositories:
         raise ToolProviderError("connection scope requires repositories")
-    return {_repository_name(repository) for repository in repositories}
+    return {
+        _repository_name(repository).casefold() for repository in repositories
+    }
+
+
+def _allowed_projects(value):
+    """Return canonical GitLab project identities from Connection scope."""
+
+    if not isinstance(value, dict):
+        raise ToolProviderError("connection scope must be an object")
+    projects = value.get("projects")
+    if not isinstance(projects, list) or not projects:
+        raise ToolProviderError("connection scope requires projects")
+    try:
+        return {_project_name(project).casefold() for project in projects}
+    except ValueError as exc:
+        raise ToolProviderError(str(exc)) from exc
+
+
+def _allowed_jira_projects(value):
+    """Return canonical Jira project keys from Connection scope."""
+
+    if not isinstance(value, dict):
+        raise ToolProviderError("connection scope must be an object")
+    projects = value.get("projects")
+    if not isinstance(projects, list) or not projects:
+        raise ToolProviderError("connection scope requires projects")
+    try:
+        return {_project_key(project) for project in projects}
+    except ValueError as exc:
+        raise ToolProviderError(str(exc)) from exc
+
+
+def _jira_issue_key(value):
+    """Return one bounded canonical Jira Issue key."""
+
+    text = _bounded_text(value, "issue_key", 40, required=True).upper()
+    parts = text.rsplit("-", 1)
+    if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) < 1:
+        raise ToolProviderError("issue_key is invalid")
+    try:
+        _project_key(parts[0])
+    except ValueError as exc:
+        raise ToolProviderError("issue_key is invalid") from exc
+    return text
 
 
 def _repository_name(value):
@@ -102,9 +232,8 @@ def _repository_name(value):
         raise ToolProviderError("repository is required")
     repository = value.strip().strip("/")
     parts = repository.split("/")
-    if (
-        len(parts) != 2
-        or not all(REPOSITORY_PART_PATTERN.fullmatch(part) for part in parts)
+    if len(parts) != 2 or not all(
+        REPOSITORY_PART_PATTERN.fullmatch(part) for part in parts
     ):
         raise ToolProviderError("repository must use owner/repository")
     return repository

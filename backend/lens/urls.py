@@ -32,6 +32,7 @@ from .views import (
     PluginCredentialLeaseView,
     PluginCredentialMaterialView,
     PluginExecutionSnapshotView,
+    PluginInvocationViewSet,
     PluginToolExecutionSnapshotView,
     PublicAssistantView,
     PublicSharedQAFileView,
@@ -79,6 +80,11 @@ router.register(
     "admin/connections",
     ConnectionViewSet,
     basename="lens-admin-connections",
+)
+router.register(
+    "admin/plugin-invocations",
+    PluginInvocationViewSet,
+    basename="lens-admin-plugin-invocations",
 )
 router.register(
     "admin/environment-variable-sets",

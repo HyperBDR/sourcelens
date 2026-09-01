@@ -34,6 +34,16 @@ warnings.filterwarnings('ignore', message='.*invalid escape sequence.*')
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+_extra_plugin_roots = [
+    value.strip()
+    for value in os.getenv("LENS_PLUGIN_ROOTS", "").split(",")
+    if value.strip()
+]
+LENS_PLUGIN_ROOTS = [
+    str(BASE_DIR.parent / "plugins"),
+    *_extra_plugin_roots,
+]
+
 # Environment variables are loaded via docker-compose env_file configuration
 # All settings use os.getenv() to read from environment variables
 

@@ -5,8 +5,6 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
-from rest_framework.test import APIClient
-
 from lens.lensnode_auth import issue_lensnode_token
 from lens.models import (
     Assistant,
@@ -14,12 +12,14 @@ from lens.models import (
     Connection,
     ExecutionSnapshot,
     LensNode,
+    PluginInvocation,
     Run,
     SecretMaterial,
     SecretVersion,
     Session,
 )
 from lens.services import create_execution_run
+from rest_framework.test import APIClient
 
 
 class PluginToolSnapshotTests(TestCase):
@@ -172,6 +172,16 @@ class PluginToolSnapshotTests(TestCase):
             "github-tool-secret",
             json.dumps(snapshot.resolved_config),
         )
+        invocation = PluginInvocation.objects.get(snapshot=snapshot)
+        self.assertEqual(invocation.status, PluginInvocation.Status.AUTHORIZED)
+        self.assertEqual(invocation.actor, self.user)
+        self.assertEqual(invocation.lensnode, self.node)
+        self.assertEqual(
+            invocation.resource_summary,
+            {"repository": "HyperBDR/sourcelens"},
+        )
+        self.assertNotIn("README.md", json.dumps(invocation.resource_summary))
+        self.assertNotIn("github-tool-secret", str(invocation.__dict__))
 
     def test_tool_snapshot_rejects_connection_not_frozen_in_run(self):
         run = self._create_active_run()
@@ -190,6 +200,56 @@ class PluginToolSnapshotTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data["detail"], "TOOL_NOT_AUTHORIZED")
+
+    def test_material_exchange_marks_invocation_audit_materialized(self):
+        run = self._create_active_run()
+        snapshot_response = self._create_snapshot(run)
+        lease_response = self.client.post(
+            "/api/lens/plugin-runtime/leases/",
+            {"snapshot_uuid": snapshot_response.data["snapshot_uuid"]},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        material_response = self.client.post(
+            "/api/lens/plugin-runtime/leases/"
+            f"{lease_response.data['lease_uuid']}/material/",
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        self.assertEqual(material_response.status_code, 200)
+        invocation = PluginInvocation.objects.get(
+            snapshot__uuid=snapshot_response.data["snapshot_uuid"]
+        )
+        self.assertEqual(
+            invocation.status,
+            PluginInvocation.Status.MATERIALIZED,
+        )
+        self.assertIsNotNone(invocation.materialized_at)
+
+    def test_admin_can_list_secret_free_plugin_invocation_audit(self):
+        run = self._create_active_run()
+        self._create_snapshot(run)
+        admin = get_user_model().objects.create_user(
+            username="plugin-audit-admin",
+            is_staff=True,
+        )
+        admin_client = APIClient()
+        admin_client.force_authenticate(admin)
+
+        response = admin_client.get(
+            "/api/lens/admin/plugin-invocations/?plugin_key=github"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.data["results"][0]
+        self.assertEqual(row["plugin_key"], "github")
+        self.assertEqual(row["tool_key"], "github_read_file")
+        self.assertEqual(row["capability"], "repository.read")
+        self.assertNotIn("resolved_config", row)
+        self.assertNotIn("secret_version", row)
+        self.assertNotIn("github-tool-secret", json.dumps(response.data))
 
     def test_tool_snapshot_rejects_tool_not_frozen_in_run(self):
         run = self._create_active_run()
@@ -215,6 +275,28 @@ class PluginToolSnapshotTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["detail"], "TOOL_ARGUMENTS_INVALID")
+
+    def test_tool_snapshot_accepts_repository_identity_case_insensitively(
+        self,
+    ):
+        run = self._create_active_run()
+
+        response = self._create_snapshot(
+            run,
+            arguments={
+                "repository": "hyperbdr/sourcelens",
+                "path": "README.md",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        snapshot = ExecutionSnapshot.objects.get(
+            uuid=response.data["snapshot_uuid"]
+        )
+        self.assertEqual(
+            snapshot.resolved_config["arguments"]["repository"],
+            "hyperbdr/sourcelens",
+        )
 
     def test_search_tool_rejects_scope_qualifiers_in_model_query(self):
         run = self._create_active_run()
@@ -416,9 +498,7 @@ class PluginToolSnapshotTests(TestCase):
         run = self._create_active_run()
         snapshot_response = self._create_snapshot(run)
         self.connection.secret_version.material.status = "disabled"
-        self.connection.secret_version.material.save(
-            update_fields=["status"]
-        )
+        self.connection.secret_version.material.save(update_fields=["status"])
 
         lease_response = self.client.post(
             "/api/lens/plugin-runtime/leases/",

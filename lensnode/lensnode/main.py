@@ -5,7 +5,7 @@ import logging
 import os
 import signal
 import threading
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 from websockets.asyncio.client import connect
@@ -52,6 +52,48 @@ from .workspace import available_dirs
 
 LOGGER = logging.getLogger("lensnode")
 RUNTIME_CLEANUP_INTERVAL_S = 60 * 60
+
+
+def _plugin_endpoint(plugin_key, value):
+    """Return a safe frozen endpoint for a built-in datasource Provider."""
+
+    parsed = urlsplit(str(value or "").strip())
+    if plugin_key == "github":
+        if (
+            parsed.scheme == "https"
+            and parsed.hostname == "github.com"
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return "https://github.com"
+        return ""
+    if plugin_key == "gitlab":
+        if (
+            parsed.scheme == "https"
+            and parsed.hostname
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return urlunsplit(("https", parsed.netloc, "", "", ""))
+    if plugin_key == "jira":
+        hostname = (parsed.hostname or "").lower()
+        if (
+            parsed.scheme == "https"
+            and hostname.endswith(".atlassian.net")
+            and hostname != "atlassian.net"
+            and parsed.username is None
+            and parsed.password is None
+            and parsed.port in {None, 443}
+            and parsed.path in {"", "/"}
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return urlunsplit(("https", parsed.netloc, "", "", ""))
+    return ""
 
 
 class LensNodeClient:
@@ -959,7 +1001,7 @@ class LensNodeClient:
             self.running_tasks.pop(task_key, None)
 
     def _execute_plugin_datasource_sync(self, message, emit=None):
-        """Execute a trusted GitHub datasource using snapshot data."""
+        """Execute a trusted Plugin datasource using snapshot data."""
 
         material = None
         try:
@@ -992,34 +1034,55 @@ class LensNodeClient:
             datasource = resolved.get("datasource_config") or {}
             if not isinstance(datasource, dict):
                 return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
-            endpoint = resolved.get("endpoint", "").rstrip("/")
-            if snapshot.get("plugin_key") != "github":
+            plugin_key = snapshot.get("plugin_key")
+            endpoint = _plugin_endpoint(
+                plugin_key,
+                resolved.get("endpoint", ""),
+            )
+            if plugin_key not in {"github", "gitlab", "jira"}:
                 return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
-            if endpoint != "https://github.com":
+            if not endpoint:
                 return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
             if (
-                material.get("plugin_key") != snapshot.get("plugin_key")
+                material.get("plugin_key") != plugin_key
                 or material.get("endpoint", "").rstrip("/") != endpoint
             ):
                 return {
                     "status": "failed",
                     "error": "PLUGIN_MATERIAL_MISMATCH",
                 }
-            repository = datasource.get("repository")
-            if not repository:
+            resource = (
+                datasource.get("repository")
+                if plugin_key == "github"
+                else datasource.get("project")
+            )
+            if not resource:
                 return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
             command = {
-                "source_type": "git",
+                "source_type": "jira" if plugin_key == "jira" else "git",
                 "datasource_uuid": snapshot.get("datasource_uuid"),
                 "target_path": resolved.get("target_path"),
                 "sync_policy": resolved.get("sync_policy") or {},
                 "trigger": message.get("trigger") or "plugin",
-                "config": {
-                    "repo_url": f"{endpoint}/{repository}.git",
+                "config": (
+                    {
+                        "endpoint": endpoint,
+                        "email": (resolved.get("connection_config") or {}).get(
+                            "email"
+                        ),
+                        "access_token": material["value"],
+                        "project": resource,
+                        "max_issues": datasource.get("max_issues") or 100,
+                    }
+                    if plugin_key == "jira"
+                    else {
+                    "repo_url": f"{endpoint}/{resource}.git",
                     "branch": datasource.get("branch") or "main",
+                    "directory": datasource.get("directory") or "",
                     "auth_scheme": "token",
                     "access_token": material["value"],
-                },
+                    }
+                ),
             }
             return sync_datasource(
                 command,

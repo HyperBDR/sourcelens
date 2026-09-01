@@ -1,0 +1,107 @@
+{
+  "key": "gitlab",
+  "version": "1.0.0",
+  "protocol_version": 1,
+  "display_name": "GitLab",
+  "description": "Connect approved GitLab projects as data sources and read-only assistant tools.",
+  "datasource_source_type": "git",
+  "handlers": {
+    "runtime": "gitlab_v1",
+    "datasource": "gitlab_datasource_v1"
+  },
+  "connection_schema": {
+    "type": "object",
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "format": "uri",
+        "title": "GitLab endpoint",
+        "description": "Public or self-managed root HTTPS GitLab endpoint.",
+        "default": "https://gitlab.com",
+        "write_to": "endpoint"
+      },
+      "secret_value": {
+        "type": "string",
+        "format": "password",
+        "title": "Personal access token",
+        "description": "A write-only token with read access to the approved projects.",
+        "write_to": "secret_value"
+      },
+      "projects": {
+        "type": "array",
+        "format": "provider-resource",
+        "resource": "projects",
+        "title": "Allowed projects",
+        "description": "Explicit namespace/project values this connection may access.",
+        "write_to": "allowed_scope.projects",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": ["endpoint", "secret_value", "projects"],
+    "additionalProperties": false
+  },
+  "datasource_schema": {
+    "type": "object",
+    "properties": {
+      "project": {
+        "type": "string",
+        "format": "provider-resource",
+        "resource": "projects",
+        "title": "Project"
+      },
+      "branch": {
+        "type": "string",
+        "format": "provider-resource-option",
+        "resource": "branches",
+        "depends_on": "project",
+        "title": "Branch"
+      },
+      "directory": {
+        "type": "string",
+        "format": "repository-path",
+        "title": "Directory",
+        "description": "Optional project-relative directory to sync."
+      }
+    },
+    "required": ["project"],
+    "additionalProperties": false
+  },
+  "tools": [
+    {
+      "key": "gitlab_read_file",
+      "description": "Read a UTF-8 text file from an approved GitLab project.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {"type": "string"},
+          "path": {"type": "string"},
+          "ref": {"type": "string"}
+        },
+        "required": ["project", "path"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "key": "gitlab_search_code",
+      "description": "Search code within an approved GitLab project and return bounded file metadata.",
+      "capability": "repository.read",
+      "side_effect": "none",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {"type": "string"},
+          "query": {"type": "string"},
+          "path": {"type": "string"},
+          "ref": {"type": "string"},
+          "max_results": {"type": "integer"}
+        },
+        "required": ["project", "query"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

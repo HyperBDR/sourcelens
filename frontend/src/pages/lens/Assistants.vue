@@ -286,6 +286,8 @@
         :skills="skills"
         :environment-variable-sets="environmentVariableSets"
         :mcps="mcps"
+        :plugin-connections="pluginConnections"
+        :plugin-manifests="pluginManifests"
         :llm-config-options="llmConfigOptions"
         :saving="saving"
         :form-error="formError"
@@ -350,11 +352,14 @@ import {
   archiveAssistant,
   createAssistant,
   getAssistant,
+  getPluginManifest,
   listAssistants,
+  listConnections,
   listGlobalSettings,
   listLensNodes,
   listMcpServers,
   listEnvironmentVariableSets,
+  listPlugins,
   listSkills,
   restoreAssistant,
   updateAssistant
@@ -404,6 +409,8 @@ const lensnodes = ref([])
 const skills = ref([])
 const environmentVariableSets = ref([])
 const mcps = ref([])
+const pluginConnections = ref([])
+const pluginManifests = ref({})
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
 let formResourcesPromise = null
@@ -518,13 +525,22 @@ async function loadFormResources() {
     await formResourcesPromise
     return
   }
-  if (lensnodes.value.length || skills.value.length || mcps.value.length) return
+  if (
+    lensnodes.value.length ||
+    skills.value.length ||
+    mcps.value.length ||
+    pluginConnections.value.length
+  ) {
+    return
+  }
 
   formResourcesPromise = Promise.all([
     listLensNodes(),
     listSkills(),
     listEnvironmentVariableSets(),
     listMcpServers(),
+    listConnections({ status: 'active' }),
+    listPlugins(),
     llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
   ])
     .then(
@@ -533,6 +549,8 @@ async function loadFormResources() {
         skillRows,
         environmentVariableSetRows,
         mcpRows,
+        connectionRows,
+        installedPlugins,
         llmRows
       ]) => {
         lensnodes.value = normalizeList(lensnodeRows)
@@ -541,7 +559,17 @@ async function loadFormResources() {
           environmentVariableSetRows
         )
         mcps.value = normalizeList(mcpRows)
+        pluginConnections.value = normalizeList(connectionRows)
         llmConfigOptions.value = normalizeList(llmRows)
+        return Promise.all(
+          normalizeList(installedPlugins).map((plugin) =>
+            getPluginManifest(plugin.key)
+          )
+        ).then((manifests) => {
+          pluginManifests.value = Object.fromEntries(
+            manifests.map((manifest) => [manifest.key, manifest])
+          )
+        })
       }
     )
     .finally(() => {
@@ -656,6 +684,7 @@ function defaultForm() {
     mcp_uuids: [],
     mcp_environment_set_uuids: {},
     mcp_environment_drafts: {},
+    plugin_bindings: [],
     visibility: 'private',
     access_group_ids: [],
     access_user_ids: [],
@@ -736,6 +765,11 @@ function formFromRow(row) {
         ])
     ),
     mcp_environment_drafts: {},
+    plugin_bindings: (row.plugin_bindings || []).map((binding) => ({
+      connection_uuid: binding.connection_uuid,
+      tools: [...(binding.tools || [])],
+      enabled: binding.enabled !== false
+    })),
     visibility: row.visibility || 'public',
     access_group_ids: (row.access_grants || [])
       .filter((g) => g.type === 'group')
@@ -834,6 +868,14 @@ function buildPayload() {
         form.value.mcp_environment_drafts?.[uuid]
       )
     }),
+    plugin_bindings:
+      form.value.mode === 'direct'
+        ? (form.value.plugin_bindings || []).map((binding) => ({
+            connection_uuid: binding.connection_uuid,
+            tools: [...(binding.tools || [])],
+            enabled: binding.enabled !== false
+          }))
+        : [],
     visibility: form.value.visibility || 'public',
     access_grants: buildAccessGrants(),
     status: form.value.status || 'active'

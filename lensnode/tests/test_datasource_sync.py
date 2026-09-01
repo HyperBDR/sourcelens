@@ -29,6 +29,7 @@ from lensnode.datasource_sync import (
     _sync_git,
     _sync_git_submodules,
     _sync_feishu_folder,
+    _sync_jira,
     upload_managed_workspace,
 )
 from lensnode.path_rules import source_sha256
@@ -41,6 +42,55 @@ def test_datasource_sync_workers_defaults_to_four():
     assert datasource_sync_workers({}) == 4
     assert datasource_sync_workers({"max_workers": "8"}) == 8
     assert datasource_sync_workers({"max_workers": "invalid"}) == 4
+
+
+def test_jira_sync_exports_bounded_issue_markdown(monkeypatch, tmp_path):
+    """Jira datasource sync writes model-indexable Issue documents."""
+
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._jira_fetch_issues",
+        lambda config: [
+            {
+                "key": "SL-488",
+                "fields": {
+                    "summary": "Plugin design",
+                    "status": {"name": "In Progress"},
+                    "description": {
+                        "content": [
+                            {
+                                "content": [
+                                    {"text": "Implement Provider chain."}
+                                ]
+                            }
+                        ]
+                    },
+                },
+            }
+        ],
+    )
+
+    result = _sync_jira(
+        {
+            "source_type": "jira",
+            "target_path": str(tmp_path / "jira"),
+            "config": {
+                "endpoint": "https://company.atlassian.net",
+                "email": "admin@example.com",
+                "access_token": "jira-api-token",
+                "project": "SL",
+                "max_issues": 50,
+            },
+        },
+        tmp_path,
+        None,
+    )
+
+    issue_path = tmp_path / "jira" / "issues" / "SL-488.md"
+    assert issue_path.exists()
+    assert "Plugin design" in issue_path.read_text()
+    assert "jira-api-token" not in issue_path.read_text()
+    assert result["synced"] == 1
+    assert result["_sync_items"][0].source_id == "jira:SL-488"
 
 
 def test_managed_workspace_path_must_exist(tmp_path):

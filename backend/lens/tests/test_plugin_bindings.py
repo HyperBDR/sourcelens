@@ -11,14 +11,18 @@ from rest_framework.test import APIClient
 from lens.execution import execute_answer_run
 from lens.models import (
     Assistant,
+    AssistantMCP,
     AssistantPluginBinding,
     Connection,
     LensNode,
+    MCPServer,
     SecretMaterial,
     SecretVersion,
     Session,
+    Skill,
 )
 from lens.services import (
+    build_loaded_mcps,
     build_loaded_plugins,
     create_execution_run,
     dispatch_run_to_lensnode,
@@ -149,6 +153,234 @@ class AssistantPluginBindingTests(TestCase):
         self.assertEqual(binding.tools, ["github_read_file"])
         self.assertNotIn("ghp-runtime-secret", str(response.data))
         self.assertNotIn("encrypted_value", str(response.data))
+
+    def test_skill_plugin_requirement_rejects_missing_capability_binding(self):
+        skill = Skill.objects.create(
+            name="GitHub workflow",
+            definition={
+                "required_plugins": [
+                    {
+                        "plugin": "github",
+                        "capabilities": ["repository.read"],
+                    }
+                ]
+            },
+        )
+
+        with self.plugin_root():
+            response = self.client.post(
+                "/api/lens/assistants/",
+                {
+                    "name": "Incomplete GitHub Assistant",
+                    "slug": "incomplete-github-assistant",
+                    "lensnode_uuid": str(self.lensnode.uuid),
+                    "selected_task": "general_chat",
+                    "selected_dirs": [],
+                    "skill_bindings": [
+                        {"skill_uuid": str(skill.uuid), "enabled": True}
+                    ],
+                    "plugin_bindings": [],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("required_plugins", str(response.data))
+
+    def test_skill_plugin_requirement_accepts_matching_capability_binding(self):
+        skill = Skill.objects.create(
+            name="GitHub workflow",
+            definition={
+                "required_plugins": [
+                    {
+                        "plugin": "github",
+                        "capabilities": ["repository.read"],
+                    }
+                ]
+            },
+        )
+
+        with self.plugin_root():
+            response = self.client.post(
+                "/api/lens/assistants/",
+                {
+                    "name": "Complete GitHub Assistant",
+                    "slug": "complete-github-assistant",
+                    "lensnode_uuid": str(self.lensnode.uuid),
+                    "selected_task": "general_chat",
+                    "selected_dirs": [],
+                    "skill_bindings": [
+                        {"skill_uuid": str(skill.uuid), "enabled": True}
+                    ],
+                    "plugin_bindings": [
+                        {
+                            "connection_uuid": str(self.connection.uuid),
+                            "tools": ["github_read_file"],
+                            "enabled": True,
+                        }
+                    ],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_plugin_mcp_adapter_uses_native_plugin_runtime(self):
+        with self.plugin_root():
+            response = self.client.post(
+                "/api/lens/admin/mcp-servers/",
+                {
+                    "name": "GitHub MCP Adapter",
+                    "transport": "plugin",
+                    "connection_uuid": str(self.connection.uuid),
+                    "tools": ["github_read_file"],
+                    "endpoint": "",
+                    "config": {},
+                    "environment": [],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(
+            response.data["connection_uuid"],
+            str(self.connection.uuid),
+        )
+        self.assertNotIn("ghp-runtime-secret", str(response.data))
+        adapter = MCPServer.objects.get(uuid=response.data["uuid"])
+        AssistantMCP.objects.create(assistant=self.assistant, mcp=adapter)
+
+        with self.plugin_root():
+            loaded_plugins = build_loaded_plugins(self.assistant)
+
+        self.assertEqual(build_loaded_mcps(self.assistant), [])
+        self.assertEqual(len(loaded_plugins), 1)
+        self.assertEqual(
+            loaded_plugins[0]["connection_uuid"],
+            str(self.connection.uuid),
+        )
+        self.assertEqual(
+            [tool["key"] for tool in loaded_plugins[0]["tools"]],
+            ["github_read_file"],
+        )
+
+    def test_plugin_mcp_adapter_rejects_arbitrary_mcp_configuration(self):
+        with self.plugin_root():
+            response = self.client.post(
+                "/api/lens/admin/mcp-servers/",
+                {
+                    "name": "Unsafe Plugin Adapter",
+                    "transport": "plugin",
+                    "connection_uuid": str(self.connection.uuid),
+                    "tools": ["github_read_file"],
+                    "endpoint": "https://mcp.example.com",
+                    "config": {
+                        "headers": {"Authorization": "Bearer bypass"}
+                    },
+                    "environment": [],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("config", str(response.data).lower())
+
+    def test_general_chat_accepts_plugin_mcp_adapter_without_skill(self):
+        adapter = MCPServer.objects.create(
+            name="GitHub MCP Adapter",
+            transport=MCPServer.Transport.PLUGIN,
+            connection=self.connection,
+            tools=["github_read_file"],
+        )
+
+        with self.plugin_root():
+            response = self.client.post(
+                "/api/lens/assistants/",
+                {
+                    "name": "GitHub MCP Assistant",
+                    "slug": "github-mcp-assistant",
+                    "lensnode_uuid": str(self.lensnode.uuid),
+                    "selected_task": "general_chat",
+                    "selected_dirs": [],
+                    "mcp_bindings": [
+                        {"mcp_uuid": str(adapter.uuid), "enabled": True}
+                    ],
+                    "plugin_bindings": [],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_skill_plugin_requirement_accepts_plugin_mcp_adapter(self):
+        skill = Skill.objects.create(
+            name="GitHub workflow",
+            definition={
+                "required_plugins": [
+                    {
+                        "plugin": "github",
+                        "capabilities": ["repository.read"],
+                    }
+                ]
+            },
+        )
+        adapter = MCPServer.objects.create(
+            name="GitHub MCP Adapter",
+            transport=MCPServer.Transport.PLUGIN,
+            connection=self.connection,
+            tools=["github_read_file"],
+        )
+
+        with self.plugin_root():
+            response = self.client.post(
+                "/api/lens/assistants/",
+                {
+                    "name": "GitHub Skill MCP Assistant",
+                    "slug": "github-skill-mcp-assistant",
+                    "lensnode_uuid": str(self.lensnode.uuid),
+                    "selected_task": "general_chat",
+                    "selected_dirs": [],
+                    "skill_bindings": [
+                        {"skill_uuid": str(skill.uuid), "enabled": True}
+                    ],
+                    "mcp_bindings": [
+                        {"mcp_uuid": str(adapter.uuid), "enabled": True}
+                    ],
+                    "plugin_bindings": [],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_plugin_mcp_adapter_rejects_duplicate_native_tool_binding(self):
+        adapter = MCPServer.objects.create(
+            name="GitHub MCP Adapter",
+            transport=MCPServer.Transport.PLUGIN,
+            connection=self.connection,
+            tools=["github_read_file"],
+        )
+
+        with self.plugin_root():
+            response = self.client.patch(
+                f"/api/lens/assistants/{self.assistant.uuid}/",
+                {
+                    "mcp_bindings": [
+                        {"mcp_uuid": str(adapter.uuid), "enabled": True}
+                    ],
+                    "plugin_bindings": [
+                        {
+                            "connection_uuid": str(self.connection.uuid),
+                            "tools": ["github_read_file"],
+                            "enabled": True,
+                        }
+                    ],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("unique", str(response.data).lower())
 
     def test_binding_rejects_tools_outside_the_manifest(self):
         with self.plugin_root():
@@ -362,6 +594,13 @@ class AssistantPluginBindingTests(TestCase):
 
         self.assertEqual(loaded, [])
 
+    @override_settings(
+        CHANNEL_LAYERS={
+            "default": {
+                "BACKEND": "channels.layers.InMemoryChannelLayer",
+            }
+        }
+    )
     def test_worker_refreshes_plugin_snapshot_when_execution_starts(self):
         binding = AssistantPluginBinding.objects.create(
             assistant=self.assistant,

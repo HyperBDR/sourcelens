@@ -24,6 +24,7 @@ from .environment_variables import (
     validate_skill_api_policy,
 )
 from .models import Skill
+from .plugins.skill_requirements import validate_required_plugins
 
 MAX_ZIP_SIZE = 50 * 1024 * 1024
 MAX_UNPACKED_SIZE = 100 * 1024 * 1024
@@ -115,6 +116,7 @@ def import_skill_zip(
                     "environment": metadata["environment"],
                     "api": metadata["api"],
                     "transforms": metadata["transforms"],
+                    "required_plugins": metadata["required_plugins"],
                 }
                 skill.version = source_ref or digest[:12]
                 skill.enabled = True
@@ -207,6 +209,7 @@ def update_skill_zip(
                     "environment": metadata["environment"],
                     "api": metadata["api"],
                     "transforms": metadata["transforms"],
+                    "required_plugins": metadata["required_plugins"],
                 }
                 skill.version = source_ref or digest[:12]
                 skill.enabled = True
@@ -420,7 +423,8 @@ def package_zip_bytes(skill):
             environment = definition.get("environment") or []
             api = definition.get("api") or {}
             transforms = definition.get("transforms") or {}
-            if environment or api or transforms:
+            required_plugins = definition.get("required_plugins") or []
+            if environment or api or transforms or required_plugins:
                 config = {"environment": environment}
                 if api:
                     config["api"] = api
@@ -433,6 +437,8 @@ def package_zip_bytes(skill):
                         }
                         for name, transform in transforms.items()
                     }
+                if required_plugins:
+                    config["required_plugins"] = required_plugins
                 archive.writestr(
                     f"{package_name}/sourcelens.json",
                     json.dumps(
@@ -624,6 +630,7 @@ def _parse_sourcelens_config(skill_root):
             "environment": [],
             "api": {},
             "transforms": {},
+            "required_plugins": [],
         }
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -643,11 +650,15 @@ def _parse_sourcelens_config(skill_root):
             skill_root,
             environment,
         )
+        required_plugins = validate_required_plugins(
+            payload.get("required_plugins")
+        )
         _enable_skill_scripts(skill_root)
         return {
             "environment": environment,
             "api": api,
             "transforms": transforms,
+            "required_plugins": required_plugins,
         }
     except Exception as exc:
         raise SkillPackageError(str(exc)) from exc

@@ -12,7 +12,10 @@ from lens.models import (
     Session,
     Run,
 )
-from lens.plugins.providers.base import DatasourceProviderError
+from lens.plugins.providers.base import (
+    DatasourceProviderError,
+    PluginRequestContext,
+)
 from lens.plugins.providers.jira import JiraDatasourceProvider
 from lens.plugins.registry import latest_plugin
 from lens.plugins.snapshots import create_datasource_sync_snapshot
@@ -123,6 +126,42 @@ class JiraDatasourceProviderTests(SimpleTestCase):
 
         items = resources["resources"]["projects"]["items"]
         self.assertEqual([item["value"] for item in items], ["SL", "OPS"])
+
+    def test_discovery_returns_partial_results_and_warnings(self):
+        def handler(request):
+            project = request.url.path.rsplit("/", 1)[-1]
+            if project == "OPS":
+                return httpx.Response(404, request=request)
+            return httpx.Response(
+                200,
+                json={"key": "SL", "name": "SourceLens"},
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            resources = self.provider.discover_resources(
+                self.scope,
+                "api-token",
+                endpoint="https://company.atlassian.net",
+                connection_config=self.config,
+                client=client,
+                request_context=PluginRequestContext(max_retries=0),
+            )
+
+        self.assertEqual(
+            resources["resources"]["projects"]["items"][0]["value"],
+            "SL",
+        )
+        self.assertEqual(
+            resources["warnings"],
+            [
+                {
+                    "resource": "OPS",
+                    "label": "project",
+                    "code": "JIRA_NOT_FOUND",
+                }
+            ],
+        )
 
 
 class JiraToolProviderTests(SimpleTestCase):
