@@ -529,6 +529,9 @@
       "switchToCode": "使用邮箱验证码登录",
       "turnstileRequired": "请先完成人机验证",
       "sendFailed": "验证码发送失败，请稍后重试",
+      "invalidCode": "验证码错误，请重新输入",
+      "expiredCode": "验证码已过期，请重新获取",
+      "tooManyAttempts": "验证码错误次数过多，请重新获取",
       "verifyFailed": "验证码错误或已过期",
       "invalidEmail": "请输入有效的邮箱地址"
     },

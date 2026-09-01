@@ -92,6 +92,7 @@ import { authApi } from '@/api/auth'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
+import { getVerificationErrorMessage } from '@/utils/verificationError'
 
 const emit = defineEmits(['success'])
 
@@ -179,8 +180,8 @@ const handleVerifyCode = async () => {
     })
     emit('success')
   } catch (error) {
-    errorMessage.value =
-      error.response?.data?.message || t('auth.codeLogin.verifyFailed')
+    errorMessage.value = getVerificationErrorMessage(error, t)
+  } finally {
     loading.value = false
   }
 }

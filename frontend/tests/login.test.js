@@ -46,3 +46,68 @@ test('email code verification submits the detected UI language', async () => {
     /loginWithCode\(\{[\s\S]*language: locale\.value[\s\S]*\}\)/
   )
 })
+
+test('email code verification maps actionable errors in every locale', async () => {
+  const [component, utility, english, chinese, spanish] = await Promise.all([
+    source('components/auth/EmailCodeLogin.vue'),
+    source('utils/verificationError.js'),
+    source('locales/en.json'),
+    source('locales/zh-CN.json'),
+    source('locales/es.json')
+  ])
+
+  assert.match(component, /getVerificationErrorMessage\(error, t\)/)
+  assert.match(utility, /data \|\| response/)
+
+  const module = await import(
+    new URL('../src/utils/verificationError.js', import.meta.url)
+  )
+  const translate = (key) => key
+  for (const [code, key] of [
+    ['INVALID', 'auth.codeLogin.invalidCode'],
+    ['EXPIRED', 'auth.codeLogin.expiredCode'],
+    ['TOO_MANY_ATTEMPTS', 'auth.codeLogin.tooManyAttempts']
+  ]) {
+    assert.equal(
+      module.getVerificationErrorMessage(
+        { response: { data: { error_code: code } } },
+        translate
+      ),
+      key
+    )
+    assert.equal(
+      module.getVerificationErrorMessage(
+        { response: { data: { data: { error_code: code } } } },
+        translate
+      ),
+      key
+    )
+  }
+  assert.equal(
+    module.getVerificationErrorMessage(
+      { response: { data: { message: 'failed' } } },
+      translate
+    ),
+    'auth.codeLogin.verifyFailed'
+  )
+  assert.equal(
+    module.getVerificationErrorMessage(
+      { response: { data: { data: { errors: { code: ['invalid'] } } } } },
+      translate
+    ),
+    'auth.codeLogin.verifyFailed'
+  )
+  assert.equal(
+    module.getVerificationErrorMessage(
+      { response: { data: { detail: 'internal error' } } },
+      translate
+    ),
+    'auth.codeLogin.verifyFailed'
+  )
+
+  for (const messages of [english, chinese, spanish].map(JSON.parse)) {
+    assert.ok(messages.auth.codeLogin.invalidCode)
+    assert.ok(messages.auth.codeLogin.expiredCode)
+    assert.ok(messages.auth.codeLogin.tooManyAttempts)
+  }
+})

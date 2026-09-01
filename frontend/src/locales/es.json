@@ -529,6 +529,9 @@
       "switchToCode": "Usa código de correo electrónico",
       "turnstileRequired": "Por favor complete la verificación humana",
       "sendFailed": "Error al enviar el código, por favor intente más tarde",
+      "invalidCode": "El código de verificación no es correcto. Inténtalo de nuevo.",
+      "expiredCode": "Este código de verificación ha caducado. Solicita uno nuevo.",
+      "tooManyAttempts": "Demasiados intentos fallidos. Solicita un código nuevo.",
       "verifyFailed": "El código es incorrecto o ha expirado.",
       "invalidEmail": "Por favor ingrese una dirección de correo electrónico válida"
     },

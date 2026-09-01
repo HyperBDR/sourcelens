@@ -115,12 +115,13 @@ class VerifyLoginCodeView(APIView):
     """
     permission_classes = [AllowAny]
 
+    _INVALID_CODE_MESSAGE = _('The verification code is incorrect.')
     _ERROR_MESSAGES = {
         'expired': _('The verification code has expired.'),
         'too_many_attempts': _(
             'Too many incorrect attempts. Request a new code.'
         ),
-        'invalid': _('The verification code is incorrect.'),
+        'invalid': _INVALID_CODE_MESSAGE,
     }
 
     @extend_schema(
@@ -133,8 +134,19 @@ class VerifyLoginCodeView(APIView):
         """Verify the code and issue JWT tokens."""
         serializer = VerifyLoginCodeSerializer(data=request.data)
         if not serializer.is_valid():
+            response_data = {
+                'success': False,
+                'errors': serializer.errors,
+            }
+            if 'code' in serializer.errors:
+                response_data.update(
+                    {
+                        'error_code': 'INVALID',
+                        'message': self._INVALID_CODE_MESSAGE,
+                    }
+                )
             return Response(
-                {'success': False, 'errors': serializer.errors},
+                response_data,
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -148,7 +160,11 @@ class VerifyLoginCodeView(APIView):
             return Response(
                 {
                     'success': False,
-                    'error_code': reason.upper(),
+                    'error_code': {
+                        'invalid': 'INVALID',
+                        'expired': 'EXPIRED',
+                        'too_many_attempts': 'TOO_MANY_ATTEMPTS',
+                    }.get(reason, 'INVALID'),
                     'message': self._ERROR_MESSAGES.get(
                         reason, _('Verification failed.')
                     ),

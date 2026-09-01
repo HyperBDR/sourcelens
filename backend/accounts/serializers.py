@@ -228,14 +228,22 @@ class VerifyLoginCodeSerializer(serializers.Serializer):
     )
     code = serializers.CharField(
         required=True,
-        min_length=4,
-        max_length=8,
+        min_length=6,
+        max_length=6,
         help_text=_("Verification code from email")
     )
 
     def validate_email(self, value):
         """Normalize the email address."""
         return value.lower().strip()
+
+    def validate_code(self, value):
+        """Require the six-digit numeric code issued by the service."""
+        if not re.fullmatch(r'[0-9]{6}', value):
+            raise serializers.ValidationError(
+                _("The verification code is incorrect.")
+            )
+        return value
 
 
 class VirtualEmailUsernameSerializer(serializers.Serializer):
