@@ -27,6 +27,7 @@ from .views import (
     LensNodeSkillPackageView,
     LensNodeViewSet,
     MCPServerViewSet,
+    PluginRegistryViewSet,
     PublicAssistantView,
     PublicSharedQAFileView,
     PublicSharedQAListView,
@@ -63,6 +64,11 @@ router.register(
     "admin/credentials",
     DataSourceCredentialViewSet,
     basename="lens-admin-credentials",
+)
+router.register(
+    "admin/plugins",
+    PluginRegistryViewSet,
+    basename="lens-admin-plugins",
 )
 router.register(
     "admin/environment-variable-sets",

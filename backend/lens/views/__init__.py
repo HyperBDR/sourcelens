@@ -31,6 +31,7 @@ from .gateway import (
 )
 from .global_settings import GlobalSettingViewSet
 from .lensnodes import LensNodeViewSet
+from .plugins import PluginRegistryViewSet
 from .sessions import (
     LensAttachmentView,
     RunCitationSourceView,
@@ -80,6 +81,7 @@ __all__ = [
     "PublicSharedQAListView",
     "PublicSharedQAPdfView",
     "PublicSharedQAView",
+    "PluginRegistryViewSet",
     "RunCitationSourceView",
     "RunOutputFileDownloadView",
     "RunViewSet",
