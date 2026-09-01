@@ -30,6 +30,7 @@ from .views import (
     PluginRegistryViewSet,
     PluginCredentialLeaseView,
     PluginCredentialMaterialView,
+    PluginExecutionSnapshotView,
     PublicAssistantView,
     PublicSharedQAFileView,
     PublicSharedQAListView,
@@ -99,6 +100,11 @@ urlpatterns = [
         "plugin-runtime/leases/<uuid:lease_uuid>/material/",
         PluginCredentialMaterialView.as_view(),
         name="lens-plugin-credential-material",
+    ),
+    path(
+        "plugin-runtime/snapshots/<uuid:snapshot_uuid>/",
+        PluginExecutionSnapshotView.as_view(),
+        name="lens-plugin-execution-snapshot",
     ),
     path(
         "admin/access/users/<int:user_id>/",

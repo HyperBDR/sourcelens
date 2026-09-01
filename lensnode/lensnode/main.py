@@ -31,6 +31,7 @@ from .gateway_model import RunCancelledError
 from .plugin_runtime import (
     PluginRuntimeError,
     acquire_plugin_lease,
+    fetch_plugin_snapshot,
     retrieve_plugin_material,
 )
 from .logging_utils import (
@@ -840,10 +841,11 @@ class LensNodeClient:
                     }
                 )
                 try:
-                    result = await asyncio.to_thread(
-                        self._execute_plugin_datasource_sync,
-                        message,
-                    )
+                result = await asyncio.to_thread(
+                    self._execute_plugin_datasource_sync,
+                    message,
+                    emit,
+                )
                 finally:
                     if slot_acquired:
                         await self.execution_queue.release(
@@ -956,10 +958,16 @@ class LensNodeClient:
         finally:
             self.running_tasks.pop(task_key, None)
 
-    def _execute_plugin_datasource_sync(self, message):
-        """Acquire a lease and reject unsupported provider execution safely."""
+    def _execute_plugin_datasource_sync(self, message, emit=None):
+        """Execute a trusted GitHub datasource using snapshot data."""
 
         try:
+            snapshot = fetch_plugin_snapshot(
+                self.gateway_http_client,
+                self.config.ai_gateway_url,
+                self.config.token,
+                message.get("snapshot_uuid"),
+            )
             lease = acquire_plugin_lease(
                 self.gateway_http_client,
                 self.config.ai_gateway_url,
@@ -974,11 +982,38 @@ class LensNodeClient:
             )
         except (PluginRuntimeError, httpx.HTTPError) as exc:
             return {"status": "failed", "error": str(exc)}
-        del material
-        return {
-            "status": "failed",
-            "error": "PLUGIN_PROVIDER_RUNTIME_UNAVAILABLE",
+        resolved = snapshot["resolved_config"]
+        datasource = resolved.get("datasource_config") or {}
+        if snapshot.get("plugin_key") != "github":
+            return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
+        repository = datasource.get("repository")
+        endpoint = resolved.get("endpoint", "").rstrip("/")
+        if not repository or not endpoint:
+            return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
+        command = {
+            "source_type": "git",
+            "datasource_uuid": snapshot.get("datasource_uuid"),
+            "target_path": resolved.get("target_path"),
+            "sync_policy": resolved.get("sync_policy") or {},
+            "trigger": message.get("trigger") or "plugin",
+            "config": {
+                "repo_url": f"{endpoint}/{repository}.git",
+                "branch": datasource.get("branch") or "main",
+                "auth_scheme": "token",
+                "access_token": material["value"],
+            },
         }
+        try:
+            return sync_datasource(
+                command,
+                self.config.workspace_path,
+                emit,
+            )
+        except DataSourceSyncError:
+            return {"status": "failed", "error": "PLUGIN_SYNC_FAILED"}
+        finally:
+            command["config"]["access_token"] = ""
+            material["value"] = ""
 
     async def _start_datasource_conversion(self, message):
         """Start one managed workspace conversion in a worker thread."""

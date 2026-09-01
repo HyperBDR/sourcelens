@@ -55,12 +55,15 @@ class PluginLeaseTests(TestCase):
             plugin_key="github",
             plugin_version="1.0.0",
             protocol_version=1,
-            resolved_config={"repository": "owner/repository"},
+            resolved_config={
+                "repository": "owner/repository",
+                "access_token": "must-not-leave-control-plane",
+            },
         )
         self.token = issue_lensnode_token(self.node)
         self.client = APIClient()
 
-    def test_node_can_issue_a_lease_for_its_snapshot_without_secret_payload(self):
+    def test_node_can_issue_lease_without_secret_payload(self):
         response = self.client.post(
             "/api/lens/plugin-runtime/leases/",
             {"snapshot_uuid": str(self.snapshot.uuid)},
@@ -109,6 +112,23 @@ class PluginLeaseTests(TestCase):
         self.assertEqual(material_response.status_code, 200)
         self.assertEqual(material_response.data["value"], "github-secret")
         self.assertEqual(material_response.data["plugin_key"], "github")
+
+    def test_node_can_fetch_non_sensitive_snapshot_config(self):
+        response = self.client.get(
+            f"/api/lens/plugin-runtime/snapshots/{self.snapshot.uuid}/",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["resolved_config"]["repository"],
+            "owner/repository",
+        )
+        self.assertNotIn(
+            "access_token",
+            response.data["resolved_config"],
+        )
+        self.assertNotIn("encrypted_value", response.data)
 
     def test_expired_lease_cannot_resolve_material(self):
         lease_response = self.client.post(

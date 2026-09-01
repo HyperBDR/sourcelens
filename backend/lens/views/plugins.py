@@ -13,6 +13,18 @@ from lens.plugins.registry import discover_plugins
 from .base import BaseAdminViewSet, LensNodeAuthMixin
 
 
+SENSITIVE_KEYS = frozenset({
+    "access_token",
+    "api_key",
+    "authorization",
+    "credential",
+    "credentials",
+    "password",
+    "secret",
+    "token",
+})
+
+
 class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
     """Expose installed Plugin identities without runtime internals."""
 
@@ -121,3 +133,54 @@ class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class PluginExecutionSnapshotView(LensNodeAuthMixin, APIView):
+    """Return non-sensitive execution data to the owning LensNode."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, snapshot_uuid):
+        """Resolve one snapshot for a node without returning its secret."""
+
+        node = self._authenticate_lensnode(request)
+        if node is None:
+            return Response({"detail": "LENSNODE_UNAUTHORIZED"}, status=401)
+        snapshot = (
+            ExecutionSnapshot.objects.select_related("datasource")
+            .filter(
+                uuid=snapshot_uuid,
+                datasource__lensnode=node,
+            )
+            .first()
+        )
+        if snapshot is None:
+            return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
+        return Response(
+            {
+                "snapshot_uuid": str(snapshot.uuid),
+                "datasource_uuid": str(snapshot.datasource.uuid),
+                "plugin_key": snapshot.plugin_key,
+                "plugin_version": snapshot.plugin_version,
+                "protocol_version": snapshot.protocol_version,
+                "resolved_config": _safe_snapshot_config(
+                    snapshot.resolved_config
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+def _safe_snapshot_config(value):
+    """Remove credential-shaped keys before returning snapshot data."""
+
+    if isinstance(value, dict):
+        return {
+            key: _safe_snapshot_config(nested)
+            for key, nested in value.items()
+            if str(key).lower() not in SENSITIVE_KEYS
+        }
+    if isinstance(value, list):
+        return [_safe_snapshot_config(item) for item in value]
+    return value

@@ -65,3 +65,21 @@ def retrieve_plugin_material(client, ai_gateway_url, token, lease_uuid):
         "endpoint": str(payload.get("endpoint") or ""),
         "value": value,
     }
+
+
+def fetch_plugin_snapshot(client, ai_gateway_url, token, snapshot_uuid):
+    """Fetch non-sensitive execution data for one snapshot."""
+
+    if not snapshot_uuid:
+        raise PluginRuntimeError("PLUGIN_SNAPSHOT_REQUIRED")
+    response = client.get(
+        f"{lease_url(ai_gateway_url).rsplit('/leases', 1)[0]}"
+        f"/snapshots/{snapshot_uuid}/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if response.is_error:
+        raise PluginRuntimeError("PLUGIN_SNAPSHOT_REQUEST_FAILED")
+    payload = response.json()
+    if not isinstance(payload.get("resolved_config"), dict):
+        raise PluginRuntimeError("PLUGIN_SNAPSHOT_INVALID_RESPONSE")
+    return payload

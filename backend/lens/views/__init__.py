@@ -34,6 +34,7 @@ from .lensnodes import LensNodeViewSet
 from .plugins import (
     PluginCredentialLeaseView,
     PluginCredentialMaterialView,
+    PluginExecutionSnapshotView,
     PluginRegistryViewSet,
 )
 from .sessions import (
@@ -88,6 +89,7 @@ __all__ = [
     "PluginRegistryViewSet",
     "PluginCredentialLeaseView",
     "PluginCredentialMaterialView",
+    "PluginExecutionSnapshotView",
     "RunCitationSourceView",
     "RunOutputFileDownloadView",
     "RunViewSet",
