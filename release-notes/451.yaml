@@ -1,0 +1,10 @@
+type: improvement
+audience: user
+en: >-
+  Improved assistant code blocks with syntax highlighting, preserved
+  formatting, and one-click copying in light and dark themes.
+zh-CN: >-
+  优化助手代码块体验，支持语法高亮、格式保留，以及明暗主题下的一键复制。
+es: >-
+  Se mejoraron los bloques de código de las respuestas con resaltado de
+  sintaxis, formato conservado y copia con un clic en temas claro y oscuro.
