@@ -1,0 +1,11 @@
+type: fix
+audience: user
+en: >-
+  Fixed login human verification when the runtime configuration does not
+  provide a Turnstile site key but the production frontend includes one.
+zh-CN: >-
+  修复运行时配置未提供 Turnstile Site Key、但生产前端已内置该配置时的登录人机验证。
+es: >-
+  Se corrigió la verificación humana del inicio de sesión cuando la
+  configuración de ejecución no proporciona una clave de sitio de Turnstile,
+  pero el frontend de producción ya incluye una.

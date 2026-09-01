@@ -103,3 +103,14 @@ test('assistant list delegates lower-frequency data to a drawer', async () => {
   assert.match(drawer, /:disabled="assistant.status !== 'active'"/)
   assert.match(drawer, /\$emit\('edit', assistant\)/)
 })
+
+test('assistant management loads form resources only when editing', async () => {
+  const page = await source('pages/lens/Assistants.vue')
+
+  assert.match(page, /async function loadFormResources\(\)/)
+  assert.match(page, /await loadFormResources\(\)/)
+  assert.doesNotMatch(
+    page,
+    /async function load\(\)[\s\S]*?Promise\.all\(\[\s*listAssistants[\s\S]*?listSkills/
+  )
+})

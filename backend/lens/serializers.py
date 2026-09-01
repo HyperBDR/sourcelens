@@ -540,11 +540,125 @@ class AccessGrantsField(serializers.Field):
         return validated
 
 
+class AssistantListSerializer(serializers.ModelSerializer):
+    """Compact assistant representation for collection responses."""
+
+    lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    lensnode_name = serializers.CharField(source="lensnode.name", read_only=True)
+    mode = serializers.CharField(read_only=True)
+    collaboration_members = serializers.SerializerMethodField()
+    skill_summary = serializers.SerializerMethodField()
+    mcp_summary = serializers.SerializerMethodField()
+    supports_document_attachments = serializers.SerializerMethodField()
+    vision_model_capability = serializers.SerializerMethodField()
+    can_process_images = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Assistant
+        fields = [
+            "uuid",
+            "name",
+            "capability",
+            "slug",
+            "lensnode",
+            "lensnode_name",
+            "mode",
+            "routing_mode",
+            "collaboration_members",
+            "status",
+            "visibility",
+            "skill_summary",
+            "mcp_summary",
+            "supports_document_attachments",
+            "vision_model_capability",
+            "can_process_images",
+        ]
+
+    def get_collaboration_members(self, assistant):
+        """Return prefetched Smart Assistant members for list views."""
+
+        if not assistant.mode_handler.supports_members:
+            return []
+        return [
+            {
+                "uuid": str(member.uuid),
+                "name": member.name,
+                "capability": member.capability,
+                "status": member.status,
+            }
+            for member in sorted(
+                assistant.collaboration_members.all(),
+                key=lambda item: (item.name, str(item.uuid)),
+            )
+        ]
+
+    def get_skill_summary(self, assistant):
+        """Summarize prefetched Skill bindings without per-row queries."""
+
+        bindings = list(assistant.skill_bindings.all())
+        return {
+            "total": len(bindings),
+            "enabled": sum(binding.enabled for binding in bindings),
+        }
+
+    def get_mcp_summary(self, assistant):
+        """Summarize prefetched MCP bindings without per-row queries."""
+
+        bindings = list(assistant.mcp_bindings.all())
+        return {
+            "total": len(bindings),
+            "enabled": sum(binding.enabled for binding in bindings),
+        }
+
+    def get_supports_document_attachments(self, assistant):
+        """Return whether an Assistant can execute with Run documents."""
+
+        if assistant.lensnode_id:
+            return assistant_supports_document_attachments(assistant)
+        cache = getattr(self, "_document_capability_cache", None)
+        if cache is None:
+            cache = {}
+            self._document_capability_cache = cache
+        if assistant.capability not in cache:
+            cache[assistant.capability] = assistant_supports_document_attachments(
+                assistant
+            )
+        return cache[assistant.capability]
+
+    def _vision_capability(self, assistant):
+        """Cache model capability resolution for the current response."""
+
+        cache = getattr(self, "_vision_capability_cache", None)
+        if cache is None:
+            cache = {}
+            self._vision_capability_cache = cache
+        key = str(assistant.multimodal_model_ref or "")
+        if key not in cache:
+            cache[key] = resolve_model_capability(assistant.multimodal_model_ref)
+        return cache[key]
+
+    def get_vision_model_capability(self, assistant):
+        """Return the configured vision-model capability."""
+
+        return self._vision_capability(assistant)
+
+    def get_can_process_images(self, assistant):
+        """Return whether the Assistant accepts image input."""
+
+        capability = self._vision_capability(assistant)
+        return bool(
+            assistant.status == Assistant.Status.ACTIVE
+            and capability.get("enabled")
+            and capability.get("supports_vision")
+        )
+
+
 class AssistantSerializer(serializers.ModelSerializer):
     """Assistant serializer with LensNode and capability validation."""
 
     lensnode_uuid = serializers.UUIDField(write_only=True, required=False)
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
+    lensnode_name = serializers.CharField(source="lensnode.name", read_only=True)
     collaboration_member_uuids = serializers.ListField(
         child=serializers.UUIDField(),
         write_only=True,
@@ -578,6 +692,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "capability",
             "slug",
             "lensnode",
+            "lensnode_name",
             "lensnode_uuid",
             "routing_mode",
             "collaboration_member_uuids",

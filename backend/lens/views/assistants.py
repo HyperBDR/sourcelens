@@ -9,9 +9,16 @@ from rest_framework.views import APIView
 
 from accounts.permissions import HasRequiredFeature
 
+from core.paginations import APIPagination
 from lens.models import Assistant, user_sees_all_assistants
-from lens.serializers import AssistantSerializer
+from lens.serializers import AssistantListSerializer, AssistantSerializer
 from .base import BaseAuthenticatedViewSet
+
+
+class AssistantPagination(APIPagination):
+    """Keep Assistant collection responses bounded and predictable."""
+
+    max_page_size = 100
 
 
 class AssistantViewSet(BaseAuthenticatedViewSet):
@@ -35,6 +42,14 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
         ),
     )
     serializer_class = AssistantSerializer
+    pagination_class = AssistantPagination
+
+    def get_serializer_class(self):
+        """Use the compact contract for the collection endpoint."""
+
+        if self.action == "list":
+            return AssistantListSerializer
+        return super().get_serializer_class()
 
     def get_permissions(self):
         """Require the admin console feature for write actions."""
@@ -52,7 +67,18 @@ class AssistantViewSet(BaseAuthenticatedViewSet):
     def get_queryset(self):
         """Scope assistants to those the caller may see."""
 
-        queryset = super().get_queryset().visible_to(self.request.user).filter(
+        if self.action == "list":
+            queryset = Assistant.objects.select_related("lensnode").prefetch_related(
+                "skill_bindings",
+                "mcp_bindings",
+                Prefetch(
+                    "collaboration_members",
+                    queryset=Assistant.objects.order_by("name", "uuid"),
+                ),
+            )
+        else:
+            queryset = super().get_queryset()
+        queryset = queryset.visible_to(self.request.user).filter(
             is_system=False
         )
         if self.action == "restore":

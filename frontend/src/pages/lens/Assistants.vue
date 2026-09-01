@@ -135,7 +135,7 @@
                     </div>
                   </td>
                   <td class="table-cell text-ink-600">
-                    {{ lensNodeName(row.lensnode) }}
+                    {{ lensNodeName(row) }}
                   </td>
                   <td class="assistant-type-column table-cell text-ink-600">
                     <div>
@@ -349,6 +349,7 @@ import AdminLayout from '@/admin/layout/AdminLayout.vue'
 import {
   archiveAssistant,
   createAssistant,
+  getAssistant,
   listAssistants,
   listGlobalSettings,
   listLensNodes,
@@ -405,6 +406,8 @@ const environmentVariableSets = ref([])
 const mcps = ref([])
 const globalSettings = ref([])
 const llmConfigOptions = ref([])
+let formResourcesPromise = null
+let globalSettingsPromise = null
 
 const activeColumns = computed(() =>
   [
@@ -442,6 +445,7 @@ function goNextPage() {
 }
 
 function lensNodeName(value) {
+  if (value?.lensnode_name) return value.lensnode_name
   const uuid = typeof value === 'object' ? value?.uuid : value
   const found = lensnodes.value.find((lensnode) => lensnode.uuid === uuid)
   return found?.name || uuid || emptyValue
@@ -468,6 +472,7 @@ function mcpCountLabel(row) {
 }
 
 async function copyShareUrl(row) {
+  await loadGlobalSettings()
   if (await copyToClipboard(shareUrl(row))) {
     showSuccess(t('lens.share.copied'))
   } else {
@@ -483,36 +488,66 @@ async function load() {
   loading.value = true
   formError.value = ''
   try {
-    const [
-      assistantRows,
-      lensnodeRows,
-      skillRows,
-      environmentVariableSetRows,
-      mcpRows,
-      settingRows,
-      llmRows
-    ] = await Promise.all([
-      listAssistants(showArchived.value ? { archived: true } : {}),
-      listLensNodes(),
-      listSkills(),
-      listEnvironmentVariableSets(),
-      listMcpServers(),
-      listGlobalSettings(),
-      llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
-    ])
-
+    const assistantRows = await listAssistants(
+      showArchived.value ? { archived: true } : {}
+    )
     assistants.value = normalizeList(assistantRows)
-    lensnodes.value = normalizeList(lensnodeRows)
-    skills.value = normalizeList(skillRows)
-    environmentVariableSets.value = normalizeList(environmentVariableSetRows)
-    mcps.value = normalizeList(mcpRows)
-    globalSettings.value = normalizeList(settingRows)
-    llmConfigOptions.value = normalizeList(llmRows)
   } catch (error) {
     showError(extractErrorMessage(error, t('lensAdmin.messages.loadFailed')))
   } finally {
     loading.value = false
   }
+}
+
+async function loadGlobalSettings() {
+  if (globalSettings.value.length) return
+  if (!globalSettingsPromise) {
+    globalSettingsPromise = listGlobalSettings()
+      .then((rows) => {
+        globalSettings.value = normalizeList(rows)
+      })
+      .finally(() => {
+        globalSettingsPromise = null
+      })
+  }
+  await globalSettingsPromise
+}
+
+async function loadFormResources() {
+  if (formResourcesPromise) {
+    await formResourcesPromise
+    return
+  }
+  if (lensnodes.value.length || skills.value.length || mcps.value.length) return
+
+  formResourcesPromise = Promise.all([
+    listLensNodes(),
+    listSkills(),
+    listEnvironmentVariableSets(),
+    listMcpServers(),
+    llmAdminApi.getLLMConfigAll({ scope: 'global' }).catch(() => [])
+  ])
+    .then(
+      ([
+        lensnodeRows,
+        skillRows,
+        environmentVariableSetRows,
+        mcpRows,
+        llmRows
+      ]) => {
+        lensnodes.value = normalizeList(lensnodeRows)
+        skills.value = normalizeList(skillRows)
+        environmentVariableSets.value = normalizeList(
+          environmentVariableSetRows
+        )
+        mcps.value = normalizeList(mcpRows)
+        llmConfigOptions.value = normalizeList(llmRows)
+      }
+    )
+    .finally(() => {
+      formResourcesPromise = null
+    })
+  await formResourcesPromise
 }
 
 async function switchArchiveView(archived) {
@@ -525,7 +560,8 @@ async function switchArchiveView(archived) {
   await load()
 }
 
-function startCreate() {
+async function startCreate() {
+  await loadFormResources()
   detailAssistant.value = null
   mode.value = 'create'
   formError.value = ''
@@ -533,15 +569,19 @@ function startCreate() {
   showDrawer.value = true
 }
 
-function startEdit(row) {
+async function startEdit(row) {
+  const [assistant] = await Promise.all([
+    getAssistant(row.uuid),
+    loadFormResources()
+  ])
   mode.value = 'edit'
   formError.value = ''
-  form.value = formFromRow(row)
+  form.value = formFromRow(assistant)
   showDrawer.value = true
 }
 
-function openDetails(row) {
-  detailAssistant.value = row
+async function openDetails(row) {
+  detailAssistant.value = await getAssistant(row.uuid)
 }
 
 function closeDetails() {
