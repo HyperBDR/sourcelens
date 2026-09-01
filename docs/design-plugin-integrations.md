@@ -1,6 +1,6 @@
 # 设计稿：内置集成 Plugin（Tool + Datasource）
 
-- 状态：设计讨论中（未开始开发）
+- 状态：提议（V1 范围已收敛，未开始开发）
 - 日期：2026-09-01
 - 范围：GitHub、GitLab、Jira 等内置集成；同时服务代码数据源和助手工具。
 
@@ -12,8 +12,8 @@ DataSource 的附属对象，无法自然复用于 Skill 和 MCP；Skill 还需�
 
 Dify 的 Plugin Provider 模型验证了另一条路径：一个插件可以同时注册 Tool
 Provider 和 Datasource Provider，平台根据插件声明动态展示配置并负责调用路由。
-SourceLens 采用这一方向，但增加独立的 Connection、Capability 和版本化授权层，
-避免把原始凭证无条件传给插件进程。
+SourceLens 采用这一方向，但增加独立的 Connection、Capability 和受控运行时，避免
+将原始凭证无条件传给 Skill、模型或任务消息。
 
 ## 2. 目标与非目标
 
@@ -25,6 +25,7 @@ SourceLens 采用这一方向，但增加独立的 Connection、Capability 和�
 - 管理页面由 Plugin manifest 动态生成，不硬编码每个供应商的表单。
 - 支持 Plugin 内部并发请求第三方 API，并统一处理超时、限流、重试和取消。
 - 对每次调用实施用户、Assistant、Skill、Connection、Capability 和资源范围校验。
+- V1 仅支持受信任内置 Plugin 提供的、代码圈定的只读操作。
 - 保留现有 CLI 作为底层执行器，逐步迁移到统一 Plugin 协议。
 
 ### 非目标
@@ -32,6 +33,7 @@ SourceLens 采用这一方向，但增加独立的 Connection、Capability 和�
 - 第一阶段不开放任意第三方 Python/原生插件执行平台权限。
 - 第一阶段不允许普通上传 Skill 直接读取长期 Token。
 - 不把所有 CLI 子命令原样暴露给模型。
+- 第一阶段不支持写操作、第三方可执行 Plugin 或通用 OAuth 流程。
 - 不在本设计中解决多租户产品模型之外的组织身份同步。
 
 ## 3. 核心概念
@@ -52,6 +54,9 @@ Connection ──────── references one SecretVersion
 
 DataSource / Skill / MCP
   └─ binds Connection and declares required capabilities
+
+ExecutionSnapshot
+  └─ immutable configuration resolved when a run starts
 ```
 
 ### Plugin
@@ -68,7 +73,8 @@ DataSource / Skill / MCP
 
 代表可以被消费者使用的完整连接：Plugin、endpoint/tenant/audience、非敏感配置、
 允许范围、SecretVersion 和授权关系。DataSource、Skill、MCP 绑定 Connection，而不
-直接绑定 SecretMaterial。
+直接绑定 SecretMaterial。Connection 是当前可编辑配置，不作为历史执行配置的唯一
+来源。
 
 ### Capability
 
@@ -82,6 +88,19 @@ DataSource / Skill / MCP
 - `jira.issue.transition`
 
 Capability 同时用于 UI 展示、绑定校验、运行时授权、风险分级和审计。
+
+V1 只发布只读 capability。平台的资源范围策略和内置 Plugin 代码是实际执行边界；
+Provider PAT 的最小权限属于纵深防御，不能以 Connection 的 allowed scope 替代。
+
+### ExecutionSnapshot
+
+Tool 调用或 DataSource 同步实际开始时，控制端将当前有效 Connection 解析成不可变
+快照。快照记录 endpoint、规范化资源范围、已授予的 capability、Plugin/manifest
+版本、SecretVersion 引用、actor、任务和节点标识；不记录明文 secret。
+
+排队任务在开始时使用当前已批准配置；已经开始的任务只使用自己的快照和短期 lease。
+这为实际执行提供可审计、可复现的记录，而不在 V1 引入完整的
+ConnectionRevision、绑定迁移和审批图谱。
 
 ## 4. Plugin Manifest
 
@@ -110,9 +129,6 @@ capabilities:
     risk: low
   - key: pull_request.read
     risk: low
-  - key: issue.write
-    risk: high
-    confirmation_required: true
 
 datasource:
   supported: true
@@ -125,16 +141,13 @@ tools:
   - key: github_search_code
     capability: repository.read
     side_effect: none
-  - key: github_create_issue
-    capability: issue.write
-    side_effect: write
 ```
 
 Manifest 应包含：
 
 - 身份、版本、展示名称、图标和说明；
 - credential/connection 字段类型、默认值、校验和脱敏规则；
-- capability、风险等级、读写属性和是否需要确认；
+- capability、风险等级、读写属性和是否需要确认；V1 只允许只读工具；
 - DataSource 资源发现与同步声明；
 - Tool 名称、描述、输入/输出 JSON Schema 和所需 capability；
 - 运行时版本和兼容的 CLI/API 协议版本。
@@ -174,8 +187,8 @@ LLM tool call
   → Tool result 返回模型
 ```
 
-禁止提供 `github_raw_exec(command)` 之类的通用命令工具。写操作必须有独立
-capability、幂等键和按风险配置的用户确认或审批。
+禁止提供 `github_raw_exec(command)` 之类的通用命令工具。未来写操作必须有独立
+capability、幂等键和按风险配置的用户确认或审批；它不属于 V1 范围。
 
 Skill 可以保留流程说明，但只声明依赖：
 
@@ -231,18 +244,28 @@ Plugin Connection
 ### 8.1 连接和凭证分离
 
 GitHub PAT 不包含仓库 URL；Jira Token 不包含项目选择。Connection 才绑定
-endpoint、tenant、audience 和允许范围。
+endpoint、tenant、audience 和允许范围。allowed scope 是平台请求约束，不会把 PAT
+本身降权；V1 依赖固定的只读 Plugin Tool 和服务端资源校验来限制实际请求。
 
 ### 8.2 Secret 交付
 
-默认采用：
+V1 的执行位置是 LensNode。默认调用路径：
 
 ```text
-Plugin Runtime → 短期 Connection lease → Provider API/CLI
+Control plane → task metadata + connection reference → LensNode
+LensNode → node-authenticated lease request → Credential service
+Credential service → short-lived credential lease → Plugin Runtime
+Plugin Runtime → Provider API/CLI
 ```
 
-普通 Skill 只获得工具，不获得原始 Token。受信任的内置 Plugin 可以在受限 Runtime
-中使用 lease；lease 绑定用户、Run、Plugin、Capability、资源范围和过期时间。
+任务消息不携带 credential。LensNode 不能直接读取数据库或长期 Token，而是以节点
+身份为本次 Run 请求短期 lease。普通 Skill 只获得工具，不获得原始 Token；模型上下文
+也不包含 credential 或授权材料。lease 至少绑定 tenant、node、actor、Run、Plugin、
+Tool、Capability、资源范围、ExecutionSnapshot 和过期时间，并只在 Plugin Runtime
+内存中使用。
+
+该模型降低队列消息、Run 快照和模型上下文泄露凭证的风险，但 LensNode 是受信任执行
+边界：若未来支持非平台管理节点，应改为控制端代理调用或更严格的隔离模型。
 
 ### 8.3 强制校验
 
@@ -254,7 +277,7 @@ Plugin Runtime → 短期 Connection lease → Provider API/CLI
 4. Capability 是否满足；
 5. endpoint、仓库、项目或文件夹是否在允许范围；
 6. 工具读写级别、确认和速率限制；
-7. lease、SecretVersion 和 Plugin manifest 是否仍有效。
+7. lease、SecretVersion、ExecutionSnapshot 和 Plugin manifest 是否仍有效。
 
 说明文字不是安全边界，所有约束必须在执行器中落实。
 
@@ -319,6 +342,7 @@ ConnectionGrant
 PluginToolBinding
 PluginDatasourceBinding
 PluginInvocation
+ExecutionSnapshot
 ```
 
 建议 API：
@@ -337,17 +361,20 @@ POST /api/lens/admin/connections/{uuid}/rotate/
 POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
 ```
 
-持久化 Run 只记录 Plugin、Connection、SecretVersion、Capability 和资源引用，
-不记录解析后的 secret。
+持久化 Run 关联 ExecutionSnapshot；该快照记录 Plugin、Connection、
+SecretVersion、Capability 和资源引用，不记录解析后的 secret。
 
 ## 12. 迁移路径
 
-### Phase 1：协议和内置 GitHub Plugin
+### Phase 1：受控 GitHub 只读垂直切片
 
-- 定义 manifest、capability 和 Tool/Datasource Provider 接口；
+- 定义受限 manifest、只读 capability、Tool/Datasource Provider 和
+  ExecutionSnapshot 契约；
+- 定义 Connection、SecretVersion、节点认证和短期 lease；
 - 将现有 GitHub CLI 封装成 Plugin Runtime；
 - 跑通 Connection → DataSource 同步；
 - 跑通 `github_read_file`、`github_search_code` 等只读工具；
+- 只支持一种 GitHub 认证方式，并限定允许的 endpoint；
 - 保留旧 DataSourceCredential 读路径，但禁止新功能继续扩展旧模型。
 
 ### Phase 2：GitLab、Jira 与动态管理页
@@ -358,12 +385,13 @@ POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
 - 将现有 GitHub/GitLab/Jira Skills 改为流程 Skill，移除自行读取 Token 和执行
   任意 CLI 的逻辑。
 
-### Phase 3：凭证版本和安全运行时
+### Phase 3：扩展集成与受控能力
 
-- 引入 SecretVersion、lease、轮换和撤销；
-- PluginInvocation 审计；
-- 工具读写风险策略、确认和审批；
+- 增加凭证轮换、撤销和 PluginInvocation 审计；
 - MCP 通过同一 Connection/Capability 层接入。
+
+写操作、第三方 Plugin、OAuth callback/refresh token rotation 和完整的
+ConnectionRevision 仅在明确的产品需求出现后另行设计。
 
 ### Phase 4：兼容迁移和清理
 
@@ -376,13 +404,13 @@ POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
 
 | 风险 | 影响 | 缓解措施 |
 |---|---|---|
-| Plugin 代码取得原始 secret | 高 | 内置受信任 Runtime、短期 lease、最小权限 |
+| LensNode 被攻破后读取运行时凭证 | 高 | 节点身份、短期 lease、内存使用、撤销和受信任节点运营 |
 | 动态 schema 过于复杂 | 中 | 第一阶段限制字段类型，保留少量自定义组件 |
 | CLI 参数被模型注入 | 高 | 只暴露业务工具，固定参数映射，禁止 raw exec |
 | 第三方 API 限流 | 中 | Connection/provider 并发预算、Retry-After、退避 |
 | 旧凭证迁移失败 | 高 | 双读、版本化、回滚和迁移前 scope 校验 |
 | Tool 与 Datasource 语义混淆 | 中 | 两套 Provider 接口，共享 Connection 但分离执行契约 |
-| 插件版本改变权限 | 高 | manifest 版本、能力变更重新验证和重新审批 |
+| endpoint 变更导致 Token 外发 | 高 | endpoint allowlist、重新连通性验证、执行快照 |
 
 ## 14. 验收标准
 
@@ -392,14 +420,14 @@ POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
 - 模型只能看到已授权 capability 对应的工具；
 - Plugin 内部可并行读取多个 API，且有并发上限、超时、取消和部分失败结果；
 - 原始 secret 不进入 prompt、Tool 参数、Run 快照和普通日志；
-- 写操作具备独立 capability、幂等和确认/审批策略；
+- V1 只暴露代码圈定的只读 Tool，且不提供 raw exec 或任意 URL 请求；
+- LensNode 仅接收任务元数据，并按执行快照取得与任务绑定的短期 lease；
 - 现有 CLI 能在不改变业务行为的情况下作为 Plugin Runtime 后端执行器。
 
 ## 15. 待确认问题
 
 1. 第一阶段 Connection 是否只允许管理员创建和授权？
-2. 内置 Plugin 的运行位置是控制端、LensNode，还是按操作类型分别选择？
+2. GitHub V1 采用 fine-grained PAT 还是 GitHub App？
 3. GitHub/GitLab 的资源 scope 是 Connection 级限制，还是允许 DataSource 级细化？
 4. Jira 是否同时支持 Cloud OAuth、PAT 和 Server/Data Center Basic Auth？
-5. Skill 工具调用是否默认允许读操作，写操作统一需要用户确认？
-6. 是否先实现原始 secret 的受信任 CLI 注入，再逐步迁移到短期 token lease？
+5. 如何定义 interactive Run、Smart 子助手、定时同步和重试的 effective actor？
