@@ -2,6 +2,8 @@
 
 from datetime import timedelta
 
+from django.db.models import Count
+from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
@@ -10,8 +12,12 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 
 from lens.models import Connection, CredentialLease, ExecutionSnapshot
+from lens.plugins.registry import (
+    PluginNotFoundError,
+    discover_plugins,
+    latest_plugin,
+)
 from lens.serializers import ConnectionSerializer
-from lens.plugins.registry import discover_plugins
 from .base import BaseAdminViewSet, LensNodeAuthMixin
 
 
@@ -51,17 +57,10 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
         """List safe model-facing tools from the latest Plugin version."""
 
         del request
-        plugins = [
-            plugin for plugin in discover_plugins() if plugin.key == key
-        ]
-        if not plugins:
+        try:
+            plugin = latest_plugin(key)
+        except PluginNotFoundError:
             return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
-        plugin = max(
-            plugins,
-            key=lambda item: tuple(
-                int(part) for part in item.version.split(".")
-            ),
-        )
         return Response([
             {
                 "key": tool.key,
@@ -77,7 +76,20 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
 class ConnectionViewSet(BaseAdminViewSet):
     """Admin CRUD for reusable Plugin connections."""
 
-    queryset = Connection.objects.all().select_related("secret_version")
+    queryset = (
+        Connection.objects.all()
+        .select_related("secret_version")
+        .annotate(
+            assistant_usage_count=Count(
+                "assistant_bindings",
+                distinct=True,
+            ),
+            datasource_usage_count=Count(
+                "datasources",
+                distinct=True,
+            ),
+        )
+    )
     serializer_class = ConnectionSerializer
 
     def get_queryset(self):
@@ -98,13 +110,20 @@ class ConnectionViewSet(BaseAdminViewSet):
         connection = self.get_object()
         if (
             connection.datasources.exists()
+            or connection.assistant_bindings.exists()
             or connection.execution_snapshots.exists()
         ):
             return Response(
                 {"detail": "CONNECTION_IN_USE"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return super().destroy(request, *args, **kwargs)
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"detail": "CONNECTION_IN_USE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):

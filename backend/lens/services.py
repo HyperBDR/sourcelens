@@ -59,6 +59,7 @@ from .models import (
     RunTraceExport,
     Session,
 )
+from .plugins.registry import latest_plugin
 from .routing_descriptions import build_routing_description
 from .runtime_events import public_step_detail, sanitize_termination_detail
 from .session_lifecycle import lock_active_session
@@ -1697,6 +1698,59 @@ def build_loaded_mcps(assistant):
     return loaded
 
 
+def build_loaded_plugins(assistant):
+    """Snapshot non-sensitive Plugin tool bindings for LensNode dispatch."""
+
+    loaded = []
+    plugins = {}
+    bindings = assistant.plugin_bindings.select_related(
+        "connection__secret_version__material"
+    ).filter(
+        enabled=True,
+        connection__status="active",
+    ).order_by("connection__plugin_key", "connection__uuid")
+    for binding in bindings:
+        connection = binding.connection
+        secret_version = connection.secret_version
+        if secret_version is None or secret_version.status != "active":
+            continue
+        if secret_version.material.status != "active":
+            continue
+        plugin = plugins.get(connection.plugin_key)
+        if plugin is None:
+            plugin = latest_plugin(connection.plugin_key)
+            plugins[connection.plugin_key] = plugin
+        definitions = {
+            tool.key: tool
+            for tool in plugin.tools
+        }
+        tools = []
+        for key in binding.tools or []:
+            tool = definitions.get(key)
+            if tool is None:
+                continue
+            tools.append(
+                {
+                    "key": tool.key,
+                    "description": tool.description,
+                    "capability": tool.capability,
+                    "side_effect": tool.side_effect,
+                    "input_schema": tool.input_schema,
+                }
+            )
+        if tools:
+            loaded.append(
+                {
+                    "connection_uuid": str(connection.uuid),
+                    "plugin_key": plugin.key,
+                    "plugin_version": plugin.version,
+                    "protocol_version": plugin.protocol_version,
+                    "tools": tools,
+                }
+            )
+    return loaded
+
+
 def _content_hash(value):
     """Return a stable sha256 hash for JSON-serializable content."""
 
@@ -1847,7 +1901,7 @@ def validate_run_dispatch(run):
         execution.task == "general_chat"
         and run.session.routing_mode != Session.RoutingMode.SMART
     ):
-        if not runtime_skills:
+        if not runtime_skills and not execution.loaded_plugins:
             raise LensNodeDispatchError("GENERAL_CHAT_SKILL_REQUIRED")
     else:
         available = available_dir_paths(lensnode)
@@ -1971,6 +2025,7 @@ def create_run_execution_snapshot(
             "task": execution_task_for_capability(assistant.capability),
             "loaded_skills": build_loaded_skills(assistant),
             "loaded_mcps": build_loaded_mcps(assistant),
+            "loaded_plugins": build_loaded_plugins(assistant),
             "agent_rounds": assistant.agent_rounds,
             "run_timeout_s": run_timeout_for_rounds(assistant.agent_rounds),
             "target_dirs": (
@@ -2032,6 +2087,7 @@ def _build_run_runtime_snapshot(
                 "skill_bindings__environment_variable_set",
                 "mcp_bindings__mcp",
                 "mcp_bindings__environment_variable_set",
+                "plugin_bindings__connection__secret_version__material",
             )
         )
         subagents = subagents[:MAX_SUBAGENTS_PER_RUN]
@@ -2057,6 +2113,7 @@ def _build_run_runtime_snapshot(
                 "settings": item.settings or {},
                 "loaded_skills": build_loaded_skills(item),
                 "loaded_mcps": build_loaded_mcps(item),
+                "loaded_plugins": build_loaded_plugins(item),
             }
             for item in subagents
         ]
@@ -2626,6 +2683,7 @@ def dispatch_run_to_lensnode(
                     execution.loaded_skills
                 ),
                 "loaded_mcps": resolve_loaded_mcp_environment(execution.loaded_mcps),
+                "loaded_plugins": execution.loaded_plugins,
                 "agent_model_ref": (agent_model_ref),
                 "agent_rounds": agent_rounds,
                 "max_agent_turns": max_agent_turns_for_rounds(agent_rounds),

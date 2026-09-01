@@ -40,6 +40,7 @@ from .models import (
     assistant_mode_for,
     AssistantAccess,
     AssistantMCP,
+    AssistantPluginBinding,
     AssistantSkill,
     Connection,
     DataSource,
@@ -62,6 +63,8 @@ from .models import (
     SecretVersion,
     Skill,
 )
+from .plugins.providers import DatasourceProviderError, get_datasource_provider
+from .plugins.registry import PluginRegistryError, latest_plugin
 from .runtime_events import (
     public_step_detail,
     sanitize_loaded_mcps,
@@ -80,7 +83,6 @@ from .vision_capabilities import (
     resolve_model_capability,
     validate_vision_model_ref,
 )
-from .plugins.providers import DatasourceProviderError, get_datasource_provider
 from .skill_generation import (
     get_workspace_guide_payload,
     sync_workspace_guide_skill,
@@ -494,6 +496,94 @@ class McpBindingsField(serializers.Field):
         return validated
 
 
+class PluginBindingsField(serializers.Field):
+    """Read/write field for Assistant Plugin connection bindings."""
+
+    def to_representation(self, bindings):
+        """Return binding identities without Connection secrets."""
+
+        return [
+            {
+                "connection_uuid": str(binding.connection.uuid),
+                "connection_name": binding.connection.name,
+                "plugin_key": binding.connection.plugin_key,
+                "tools": list(binding.tools or []),
+                "enabled": binding.enabled,
+            }
+            for binding in bindings.select_related("connection").all()
+        ]
+
+    def to_internal_value(self, data):
+        """Validate requested tools against the installed Plugin contract."""
+
+        if not isinstance(data, list):
+            raise serializers.ValidationError("Expected a list of bindings.")
+        validated = []
+        seen = set()
+        for item in data:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(
+                    "Each binding must be an object."
+                )
+            connection_uuid = item.get("connection_uuid")
+            connection = Connection.objects.select_related(
+                "secret_version__material"
+            ).filter(uuid=connection_uuid).first()
+            if connection is None:
+                raise serializers.ValidationError(
+                    "Plugin Connection does not exist."
+                )
+            if connection.pk in seen:
+                raise serializers.ValidationError(
+                    "Plugin Connection bindings must be unique."
+                )
+            if connection.status != Connection.Status.ACTIVE:
+                raise serializers.ValidationError(
+                    "Plugin Connection is disabled."
+                )
+            enabled = item.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise serializers.ValidationError(
+                    "Plugin binding enabled must be a boolean."
+                )
+            secret_version = connection.secret_version
+            if enabled and (
+                secret_version is None
+                or secret_version.status != "active"
+                or secret_version.material.status != "active"
+            ):
+                raise serializers.ValidationError(
+                    "Plugin Connection secret is unavailable."
+                )
+            try:
+                plugin = latest_plugin(connection.plugin_key)
+            except PluginRegistryError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
+            available = {tool.key for tool in plugin.tools}
+            requested = item.get("tools")
+            if requested is None:
+                requested = sorted(available)
+            if (
+                not isinstance(requested, list)
+                or not requested
+                or any(not isinstance(tool, str) for tool in requested)
+                or len(set(requested)) != len(requested)
+                or set(requested).difference(available)
+            ):
+                raise serializers.ValidationError(
+                    "Plugin tools must be installed read-only tools."
+                )
+            seen.add(connection.pk)
+            validated.append(
+                {
+                    "connection": connection,
+                    "tools": requested,
+                    "enabled": enabled,
+                }
+            )
+        return validated
+
+
 class AccessGrantsField(serializers.Field):
     """Read/write field for assistant access grants (group or user)."""
 
@@ -553,6 +643,7 @@ class AssistantListSerializer(serializers.ModelSerializer):
     collaboration_members = serializers.SerializerMethodField()
     skill_summary = serializers.SerializerMethodField()
     mcp_summary = serializers.SerializerMethodField()
+    plugin_summary = serializers.SerializerMethodField()
     supports_document_attachments = serializers.SerializerMethodField()
     vision_model_capability = serializers.SerializerMethodField()
     can_process_images = serializers.SerializerMethodField()
@@ -573,6 +664,7 @@ class AssistantListSerializer(serializers.ModelSerializer):
             "visibility",
             "skill_summary",
             "mcp_summary",
+            "plugin_summary",
             "supports_document_attachments",
             "vision_model_capability",
             "can_process_images",
@@ -609,6 +701,15 @@ class AssistantListSerializer(serializers.ModelSerializer):
         """Summarize prefetched MCP bindings without per-row queries."""
 
         bindings = list(assistant.mcp_bindings.all())
+        return {
+            "total": len(bindings),
+            "enabled": sum(binding.enabled for binding in bindings),
+        }
+
+    def get_plugin_summary(self, assistant):
+        """Summarize prefetched Plugin bindings without per-row queries."""
+
+        bindings = list(assistant.plugin_bindings.all())
         return {
             "total": len(bindings),
             "enabled": sum(binding.enabled for binding in bindings),
@@ -671,10 +772,12 @@ class AssistantSerializer(serializers.ModelSerializer):
     collaboration_members = serializers.SerializerMethodField()
     skill_bindings = SkillBindingsField(required=False)
     mcp_bindings = McpBindingsField(required=False)
+    plugin_bindings = PluginBindingsField(required=False)
     access_grants = AccessGrantsField(required=False)
     workspace_guide = serializers.JSONField(required=False)
     skill_summary = serializers.SerializerMethodField()
     mcp_summary = serializers.SerializerMethodField()
+    plugin_summary = serializers.SerializerMethodField()
     supports_document_attachments = serializers.SerializerMethodField()
     vision_model_capability = serializers.SerializerMethodField()
     can_process_images = serializers.SerializerMethodField()
@@ -712,12 +815,14 @@ class AssistantSerializer(serializers.ModelSerializer):
             "visibility",
             "skill_bindings",
             "mcp_bindings",
+            "plugin_bindings",
             "access_grants",
             "workspace_guide",
             "kind",
             "selected_task",
             "skill_summary",
             "mcp_summary",
+            "plugin_summary",
             "supports_document_attachments",
             "vision_model_capability",
             "can_process_images",
@@ -730,6 +835,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             "collaboration_members",
             "skill_summary",
             "mcp_summary",
+            "plugin_summary",
             "supports_document_attachments",
             "status",
             "created_at",
@@ -799,6 +905,15 @@ class AssistantSerializer(serializers.ModelSerializer):
         enabled = assistant.mcp_bindings.filter(enabled=True).count()
         return {
             "total": assistant.mcp_bindings.count(),
+            "enabled": enabled,
+        }
+
+    def get_plugin_summary(self, assistant):
+        """Return Plugin binding summary for Assistant views."""
+
+        enabled = assistant.plugin_bindings.filter(enabled=True).count()
+        return {
+            "total": assistant.plugin_bindings.count(),
             "enabled": enabled,
         }
 
@@ -908,6 +1023,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             attrs["multimodal_model_ref"] = None
             attrs["skill_bindings"] = []
             attrs["mcp_bindings"] = []
+            attrs["plugin_bindings"] = []
             lensnode = None
         elif member_uuids is not None:
             raise serializers.ValidationError(
@@ -957,11 +1073,29 @@ class AssistantSerializer(serializers.ModelSerializer):
                         uuid__in=enabled_skill_uuids,
                         enabled=True,
                     ).exists()
-                if not has_enabled_skill:
+                plugin_bindings = attrs.get("plugin_bindings")
+                if plugin_bindings is None and self.instance is not None:
+                    has_enabled_plugin = (
+                        self.instance.plugin_bindings.filter(
+                            enabled=True,
+                            connection__status=Connection.Status.ACTIVE,
+                            connection__secret_version__status="active",
+                            connection__secret_version__material__status=(
+                                "active"
+                            ),
+                        ).exists()
+                    )
+                else:
+                    has_enabled_plugin = any(
+                        binding.get("enabled", True)
+                        for binding in (plugin_bindings or [])
+                    )
+                if not has_enabled_skill and not has_enabled_plugin:
                     raise serializers.ValidationError(
                         {
                             "skill_bindings": (
-                                "general_chat requires at least one enabled skill"
+                                "general_chat requires at least one enabled "
+                                "Skill or Plugin tool"
                             )
                         }
                     )
@@ -1040,6 +1174,7 @@ class AssistantSerializer(serializers.ModelSerializer):
     def _sync_bindings(self, assistant, validated_data):
         skill_bindings = validated_data.pop("skill_bindings", None)
         mcp_bindings = validated_data.pop("mcp_bindings", None)
+        plugin_bindings = validated_data.pop("plugin_bindings", None)
 
         binding_groups = [
             bindings
@@ -1102,6 +1237,16 @@ class AssistantSerializer(serializers.ModelSerializer):
                     environment_variable_set=variable_set,
                     enabled=binding.get("enabled", True),
                     load_config=binding.get("load_config", {}),
+                )
+
+        if plugin_bindings is not None:
+            assistant.plugin_bindings.all().delete()
+            for binding in plugin_bindings:
+                AssistantPluginBinding.objects.create(
+                    assistant=assistant,
+                    connection=binding["connection"],
+                    tools=binding["tools"],
+                    enabled=binding.get("enabled", True),
                 )
 
     def _sync_environment_variable_set(self, assistant, resource, binding):
@@ -1198,6 +1343,7 @@ class AssistantSerializer(serializers.ModelSerializer):
         )
         skill_bindings = validated_data.pop("skill_bindings", None)
         mcp_bindings = validated_data.pop("mcp_bindings", None)
+        plugin_bindings = validated_data.pop("plugin_bindings", None)
         access_grants = validated_data.pop("access_grants", None)
         workspace_guide = validated_data.pop("workspace_guide", None)
         assistant = Assistant.objects.create(**validated_data)
@@ -1206,6 +1352,7 @@ class AssistantSerializer(serializers.ModelSerializer):
             {
                 "skill_bindings": skill_bindings,
                 "mcp_bindings": mcp_bindings,
+                "plugin_bindings": plugin_bindings,
             },
         )
         self._sync_access_grants(assistant, access_grants)
@@ -1257,6 +1404,7 @@ class ConnectionSerializer(serializers.ModelSerializer):
     has_secret = serializers.SerializerMethodField()
     secret_version_uuid = serializers.SerializerMethodField()
     datasource_count = serializers.SerializerMethodField()
+    assistant_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Connection
@@ -1271,6 +1419,7 @@ class ConnectionSerializer(serializers.ModelSerializer):
             "has_secret",
             "secret_version_uuid",
             "datasource_count",
+            "assistant_count",
             "status",
             "created_at",
             "updated_at",
@@ -1280,6 +1429,7 @@ class ConnectionSerializer(serializers.ModelSerializer):
             "has_secret",
             "secret_version_uuid",
             "datasource_count",
+            "assistant_count",
             "created_at",
             "updated_at",
         ]
@@ -1300,7 +1450,18 @@ class ConnectionSerializer(serializers.ModelSerializer):
     def get_datasource_count(self, connection):
         """Return how many datasources use this connection."""
 
-        return connection.datasources.count()
+        count = getattr(connection, "datasource_usage_count", None)
+        return count if count is not None else connection.datasources.count()
+
+    def get_assistant_count(self, connection):
+        """Return how many Assistants use this connection."""
+
+        count = getattr(connection, "assistant_usage_count", None)
+        return (
+            count
+            if count is not None
+            else connection.assistant_bindings.count()
+        )
 
     def validate(self, attrs):
         """Validate provider, endpoint, and non-secret JSON configuration."""
