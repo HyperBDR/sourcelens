@@ -803,10 +803,59 @@ class LensNodeClient:
 
         try:
             if plugin:
-                result = await asyncio.to_thread(
-                    self._execute_plugin_datasource_sync,
-                    message,
+                slot_acquired = False
+
+                def report_plugin_queued():
+                    self._enqueue(
+                        {
+                            "type": "datasource_sync_event",
+                            "request_id": request_id,
+                            "task_id": task_id,
+                            "step": "queue",
+                            "status": "queued",
+                            "message": (
+                                "Waiting for exclusive LensNode execution "
+                                "capacity."
+                            ),
+                        }
+                    )
+
+                await self._acquire_execution(
+                    ExecutionClass.EXCLUSIVE,
+                    on_queued=report_plugin_queued,
                 )
+                slot_acquired = True
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_event",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "step": "queue",
+                        "status": "running",
+                        "message": "Acquired exclusive LensNode capacity.",
+                    }
+                )
+                try:
+                    result = await asyncio.to_thread(
+                        self._execute_plugin_datasource_sync,
+                        message,
+                    )
+                finally:
+                    if slot_acquired:
+                        await self.execution_queue.release(
+                            ExecutionClass.EXCLUSIVE
+                        )
+                if result.get("status") == "failed":
+                    self._enqueue(
+                        {
+                            "type": "datasource_sync_event",
+                            "request_id": request_id,
+                            "task_id": task_id,
+                            "step": "failed",
+                            "status": "failed",
+                            "message": result.get("error") or "Plugin failed.",
+                        }
+                    )
                 self._enqueue(
                     {
                         "type": "datasource_sync_done",
