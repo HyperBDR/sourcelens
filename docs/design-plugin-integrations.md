@@ -1,6 +1,6 @@
 # 设计稿：内置集成 Plugin（Tool + Datasource）
 
-- 状态：提议（V1 范围已收敛，未开始开发）
+- 状态：实施中（V1 控制面与 DataSource 主链路已落地）
 - 日期：2026-09-01
 - 范围：GitHub、GitLab、Jira 等内置集成；同时服务代码数据源和助手工具。
 
@@ -435,6 +435,7 @@ POST /api/lens/admin/connections/{uuid}/validate/
 POST /api/lens/admin/connections/{uuid}/rotate/
 GET  /api/lens/admin/connections/{uuid}/resources/
 POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
+```
 
 当前 V1 已落地的 Connection 管理接口为：
 
@@ -448,7 +449,27 @@ DELETE /api/lens/admin/connections/{uuid}/
 Connection 的 `secret_value` 仅允许写入，不会出现在响应中；每次更新会创建新的
 SecretVersion，并复用同一个 SecretMaterial。V1 GitHub Provider 只接受
 `https://github.com` endpoint，后续企业 GitHub 域名需要单独增加受控 allowlist。
+
+Assistant 创建和更新接口通过可选的 `plugin_bindings` 管理模型工具授权：
+
+```json
+{
+  "plugin_bindings": [
+    {
+      "connection_uuid": "<connection-uuid>",
+      "tools": ["github_read_file", "github_search_code"],
+      "enabled": true
+    }
+  ]
+}
 ```
+
+绑定时控制端校验已安装 Plugin、只读工具 allowlist、Connection 与 Secret 生命周期；
+响应只返回 Connection 身份、名称、Plugin key 和工具 key，不返回 endpoint、scope、
+SecretVersion 内容或密文。Direct `general_chat` 至少需要一个启用的 Skill 或一个有效的
+Plugin Tool。Run 创建时保存非敏感 `loaded_plugins`，Worker 实际开始执行时按当前有效
+绑定重新固化，并将工具定义下发给 LensNode；工具调用、Tool ExecutionSnapshot 与
+GitHub API 处理器仍属于后续垂直切片。
 
 持久化 Run 关联 ExecutionSnapshot；该快照记录 Plugin、Connection、
 SecretVersion、Capability 和资源引用，不记录解析后的 secret。
