@@ -14,6 +14,7 @@ from .views import (
     AdminSharedQAViewSet,
     AdminUserAccessDetailView,
     AssistantViewSet,
+    ConnectionViewSet,
     DataSourceCredentialViewSet,
     DataSourceViewSet,
     EnvironmentVariableSetViewSet,
@@ -72,6 +73,11 @@ router.register(
     "admin/plugins",
     PluginRegistryViewSet,
     basename="lens-admin-plugins",
+)
+router.register(
+    "admin/connections",
+    ConnectionViewSet,
+    basename="lens-admin-connections",
 )
 router.register(
     "admin/environment-variable-sets",

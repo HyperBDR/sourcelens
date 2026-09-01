@@ -8,7 +8,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 
-from lens.models import CredentialLease, ExecutionSnapshot
+from lens.models import Connection, CredentialLease, ExecutionSnapshot
+from lens.serializers import ConnectionSerializer
 from lens.plugins.registry import discover_plugins
 from .base import BaseAdminViewSet, LensNodeAuthMixin
 
@@ -42,6 +43,39 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
             }
             for plugin in discover_plugins()
         ])
+
+
+class ConnectionViewSet(BaseAdminViewSet):
+    """Admin CRUD for reusable Plugin connections."""
+
+    queryset = Connection.objects.all().select_related("secret_version")
+    serializer_class = ConnectionSerializer
+
+    def get_queryset(self):
+        """Filter connections by Plugin or lifecycle status."""
+
+        queryset = super().get_queryset()
+        plugin_key = self.request.query_params.get("plugin_key")
+        status_value = self.request.query_params.get("status")
+        if plugin_key:
+            queryset = queryset.filter(plugin_key=plugin_key)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        return queryset
+
+    def destroy(self, request, *args, **kwargs):
+        """Reject deletion while a connection is referenced."""
+
+        connection = self.get_object()
+        if (
+            connection.datasources.exists()
+            or connection.execution_snapshots.exists()
+        ):
+            return Response(
+                {"detail": "CONNECTION_IN_USE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):

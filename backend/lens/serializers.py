@@ -41,9 +41,9 @@ from .models import (
     AssistantAccess,
     AssistantMCP,
     AssistantSkill,
+    Connection,
     DataSource,
     DataSourceCredential,
-    Connection,
     EnvironmentVariableSet,
     GlobalSetting,
     LensNode,
@@ -58,6 +58,8 @@ from .models import (
     Session,
     SharedQA,
     SharedQAFile,
+    SecretMaterial,
+    SecretVersion,
     Skill,
 )
 from .runtime_events import (
@@ -1242,6 +1244,168 @@ class AssistantSerializer(serializers.ModelSerializer):
         check_assistant_model_refs(assistant)
         refresh_routing_description(assistant)
         return assistant
+
+
+class ConnectionSerializer(serializers.ModelSerializer):
+    """Admin serializer for reusable Plugin connections."""
+
+    secret_value = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=False,
+    )
+    has_secret = serializers.SerializerMethodField()
+    secret_version_uuid = serializers.SerializerMethodField()
+    datasource_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Connection
+        fields = [
+            "uuid",
+            "name",
+            "plugin_key",
+            "endpoint",
+            "config",
+            "allowed_scope",
+            "secret_value",
+            "has_secret",
+            "secret_version_uuid",
+            "datasource_count",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "uuid",
+            "has_secret",
+            "secret_version_uuid",
+            "datasource_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_has_secret(self, connection):
+        """Return whether the current connection has secret material."""
+
+        version = connection.secret_version
+        return bool(version and version.encrypted_value)
+
+    def get_secret_version_uuid(self, connection):
+        """Return the opaque SecretVersion identity for audit views."""
+
+        if connection.secret_version is None:
+            return None
+        return str(connection.secret_version.uuid)
+
+    def get_datasource_count(self, connection):
+        """Return how many datasources use this connection."""
+
+        return connection.datasources.count()
+
+    def validate(self, attrs):
+        """Validate provider, endpoint, and non-secret JSON configuration."""
+
+        plugin_key = attrs.get(
+            "plugin_key",
+            getattr(self.instance, "plugin_key", ""),
+        )
+        config = attrs.get(
+            "config",
+            getattr(self.instance, "config", {}),
+        )
+        allowed_scope = attrs.get(
+            "allowed_scope",
+            getattr(self.instance, "allowed_scope", {}),
+        )
+        if not isinstance(config, dict):
+            raise serializers.ValidationError(
+                {"config": "config must be an object"}
+            )
+        if not isinstance(allowed_scope, dict):
+            raise serializers.ValidationError(
+                {"allowed_scope": "allowed_scope must be an object"}
+            )
+        _validate_plugin_json(config, "config")
+        _validate_plugin_json(allowed_scope, "allowed_scope")
+        try:
+            provider = get_datasource_provider(plugin_key)
+            attrs["endpoint"] = provider.validate_connection(
+                attrs.get("endpoint", getattr(self.instance, "endpoint", "")),
+                config,
+            )
+        except DatasourceProviderError as exc:
+            raise serializers.ValidationError({"endpoint": str(exc)})
+        return attrs
+
+    def create(self, validated_data):
+        """Create a connection and optionally its first encrypted version."""
+
+        secret_value = validated_data.pop("secret_value", "")
+        with transaction.atomic():
+            connection = Connection.objects.create(**validated_data)
+            if secret_value:
+                connection.secret_version = _create_secret_version(
+                    connection.name,
+                    secret_value,
+                )
+                connection.save(update_fields=["secret_version", "updated_at"])
+        return connection
+
+    def update(self, instance, validated_data):
+        """Update metadata and rotate SecretVersion when supplied."""
+
+        secret_value = validated_data.pop("secret_value", "")
+        with transaction.atomic():
+            for field, value in validated_data.items():
+                setattr(instance, field, value)
+            if secret_value:
+                material = (
+                    instance.secret_version.material
+                    if instance.secret_version is not None
+                    else None
+                )
+                instance.secret_version = _create_secret_version(
+                    instance.name,
+                    secret_value,
+                    material=material,
+                )
+            instance.save()
+        return instance
+
+
+def _create_secret_version(name, value, material=None):
+    """Create encrypted SecretMaterial and SecretVersion records."""
+
+    material = material or SecretMaterial.objects.create(name=f"{name} secret")
+    version = SecretVersion(material=material, status="active")
+    version.set_value(value)
+    version.save()
+    return version
+
+
+def _validate_plugin_json(value, field_name):
+    """Reject credential-shaped fields in persisted Plugin configuration."""
+
+    forbidden = {
+        "access_token",
+        "api_key",
+        "app_secret",
+        "authorization",
+        "password",
+        "private_key",
+        "secret",
+        "token",
+    }
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if str(key).lower() in forbidden:
+                raise serializers.ValidationError(
+                    {field_name: "secret fields must use secret_value"}
+                )
+            _validate_plugin_json(nested, field_name)
+    elif isinstance(value, list):
+        for nested in value:
+            _validate_plugin_json(nested, field_name)
 
 
 class DataSourceSerializer(serializers.ModelSerializer):
