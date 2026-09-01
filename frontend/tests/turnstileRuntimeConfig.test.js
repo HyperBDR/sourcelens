@@ -31,6 +31,18 @@ test('runtime configuration enables a configured Turnstile site key', () => {
   })
 })
 
+test('empty runtime site key preserves the bundled site key', () => {
+  globalThis.__SOURCELENS_CONFIG__ = {
+    turnstileEnabled: true,
+    turnstileSiteKey: ''
+  }
+
+  assert.deepEqual(getTurnstileConfig('bundled-key'), {
+    enabled: true,
+    siteKey: 'bundled-key'
+  })
+})
+
 test('build configuration remains the fallback outside a container', () => {
   assert.deepEqual(getTurnstileConfig('bundled-key'), {
     enabled: true,
