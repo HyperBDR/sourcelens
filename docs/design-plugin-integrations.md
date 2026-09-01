@@ -4,6 +4,10 @@
 - 日期：2026-09-01
 - 范围：GitHub、GitLab、Jira 等内置集成；同时服务代码数据源和助手工具。
 
+本设计借鉴 Dify 的 Plugin Daemon、双 Provider 和 Manifest 机制，但不采用其在
+调用请求中传递完整 credentials 的方式。Plugin 是商业化交付物，以独立项目构建和
+发布，由企业部署安装；普通用户不能上传或安装 Plugin。
+
 ## 1. 背景与问题
 
 当前 GitHub、GitLab、Jira 能力主要以可上传的 CLI/Skill 形式存在。凭证被建模为
@@ -48,6 +52,9 @@ PluginDefinition
   ├─ capabilities
   └─ runtime_adapter
 
+PluginRegistry
+  └─ discovers trusted installed Plugin projects and negotiated versions
+
 SecretMaterial ──< SecretVersion
 Connection ──────── references one SecretVersion
   ├─ endpoint / tenant / audience
@@ -63,8 +70,28 @@ ExecutionSnapshot
 
 ### Plugin
 
-代表一个外部系统集成，如 `github`、`gitlab`、`jira`。Plugin 注册协议、能力、
-动态配置 schema 和运行时适配器。
+代表一个外部系统集成，如 `github`、`gitlab`、`jira`。每个 Plugin 作为独立项目
+管理，注册协议、能力、动态配置 schema 和运行时适配器。
+
+### Plugin Registry 与目录发现
+
+企业部署将经过 CI 构建和校验的 Plugin 包安装到受控目录，例如：
+
+```text
+/opt/sourcelens/plugins/
+  github/1.0.0/
+  gitlab/1.0.0/
+  jira/1.0.0/
+```
+
+平台启动或显式刷新时扫描目录，读取 manifest，并通过 Registry 注册
+`plugin_key + version + protocol_version`。目录发现是部署扩展机制，不是授权边界；
+Registry 只加载平台允许的内置 handler，不允许 manifest 指定任意 Python import、
+shell command、远程组件或前端代码。
+
+Plugin 升级采用新旧版本并存：先安装、校验和启用新版本，再让新执行使用新版本；
+运行中的 ExecutionSnapshot 固定 Plugin 版本，旧版本待运行结束后再清理。控制端与
+LensNode 在调度/启动时校验 Plugin、版本和协议兼容性。
 
 ### SecretMaterial
 
@@ -174,6 +201,10 @@ Manifest 应包含：
 - DataSource 的资源选择、同步配置和索引输入 schema；
 - Tool 名称、描述、输入/输出 JSON Schema 和所需 capability；
 - 运行时版本和兼容的 CLI/API 协议版本。
+
+同一个 Manifest 同时声明 Tool Provider 和 Datasource Provider。Plugin 项目可以
+独立维护代码、测试、文档和发布流程，SourceLens 主仓库只维护 Registry、通用
+Connection、DataSource、Task、Lease 和 schema renderer。
 
 动态页面只使用 schema 生成表单；后端必须再次执行完整校验。
 
@@ -293,7 +324,10 @@ Plugin Runtime → Provider API/CLI
 Tool、Capability、资源范围、ExecutionSnapshot 和过期时间，并只在 Plugin Runtime
 内存中使用。
 
-该模型降低队列消息、Run 快照和模型上下文泄露凭证的风险，但 LensNode 是受信任执行
+该模型与 Dify 的主要差异是：Dify 常将 credentials 作为 API 到 Plugin Daemon 的
+调用数据传递；SourceLens 不将完整 credential 放入任务消息、Tool 参数或普通调用
+日志，而由受信任 LensNode 按 ExecutionSnapshot 申请 lease。该模型降低队列消息、
+Run 快照和模型上下文泄露凭证的风险，但 LensNode 是受信任执行
 边界：若未来支持非平台管理节点，应改为控制端代理调用或更严格的隔离模型。
 
 DataSource 的初始、手动、定时和重试同步都走相同路径：控制端在任务实际开始时解析
@@ -406,10 +440,10 @@ DataSource API 保持数据源生命周期入口，但外部类型的写入契�
 
 ## 12. 迁移路径
 
-### Phase 1：受控 GitHub 只读垂直切片
+### Phase 1：Plugin Registry 与 GitHub 只读垂直切片
 
-- 定义受限 manifest、只读 capability、Tool/Datasource Provider 和
-  ExecutionSnapshot 契约；
+- 定义独立 Plugin 项目布局、受控目录发现、Registry、受限 manifest、只读 capability、
+  Tool/Datasource Provider 和 ExecutionSnapshot 契约；
 - 定义 Connection、SecretVersion、节点认证和短期 lease；
 - 将现有 GitHub CLI 封装成 Plugin Runtime；
 - 改造 GitHub DataSource 管理：Connection 选择、manifest 驱动的资源配置、资源范围
@@ -418,6 +452,7 @@ DataSource API 保持数据源生命周期入口，但外部类型的写入契�
   credential config；
 - 跑通 `github_read_file`、`github_search_code` 等只读工具；
 - 只支持一种 GitHub 认证方式，并限定允许的 endpoint；
+- 完成控制端与 LensNode 的 Plugin/version/protocol 握手；
 - 保留旧 DataSourceCredential 读路径，但禁止新功能继续扩展旧模型。
 
 ### Phase 2：动态管理页、Skill 迁移与更多 Provider
@@ -457,6 +492,7 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 | 数据源仍经消息传递解密 Token | 高 | 同步下发统一改为 task metadata、snapshot 和 lease |
 | DataSource 资源越过 Connection scope | 高 | 创建、更新、发现和执行时做子集校验 |
 | endpoint 变更导致 Token 外发 | 高 | endpoint allowlist、重新连通性验证、执行快照 |
+| Plugin 目录或版本被错误加载 | 高 | 受控安装目录、Registry handler allowlist、制品校验和版本握手 |
 
 ## 14. 验收标准
 
@@ -472,6 +508,9 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
   endpoint；其资源选择经过 manifest 与 Connection scope 校验；
 - 初始、手动、定时和重试同步均不向 LensNode 下发解密 credential config；
 - 现有 CLI 能在不改变业务行为的情况下作为 Plugin Runtime 后端执行器。
+- Plugin 可作为独立项目构建、测试和发布，并由企业部署安装到受控目录；普通用户
+  无 Plugin 上传或安装权限；
+- 控制端和 LensNode 拒绝执行未注册、版本不兼容或协议不兼容的 Plugin。
 
 ## 15. 待确认问题
 
@@ -481,3 +520,4 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 4. Jira 是否同时支持 Cloud OAuth、PAT 和 Server/Data Center Basic Auth？
 5. 如何定义 interactive Run、Smart 子助手、定时同步和重试的 effective actor？
 6. 外部 DataSource 是否允许在 Connection scope 之下单独配置更窄的资源范围？
+7. Plugin Registry 的安装目录、制品校验方式和升级保留窗口如何配置？
