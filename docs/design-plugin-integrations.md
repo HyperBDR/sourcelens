@@ -322,7 +322,9 @@ Plugin Runtime → Provider API/CLI
 身份为本次 Run 请求短期 lease。普通 Skill 只获得工具，不获得原始 Token；模型上下文
 也不包含 credential 或授权材料。lease 至少绑定 tenant、node、actor、Run、Plugin、
 Tool、Capability、资源范围、ExecutionSnapshot 和过期时间，并只在 Plugin Runtime
-内存中使用。当前控制面提供两个内部接口：先创建
+内存中使用。当前控制面提供三个内部接口：LensNode 先读取
+`GET /api/lens/plugin-runtime/snapshots/{snapshot_uuid}/` 获取脱敏的执行配置，
+再创建
 `POST /api/lens/plugin-runtime/leases/` 获取 opaque lease，再调用
 `POST /api/lens/plugin-runtime/leases/{lease_uuid}/material/` 领取快照绑定的短时
 材料。第二个响应只对已认证且绑定的 LensNode 返回，材料不写入任务消息、快照、日志，
