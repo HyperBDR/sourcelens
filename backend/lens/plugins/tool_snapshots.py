@@ -7,6 +7,8 @@ from django.db import transaction
 
 from lens.models import Connection, ExecutionSnapshot, Run
 
+from .audit import create_invocation_audit
+from .registry import READ_ONLY_TOOL_CAPABILITIES
 from .tool_providers import ToolProviderError, get_tool_provider
 
 
@@ -51,7 +53,7 @@ def create_tool_execution_snapshot(
 
     run = (
         Run.objects.select_for_update(of=("self",))
-        .select_related("execution")
+        .select_related("execution", "session__user")
         .filter(uuid=run_uuid)
         .first()
     )
@@ -138,7 +140,24 @@ def create_tool_execution_snapshot(
         invocation_id=call_id,
         resolved_config=resolved_config,
     )
+    create_invocation_audit(
+        snapshot,
+        lensnode=lensnode,
+        actor=run.session.user,
+        capability=frozen_tool.get("capability") or "",
+        resource_summary=_resource_summary(normalized_arguments),
+    )
     return snapshot, True
+
+
+def _resource_summary(arguments):
+    """Return resource identities without storing Tool search or file input."""
+
+    return {
+        key: arguments[key]
+        for key in ("repository", "project", "issue_key")
+        if arguments.get(key)
+    }
 
 
 def _frozen_tool(loaded_plugins, connection_uuid, tool_key):
@@ -160,9 +179,10 @@ def _frozen_tool(loaded_plugins, connection_uuid, tool_key):
 def _validate_frozen_tool(tool, arguments):
     """Validate model arguments against the frozen bounded JSON schema."""
 
-    if tool.get("side_effect") != "none":
-        raise ToolSnapshotError("TOOL_NOT_AUTHORIZED", 403)
-    if tool.get("capability") != "repository.read":
+    if (
+        tool.get("side_effect") != "none"
+        or tool.get("capability") not in READ_ONLY_TOOL_CAPABILITIES
+    ):
         raise ToolSnapshotError("TOOL_NOT_AUTHORIZED", 403)
     schema = tool.get("input_schema") or {}
     properties = schema.get("properties") or {}
