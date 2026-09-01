@@ -28,6 +28,7 @@ from .views import (
     LensNodeViewSet,
     MCPServerViewSet,
     PluginRegistryViewSet,
+    PluginCredentialLeaseView,
     PublicAssistantView,
     PublicSharedQAFileView,
     PublicSharedQAListView,
@@ -88,6 +89,11 @@ router.register(
 )
 
 urlpatterns = [
+    path(
+        "plugin-runtime/leases/",
+        PluginCredentialLeaseView.as_view(),
+        name="lens-plugin-credential-lease",
+    ),
     path(
         "admin/access/users/<int:user_id>/",
         AdminUserAccessDetailView.as_view(),

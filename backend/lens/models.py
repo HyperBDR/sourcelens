@@ -784,6 +784,26 @@ class ExecutionSnapshot(TimestampedUUIDModel):
         ordering = ["-created_at"]
 
 
+class CredentialLease(TimestampedUUIDModel):
+    """Short-lived authorization handle bound to one execution snapshot."""
+
+    snapshot = models.ForeignKey(
+        ExecutionSnapshot,
+        on_delete=models.PROTECT,
+        related_name="credential_leases",
+    )
+    lensnode = models.ForeignKey(
+        LensNode,
+        on_delete=models.PROTECT,
+        related_name="credential_leases",
+    )
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 def _datasource_fernet():
     """Return the symmetric encryptor for datasource credentials."""
 
