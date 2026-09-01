@@ -29,6 +29,10 @@ class PluginRegistryError(ValueError):
     """Raised when an installed plugin manifest is invalid or unsafe."""
 
 
+class PluginNotFoundError(PluginRegistryError):
+    """Raised when no installed version matches one Plugin identity."""
+
+
 @dataclass(frozen=True)
 class InstalledPlugin:
     """One validated plugin version available to the platform."""
@@ -78,6 +82,22 @@ def discover_plugins():
                 identities.add(identity)
                 plugins.append(plugin)
     return plugins
+
+
+def latest_plugin(plugin_key):
+    """Return the latest installed version for one Plugin identity."""
+
+    matches = [
+        plugin for plugin in discover_plugins() if plugin.key == plugin_key
+    ]
+    if not matches:
+        raise PluginNotFoundError("installed plugin is required")
+    return max(
+        matches,
+        key=lambda plugin: tuple(
+            int(part) for part in plugin.version.split(".")
+        ),
+    )
 
 
 def _load_plugin(root, key_dir, version_dir):

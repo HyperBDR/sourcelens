@@ -5,8 +5,8 @@ from copy import deepcopy
 from django.db import transaction
 
 from lens.models import DataSource, ExecutionSnapshot
-from .registry import PluginRegistryError, discover_plugins
 from .providers import DatasourceProviderError, get_datasource_provider
+from .registry import PluginRegistryError, latest_plugin
 
 
 SENSITIVE_CONFIG_KEYS = frozenset({
@@ -54,7 +54,7 @@ def create_datasource_sync_snapshot(datasource):
         )
     except DatasourceProviderError as exc:
         raise PluginRegistryError(str(exc)) from exc
-    plugin = _latest_plugin(datasource.plugin_key)
+    plugin = latest_plugin(datasource.plugin_key)
     resolved_config = {
         "endpoint": endpoint,
         "connection_config": deepcopy(connection.config),
@@ -75,21 +75,6 @@ def create_datasource_sync_snapshot(datasource):
             protocol_version=plugin.protocol_version,
             resolved_config=resolved_config,
         )
-
-
-def _latest_plugin(plugin_key):
-    """Return the highest installed compatible version for one plugin key."""
-
-    matches = [plugin for plugin in discover_plugins() if plugin.key == plugin_key]
-    if not matches:
-        raise PluginRegistryError("installed plugin is required")
-    return max(matches, key=lambda plugin: _version_tuple(plugin.version))
-
-
-def _version_tuple(version):
-    """Convert validated semantic version text into a sortable tuple."""
-
-    return tuple(int(part) for part in version.split("."))
 
 
 def _reject_sensitive_values(value):
