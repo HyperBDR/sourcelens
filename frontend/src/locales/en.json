@@ -223,7 +223,6 @@
       "participatingAssistants": "Participating assistants · {count}",
       "participatingAssistantsTitle": "Choose collaborating assistants",
       "participatingAssistantsHint": "Only checked assistants are considered for future messages in this conversation.",
-      "participatingAssistantsRecommended": "Recommended combination",
       "participatingAssistantsCount": "{count} selected · We recommend no more than {max} for precise routing.",
       "participatingAssistantsNone": "Select at least one assistant to enable collaboration.",
       "participatingAssistantsRequired": "Select at least one participating assistant.",
