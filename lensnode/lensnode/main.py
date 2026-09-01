@@ -28,6 +28,7 @@ from .datasource_sync import upload_managed_workspace
 from .executor import TASKS, LensNodeExecutor
 from .execution_queue import ExecutionClass, LensNodeExecutionQueue
 from .gateway_model import RunCancelledError
+from .plugin_runtime import PluginRuntimeError, acquire_plugin_lease
 from .logging_utils import (
     elapsed_since,
     format_duration,
@@ -478,6 +479,8 @@ class LensNodeClient:
             await self._handle_datasource_test_connection(message)
         elif message_type == "datasource_sync":
             await self._start_datasource_sync(message)
+        elif message_type == "plugin_datasource_sync":
+            await self._start_datasource_sync(message, plugin=True)
         elif message_type == "datasource_convert":
             await self._start_datasource_conversion(message)
         elif message_type == "datasource_upload":
@@ -766,7 +769,7 @@ class LensNodeClient:
             }
         )
 
-    async def _start_datasource_sync(self, message):
+    async def _start_datasource_sync(self, message, plugin=False):
         """Start one datasource sync without blocking WebSocket receive."""
 
         request_id = str(message.get("request_id") or "")
@@ -776,12 +779,12 @@ class LensNodeClient:
 
         task_key = f"datasource:{task_id}"
         task = asyncio.create_task(
-            self._execute_datasource_sync(message)
+            self._execute_datasource_sync(message, plugin)
         )
         self.running_tasks[task_key] = task
         task.add_done_callback(lambda item: self._consume_task_exception(item))
 
-    async def _execute_datasource_sync(self, message):
+    async def _execute_datasource_sync(self, message, plugin=False):
         """Execute a datasource sync command in a worker thread."""
 
         request_id = str(message.get("request_id") or "")
@@ -799,6 +802,21 @@ class LensNodeClient:
             loop.call_soon_threadsafe(self._enqueue, payload)
 
         try:
+            if plugin:
+                result = await asyncio.to_thread(
+                    self._execute_plugin_datasource_sync,
+                    message,
+                )
+                self._enqueue(
+                    {
+                        "type": "datasource_sync_done",
+                        "request_id": request_id,
+                        "task_id": task_id,
+                        "status": result.get("status") or "success",
+                        **result,
+                    }
+                )
+                return
             command = {
                 **message,
                 "ai_gateway_url": self.config.ai_gateway_url,
@@ -884,6 +902,24 @@ class LensNodeClient:
             )
         finally:
             self.running_tasks.pop(task_key, None)
+
+    def _execute_plugin_datasource_sync(self, message):
+        """Acquire a lease and reject unsupported provider execution safely."""
+
+        try:
+            lease = acquire_plugin_lease(
+                self.gateway_http_client,
+                self.config.ai_gateway_url,
+                self.config.token,
+                message.get("snapshot_uuid"),
+            )
+        except (PluginRuntimeError, httpx.HTTPError) as exc:
+            return {"status": "failed", "error": str(exc)}
+        del lease
+        return {
+            "status": "failed",
+            "error": "PLUGIN_PROVIDER_RUNTIME_UNAVAILABLE",
+        }
 
     async def _start_datasource_conversion(self, message):
         """Start one managed workspace conversion in a worker thread."""
