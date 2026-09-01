@@ -917,6 +917,26 @@ class AssistantMCP(models.Model):
         return result
 
 
+class AssistantPluginBinding(models.Model):
+    """Assistant access to one reusable Plugin connection."""
+
+    assistant = models.ForeignKey(
+        Assistant,
+        on_delete=models.CASCADE,
+        related_name="plugin_bindings",
+    )
+    connection = models.ForeignKey(
+        Connection,
+        on_delete=models.PROTECT,
+        related_name="assistant_bindings",
+    )
+    tools = models.JSONField(default=list, blank=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = [("assistant", "connection")]
+
+
 class Session(TimestampedUUIDModel):
     """Conversation session for a user and assistant."""
 
@@ -1297,6 +1317,7 @@ class RunExecution(models.Model):
     task = models.CharField(max_length=160)
     loaded_skills = models.JSONField(default=list, blank=True)
     loaded_mcps = models.JSONField(default=list, blank=True)
+    loaded_plugins = models.JSONField(default=list, blank=True)
     target_dirs = models.JSONField(default=list, blank=True)
     runtime_snapshot = models.JSONField(default=dict, blank=True)
     agent_rounds = models.CharField(
