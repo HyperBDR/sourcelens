@@ -1,0 +1,10 @@
+type: fix
+audience: user
+en: >-
+  Improved document explanations to keep internal runtime details out of
+  responses while preserving evidence-based answers.
+zh-CN: >-
+  优化文档解释，避免在回答中暴露内部运行时细节，同时保持基于证据的回答。
+es: >-
+  Se mejoraron las explicaciones de documentos para evitar detalles internos
+  del entorno de ejecución y mantener respuestas basadas en evidencia.
