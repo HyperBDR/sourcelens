@@ -435,6 +435,19 @@ POST /api/lens/admin/connections/{uuid}/validate/
 POST /api/lens/admin/connections/{uuid}/rotate/
 GET  /api/lens/admin/connections/{uuid}/resources/
 POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
+
+当前 V1 已落地的 Connection 管理接口为：
+
+```text
+GET    /api/lens/admin/connections/
+POST   /api/lens/admin/connections/
+PATCH  /api/lens/admin/connections/{uuid}/
+DELETE /api/lens/admin/connections/{uuid}/
+```
+
+Connection 的 `secret_value` 仅允许写入，不会出现在响应中；每次更新会创建新的
+SecretVersion，并复用同一个 SecretMaterial。V1 GitHub Provider 只接受
+`https://github.com` endpoint，后续企业 GitHub 域名需要单独增加受控 allowlist。
 ```
 
 持久化 Run 关联 ExecutionSnapshot；该快照记录 Plugin、Connection、
