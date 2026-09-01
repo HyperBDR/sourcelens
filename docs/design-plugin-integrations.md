@@ -23,6 +23,8 @@ SourceLens 采用这一方向，但增加独立的 Connection、Capability 和�
 - 一个 Plugin 同时提供 DataSource 适配器和面向大模型的 Tool Provider。
 - 凭证、连接目标、资源范围和消费者配置分层，支持真正复用。
 - 管理页面由 Plugin manifest 动态生成，不硬编码每个供应商的表单。
+- 改造数据源管理，使其通过 Connection 与 Plugin Provider 同步，而不再向 LensNode
+  下发解密后的 credential config。
 - 支持 Plugin 内部并发请求第三方 API，并统一处理超时、限流、重试和取消。
 - 对每次调用实施用户、Assistant、Skill、Connection、Capability 和资源范围校验。
 - V1 仅支持受信任内置 Plugin 提供的、代码圈定的只读操作。
@@ -75,6 +77,15 @@ ExecutionSnapshot
 允许范围、SecretVersion 和授权关系。DataSource、Skill、MCP 绑定 Connection，而不
 直接绑定 SecretMaterial。Connection 是当前可编辑配置，不作为历史执行配置的唯一
 来源。
+
+### DataSource
+
+DataSource 是 Plugin 的内容摄取消费者，而不是 Connection 的别名。它保存具体资源选择
+（如 repository、branch、directory）、索引目标、同步策略、状态和同步历史；Connection
+保存可复用认证、endpoint 和平台资源策略。一个 Connection 可被多个 DataSource 复用。
+
+外部 DataSource 的资源选择必须是 Connection 允许范围的子集。`managed_workspace`
+不使用外部 Connection，保留现有本地文件、上传和转换生命周期。
 
 ### Capability
 
@@ -133,6 +144,17 @@ capabilities:
 datasource:
   supported: true
   resources: [organization, repository, branch]
+  datasource_schema:
+    fields:
+      - key: repository
+        type: provider_resource
+        required: true
+      - key: branch
+        type: string
+        required: false
+      - key: directory
+        type: path
+        required: false
 
 tools:
   - key: github_read_file
@@ -149,6 +171,7 @@ Manifest 应包含：
 - credential/connection 字段类型、默认值、校验和脱敏规则；
 - capability、风险等级、读写属性和是否需要确认；V1 只允许只读工具；
 - DataSource 资源发现与同步声明；
+- DataSource 的资源选择、同步配置和索引输入 schema；
 - Tool 名称、描述、输入/输出 JSON Schema 和所需 capability；
 - 运行时版本和兼容的 CLI/API 协议版本。
 
@@ -222,7 +245,13 @@ Plugin Datasource Provider
 ```
 
 同一个 GitHub Connection 可以服务多个 DataSource；每个 DataSource 独立保存仓库、
-分支、目录和同步策略，不能反向修改 Connection 的 endpoint 或 secret scope。
+分支、目录、索引目标和同步策略，不能反向修改 Connection 的 endpoint 或资源策略。
+`datasource_config` 不得存 Token、endpoint 或 Connection scope；Plugin Datasource
+Provider 在创建、更新、资源发现和执行前均验证其资源选择属于 Connection scope。
+
+数据源管理页面分为两层：先选择或创建 Connection，随后按 manifest 的
+`datasource_schema` 选择资源并配置同步。API 同样分离 Connection 的 CRUD/验证与
+DataSource 的资源选择/调度，避免继续向通用 `config` 字段塞入认证字段。
 
 ## 7. MCP 集成
 
@@ -266,6 +295,11 @@ Tool、Capability、资源范围、ExecutionSnapshot 和过期时间，并只在
 
 该模型降低队列消息、Run 快照和模型上下文泄露凭证的风险，但 LensNode 是受信任执行
 边界：若未来支持非平台管理节点，应改为控制端代理调用或更严格的隔离模型。
+
+DataSource 的初始、手动、定时和重试同步都走相同路径：控制端在任务实际开始时解析
+DataSource 与 Connection，创建 ExecutionSnapshot；LensNode 只接收 task、snapshot、
+datasource 和插件运行参数标识，并以节点身份取得短期 lease。任何 Connection 无效、
+资源范围不匹配或 lease 申请失败都应使任务以明确状态失败，不能回退到旧 credential。
 
 ### 8.3 强制校验
 
@@ -358,11 +392,17 @@ POST /api/lens/admin/connections/
 PATCH /api/lens/admin/connections/{uuid}/
 POST /api/lens/admin/connections/{uuid}/validate/
 POST /api/lens/admin/connections/{uuid}/rotate/
+GET  /api/lens/admin/connections/{uuid}/resources/
 POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
 ```
 
 持久化 Run 关联 ExecutionSnapshot；该快照记录 Plugin、Connection、
 SecretVersion、Capability 和资源引用，不记录解析后的 secret。
+
+DataSource API 保持数据源生命周期入口，但外部类型的写入契约调整为 `plugin`、
+`connection_uuid` 和受 manifest 校验的 `datasource_config`。创建/更新后注册同步策略；
+初始、手动、定时和重试任务统一通过 snapshot + lease 下发。迁移期间旧
+`source_type`、`config` 和 `credential_uuid` 仅作为兼容读路径，不能成为新写入路径。
 
 ## 12. 迁移路径
 
@@ -372,18 +412,21 @@ SecretVersion、Capability 和资源引用，不记录解析后的 secret。
   ExecutionSnapshot 契约；
 - 定义 Connection、SecretVersion、节点认证和短期 lease；
 - 将现有 GitHub CLI 封装成 Plugin Runtime；
-- 跑通 Connection → DataSource 同步；
+- 改造 GitHub DataSource 管理：Connection 选择、manifest 驱动的资源配置、资源范围
+  校验和同步任务快照；
+- 跑通 Connection → DataSource 初始、手动、定时和重试同步，LensNode 不接收解密
+  credential config；
 - 跑通 `github_read_file`、`github_search_code` 等只读工具；
 - 只支持一种 GitHub 认证方式，并限定允许的 endpoint；
 - 保留旧 DataSourceCredential 读路径，但禁止新功能继续扩展旧模型。
 
-### Phase 2：GitLab、Jira 与动态管理页
+### Phase 2：动态管理页、Skill 迁移与更多 Provider
 
-- 增加 GitLab/Jira 内置 Plugin；
-- 根据 manifest 动态渲染 Connection 页面；
+- 根据 manifest 动态渲染 Connection 与 DataSource 页面；
 - 增加资源发现、能力筛选和绑定校验；
 - 将现有 GitHub/GitLab/Jira Skills 改为流程 Skill，移除自行读取 Token 和执行
   任意 CLI 的逻辑。
+- 增加 GitLab/Jira 内置 Plugin，并分别完成其 DataSource 垂直切片。
 
 ### Phase 3：扩展集成与受控能力
 
@@ -395,8 +438,9 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 
 ### Phase 4：兼容迁移和清理
 
-- 将旧 DataSourceCredential 映射为 Connection；
-- 校验并修正 endpoint/scope；
+- 将旧 DataSourceCredential 映射为 Connection，将旧 DataSource 的可迁移资源字段
+  映射为 datasource_config；
+- 校验并修正 endpoint/scope，并识别无法自动迁移的 config；
 - 提供失败可回滚的双读迁移；
 - 删除旧的 DataSourceCredential API 和明文 Reveal 能力。
 
@@ -410,6 +454,8 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 | 第三方 API 限流 | 中 | Connection/provider 并发预算、Retry-After、退避 |
 | 旧凭证迁移失败 | 高 | 双读、版本化、回滚和迁移前 scope 校验 |
 | Tool 与 Datasource 语义混淆 | 中 | 两套 Provider 接口，共享 Connection 但分离执行契约 |
+| 数据源仍经消息传递解密 Token | 高 | 同步下发统一改为 task metadata、snapshot 和 lease |
+| DataSource 资源越过 Connection scope | 高 | 创建、更新、发现和执行时做子集校验 |
 | endpoint 变更导致 Token 外发 | 高 | endpoint allowlist、重新连通性验证、执行快照 |
 
 ## 14. 验收标准
@@ -422,6 +468,9 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 - 原始 secret 不进入 prompt、Tool 参数、Run 快照和普通日志；
 - V1 只暴露代码圈定的只读 Tool，且不提供 raw exec 或任意 URL 请求；
 - LensNode 仅接收任务元数据，并按执行快照取得与任务绑定的短期 lease；
+- 外部 DataSource 持有 `plugin + connection + datasource_config`，不持有 Token 或
+  endpoint；其资源选择经过 manifest 与 Connection scope 校验；
+- 初始、手动、定时和重试同步均不向 LensNode 下发解密 credential config；
 - 现有 CLI 能在不改变业务行为的情况下作为 Plugin Runtime 后端执行器。
 
 ## 15. 待确认问题
@@ -431,3 +480,4 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 3. GitHub/GitLab 的资源 scope 是 Connection 级限制，还是允许 DataSource 级细化？
 4. Jira 是否同时支持 Cloud OAuth、PAT 和 Server/Data Center Basic Auth？
 5. 如何定义 interactive Run、Smart 子助手、定时同步和重试的 effective actor？
+6. 外部 DataSource 是否允许在 Connection scope 之下单独配置更窄的资源范围？
