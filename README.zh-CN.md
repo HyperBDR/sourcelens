@@ -158,87 +158,48 @@ done
 
 ## 生产部署
 
-SourceLens 有两种生产形态——每台主机**只选一种**（两者共享 `sourcelens` compose 项目名）：
+SourceLens 有两种生产部署方式，每台主机选择一种：
 
-- **Standalone 单实例**（一个 backend-api、一个 frontend，无蓝绿切换）。
-  一键安装器：从 tag 拉取 release 配置文件、生成带随机密钥的 `.env`、拉取镜像、
-  启动栈并做健康检查。GitHub 不可达时用 `-c cn`，镜像改从阿里云 ACR 拉取、
-  配置文件从 Gitee 下载。
+- **Standalone 单实例**：使用 `install.sh` 安装和升级。
+- **零停机蓝绿部署**：使用 `scripts/install.sh <tag>` 部署。
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
-      -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
-  ```
+默认端口为 HTTP 10080 和 HTTPS 10443。
 
-- **零停机蓝绿**（docker-compose.yml）：`scripts/install.sh <tag>`。
+### 一键安装
 
-默认端口：HTTP 10080, HTTPS 10443（可通过 `NGINX_HTTP_PORT`、`NGINX_HTTPS_PORT` 调整）。
+使用一键安装器可完成 SourceLens 的安装和启动，并在完成后检查服务健康状态。
 
-### 自动化部署（standalone 安装器）
+前置要求：
 
-standalone 栈可用一条命令完成安装与升级：从仓库 tag 下载 release 配置文件
-（`docker-compose.standalone.yml`、nginx/postgres 配置、`env.sample`），生成带
-随机密钥的生产 `.env`，拉取容器镜像，启动栈并做健康检查。
+- Docker + Docker Compose V2（`docker compose`）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
-    -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
+curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/main/install.sh | \
+  sudo bash
 ```
 
-- **前置要求**：Docker + Docker Compose **V2**（`docker compose`）。旧版
-  Compose v1 会被拒绝——compose 文件使用了 V2 专属特性。
-- **幂等升级**：用更新的 tag 重跑同一条命令即可原地升级。已有 `.env` 绝不
-  覆盖，只会把已知的不安全占位值（`change-me`、`postgres`、`adminpassword`、
-  `change-me-lensnode-token`）替换为随机密钥。初始管理员用户名/密码会在结束
-  时打印并保存在 `install-info.env`。
-- **通道**：默认 release 文件来自 GitHub、应用镜像来自 Docker Hub
-  （`oneprolabs/*`）。GitHub 不可达时加 `-c cn`，release 文件改从 Gitee 下载、
-  应用镜像改从阿里云 ACR（`registry.cn-beijing.aliyuncs.com/oneprolabs`）拉取。
-  基础设施镜像（postgres/redis/nginx）始终来自 Docker Hub。
-- **端口**：HTTP 默认 10080、HTTPS 默认 10443。检测到端口被占用时会自动
-  使用下一个空闲端口。
+网络无法稳定访问 GitHub 时，使用中国分发通道：
 
-常用选项：
+```bash
+curl -fsSL https://gitee.com/oneprolabs/sourcelens/raw/main/install.sh | \
+  sudo bash -s -- --channel cn --download-source gitee
+```
 
-| 选项 | 说明 |
-|---|---|
-| `-d, --dir DIR` | 安装目录（默认 `/opt/sourcelens`） |
-| `-p, --port PORT` | HTTP 端口（默认 10080） |
-| `-v, --version VER` | 发布版本（默认：最新 tag） |
-| `-c, --channel github\|cn` | 分发通道（默认：自动探测） |
-| `--download-source github\|gitee` | release 文件来源；同时决定镜像仓库 |
-| `--source DIR` | 使用本地仓库代码而非下载（测试/离线） |
-| `--domain HOST` | 公网主机名/IP（默认：自动探测） |
-| `-y, --yes` | 非交互：接受默认值，不提问 |
+全新安装时，安装器会选择当前可用的最新 release tag。已有安装默认沿用当前版本；
+如需升级或安装指定版本，增加 `--version <version>`。完整选项见
+`install.sh --help`。
 
-完整选项及环境变量覆盖（`SOURCELENS_INSTALL_DIR`、`SOURCELENS_HTTP_PORT`、
-`SOURCELENS_HTTPS_PORT`、`SOURCELENS_VERSION`、`SOURCELENS_REGISTRY`、
-`SOURCELENS_DOMAIN` 等）见 `install.sh --help`。
+安装完成后：
 
-> **Cloudflare Turnstile**：`env.sample` 保持 `TURNSTILE_ENABLED=true`，生产
-> 环境要求配置真实的 `TURNSTILE_SECRET_KEY`——否则后端拒绝启动（这是刻意的
-> fail-fast 守卫）。一键安装器无法生成真实密钥，因此在全新安装时会把
-> `TURNSTILE_ENABLED` 设为 `false`，让登录在无验证组件下可用。之后要启用
-> Turnstile，请在 `.env` 中配置真实密钥（及前端 site key），再把
-> `TURNSTILE_ENABLED` 翻回 `true`。
+- 主站：`http://<host>:10080`（HTTPS：`https://<host>:10443`）
+- 配置文件：`<install-dir>/.env`
+- 安装详情和初始管理员密码：`<install-dir>/install-info.env`
 
-### 容量与并发调优
+默认安装目录为 `/opt/sourcelens`。使用新 tag 重复运行安装器即可原地升级，已有
+`.env` 配置和应用数据会被保留。
 
-生产面向多用户，按负载在服务器 `.env` 中调整这些值（CI 不会覆盖 `.env`，跨部署保留）：
-
-| 变量 | 作用 | 默认 | 调优建议 |
-|---|---|---|---|
-| `LENSNODE_MAX_CONCURRENT_RUNS` | 单个 LensNode 的并发问答数 | `1` | **真正的吞吐上限——务必调大。** 节点满时新 run 会停在 `Queued`（每 5s 重试，最长 120s）。设为 ≥ 最繁忙助手的 `max_concurrency`，并按内存（每个 deep-agent 回答约数百 MB）与上游 LLM 限流量力而行。 |
-| `CELERY_CONCURRENCY` | Celery worker 进程数 | CPU 核数 | 很少是瓶颈：worker 任务只是把活派发给 LensNode（重活在 LensNode 上跑）。适度上调只为留余量。 |
-| `max_concurrency`（每助手，DB） | 单个助手的并发 run 数 | `5` | 按助手限流；系统级上限是 `LENSNODE_MAX_CONCURRENT_RUNS`。 |
-
-- API 实为**单个 Daphne ASGI 进程**（只占 1 核）。async 能抗大量并发连接，但要用更多核需多开 ASGI worker/副本——不是 `.env` 能搞定的。
-- 服务器上用 **Docker Compose v2**（`docker compose`）。旧版 v1（`docker-compose`）会因部署未下发的 `build:` 上下文而中止 `up -d`。
-- 改完 `.env` 需重建而非重启（`docker restart` 不会重读 env 文件）：
-
-  ```bash
-  APP_VERSION=<version> docker compose up -d --force-recreate --no-deps lensnode backend-worker
-  ```
+如需零停机升级，请参阅
+[`docs/blue-green-deployment.md`](docs/blue-green-deployment.md)。
 
 ## 技术栈
 
