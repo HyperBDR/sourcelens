@@ -1,0 +1,11 @@
+type: fix
+audience: user
+en: >-
+  Improved email verification code login errors with clear, localized guidance
+  for incorrect, expired, and exhausted codes.
+zh-CN: >-
+  优化邮箱验证码登录错误提示，为验证码错误、过期及尝试次数过多提供清晰的本地化指引。
+es: >-
+  Se mejoraron los errores de inicio de sesión con código de verificación por
+  correo con indicaciones claras y localizadas para códigos incorrectos,
+  caducados o con demasiados intentos.
