@@ -168,6 +168,11 @@ class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
             and secret_version.status != "active"
         ):
             return Response({"detail": "SECRET_VERSION_DISABLED"}, status=409)
+        if (
+            secret_version is not None
+            and secret_version.material.status != "active"
+        ):
+            return Response({"detail": "SECRET_MATERIAL_DISABLED"}, status=409)
         value = secret_version.get_value() if secret_version else ""
         if not value:
             return Response({"detail": "SECRET_UNAVAILABLE"}, status=409)

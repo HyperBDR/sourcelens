@@ -40,6 +40,7 @@ def create_datasource_sync_snapshot(datasource):
     if datasource.lensnode is None:
         raise PluginRegistryError("datasource LensNode is required")
     _reject_sensitive_values(connection.config)
+    _reject_sensitive_values(connection.allowed_scope)
     _reject_sensitive_values(datasource.datasource_config)
     try:
         provider = get_datasource_provider(datasource.plugin_key)
