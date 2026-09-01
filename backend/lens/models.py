@@ -574,6 +574,15 @@ class DataSource(TimestampedUUIDModel):
         on_delete=models.SET_NULL,
         related_name="datasources",
     )
+    connection = models.ForeignKey(
+        "Connection",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="datasources",
+    )
+    plugin_key = models.CharField(max_length=64, blank=True, default="")
+    datasource_config = models.JSONField(default=dict, blank=True)
     last_synced_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True, default="")
     availability_status = models.CharField(
@@ -677,6 +686,102 @@ class DataSourceCredential(TimestampedUUIDModel):
 
     def __str__(self):
         return self.name
+
+
+class SecretMaterial(TimestampedUUIDModel):
+    """Stable identity for encrypted integration authentication material."""
+
+    name = models.CharField(max_length=160)
+    status = models.CharField(max_length=16, default="active")
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class SecretVersion(TimestampedUUIDModel):
+    """One encrypted version of reusable authentication material."""
+
+    material = models.ForeignKey(
+        SecretMaterial,
+        on_delete=models.CASCADE,
+        related_name="versions",
+    )
+    encrypted_value = models.TextField()
+    status = models.CharField(max_length=16, default="active")
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class Connection(TimestampedUUIDModel):
+    """Current approved plugin authentication and platform access policy."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+
+    name = models.CharField(max_length=160)
+    plugin_key = models.CharField(max_length=64)
+    endpoint = models.URLField(max_length=500)
+    config = models.JSONField(default=dict, blank=True)
+    allowed_scope = models.JSONField(default=dict, blank=True)
+    secret_version = models.ForeignKey(
+        SecretVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="connections",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class ExecutionSnapshot(TimestampedUUIDModel):
+    """Immutable resolved configuration used by a started plugin operation."""
+
+    class Kind(models.TextChoices):
+        DATASOURCE_SYNC = "datasource_sync", "Datasource Sync"
+        TOOL_INVOKE = "tool_invoke", "Tool Invoke"
+
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    connection = models.ForeignKey(
+        Connection,
+        on_delete=models.PROTECT,
+        related_name="execution_snapshots",
+    )
+    datasource = models.ForeignKey(
+        DataSource,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="execution_snapshots",
+    )
+    secret_version = models.ForeignKey(
+        SecretVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="execution_snapshots",
+    )
+    plugin_key = models.CharField(max_length=64)
+    plugin_version = models.CharField(max_length=32)
+    protocol_version = models.PositiveIntegerField()
+    resolved_config = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
 def _datasource_fernet():
