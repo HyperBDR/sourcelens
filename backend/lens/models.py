@@ -715,6 +715,27 @@ class SecretVersion(TimestampedUUIDModel):
     class Meta:
         ordering = ["-created_at"]
 
+    def set_value(self, value):
+        """Encrypt and store one secret version value."""
+
+        self.encrypted_value = (
+            _datasource_fernet()
+            .encrypt(str(value or "").encode("utf-8"))
+            .decode("utf-8")
+        )
+
+    def get_value(self):
+        """Return the decrypted secret value for trusted runtime use."""
+
+        if not self.encrypted_value:
+            return ""
+        try:
+            return _datasource_fernet().decrypt(
+                self.encrypted_value.encode("utf-8")
+            ).decode("utf-8")
+        except InvalidToken:
+            return ""
+
 
 class Connection(TimestampedUUIDModel):
     """Current approved plugin authentication and platform access policy."""

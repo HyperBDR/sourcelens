@@ -55,6 +55,10 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
         "lensnode.main.acquire_plugin_lease",
         lambda *args: {"lease_uuid": "lease-1"},
     )
+    monkeypatch.setattr(
+        "lensnode.main.retrieve_plugin_material",
+        lambda *args: {"value": "secret"},
+    )
 
     result = client._execute_plugin_datasource_sync(
         {"snapshot_uuid": "snapshot-1", "access_token": "must-not-use"}

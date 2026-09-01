@@ -29,6 +29,7 @@ from .views import (
     MCPServerViewSet,
     PluginRegistryViewSet,
     PluginCredentialLeaseView,
+    PluginCredentialMaterialView,
     PublicAssistantView,
     PublicSharedQAFileView,
     PublicSharedQAListView,
@@ -93,6 +94,11 @@ urlpatterns = [
         "plugin-runtime/leases/",
         PluginCredentialLeaseView.as_view(),
         name="lens-plugin-credential-lease",
+    ),
+    path(
+        "plugin-runtime/leases/<uuid:lease_uuid>/material/",
+        PluginCredentialMaterialView.as_view(),
+        name="lens-plugin-credential-material",
     ),
     path(
         "admin/access/users/<int:user_id>/",

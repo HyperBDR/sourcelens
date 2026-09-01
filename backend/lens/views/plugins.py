@@ -46,13 +46,19 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
             return Response({"detail": "LENSNODE_UNAUTHORIZED"}, status=401)
         snapshot_uuid = request.data.get("snapshot_uuid")
         snapshot = (
-            ExecutionSnapshot.objects.select_related("datasource", "connection")
+            ExecutionSnapshot.objects.select_related(
+                "datasource",
+                "connection",
+            )
             .filter(uuid=snapshot_uuid)
             .first()
         )
         if snapshot is None:
             return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
-        if snapshot.datasource_id is None or snapshot.datasource.lensnode_id != node.pk:
+        if (
+            snapshot.datasource_id is None
+            or snapshot.datasource.lensnode_id != node.pk
+        ):
             return Response({"detail": "SNAPSHOT_NODE_MISMATCH"}, status=403)
         if snapshot.connection.status != snapshot.connection.Status.ACTIVE:
             return Response({"detail": "CONNECTION_DISABLED"}, status=409)
@@ -69,4 +75,49 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
                 "expires_at": lease.expires_at,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
+    """Return lease-bound secret material to the authenticated LensNode."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request, lease_uuid):
+        """Resolve a non-expired lease without exposing snapshot metadata."""
+
+        node = self._authenticate_lensnode(request)
+        if node is None:
+            return Response({"detail": "LENSNODE_UNAUTHORIZED"}, status=401)
+        lease = (
+            CredentialLease.objects.select_related(
+                "snapshot__secret_version",
+                "snapshot__connection",
+            )
+            .filter(uuid=lease_uuid, lensnode=node)
+            .first()
+        )
+        if lease is None:
+            return Response({"detail": "LEASE_NOT_FOUND"}, status=404)
+        now = timezone.now()
+        if lease.revoked_at is not None or lease.expires_at <= now:
+            return Response({"detail": "LEASE_EXPIRED"}, status=410)
+        if (
+            lease.snapshot.connection.status
+            != lease.snapshot.connection.Status.ACTIVE
+        ):
+            return Response({"detail": "CONNECTION_DISABLED"}, status=409)
+        secret_version = lease.snapshot.secret_version
+        value = secret_version.get_value() if secret_version else ""
+        if not value:
+            return Response({"detail": "SECRET_UNAVAILABLE"}, status=409)
+        return Response(
+            {
+                "lease_uuid": str(lease.uuid),
+                "plugin_key": lease.snapshot.plugin_key,
+                "endpoint": lease.snapshot.resolved_config.get("endpoint", ""),
+                "value": value,
+            },
+            status=status.HTTP_200_OK,
         )

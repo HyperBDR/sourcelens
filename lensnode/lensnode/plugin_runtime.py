@@ -43,3 +43,25 @@ def acquire_plugin_lease(client, ai_gateway_url, token, snapshot_uuid):
         "snapshot_uuid": str(payload.get("snapshot_uuid") or snapshot_uuid),
         "expires_at": payload.get("expires_at"),
     }
+
+
+def retrieve_plugin_material(client, ai_gateway_url, token, lease_uuid):
+    """Resolve lease-bound material in memory for the trusted plugin."""
+
+    if not lease_uuid:
+        raise PluginRuntimeError("PLUGIN_LEASE_REQUIRED")
+    response = client.post(
+        f"{lease_url(ai_gateway_url)}/{lease_uuid}/material/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if response.is_error:
+        raise PluginRuntimeError("PLUGIN_MATERIAL_REQUEST_FAILED")
+    payload = response.json()
+    value = payload.get("value")
+    if not isinstance(value, str) or not value:
+        raise PluginRuntimeError("PLUGIN_MATERIAL_INVALID_RESPONSE")
+    return {
+        "plugin_key": str(payload.get("plugin_key") or ""),
+        "endpoint": str(payload.get("endpoint") or ""),
+        "value": value,
+    }

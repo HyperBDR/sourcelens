@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 from lens.lensnode_auth import issue_lensnode_token
 from lens.models import (
     Connection,
+    CredentialLease,
     DataSource,
     ExecutionSnapshot,
     LensNode,
@@ -22,8 +23,9 @@ class PluginLeaseTests(TestCase):
         material = SecretMaterial.objects.create(name="GitHub PAT")
         version = SecretVersion.objects.create(
             material=material,
-            encrypted_value="encrypted",
         )
+        version.set_value("github-secret")
+        version.save(update_fields=["encrypted_value"])
         self.connection = Connection.objects.create(
             name="GitHub readonly",
             plugin_key="github",
@@ -89,3 +91,40 @@ class PluginLeaseTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_node_can_resolve_material_for_an_active_lease(self):
+        lease_response = self.client.post(
+            "/api/lens/plugin-runtime/leases/",
+            {"snapshot_uuid": str(self.snapshot.uuid)},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+        material_response = self.client.post(
+            "/api/lens/plugin-runtime/leases/"
+            f"{lease_response.data['lease_uuid']}/material/",
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        self.assertEqual(material_response.status_code, 200)
+        self.assertEqual(material_response.data["value"], "github-secret")
+        self.assertEqual(material_response.data["plugin_key"], "github")
+
+    def test_expired_lease_cannot_resolve_material(self):
+        lease_response = self.client.post(
+            "/api/lens/plugin-runtime/leases/",
+            {"snapshot_uuid": str(self.snapshot.uuid)},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+        CredentialLease.objects.filter(
+            uuid=lease_response.data["lease_uuid"]
+        ).update(expires_at=timezone.now() - timedelta(seconds=1))
+        material_response = self.client.post(
+            "/api/lens/plugin-runtime/leases/"
+            f"{lease_response.data['lease_uuid']}/material/",
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        self.assertEqual(material_response.status_code, 410)

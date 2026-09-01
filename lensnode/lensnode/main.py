@@ -28,7 +28,11 @@ from .datasource_sync import upload_managed_workspace
 from .executor import TASKS, LensNodeExecutor
 from .execution_queue import ExecutionClass, LensNodeExecutionQueue
 from .gateway_model import RunCancelledError
-from .plugin_runtime import PluginRuntimeError, acquire_plugin_lease
+from .plugin_runtime import (
+    PluginRuntimeError,
+    acquire_plugin_lease,
+    retrieve_plugin_material,
+)
 from .logging_utils import (
     elapsed_since,
     format_duration,
@@ -962,9 +966,15 @@ class LensNodeClient:
                 self.config.token,
                 message.get("snapshot_uuid"),
             )
+            material = retrieve_plugin_material(
+                self.gateway_http_client,
+                self.config.ai_gateway_url,
+                self.config.token,
+                lease["lease_uuid"],
+            )
         except (PluginRuntimeError, httpx.HTTPError) as exc:
             return {"status": "failed", "error": str(exc)}
-        del lease
+        del material
         return {
             "status": "failed",
             "error": "PLUGIN_PROVIDER_RUNTIME_UNAVAILABLE",
