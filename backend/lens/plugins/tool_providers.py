@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 
 REPOSITORY_PART_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
+SEARCH_SCOPE_PATTERN = re.compile(r"(?:repo|org|user):", re.IGNORECASE)
 
 
 class ToolProviderError(ValueError):
@@ -38,20 +39,17 @@ class GitHubToolProvider:
         if tool_key == "github_search_code":
             normalized = {
                 "repository": repository,
-                "query": _bounded_text(
-                    arguments.get("query"),
-                    "query",
-                    1024,
-                    required=True,
-                ),
+                "query": _search_query(arguments.get("query")),
                 "max_results": _max_results(arguments.get("max_results")),
             }
             path = _repository_path(arguments.get("path"), required=False)
-            ref = _bounded_text(arguments.get("ref"), "ref", 255)
+            if path and (
+                any(character.isspace() for character in path)
+                or '"' in path
+            ):
+                raise ToolProviderError("search path is invalid")
             if path:
                 normalized["path"] = path
-            if ref:
-                normalized["ref"] = ref
             return endpoint, normalized
         raise ToolProviderError("tool is unsupported")
 
@@ -152,3 +150,12 @@ def _max_results(value):
     if value < 1 or value > 20:
         raise ToolProviderError("max_results must be between 1 and 20")
     return value
+
+
+def _search_query(value):
+    """Return bounded code terms without provider scope qualifiers."""
+
+    query = _bounded_text(value, "query", 1024, required=True)
+    if SEARCH_SCOPE_PATTERN.search(query):
+        raise ToolProviderError("query scope qualifiers are not allowed")
+    return query

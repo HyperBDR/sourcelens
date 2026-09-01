@@ -104,7 +104,6 @@ class PluginToolSnapshotTests(TestCase):
                             "repository": {"type": "string"},
                             "query": {"type": "string"},
                             "path": {"type": "string"},
-                            "ref": {"type": "string"},
                             "max_results": {"type": "integer"},
                         },
                         "required": ["repository", "query"],
@@ -211,6 +210,53 @@ class PluginToolSnapshotTests(TestCase):
             arguments={
                 "repository": "other/repository",
                 "path": "README.md",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "TOOL_ARGUMENTS_INVALID")
+
+    def test_search_tool_rejects_scope_qualifiers_in_model_query(self):
+        run = self._create_active_run()
+
+        response = self._create_snapshot(
+            run,
+            tool_key="github_search_code",
+            arguments={
+                "repository": "HyperBDR/sourcelens",
+                "query": "token repo:other/private-repository",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "TOOL_ARGUMENTS_INVALID")
+
+    def test_search_tool_rejects_splittable_path_qualifier(self):
+        run = self._create_active_run()
+
+        response = self._create_snapshot(
+            run,
+            tool_key="github_search_code",
+            arguments={
+                "repository": "HyperBDR/sourcelens",
+                "query": "token",
+                "path": "src repo:other/private-repository",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "TOOL_ARGUMENTS_INVALID")
+
+    def test_search_tool_rejects_unsupported_ref_argument(self):
+        run = self._create_active_run()
+
+        response = self._create_snapshot(
+            run,
+            tool_key="github_search_code",
+            arguments={
+                "repository": "HyperBDR/sourcelens",
+                "query": "token",
+                "ref": "main",
             },
         )
 

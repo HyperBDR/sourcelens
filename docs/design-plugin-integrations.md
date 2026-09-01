@@ -1,6 +1,6 @@
 # 设计稿：内置集成 Plugin（Tool + Datasource）
 
-- 状态：实施中（V1 控制面与 DataSource 主链路已落地）
+- 状态：实施中（V1 控制面、DataSource 与 LensNode Tool 主链路已落地）
 - 日期：2026-09-01
 - 范围：GitHub、GitLab、Jira 等内置集成；同时服务代码数据源和助手工具。
 
@@ -241,6 +241,29 @@ LLM tool call
   → Tool result 返回模型
 ```
 
+当前 GitHub V1 的 LensNode 实现固定使用以下受控链路：
+
+```text
+模型 Tool Call（ToolRuntime.tool_call_id）
+  → POST /api/lens/plugin-runtime/tool-snapshots/
+  → GET  /api/lens/plugin-runtime/snapshots/{uuid}/
+  → POST /api/lens/plugin-runtime/leases/
+  → POST /api/lens/plugin-runtime/leases/{uuid}/material/
+  → https://api.github.com（禁止重定向）
+```
+
+一个模型 Tool Call 对应一个 `tool_invoke` ExecutionSnapshot，调用 ID 作为幂等键；
+同一模型轮次中彼此独立的 Tool Call 由现有 ToolNode 并行执行，共享线程安全的
+HTTPX Client 连接池。PAT 只在受信任的 LensNode/Provider 内存中短暂存在，绝不进入
+Tool 参数、Run 快照、模型上下文、返回结果或普通事件明细。`github_read_file` 的
+结果最多读取 200 KB，`github_search_code` 的响应最多读取 1 MB，搜索结果最多 20
+项；超限、非文本和重定向均返回稳定错误码。
+
+V1 不允许多个 Connection 暴露同名模型 Tool，避免在不向模型泄露 Connection 身份
+的前提下产生歧义。GitHub 搜索会拒绝 `repo:`、`org:`、`user:` 等模型可控范围限定
+符号，仓库范围只由 Connection 允许范围和 Provider 代码决定；搜索不接受不会被
+GitHub API 使用的 `ref` 参数。
+
 禁止提供 `github_raw_exec(command)` 之类的通用命令工具。未来写操作必须有独立
 capability、幂等键和按风险配置的用户确认或审批；它不属于 V1 范围。
 
@@ -434,8 +457,15 @@ PATCH /api/lens/admin/connections/{uuid}/
 POST /api/lens/admin/connections/{uuid}/validate/
 POST /api/lens/admin/connections/{uuid}/rotate/
 GET  /api/lens/admin/connections/{uuid}/resources/
-POST /api/lens/plugin-tools/{provider}/{tool}/invoke/
+POST /api/lens/plugin-runtime/tool-snapshots/
+GET  /api/lens/plugin-runtime/snapshots/{uuid}/
+POST /api/lens/plugin-runtime/leases/
+POST /api/lens/plugin-runtime/leases/{uuid}/material/
 ```
+
+上面的 Tool Runtime 接口仅供已认证的 LensNode 使用；模型不直接访问这些接口。
+未来如需提供面向其他内部调用方的统一 invoke API，必须复用同一快照、租约和
+Provider 校验链路，不能绕过 Connection scope。
 
 当前 V1 已落地的 Connection 管理接口为：
 
@@ -468,8 +498,9 @@ Assistant 创建和更新接口通过可选的 `plugin_bindings` 管理模型工
 响应只返回 Connection 身份、名称、Plugin key 和工具 key，不返回 endpoint、scope、
 SecretVersion 内容或密文。Direct `general_chat` 至少需要一个启用的 Skill 或一个有效的
 Plugin Tool。Run 创建时保存非敏感 `loaded_plugins`，Worker 实际开始执行时按当前有效
-绑定重新固化，并将工具定义下发给 LensNode；工具调用、Tool ExecutionSnapshot 与
-GitHub API 处理器仍属于后续垂直切片。
+绑定重新固化，并将工具定义下发给 LensNode。LensNode 使用模型真实 Tool Call ID
+创建 Tool ExecutionSnapshot，再通过 snapshot-bound lease 获取材料并调用固定的
+GitHub API；执行失败不会回退到旧凭证路径。
 
 持久化 Run 关联 ExecutionSnapshot；该快照记录 Plugin、Connection、
 SecretVersion、Capability 和资源引用，不记录解析后的 secret。
@@ -491,7 +522,7 @@ DataSource API 保持数据源生命周期入口，但外部类型的写入契�
   驱动的资源配置、资源范围校验和同步任务快照；
 - 跑通 Connection → DataSource 初始、手动、定时和重试同步，LensNode 不接收解密
   credential config；
-- 跑通 `github_read_file`、`github_search_code` 等只读工具；
+- 跑通 `github_read_file`、`github_search_code` 等只读工具，并验证同轮独立调用并行；
 - 只支持一种 GitHub 认证方式，并限定允许的 endpoint；
 - 完成控制端与 LensNode 的 Plugin/version/protocol 握手；
 - 保留旧 DataSourceCredential 读路径，但禁止新功能继续扩展旧模型。

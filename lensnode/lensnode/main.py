@@ -961,6 +961,7 @@ class LensNodeClient:
     def _execute_plugin_datasource_sync(self, message, emit=None):
         """Execute a trusted GitHub datasource using snapshot data."""
 
+        material = None
         try:
             snapshot = fetch_plugin_snapshot(
                 self.gateway_http_client,
@@ -982,33 +983,44 @@ class LensNodeClient:
             )
         except (PluginRuntimeError, httpx.HTTPError) as exc:
             return {"status": "failed", "error": str(exc)}
-        resolved = snapshot["resolved_config"]
-        datasource = resolved.get("datasource_config") or {}
-        if material.get("plugin_key") != snapshot.get("plugin_key"):
-            material["value"] = ""
-            return {"status": "failed", "error": "PLUGIN_MATERIAL_MISMATCH"}
-        if snapshot.get("plugin_key") != "github":
-            material["value"] = ""
-            return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
-        repository = datasource.get("repository")
-        endpoint = resolved.get("endpoint", "").rstrip("/")
-        if not repository or not endpoint:
-            material["value"] = ""
-            return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
-        command = {
-            "source_type": "git",
-            "datasource_uuid": snapshot.get("datasource_uuid"),
-            "target_path": resolved.get("target_path"),
-            "sync_policy": resolved.get("sync_policy") or {},
-            "trigger": message.get("trigger") or "plugin",
-            "config": {
-                "repo_url": f"{endpoint}/{repository}.git",
-                "branch": datasource.get("branch") or "main",
-                "auth_scheme": "token",
-                "access_token": material["value"],
-            },
-        }
         try:
+            resolved = snapshot.get("resolved_config")
+            if not isinstance(resolved, dict) or not isinstance(
+                material, dict
+            ):
+                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
+            datasource = resolved.get("datasource_config") or {}
+            if not isinstance(datasource, dict):
+                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
+            endpoint = resolved.get("endpoint", "").rstrip("/")
+            if snapshot.get("plugin_key") != "github":
+                return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
+            if endpoint != "https://github.com":
+                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
+            if (
+                material.get("plugin_key") != snapshot.get("plugin_key")
+                or material.get("endpoint", "").rstrip("/") != endpoint
+            ):
+                return {
+                    "status": "failed",
+                    "error": "PLUGIN_MATERIAL_MISMATCH",
+                }
+            repository = datasource.get("repository")
+            if not repository:
+                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
+            command = {
+                "source_type": "git",
+                "datasource_uuid": snapshot.get("datasource_uuid"),
+                "target_path": resolved.get("target_path"),
+                "sync_policy": resolved.get("sync_policy") or {},
+                "trigger": message.get("trigger") or "plugin",
+                "config": {
+                    "repo_url": f"{endpoint}/{repository}.git",
+                    "branch": datasource.get("branch") or "main",
+                    "auth_scheme": "token",
+                    "access_token": material["value"],
+                },
+            }
             return sync_datasource(
                 command,
                 self.config.workspace_path,
@@ -1017,8 +1029,8 @@ class LensNodeClient:
         except DataSourceSyncError:
             return {"status": "failed", "error": "PLUGIN_SYNC_FAILED"}
         finally:
-            command["config"]["access_token"] = ""
-            material["value"] = ""
+            if material is not None:
+                material["value"] = ""
 
     async def _start_datasource_conversion(self, message):
         """Start one managed workspace conversion in a worker thread."""

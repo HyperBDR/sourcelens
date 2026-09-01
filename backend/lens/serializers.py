@@ -520,6 +520,7 @@ class PluginBindingsField(serializers.Field):
             raise serializers.ValidationError("Expected a list of bindings.")
         validated = []
         seen = set()
+        seen_enabled_tools = set()
         for item in data:
             if not isinstance(item, dict):
                 raise serializers.ValidationError(
@@ -573,6 +574,12 @@ class PluginBindingsField(serializers.Field):
                 raise serializers.ValidationError(
                     "Plugin tools must be installed read-only tools."
                 )
+            if enabled and seen_enabled_tools.intersection(requested):
+                raise serializers.ValidationError(
+                    "Enabled Plugin tool names must be unique."
+                )
+            if enabled:
+                seen_enabled_tools.update(requested)
             seen.add(connection.pk)
             validated.append(
                 {

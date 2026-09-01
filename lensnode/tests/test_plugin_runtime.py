@@ -1,12 +1,16 @@
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from lensnode.main import LensNodeClient
 from lensnode.plugin_runtime import (
+    PluginRuntimeError,
     acquire_plugin_lease,
+    create_plugin_tool_snapshot,
     fetch_plugin_snapshot,
     lease_url,
+    tool_snapshot_url,
 )
 
 
@@ -14,6 +18,77 @@ def test_lease_url_replaces_ai_gateway_path():
     assert lease_url(
         "http://gateway/api/lens/lensnode/ai-gateway/"
     ) == "http://gateway/api/lens/plugin-runtime/leases/"
+
+
+def test_tool_snapshot_url_replaces_ai_gateway_path():
+    assert tool_snapshot_url(
+        "http://gateway/api/lens/lensnode/ai-gateway/"
+    ) == "http://gateway/api/lens/plugin-runtime/tool-snapshots/"
+
+
+def test_create_plugin_tool_snapshot_uses_model_call_identity():
+    class Client:
+        def post(self, url, **kwargs):
+            assert url.endswith("/plugin-runtime/tool-snapshots/")
+            assert kwargs["json"] == {
+                "run_uuid": "run-1",
+                "connection_uuid": "connection-1",
+                "tool_key": "github_read_file",
+                "call_id": "call-1",
+                "arguments": {
+                    "repository": "owner/repository",
+                    "path": "README.md",
+                },
+            }
+            assert kwargs["headers"]["Authorization"] == "Bearer node-token"
+            return httpx.Response(
+                201,
+                json={
+                    "snapshot_uuid": "snapshot-1",
+                    "run_uuid": "run-1",
+                    "connection_uuid": "connection-1",
+                    "tool_key": "github_read_file",
+                    "invocation_id": "call-1",
+                    "plugin_key": "github",
+                },
+            )
+
+    result = create_plugin_tool_snapshot(
+        Client(),
+        "http://gateway/api/lens/lensnode/ai-gateway/",
+        "node-token",
+        "run-1",
+        "connection-1",
+        "github_read_file",
+        "call-1",
+        {
+            "repository": "owner/repository",
+            "path": "README.md",
+        },
+    )
+
+    assert result["snapshot_uuid"] == "snapshot-1"
+    assert result["invocation_id"] == "call-1"
+
+
+def test_create_plugin_tool_snapshot_rejects_malformed_control_response():
+    class Client:
+        def post(self, _url, **_kwargs):
+            return httpx.Response(201, text="not-json")
+
+    with pytest.raises(PluginRuntimeError) as exc_info:
+        create_plugin_tool_snapshot(
+            Client(),
+            "http://gateway/api/lens/lensnode/ai-gateway/",
+            "node-token",
+            "run-1",
+            "connection-1",
+            "github_read_file",
+            "call-1",
+            {"repository": "owner/repository", "path": "README.md"},
+        )
+
+    assert str(exc_info.value) == "PLUGIN_TOOL_SNAPSHOT_INVALID_RESPONSE"
 
 
 def test_acquire_plugin_lease_returns_opaque_metadata():
@@ -93,6 +168,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     client.config = SimpleNamespace(
         ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
         token="node-token",
+        workspace_path="/workspace",
     )
     client.gateway_http_client = object()
     monkeypatch.setattr(
@@ -113,7 +189,11 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     )
     monkeypatch.setattr(
         "lensnode.main.retrieve_plugin_material",
-        lambda *args: {"plugin_key": "github", "value": "secret"},
+        lambda *args: {
+            "plugin_key": "github",
+            "endpoint": "https://github.com",
+            "value": "secret",
+        },
     )
     seen = {}
 
@@ -130,6 +210,81 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     assert seen["token"] == "secret"
 
 
+def test_plugin_sync_rejects_material_for_another_endpoint(monkeypatch):
+    client = LensNodeClient.__new__(LensNodeClient)
+    client.config = SimpleNamespace(
+        ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
+        token="node-token",
+        workspace_path="/workspace",
+    )
+    client.gateway_http_client = object()
+    monkeypatch.setattr(
+        "lensnode.main.fetch_plugin_snapshot",
+        lambda *args: {
+            "plugin_key": "github",
+            "resolved_config": {
+                "endpoint": "https://github.com",
+                "target_path": "/workspace/repo",
+                "datasource_config": {"repository": "owner/repo"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.main.acquire_plugin_lease",
+        lambda *args: {"lease_uuid": "lease-1"},
+    )
+    material = {
+        "plugin_key": "github",
+        "endpoint": "https://evil.example",
+        "value": "secret",
+    }
+    monkeypatch.setattr(
+        "lensnode.main.retrieve_plugin_material",
+        lambda *args: material,
+    )
+
+    result = client._execute_plugin_datasource_sync(
+        {"snapshot_uuid": "snapshot-1"}
+    )
+
+    assert result["error"] == "PLUGIN_MATERIAL_MISMATCH"
+    assert material["value"] == ""
+
+
+def test_plugin_sync_releases_material_for_malformed_snapshot(monkeypatch):
+    client = LensNodeClient.__new__(LensNodeClient)
+    client.config = SimpleNamespace(
+        ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
+        token="node-token",
+        workspace_path="/workspace",
+    )
+    client.gateway_http_client = object()
+    monkeypatch.setattr(
+        "lensnode.main.fetch_plugin_snapshot",
+        lambda *args: {"plugin_key": "github", "resolved_config": []},
+    )
+    monkeypatch.setattr(
+        "lensnode.main.acquire_plugin_lease",
+        lambda *args: {"lease_uuid": "lease-1"},
+    )
+    material = {
+        "plugin_key": "github",
+        "endpoint": "https://github.com",
+        "value": "secret",
+    }
+    monkeypatch.setattr(
+        "lensnode.main.retrieve_plugin_material",
+        lambda *args: material,
+    )
+
+    result = client._execute_plugin_datasource_sync(
+        {"snapshot_uuid": "snapshot-1"}
+    )
+
+    assert result["error"] == "PLUGIN_CONFIG_INVALID"
+    assert material["value"] == ""
+
+
 def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
     client = LensNodeClient.__new__(LensNodeClient)
     client.config = SimpleNamespace(
@@ -141,14 +296,21 @@ def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "github",
-            "resolved_config": {"datasource_config": {}},
+            "resolved_config": {
+                "endpoint": "https://github.com",
+                "datasource_config": {},
+            },
         },
     )
     monkeypatch.setattr(
         "lensnode.main.acquire_plugin_lease",
         lambda *args: {"lease_uuid": "lease-1"},
     )
-    material = {"plugin_key": "gitlab", "value": "secret"}
+    material = {
+        "plugin_key": "gitlab",
+        "endpoint": "https://github.com",
+        "value": "secret",
+    }
     monkeypatch.setattr(
         "lensnode.main.retrieve_plugin_material",
         lambda *args: material,

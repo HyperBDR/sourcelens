@@ -169,6 +169,37 @@ class AssistantPluginBindingTests(TestCase):
         self.assertIn("plugin_bindings", response.data)
         self.assertFalse(self.assistant.plugin_bindings.exists())
 
+    def test_binding_rejects_duplicate_tool_names_across_connections(self):
+        other = Connection.objects.create(
+            name="Other GitHub",
+            plugin_key="github",
+            endpoint="https://github.com",
+            allowed_scope={"repositories": ["other/repository"]},
+            secret_version=self.connection.secret_version,
+        )
+
+        with self.plugin_root():
+            response = self.client.patch(
+                f"/api/lens/assistants/{self.assistant.uuid}/",
+                {
+                    "plugin_bindings": [
+                        {
+                            "connection_uuid": str(self.connection.uuid),
+                            "tools": ["github_read_file"],
+                        },
+                        {
+                            "connection_uuid": str(other.uuid),
+                            "tools": ["github_read_file"],
+                        },
+                    ]
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("unique", str(response.data).lower())
+        self.assertFalse(self.assistant.plugin_bindings.exists())
+
     def test_binding_rejects_a_disabled_connection(self):
         self.connection.status = Connection.Status.DISABLED
         self.connection.save(update_fields=["status"])
