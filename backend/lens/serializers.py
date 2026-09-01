@@ -43,6 +43,7 @@ from .models import (
     AssistantSkill,
     DataSource,
     DataSourceCredential,
+    Connection,
     EnvironmentVariableSet,
     GlobalSetting,
     LensNode,
@@ -77,6 +78,7 @@ from .vision_capabilities import (
     resolve_model_capability,
     validate_vision_model_ref,
 )
+from .plugins.providers import DatasourceProviderError, get_datasource_provider
 from .skill_generation import (
     get_workspace_guide_payload,
     sync_workspace_guide_skill,
@@ -1251,6 +1253,12 @@ class DataSourceSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    connection_uuid = serializers.UUIDField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    connection = serializers.UUIDField(source="connection.uuid", read_only=True)
     lensnode = serializers.UUIDField(source="lensnode.uuid", read_only=True)
     lensnode_name = serializers.CharField(
         source="lensnode.name",
@@ -1304,6 +1312,16 @@ class DataSourceSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"credential_uuid": "Credential does not exist"}
                 )
+        connection_uuid = attrs.pop("connection_uuid", None)
+        if "connection_uuid" in self.initial_data and connection_uuid is None:
+            attrs["connection"] = None
+        elif connection_uuid is not None:
+            try:
+                attrs["connection"] = Connection.objects.get(uuid=connection_uuid)
+            except Connection.DoesNotExist:
+                raise serializers.ValidationError(
+                    {"connection_uuid": "Connection does not exist"}
+                )
 
         if not isinstance(config, dict):
             raise serializers.ValidationError({"config": "config must be an object"})
@@ -1334,7 +1352,45 @@ class DataSourceSerializer(serializers.ModelSerializer):
             if "credential" in attrs
             else getattr(self.instance, "credential", None)
         )
-        if source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+        connection = (
+            attrs["connection"]
+            if "connection" in attrs
+            else getattr(self.instance, "connection", None)
+        )
+        datasource_config = attrs.get(
+            "datasource_config",
+            getattr(self.instance, "datasource_config", {}),
+        )
+        plugin_key = attrs.get(
+            "plugin_key",
+            getattr(self.instance, "plugin_key", ""),
+        )
+        if connection is not None:
+            if source_type == DataSource.SourceType.MANAGED_WORKSPACE:
+                raise serializers.ValidationError(
+                    {"connection_uuid": "Managed workspace does not use connections"}
+                )
+            if plugin_key and plugin_key != connection.plugin_key:
+                raise serializers.ValidationError(
+                    {"plugin_key": "Plugin key differs from connection"}
+                )
+            plugin_key = connection.plugin_key
+            try:
+                provider = get_datasource_provider(plugin_key)
+                attrs["datasource_config"] = provider.validate_datasource_config(
+                    connection.allowed_scope,
+                    datasource_config,
+                )
+            except DatasourceProviderError as exc:
+                raise serializers.ValidationError({"datasource_config": str(exc)})
+            attrs["plugin_key"] = plugin_key
+            attrs["credential"] = None
+            config = {}
+            attrs["config"] = {}
+            credential = None
+        if connection is not None:
+            pass
+        elif source_type == DataSource.SourceType.MANAGED_WORKSPACE:
             if credential is not None:
                 raise serializers.ValidationError(
                     {"credential_uuid": ("Managed workspace does not use credentials")}
@@ -1547,6 +1603,10 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "lensnode_name",
             "credential",
             "credential_uuid",
+            "connection",
+            "connection_uuid",
+            "plugin_key",
+            "datasource_config",
             "config",
             "credential_configured",
             "current_sync",

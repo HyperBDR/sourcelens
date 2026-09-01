@@ -8,6 +8,7 @@ from lens.models import (
     SecretMaterial,
     SecretVersion,
 )
+from lens.serializers import DataSourceSerializer
 
 
 class PluginModelTests(TestCase):
@@ -29,6 +30,8 @@ class PluginModelTests(TestCase):
         self.lensnode = LensNode.objects.create(
             name="Node",
             workspace_path="/workspace",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
         )
 
     def test_datasource_can_use_a_connection_without_embedding_auth_config(self):
@@ -76,3 +79,22 @@ class PluginModelTests(TestCase):
             snapshot.resolved_config["repository"],
             "HyperBDR/sourcelens",
         )
+
+    def test_serializer_accepts_provider_datasource_configuration(self):
+        serializer = DataSourceSerializer(data={
+            "name": "Repository",
+            "source_type": "git",
+            "lensnode_uuid": str(self.lensnode.uuid),
+            "connection_uuid": str(self.connection.uuid),
+            "plugin_key": "github",
+            "datasource_config": {"repository": "HyperBDR/sourcelens"},
+            "sync_policy": {},
+            "target_path": "/workspace/repository",
+        })
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(
+            serializer.validated_data["datasource_config"],
+            {"repository": "HyperBDR/sourcelens"},
+        )
+        self.assertIsNone(serializer.validated_data["credential"])
