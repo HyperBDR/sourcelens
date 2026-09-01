@@ -145,6 +145,18 @@ test('fixed Smart Assistants allow member inspection without editing', async () 
   assert.match(picker, /:disabled="readonly"/)
   assert.match(picker, /v-if="!readonly"/)
   assert.match(picker, /readonly \? t\('common\.close'\)/)
+  assert.match(
+    chat,
+    /if \(!isFixedSmartAssistant\.value\) return candidates/
+  )
+  assert.match(
+    chat,
+    /selectedAssistant\.value\?\.collaboration_members/
+  )
+  assert.match(
+    chat,
+    /return candidates\.filter\(\(assistant\) => configured\.has\(assistant\.uuid\)\)/
+  )
   assert.doesNotMatch(
     chat,
     /function openRoutingScope\(\) \{\s*if \(isFixedSmartAssistant\.value\) return/

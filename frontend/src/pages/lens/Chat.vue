@@ -2040,13 +2040,22 @@ const selectedSessionArchived = computed(
   () => selectedSession.value?.status === 'archived'
 )
 
-const routingCandidates = computed(() =>
-  assistants.value.filter(
+const routingCandidates = computed(() => {
+  const candidates = assistants.value.filter(
     (assistant) =>
       assistant.status === 'active' &&
       (assistant.mode || assistant.routing_mode || 'direct') === 'direct'
   )
-)
+
+  if (!isFixedSmartAssistant.value) return candidates
+
+  const configured = new Set(
+    (selectedAssistant.value?.collaboration_members || []).map(
+      (member) => member.uuid
+    )
+  )
+  return candidates.filter((assistant) => configured.has(assistant.uuid))
+})
 
 const filteredRoutingCandidates = computed(() =>
   filterRoutingCandidates(routingCandidates.value, routingScopeQuery.value)
@@ -3218,10 +3227,17 @@ async function loadSessions(selectUuid = '', { useRouteSession = true } = {}) {
     return
   }
 
-  sessions.value = await listSessions(selectedAssistant.value?.slug || '', {
-    routingMode: isSmartCollaborationConversation.value ? 'smart' : '',
-    archived: showArchivedSessions.value
-  })
+  const loadGeneration = ++sessionLoadGeneration
+  const loadedSessions = await listSessions(
+    selectedAssistant.value?.slug || '',
+    {
+      routingMode: isSmartCollaborationConversation.value ? 'smart' : '',
+      archived: showArchivedSessions.value
+    }
+  )
+  if (loadGeneration !== sessionLoadGeneration) return
+
+  sessions.value = loadedSessions
 
   const requestedUuid =
     selectUuid || (useRouteSession ? route.query.session || '' : '')
@@ -3329,10 +3345,10 @@ function clearSessionSelection() {
 
 async function switchSessionView(archived) {
   if (showArchivedSessions.value === archived) return
+  sessionLoadGeneration += 1
   showArchivedSessions.value = archived
   cancelRename()
   closeDeleteSession()
-  await router.replace({ path: route.path })
   await loadSessions('', {
     useRouteSession: false
   })
@@ -4550,7 +4566,7 @@ watch(
 )
 
 watch(
-  () => [route.name, route.params.slug],
+  [() => route.name, () => route.params.slug],
   () => {
     // On a hard load with a stored token, defer the first bootstrap to
     // onMounted so it runs after the user is hydrated — avoids a flash of

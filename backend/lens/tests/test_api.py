@@ -1009,6 +1009,31 @@ class LensApiTests(TestCase):
         ]
         self.assertIn(self.assistant.slug, active_slugs)
 
+    def test_assistant_list_uses_compact_rows_but_retrieve_has_bindings(self):
+        """Keep list payloads small while retaining the edit contract."""
+
+        AssistantSkill.objects.create(assistant=self.assistant, skill=self.skill)
+        AssistantMCP.objects.create(assistant=self.assistant, mcp=self.mcp)
+
+        list_response = self.client.get("/api/lens/assistants/")
+        row = list_response.data["results"][0]
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(row["skill_summary"], {"total": 1, "enabled": 1})
+        self.assertEqual(row["mcp_summary"], {"total": 1, "enabled": 1})
+        self.assertNotIn("skill_bindings", row)
+        self.assertNotIn("mcp_bindings", row)
+        self.assertNotIn("access_grants", row)
+        self.assertNotIn("settings", row)
+
+        detail_response = self.client.get(
+            f"/api/lens/assistants/{self.assistant.uuid}/"
+        )
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(len(detail_response.data["skill_bindings"]), 1)
+        self.assertEqual(len(detail_response.data["mcp_bindings"]), 1)
+
     def test_assistant_status_cannot_bypass_lifecycle_actions(self):
         response = self.client.patch(
             f"/api/lens/assistants/{self.assistant.uuid}/",
