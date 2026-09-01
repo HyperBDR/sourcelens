@@ -2251,7 +2251,6 @@ function assistantCapabilityLabel(capability) {
 }
 
 function openRoutingScope() {
-  if (isFixedSmartAssistant.value) return
   routingScopeDraft.value = selectedSession.value
     ? [...(selectedSession.value.allowed_assistant_uuids || [])]
     : [...routingScopeDraft.value]

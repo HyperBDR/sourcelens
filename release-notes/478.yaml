@@ -1,0 +1,10 @@
+type: improvement
+audience: user
+en: >-
+  Fixed Smart Assistants now let users inspect their configured collaborating
+  assistants without allowing membership changes.
+zh-CN: >-
+  固定智能助手现在支持查看已配置的协作助手，同时保持成员不可修改。
+es: >-
+  Los asistentes inteligentes fijos ahora permiten consultar los asistentes
+  colaboradores configurados sin permitir cambios en sus miembros.

@@ -9,7 +9,6 @@
           count: selectedAssistants.length
         })
       "
-      :aria-disabled="readonly"
       aria-controls="participating-assistants-panel"
       @click="handleEntryClick"
     >
@@ -55,31 +54,6 @@
             </p>
           </div>
         </div>
-        <div
-          v-if="recommendedAssistants.length"
-          class="routing-scope-recommend"
-        >
-          <div class="routing-scope-recommend-copy">
-            <span class="routing-scope-recommend-icon" aria-hidden="true">
-              ✨
-            </span>
-            <div class="routing-scope-recommend-text">
-              <p class="routing-scope-recommend-title">
-                {{ t('lens.chat.participatingAssistantsRecommended') }}
-              </p>
-              <p class="routing-scope-recommend-names">
-                {{ recommendedAssistantNames }}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            class="routing-scope-recommend-apply"
-            @click="applyRecommendedAssistants"
-          >
-            {{ t('common.apply') }}
-          </button>
-        </div>
         <div class="routing-scope-toolbar">
           <label class="routing-scope-search">
             <span class="sr-only">
@@ -99,7 +73,7 @@
           </label>
           <button
             type="button"
-            :disabled="!candidateCount"
+            :disabled="readonly || !candidateCount"
             :aria-pressed="allSelected"
             class="routing-scope-select-all"
             @click="$emit('toggle-all')"
@@ -127,6 +101,7 @@
                 :value="assistant.uuid"
                 :checked="draft.includes(assistant.uuid)"
                 class="routing-scope-checkbox sr-only"
+                :disabled="readonly"
                 @change="toggleAssistant(assistant.uuid, $event.target.checked)"
               />
               <span
@@ -180,9 +155,10 @@
               class="routing-scope-action text-ink-600 hover:bg-surface-sunken"
               @click="$emit('cancel')"
             >
-              {{ t('common.cancel') }}
+              {{ readonly ? t('common.close') : t('common.cancel') }}
             </button>
             <button
+              v-if="!readonly"
               type="button"
               class="routing-scope-action bg-brand-600 font-medium text-white hover:bg-brand-700"
               @click="$emit('save')"
@@ -233,13 +209,6 @@ const assistantColors = [
   '#475569',
   '#e11d48'
 ]
-const assistantColorsByName = {
-  'agione-ai-assistant': '#2563eb',
-  'agione-price-assistant': '#7c3aed',
-  'aishu-anybackup-assistant': '#0d9488',
-  'engineering-ops': '#475569',
-  'hyperbdr-ai-assistant': '#e11d48'
-}
 const selectedAssistants = computed(() =>
   props.candidates.filter((assistant) =>
     props.selectedUuids.includes(assistant.uuid)
@@ -258,30 +227,6 @@ const candidateGroups = computed(() => {
     }))
     .filter((group) => group.assistants.length)
 })
-const recommendedAssistants = computed(() => {
-  const matches = props.candidates.filter((assistant) => {
-    const name = String(assistant.name || '').toLocaleLowerCase()
-    return (
-      name === 'hyperbdr-ai-assistant' || name.startsWith('company-knowledge')
-    )
-  })
-  if (matches.length !== 2) return []
-  return [
-    matches.find(
-      (assistant) =>
-        String(assistant.name || '').toLocaleLowerCase() ===
-        'hyperbdr-ai-assistant'
-    ),
-    matches.find((assistant) =>
-      String(assistant.name || '')
-        .toLocaleLowerCase()
-        .startsWith('company-knowledge')
-    )
-  ]
-})
-const recommendedAssistantNames = computed(() =>
-  recommendedAssistants.value.map((assistant) => assistant.name).join(' + ')
-)
 const selectionStatusText = computed(() => {
   if (draftCount.value === 0) {
     return t('lens.chat.participatingAssistantsNone')
@@ -324,9 +269,6 @@ function assistantInitials(name) {
 }
 
 function assistantColor(assistant) {
-  const name = String(assistant.name || '').toLocaleLowerCase()
-  if (name.startsWith('company-knowledge')) return '#d97706'
-  if (assistantColorsByName[name]) return assistantColorsByName[name]
   const source = String(assistant.uuid || assistant.name || '')
   const index = [...source].reduce(
     (total, character) => total + character.codePointAt(0),
@@ -340,14 +282,7 @@ function handleBackdropClick() {
 }
 
 function handleEntryClick() {
-  if (!props.readonly) emit('open')
-}
-
-function applyRecommendedAssistants() {
-  emit(
-    'update:draft',
-    recommendedAssistants.value.map((assistant) => assistant.uuid)
-  )
+  emit('open')
 }
 
 function toggleAssistant(uuid, checked) {
@@ -365,7 +300,6 @@ function toggleAssistant(uuid, checked) {
 
 .routing-scope-entry:focus-visible,
 .routing-scope-select-all:focus-visible,
-.routing-scope-recommend-apply:focus-visible,
 .routing-scope-action:focus-visible {
   @apply outline-none ring-2 ring-primary-300 ring-offset-1;
 }
@@ -419,38 +353,6 @@ function toggleAssistant(uuid, checked) {
 
 .routing-scope-hint {
   @apply mt-0.5 text-[12.5px] leading-5 text-ink-400;
-}
-
-.routing-scope-recommend {
-  @apply mx-[22px] mt-3.5 flex items-center justify-between gap-3 rounded-[10px]
-    border px-3 py-2.5;
-  border-color: #eaecf2;
-  background: #f6f7fb;
-}
-
-.routing-scope-recommend-copy {
-  @apply flex min-w-0 items-center gap-2.5;
-}
-
-.routing-scope-recommend-icon {
-  @apply shrink-0 text-base;
-}
-
-.routing-scope-recommend-text {
-  @apply min-w-0;
-}
-
-.routing-scope-recommend-title {
-  @apply text-[12.5px] font-semibold text-ink-900;
-}
-
-.routing-scope-recommend-names {
-  @apply truncate text-[11.5px] text-ink-400;
-}
-
-.routing-scope-recommend-apply {
-  @apply shrink-0 rounded-md px-1 py-1 text-xs font-semibold text-primary-700
-    transition-colors hover:bg-primary-50;
 }
 
 .routing-scope-toolbar {
@@ -559,10 +461,6 @@ function toggleAssistant(uuid, checked) {
 .routing-scope-layer.is-mobile .routing-scope-toolbar,
 .routing-scope-layer.is-mobile .routing-scope-footer {
   @apply px-4;
-}
-
-.routing-scope-layer.is-mobile .routing-scope-recommend {
-  @apply mx-4;
 }
 
 .routing-scope-layer.is-mobile .routing-scope-select-all {
