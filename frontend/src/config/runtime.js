@@ -6,8 +6,11 @@ const parseBoolean = (value) => {
 
 export const getTurnstileConfig = (buildSiteKey = '') => {
   const runtime = globalThis.__SOURCELENS_CONFIG__ || {}
-  const siteKey = runtime.turnstileSiteKey ?? buildSiteKey ?? ''
   const runtimeEnabled = parseBoolean(runtime.turnstileEnabled)
+  const siteKey =
+    runtimeEnabled === false
+      ? (runtime.turnstileSiteKey ?? '')
+      : runtime.turnstileSiteKey || buildSiteKey || ''
 
   return {
     enabled: runtimeEnabled ?? Boolean(siteKey),
