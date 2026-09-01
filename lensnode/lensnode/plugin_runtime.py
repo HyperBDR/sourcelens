@@ -19,7 +19,7 @@ def lease_url(ai_gateway_url):
         path = path.split(marker, 1)[0] + "/api/lens/plugin-runtime/leases"
     else:
         path = "/api/lens/plugin-runtime/leases"
-    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+    return urlunsplit((parsed.scheme, parsed.netloc, path + "/", "", ""))
 
 
 def acquire_plugin_lease(client, ai_gateway_url, token, snapshot_uuid):
@@ -51,7 +51,7 @@ def retrieve_plugin_material(client, ai_gateway_url, token, lease_uuid):
     if not lease_uuid:
         raise PluginRuntimeError("PLUGIN_LEASE_REQUIRED")
     response = client.post(
-        f"{lease_url(ai_gateway_url)}/{lease_uuid}/material/",
+        f"{lease_url(ai_gateway_url)}{lease_uuid}/material/",
         headers={"Authorization": f"Bearer {token}"},
     )
     if response.is_error:
@@ -73,7 +73,7 @@ def fetch_plugin_snapshot(client, ai_gateway_url, token, snapshot_uuid):
     if not snapshot_uuid:
         raise PluginRuntimeError("PLUGIN_SNAPSHOT_REQUIRED")
     response = client.get(
-        f"{lease_url(ai_gateway_url).rsplit('/leases', 1)[0]}"
+        f"{lease_url(ai_gateway_url).rsplit('/leases/', 1)[0]}"
         f"/snapshots/{snapshot_uuid}/",
         headers={"Authorization": f"Bearer {token}"},
     )

@@ -13,7 +13,7 @@ from lensnode.plugin_runtime import (
 def test_lease_url_replaces_ai_gateway_path():
     assert lease_url(
         "http://gateway/api/lens/lensnode/ai-gateway/"
-    ) == "http://gateway/api/lens/plugin-runtime/leases"
+    ) == "http://gateway/api/lens/plugin-runtime/leases/"
 
 
 def test_acquire_plugin_lease_returns_opaque_metadata():
@@ -33,7 +33,7 @@ def test_acquire_plugin_lease_returns_opaque_metadata():
 
     class Client:
         def post(self, url, **kwargs):
-            assert url.endswith("/plugin-runtime/leases")
+            assert url.endswith("/plugin-runtime/leases/")
             assert kwargs["json"] == {"snapshot_uuid": "snapshot-1"}
             assert "secret" not in kwargs
             return response
@@ -46,6 +46,24 @@ def test_acquire_plugin_lease_returns_opaque_metadata():
     )
     assert result["lease_uuid"] == "lease-1"
     assert "access_token" not in result
+
+
+def test_retrieve_plugin_material_uses_snapshot_lease_path():
+    class Client:
+        def post(self, url, **kwargs):
+            assert url.endswith("/plugin-runtime/leases/lease-1/material/")
+            assert "json" not in kwargs
+            return httpx.Response(200, json={"value": "secret"})
+
+    from lensnode.plugin_runtime import retrieve_plugin_material
+
+    result = retrieve_plugin_material(
+        Client(),
+        "http://gateway/api/lens/lensnode/ai-gateway/",
+        "node-token",
+        "lease-1",
+    )
+    assert result["value"] == "secret"
 
 
 def test_fetch_plugin_snapshot_returns_non_sensitive_config():
