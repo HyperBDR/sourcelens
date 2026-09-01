@@ -32,6 +32,7 @@ from .views import (
     PluginCredentialLeaseView,
     PluginCredentialMaterialView,
     PluginExecutionSnapshotView,
+    PluginToolExecutionSnapshotView,
     PublicAssistantView,
     PublicSharedQAFileView,
     PublicSharedQAListView,
@@ -97,6 +98,11 @@ router.register(
 )
 
 urlpatterns = [
+    path(
+        "plugin-runtime/tool-snapshots/",
+        PluginToolExecutionSnapshotView.as_view(),
+        name="lens-plugin-tool-execution-snapshot",
+    ),
     path(
         "plugin-runtime/leases/",
         PluginCredentialLeaseView.as_view(),

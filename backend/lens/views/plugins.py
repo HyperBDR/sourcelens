@@ -1,5 +1,6 @@
 """Administrative views for trusted installed plugins."""
 
+import uuid
 from datetime import timedelta
 
 from django.db.models import Count
@@ -17,6 +18,11 @@ from lens.plugins.registry import (
     discover_plugins,
     latest_plugin,
 )
+from lens.plugins.tool_snapshots import (
+    ACTIVE_RUN_STATUSES,
+    ToolSnapshotError,
+    create_tool_execution_snapshot,
+)
 from lens.serializers import ConnectionSerializer
 from .base import BaseAdminViewSet, LensNodeAuthMixin
 
@@ -31,6 +37,22 @@ SENSITIVE_KEYS = frozenset({
     "secret",
     "token",
 })
+
+
+class PluginRuntimeNoStoreMixin:
+    """Prevent caching of Plugin Runtime responses in every outcome."""
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        """Attach the runtime cache policy after DRF handles the request."""
+
+        response = super().finalize_response(
+            request,
+            response,
+            *args,
+            **kwargs,
+        )
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
@@ -126,7 +148,67 @@ class ConnectionViewSet(BaseAdminViewSet):
             )
 
 
-class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
+class PluginToolExecutionSnapshotView(
+    PluginRuntimeNoStoreMixin,
+    LensNodeAuthMixin,
+    APIView,
+):
+    """Create one authorized execution snapshot for a Plugin Tool call."""
+
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        """Authorize a Run-bound Tool call for the requesting LensNode."""
+
+        node = self._authenticate_lensnode(request)
+        if node is None:
+            return Response({"detail": "LENSNODE_UNAUTHORIZED"}, status=401)
+        if not isinstance(request.data, dict):
+            return Response({"detail": "TOOL_REQUEST_INVALID"}, status=400)
+        run_uuid = _parse_uuid(request.data.get("run_uuid"))
+        connection_uuid = _parse_uuid(request.data.get("connection_uuid"))
+        if run_uuid is None or connection_uuid is None:
+            return Response({"detail": "TOOL_REQUEST_INVALID"}, status=400)
+        try:
+            snapshot, created = create_tool_execution_snapshot(
+                run_uuid=run_uuid,
+                lensnode=node,
+                connection_uuid=connection_uuid,
+                tool_key=request.data.get("tool_key"),
+                call_id=request.data.get("call_id"),
+                arguments=request.data.get("arguments"),
+            )
+        except ToolSnapshotError as exc:
+            return Response(
+                {"detail": exc.code},
+                status=exc.status_code,
+            )
+        response = Response(
+            {
+                "snapshot_uuid": str(snapshot.uuid),
+                "run_uuid": str(snapshot.run.uuid),
+                "connection_uuid": str(snapshot.connection.uuid),
+                "tool_key": snapshot.tool_key,
+                "invocation_id": snapshot.invocation_id,
+                "plugin_key": snapshot.plugin_key,
+                "plugin_version": snapshot.plugin_version,
+                "protocol_version": snapshot.protocol_version,
+            },
+            status=(
+                status.HTTP_201_CREATED
+                if created
+                else status.HTTP_200_OK
+            ),
+        )
+        return response
+
+
+class PluginCredentialLeaseView(
+    PluginRuntimeNoStoreMixin,
+    LensNodeAuthMixin,
+    APIView,
+):
     """Issue a short-lived opaque lease for a node-owned execution snapshot."""
 
     authentication_classes = []
@@ -142,19 +224,19 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
         snapshot = (
             ExecutionSnapshot.objects.select_related(
                 "datasource",
+                "run",
                 "connection",
-                "secret_version",
+                "secret_version__material",
             )
             .filter(uuid=snapshot_uuid)
             .first()
         )
         if snapshot is None:
             return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
-        if (
-            snapshot.datasource_id is None
-            or snapshot.datasource.lensnode_id != node.pk
-        ):
+        if _snapshot_node_id(snapshot) != node.pk:
             return Response({"detail": "SNAPSHOT_NODE_MISMATCH"}, status=403)
+        if not _tool_snapshot_run_is_active(snapshot):
+            return Response({"detail": "RUN_NOT_ACTIVE"}, status=409)
         if snapshot.connection.status != snapshot.connection.Status.ACTIVE:
             return Response({"detail": "CONNECTION_DISABLED"}, status=409)
         if (
@@ -162,6 +244,12 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
             and snapshot.secret_version.status != "active"
         ):
             return Response({"detail": "SECRET_VERSION_DISABLED"}, status=409)
+        if (
+            snapshot.kind == ExecutionSnapshot.Kind.TOOL_INVOKE
+            and snapshot.secret_version is not None
+            and snapshot.secret_version.material.status != "active"
+        ):
+            return Response({"detail": "SECRET_MATERIAL_DISABLED"}, status=409)
         now = timezone.now()
         lease = CredentialLease.objects.create(
             snapshot=snapshot,
@@ -176,11 +264,14 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
             },
             status=status.HTTP_201_CREATED,
         )
-        response["Cache-Control"] = "no-store"
         return response
 
 
-class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
+class PluginCredentialMaterialView(
+    PluginRuntimeNoStoreMixin,
+    LensNodeAuthMixin,
+    APIView,
+):
     """Return lease-bound secret material to the authenticated LensNode."""
 
     authentication_classes = []
@@ -196,6 +287,7 @@ class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
             CredentialLease.objects.select_related(
                 "snapshot__secret_version",
                 "snapshot__connection",
+                "snapshot__run",
             )
             .filter(uuid=lease_uuid, lensnode=node)
             .first()
@@ -205,6 +297,8 @@ class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
         now = timezone.now()
         if lease.revoked_at is not None or lease.expires_at <= now:
             return Response({"detail": "LEASE_EXPIRED"}, status=410)
+        if not _tool_snapshot_run_is_active(lease.snapshot):
+            return Response({"detail": "RUN_NOT_ACTIVE"}, status=409)
         if (
             lease.snapshot.connection.status
             != lease.snapshot.connection.Status.ACTIVE
@@ -233,11 +327,14 @@ class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
             },
             status=status.HTTP_200_OK,
         )
-        response["Cache-Control"] = "no-store"
         return response
 
 
-class PluginExecutionSnapshotView(LensNodeAuthMixin, APIView):
+class PluginExecutionSnapshotView(
+    PluginRuntimeNoStoreMixin,
+    LensNodeAuthMixin,
+    APIView,
+):
     """Return non-sensitive execution data to the owning LensNode."""
 
     authentication_classes = []
@@ -250,29 +347,35 @@ class PluginExecutionSnapshotView(LensNodeAuthMixin, APIView):
         if node is None:
             return Response({"detail": "LENSNODE_UNAUTHORIZED"}, status=401)
         snapshot = (
-            ExecutionSnapshot.objects.select_related("datasource")
-            .filter(
-                uuid=snapshot_uuid,
-                datasource__lensnode=node,
-            )
+            ExecutionSnapshot.objects.select_related("datasource", "run")
+            .filter(uuid=snapshot_uuid)
             .first()
         )
-        if snapshot is None:
+        if snapshot is None or _snapshot_node_id(snapshot) != node.pk:
+            return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
+        payload = {
+            "snapshot_uuid": str(snapshot.uuid),
+            "plugin_key": snapshot.plugin_key,
+            "plugin_version": snapshot.plugin_version,
+            "protocol_version": snapshot.protocol_version,
+            "resolved_config": _safe_snapshot_config(
+                snapshot.resolved_config
+            ),
+        }
+        if snapshot.kind == ExecutionSnapshot.Kind.DATASOURCE_SYNC:
+            payload["datasource_uuid"] = str(snapshot.datasource.uuid)
+        elif snapshot.kind == ExecutionSnapshot.Kind.TOOL_INVOKE:
+            payload.update({
+                "run_uuid": str(snapshot.run.uuid),
+                "tool_key": snapshot.tool_key,
+                "invocation_id": snapshot.invocation_id,
+            })
+        else:
             return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
         response = Response(
-            {
-                "snapshot_uuid": str(snapshot.uuid),
-                "datasource_uuid": str(snapshot.datasource.uuid),
-                "plugin_key": snapshot.plugin_key,
-                "plugin_version": snapshot.plugin_version,
-                "protocol_version": snapshot.protocol_version,
-                "resolved_config": _safe_snapshot_config(
-                    snapshot.resolved_config
-                ),
-            },
+            payload,
             status=status.HTTP_200_OK,
         )
-        response["Cache-Control"] = "no-store"
         return response
 
 
@@ -288,3 +391,39 @@ def _safe_snapshot_config(value):
     if isinstance(value, list):
         return [_safe_snapshot_config(item) for item in value]
     return value
+
+
+def _parse_uuid(value):
+    """Return a UUID or None for malformed external identifiers."""
+
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _snapshot_node_id(snapshot):
+    """Return the LensNode owner for a valid typed execution snapshot."""
+
+    if (
+        snapshot.kind == ExecutionSnapshot.Kind.DATASOURCE_SYNC
+        and snapshot.datasource_id is not None
+    ):
+        return snapshot.datasource.lensnode_id
+    if (
+        snapshot.kind == ExecutionSnapshot.Kind.TOOL_INVOKE
+        and snapshot.run_id is not None
+    ):
+        return snapshot.run.lensnode_id
+    return None
+
+
+def _tool_snapshot_run_is_active(snapshot):
+    """Return whether a snapshot is executable under its Run lifecycle."""
+
+    if snapshot.kind != ExecutionSnapshot.Kind.TOOL_INVOKE:
+        return True
+    return (
+        snapshot.run_id is not None
+        and snapshot.run.status in ACTIVE_RUN_STATUSES
+    )

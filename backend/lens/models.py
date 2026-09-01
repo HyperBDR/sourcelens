@@ -789,6 +789,13 @@ class ExecutionSnapshot(TimestampedUUIDModel):
         on_delete=models.PROTECT,
         related_name="execution_snapshots",
     )
+    run = models.ForeignKey(
+        "Run",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="plugin_execution_snapshots",
+    )
     secret_version = models.ForeignKey(
         SecretVersion,
         null=True,
@@ -799,10 +806,40 @@ class ExecutionSnapshot(TimestampedUUIDModel):
     plugin_key = models.CharField(max_length=64)
     plugin_version = models.CharField(max_length=32)
     protocol_version = models.PositiveIntegerField()
+    tool_key = models.CharField(max_length=128, blank=True, default="")
+    invocation_id = models.CharField(max_length=128, blank=True, default="")
     resolved_config = models.JSONField(default=dict)
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        kind="datasource_sync",
+                        datasource__isnull=False,
+                        run__isnull=True,
+                        tool_key="",
+                        invocation_id="",
+                    )
+                    | (
+                        Q(
+                            kind="tool_invoke",
+                            datasource__isnull=True,
+                            run__isnull=False,
+                        )
+                        & ~Q(tool_key="")
+                        & ~Q(invocation_id="")
+                    )
+                ),
+                name="lens_snapshot_owner_kind_ck",
+            ),
+            models.UniqueConstraint(
+                fields=["run", "invocation_id"],
+                condition=Q(kind="tool_invoke"),
+                name="lens_snap_run_invocation_uniq",
+            ),
+        ]
 
 
 class CredentialLease(TimestampedUUIDModel):
