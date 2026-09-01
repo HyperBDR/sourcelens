@@ -1537,7 +1537,12 @@ def _sync_git(command, workspace_path, emit):
 
     _sync_git_submodules(target)
 
-    items = _git_manifest_items(target, repo_url, branch)
+    items = _git_manifest_items(
+        target,
+        repo_url,
+        branch,
+        directory=config.get("directory") or "",
+    )
     changed_paths, deleted_paths, skipped = _git_manifest_delta(
         items,
         previous_items,
@@ -1831,17 +1836,23 @@ def _sync_git_submodules(target):
     )
 
 
-def _git_manifest_items(target, repo_url, branch):
+def _git_manifest_items(target, repo_url, branch, directory=""):
     """Return unified manifest items for a Git datasource."""
 
     items = []
     commit = _git_output(["rev-parse", "HEAD"], cwd=target)
+    directory_path = Path(str(directory or "").strip())
     for path in sorted(target.rglob("*")):
         if not path.is_file():
             continue
         if _is_generated_datasource_path(target, path):
             continue
         local_path = relative_path(target, path)
+        if directory_path != Path("."):
+            try:
+                Path(local_path).relative_to(directory_path)
+            except ValueError:
+                continue
         extension = path.suffix.lower().lstrip(".")
         source_id = f"git:{repo_url}:{branch}:{local_path}"
         items.append(

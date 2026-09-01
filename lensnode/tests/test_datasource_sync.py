@@ -194,6 +194,30 @@ def test_default_git_branch_prefers_main():
     assert _default_git_branch(["release"]) == "release"
 
 
+def test_git_manifest_items_honors_repository_directory(tmp_path, monkeypatch):
+    """Git datasource manifests include only the selected subdirectory."""
+
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text("guide")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("app")
+    monkeypatch.setattr(
+        "lensnode.datasource_sync._git_output",
+        lambda *args, **kwargs: "commit",
+    )
+
+    from lensnode.datasource_sync import _git_manifest_items
+
+    items = _git_manifest_items(
+        tmp_path,
+        "https://github.com/owner/repo.git",
+        "main",
+        directory="docs",
+    )
+
+    assert [item.local_path for item in items] == ["docs/guide.md"]
+
+
 def test_discover_github_org_repositories(monkeypatch):
     """GitHub organization URLs use the GitHub organization API."""
 
