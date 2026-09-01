@@ -158,94 +158,52 @@ done
 
 ## Production
 
-SourceLens has two production shapes — pick **ONE** per host (both share the
-`sourcelens` compose project):
+SourceLens has two production deployment options. Use one per host:
 
-- **Standalone single instance** (one backend-api, one frontend, no blue/green).
-  One-command installer: fetches the release config files from the tag,
-  generates a `.env` with random secrets, pulls images, starts the stack and
-  health-checks it. GitHub unreachable? `-c cn` pulls images from Aliyun ACR and
-  release files from Gitee.
+- **Standalone single instance**: installed and upgraded with `install.sh`.
+- **Zero-downtime blue/green**: deployed with `scripts/install.sh <tag>`.
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
-      -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
-  ```
+Default ports are HTTP 10080 and HTTPS 10443.
 
-- **Zero-downtime blue/green** (docker-compose.yml): `scripts/install.sh <tag>`.
+### One-command Installation
 
-Default ports: HTTP 10080, HTTPS 10443 (configurable via `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`).
+The one-command installer sets up and starts SourceLens, then checks service
+health.
 
-### Automated Deployment (standalone installer)
+Requirements:
 
-The standalone stack installs and upgrades with a single command: it downloads
-the release config files (`docker-compose.standalone.yml`, nginx/postgres
-config, `env.sample`) from the repository tag, generates a production `.env`
-with random secrets, pulls the container images, starts the stack and
-health-checks it.
+- Docker with Compose V2 (`docker compose`)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/<tag>/install.sh \
-    -o install.sh && chmod +x install.sh && sudo ./install.sh <tag>
+curl -fsSL https://raw.githubusercontent.com/oneprolabs/sourcelens/main/install.sh | \
+  sudo bash
 ```
 
-- **Requirements**: Docker + Docker Compose V2 (`docker compose`). Legacy
-  Compose v1 is rejected — the compose files use V2-only features.
-- **Idempotent upgrades**: re-running the same command with a newer tag upgrades
-  in place. An existing `.env` is never overwritten; only known insecure
-  placeholder values (`change-me`, `postgres`, `adminpassword`,
-  `change-me-lensnode-token`) are replaced with random secrets. The initial
-  admin username/password are printed at the end and stored in
-  `install-info.env`.
-- **Channels**: release files come from GitHub and application images from
-  Docker Hub (`oneprolabs/*`) by default. When GitHub is unreachable, pass
-  `-c cn` to fetch release files from Gitee and pull application images from
-  Aliyun ACR (`registry.cn-beijing.aliyuncs.com/oneprolabs`). Infrastructure
-  images (postgres/redis/nginx) always come from Docker Hub.
-- **Ports**: HTTP port defaults to 10080, HTTPS to 10443. Busy ports are
-  detected and the next free port is used automatically.
+For networks with limited GitHub access, use the China distribution channel:
 
-Common options:
+```bash
+curl -fsSL https://gitee.com/oneprolabs/sourcelens/raw/main/install.sh | \
+  sudo bash -s -- --channel cn --download-source gitee
+```
 
-| Option | Description |
-|---|---|
-| `-d, --dir DIR` | Install directory (default `/opt/sourcelens`) |
-| `-p, --port PORT` | HTTP port (default 10080) |
-| `-v, --version VER` | Release version (default: latest tag) |
-| `-c, --channel github\|cn` | Distribution channel (default: auto-detect) |
-| `--download-source github\|gitee` | Release-file source; also selects the image registry |
-| `--source DIR` | Use a local repository checkout instead of downloading (testing/offline) |
-| `--domain HOST` | Public hostname/IP (default: auto-detect) |
-| `-y, --yes` | Non-interactive: accept defaults, no prompts |
+For a fresh installation, the installer selects the latest available release
+tag. An existing installation reuses its current version by default; to
+upgrade or install a specific release, add `--version <version>`. Run
+`install.sh --help` for the complete list of options.
 
-Run `install.sh --help` for the full list, including environment overrides
-(`SOURCELENS_INSTALL_DIR`, `SOURCELENS_HTTP_PORT`, `SOURCELENS_HTTPS_PORT`,
-`SOURCELENS_VERSION`, `SOURCELENS_REGISTRY`, `SOURCELENS_DOMAIN`, ...).
+After installation:
 
-> **Cloudflare Turnstile**: `env.sample` keeps `TURNSTILE_ENABLED=true` and
-> requires a real `TURNSTILE_SECRET_KEY` in production — the backend refuses to
-> start without one (a deliberate fail-fast guard). The one-command installer
-> cannot mint real keys, so it sets `TURNSTILE_ENABLED=false` on a fresh install
-> so login works without the widget. To enable Turnstile later, set a real
-> secret (and frontend site key), then flip `TURNSTILE_ENABLED=true` in `.env`.
+- Main site: `http://<host>:10080` (HTTPS: `https://<host>:10443`)
+- Configuration: `<install-dir>/.env`
+- Installation details and the initial admin password:
+  `<install-dir>/install-info.env`
 
-### Capacity & Concurrency Tuning
+The default installation directory is `/opt/sourcelens`. Re-running the
+installer with a newer tag upgrades the installation in place. Existing `.env`
+configuration and application data are preserved.
 
-Production serves many users, so size these in the server `.env` (CI never overwrites `.env`, so values persist across deploys):
-
-| Variable | Controls | Default | Guidance |
-|---|---|---|---|
-| `LENSNODE_MAX_CONCURRENT_RUNS` | Concurrent answer runs on a LensNode | `1` | **The real throughput cap — raise it.** When the node is full a run sits in `Queued` (retried every 5s, up to 120s). Set it ≥ the busiest assistant's `max_concurrency`, sized to RAM (each deep-agent run uses hundreds of MB) and upstream LLM rate limits. |
-| `CELERY_CONCURRENCY` | Celery worker processes | CPU count | Rarely the bottleneck: worker tasks just dispatch to the LensNode (the heavy work runs there). A modest bump only adds headroom. |
-| `max_concurrency` (per assistant, DB) | Concurrent runs per assistant | `5` | Per-assistant limit; the system-wide cap is `LENSNODE_MAX_CONCURRENT_RUNS`. |
-
-- The API runs as a **single Daphne ASGI process** (one core). Async handles many concurrent connections, but using more cores means running multiple ASGI workers/replicas — not an `.env` change.
-- Use **Docker Compose v2** (`docker compose`) on the server. Legacy v1 (`docker-compose`) aborts `up -d` on `build:` contexts the deploy does not ship to the host.
-- `.env` changes need a recreate, not a restart (`docker restart` does not re-read env files):
-
-  ```bash
-  APP_VERSION=<version> docker compose up -d --force-recreate --no-deps lensnode backend-worker
-  ```
+For zero-downtime upgrades, see
+[`docs/blue-green-deployment.md`](docs/blue-green-deployment.md).
 
 ## Tech Stack
 
