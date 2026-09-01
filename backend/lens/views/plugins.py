@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
@@ -30,6 +31,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
     """Expose installed Plugin identities without runtime internals."""
 
     http_method_names = ["get", "head", "options"]
+    lookup_field = "key"
 
     def list(self, request):
         """List installed Plugin versions visible to administrators."""
@@ -42,6 +44,33 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
                 "protocol_version": plugin.protocol_version,
             }
             for plugin in discover_plugins()
+        ])
+
+    @action(detail=True, methods=["get"], url_path="tools")
+    def tools(self, request, key=None):
+        """List safe model-facing tools from the latest Plugin version."""
+
+        del request
+        plugins = [
+            plugin for plugin in discover_plugins() if plugin.key == key
+        ]
+        if not plugins:
+            return Response({"detail": "PLUGIN_NOT_FOUND"}, status=404)
+        plugin = max(
+            plugins,
+            key=lambda item: tuple(
+                int(part) for part in item.version.split(".")
+            ),
+        )
+        return Response([
+            {
+                "key": tool.key,
+                "description": tool.description,
+                "capability": tool.capability,
+                "side_effect": tool.side_effect,
+                "input_schema": tool.input_schema,
+            }
+            for tool in plugin.tools
         ])
 
 

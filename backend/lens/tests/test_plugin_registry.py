@@ -96,3 +96,70 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
         }])
+
+    def test_admin_can_list_read_only_plugin_tools(self):
+        manifest = {
+            "key": "github",
+            "version": "1.0.0",
+            "protocol_version": 1,
+            "handlers": {
+                "runtime": "github_v1",
+                "datasource": "github_datasource_v1",
+            },
+            "tools": [
+                {
+                    "key": "github_read_file",
+                    "description": (
+                        "Read a file from an authorized repository."
+                    ),
+                    "capability": "repository.read",
+                    "side_effect": "none",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "repository": {"type": "string"},
+                            "path": {"type": "string"},
+                        },
+                        "required": ["repository", "path"],
+                    },
+                }
+            ],
+        }
+        admin = User.objects.create_user("tools-admin", is_staff=True)
+        client = APIClient()
+        client.force_authenticate(admin)
+        with tempfile.TemporaryDirectory() as root:
+            self._write_manifest(root, "1.0.0", manifest)
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                response = client.get(
+                    "/api/lens/admin/plugins/github/tools/"
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["key"], "github_read_file")
+        self.assertEqual(response.data[0]["side_effect"], "none")
+
+    def test_rejects_a_mutating_or_unknown_plugin_tool(self):
+        manifest = {
+            "key": "github",
+            "version": "1.0.0",
+            "protocol_version": 1,
+            "handlers": {
+                "runtime": "github_v1",
+                "datasource": "github_datasource_v1",
+            },
+            "tools": [
+                {
+                    "key": "github_raw_exec",
+                    "description": "Execute a command.",
+                    "capability": "repository.write",
+                    "side_effect": "write",
+                    "input_schema": {"type": "object"},
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as root:
+            self._write_manifest(root, "1.0.0", manifest)
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                with self.assertRaisesMessage(PluginRegistryError, "tool"):
+                    discover_plugins()
