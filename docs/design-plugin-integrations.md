@@ -446,8 +446,8 @@ DataSource API 保持数据源生命周期入口，但外部类型的写入契�
   Tool/Datasource Provider 和 ExecutionSnapshot 契约；
 - 定义 Connection、SecretVersion、节点认证和短期 lease；
 - 将现有 GitHub CLI 封装成 Plugin Runtime；
-- 改造 GitHub DataSource 管理：Connection 选择、manifest 驱动的资源配置、资源范围
-  校验和同步任务快照；
+- 实现 `GitHubDatasourceProvider` 并集成 DataSource 管理：Connection 选择、manifest
+  驱动的资源配置、资源范围校验和同步任务快照；
 - 跑通 Connection → DataSource 初始、手动、定时和重试同步，LensNode 不接收解密
   credential config；
 - 跑通 `github_read_file`、`github_search_code` 等只读工具；
