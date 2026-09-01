@@ -55,7 +55,9 @@ services:
         condition: service_healthy
     command: gunicorn
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health/celery"]
+      # Gate dependent services on API readiness only. Full Celery readiness is
+      # checked by install.sh after worker and scheduler have started.
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -78,6 +80,9 @@ services:
         VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
         VITE_SENTRY_SEND_DEFAULT_PII: ${VITE_SENTRY_SEND_DEFAULT_PII:-}
         VITE_GA_ID: ${VITE_GA_ID:-}
+    environment:
+      TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-true}
+      VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
     expose:
       - "80"
     networks:

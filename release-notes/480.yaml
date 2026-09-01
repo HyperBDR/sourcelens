@@ -1,0 +1,13 @@
+type: fix
+audience: admin
+en: >-
+  Fixed the one-command standalone installation so service readiness no longer
+  blocks startup, the installer shows the administrator email required for
+  login, and Turnstile is disabled consistently when keys are not configured.
+zh-CN: >-
+  修复一键式 standalone 安装：服务就绪检查不再阻塞启动，安装器会显示登录所需的
+  管理员邮箱，且未配置密钥时前后端会一致关闭 Turnstile。
+es: >-
+  Se corrigió la instalación standalone con un solo comando: la comprobación
+  de servicios ya no bloquea el inicio, se muestra el correo del administrador
+  para iniciar sesión y Turnstile se desactiva si no se configuran claves.

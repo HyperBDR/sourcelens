@@ -83,6 +83,9 @@ x-sourcelens-ui-common: &sourcelens-ui-common
       VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-}
       VITE_SENTRY_SEND_DEFAULT_PII: ${VITE_SENTRY_SEND_DEFAULT_PII:-}
       VITE_GA_ID: ${VITE_GA_ID:-}
+  environment:
+    TURNSTILE_ENABLED: ${TURNSTILE_ENABLED:-true}
+    VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
   expose:
     - "80"
   networks:
