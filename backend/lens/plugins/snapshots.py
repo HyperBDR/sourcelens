@@ -6,6 +6,7 @@ from django.db import transaction
 
 from lens.models import DataSource, ExecutionSnapshot
 from .registry import PluginRegistryError, discover_plugins
+from .providers import DatasourceProviderError, get_datasource_provider
 
 
 SENSITIVE_CONFIG_KEYS = frozenset({
@@ -38,14 +39,22 @@ def create_datasource_sync_snapshot(datasource):
         raise PluginRegistryError("datasource and connection plugin keys differ")
     if datasource.lensnode is None:
         raise PluginRegistryError("datasource LensNode is required")
-    _reject_sensitive_values(datasource.datasource_config)
     _reject_sensitive_values(connection.config)
+    _reject_sensitive_values(datasource.datasource_config)
+    try:
+        provider = get_datasource_provider(datasource.plugin_key)
+        datasource_config = provider.validate_datasource_config(
+            connection.allowed_scope,
+            datasource.datasource_config,
+        )
+    except DatasourceProviderError as exc:
+        raise PluginRegistryError(str(exc)) from exc
     plugin = _latest_plugin(datasource.plugin_key)
     resolved_config = {
         "endpoint": connection.endpoint,
         "connection_config": deepcopy(connection.config),
         "connection_scope": deepcopy(connection.allowed_scope),
-        "datasource_config": deepcopy(datasource.datasource_config),
+        "datasource_config": datasource_config,
         "sync_policy": deepcopy(datasource.sync_policy),
         "target_path": datasource.target_path,
         "lensnode_uuid": str(datasource.lensnode.uuid),

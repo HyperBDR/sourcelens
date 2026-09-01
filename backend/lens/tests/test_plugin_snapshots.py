@@ -76,3 +76,10 @@ class PluginSnapshotTests(TestCase):
 
         with self.assertRaisesMessage(PluginRegistryError, "credentials"):
             create_datasource_sync_snapshot(self.datasource)
+
+    def test_snapshot_rejects_resource_outside_connection_scope(self):
+        self.datasource.datasource_config["repository"] = "other/repository"
+        self.datasource.save(update_fields=["datasource_config"])
+
+        with self.assertRaisesMessage(PluginRegistryError, "scope"):
+            create_datasource_sync_snapshot(self.datasource)
