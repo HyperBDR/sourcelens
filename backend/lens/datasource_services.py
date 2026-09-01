@@ -10,6 +10,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from .models import DataSource, DataSourceCredential, GlobalSetting, LensNode
+from .plugins.snapshots import create_datasource_sync_snapshot
 from .services import lensnode_group_name
 
 WORKSPACE_ROOT = "/workspace"
@@ -277,6 +278,29 @@ def dispatch_datasource_sync_async(datasource, task_id, trigger="scheduled"):
     if datasource.source_type == DataSource.SourceType.MANAGED_WORKSPACE:
         raise DataSourceDispatchError("DATASOURCE_SYNC_NOT_SUPPORTED")
     validate_datasource_lensnode(datasource.lensnode)
+    if datasource.connection_id and datasource.plugin_key:
+        snapshot = create_datasource_sync_snapshot(datasource)
+        request_id = uuid.uuid4().hex
+        _send_lensnode_command(
+            datasource.lensnode,
+            {
+                "type": "plugin_datasource_sync",
+                "request_id": request_id,
+                "task_id": task_id,
+                "datasource_uuid": str(datasource.uuid),
+                "snapshot_uuid": str(snapshot.uuid),
+                "plugin_key": snapshot.plugin_key,
+                "plugin_version": snapshot.plugin_version,
+                "protocol_version": snapshot.protocol_version,
+                "trigger": trigger,
+            },
+        )
+        cache.set(
+            f"lens:datasource_sync_request:{request_id}",
+            task_id,
+            timeout=get_datasource_sync_timeout_s(),
+        )
+        return request_id
     config = datasource_runtime_config(datasource)
     sync_policy = datasource.sync_policy or {}
     conversion = datasource_conversion_policy(sync_policy)

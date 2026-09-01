@@ -7,6 +7,8 @@ from django.test import TestCase, override_settings
 from lens.models import Connection, DataSource, LensNode, SecretMaterial, SecretVersion
 from lens.plugins.registry import PluginRegistryError
 from lens.plugins.snapshots import create_datasource_sync_snapshot
+from lens.datasource_services import dispatch_datasource_sync_async
+from unittest.mock import patch
 
 
 class PluginSnapshotTests(TestCase):
@@ -28,6 +30,8 @@ class PluginSnapshotTests(TestCase):
         self.node = LensNode.objects.create(
             name="Node",
             workspace_path="/workspace",
+            status=LensNode.Status.ONLINE,
+            enrollment_status=LensNode.EnrollmentStatus.APPROVED,
         )
         self.datasource = DataSource.objects.create(
             name="SourceLens repository",
@@ -83,3 +87,31 @@ class PluginSnapshotTests(TestCase):
 
         with self.assertRaisesMessage(PluginRegistryError, "scope"):
             create_datasource_sync_snapshot(self.datasource)
+
+    def test_plugin_datasource_dispatch_sends_snapshot_metadata_only(self):
+        manifest = {
+            "key": "github",
+            "version": "1.0.0",
+            "protocol_version": 1,
+            "handlers": {
+                "runtime": "github_v1",
+                "datasource": "github_datasource_v1",
+            },
+        }
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "github" / "1.0.0"
+            path.mkdir(parents=True)
+            (path / "plugin.json").write_text(json.dumps(manifest))
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                with patch("lens.datasource_services._send_lensnode_command") as send:
+                    dispatch_datasource_sync_async(
+                        self.datasource,
+                        task_id="sync-task",
+                        trigger="manual",
+                    )
+
+        payload = send.call_args.args[1]
+        self.assertEqual(payload["type"], "plugin_datasource_sync")
+        self.assertIn("snapshot_uuid", payload)
+        self.assertNotIn("config", payload)
+        self.assertNotIn("access_token", json.dumps(payload))
