@@ -40,3 +40,16 @@ class GitHubDatasourceProviderTests(SimpleTestCase):
                     "access_token": "not-allowed",
                 },
             )
+
+    def test_rejects_non_github_connection_endpoint(self):
+        with self.assertRaisesMessage(DatasourceProviderError, "endpoint"):
+            self.provider.validate_connection(
+                "https://evil.example",
+                {},
+            )
+
+    def test_normalizes_public_github_connection_endpoint(self):
+        self.assertEqual(
+            self.provider.validate_connection("https://github.com/", {}),
+            "https://github.com",
+        )

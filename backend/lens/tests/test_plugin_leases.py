@@ -148,3 +148,17 @@ class PluginLeaseTests(TestCase):
         )
 
         self.assertEqual(material_response.status_code, 410)
+
+    def test_disabled_secret_version_cannot_issue_a_lease(self):
+        self.snapshot.secret_version.status = "disabled"
+        self.snapshot.secret_version.save(update_fields=["status"])
+
+        response = self.client.post(
+            "/api/lens/plugin-runtime/leases/",
+            {"snapshot_uuid": str(self.snapshot.uuid)},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {self.token}",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["detail"], "SECRET_VERSION_DISABLED")

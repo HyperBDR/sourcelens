@@ -1377,6 +1377,10 @@ class DataSourceSerializer(serializers.ModelSerializer):
             plugin_key = connection.plugin_key
             try:
                 provider = get_datasource_provider(plugin_key)
+                provider.validate_connection(
+                    connection.endpoint,
+                    connection.config,
+                )
                 attrs["datasource_config"] = provider.validate_datasource_config(
                     connection.allowed_scope,
                     datasource_config,

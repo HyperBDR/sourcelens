@@ -43,6 +43,10 @@ def create_datasource_sync_snapshot(datasource):
     _reject_sensitive_values(datasource.datasource_config)
     try:
         provider = get_datasource_provider(datasource.plugin_key)
+        endpoint = provider.validate_connection(
+            connection.endpoint,
+            connection.config,
+        )
         datasource_config = provider.validate_datasource_config(
             connection.allowed_scope,
             datasource.datasource_config,
@@ -51,7 +55,7 @@ def create_datasource_sync_snapshot(datasource):
         raise PluginRegistryError(str(exc)) from exc
     plugin = _latest_plugin(datasource.plugin_key)
     resolved_config = {
-        "endpoint": connection.endpoint,
+        "endpoint": endpoint,
         "connection_config": deepcopy(connection.config),
         "connection_scope": deepcopy(connection.allowed_scope),
         "datasource_config": datasource_config,

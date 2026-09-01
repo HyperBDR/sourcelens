@@ -61,6 +61,7 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
             ExecutionSnapshot.objects.select_related(
                 "datasource",
                 "connection",
+                "secret_version",
             )
             .filter(uuid=snapshot_uuid)
             .first()
@@ -74,13 +75,18 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
             return Response({"detail": "SNAPSHOT_NODE_MISMATCH"}, status=403)
         if snapshot.connection.status != snapshot.connection.Status.ACTIVE:
             return Response({"detail": "CONNECTION_DISABLED"}, status=409)
+        if (
+            snapshot.secret_version is not None
+            and snapshot.secret_version.status != "active"
+        ):
+            return Response({"detail": "SECRET_VERSION_DISABLED"}, status=409)
         now = timezone.now()
         lease = CredentialLease.objects.create(
             snapshot=snapshot,
             lensnode=node,
             expires_at=now + timedelta(minutes=5),
         )
-        return Response(
+        response = Response(
             {
                 "lease_uuid": str(lease.uuid),
                 "snapshot_uuid": str(snapshot.uuid),
@@ -88,6 +94,8 @@ class PluginCredentialLeaseView(LensNodeAuthMixin, APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
@@ -121,10 +129,15 @@ class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
         ):
             return Response({"detail": "CONNECTION_DISABLED"}, status=409)
         secret_version = lease.snapshot.secret_version
+        if (
+            secret_version is not None
+            and secret_version.status != "active"
+        ):
+            return Response({"detail": "SECRET_VERSION_DISABLED"}, status=409)
         value = secret_version.get_value() if secret_version else ""
         if not value:
             return Response({"detail": "SECRET_UNAVAILABLE"}, status=409)
-        return Response(
+        response = Response(
             {
                 "lease_uuid": str(lease.uuid),
                 "plugin_key": lease.snapshot.plugin_key,
@@ -133,6 +146,8 @@ class PluginCredentialMaterialView(LensNodeAuthMixin, APIView):
             },
             status=status.HTTP_200_OK,
         )
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 class PluginExecutionSnapshotView(LensNodeAuthMixin, APIView):
@@ -157,7 +172,7 @@ class PluginExecutionSnapshotView(LensNodeAuthMixin, APIView):
         )
         if snapshot is None:
             return Response({"detail": "SNAPSHOT_NOT_FOUND"}, status=404)
-        return Response(
+        response = Response(
             {
                 "snapshot_uuid": str(snapshot.uuid),
                 "datasource_uuid": str(snapshot.datasource.uuid),
@@ -170,6 +185,8 @@ class PluginExecutionSnapshotView(LensNodeAuthMixin, APIView):
             },
             status=status.HTTP_200_OK,
         )
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 def _safe_snapshot_config(value):

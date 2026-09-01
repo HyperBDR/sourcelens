@@ -1,6 +1,7 @@
 """GitHub implementation of the generic datasource provider contract."""
 
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 from .base import DatasourceProvider, DatasourceProviderError
 
@@ -22,6 +23,23 @@ class GitHubDatasourceProvider(DatasourceProvider):
     """Validate read-only GitHub repository datasource selections."""
 
     key = "github"
+
+    def validate_connection(self, endpoint, connection_config):
+        """Allow only the public GitHub HTTPS endpoint in V1."""
+
+        del connection_config
+        parsed = urlsplit(str(endpoint or "").strip())
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "github.com"
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise DatasourceProviderError(
+                "GitHub connection endpoint must be https://github.com"
+            )
+        return "https://github.com"
 
     def validate_datasource_config(self, connection_scope, datasource_config):
         """Return a normalized repository selection within configured scope."""
