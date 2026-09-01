@@ -107,6 +107,19 @@ test('selects a conversation when its route query changes', async () => {
   assert.notEqual(selectWithoutRouteUpdate, -1)
 })
 
+test('does not bootstrap again when only the session query changes', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /watch\(\s*\[\(\) => route\.name, \(\) => route\.params\.slug\],/
+  )
+  assert.doesNotMatch(
+    source,
+    /watch\(\s*\(\) => \[route\.name, route\.params\.slug\],/
+  )
+})
+
 test('switches assistants through the assistant chat route', async () => {
   const source = await assistantSwitcherSource()
 
@@ -136,6 +149,36 @@ test('loads sessions after selecting the route assistant', async () => {
   assert.notEqual(selectAssistant, -1)
   assert.notEqual(loadSessions, -1)
   assert.ok(loadSessions > selectAssistant)
+})
+
+test('ignores a stale session list after switching to archived sessions', async () => {
+  const source = await chatSource()
+
+  assert.match(
+    source,
+    /const loadGeneration = \+\+sessionLoadGeneration/
+  )
+  assert.match(
+    source,
+    /const loadedSessions = await listSessions\(/
+  )
+  assert.match(
+    source,
+    /if \(loadGeneration !== sessionLoadGeneration\) return/
+  )
+  assert.match(
+    source,
+    /async function switchSessionView\(archived\) \{\s*if \(showArchivedSessions\.value === archived\) return\s*sessionLoadGeneration \+= 1/
+  )
+  const switchStart = source.indexOf('async function switchSessionView')
+  const switchEnd = source.indexOf('function sortManagedSessions', switchStart)
+  const switchSource = source.slice(switchStart, switchEnd)
+
+  assert.ok(
+    switchSource.indexOf('await loadSessions') <
+      switchSource.indexOf('router.replace') ||
+      !switchSource.includes('router.replace')
+  )
 })
 
 test('shows an assistant welcome state on mobile before the first message', async () => {
