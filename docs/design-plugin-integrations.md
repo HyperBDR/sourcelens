@@ -314,7 +314,7 @@ V1 的执行位置是 LensNode。默认调用路径：
 ```text
 Control plane → task metadata + connection reference → LensNode
 LensNode → node-authenticated lease request → Credential service
-Credential service → short-lived credential lease → Plugin Runtime
+LensNode → node-authenticated material exchange → Plugin Runtime
 Plugin Runtime → Provider API/CLI
 ```
 
@@ -322,7 +322,12 @@ Plugin Runtime → Provider API/CLI
 身份为本次 Run 请求短期 lease。普通 Skill 只获得工具，不获得原始 Token；模型上下文
 也不包含 credential 或授权材料。lease 至少绑定 tenant、node、actor、Run、Plugin、
 Tool、Capability、资源范围、ExecutionSnapshot 和过期时间，并只在 Plugin Runtime
-内存中使用。
+内存中使用。当前控制面提供两个内部接口：先创建
+`POST /api/lens/plugin-runtime/leases/` 获取 opaque lease，再调用
+`POST /api/lens/plugin-runtime/leases/{lease_uuid}/material/` 领取快照绑定的短时
+材料。第二个响应只对已认证且绑定的 LensNode 返回，材料不写入任务消息、快照、日志，
+Provider 使用完成后应立即释放引用。后续可将该接口替换为节点本地密钥代理或
+GitHub App installation token，而不改变任务消息契约。
 
 该模型与 Dify 的主要差异是：Dify 常将 credentials 作为 API 到 Plugin Daemon 的
 调用数据传递；SourceLens 不将完整 credential 放入任务消息、Tool 参数或普通调用
