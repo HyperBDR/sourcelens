@@ -113,7 +113,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     )
     monkeypatch.setattr(
         "lensnode.main.retrieve_plugin_material",
-        lambda *args: {"value": "secret"},
+        lambda *args: {"plugin_key": "github", "value": "secret"},
     )
     seen = {}
 
@@ -128,3 +128,35 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
     )
     assert result["status"] == "success"
     assert seen["token"] == "secret"
+
+
+def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
+    client = LensNodeClient.__new__(LensNodeClient)
+    client.config = SimpleNamespace(
+        ai_gateway_url="http://gateway/api/lens/lensnode/ai-gateway/",
+        token="node-token",
+    )
+    client.gateway_http_client = object()
+    monkeypatch.setattr(
+        "lensnode.main.fetch_plugin_snapshot",
+        lambda *args: {
+            "plugin_key": "github",
+            "resolved_config": {"datasource_config": {}},
+        },
+    )
+    monkeypatch.setattr(
+        "lensnode.main.acquire_plugin_lease",
+        lambda *args: {"lease_uuid": "lease-1"},
+    )
+    material = {"plugin_key": "gitlab", "value": "secret"}
+    monkeypatch.setattr(
+        "lensnode.main.retrieve_plugin_material",
+        lambda *args: material,
+    )
+
+    result = client._execute_plugin_datasource_sync(
+        {"snapshot_uuid": "snapshot-1"}
+    )
+
+    assert result["error"] == "PLUGIN_MATERIAL_MISMATCH"
+    assert material["value"] == ""

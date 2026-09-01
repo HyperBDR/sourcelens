@@ -984,11 +984,16 @@ class LensNodeClient:
             return {"status": "failed", "error": str(exc)}
         resolved = snapshot["resolved_config"]
         datasource = resolved.get("datasource_config") or {}
+        if material.get("plugin_key") != snapshot.get("plugin_key"):
+            material["value"] = ""
+            return {"status": "failed", "error": "PLUGIN_MATERIAL_MISMATCH"}
         if snapshot.get("plugin_key") != "github":
+            material["value"] = ""
             return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
         repository = datasource.get("repository")
         endpoint = resolved.get("endpoint", "").rstrip("/")
         if not repository or not endpoint:
+            material["value"] = ""
             return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
         command = {
             "source_type": "git",
