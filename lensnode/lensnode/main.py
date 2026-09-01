@@ -841,11 +841,11 @@ class LensNodeClient:
                     }
                 )
                 try:
-                result = await asyncio.to_thread(
-                    self._execute_plugin_datasource_sync,
-                    message,
-                    emit,
-                )
+                    result = await asyncio.to_thread(
+                        self._execute_plugin_datasource_sync,
+                        message,
+                        emit,
+                    )
                 finally:
                     if slot_acquired:
                         await self.execution_queue.release(
