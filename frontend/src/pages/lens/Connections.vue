@@ -193,23 +193,6 @@
           </span>
           <input v-model="form.name" class="form-input" required />
         </label>
-        <div
-          v-if="connectionResourceField"
-          class="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface-sunken px-3 py-2"
-        >
-          <p class="text-xs text-ink-500">
-            {{ t('lensAdmin.connections.discoverResourcesHint') }}
-          </p>
-          <BaseButton
-            size="sm"
-            variant="outline"
-            :loading="discoveringResources"
-            :disabled="!hasFieldValue(form.secret_value)"
-            @click="discoverConnectionResources"
-          >
-            {{ t('lensAdmin.connections.discoverResourcesAction') }}
-          </BaseButton>
-        </div>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-ink-700">Plugin</span>
           <BaseSelect
@@ -231,7 +214,20 @@
           v-model="form"
           :schema="manifest.connection_schema"
           :resources="connectionResourceOptions"
-        />
+        >
+          <template #field-actions="{ field }">
+            <BaseButton
+              v-if="field.key === connectionResourceField?.[0]"
+              size="sm"
+              variant="outline"
+              :loading="discoveringResources"
+              :disabled="!hasFieldValue(form.secret_value)"
+              @click.prevent="discoverConnectionResources"
+            >
+              {{ t('lensAdmin.connections.discoverResourcesAction') }}
+            </BaseButton>
+          </template>
+        </ManifestSchemaForm>
         <p v-if="mode === 'edit'" class="-mt-2 text-xs text-ink-500">
           {{ t('lensAdmin.connections.tokenEditHint') }}
         </p>

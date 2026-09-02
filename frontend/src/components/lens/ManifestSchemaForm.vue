@@ -7,38 +7,44 @@
     >
       <label
         :for="fieldId(field)"
-        class="block text-sm font-medium text-ink-700"
+        class="flex items-center justify-between gap-2 text-sm font-medium text-ink-700"
       >
-        {{ field.title || field.key }}
-        <span v-if="isRequired(field)" class="text-danger-600">*</span>
+        <span>
+          {{ field.title || field.key }}
+          <span v-if="isRequired(field)" class="text-danger-600">*</span>
+        </span>
+        <slot name="field-actions" :field="field" />
       </label>
 
       <div
         v-if="isTreeField(field)"
-        class="max-h-56 overflow-y-auto rounded-lg border border-line bg-surface-sunken p-2"
+        class="max-h-64 overflow-y-auto rounded-lg border border-line bg-surface-sunken p-2"
       >
         <div
           v-for="group in treeGroups(field)"
           :key="group.owner"
-          class="mb-1 last:mb-0"
+          class="mb-2 overflow-hidden rounded-md border border-line bg-surface last:mb-0"
         >
-          <label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm font-medium hover:bg-surface">
+          <label class="flex cursor-pointer items-center gap-2 bg-surface-sunken px-3 py-2 text-sm font-medium hover:bg-line-soft">
             <input
               type="checkbox"
+              class="h-4 w-4 shrink-0 rounded-sm border-2 border-ink-300 accent-brand-600"
               :checked="groupSelected(field, group)"
               :indeterminate="groupPartial(field, group)"
               @change="toggleGroup(field, group, $event.target.checked)"
             />
-            <span class="text-ink-800">{{ group.owner }}</span>
+            <span class="min-w-0 flex-1 truncate text-ink-800">{{ group.owner }}</span>
+            <span class="text-xs font-normal text-ink-500">{{ group.items.length }}</span>
           </label>
-          <div class="ml-6 border-l border-line pl-2">
+          <div class="space-y-0.5 border-t border-line px-2 py-1.5">
             <label
               v-for="item in group.items"
               :key="optionValue(item)"
-              class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-surface"
+              class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-sunken"
             >
               <input
                 type="checkbox"
+                class="h-4 w-4 shrink-0 rounded-sm border-2 border-ink-300 accent-brand-600"
                 :checked="arrayValue(field).includes(optionValue(item))"
                 @change="toggleArrayItem(field, optionValue(item), $event.target.checked)"
               />
