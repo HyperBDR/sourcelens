@@ -5,7 +5,7 @@ import logging
 import os
 import signal
 import threading
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode
 
 import httpx
 from websockets.asyncio.client import connect
@@ -34,6 +34,10 @@ from .plugin_runtime import (
     fetch_plugin_snapshot,
     retrieve_plugin_material,
 )
+from .plugin_package_loader import (
+    PluginPackageLoadError,
+    load_runtime_contract,
+)
 from .logging_utils import (
     elapsed_since,
     format_duration,
@@ -52,48 +56,6 @@ from .workspace import available_dirs
 
 LOGGER = logging.getLogger("lensnode")
 RUNTIME_CLEANUP_INTERVAL_S = 60 * 60
-
-
-def _plugin_endpoint(plugin_key, value):
-    """Return a safe frozen endpoint for a built-in datasource Provider."""
-
-    parsed = urlsplit(str(value or "").strip())
-    if plugin_key == "github":
-        if (
-            parsed.scheme == "https"
-            and parsed.hostname == "github.com"
-            and parsed.path in {"", "/"}
-            and not parsed.query
-            and not parsed.fragment
-        ):
-            return "https://github.com"
-        return ""
-    if plugin_key == "gitlab":
-        if (
-            parsed.scheme == "https"
-            and parsed.hostname
-            and parsed.username is None
-            and parsed.password is None
-            and parsed.path in {"", "/"}
-            and not parsed.query
-            and not parsed.fragment
-        ):
-            return urlunsplit(("https", parsed.netloc, "", "", ""))
-    if plugin_key == "jira":
-        hostname = (parsed.hostname or "").lower()
-        if (
-            parsed.scheme == "https"
-            and hostname.endswith(".atlassian.net")
-            and hostname != "atlassian.net"
-            and parsed.username is None
-            and parsed.password is None
-            and parsed.port in {None, 443}
-            and parsed.path in {"", "/"}
-            and not parsed.query
-            and not parsed.fragment
-        ):
-            return urlunsplit(("https", parsed.netloc, "", "", ""))
-    return ""
 
 
 class LensNodeClient:
@@ -1026,69 +988,24 @@ class LensNodeClient:
         except (PluginRuntimeError, httpx.HTTPError) as exc:
             return {"status": "failed", "error": str(exc)}
         try:
-            resolved = snapshot.get("resolved_config")
-            if not isinstance(resolved, dict) or not isinstance(
-                material, dict
-            ):
-                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
-            datasource = resolved.get("datasource_config") or {}
-            if not isinstance(datasource, dict):
-                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
-            plugin_key = snapshot.get("plugin_key")
-            endpoint = _plugin_endpoint(
-                plugin_key,
-                resolved.get("endpoint", ""),
-            )
-            if plugin_key not in {"github", "gitlab", "jira"}:
+            plugin_key = str(snapshot.get("plugin_key") or "")
+            plugin_version = str(snapshot.get("plugin_version") or "")
+            try:
+                runtime = load_runtime_contract(plugin_key, plugin_version)
+                command = runtime.build_datasource_command(
+                    snapshot,
+                    material,
+                    message.get("trigger") or "plugin",
+                )
+            except PluginPackageLoadError:
                 return {"status": "failed", "error": "PLUGIN_UNSUPPORTED"}
-            if not endpoint:
-                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
-            if (
-                material.get("plugin_key") != plugin_key
-                or material.get("endpoint", "").rstrip("/") != endpoint
-            ):
-                return {
-                    "status": "failed",
-                    "error": "PLUGIN_MATERIAL_MISMATCH",
-                }
-            resource = (
-                datasource.get("repository")
-                if plugin_key == "github"
-                else datasource.get("project")
-            )
-            if not resource:
-                return {"status": "failed", "error": "PLUGIN_CONFIG_INVALID"}
-            command = {
-                "source_type": "jira" if plugin_key == "jira" else "git",
-                "datasource_uuid": snapshot.get("datasource_uuid"),
-                "target_path": resolved.get("target_path"),
-                "sync_policy": resolved.get("sync_policy") or {},
-                "trigger": message.get("trigger") or "plugin",
-                "config": (
-                    {
-                        "endpoint": endpoint,
-                        "email": (resolved.get("connection_config") or {}).get(
-                            "email"
-                        ),
-                        "access_token": material["value"],
-                        "project": resource,
-                        "max_issues": datasource.get("max_issues") or 100,
-                    }
-                    if plugin_key == "jira"
-                    else {
-                    "repo_url": f"{endpoint}/{resource}.git",
-                    "branch": datasource.get("branch") or "main",
-                    "directory": datasource.get("directory") or "",
-                    "auth_scheme": "token",
-                    "access_token": material["value"],
-                    }
-                ),
-            }
             return sync_datasource(
                 command,
                 self.config.workspace_path,
                 emit,
             )
+        except PluginRuntimeError as exc:
+            return {"status": "failed", "error": str(exc)}
         except DataSourceSyncError:
             return {"status": "failed", "error": "PLUGIN_SYNC_FAILED"}
         finally:

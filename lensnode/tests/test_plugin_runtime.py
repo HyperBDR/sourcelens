@@ -50,6 +50,7 @@ def test_create_plugin_tool_snapshot_uses_model_call_identity():
                     "tool_key": "github_read_file",
                     "invocation_id": "call-1",
                     "plugin_key": "github",
+                "plugin_version": "1.0.0",
                 },
             )
 
@@ -179,6 +180,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "github",
+                "plugin_version": "1.0.0",
             "datasource_uuid": "datasource-1",
             "resolved_config": {
                 "endpoint": "https://github.com",
@@ -194,6 +196,7 @@ def test_plugin_sync_does_not_fallback_to_legacy_credentials(monkeypatch):
         "lensnode.main.retrieve_plugin_material",
         lambda *args: {
             "plugin_key": "github",
+                "plugin_version": "1.0.0",
             "endpoint": "https://github.com",
             "value": "secret",
         },
@@ -227,6 +230,7 @@ def test_plugin_sync_rejects_material_for_another_endpoint(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "github",
+                "plugin_version": "1.0.0",
             "resolved_config": {
                 "endpoint": "https://github.com",
                 "target_path": "/workspace/repo",
@@ -240,6 +244,7 @@ def test_plugin_sync_rejects_material_for_another_endpoint(monkeypatch):
     )
     material = {
         "plugin_key": "github",
+                "plugin_version": "1.0.0",
         "endpoint": "https://evil.example",
         "value": "secret",
     }
@@ -266,7 +271,8 @@ def test_plugin_sync_releases_material_for_malformed_snapshot(monkeypatch):
     client.gateway_http_client = object()
     monkeypatch.setattr(
         "lensnode.main.fetch_plugin_snapshot",
-        lambda *args: {"plugin_key": "github", "resolved_config": []},
+        lambda *args: {"plugin_key": "github",
+                "plugin_version": "1.0.0", "resolved_config": []},
     )
     monkeypatch.setattr(
         "lensnode.main.acquire_plugin_lease",
@@ -274,6 +280,7 @@ def test_plugin_sync_releases_material_for_malformed_snapshot(monkeypatch):
     )
     material = {
         "plugin_key": "github",
+                "plugin_version": "1.0.0",
         "endpoint": "https://github.com",
         "value": "secret",
     }
@@ -301,6 +308,7 @@ def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "github",
+                "plugin_version": "1.0.0",
             "resolved_config": {
                 "endpoint": "https://github.com",
                 "datasource_config": {},
@@ -313,6 +321,7 @@ def test_plugin_sync_rejects_material_for_another_plugin(monkeypatch):
     )
     material = {
         "plugin_key": "gitlab",
+                "plugin_version": "1.0.0",
         "endpoint": "https://github.com",
         "value": "secret",
     }
@@ -341,6 +350,7 @@ def test_gitlab_plugin_sync_builds_git_command_from_snapshot(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "gitlab",
+                "plugin_version": "1.0.0",
             "datasource_uuid": "datasource-1",
             "resolved_config": {
                 "endpoint": "https://gitlab.internal.example",
@@ -359,6 +369,7 @@ def test_gitlab_plugin_sync_builds_git_command_from_snapshot(monkeypatch):
     )
     material = {
         "plugin_key": "gitlab",
+                "plugin_version": "1.0.0",
         "endpoint": "https://gitlab.internal.example",
         "value": "gitlab-secret",
     }
@@ -398,6 +409,7 @@ def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
         "lensnode.main.fetch_plugin_snapshot",
         lambda *args: {
             "plugin_key": "jira",
+                "plugin_version": "1.0.0",
             "datasource_uuid": "datasource-1",
             "resolved_config": {
                 "endpoint": "https://company.atlassian.net",
@@ -416,6 +428,7 @@ def test_jira_plugin_sync_builds_issue_export_command(monkeypatch):
     )
     material = {
         "plugin_key": "jira",
+                "plugin_version": "1.0.0",
         "endpoint": "https://company.atlassian.net",
         "value": "jira-api-token",
     }

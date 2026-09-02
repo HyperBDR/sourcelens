@@ -7,7 +7,8 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
-from .base import (
+from lens.plugins.contracts import ToolProviderError
+from lens.plugins.providers.base import (
     DatasourceProvider,
     DatasourceProviderError,
     PluginRequestContext,
@@ -23,6 +24,10 @@ JIRA_MAX_ISSUES = 100
 JIRA_DISCOVERY_WORKERS = 5
 JIRA_TIMEOUT_SECONDS = 15
 JIRA_MAX_RESPONSE_BYTES = 500_000
+
+PLUGIN_API_VERSION = 1
+PLUGIN_KEY = "jira"
+PLUGIN_VERSION = "1.0.0"
 
 
 class JiraDatasourceProvider(DatasourceProvider):
@@ -339,3 +344,96 @@ def _jira_error(status_code):
     if status_code == 429:
         return "JIRA_RATE_LIMITED"
     return "JIRA_REQUEST_FAILED"
+
+
+class JiraToolProvider:
+    """Validate bounded read-only Jira Cloud Tool requests."""
+
+    key = "jira"
+
+    def validate_request(self, endpoint, allowed_scope, tool_key, arguments):
+        """Return canonical endpoint and authorized arguments."""
+
+        try:
+            endpoint = _endpoint(endpoint)
+            allowed = set(
+                JiraDatasourceProvider()
+                .validate_connection_scope(allowed_scope)["projects"]
+            )
+        except DatasourceProviderError as exc:
+            raise ToolProviderError(str(exc)) from exc
+        if not isinstance(arguments, dict):
+            raise ToolProviderError("tool arguments must be an object")
+        if tool_key == "jira_get_issue":
+            issue_key = _issue_key(arguments.get("issue_key"))
+            if issue_key.rsplit("-", 1)[0] not in allowed:
+                raise ToolProviderError("issue is outside connection scope")
+            return endpoint, {"issue_key": issue_key}
+        if tool_key == "jira_search_issues":
+            try:
+                project = _project_key(arguments.get("project"))
+            except DatasourceProviderError as exc:
+                raise ToolProviderError(str(exc)) from exc
+            if project not in allowed:
+                raise ToolProviderError("project is outside connection scope")
+            return endpoint, {
+                "project": project,
+                "query": _tool_text(
+                    arguments.get("query"),
+                    "query",
+                    500,
+                    required=True,
+                ),
+                "max_results": _tool_max_results(
+                    arguments.get("max_results")
+                ),
+            }
+        raise ToolProviderError("tool is unsupported")
+
+
+def _tool_text(value, field, limit, required=False):
+    """Return bounded Tool text without control characters."""
+
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str):
+        raise ToolProviderError(f"{field} must be a string")
+    text = value.strip()
+    if (required and not text) or len(text) > limit or any(
+        ord(character) < 32 for character in text
+    ):
+        raise ToolProviderError(f"{field} is invalid")
+    return text
+
+
+def _issue_key(value):
+    """Return one bounded canonical Jira Issue key."""
+
+    text = _tool_text(value, "issue_key", 40, required=True).upper()
+    parts = text.rsplit("-", 1)
+    if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) < 1:
+        raise ToolProviderError("issue_key is invalid")
+    try:
+        _project_key(parts[0])
+    except DatasourceProviderError as exc:
+        raise ToolProviderError("issue_key is invalid") from exc
+    return text
+
+
+def _tool_max_results(value):
+    """Return one bounded search result count."""
+
+    if value is None:
+        return 10
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        or value > 20
+    ):
+        raise ToolProviderError("max_results must be between 1 and 20")
+    return value
+
+
+DATASOURCE_PROVIDER = JiraDatasourceProvider()
+TOOL_PROVIDER = JiraToolProvider()

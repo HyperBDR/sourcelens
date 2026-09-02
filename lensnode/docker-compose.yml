@@ -1,8 +1,8 @@
 services:
   lensnode:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: lensnode/Dockerfile
       args:
         APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}

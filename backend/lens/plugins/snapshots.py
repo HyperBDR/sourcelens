@@ -57,11 +57,15 @@ def create_datasource_sync_snapshot(datasource):
         )
     if datasource.lensnode is None:
         raise PluginRegistryError("datasource LensNode is required")
+    plugin = latest_plugin(datasource.plugin_key)
     _reject_sensitive_values(connection.config)
     _reject_sensitive_values(connection.allowed_scope)
     _reject_sensitive_values(datasource.datasource_config)
     try:
-        provider = get_datasource_provider(datasource.plugin_key)
+        provider = get_datasource_provider(
+            datasource.plugin_key,
+            plugin.version,
+        )
         provider.validate_datasource_source_type(datasource.source_type)
         endpoint = provider.validate_connection(
             connection.endpoint,
@@ -73,7 +77,6 @@ def create_datasource_sync_snapshot(datasource):
         )
     except DatasourceProviderError as exc:
         raise PluginRegistryError(str(exc)) from exc
-    plugin = latest_plugin(datasource.plugin_key)
     resolved_config = {
         "endpoint": endpoint,
         "connection_config": deepcopy(connection.config),

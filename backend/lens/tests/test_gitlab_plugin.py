@@ -16,7 +16,7 @@ from lens.models import (
     Session,
 )
 from lens.plugins.providers.base import DatasourceProviderError
-from lens.plugins.providers.gitlab import GitLabDatasourceProvider
+from lens.plugins.providers import get_datasource_provider
 from lens.plugins.registry import latest_plugin
 from lens.plugins.tool_providers import ToolProviderError, get_tool_provider
 from lens.services import create_execution_run
@@ -41,7 +41,7 @@ class GitLabDatasourceProviderTests(SimpleTestCase):
     """Verify GitLab implements the datasource Provider contract."""
 
     def setUp(self):
-        self.provider = GitLabDatasourceProvider()
+        self.provider = get_datasource_provider("gitlab")
         self.scope = {"projects": ["platform/sourcelens"]}
 
     def test_accepts_nested_project_within_connection_scope(self):

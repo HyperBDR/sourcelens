@@ -1,12 +1,14 @@
 """GitHub implementation of the generic datasource provider contract."""
 
 import json
+import re
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlsplit
 
 import httpx
 
-from .base import (
+from lens.plugins.contracts import ToolProviderError
+from lens.plugins.providers.base import (
     DatasourceProvider,
     DatasourceProviderError,
     PluginRequestContext,
@@ -36,6 +38,11 @@ GITHUB_DISCOVERY_WORKERS = 5
 GITHUB_TIMEOUT_SECONDS = 15
 GITHUB_MAX_BRANCH_LENGTH = 255
 GITHUB_MAX_DIRECTORY_LENGTH = 1000
+SEARCH_SCOPE_PATTERN = re.compile(r"(?:repo|org|user):", re.IGNORECASE)
+
+PLUGIN_API_VERSION = 1
+PLUGIN_KEY = "github"
+PLUGIN_VERSION = "1.0.0"
 
 
 class GitHubDatasourceProvider(DatasourceProvider):
@@ -409,3 +416,113 @@ def _github_error(status_code):
     if status_code == 429:
         return "GITHUB_RATE_LIMITED"
     return "GITHUB_REQUEST_FAILED"
+
+
+class GitHubToolProvider:
+    """Validate bounded read-only GitHub Tool requests."""
+
+    key = "github"
+
+    def validate_request(self, endpoint, allowed_scope, tool_key, arguments):
+        """Return canonical endpoint and authorized arguments."""
+
+        try:
+            endpoint = GitHubDatasourceProvider().validate_connection(
+                endpoint,
+                {},
+            )
+            repository = _repository_name(
+                arguments.get("repository")
+                if isinstance(arguments, dict)
+                else None
+            )
+            allowed = _allowed_repositories(allowed_scope)
+        except DatasourceProviderError as exc:
+            raise ToolProviderError(str(exc)) from exc
+        if repository.casefold() not in allowed:
+            raise ToolProviderError("repository is outside connection scope")
+        if tool_key == "github_read_file":
+            normalized = {
+                "repository": repository,
+                "path": _tool_path(arguments.get("path"), required=True),
+            }
+            ref = _tool_text(arguments.get("ref"), "ref", 255)
+            if ref:
+                normalized["ref"] = ref
+            return endpoint, normalized
+        if tool_key == "github_search_code":
+            query = _tool_text(
+                arguments.get("query"),
+                "query",
+                1024,
+                required=True,
+            )
+            if SEARCH_SCOPE_PATTERN.search(query):
+                raise ToolProviderError(
+                    "query scope qualifiers are not allowed"
+                )
+            normalized = {
+                "repository": repository,
+                "query": query,
+                "max_results": _tool_max_results(
+                    arguments.get("max_results")
+                ),
+            }
+            path = _tool_path(arguments.get("path"), required=False)
+            if path and (
+                any(character.isspace() for character in path) or '"' in path
+            ):
+                raise ToolProviderError("search path is invalid")
+            if path:
+                normalized["path"] = path
+            return endpoint, normalized
+        raise ToolProviderError("tool is unsupported")
+
+
+def _tool_text(value, field, limit, required=False):
+    """Return bounded Tool text without control characters."""
+
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str):
+        raise ToolProviderError(f"{field} must be a string")
+    text = value.strip()
+    if (required and not text) or len(text) > limit or any(
+        ord(character) < 32 for character in text
+    ):
+        raise ToolProviderError(f"{field} is invalid")
+    return text
+
+
+def _tool_path(value, required):
+    """Return a bounded repository-relative Tool path."""
+
+    text = _tool_text(value, "path", 4096, required=required)
+    if not text:
+        return ""
+    path = PurePosixPath(text)
+    if path.is_absolute() or ".." in path.parts:
+        raise ToolProviderError("path must be repository-relative")
+    normalized = path.as_posix()
+    if normalized in {"", "."} and required:
+        raise ToolProviderError("path is required")
+    return "" if normalized == "." else normalized
+
+
+def _tool_max_results(value):
+    """Return one bounded search result count."""
+
+    if value is None:
+        return 10
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        or value > 20
+    ):
+        raise ToolProviderError("max_results must be between 1 and 20")
+    return value
+
+
+DATASOURCE_PROVIDER = GitHubDatasourceProvider()
+TOOL_PROVIDER = GitHubToolProvider()

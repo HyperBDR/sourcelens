@@ -6,8 +6,8 @@
   "description": "Connect approved Jira Cloud projects as Issue data sources and read-only assistant tools.",
   "datasource_source_type": "jira",
   "handlers": {
-    "runtime": "jira_v1",
-    "datasource": "jira_datasource_v1"
+    "control": "python_v1",
+    "runtime": "python_v1"
   },
   "connection_schema": {
     "type": "object",

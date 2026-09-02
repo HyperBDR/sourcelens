@@ -12,14 +12,46 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from lensnode.plugin_runtime import PluginRuntimeError
-from lensnode.plugin_tools import (
-    _github_read_file,
-    _github_search_code,
-    build_plugin_tools,
-)
+from lensnode.plugin_package_loader import load_runtime_contract
+from lensnode.plugin_tools import build_plugin_tools
 
 
 AI_GATEWAY_URL = "http://gateway/api/lens/lensnode/ai-gateway/"
+GITHUB_RUNTIME = load_runtime_contract("github", "1.0.0")
+
+
+def _github_read_file(
+    client,
+    arguments,
+    token,
+    endpoint="https://github.com",
+    config=None,
+):
+    return GITHUB_RUNTIME.execute_tool(
+        "github_read_file",
+        client,
+        arguments,
+        token,
+        endpoint,
+        config,
+    )
+
+
+def _github_search_code(
+    client,
+    arguments,
+    token,
+    endpoint="https://github.com",
+    config=None,
+):
+    return GITHUB_RUNTIME.execute_tool(
+        "github_search_code",
+        client,
+        arguments,
+        token,
+        endpoint,
+        config,
+    )
 
 
 def _command(*tool_keys):

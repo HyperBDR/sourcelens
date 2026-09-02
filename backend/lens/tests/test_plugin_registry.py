@@ -49,8 +49,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
             "datasource_schema": {
                 "type": "object",
@@ -91,8 +91,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
             "datasource_schema": {
                 "type": "object",
@@ -120,8 +120,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
             "datasource_schema": {
                 "type": "object",
@@ -150,8 +150,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
         }
         with tempfile.TemporaryDirectory() as root:
@@ -162,7 +162,7 @@ class PluginRegistryTests(TestCase):
         self.assertEqual(len(plugins), 1)
         self.assertEqual(plugins[0].key, "github")
         self.assertEqual(plugins[0].version, "1.0.0")
-        self.assertEqual(plugins[0].runtime_handler, "github_v1")
+        self.assertEqual(plugins[0].runtime_handler, "python_v1")
 
     def test_rejects_a_manifest_with_an_unapproved_handler(self):
         manifest = {
@@ -171,7 +171,7 @@ class PluginRegistryTests(TestCase):
             "protocol_version": 1,
             "handlers": {
                 "runtime": "os.system",
-                "datasource": "github_datasource_v1",
+                "datasource": "python_v1",
             },
         }
         with tempfile.TemporaryDirectory() as root:
@@ -186,8 +186,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
         }
         with tempfile.TemporaryDirectory() as root:
@@ -204,8 +204,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
         }
         admin = User.objects.create_user("plugin-admin", is_staff=True)
@@ -237,8 +237,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
             "tools": [
                 {
@@ -292,8 +292,8 @@ class PluginRegistryTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
             "tools": [
                 {

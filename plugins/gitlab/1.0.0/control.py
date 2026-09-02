@@ -6,7 +6,8 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
-from .base import (
+from lens.plugins.contracts import ToolProviderError
+from lens.plugins.providers.base import (
     DatasourceProvider,
     DatasourceProviderError,
     PluginRequestContext,
@@ -34,6 +35,10 @@ GITLAB_TIMEOUT_SECONDS = 15
 GITLAB_MAX_RESPONSE_BYTES = 500_000
 GITLAB_MAX_BRANCH_LENGTH = 255
 GITLAB_MAX_DIRECTORY_LENGTH = 1000
+
+PLUGIN_API_VERSION = 1
+PLUGIN_KEY = "gitlab"
+PLUGIN_VERSION = "1.0.0"
 
 
 class GitLabDatasourceProvider(DatasourceProvider):
@@ -404,3 +409,108 @@ def _gitlab_error(status_code):
     if status_code == 429:
         return "GITLAB_RATE_LIMITED"
     return "GITLAB_REQUEST_FAILED"
+
+
+class GitLabToolProvider:
+    """Validate bounded read-only GitLab Tool requests."""
+
+    key = "gitlab"
+
+    def validate_request(self, endpoint, allowed_scope, tool_key, arguments):
+        """Return canonical endpoint and authorized arguments."""
+
+        try:
+            endpoint = _endpoint(endpoint)
+            project = _project_name(
+                arguments.get("project")
+                if isinstance(arguments, dict)
+                else None
+            )
+            allowed = {
+                item.casefold()
+                for item in GitLabDatasourceProvider()
+                .validate_connection_scope(allowed_scope)["projects"]
+            }
+        except DatasourceProviderError as exc:
+            raise ToolProviderError(str(exc)) from exc
+        if project.casefold() not in allowed:
+            raise ToolProviderError("project is outside connection scope")
+        if tool_key == "gitlab_read_file":
+            normalized = {
+                "project": project,
+                "path": _tool_path(arguments.get("path"), required=True),
+            }
+            ref = _tool_text(arguments.get("ref"), "ref", 255)
+            if ref:
+                normalized["ref"] = ref
+            return endpoint, normalized
+        if tool_key == "gitlab_search_code":
+            normalized = {
+                "project": project,
+                "query": _tool_text(
+                    arguments.get("query"),
+                    "query",
+                    1024,
+                    required=True,
+                ),
+                "max_results": _tool_max_results(
+                    arguments.get("max_results")
+                ),
+            }
+            path = _tool_path(arguments.get("path"), required=False)
+            if path:
+                normalized["path"] = path
+            ref = _tool_text(arguments.get("ref"), "ref", 255)
+            if ref:
+                normalized["ref"] = ref
+            return endpoint, normalized
+        raise ToolProviderError("tool is unsupported")
+
+
+def _tool_text(value, field, limit, required=False):
+    """Return bounded Tool text without control characters."""
+
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str):
+        raise ToolProviderError(f"{field} must be a string")
+    text = value.strip()
+    if (required and not text) or len(text) > limit or any(
+        ord(character) < 32 for character in text
+    ):
+        raise ToolProviderError(f"{field} is invalid")
+    return text
+
+
+def _tool_path(value, required):
+    """Return one safe repository-relative path."""
+
+    text = _tool_text(value, "path", 4096, required=required)
+    if not text:
+        return ""
+    path = PurePosixPath(text)
+    if path.is_absolute() or ".." in path.parts:
+        raise ToolProviderError("path must be repository-relative")
+    normalized = path.as_posix()
+    if normalized in {"", "."} and required:
+        raise ToolProviderError("path is required")
+    return "" if normalized == "." else normalized
+
+
+def _tool_max_results(value):
+    """Return one bounded search result count."""
+
+    if value is None:
+        return 10
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        or value > 20
+    ):
+        raise ToolProviderError("max_results must be between 1 and 20")
+    return value
+
+
+DATASOURCE_PROVIDER = GitLabDatasourceProvider()
+TOOL_PROVIDER = GitLabToolProvider()

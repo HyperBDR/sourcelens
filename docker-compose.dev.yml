@@ -175,8 +175,8 @@ services:
 
   lensnode:
     build:
-      context: ./lensnode
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: lensnode/Dockerfile
       args:
         APT_MIRROR_URL: ${APT_MIRROR_URL:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
@@ -217,6 +217,7 @@ services:
     volumes:
       - ./data.dev/workspace:/workspace
       - ./lensnode/lensnode:/opt/lensnode/lensnode:ro
+      - ./plugins:/opt/plugins:ro
     networks:
       - backend_network
     depends_on:

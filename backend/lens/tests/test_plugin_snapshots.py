@@ -1,9 +1,7 @@
 import json
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from lens.datasource_services import dispatch_datasource_sync_async
 from lens.models import (
     Connection,
@@ -55,21 +53,7 @@ class PluginSnapshotTests(TestCase):
         )
 
     def test_snapshot_contains_complete_resolved_sync_config(self):
-        manifest = {
-            "key": "github",
-            "version": "1.0.0",
-            "protocol_version": 1,
-            "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
-            },
-        }
-        with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "github" / "1.0.0"
-            path.mkdir(parents=True)
-            (path / "plugin.json").write_text(json.dumps(manifest))
-            with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                snapshot = create_datasource_sync_snapshot(self.datasource)
+        snapshot = create_datasource_sync_snapshot(self.datasource)
 
         self.assertEqual(snapshot.plugin_version, "1.0.0")
         self.assertEqual(
@@ -124,28 +108,12 @@ class PluginSnapshotTests(TestCase):
             create_datasource_sync_snapshot(self.datasource)
 
     def test_plugin_datasource_dispatch_sends_snapshot_metadata_only(self):
-        manifest = {
-            "key": "github",
-            "version": "1.0.0",
-            "protocol_version": 1,
-            "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
-            },
-        }
-        with tempfile.TemporaryDirectory() as root:
-            path = Path(root) / "github" / "1.0.0"
-            path.mkdir(parents=True)
-            (path / "plugin.json").write_text(json.dumps(manifest))
-            with override_settings(LENS_PLUGIN_ROOTS=[root]):
-                with patch(
-                    "lens.datasource_services._send_lensnode_command"
-                ) as send:
-                    dispatch_datasource_sync_async(
-                        self.datasource,
-                        task_id="sync-task",
-                        trigger="manual",
-                    )
+        with patch("lens.datasource_services._send_lensnode_command") as send:
+            dispatch_datasource_sync_async(
+                self.datasource,
+                task_id="sync-task",
+                trigger="manual",
+            )
 
         payload = send.call_args.args[1]
         self.assertEqual(payload["type"], "plugin_datasource_sync")

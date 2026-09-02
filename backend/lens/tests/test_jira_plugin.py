@@ -16,7 +16,7 @@ from lens.plugins.providers.base import (
     DatasourceProviderError,
     PluginRequestContext,
 )
-from lens.plugins.providers.jira import JiraDatasourceProvider
+from lens.plugins.providers import get_datasource_provider
 from lens.plugins.registry import latest_plugin
 from lens.plugins.snapshots import create_datasource_sync_snapshot
 from lens.plugins.tool_providers import ToolProviderError, get_tool_provider
@@ -43,7 +43,7 @@ class JiraDatasourceProviderTests(SimpleTestCase):
     """Verify Jira Cloud implements the datasource Provider contract."""
 
     def setUp(self):
-        self.provider = JiraDatasourceProvider()
+        self.provider = get_datasource_provider("jira")
         self.config = {"email": "admin@example.com"}
         self.scope = {"projects": ["SL", "OPS"]}
 

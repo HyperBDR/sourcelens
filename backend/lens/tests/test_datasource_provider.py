@@ -3,14 +3,14 @@ from threading import Barrier
 import httpx
 from django.test import SimpleTestCase
 from lens.plugins.providers.base import DatasourceProviderError
-from lens.plugins.providers.github import GitHubDatasourceProvider
+from lens.plugins.providers import get_datasource_provider
 
 
 class GitHubDatasourceProviderTests(SimpleTestCase):
     """Verify GitHub implements the generic datasource contract."""
 
     def setUp(self):
-        self.provider = GitHubDatasourceProvider()
+        self.provider = get_datasource_provider("github")
         self.scope = {"repositories": ["HyperBDR/sourcelens"]}
 
     def test_accepts_a_repository_within_connection_scope(self):

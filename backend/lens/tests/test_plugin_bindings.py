@@ -79,8 +79,8 @@ class AssistantPluginBindingTests(TestCase):
             "version": "1.0.0",
             "protocol_version": 1,
             "handlers": {
-                "runtime": "github_v1",
-                "datasource": "github_datasource_v1",
+                "runtime": "python_v1",
+                "datasource": "python_v1",
             },
             "tools": [
                 {

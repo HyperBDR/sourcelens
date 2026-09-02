@@ -6,8 +6,8 @@
   "description": "Connect approved GitLab projects as data sources and read-only assistant tools.",
   "datasource_source_type": "git",
   "handlers": {
-    "runtime": "gitlab_v1",
-    "datasource": "gitlab_datasource_v1"
+    "control": "python_v1",
+    "runtime": "python_v1"
   },
   "connection_schema": {
     "type": "object",

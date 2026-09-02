@@ -643,3 +643,37 @@ ConnectionRevision 仅在明确的产品需求出现后另行设计。
 5. 如何定义 interactive Run、Smart 子助手、定时同步和重试的 effective actor？
 6. 外部 DataSource 是否允许在 Connection scope 之下单独配置更窄的资源范围？
 7. Plugin Registry 的安装目录、制品校验方式和升级保留窗口如何配置？
+
+## 16. 独立 Plugin Runtime V1
+
+每个受信任的企业内置 Plugin 是可单独构建、测试、安装的目录项目：
+
+```text
+plugins/<plugin-key>/<version>/
+  plugin.json
+  control.py
+  runtime.py
+```
+
+`plugin.json` 只声明固定的 `python_v1` control/runtime handler，不能指定任意
+import、命令、前端代码或远程 URL。控制面和 LensNode 都仅按冻结的
+`plugin_key + plugin_version` 找到该目录；拒绝路径穿越、符号链接、目录逃逸、缺失
+entrypoint、超限文件及导出身份不一致的包。
+
+`control.py` 导出数据源和 Tool Provider，`runtime.py` 导出：
+
+```python
+PLUGIN_API_VERSION = 1
+PLUGIN_KEY = "github"
+PLUGIN_VERSION = "1.0.0"
+
+build_tool(definition, executor)
+execute_tool(tool_key, client, arguments, secret, endpoint, config)
+build_datasource_command(snapshot, material, trigger)
+```
+
+LensNode 保留通用的快照、lease、材料读取、审计和 finally 清理职责；Provider API
+调用、endpoint 策略、工具签名、结果上限及同步命令规范化均由 Plugin runtime 承担。
+新 Plugin 或新版本因此不需要向 SourceLens/LensNode 增加供应商 key 分支。V1 仍是
+企业管理员安装的受信任 Python 代码；进程隔离、制品签名和外部第三方 Plugin 运行权
+限是后续安全发布工作。

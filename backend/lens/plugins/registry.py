@@ -19,12 +19,6 @@ SUPPORTED_PROTOCOL_VERSION = 1
 ALLOWED_HANDLERS = frozenset(
     {
         "python_v1",
-        "github_v1",
-        "github_datasource_v1",
-        "gitlab_v1",
-        "gitlab_datasource_v1",
-        "jira_v1",
-        "jira_datasource_v1",
     }
 )
 READ_ONLY_TOOL_CAPABILITIES = frozenset(

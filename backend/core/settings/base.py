@@ -40,7 +40,7 @@ _extra_plugin_roots = [
     if value.strip()
 ]
 LENS_PLUGIN_ROOTS = [
-    str(BASE_DIR.parent / "plugins"),
+    str(BASE_DIR.parent.parent / "plugins"),
     *_extra_plugin_roots,
 ]
 

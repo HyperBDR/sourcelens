@@ -94,7 +94,10 @@ def create_tool_execution_snapshot(
 
     _validate_frozen_tool(frozen_tool, arguments)
     try:
-        provider = get_tool_provider(connection.plugin_key)
+        provider = get_tool_provider(
+            connection.plugin_key,
+            frozen_plugin.get("plugin_version"),
+        )
         endpoint, normalized_arguments = provider.validate_request(
             connection.endpoint,
             connection.allowed_scope,

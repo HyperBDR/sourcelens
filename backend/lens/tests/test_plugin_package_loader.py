@@ -8,11 +8,13 @@ from lens.plugins.package_loader import (
     PluginPackageLoadError,
     load_control_contract,
 )
+from lens.plugins.providers import get_datasource_provider
 from lens.plugins.registry import (
     PluginRegistryError,
     discover_plugins,
     installed_plugin,
 )
+from lens.plugins.tool_providers import get_tool_provider
 
 
 class PluginPackageLoaderTests(SimpleTestCase):
@@ -138,3 +140,36 @@ TOOL_PROVIDER = object()
                     "control entrypoint",
                 ):
                     discover_plugins()
+
+    def test_provider_registries_resolve_exact_plugin_package_version(self):
+        source = """
+PLUGIN_API_VERSION = 1
+PLUGIN_KEY = "example"
+PLUGIN_VERSION = "1.2.3"
+
+class Provider:
+    key = "example"
+
+    def validate_connection(self, *args): pass
+    def validate_connection_scope(self, *args): pass
+    def validate_live_connection(self, *args, **kwargs): pass
+    def discover_resources(self, *args, **kwargs): pass
+    def validate_datasource_source_type(self, *args): pass
+    def validate_datasource_config(self, *args): pass
+    def validate_request(self, *args): pass
+
+DATASOURCE_PROVIDER = Provider()
+TOOL_PROVIDER = Provider()
+"""
+        with tempfile.TemporaryDirectory() as root:
+            self._write_plugin(
+                root,
+                control_source=source,
+                runtime_source="PLUGIN_API_VERSION = 1\n",
+            )
+            with override_settings(LENS_PLUGIN_ROOTS=[root]):
+                datasource = get_datasource_provider("example", "1.2.3")
+                tools = get_tool_provider("example", "1.2.3")
+
+        self.assertEqual(datasource.key, "example")
+        self.assertEqual(tools.key, "example")
