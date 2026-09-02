@@ -12,7 +12,7 @@ from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.utils import timezone
 
 from accounts.models import normalize_answer_language
@@ -885,6 +885,51 @@ def _attachment_name_tokens(name):
     return {token.lower() for token in re.split(r"[^\w]+", name or "") if token}
 
 
+def _clearly_referenced_attachment_kind(question):
+    """Return the kind of attachment clearly referenced by the question."""
+
+    lowered = (question or "").lower()
+    english_prefix = (
+        r"(?:this|that|(?:the\s+)?previous|earlier|uploaded|attached)"
+    )
+    if re.search(
+        rf"\b{english_prefix}\s+(?:image|picture|photo)\b",
+        lowered,
+    ):
+        return "image"
+    if re.search(
+        rf"\b{english_prefix}\s+(?:document|file|pdf|docx|xlsx|pptx)\b",
+        lowered,
+    ):
+        return "document"
+    chinese_reference = any(
+        marker in lowered
+        for marker in (
+            "这张",
+            "这个",
+            "这份",
+            "该",
+            "那张",
+            "那个",
+            "之前",
+            "刚才",
+            "上一个",
+            "上述",
+            "上传的",
+        )
+    )
+    if chinese_reference and any(
+        marker in lowered for marker in ("图片", "图像", "照片")
+    ):
+        return "image"
+    if chinese_reference and any(
+        marker in lowered
+        for marker in ("文档", "文件", "pdf", "docx", "xlsx", "pptx")
+    ):
+        return "document"
+    return None
+
+
 def select_session_attachment_context(session, question, explicit_uuids=None):
     """Select current or clearly referenced attachments for a new Run."""
 
@@ -917,6 +962,7 @@ def select_session_attachment_context(session, question, explicit_uuids=None):
     historical = [item for item in candidates if item["uuid"] not in explicit]
     if explicit:
         return selected
+    requested_kind = _clearly_referenced_attachment_kind(question)
     if not historical:
         return selected
 
@@ -929,37 +975,14 @@ def select_session_attachment_context(session, question, explicit_uuids=None):
     if named:
         return selected + named
 
-    lowered = (question or "").lower()
-    refers_to_attachment = any(
-        marker in lowered
-        for marker in (
-            "previous",
-            "earlier",
-            "before",
-            "that image",
-            "this image",
-            "that document",
-            "this document",
-            "that pdf",
-            "this pdf",
-            "之前",
-            "刚才",
-            "上一个",
-            "图片",
-            "文档",
-            "文件",
-            "pdf",
-        )
-    )
-    if refers_to_attachment:
-        requested_kind = (
-            "image"
-            if any(marker in lowered for marker in ("image", "图片"))
-            else "document"
-        )
+    if requested_kind:
         same_kind = [item for item in historical if item["kind"] == requested_kind]
-        historical = same_kind or historical
-        return selected + historical[:1]
+        # Never substitute an attachment of another kind.  A request for a
+        # document must not accidentally inherit an older image (or vice
+        # versa) when the requested attachment has expired or is unavailable.
+        if not same_kind:
+            raise AttachmentError("ATTACHMENT_NOT_FOUND")
+        return selected + same_kind[:1]
     return selected
 
 
@@ -1204,6 +1227,7 @@ def create_execution_run(
     runtime_snapshot["session_attachment_uuids"] = [
         item["uuid"] for item in selected_context if item["kind"] == "image"
     ]
+    runtime_snapshot["direct_attachment_uuids"] = requested_attachment_uuids
     runtime_snapshot["document_attachment_count"] = document_count
     execution.runtime_snapshot = runtime_snapshot
     execution.save(update_fields=["runtime_snapshot"])
@@ -2130,6 +2154,58 @@ def build_run_history(run):
     return history
 
 
+def _question_references_historical_attachment(question):
+    """Return whether the current question clearly refers to an older file."""
+
+    lowered = (question or "").lower()
+    historical_marker = any(
+        marker in lowered
+        for marker in (
+            "previous",
+            "earlier",
+            "之前",
+            "刚才",
+            "上一个",
+            "上述",
+        )
+    )
+    return bool(
+        historical_marker and _clearly_referenced_attachment_kind(question)
+    )
+
+
+def _run_has_attachment_context(run):
+    """Return whether a prior Run used an image or document attachment."""
+
+    has_input_attachments = getattr(run, "has_input_attachments", None)
+    if has_input_attachments is None:
+        has_input_attachments = run.input_message.attachments.exists()
+    if has_input_attachments:
+        return True
+    try:
+        snapshot = run.execution.runtime_snapshot or {}
+    except RunExecution.DoesNotExist:
+        snapshot = {}
+    return bool(
+        snapshot.get("session_attachment_uuids")
+        or snapshot.get("document_attachment_count")
+    )
+
+
+def _run_has_direct_attachment(run):
+    """Return whether the current message directly supplied an attachment."""
+
+    try:
+        snapshot = run.execution.runtime_snapshot or {}
+    except RunExecution.DoesNotExist:
+        snapshot = {}
+    if "direct_attachment_uuids" in snapshot:
+        return bool(snapshot["direct_attachment_uuids"])
+    if run.input_message.attachments.exists():
+        return True
+    return bool(snapshot.get("direct_attachment_uuids"))
+
+
 def build_clarification_continuation_question(run, current_question):
     """Restore the original request and answers for a clarification retry."""
 
@@ -2292,8 +2368,16 @@ def _build_run_history_data(run):
             input_message__sequence__lt=run.input_message.sequence,
         )
         .select_related(
+            "execution",
             "input_message",
             "output_message",
+        )
+        .annotate(
+            has_input_attachments=Exists(
+                MessageAttachment.objects.filter(
+                    message_id=OuterRef("input_message_id")
+                )
+            )
         )
         .order_by("input_message__sequence")
     )
@@ -2309,6 +2393,18 @@ def _build_run_history_data(run):
     prior_runs = [
         item for item in all_prior_runs if item.input_message.sequence < cutoff_sequence
     ]
+    attachment_history_runs_removed = 0
+    if _run_has_direct_attachment(run) and not (
+        _question_references_historical_attachment(run.input_message.content)
+    ):
+        attachment_history_runs_removed = sum(
+            _run_has_attachment_context(item) for item in prior_runs
+        )
+        prior_runs = [
+            item
+            for item in prior_runs
+            if not _run_has_attachment_context(item)
+        ]
     latest_attempts = _latest_retry_attempts(prior_runs)
     limited_pairs = []
     limited_manifests = []
@@ -2361,6 +2457,7 @@ def _build_run_history_data(run):
             and not _assistant_output_is_trusted(prior)
             for prior in latest_attempts
         ),
+        "attachment_history_runs_removed": attachment_history_runs_removed,
         "included_history": list(reversed(limited_manifests)),
     }
     return history, metadata

@@ -743,6 +743,13 @@ def _admin_run_detail(run):
             str(value)
             for value in run.input_message.attachments.values_list("uuid", flat=True)
         }
+        direct_attachment_uuids.update(
+            str(value)
+            for value in (run.execution.runtime_snapshot or {}).get(
+                "direct_attachment_uuids",
+                [],
+            )
+        )
         selected = (run.execution.runtime_snapshot or {}).get(
             "session_attachment_uuids", []
         )
