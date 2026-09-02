@@ -1,0 +1,11 @@
+type: fix
+audience: user
+en: >-
+  Fixed historical conversations to analyze newly uploaded documents without
+  reusing unrelated images or files from earlier messages.
+zh-CN: >-
+  修复历史会话分析新上传文档时错误复用先前消息中无关图片或文件的问题。
+es: >-
+  Se corrigieron las conversaciones históricas para analizar documentos
+  recién cargados sin reutilizar imágenes o archivos no relacionados de
+  mensajes anteriores.
