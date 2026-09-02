@@ -1561,6 +1561,7 @@
     "datasourceWizard": {
       "createTitle": "Create Data Source",
       "editTitle": "Edit Data Source",
+      "progressLabel": "Setup progress",
       "step1Title": "Basics",
       "step1Desc": "Set the datasource name, type, and status.",
       "step2Title": "Node",

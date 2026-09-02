@@ -1561,6 +1561,7 @@
     "datasourceWizard": {
       "createTitle": "Crear Fuente de Datos",
       "editTitle": "Editar Fuente de Datos",
+      "progressLabel": "Progreso de configuración",
       "step1Title": "Conceptos básicos",
       "step1Desc": "Establecer el nombre, tipo y estado de la fuente de datos.",
       "step2Title": "Nodo",

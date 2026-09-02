@@ -5,9 +5,32 @@
     :subtitle="drawerSubtitle"
     @close="$emit('close')"
   >
-    <div class="mb-6 flex items-center">
+    <div
+      class="mb-6 rounded-xl border border-line bg-surface-sunken px-4 py-3"
+      aria-label="Datasource creation progress"
+    >
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <p class="text-xs font-medium uppercase tracking-wide text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.progressLabel') }}
+          </p>
+          <p class="mt-0.5 text-sm font-semibold text-ink-900">
+            {{ wizardStepsMeta[wizardStep - 1]?.title }}
+          </p>
+        </div>
+        <span class="text-xs font-medium tabular-nums text-ink-500">
+          {{ wizardStep }} / {{ wizardStepCount }}
+        </span>
+      </div>
+      <div class="flex items-center">
       <template v-for="(step, i) in wizardStepsMeta" :key="step.key">
-        <div class="flex flex-col items-center">
+        <button
+          type="button"
+          class="flex min-w-0 flex-col items-center rounded-md px-1 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+          :aria-current="i + 1 === wizardStep ? 'step' : undefined"
+          :disabled="i + 1 > wizardStep"
+          @click="goToWizardStep(i + 1)"
+        >
           <div
             class="flex h-8 w-8 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors"
             :class="
@@ -31,12 +54,13 @@
           >
             {{ step.title }}
           </span>
-        </div>
+        </button>
         <div
           v-if="i < wizardStepsMeta.length - 1"
-          class="mb-4 mx-1 h-px flex-1 bg-line"
+          class="mx-1 h-px flex-1 bg-line"
         />
       </template>
+      </div>
     </div>
 
     <div v-if="activeStepKey === 'basic'" class="space-y-5">
@@ -1220,7 +1244,7 @@
         </div>
         <div class="flex items-center gap-3">
           <span class="text-xs text-ink-400">
-            {{ wizardStep }} / {{ wizardStepCount }}
+            {{ wizardStepsMeta[wizardStep - 1]?.title }}
           </span>
           <BaseButton
             v-if="wizardStep < wizardStepCount"
@@ -1529,6 +1553,11 @@ const wizardStepCount = computed(() => wizardStepsMeta.value.length)
 const activeStepKey = computed(
   () => wizardStepsMeta.value[wizardStep.value - 1]?.key || 'basic'
 )
+
+function goToWizardStep(step) {
+  if (step < 1 || step > wizardStep.value) return
+  wizardStep.value = step
+}
 
 const onlineLensNodes = computed(() =>
   props.lensnodes.filter(

@@ -1561,6 +1561,7 @@
     "datasourceWizard": {
       "createTitle": "新建数据源",
       "editTitle": "编辑数据源",
+      "progressLabel": "配置进度",
       "step1Title": "基础信息",
       "step1Desc": "设置数据源名称、类型与启用状态。",
       "step2Title": "绑定节点",
