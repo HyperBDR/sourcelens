@@ -21,6 +21,8 @@ class PluginRegistryTests(TestCase):
         path = Path(root) / "github" / version
         path.mkdir(parents=True)
         (path / "plugin.json").write_text(json.dumps(manifest))
+        (path / "control.py").write_text("# test entrypoint\n")
+        (path / "runtime.py").write_text("# test entrypoint\n")
 
     def test_bundled_github_plugin_is_discoverable(self):
         plugin = latest_plugin("github")
@@ -227,6 +229,24 @@ class PluginRegistryTests(TestCase):
                     "display_name": "github",
                     "description": "",
                     "datasource_source_type": "git",
+                    "datasource": {
+                        "key": "default",
+                        "display_name": "Datasource",
+                        "description": "",
+                        "source_type": "git",
+                        "config_schema": {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                            "additionalProperties": False,
+                        },
+                        "resources": [],
+                        "runtime": {
+                            "supports_incremental": False,
+                            "supports_cancel": True,
+                            "output": "workspace",
+                        },
+                    },
                 }
             ],
         )
@@ -283,6 +303,13 @@ class PluginRegistryTests(TestCase):
         self.assertEqual(response.data["display_name"], "GitHub")
         self.assertIn("connection_schema", response.data)
         self.assertIn("datasource_schema", response.data)
+        self.assertEqual(
+            response.data["datasource"]["key"],
+            "github_repository",
+        )
+        self.assertTrue(
+            response.data["datasource"]["runtime"]["supports_incremental"]
+        )
         self.assertNotIn("handlers", response.data)
         self.assertNotIn("path", response.data)
 

@@ -117,6 +117,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
                     "datasource_source_type": (
                         plugin.datasource_source_type
                     ),
+                    "datasource": plugin.datasource,
                 }
                 for plugin in discover_plugins()
             ]
@@ -161,6 +162,7 @@ class PluginRegistryViewSet(BaseAdminViewSet, ViewSet):
                 "display_name": plugin.display_name,
                 "description": plugin.description,
                 "datasource_source_type": plugin.datasource_source_type,
+                "datasource": plugin.datasource,
                 "connection_schema": plugin.connection_schema,
                 "datasource_schema": plugin.datasource_schema,
                 "tools": [

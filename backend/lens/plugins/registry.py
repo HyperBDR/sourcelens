@@ -55,6 +55,7 @@ class InstalledPlugin:
     display_name: str
     description: str
     datasource_source_type: str
+    datasource: dict
     connection_schema: dict
     datasource_schema: dict
     control_handler: str
@@ -204,6 +205,11 @@ def _load_plugin(root, key_dir, version_dir):
         manifest.get("datasource_schema"),
         "datasource",
     )
+    datasource = _validate_datasource_definition(
+        manifest.get("datasource"),
+        datasource_source_type,
+        datasource_schema,
+    )
     return InstalledPlugin(
         key=key,
         version=version,
@@ -211,6 +217,7 @@ def _load_plugin(root, key_dir, version_dir):
         display_name=display_name,
         description=description,
         datasource_source_type=datasource_source_type,
+        datasource=datasource,
         connection_schema=connection_schema,
         datasource_schema=datasource_schema,
         control_handler=control_handler,
@@ -219,6 +226,82 @@ def _load_plugin(root, key_dir, version_dir):
         tools=tools,
         path=version_dir.resolve(),
     )
+
+
+def _validate_datasource_definition(value, source_type, schema):
+    """Return one safe datasource definition with legacy manifest fallback."""
+
+    if value is None:
+        return {
+            "key": "default",
+            "display_name": "Datasource",
+            "description": "",
+            "source_type": source_type,
+            "config_schema": schema,
+            "resources": [],
+            "runtime": {
+                "supports_incremental": False,
+                "supports_cancel": True,
+                "output": "workspace",
+            },
+        }
+    if not isinstance(value, dict):
+        raise PluginRegistryError("plugin datasource definition is invalid")
+    key = value.get("key")
+    if not isinstance(key, str) or not PLUGIN_KEY_PATTERN.fullmatch(key):
+        raise PluginRegistryError("plugin datasource key is invalid")
+    if value.get("source_type") != source_type:
+        raise PluginRegistryError("plugin datasource source type is invalid")
+    resources = value.get("resources") or []
+    if not isinstance(resources, list) or len(resources) > 20:
+        raise PluginRegistryError("plugin datasource resources are invalid")
+    normalized_resources = []
+    for resource in resources:
+        if not isinstance(resource, dict):
+            raise PluginRegistryError("plugin datasource resource is invalid")
+        resource_key = resource.get("key")
+        if (
+            not isinstance(resource_key, str)
+            or not RESOURCE_KEY_PATTERN.fullmatch(resource_key)
+        ):
+            raise PluginRegistryError("plugin datasource resource is invalid")
+        normalized_resources.append({
+            "key": resource_key,
+            "display_name": _bounded_manifest_text(
+                resource.get("display_name") or resource_key,
+                "plugin datasource resource display name",
+                160,
+            ),
+            "depends_on": resource.get("depends_on") or "",
+        })
+    runtime = value.get("runtime") or {}
+    if (
+        not isinstance(runtime, dict)
+        or runtime.get("output") not in {"workspace", "documents"}
+    ):
+        raise PluginRegistryError("plugin datasource runtime is invalid")
+    return {
+        "key": key,
+        "display_name": _bounded_manifest_text(
+            value.get("display_name") or key,
+            "plugin datasource display name",
+            160,
+        ),
+        "description": _bounded_manifest_text(
+            value.get("description") or "",
+            "plugin datasource description",
+            1000,
+            required=False,
+        ),
+        "source_type": source_type,
+        "config_schema": schema,
+        "resources": normalized_resources,
+        "runtime": {
+            "supports_incremental": bool(runtime.get("supports_incremental")),
+            "supports_cancel": bool(runtime.get("supports_cancel")),
+            "output": runtime["output"],
+        },
+    }
 
 
 def _validate_tools(value):

@@ -5,6 +5,28 @@
   "display_name": "GitHub",
   "description": "Connect approved GitHub repositories as data sources and read-only assistant tools.",
   "datasource_source_type": "git",
+  "datasource": {
+    "key": "github_repository",
+    "display_name": "GitHub repository",
+    "description": "Synchronize an explicitly authorized GitHub repository into a LensNode workspace.",
+    "source_type": "git",
+    "resources": [
+      {
+        "key": "repositories",
+        "display_name": "Repositories"
+      },
+      {
+        "key": "branches",
+        "display_name": "Branches",
+        "depends_on": "repositories"
+      }
+    ],
+    "runtime": {
+      "supports_incremental": true,
+      "supports_cancel": true,
+      "output": "workspace"
+    }
+  },
   "handlers": {
     "control": "python_v1",
     "runtime": "python_v1"
