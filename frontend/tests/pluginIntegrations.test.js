@@ -101,6 +101,35 @@ test('connection resource trees stay hidden until scope values exist', async () 
   assert.match(renderer, /optionsFor\(field\)\.length > 0/)
 })
 
+test('connection forms pass a shared input style to manifest fields', async () => {
+  const [page, renderer] = await Promise.all([
+    source('pages/lens/Connections.vue'),
+    source('components/lens/ManifestSchemaForm.vue')
+  ])
+
+  assert.match(page, /control-class="connection-form-input"/)
+  assert.match(renderer, /controlClass/)
+})
+
+test('datasource wizard exposes completed steps for quick navigation', async () => {
+  const drawer = await source('pages/lens/DataSourceFormDrawer.vue')
+
+  assert.match(drawer, /aria-current="i \+ 1 === wizardStep \? 'step' : undefined"/)
+  assert.match(drawer, /:disabled="i \+ 1 > wizardStep"/)
+  assert.match(drawer, /goToWizardStep\(i \+ 1\)/)
+})
+
+test('datasource wizard groups creation into three steps', async () => {
+  const drawer = await source('pages/lens/DataSourceFormDrawer.vue')
+
+  assert.match(drawer, /key: 'basic'/)
+  assert.match(drawer, /key: 'connection'/)
+  assert.match(drawer, /key: 'sync'/)
+  assert.match(drawer, /processingTitle/)
+  assert.match(drawer, /conversionOpen/)
+  assert.doesNotMatch(drawer, /key: 'conversion'/)
+})
+
 test('Connection management renders manifest connection fields instead of GitHub-only inputs', async () => {
   const page = await source('pages/lens/Connections.vue')
 

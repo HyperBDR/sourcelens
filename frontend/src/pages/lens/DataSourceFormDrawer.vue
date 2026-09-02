@@ -84,52 +84,11 @@
           {{ selectedSourceTypeDescription }}
         </p>
       </FormRow>
-      <FormRow :label="t('lensAdmin.fields.status')" required>
-        <BaseSelect v-model="form.status">
-          <option value="active">{{ t('common.status.active') }}</option>
-          <option value="disabled">{{ t('common.status.disabled') }}</option>
-        </BaseSelect>
-      </FormRow>
-    </div>
-
-    <div v-else-if="activeStepKey === 'node'" class="space-y-5">
-      <p class="text-sm text-ink-500">
-        {{
-          t(
-            isManagedWorkspace
-              ? 'lensAdmin.datasourceWizard.managedNodeDesc'
-              : 'lensAdmin.datasourceWizard.step2Desc'
-          )
-        }}
-      </p>
-      <FormRow :label="t('lensAdmin.fields.lensnode')" required>
-        <BaseSelect v-model="form.lensnode_uuid" required>
-          <option value="">
-            {{ t('lensAdmin.placeholders.selectLensNode') }}
-          </option>
-          <option
-            v-for="node in onlineLensNodes"
-            :key="node.uuid"
-            :value="node.uuid"
-          >
-            {{ node.name }} · {{ node.workspace_path || '/workspace' }}
-          </option>
-        </BaseSelect>
-        <p class="mt-1 text-xs text-ink-500">
-          {{ t('lensAdmin.datasourceWizard.onlineNodeHint') }}
-        </p>
-      </FormRow>
-      <div
-        v-if="!onlineLensNodes.length"
-        class="rounded-md border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
-      >
-        {{ t('lensAdmin.datasourceWizard.noOnlineNodes') }}
-      </div>
     </div>
 
     <div v-else-if="activeStepKey === 'connection'" class="space-y-5">
       <p class="text-sm text-ink-500">
-        {{ t('lensAdmin.datasourceWizard.step3Desc') }}
+        {{ t('lensAdmin.datasourceWizard.step2Desc') }}
       </p>
       <template v-if="isPluginSourceType(form.source_type)">
         <FormRow :label="t('lensAdmin.pages.connections.label')" required>
@@ -523,14 +482,31 @@
 
     <div v-else-if="activeStepKey === 'sync'" class="space-y-5">
       <p class="text-sm text-ink-500">
-        {{
-          t(
-            isManagedWorkspace
-              ? 'lensAdmin.datasourceWizard.managedPathDesc'
-              : 'lensAdmin.datasourceWizard.step4Desc'
-          )
-        }}
+        {{ t('lensAdmin.datasourceWizard.step3Desc') }}
       </p>
+      <FormRow :label="t('lensAdmin.fields.lensnode')" required>
+        <BaseSelect v-model="form.lensnode_uuid" required>
+          <option value="">
+            {{ t('lensAdmin.placeholders.selectLensNode') }}
+          </option>
+          <option
+            v-for="node in onlineLensNodes"
+            :key="node.uuid"
+            :value="node.uuid"
+          >
+            {{ node.name }} · {{ node.workspace_path || '/workspace' }}
+          </option>
+        </BaseSelect>
+        <p class="mt-1 text-xs text-ink-500">
+          {{ t('lensAdmin.datasourceWizard.onlineNodeHint') }}
+        </p>
+      </FormRow>
+      <div
+        v-if="!onlineLensNodes.length"
+        class="rounded-md border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+      >
+        {{ t('lensAdmin.datasourceWizard.noOnlineNodes') }}
+      </div>
       <FormRow :label="t('lensAdmin.fields.targetPath')" required>
         <div class="space-y-3">
           <input
@@ -931,12 +907,37 @@
           </label>
         </div>
       </section>
+      <FormRow :label="t('lensAdmin.fields.status')" required>
+        <BaseSelect v-model="form.status">
+          <option value="active">{{ t('common.status.active') }}</option>
+          <option value="disabled">{{ t('common.status.disabled') }}</option>
+        </BaseSelect>
+      </FormRow>
     </div>
 
-    <div v-else-if="activeStepKey === 'conversion'" class="space-y-5">
-      <p class="text-sm text-ink-500">
-        {{ t('lensAdmin.datasourceWizard.step5Desc') }}
-      </p>
+    <section
+      v-if="activeStepKey === 'sync'"
+      class="mt-5 rounded-xl border border-line bg-surface"
+    >
+      <button
+        type="button"
+        class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        @click="conversionOpen = !conversionOpen"
+      >
+        <span>
+          <span class="block text-sm font-semibold text-ink-900">
+            {{ t('lensAdmin.datasourceWizard.processingTitle') }}
+          </span>
+          <span class="mt-0.5 block text-xs text-ink-500">
+            {{ t('lensAdmin.datasourceWizard.processingHint') }}
+          </span>
+        </span>
+        <component
+          :is="conversionOpen ? ChevronDownIcon : ChevronRightIcon"
+          class="h-4 w-4 shrink-0 text-ink-500"
+        />
+      </button>
+      <div v-if="conversionOpen" class="space-y-5 border-t border-line p-4">
       <section class="space-y-4 rounded-md border border-line p-3">
         <div>
           <h3 class="text-sm font-semibold text-ink-900">
@@ -1225,6 +1226,7 @@
         </div>
       </section>
     </div>
+    </section>
 
     <p v-if="formError" class="mt-4 text-sm text-danger-700">
       {{ formError }}
@@ -1352,6 +1354,7 @@ const pdfAdvancedOpen = ref(false)
 const gitRepositorySearch = ref('')
 const gitBulkBranch = ref('')
 const acceptedCredentialUuid = ref('')
+const conversionOpen = ref(false)
 
 const syncIntervalSeconds = computed({
   get() {
@@ -1536,17 +1539,11 @@ const isManagedWorkspace = computed(
 )
 
 const wizardStepsMeta = computed(() => {
-  const steps = [
+  return [
     { key: 'basic', title: t('lensAdmin.datasourceWizard.step1Title') },
-    { key: 'node', title: t('lensAdmin.datasourceWizard.step2Title') },
-    { key: 'connection', title: t('lensAdmin.datasourceWizard.step3Title') },
-    { key: 'sync', title: t('lensAdmin.datasourceWizard.step4Title') },
-    { key: 'conversion', title: t('lensAdmin.datasourceWizard.step5Title') }
+    { key: 'connection', title: t('lensAdmin.datasourceWizard.step2Title') },
+    { key: 'sync', title: t('lensAdmin.datasourceWizard.step3Title') }
   ]
-  if (isManagedWorkspace.value) {
-    return steps.filter((step) => ['basic', 'node', 'sync'].includes(step.key))
-  }
-  return steps
 })
 
 const wizardStepCount = computed(() => wizardStepsMeta.value.length)
@@ -2123,6 +2120,7 @@ watch(
       newDirectoryName.value = ''
       feishuAdvancedOpen.value = false
       pdfAdvancedOpen.value = false
+      conversionOpen.value = false
       gitRepositorySearch.value = ''
       gitBulkBranch.value = ''
       acceptedCredentialUuid.value = props.form.credential_uuid || ''
