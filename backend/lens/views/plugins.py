@@ -226,6 +226,34 @@ class ConnectionViewSet(BaseAdminViewSet):
     )
     serializer_class = ConnectionSerializer
 
+    @action(detail=False, methods=["post"], url_path="resource-preview")
+    def resource_preview(self, request, *args, **kwargs):
+        """Discover selectable resources using an unsaved secret in memory."""
+
+        del args, kwargs
+        if not isinstance(request.data, dict):
+            return Response({"detail": "REQUEST_INVALID"}, status=400)
+        plugin_key = request.data.get("plugin_key")
+        secret_value = request.data.get("secret_value")
+        endpoint = request.data.get("endpoint", "")
+        config = request.data.get("config", {})
+        try:
+            provider = get_datasource_provider(plugin_key)
+            endpoint = provider.validate_connection(endpoint, config)
+            resources = provider.discover_connection_resources(
+                secret_value,
+                endpoint=endpoint,
+                connection_config=config,
+                query=request.data.get("query", ""),
+                cursor=request.data.get("cursor", ""),
+                limit=request.data.get("limit", 50),
+            )
+        except (DatasourceProviderError, PluginNotFoundError) as exc:
+            return Response({"detail": str(exc)}, status=400)
+        response = Response(resources)
+        response["Cache-Control"] = "no-store"
+        return response
+
     def get_queryset(self):
         """Filter connections by Plugin or lifecycle status."""
 

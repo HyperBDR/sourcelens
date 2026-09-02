@@ -48,6 +48,42 @@ class PluginConnectionApiTests(TestCase):
             "ghp-example", connection.secret_version.encrypted_value
         )
 
+    @patch("lens.views.plugins.get_datasource_provider")
+    def test_preview_resources_uses_unsaved_secret_without_persisting(self, provider_factory):
+        provider = provider_factory.return_value
+        provider.validate_connection.return_value = "https://github.com"
+        provider.discover_connection_resources.return_value = {
+            "resources": {
+                "repositories": {
+                    "items": [{"value": "owner/repo", "label": "owner/repo"}]
+                }
+            },
+            "next_cursor": "",
+        }
+
+        response = self.client.post(
+            "/api/lens/admin/connections/resource-preview/",
+            {
+                "plugin_key": "github",
+                "endpoint": "https://github.com",
+                "secret_value": "temporary-token",
+                "config": {},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(Connection.objects.count(), 0)
+        provider.discover_connection_resources.assert_called_once_with(
+            "temporary-token",
+            endpoint="https://github.com",
+            connection_config={},
+            query="",
+            cursor="",
+            limit=50,
+        )
+
     def test_update_secret_reuses_material_identity(self):
         material = SecretMaterial.objects.create(name="Existing")
         version = SecretVersion(material=material)

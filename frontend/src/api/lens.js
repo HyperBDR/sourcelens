@@ -435,6 +435,15 @@ export async function getConnectionResources(uuid) {
   return unwrapResponse(response)
 }
 
+export async function previewConnectionResources(payload) {
+  const response = await api.post(
+    '/lens/admin/connections/resource-preview/',
+    payload,
+    { headers: { 'Cache-Control': 'no-store' } }
+  )
+  return unwrapResponse(response)
+}
+
 export async function listEnvironmentVariableSets() {
   return collectPaginatedResults(async (page) => {
     const response = await api.get('/lens/admin/environment-variable-sets/', {

@@ -181,6 +181,77 @@ class GitHubDatasourceProvider(DatasourceProvider):
             result["warnings"] = warnings
         return result
 
+    def discover_connection_resources(
+        self,
+        secret,
+        endpoint="",
+        connection_config=None,
+        query="",
+        cursor="",
+        limit=50,
+        client=None,
+        request_context=None,
+    ):
+        """List repositories visible to a temporary Connection secret."""
+
+        self.validate_connection(endpoint, connection_config)
+        token = _secret_value(secret)
+        page = _connection_resource_page(cursor)
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise DatasourceProviderError(
+                "connection resource limit is invalid"
+            )
+        limit = min(max(limit, 1), 100)
+        if not isinstance(query, str) or len(query) > 100:
+            raise DatasourceProviderError(
+                "connection resource query is invalid"
+            )
+        context = request_context or PluginRequestContext(
+            timeout_seconds=GITHUB_TIMEOUT_SECONDS,
+        )
+        with _GitHubClient(client) as github_client:
+            payload = context.run(
+                lambda: _github_json(
+                    github_client,
+                    "/user/repos",
+                    token,
+                    params={
+                        "affiliation": (
+                            "owner,collaborator,organization_member"
+                        ),
+                        "sort": "updated",
+                        "direction": "desc",
+                        "per_page": limit,
+                        "page": page,
+                    },
+                )
+            )
+        if not isinstance(payload, list):
+            raise DatasourceProviderError("GITHUB_RESPONSE_INVALID")
+        items = []
+        query_key = query.casefold().strip()
+        for item in payload:
+            name = item.get("full_name") if isinstance(item, dict) else None
+            if not isinstance(name, str) or not name:
+                continue
+            repository = _repository_name(name)
+            if query_key and query_key not in repository.casefold():
+                continue
+            items.append(
+                {
+                    "value": repository,
+                    "label": repository,
+                    "metadata": {
+                        "private": bool(item.get("private")),
+                        "updated_at": str(item.get("updated_at") or "")[:64],
+                    },
+                }
+            )
+        return {
+            "resources": {"repositories": {"items": items}},
+            "next_cursor": str(page + 1) if len(payload) == limit else "",
+        }
+
     def validate_datasource_config(self, connection_scope, datasource_config):
         """Return a normalized repository selection within configured scope."""
 
@@ -316,6 +387,19 @@ def _secret_value(value):
     if not isinstance(value, str) or not value:
         raise DatasourceProviderError("GITHUB_SECRET_UNAVAILABLE")
     return value
+
+
+def _connection_resource_page(value):
+    """Return a bounded GitHub repository-list page number."""
+
+    if value in (None, ""):
+        return 1
+    if not isinstance(value, str) or not value.isdecimal():
+        raise DatasourceProviderError("connection resource cursor is invalid")
+    page = int(value)
+    if not 1 <= page <= 100:
+        raise DatasourceProviderError("connection resource cursor is invalid")
+    return page
 
 
 def _github_repository_resource(client, repository, token):

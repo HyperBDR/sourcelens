@@ -178,6 +178,33 @@ class DatasourceProvider(ABC):
         )
         raise DatasourceProviderError("PROVIDER_DISCOVERY_UNSUPPORTED")
 
+    def discover_connection_resources(
+        self,
+        secret,
+        endpoint="",
+        connection_config=None,
+        query="",
+        cursor="",
+        limit=50,
+        client=None,
+        request_context=None,
+    ):
+        """Return bounded resources before a Connection is saved."""
+
+        del (
+            secret,
+            endpoint,
+            connection_config,
+            query,
+            cursor,
+            limit,
+            client,
+            request_context,
+        )
+        raise DatasourceProviderError(
+            "PROVIDER_CONNECTION_DISCOVERY_UNSUPPORTED"
+        )
+
     def validate_datasource_source_type(self, source_type):
         """Reject datasource kinds unsupported by this provider."""
 

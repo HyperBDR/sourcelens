@@ -214,6 +214,50 @@
           v-model="form"
           :schema="manifest.connection_schema"
         />
+        <section
+          v-if="connectionResourceField"
+          class="rounded-lg border border-line bg-surface-sunken p-3"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="text-sm font-medium text-ink-800">
+                {{ t('lensAdmin.connections.discoverResources') }}
+              </p>
+              <p class="mt-1 text-xs text-ink-500">
+                {{ t('lensAdmin.connections.discoverResourcesHint') }}
+              </p>
+            </div>
+            <BaseButton
+              size="sm"
+              variant="outline"
+              :loading="discoveringResources"
+              :disabled="!hasFieldValue(form.secret_value)"
+              @click="discoverConnectionResources"
+            >
+              {{ t('lensAdmin.connections.discoverResourcesAction') }}
+            </BaseButton>
+          </div>
+          <div
+            v-if="connectionResourceCandidates.length"
+            class="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md border border-line bg-surface p-2"
+          >
+            <label
+              v-for="item in connectionResourceCandidates"
+              :key="item.value"
+              class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-surface-sunken"
+            >
+              <input
+                type="checkbox"
+                :checked="selectedConnectionResource(item.value)"
+                @change="toggleConnectionResource(item.value, $event.target.checked)"
+              >
+              <span class="min-w-0 truncate text-ink-800">{{ item.label }}</span>
+              <span v-if="item.metadata?.private" class="text-xs text-ink-500">
+                {{ t('lensAdmin.connections.privateResource') }}
+              </span>
+            </label>
+          </div>
+        </section>
         <p v-if="mode === 'edit'" class="-mt-2 text-xs text-ink-500">
           {{ t('lensAdmin.connections.tokenEditHint') }}
         </p>
@@ -264,6 +308,7 @@ import {
   getPluginManifest,
   listConnections,
   listPlugins,
+  previewConnectionResources,
   updateConnection,
   validateConnection
 } from '@/api/lens'
@@ -283,6 +328,8 @@ const drawerOpen = ref(false)
 const mode = ref('create')
 const formError = ref('')
 const form = ref(defaultForm())
+const discoveringResources = ref(false)
+const connectionResourceCandidates = ref([])
 
 const activeConnectionCount = computed(
   () => connections.value.filter((row) => row.status === 'active').length
@@ -293,6 +340,11 @@ const pluginCount = computed(
 
 const manifest = computed(
   () => pluginManifests.value[form.value.plugin_key] || null
+)
+const connectionResourceField = computed(() =>
+  Object.entries(manifest.value?.connection_schema?.properties || {}).find(
+    ([, field]) => field.type === 'array' && field.format === 'provider-resource'
+  )
 )
 
 const canSave = computed(() => {
@@ -392,6 +444,42 @@ function startEdit(row) {
 function closeDrawer() {
   drawerOpen.value = false
   formError.value = ''
+  connectionResourceCandidates.value = []
+}
+
+async function discoverConnectionResources() {
+  if (!connectionResourceField.value) return
+  discoveringResources.value = true
+  try {
+    const [key, field] = connectionResourceField.value
+    const result = await previewConnectionResources({
+      plugin_key: form.value.plugin_key,
+      secret_value: form.value.secret_value,
+      endpoint: form.value.endpoint,
+      config: buildConnectionPayload().config,
+      limit: 50
+    })
+    connectionResourceCandidates.value =
+      result.resources?.[field.resource]?.items || []
+    if (!Array.isArray(form.value[key])) form.value[key] = []
+  } catch (error) {
+    showError(extractErrorMessage(error, t('lensAdmin.connections.discoveryFailed')))
+  } finally {
+    discoveringResources.value = false
+  }
+}
+
+function selectedConnectionResource(value) {
+  const [key] = connectionResourceField.value || []
+  return Array.isArray(form.value[key]) && form.value[key].includes(value)
+}
+
+function toggleConnectionResource(value, selected) {
+  const [key] = connectionResourceField.value || []
+  const current = Array.isArray(form.value[key]) ? form.value[key] : []
+  form.value[key] = selected
+    ? [...new Set([...current, value])]
+    : current.filter((item) => item !== value)
 }
 
 async function save() {
