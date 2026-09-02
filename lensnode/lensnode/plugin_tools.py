@@ -22,6 +22,9 @@ class PluginToolError(RuntimeError):
     """Raised when a frozen Plugin Tool cannot be safely registered."""
 
 
+RESULT_MAX_BYTES = 900_000
+
+
 def build_plugin_tools(command, config, http_client, emit_event=None):
     """Build tools from exact runtime versions in frozen Plugin bindings."""
 
@@ -227,7 +230,14 @@ def _validate_snapshot(snapshot, run_uuid, plugin_key, tool_key, call_id):
 def _json(value):
     """Serialize a bounded provider result for model context."""
 
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if len(payload.encode("utf-8")) <= RESULT_MAX_BYTES:
+        return payload
+    return json.dumps(
+        {"ok": False, "error": "PLUGIN_RESULT_TOO_LARGE"},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def _emit(callback, event_type, payload):

@@ -15,6 +15,7 @@ from lensnode.plugin_runtime import PluginRuntimeError
 from lensnode.plugin_package_loader import load_runtime_contract
 from lensnode.plugin_tools import build_plugin_tools
 from lensnode.plugin_tools import _execute_plugin_tool
+from lensnode.plugin_tools import _json
 
 
 AI_GATEWAY_URL = "http://gateway/api/lens/lensnode/ai-gateway/"
@@ -424,6 +425,14 @@ def test_plugin_runtime_failure_is_returned_as_a_stable_error():
 
     payload = json.loads(result)
     assert payload == {"ok": False, "error": "PLUGIN_EXECUTION_FAILED"}
+
+
+def test_plugin_result_has_a_total_model_context_limit():
+    """Large Plugin responses must not consume an unbounded context window."""
+
+    payload = json.loads(_json({"ok": True, "content": "x" * 900_001}))
+
+    assert payload == {"ok": False, "error": "PLUGIN_RESULT_TOO_LARGE"}
 
 
 class PluginToolCallingModel(BaseChatModel):
